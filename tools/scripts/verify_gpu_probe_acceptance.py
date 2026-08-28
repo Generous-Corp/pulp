@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Any
 
@@ -17,6 +18,7 @@ import json_schema_lite
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
 GROUPS = {
     "compute": "gpu-compute.magnitude.v1",
     "stft": "gpu-audio.stft.v1",
@@ -30,11 +32,37 @@ EXPECTED_SAMPLE_COUNTS = {
     "renderer": 0,
     "threejs": 5,
 }
+EXPECTED_DIMENSIONS = {
+    "compute": {"width": 256, "height": 1, "work_items": 256},
+    "stft": {"width": 1024, "height": 1, "work_items": 1024},
+    "renderer": {"width": 128, "height": 128, "work_items": 16_384},
+    "threejs": {"width": 96, "height": 96, "work_items": 9_216},
+}
+RENDERER_NEGATIVE_DIMENSIONS = {"width": 32, "height": 32, "work_items": 1_024}
+RENDERER_NEGATIVE_MUTATION = "pre-submit-framebuffer-downscale"
 EXPECTED_BINARY_ROLES = {
     "compute": "installed_rust_cli",
     "stft": "installed_rust_cli",
     "renderer": "scene3d_cpp_cli",
     "threejs": "v8_threejs_cpp_cli",
+}
+EXPECTED_SOURCE_BLOBS = {
+    "core/render/include/pulp/render/gpu_compute.hpp",
+    "core/render/include/pulp/render/renderer3d.hpp",
+    "core/render/src/gpu_compute.cpp",
+    "core/render/src/renderer3d.cpp",
+    "tools/cli/gpu_probe/src/native_acceptance.cpp",
+    "tools/cli/gpu_probe/src/native_recipes.cpp",
+    "tools/cli/gpu_probe/src/probe_result.cpp",
+    "tools/cli/gpu_probe/src/probe_result_json.cpp",
+    "tools/cli/gpu_probe/src/stft_native_acceptance.cpp",
+}
+EXPECTED_BINARIES = {
+    "installed_rust_cli",
+    "installed_cpp_delegate",
+    "installed_mcp",
+    "scene3d_cpp_cli",
+    "v8_threejs_cpp_cli",
 }
 RESULT_SCHEMA = (
     Path(__file__).resolve().parents[2]
@@ -44,6 +72,56 @@ RESULT_SCHEMA = (
 
 def _load(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _mapping(value: Any, name: str, errors: list[str]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        errors.append(f"{name} must be an object")
+        return {}
+    return value
+
+
+def _git_blobs(commit: str, paths: set[str]) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "ls-tree", commit, "--", *sorted(paths)],
+        cwd=Path(__file__).resolve().parents[2],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        return {}
+    blobs: dict[str, str] = {}
+    for line in completed.stdout.splitlines():
+        try:
+            metadata, path = line.split("\t", 1)
+            _mode, kind, value = metadata.split()
+        except ValueError:
+            continue
+        if kind == "blob" and GIT_SHA.fullmatch(value):
+            blobs[path] = value
+    return blobs
+
+
+def _checkout_blobs(paths: set[str]) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "hash-object", "--stdin-paths"],
+        cwd=Path(__file__).resolve().parents[2],
+        input="".join(f"{path}\n" for path in sorted(paths)),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        return {}
+    values = completed.stdout.splitlines()
+    if len(values) != len(paths):
+        return {}
+    return {
+        path: value
+        for path, value in zip(sorted(paths), values)
+        if GIT_SHA.fullmatch(value)
+    }
 
 
 def _canonical_repeat(result: dict[str, Any]) -> dict[str, Any]:
@@ -66,21 +144,53 @@ def verify(root: Path) -> list[str]:
 
     if receipt.get("schema") != "pulp.gpu-probe-acceptance-receipt.v1":
         errors.append("receipt schema mismatch")
-    if not GIT_SHA.fullmatch(str(receipt.get("integration_head", ""))):
+    integration_head = str(receipt.get("integration_head", ""))
+    if not GIT_SHA.fullmatch(integration_head):
         errors.append("integration_head must be an exact Git SHA")
-    for role, commit in receipt.get("source_heads", {}).items():
-        if not GIT_SHA.fullmatch(str(commit)):
-            errors.append(f"source head {role} must be an exact Git SHA")
-    context = receipt.get("execution_context", {})
+    source_blobs = _mapping(receipt.get("source_blobs"), "source_blobs", errors)
+    if set(source_blobs) != EXPECTED_SOURCE_BLOBS:
+        errors.append("source_blobs does not bind the exact recipe source set")
+    historical_blobs = (
+        _git_blobs(integration_head, EXPECTED_SOURCE_BLOBS)
+        if GIT_SHA.fullmatch(integration_head)
+        else {}
+    )
+    head_blobs = _git_blobs("HEAD", EXPECTED_SOURCE_BLOBS)
+    checkout_blobs = _checkout_blobs(EXPECTED_SOURCE_BLOBS)
+    for path, declared_blob in source_blobs.items():
+        if path not in EXPECTED_SOURCE_BLOBS:
+            continue
+        if not GIT_SHA.fullmatch(str(declared_blob)):
+            errors.append(f"source blob {path} must be an exact Git blob SHA")
+            continue
+        observed_blob = historical_blobs.get(path)
+        if observed_blob is None:
+            errors.append(f"cannot resolve {path} at integration_head")
+        elif observed_blob != declared_blob:
+            errors.append(f"source blob mismatch for {path}")
+        head_blob = head_blobs.get(path)
+        if head_blob is None:
+            errors.append(f"cannot resolve {path} at current HEAD")
+        elif head_blob != declared_blob:
+            errors.append(f"current HEAD source blob drift for {path}")
+        checkout_blob = checkout_blobs.get(path)
+        if checkout_blob is None:
+            errors.append(f"cannot hash {path} in current checkout")
+        elif checkout_blob != declared_blob:
+            errors.append(f"current checkout source blob drift for {path}")
+    context = _mapping(receipt.get("execution_context"), "execution_context", errors)
     if context.get("cwd_role") != "fresh-temporary-directory-outside-any-checkout":
         errors.append("installed fronts were not recorded outside every checkout")
     if context.get("path") != "/usr/bin:/bin:/usr/sbin:/sbin":
         errors.append("installed fronts did not use the bounded system-only PATH")
-    for role, digest in receipt.get("binaries", {}).items():
+    binaries = _mapping(receipt.get("binaries"), "binaries", errors)
+    if set(binaries) != EXPECTED_BINARIES:
+        errors.append("binaries does not bind the exact installed executable set")
+    for role, digest in binaries.items():
         if not SHA256.fullmatch(str(digest)):
             errors.append(f"binary {role} lacks a SHA-256 digest")
 
-    declared = receipt.get("raw_sha256", {})
+    declared = _mapping(receipt.get("raw_sha256"), "raw_sha256", errors)
     expected_files = {
         *(f"{group}-{suffix}.json" for group in GROUPS for suffix in ("run1", "run2", "negative")),
         "mcp-transcript.jsonl",
@@ -97,14 +207,19 @@ def verify(root: Path) -> list[str]:
         if observed != digest:
             errors.append(f"raw digest mismatch for {name}")
 
-    run_groups = receipt.get("run_groups", {})
+    run_groups = _mapping(receipt.get("run_groups"), "run_groups", errors)
     if set(run_groups) != set(GROUPS):
         errors.append("receipt does not bind the exact four run groups")
+    seen_evidence_ids: set[str] = set()
     for group, recipe in GROUPS.items():
-        if run_groups.get(group, {}).get("recipe") != recipe:
+        run_group = run_groups.get(group, {})
+        if not isinstance(run_group, dict):
+            errors.append(f"receipt run group {group} must be an object")
+            run_group = {}
+        if run_group.get("recipe") != recipe:
             errors.append(f"receipt run group {group} does not bind recipe {recipe}")
-        role = run_groups.get(group, {}).get("binary_role")
-        if role != EXPECTED_BINARY_ROLES[group] or role not in receipt.get("binaries", {}):
+        role = run_group.get("binary_role")
+        if role != EXPECTED_BINARY_ROLES[group] or role not in binaries:
             errors.append(f"receipt run group {group} has the wrong executable role")
         runs: dict[str, dict[str, Any]] = {}
         for suffix in ("run1", "run2", "negative"):
@@ -115,10 +230,24 @@ def verify(root: Path) -> list[str]:
                 errors.append(f"cannot parse {path.name}: {error}")
                 continue
             runs[suffix] = result
+            evidence_id = result.get("gpu_evidence_id")
+            if not GPU_EVIDENCE_ID.fullmatch(str(evidence_id)):
+                errors.append(f"{path.name}: gpu_evidence_id must be exact 32-hex")
+            elif evidence_id in seen_evidence_ids:
+                errors.append(f"{path.name}: gpu_evidence_id was reused by another A2 run")
+            else:
+                seen_evidence_ids.add(evidence_id)
             for problem in json_schema_lite.validate(result, result_schema):
                 errors.append(f"{path.name}: schema: {problem}")
             if result.get("recipe_id") != recipe:
                 errors.append(f"{path.name}: recipe mismatch")
+            expected_dimensions = (
+                RENDERER_NEGATIVE_DIMENSIONS
+                if group == "renderer" and suffix == "negative"
+                else EXPECTED_DIMENSIONS[group]
+            )
+            if result.get("dimensions") != expected_dimensions:
+                errors.append(f"{path.name}: execution dimensions are not recipe-bound")
             if not result.get("passes") or not all(p.get("work_completed") for p in result["passes"]):
                 errors.append(f"{path.name}: work was not proven complete")
             artifacts = result.get("artifacts", [])
@@ -127,6 +256,16 @@ def verify(root: Path) -> list[str]:
             for artifact in artifacts:
                 if not SHA256.fullmatch(str(artifact.get("sha256", ""))):
                     errors.append(f"{path.name}: artifact lacks SHA-256")
+            if group == "renderer":
+                rgba = [artifact for artifact in artifacts
+                        if artifact.get("name") == "observed.rgba8"]
+                expected_rgba_bytes = expected_dimensions["work_items"] * 4
+                if len(rgba) != 1 or rgba[0].get("kind") != "image" or \
+                        rgba[0].get("mime") != "application/octet-stream" or \
+                        rgba[0].get("bytes") != expected_rgba_bytes:
+                    errors.append(
+                        f"{path.name}: observed RGBA artifact does not match declared dimensions"
+                    )
             if result.get("numeric_sample_count") != EXPECTED_SAMPLE_COUNTS[group]:
                 errors.append(f"{path.name}: numeric sample count changed")
             adapter = result.get("adapter", {})
@@ -155,6 +294,8 @@ def verify(root: Path) -> list[str]:
         negative = runs["negative"]
         if negative.get("verdict") != "fail" or not negative.get("mutation"):
             errors.append(f"{group}: seeded negative control did not fail")
+        if group == "renderer" and negative.get("mutation") != RENDERER_NEGATIVE_MUTATION:
+            errors.append("renderer: negative mutation is not the exact pre-submit mutation")
         if not any(p.get("verdict") == "fail" and p.get("work_completed") for p in negative.get("passes", [])):
             errors.append(f"{group}: negative control lacks a completed causal failure")
 

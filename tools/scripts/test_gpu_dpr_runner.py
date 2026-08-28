@@ -4,15 +4,22 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
 import gpu_dpr_experiment as experiment
 import gpu_dpr_runner as runner
+from gpu_dpr_test_support import (
+    dependency_receipts, exact_binary, forged_minimal_dependencies,
+    malformed_adapter_script, no_receipt_adapter_script, test_adapter_script,
+    timeout_adapter_script, trace_analyzer_script, wrong_nonce_adapter_script,
+)
 
-SHA_A = "a" * 40
-SHA_B = "b" * 40
-SHA_C = "c" * 40
+SHA_A = "3" * 40
+SHA_B = "1" * 40
+SHA_C = "2" * 40
 
 
 def plan(manifest: dict) -> dict:
@@ -30,7 +37,12 @@ def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
-def raw_samples(*, logical_input_ok: bool = True, fidelity_ok: bool = True) -> dict:
+def raw_samples(
+    *,
+    logical_input_ok: bool = True,
+    fidelity_ok: bool = True,
+    capture_similarity: float = 0.99,
+) -> dict:
     expected = [123.25, 45.5]
     observed = expected if logical_input_ok else [61.625, 22.75]
     return {
@@ -47,7 +59,7 @@ def raw_samples(*, logical_input_ok: bool = True, fidelity_ok: bool = True) -> d
         },
         "fidelity": {
             "content_floor_passed": fidelity_ok,
-            "capture_similarity": 0.99,
+            "capture_similarity": capture_similarity,
             "small_text_legible": fidelity_ok,
             "thin_strokes_preserved": fidelity_ok,
         },
@@ -59,12 +71,6 @@ def raw_samples(*, logical_input_ok: bool = True, fidelity_ok: bool = True) -> d
         }],
         "trace": {
             "complete": True,
-            "categories": ["render", "gpu", "text", "js", "layout"],
-            "questions": [
-                {"id": "gpu-startup", "status": "unverified", "evidence_id": "trace:startup"},
-                {"id": "gpu-health", "status": "pass", "evidence_id": "trace:health"},
-                {"id": "gpu-probe", "status": "pass", "evidence_id": "trace:probe"},
-            ],
         },
     }
 
@@ -75,18 +81,24 @@ def make_receipt(
     manifest: dict,
     key: str,
     *,
+    analyzer: Path,
+    binary: Path,
     outcome: str = "pass",
     logical_input_ok: bool = True,
     fidelity_ok: bool = True,
+    capture_similarity: float = 0.99,
+    attempt_nonce: str | None = None,
 ) -> Path:
     cell = state["cells"][key]
     scenario = runner.scenario_map(manifest)[cell["scenario_id"]]
     cell_dir = runner.cell_directory(run_dir, key)
     cell_dir.mkdir(parents=True, exist_ok=True)
+    nonce = attempt_nonce or runner.secrets.token_hex(runner.NONCE_HEX_LENGTH // 2)
     if outcome in runner.INCOMPLETE_OUTCOMES:
         receipt = {
             "schema": runner.RECEIPT_SCHEMA,
             "version": 1,
+            "attempt_nonce": nonce,
             "scenario_id": cell["scenario_id"],
             "scenario_kind": cell["scenario_kind"],
             "mode": cell["mode"],
@@ -99,10 +111,36 @@ def make_receipt(
         write_json(path, receipt)
         return path
 
-    raw = raw_samples(logical_input_ok=logical_input_ok, fidelity_ok=fidelity_ok)
+    raw = raw_samples(
+        logical_input_ok=logical_input_ok,
+        fidelity_ok=fidelity_ok,
+        capture_similarity=capture_similarity,
+    )
+    if cell["mode"] == "adaptive_simulation":
+        profile = manifest["adaptive_profile"]
+        raw["adaptive_policy_evidence"] = {
+            "profile": profile,
+            "downshift": {
+                "consecutive_frames_before":
+                    profile["downshift_after_over_budget_frames"] - 1,
+                "transitioned_before": False,
+                "consecutive_frames_at":
+                    profile["downshift_after_over_budget_frames"],
+                "transitioned_at": True,
+            },
+            "upshift": {
+                "consecutive_frames_before":
+                    profile["upshift_after_under_budget_frames"] - 1,
+                "transitioned_before": False,
+                "consecutive_frames_at":
+                    profile["upshift_after_under_budget_frames"],
+                "transitioned_at": True,
+                "budget_fraction": profile["upshift_budget_fraction"],
+            },
+        }
     files = {
         "capture": ("capture.png", b"real-capture-bytes"),
-        "trace": ("trace.pftrace", b"real-trace-bytes"),
+        "trace": ("trace.pftrace", b"real-trace-bytes:" + nonce.encode("ascii")),
         "raw_samples": ("raw-samples.json", None),
         "input_receipt": ("input-receipt.json", b'{"logical":true}\n'),
     }
@@ -144,6 +182,7 @@ def make_receipt(
             scenario, Path(state["manifest_path"]), state["plan"]["forge_sha"]
         ),
         "outcome": outcome,
+        "attempt_nonce": nonce,
         "reason": None,
         "dependencies": [],
         "machine": {"id": "selftest-m3", "os": "macos", "architecture": "arm64"},
@@ -151,7 +190,10 @@ def make_receipt(
         "build_identity": {
             "pulp_sha": state["plan"]["pulp_sha"],
             "forge_sha": state["plan"]["forge_sha"],
-            "binary": {"path": "Forge Modular", "sha256": "d" * 64},
+            "binary": {
+                "path": str(binary.resolve()),
+                "sha256": runner.sha256_file(binary),
+            },
         },
         "plugin_format": "vst3",
         "format_qualified": True,
@@ -176,69 +218,88 @@ def expect_rejected(
     raise AssertionError(f"planted bad evidence unexpectedly passed: {label}")
 
 
-def test_adapter_script(root: Path) -> Path:
-    script = root / "skip-adapter.py"
-    script.write_text(
-        """#!/usr/bin/env python3
-import argparse, json
-from pathlib import Path
-p=argparse.ArgumentParser(); p.add_argument('--request'); p.add_argument('--receipt'); a=p.parse_args()
-r=json.loads(Path(a.request).read_text())
-Path(a.receipt).write_text(json.dumps({
-  'schema':'pulp.gpu-dpr-cell-receipt.v1','version':1,
-  'scenario_id':r['scenario']['id'],'scenario_kind':r['scenario']['kind'],
-  'mode':r['mode'],'requested_dpr':r['requested_dpr'],'outcome':'skip',
-  'reason':'real product adapter unavailable in selftest',
-  'dependencies':['adapter:test-real-product']})+'\\n')
-raise SystemExit(2)
-""",
-        encoding="utf-8",
-    )
-    script.chmod(0o755)
-    return script
-
-
-def timeout_adapter_script(root: Path) -> Path:
-    script = root / "timeout-adapter.py"
-    script.write_text(
-        """#!/usr/bin/env python3
-import time
-time.sleep(60)
-""",
-        encoding="utf-8",
-    )
-    script.chmod(0o755)
-    return script
-
-
-def malformed_adapter_script(root: Path) -> Path:
-    script = root / "malformed-adapter.py"
-    script.write_text(
-        """#!/usr/bin/env python3
-import argparse
-from pathlib import Path
-p=argparse.ArgumentParser(); p.add_argument('--request'); p.add_argument('--receipt'); a=p.parse_args()
-Path(a.receipt).write_text('{not-json')
-""",
-        encoding="utf-8",
-    )
-    script.chmod(0o755)
-    return script
+def ingest_receipt(run_dir: Path, receipt: Path) -> str:
+    nonce = runner.regular_json(receipt, "selftest receipt")["attempt_nonce"]
+    return runner.ingest_receipt(run_dir, receipt, nonce)
 
 
 def main() -> int:
-    manifest = runner.load_json(experiment.DEFAULT_MANIFEST)
     with tempfile.TemporaryDirectory(prefix="pulp-dpr-runner-") as temporary:
         root = Path(temporary)
+        manifest_path = root / "manifest.json"
+        manifest = runner.load_json(experiment.DEFAULT_MANIFEST)
+        write_json(manifest_path, manifest)
+        for scenario in manifest["scenarios"]:
+            if scenario.get("source_sha256"):
+                shutil.copy2(
+                    experiment.DEFAULT_MANIFEST.parent / scenario["source"],
+                    root / scenario["source"],
+                )
+            elif scenario["kind"].startswith("maintained_"):
+                maintained = root / scenario["source"]
+                maintained.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(experiment.ROOT / scenario["source"], maintained)
+        analyzer = trace_analyzer_script(root)
+        pinned_analyzer = root / "runner-owned" / "trace-analyzer"
+        analyzer_digest = runner.snapshot_file(
+            analyzer, pinned_analyzer, "selftest analyzer", executable=True
+        )
+        analyzer_identity = {
+            "path": str(pinned_analyzer.resolve()), "sha256": analyzer_digest
+        }
+        binary = exact_binary(root)
         run_dir = root / "run"
         planned = plan(manifest)
-        state = runner.initial_state(planned, manifest, experiment.DEFAULT_MANIFEST)
+        unratified_manifest = json.loads(json.dumps(manifest))
+        del unratified_manifest["trial_contract"]["capture_similarity_minimum"]
+        try:
+            runner.initial_state(
+                planned, unratified_manifest, manifest_path, analyzer_identity
+            )
+        except runner.EvidenceError:
+            pass
+        else:
+            raise AssertionError("manifest without a similarity threshold was accepted")
+        state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
         runner.save_state(run_dir, state)
         assert len(state["cells"]) == 84
         assert runner.status_document(state)["incomplete_cells"] == 84
 
+        request_run = root / "adaptive-request-run"
+        request_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(request_run, request_state)
+        adaptive_request_key = runner.cell_key(
+            "dense-text-thin-strokes", "adaptive_simulation", 1
+        )
+        _, adaptive_request_path = runner.issue_attempt(
+            request_run, request_state, manifest, adaptive_request_key
+        )
+        assert runner.load_json(adaptive_request_path)["adaptive_profile"] == (
+            manifest["adaptive_profile"]
+        )
+
+        initialized_run = root / "initialized-run"
+        initialized_run.mkdir()
+        initialized = runner.initialize_run(
+            initialized_run, planned, manifest, manifest_path, analyzer
+        )
+        initialized_digest = initialized["trace_analyzer"]["sha256"]
+        analyzer_source_bytes = analyzer.read_bytes()
+        analyzer.write_bytes(analyzer_source_bytes + b"# source mutation\n")
+        assert runner.sha256_file(Path(initialized["trace_analyzer"]["path"])) == (
+            initialized_digest
+        )
+        analyzer.write_bytes(analyzer_source_bytes)
+        analyzer.chmod(0o755)
+
         dense = runner.cell_key("dense-text-thin-strokes", "exact", 1)
-        good = make_receipt(run_dir, state, manifest, dense)
+        good = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+        )
         key, observation, dependencies = runner.receipt_observation(
             good, state, manifest, Path(state["manifest_path"]), run_dir
         )
@@ -252,39 +313,249 @@ def main() -> int:
         expect_rejected(good, state, manifest, run_dir, "artifact digest mismatch")
         planted += 1
 
-        good = make_receipt(run_dir, state, manifest, dense, logical_input_ok=False)
+        good = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary,
+            logical_input_ok=False,
+        )
         expect_rejected(good, state, manifest, run_dir, "logical coordinate scaling")
         planted += 1
 
-        good = make_receipt(run_dir, state, manifest, dense)
+        good = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+        )
         changed_content = runner.load_json(good)
         changed_content["content_digest"] = "0" * 64
         write_json(good, changed_content)
         expect_rejected(good, state, manifest, run_dir, "content digest drift")
         planted += 1
 
+        maintained_key = runner.cell_key("threejs-audio-reactive", "exact", 1)
+        maintained_receipt = make_receipt(
+            run_dir, state, manifest, maintained_key,
+            analyzer=analyzer, binary=binary,
+        )
+        maintained_source = root / runner.scenario_map(manifest)[
+            "threejs-audio-reactive"
+        ]["source"]
+        maintained_bytes = maintained_source.read_bytes()
+        maintained_source.write_bytes(maintained_bytes + b"\n// planted drift\n")
+        expect_rejected(
+            maintained_receipt, state, manifest, run_dir,
+            "maintained source byte drift",
+        )
+        maintained_source.write_bytes(maintained_bytes)
+        planted += 1
+
         gpu_key = runner.cell_key("shader-heavy-controls", "exact", 1)
-        gpu_receipt = make_receipt(run_dir, state, manifest, gpu_key)
+        gpu_receipt = make_receipt(
+            run_dir, state, manifest, gpu_key, analyzer=analyzer, binary=binary
+        )
         software = runner.load_json(gpu_receipt)
         software["adapter"]["class"] = "software"
         write_json(gpu_receipt, software)
         expect_rejected(gpu_receipt, state, manifest, run_dir, "software GPU substitution")
         planted += 1
 
-        gpu_receipt = make_receipt(run_dir, state, manifest, gpu_key)
+        gpu_receipt = make_receipt(
+            run_dir, state, manifest, gpu_key, analyzer=analyzer, binary=binary
+        )
         raw_path = runner.cell_directory(run_dir, gpu_key) / "raw-samples.json"
         raw = runner.load_json(raw_path)
-        raw["trace"]["categories"].remove("gpu")
+        raw["trace"]["categories"] = ["render", "gpu", "text", "js", "layout"]
         write_json(raw_path, raw)
         receipt = runner.load_json(gpu_receipt)
         next(item for item in receipt["artifacts"] if item["kind"] == "raw_samples")["sha256"] = runner.sha256_file(raw_path)
         write_json(gpu_receipt, receipt)
-        expect_rejected(gpu_receipt, state, manifest, run_dir, "missing trace category")
+        expect_rejected(
+            gpu_receipt, state, manifest, run_dir,
+            "adapter-authored trace categories",
+        )
+        planted += 1
+
+        similarity_receipt = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary,
+            capture_similarity=0.98,
+        )
+        expect_rejected(
+            similarity_receipt, state, manifest, run_dir,
+            "capture similarity below ratified threshold",
+        )
+        planted += 1
+
+        adaptive_key = runner.cell_key(
+            "dense-text-thin-strokes", "adaptive_simulation", 1
+        )
+        adaptive_receipt = make_receipt(
+            run_dir, state, manifest, adaptive_key,
+            analyzer=analyzer, binary=binary,
+        )
+        adaptive_raw_path = runner.cell_directory(run_dir, adaptive_key) / "raw-samples.json"
+        adaptive_raw = runner.load_json(adaptive_raw_path)
+        del adaptive_raw["adaptive_policy_evidence"]
+        write_json(adaptive_raw_path, adaptive_raw)
+        adaptive_document = runner.load_json(adaptive_receipt)
+        next(
+            item for item in adaptive_document["artifacts"]
+            if item["kind"] == "raw_samples"
+        )["sha256"] = runner.sha256_file(adaptive_raw_path)
+        write_json(adaptive_receipt, adaptive_document)
+        expect_rejected(
+            adaptive_receipt, state, manifest, run_dir,
+            "adaptive cell without transition evidence",
+        )
+        planted += 1
+
+        adaptive_receipt = make_receipt(
+            run_dir, state, manifest, adaptive_key,
+            analyzer=analyzer, binary=binary,
+        )
+        adaptive_raw = runner.load_json(adaptive_raw_path)
+        adaptive_raw["adaptive_policy_evidence"]["upshift"]["consecutive_frames_at"] -= 1
+        write_json(adaptive_raw_path, adaptive_raw)
+        adaptive_document = runner.load_json(adaptive_receipt)
+        next(
+            item for item in adaptive_document["artifacts"]
+            if item["kind"] == "raw_samples"
+        )["sha256"] = runner.sha256_file(adaptive_raw_path)
+        write_json(adaptive_receipt, adaptive_document)
+        expect_rejected(
+            adaptive_receipt, state, manifest, run_dir,
+            "adaptive hysteresis boundary drift",
+        )
+        planted += 1
+
+        trace_receipt = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+        )
+        trace_path = runner.cell_directory(run_dir, dense) / "trace.pftrace"
+        trace_path.write_bytes(b"dummy-self-attested-trace")
+        trace_document = runner.load_json(trace_receipt)
+        next(
+            item for item in trace_document["artifacts"] if item["kind"] == "trace"
+        )["sha256"] = runner.sha256_file(trace_path)
+        write_json(trace_receipt, trace_document)
+        expect_rejected(
+            trace_receipt, state, manifest, run_dir,
+            "self-attested trace outcomes over dummy bytes",
+        )
+        planted += 1
+
+        wrong_cohort_receipt = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+        )
+        wrong_cohort_trace = runner.cell_directory(run_dir, dense) / "trace.pftrace"
+        wrong_cohort_trace.write_bytes(b"real-trace-bytes:" + b"f" * 32)
+        wrong_cohort_document = runner.load_json(wrong_cohort_receipt)
+        next(
+            item for item in wrong_cohort_document["artifacts"]
+            if item["kind"] == "trace"
+        )["sha256"] = runner.sha256_file(wrong_cohort_trace)
+        write_json(wrong_cohort_receipt, wrong_cohort_document)
+        expect_rejected(
+            wrong_cohort_receipt, state, manifest, run_dir,
+            "trace cohort not bound to the issued cell attempt nonce",
+        )
+        planted += 1
+
+        analyzer_receipt = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+        )
+        analyzer_raw_path = runner.cell_directory(run_dir, dense) / "raw-samples.json"
+        analyzer_raw = runner.load_json(analyzer_raw_path)
+        analyzer_raw["trace"]["analyzer"] = {
+            "path": str(analyzer), "sha256": "0" * 64
+        }
+        write_json(analyzer_raw_path, analyzer_raw)
+        analyzer_document = runner.load_json(analyzer_receipt)
+        next(
+            item for item in analyzer_document["artifacts"]
+            if item["kind"] == "raw_samples"
+        )["sha256"] = runner.sha256_file(analyzer_raw_path)
+        write_json(analyzer_receipt, analyzer_document)
+        expect_rejected(
+            analyzer_receipt, state, manifest, run_dir,
+            "adapter-authored trace analyzer substitution",
+        )
+        planted += 1
+
+        symlink_receipt = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+        )
+        symlink_capture = runner.cell_directory(run_dir, dense) / "capture.png"
+        symlink_capture.unlink()
+        outside_capture = root / "outside-capture.png"
+        outside_capture.write_bytes(b"real-capture-bytes")
+        symlink_capture.symlink_to(outside_capture)
+        expect_rejected(
+            symlink_receipt, state, manifest, run_dir,
+            "artifact symlink escape",
+        )
+        symlink_capture.unlink()
+        planted += 1
+
+        escaped_run = root / "escaped-run"
+        escaped_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(escaped_run, escaped_state)
+        escaped_cells = escaped_run / "cells"
+        escaped_cells.mkdir()
+        outside_cell = root / "outside-cell"
+        outside_cell.mkdir()
+        (escaped_cells / dense).symlink_to(outside_cell, target_is_directory=True)
+        try:
+            runner.checked_cell_directory(escaped_run, dense)
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("cell-directory symlink escape was accepted")
+
+        frozen_escape_run = root / "frozen-escape-run"
+        frozen_escape_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(frozen_escape_run, frozen_escape_state)
+        frozen_nonce, _ = runner.issue_attempt(
+            frozen_escape_run, frozen_escape_state, manifest, dense
+        )
+        frozen_receipt = make_receipt(
+            frozen_escape_run, frozen_escape_state, manifest, dense,
+            analyzer=analyzer, binary=binary, attempt_nonce=frozen_nonce,
+        )
+        outside_frozen = root / "outside-frozen"
+        outside_frozen.mkdir()
+        (frozen_escape_run / "frozen-evidence").symlink_to(
+            outside_frozen, target_is_directory=True
+        )
+        try:
+            runner.ingest_receipt(
+                frozen_escape_run, frozen_receipt, frozen_nonce
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("frozen-evidence symlink escape was accepted")
+
+        forge_key = runner.cell_key("forge-modular-native", "exact", 1)
+        forge_receipt = make_receipt(
+            run_dir, state, manifest, forge_key, analyzer=analyzer, binary=binary
+        )
+        missing_binary = runner.load_json(forge_receipt)
+        missing_binary["build_identity"]["binary"]["path"] = str(
+            root / "not-an-executable"
+        )
+        write_json(forge_receipt, missing_binary)
+        expect_rejected(
+            forge_receipt, state, manifest, run_dir,
+            "nonexistent exact Forge binary",
+        )
         planted += 1
 
         # The fixed executable protocol calls a scenario adapter without a shell.
         adapter_run = root / "adapter-run"
-        adapter_state = runner.initial_state(planned, manifest, experiment.DEFAULT_MANIFEST)
+        adapter_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
         runner.save_state(adapter_run, adapter_state)
         adapter = test_adapter_script(root)
         runner.run_cells(
@@ -295,9 +566,34 @@ def main() -> int:
         assert runner.project_result(adapter_state)["status"] == "incomplete"
         assert runner.status_document(adapter_state)["incomplete_cells"] == 84
 
+        # The maintained native adapter echoes the runner-issued nonce even
+        # when it can only report an inconclusive dependency receipt.
+        native_run = root / "native-adapter-run"
+        native_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(native_run, native_state)
+        runner.run_cells(
+            native_run,
+            {"dense-text-thin-strokes": experiment.SCRIPT_DIR / "gpu_dpr_pulp_native_adapter.py"},
+            {dense},
+            None,
+        )
+        native_state = runner.load_state(native_run)
+        native_cell = native_state["cells"][dense]
+        assert native_cell["status"] == "inconclusive"
+        assert "native-capture:dense-text-thin-strokes" in native_cell["dependencies"]
+        native_attempt = native_cell["attempts"][-1]
+        native_receipt = runner.load_json(Path(native_attempt["receipt"]))
+        assert native_attempt["reason"] == native_receipt["reason"]
+        assert native_attempt["dependencies"] == native_receipt["dependencies"]
+        assert native_attempt["nonce"] == native_receipt["attempt_nonce"]
+
         # Missing adapters are explicit resumable dependencies, not fake samples.
         missing_run = root / "missing-run"
-        missing_state = runner.initial_state(planned, manifest, experiment.DEFAULT_MANIFEST)
+        missing_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
         runner.save_state(missing_run, missing_state)
         runner.run_cells(missing_run, {}, {dense}, None)
         missing_state = runner.load_state(missing_run)
@@ -308,7 +604,9 @@ def main() -> int:
 
         # Timeout is a durable incomplete attempt, so resumption never loses it.
         timeout_run = root / "timeout-run"
-        timeout_state = runner.initial_state(planned, manifest, experiment.DEFAULT_MANIFEST)
+        timeout_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
         runner.save_state(timeout_run, timeout_state)
         runner.run_cells(
             timeout_run,
@@ -325,7 +623,9 @@ def main() -> int:
         assert runner.project_result(timeout_state)["status"] == "incomplete"
 
         malformed_run = root / "malformed-run"
-        malformed_state = runner.initial_state(planned, manifest, experiment.DEFAULT_MANIFEST)
+        malformed_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
         runner.save_state(malformed_run, malformed_state)
         runner.run_cells(
             malformed_run,
@@ -339,19 +639,312 @@ def main() -> int:
             "valid-cell-receipt"
         ]
 
+        nonce_run = root / "nonce-run"
+        nonce_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(nonce_run, nonce_state)
+        runner.run_cells(
+            nonce_run,
+            {"dense-text-thin-strokes": wrong_nonce_adapter_script(root)},
+            {dense},
+            None,
+        )
+        nonce_state = runner.load_state(nonce_run)
+        assert nonce_state["cells"][dense]["status"] == "inconclusive"
+        assert nonce_state["cells"][dense]["dependencies"] == [
+            "valid-cell-receipt"
+        ]
+        planted += 1
+
+        analyzer_timeout_run = root / "analyzer-timeout-run"
+        analyzer_timeout_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(analyzer_timeout_run, analyzer_timeout_state)
+        second_dense = runner.cell_key("dense-text-thin-strokes", "exact", 1.5)
+        real_ingest = runner.ingest_receipt
+        def planted_analyzer_timeout(*_args: object, **_kwargs: object) -> str:
+            raise subprocess.TimeoutExpired("trace-analyzer", 0.05)
+        runner.ingest_receipt = planted_analyzer_timeout
+        try:
+            runner.run_cells(
+                analyzer_timeout_run,
+                {"dense-text-thin-strokes": test_adapter_script(root)},
+                {dense, second_dense},
+                None,
+            )
+        finally:
+            runner.ingest_receipt = real_ingest
+        analyzer_timeout_state = runner.load_state(analyzer_timeout_run)
+        assert all(
+            analyzer_timeout_state["cells"][key]["status"] == "inconclusive"
+            for key in (dense, second_dense)
+        )
+        assert all(
+            analyzer_timeout_state["cells"][key]["dependencies"]
+            == ["valid-cell-receipt"]
+            for key in (dense, second_dense)
+        )
+        planted += 1
+
+        replay_run = root / "nonce-replay-run"
+        replay_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(replay_run, replay_state)
+        replay_nonce, _ = runner.issue_attempt(
+            replay_run, replay_state, manifest, dense
+        )
+        replay_receipt = make_receipt(
+            replay_run, replay_state, manifest, dense,
+            analyzer=analyzer, binary=binary, attempt_nonce=replay_nonce,
+        )
+        ingest_receipt(replay_run, replay_receipt)
+        try:
+            ingest_receipt(replay_run, replay_receipt)
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("replayed attempt nonce was accepted")
+
+        # A fixed-name receipt left by an earlier attempt cannot be replayed.
+        stale_run = root / "stale-run"
+        stale_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(stale_run, stale_state)
+        stale_path = runner.cell_directory(stale_run, dense) / "receipt.json"
+        make_receipt(
+            stale_run, stale_state, manifest, dense,
+            analyzer=analyzer, binary=binary, outcome="skip",
+        )
+        assert stale_path.is_file()
+        runner.run_cells(
+            stale_run,
+            {"dense-text-thin-strokes": no_receipt_adapter_script(root)},
+            {dense},
+            None,
+        )
+        stale_state = runner.load_state(stale_run)
+        assert stale_state["cells"][dense]["status"] == "inconclusive"
+        assert not stale_path.exists()
+        planted += 1
+
         # Fill all 84 cells with full synthetic receipts to exercise projection.
         complete_run = root / "complete-run"
-        complete_state = runner.initial_state(planned, manifest, experiment.DEFAULT_MANIFEST)
+        complete_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
         runner.save_state(complete_run, complete_state)
         for cell in complete_state["cells"]:
             current = runner.load_state(complete_run)
-            receipt_path = make_receipt(complete_run, current, manifest, cell)
-            runner.ingest_receipt(complete_run, receipt_path)
+            attempt_nonce, _ = runner.issue_attempt(
+                complete_run, current, manifest, cell
+            )
+            receipt_path = make_receipt(
+                complete_run, current, manifest, cell,
+                analyzer=analyzer, binary=binary,
+                attempt_nonce=attempt_nonce,
+            )
+            ingest_receipt(complete_run, receipt_path)
         completed = runner.load_state(complete_run)
         assert runner.status_document(completed)["complete_cells"] == 84
+        a2t_receipt, budget_id, a3_receipt = dependency_receipts(root)
+        assert "machine_id" not in runner.load_json(a2t_receipt)["machine"]
+        _, _, unratified_a3 = dependency_receipts(root, ratified=False)
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", "a2t:selftest",
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("synthetic A2T dependency string was accepted")
+
+        forged_a2t, forged_a3 = forged_minimal_dependencies(root)
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(forged_a2t),
+                budget_id, str(forged_a3),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("forged minimal A2T/A3 receipts were accepted")
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(unratified_a3),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("unratified A3 budget was accepted")
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                "different-budget", str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("A3 receipt with a mismatched budget id was accepted")
+
+        a2t_original = runner.load_json(a2t_receipt)
+        a3_original = runner.load_json(a3_receipt)
+        wrong_plan_a2t = json.loads(json.dumps(a2t_original))
+        wrong_plan_a2t["producer_overhead_disposition"]["formal_plan_revision"] = "0" * 40
+        write_json(a2t_receipt, wrong_plan_a2t)
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("cross-plan A2T receipt was accepted")
+        write_json(a2t_receipt, a2t_original)
+
+        cross_machine_a3 = json.loads(json.dumps(a3_original))
+        causal_id = cross_machine_a3["same_instance_a2t"]["campaign_id"]
+        causal_campaign = next(
+            campaign for campaign in cross_machine_a3["campaigns"]
+            if campaign["identity"]["campaign_id"] == causal_id
+        )
+        causal_campaign["identity"]["machine_id"] = "different-machine"
+        write_json(a3_receipt, cross_machine_a3)
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("cross-machine A3 receipt was accepted")
+
+        mismatched_a2t = root / "digest-mismatched-a2t.json"
+        mismatched_a2t.write_bytes(a2t_receipt.read_bytes() + b"\n")
+        write_json(a3_receipt, a3_original)
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(mismatched_a2t),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("A3 receipt accepted different supplied A2T bytes")
+
+        # Finalization consumes only runner-owned snapshots. Mutating the
+        # adapter's original path is harmless; mutating the snapshot fails.
+        capture_path = runner.cell_directory(complete_run, dense) / "capture.png"
+        capture_bytes = capture_path.read_bytes()
+        capture_path.write_bytes(capture_bytes + b"mutated")
+        runner.finalize(
+            complete_run, "adaptive-candidate", str(a2t_receipt),
+            budget_id, str(a3_receipt),
+        )
+        snapshot_capture = complete_run / next(
+            item["path"]
+            for item in runner.load_state(complete_run)["cells"][dense]["observation"]["artifacts"]
+            if item["kind"] == "capture"
+        )
+        snapshot_bytes = snapshot_capture.read_bytes()
+        snapshot_capture.chmod(0o644)
+        snapshot_capture.write_bytes(snapshot_bytes + b"mutated")
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("runner-owned artifact snapshot mutation was accepted")
+        snapshot_capture.write_bytes(snapshot_bytes)
+        snapshot_capture.chmod(0o444)
+        capture_path.write_bytes(capture_bytes)
+
+        complete_snapshot = runner.load_state(complete_run)
+        projected_mutation = runner.load_state(complete_run)
+        projected_mutation["cells"][dense]["observation"]["physical_size"]["width"] += 1
+        runner.save_state(complete_run, projected_mutation)
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("post-ingest projected observation mutation was accepted")
+        runner.save_state(complete_run, complete_snapshot)
+
+        plan_mutation = runner.load_state(complete_run)
+        plan_mutation["plan"]["pulp_sha"] = "0" * 40
+        runner.save_state(complete_run, plan_mutation)
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("embedded plan mutation was accepted")
+        runner.save_state(complete_run, complete_snapshot)
+
+        mutated_manifest = runner.load_json(manifest_path)
+        mutated_manifest["trial_contract"]["capture_similarity_minimum"] = 0.98
+        write_json(manifest_path, mutated_manifest)
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("post-init manifest mutation was accepted")
+        write_json(manifest_path, manifest)
+
+        binary_bytes = binary.read_bytes()
+        binary.write_bytes(binary_bytes + b"# mutation\n")
+        runner.finalize(
+            complete_run, "adaptive-candidate", str(a2t_receipt),
+            budget_id, str(a3_receipt),
+        )
+        forge_snapshot_receipt = runner.regular_json(
+            Path(runner.load_state(complete_run)["cells"][forge_key]["attempts"][-1]["receipt"]),
+            "Forge receipt",
+        )
+        pinned_binary = Path(
+            forge_snapshot_receipt["build_identity"]["binary"]["path"]
+        )
+        pinned_binary_bytes = pinned_binary.read_bytes()
+        pinned_binary.chmod(0o755)
+        pinned_binary.write_bytes(pinned_binary_bytes + b"# mutation\n")
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("runner-owned exact binary mutation was accepted")
+        pinned_binary.write_bytes(pinned_binary_bytes)
+        pinned_binary.chmod(0o555)
+        binary.write_bytes(binary_bytes)
+        binary.chmod(0o755)
+
         b5 = runner.finalize(
-            complete_run, "adaptive-candidate", "a2t:selftest",
-            "a3-budget:selftest", "a3:selftest"
+            complete_run, "adaptive-candidate", str(a2t_receipt),
+            budget_id, str(a3_receipt)
         )
         assert b5["status"] == "waiting-trigger"
         assert b5["requires"] == ["B0-adopted-vellum-api-refresh"]
@@ -362,22 +955,27 @@ def main() -> int:
             result, manifest, experiment.canonical_sha256(manifest)
         )
 
-        # A planted fidelity failure can only close B5 no-change.
-        failed = runner.load_state(complete_run)
-        failed["cells"][dense]["observation"]["fidelity"]["small_text_legible"] = False
-        runner.save_state(complete_run, failed)
+        # An authoritative failing receipt can only close B5 no-change.
+        failed_receipt = make_receipt(
+            complete_run, runner.load_state(complete_run), manifest, dense,
+            analyzer=analyzer, binary=binary, outcome="fail", fidelity_ok=False,
+            attempt_nonce=runner.issue_attempt(
+                complete_run, runner.load_state(complete_run), manifest, dense
+            )[0],
+        )
+        ingest_receipt(complete_run, failed_receipt)
         try:
             runner.finalize(
-                complete_run, "configured-max-candidate", "a2t:selftest",
-                "a3-budget:selftest", "a3:selftest"
+                complete_run, "configured-max-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt)
             )
         except runner.EvidenceError:
             planted += 1
         else:
             raise AssertionError("candidate crossed a planted fidelity failure")
         b5 = runner.finalize(
-            complete_run, "no-change", "a2t:selftest",
-            "a3-budget:selftest", "a3:selftest"
+            complete_run, "no-change", str(a2t_receipt),
+            budget_id, str(a3_receipt)
         )
         assert b5["status"] == "cancelled-no-change"
         assert b5["authorizes_policy_change"] is False

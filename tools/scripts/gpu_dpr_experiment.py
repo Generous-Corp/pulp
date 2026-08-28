@@ -118,7 +118,17 @@ def manifest_errors(manifest: dict[str, Any], manifest_path: Path) -> list[str]:
     trial = manifest.get("trial_contract", {})
     if trial.get("warmups", 0) < 1 or trial.get("measured_trials", 0) < 1:
         errors.append("trial counts must be positive")
-    for gate in ("small_text_legible", "thin_strokes_preserved", "logical_input_correct"):
+    similarity_minimum = trial.get("capture_similarity_minimum")
+    if (
+        isinstance(similarity_minimum, bool)
+        or not isinstance(similarity_minimum, (int, float))
+        or not 0 <= similarity_minimum <= 1
+    ):
+        errors.append("capture similarity minimum must be a number in 0..1")
+    for gate in (
+        "capture_similarity", "small_text_legible",
+        "thin_strokes_preserved", "logical_input_correct",
+    ):
         if gate not in trial.get("fidelity_gates", []):
             errors.append(f"missing fidelity gate: {gate}")
     return errors
@@ -161,6 +171,9 @@ def result_semantic_errors(
         scenario["id"]: scenario["logical_size"] for scenario in manifest["scenarios"]
     }
     content_by_scenario: dict[str, str] = {}
+    similarity_minimum = manifest.get("trial_contract", {}).get(
+        "capture_similarity_minimum"
+    )
     for item in observations:
         scenario = item["scenario_id"]
         if item["logical_size"] != source_sizes[scenario]:
@@ -194,6 +207,14 @@ def result_semantic_errors(
         for statistic in item["metrics"].values():
             if statistic["p95"] < statistic["median"]:
                 errors.append(f"{scenario}: p95 is below median")
+        similarity = item.get("fidelity", {}).get("capture_similarity")
+        if (
+            isinstance(similarity, bool)
+            or not isinstance(similarity, (int, float))
+            or not isinstance(similarity_minimum, (int, float))
+            or similarity < similarity_minimum
+        ):
+            errors.append(f"{scenario}: capture similarity is below the ratified floor")
         artifact_kinds = {artifact["kind"] for artifact in item["artifacts"]}
         if not {"capture", "trace", "raw_samples"}.issubset(artifact_kinds):
             errors.append(f"{scenario}: observation lacks capture/trace/raw artifacts")
@@ -216,10 +237,14 @@ def result_semantic_errors(
             errors.append("synthetic evidence is eligible for policy")
     elif result["status"] == "complete":
         fidelity_passed = all(
-            item["fidelity"][gate]
+            (
+                item["fidelity"][gate]
+                if gate != "capture_similarity"
+                else item["fidelity"][gate] >= similarity_minimum
+            )
             for item in observations
             for gate in (
-                "content_floor_passed", "small_text_legible",
+                "content_floor_passed", "capture_similarity", "small_text_legible",
                 "thin_strokes_preserved", "logical_input_correct"
             )
         )

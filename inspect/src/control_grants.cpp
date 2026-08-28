@@ -70,6 +70,12 @@ std::string_view control_grant_status_id(ControlGrantStatus status) {
 
 class ControlGrantStore::Impl {
 public:
+    struct OneShotAuthorization {
+        std::string operation_identity;
+        bool committed = false;
+        std::unordered_set<std::uint64_t> provisional_tokens;
+    };
+
     Impl(ControlIdentityRegistry& identities_in,
          std::shared_ptr<ControlSecurityAuditLog> audit_log_in,
          ControlGrantStoreConfig config_in,
@@ -139,6 +145,8 @@ public:
     Clock clock;
     std::mutex mutex;
     std::unordered_map<std::string, ControlGrant> grants;
+    std::unordered_map<std::string, OneShotAuthorization> one_shot_authorizations;
+    std::uint64_t next_authorization_token = 1;
     std::deque<std::string> retired_grant_order;
     std::unordered_set<std::string> retired_grant_ids;
     std::unordered_set<std::string> consumed_consent_decisions;
@@ -233,17 +241,16 @@ ControlGrantResult ControlGrantStore::issue(
         return result;
     }
     ControlGrant grant{
-        ControlGrantId{*grant_id},
-        impl_->identities.broker_id(),
-        request.client_id,
-        request.registration_id,
-        registration->session_id,
-        registration->instance_id,
-        registration->publication_id,
-        std::move(request.capabilities),
-        std::move(consent.decision_id),
-        now + ttl,
-        false,
+        .grant_id = ControlGrantId{*grant_id},
+        .broker_id = impl_->identities.broker_id(),
+        .client_id = request.client_id,
+        .registration_id = request.registration_id,
+        .session_id = registration->session_id,
+        .instance_id = registration->instance_id,
+        .publication_id = registration->publication_id,
+        .capabilities = std::move(request.capabilities),
+        .consent_decision_id = std::move(consent.decision_id),
+        .expires_at = now + ttl,
     };
     {
         std::lock_guard lock(impl_->mutex);
@@ -294,6 +301,9 @@ ControlGrantResult ControlGrantStore::issue(
             return result;
         }
         if (one_shot_consent)
+            impl_->one_shot_authorizations.emplace(grant.grant_id.value,
+                                                   Impl::OneShotAuthorization{});
+        if (one_shot_consent)
             impl_->consumed_consent_decisions.emplace(
                 grant.consent_decision_id);
     }
@@ -321,6 +331,7 @@ ControlGrantStatus ControlGrantStore::revoke(
                        : ControlGrantStatus::NotFound;
         }
         snapshot = found->second;
+        impl_->one_shot_authorizations.erase(grant_id.value);
         impl_->grants.erase(found);
         impl_->retire_locked(grant_id.value);
     }
@@ -341,6 +352,7 @@ std::size_t ControlGrantStore::revoke_client(
             if (it->second.client_id == client_id) {
                 revoked.push_back(it->second);
                 impl_->retire_locked(it->second.grant_id.value);
+                impl_->one_shot_authorizations.erase(it->second.grant_id.value);
                 it = impl_->grants.erase(it);
             } else {
                 ++it;
@@ -366,6 +378,7 @@ std::size_t ControlGrantStore::revoke_registration(
             if (it->second.registration_id == registration_id) {
                 revoked.push_back(it->second);
                 impl_->retire_locked(it->second.grant_id.value);
+                impl_->one_shot_authorizations.erase(it->second.grant_id.value);
                 it = impl_->grants.erase(it);
             } else {
                 ++it;
@@ -410,6 +423,81 @@ bool ControlGrantStore::is_granted(
            registration->session_id == snapshot.session_id &&
            registration->instance_id == snapshot.instance_id &&
            registration->publication_id == snapshot.publication_id;
+}
+
+std::optional<ControlOperationAuthorization> ControlGrantStore::authorize_operation(
+    const ControlGrantId& grant_id, const ControlClientId& client_id,
+    const ControlRegistrationId& registration_id, InspectorCapability capability,
+    std::string_view operation_identity) {
+    if (operation_identity.empty() ||
+        !is_granted(grant_id, client_id, registration_id, capability))
+        return std::nullopt;
+    std::lock_guard lock(impl_->mutex);
+    const auto now = impl_->clock();
+    const auto found = impl_->grants.find(grant_id.value);
+    if (found == impl_->grants.end() || found->second.revoked ||
+        now >= found->second.expires_at || found->second.client_id != client_id ||
+        found->second.registration_id != registration_id ||
+        std::find(found->second.capabilities.begin(), found->second.capabilities.end(),
+                  capability) == found->second.capabilities.end())
+        return std::nullopt;
+    const auto authorization = impl_->one_shot_authorizations.find(grant_id.value);
+    if (authorization == impl_->one_shot_authorizations.end())
+        return ControlOperationAuthorization{
+            .kind = ControlOperationAuthorizationKind::Reusable};
+    auto& state = authorization->second;
+    if (state.committed)
+        return ControlOperationAuthorization{
+            .kind = ControlOperationAuthorizationKind::CommittedOneShot};
+    if (state.operation_identity.empty())
+        state.operation_identity = operation_identity;
+    if (state.operation_identity != operation_identity)
+        return std::nullopt;
+    auto token = impl_->next_authorization_token++;
+    if (token == 0)
+        token = impl_->next_authorization_token++;
+    if (token == 0 || !state.provisional_tokens.insert(token).second)
+        return std::nullopt;
+    return ControlOperationAuthorization{
+        .kind = ControlOperationAuthorizationKind::ProvisionalOneShot,
+        .reservation_token = token};
+}
+
+bool ControlGrantStore::commit_operation_authorization(
+    const ControlGrantId& grant_id, std::string_view operation_identity,
+    std::uint64_t reservation_token) {
+    if (!grant_id || operation_identity.empty() || reservation_token == 0)
+        return false;
+    std::lock_guard lock(impl_->mutex);
+    const auto authorization = impl_->one_shot_authorizations.find(grant_id.value);
+    if (authorization == impl_->one_shot_authorizations.end() ||
+        authorization->second.operation_identity != operation_identity)
+        return false;
+    auto& state = authorization->second;
+    if (state.committed)
+        return true;
+    if (!state.provisional_tokens.contains(reservation_token))
+        return false;
+    state.committed = true;
+    state.provisional_tokens.clear();
+    return true;
+}
+
+bool ControlGrantStore::release_operation_authorization(
+    const ControlGrantId& grant_id, std::string_view operation_identity,
+    std::uint64_t reservation_token) {
+    if (!grant_id || operation_identity.empty() || reservation_token == 0)
+        return false;
+    std::lock_guard lock(impl_->mutex);
+    const auto authorization = impl_->one_shot_authorizations.find(grant_id.value);
+    if (authorization == impl_->one_shot_authorizations.end() ||
+        authorization->second.operation_identity != operation_identity ||
+        authorization->second.committed)
+        return false;
+    auto& state = authorization->second;
+    if (state.provisional_tokens.erase(reservation_token) == 0)
+        return false;
+    return true;
 }
 
 std::optional<ControlGrant> ControlGrantStore::grant(
@@ -461,6 +549,7 @@ std::vector<ControlGrant> ControlGrantStore::sweep_expired() {
                 expired.push_back(it->second);
             else
                 removed.push_back(it->second);
+            impl_->one_shot_authorizations.erase(it->second.grant_id.value);
             it = impl_->grants.erase(it);
         }
     }

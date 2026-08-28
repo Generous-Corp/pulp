@@ -119,7 +119,10 @@ preflight context and is never relabeled as frame time.
 
 `ingest` accepts an independently produced cell receipt and applies the same
 fidelity, logical-input, artifact-hash, identity, trace-category, and raw-sample
-checks. `finalize` requires all 84 cells plus exact A2T and A3 receipts. A
+checks. Every closed trace question must return exactly the cell's issued
+32-hex attempt nonce as its sole GPU evidence ID; IDs from another cell or a
+capture containing ambiguous cohorts fail closed rather than being unioned.
+`finalize` requires all 84 cells plus exact A2T and A3 receipts. A
 `no-change` disposition cancels B5; either candidate leaves B5
 `waiting-trigger` on `B0-adopted-vellum-api-refresh`. Neither result authorizes
 a Pulp policy change.

@@ -132,6 +132,22 @@ def main() -> int:
     manifest = contract.load_json(contract.DEFAULT_MANIFEST)
     assert not contract.manifest_errors(manifest, contract.DEFAULT_MANIFEST)
     assert len(contract.expected_matrix(manifest)) == 84
+    manifest_mutations: list[tuple[str, Any]] = [
+        ("missing", None),
+        ("boolean", True),
+        ("below-range", -0.01),
+        ("above-range", 1.01),
+    ]
+    for label, value in manifest_mutations:
+        mutated_manifest = copy.deepcopy(manifest)
+        if value is None:
+            del mutated_manifest["trial_contract"]["capture_similarity_minimum"]
+        else:
+            mutated_manifest["trial_contract"]["capture_similarity_minimum"] = value
+        if not contract.manifest_errors(mutated_manifest, contract.DEFAULT_MANIFEST):
+            raise AssertionError(
+                f"capture similarity manifest mutation unexpectedly passed: {label}"
+            )
 
     schema = contract.schema_for_lite(contract.load_json(contract.DEFAULT_SCHEMA))
     fixture = complete_fixture(manifest)
@@ -163,6 +179,11 @@ def main() -> int:
     bad_input["eligible_for_policy"] = True
     bad_input["observations"][0]["fidelity"]["logical_input_correct"] = False
     mutations.append(("broken logical input policy candidate", bad_input))
+    low_similarity = copy.deepcopy(fixture)
+    low_similarity["evidence_kind"] = "measured"
+    low_similarity["eligible_for_policy"] = True
+    low_similarity["observations"][0]["fidelity"]["capture_similarity"] = 0.98
+    mutations.append(("capture similarity below ratified floor", low_similarity))
     synthetic_policy = copy.deepcopy(fixture)
     synthetic_policy["eligible_for_policy"] = True
     mutations.append(("synthetic evidence eligible for policy", synthetic_policy))
@@ -201,7 +222,8 @@ def main() -> int:
     print(
         "gpu_dpr_contract_selftest=true "
         f"matrix_cells={len(contract.expected_matrix(manifest))} "
-        f"semantic_mutations={len(mutations)} schema_mutations=2"
+        f"semantic_mutations={len(mutations)} schema_mutations=2 "
+        f"manifest_mutations={len(manifest_mutations)}"
     )
     return 0
 

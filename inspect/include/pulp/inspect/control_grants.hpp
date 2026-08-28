@@ -103,6 +103,18 @@ struct ControlGrantResult {
     std::optional<ControlGrant> grant;
 };
 
+enum class ControlOperationAuthorizationKind : std::uint8_t {
+    Reusable,
+    ProvisionalOneShot,
+    CommittedOneShot,
+};
+
+struct ControlOperationAuthorization {
+    ControlOperationAuthorizationKind kind =
+        ControlOperationAuthorizationKind::Reusable;
+    std::uint64_t reservation_token = 0;
+};
+
 struct ControlGrantStoreConfig {
     std::size_t max_grants = 256;
     std::size_t max_consumed_consent_decisions = 1024;
@@ -146,6 +158,27 @@ public:
                     const ControlClientId& client_id,
                     const ControlRegistrationId& registration_id,
                     InspectorCapability capability);
+    /// Atomically reserves an interactive-consent grant for its first durable
+    /// idempotency identity. Once selected, a failed provisional admission may
+    /// retry only that identity; once committed, only operation-store replay is
+    /// eligible. The durable store remains the replay authority.
+    std::optional<ControlOperationAuthorization> authorize_operation(
+        const ControlGrantId& grant_id,
+        const ControlClientId& client_id,
+        const ControlRegistrationId& registration_id,
+        InspectorCapability capability,
+        std::string_view operation_identity);
+    /// Commits a provisional one-shot reservation after the durable operation
+    /// receipt exists. Once committed, no release can reopen the grant.
+    bool commit_operation_authorization(const ControlGrantId& grant_id,
+                                        std::string_view operation_identity,
+                                        std::uint64_t reservation_token);
+    /// Releases only the caller's still-provisional reservation. Concurrent
+    /// reservations, the selected operation identity, and committed grants are
+    /// preserved.
+    bool release_operation_authorization(const ControlGrantId& grant_id,
+                                         std::string_view operation_identity,
+                                         std::uint64_t reservation_token);
     std::optional<ControlGrant> grant(const ControlGrantId& grant_id);
     std::vector<ControlGrant> sweep_expired();
 

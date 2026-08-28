@@ -17,6 +17,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/render/gpu_surface.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/motion.hpp>
@@ -425,8 +426,21 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                         return window_ ? window_->capture_back_buffer_png()
                                        : std::vector<std::uint8_t>{};
                     },
-                    .gpu_surface = [this] {
-                        return window_ ? window_->gpu_surface() : nullptr;
+                    .frame_evidence = [this] {
+                        ControlGpuHealthProvider::FrameObservation frame;
+                        const auto* surface = window_ ? window_->gpu_surface() : nullptr;
+                        if (!surface)
+                            return frame;
+                        const auto adapter = surface->adapter_info();
+                        frame.adapter = ControlGpuHealthProvider::AdapterIdentity{
+                            .available = adapter.available,
+                            .native_bridge = adapter.native_bridge,
+                            .backend = adapter.backend,
+                            .name = adapter.name,
+                            .vendor = adapter.vendor,
+                            .architecture = adapter.architecture,
+                        };
+                        return frame;
                     },
                 });
                 if (!gpu_health_view_adapter_)

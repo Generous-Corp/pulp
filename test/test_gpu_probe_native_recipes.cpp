@@ -67,17 +67,23 @@ TEST_CASE("Renderer3D recipe produces bounded typed evidence", "[gpu][gpu-probe]
     REQUIRE_FALSE(run.payloads.empty());
 }
 
-TEST_CASE("Renderer3D post-readback mutation localizes to content",
+TEST_CASE("Renderer3D planted framebuffer regression reaches GPU readback",
           "[gpu][gpu-probe][mutation]") {
     const auto run = probe::run_renderer3d_recipe({true, kEvidenceId});
     require_valid(run);
     require_work_or_skip(run);
     REQUIRE(run.result.verdict == probe::Verdict::fail);
+    REQUIRE(run.result.mutation == "pre-submit-framebuffer-downscale");
+    CHECK(run.result.dimensions.width == 32);
+    CHECK(run.result.dimensions.height == 32);
+    CHECK(run.result.dimensions.work_items == 1'024);
     REQUIRE(run.result.passes[0].verdict == probe::Verdict::pass);
     REQUIRE(run.result.passes[1].verdict == probe::Verdict::pass);
     REQUIRE(run.result.passes[2].verdict == probe::Verdict::pass);
     REQUIRE(run.result.passes[3].verdict == probe::Verdict::fail);
     REQUIRE(run.result.passes[3].code == "portable_structure_mismatch");
+    REQUIRE(payload_named(run, "observed.rgba8").bytes.size() ==
+            run.result.dimensions.work_items * 4);
 }
 
 TEST_CASE("GpuCompute magnitude recipe agrees with an independent CPU oracle",

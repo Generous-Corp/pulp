@@ -4,6 +4,9 @@
 
 #include <chrono>
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <future>
 #include <memory>
 #include <string>
 
@@ -200,6 +203,147 @@ TEST_CASE("interactive consent decisions are single-use while policy is reusable
               GrantFixture::consent(ControlConsentAuthority::ExistingUserPolicy,
                                     "policy-a")).status ==
           ControlGrantStatus::Granted);
+}
+
+TEST_CASE("one-shot grants authorize one fresh request and preserve its replay",
+          "[inspect][control][grants][one-shot]") {
+    GrantFixture fixture;
+    auto consent = GrantFixture::consent(ControlConsentAuthority::BrokerUserPrompt,
+                                         "one-shot-prompt");
+    consent.expires_at = fixture.now + 5s;
+    auto issued = fixture.grants.issue(fixture.request(), consent);
+    REQUIRE(issued.grant);
+
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::array<std::future<std::optional<ControlOperationAuthorization>>, 8> attempts;
+    for (std::size_t index = 0; index < attempts.size(); ++index) {
+        attempts[index] = std::async(std::launch::async, [&, index] {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {}
+            return fixture.grants.authorize_operation(
+                issued.grant->grant_id, fixture.client.client_id,
+                fixture.registration.registration_id, InspectorCapability::StateRead,
+                "operation-" + std::to_string(index));
+        });
+    }
+    while (ready.load(std::memory_order_acquire) != static_cast<int>(attempts.size())) {}
+    start.store(true, std::memory_order_release);
+
+    std::size_t authorized = 0;
+    ControlOperationAuthorization winner;
+    std::string winner_identity;
+    for (std::size_t index = 0; index < attempts.size(); ++index) {
+        if (const auto attempt = attempts[index].get()) {
+            ++authorized;
+            winner = *attempt;
+            winner_identity = "operation-" + std::to_string(index);
+        }
+    }
+    REQUIRE(authorized == 1);
+    CHECK(winner.kind == ControlOperationAuthorizationKind::ProvisionalOneShot);
+    CHECK(winner.reservation_token != 0);
+    REQUIRE(fixture.grants.commit_operation_authorization(
+        issued.grant->grant_id, winner_identity, winner.reservation_token));
+    const auto replay = fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::StateRead,
+        winner_identity);
+    REQUIRE(replay);
+    CHECK(replay->kind == ControlOperationAuthorizationKind::CommittedOneShot);
+    const auto store_adjudicated_replay = fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::StateRead,
+        "different-operation");
+    REQUIRE(store_adjudicated_replay);
+    CHECK(store_adjudicated_replay->kind ==
+          ControlOperationAuthorizationKind::CommittedOneShot);
+}
+
+TEST_CASE("one-shot release cannot clear a concurrent or committed reservation",
+          "[inspect][control][grants][one-shot][race]") {
+    GrantFixture fixture;
+    auto consent = GrantFixture::consent(ControlConsentAuthority::BrokerUserPrompt,
+                                         "one-shot-race");
+    consent.expires_at = fixture.now + 5s;
+    const auto issued = fixture.grants.issue(fixture.request(), consent);
+    REQUIRE(issued.grant);
+
+    const auto first = fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::StateRead,
+        "stable-operation");
+    const auto second = fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::StateRead,
+        "stable-operation");
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(first->reservation_token != second->reservation_token);
+    REQUIRE(fixture.grants.release_operation_authorization(
+        issued.grant->grant_id, "stable-operation", first->reservation_token));
+    CHECK_FALSE(fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::StateRead,
+        "competing-operation"));
+    REQUIRE(fixture.grants.commit_operation_authorization(
+        issued.grant->grant_id, "stable-operation", second->reservation_token));
+    CHECK_FALSE(fixture.grants.release_operation_authorization(
+        issued.grant->grant_id, "stable-operation", second->reservation_token));
+    const auto committed = fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::StateRead,
+        "competing-operation");
+    REQUIRE(committed);
+    CHECK(committed->kind == ControlOperationAuthorizationKind::CommittedOneShot);
+}
+
+TEST_CASE("interactive consent authorities always create one-shot operation authorization",
+          "[inspect][control][grants][one-shot][authority]") {
+    for (const auto authority : {ControlConsentAuthority::BrokerUserPrompt,
+                                 ControlConsentAuthority::TrustedPulpCli,
+                                 ControlConsentAuthority::TrustedHostUi}) {
+        GrantFixture fixture;
+        auto prompt = GrantFixture::consent(authority, "forced-one-shot");
+        prompt.expires_at = fixture.now + 5s;
+        const auto issued = fixture.grants.issue(fixture.request(), prompt);
+        REQUIRE(issued.grant);
+        const auto authorization = fixture.grants.authorize_operation(
+            issued.grant->grant_id, fixture.client.client_id,
+            fixture.registration.registration_id, InspectorCapability::StateRead,
+            "operation");
+        REQUIRE(authorization);
+        CHECK(authorization->kind ==
+              ControlOperationAuthorizationKind::ProvisionalOneShot);
+    }
+}
+
+TEST_CASE("one-shot release preserves the selected operation identity",
+          "[inspect][control][grants][one-shot][retry]") {
+    GrantFixture fixture;
+    auto consent = GrantFixture::consent(ControlConsentAuthority::BrokerUserPrompt,
+                                         "one-shot-retry");
+    consent.expires_at = fixture.now + 5s;
+    const auto issued = fixture.grants.issue(fixture.request(), consent);
+    REQUIRE(issued.grant);
+
+    const auto first = fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::StateRead,
+        "selected-operation");
+    REQUIRE(first);
+    REQUIRE(fixture.grants.release_operation_authorization(
+        issued.grant->grant_id, "selected-operation", first->reservation_token));
+    CHECK_FALSE(fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::StateRead,
+        "different-operation"));
+    const auto retry = fixture.grants.authorize_operation(
+        issued.grant->grant_id, fixture.client.client_id,
+        fixture.registration.registration_id, InspectorCapability::StateRead,
+        "selected-operation");
+    REQUIRE(retry);
+    CHECK(retry->kind == ControlOperationAuthorizationKind::ProvisionalOneShot);
 }
 
 TEST_CASE("runtime evaluation rejects reusable policy and consumes interactive consent",

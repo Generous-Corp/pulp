@@ -33,6 +33,8 @@ DEVICE_MARKERS = (
     "GpuSurface",
     "run_renderer3d_recipe",
     "run_gpu_compute_magnitude_recipe",
+    "run_gpu_audio_stft_recipe",
+    "run_threejs_multi_pass_recipe",
 )
 
 # Deliberately NOT a marker: the bare word "Dawn". It appears in prose — one

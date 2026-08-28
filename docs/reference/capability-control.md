@@ -163,6 +163,14 @@ is intersected with the exact live registration's declared capabilities. Empty
 intersection, missing consent, stale publication, or a dead session denies the
 request.
 
+Interactive grants from the trusted Pulp CLI, host UI, or broker-owned prompt
+are one-shot for new operations. Approval admits at most one fresh idempotency
+identity; reconnecting or changing the request ID may only replay that
+operation's existing durable receipt. Different params, operation identity,
+target lineage, or idempotency identity require new consent. Reusable grants
+exist only when an explicit existing-user policy, rather than an interactive
+decision, authorizes them.
+
 ### GPU startup-health snapshots
 
 `dev.pulp.gpu/health.read@1` is the exact-instance read operation for the
@@ -200,15 +208,25 @@ PNG content floor, and publishes an immutable snapshot for the exact admitted
 registration, instance, and publication. Reads are atomic and never render,
 block, compile, trace, or touch the audio thread.
 
-This first implementation is intentionally conservative: a capture-confirmed
-frame is an upper bound, not proof of the generic native present boundary.
-Until Vellum-owned frame-lifecycle/source/shader identity and a correlated A2T
-trace are available, the versioned `pulp.editor-first-visible.v1` budget remains
-`unratified`, startup remains `incomplete`/`unverified`, and no B4 disposition
-is legal. `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` provides the deterministic blank
+The default Standalone composition is intentionally conservative: capture
+completion bounds back-buffer readiness but does not prove the native present
+boundary. Only a trusted product composition may supply independent native
+present timestamps, unique editor-lifecycle and observed cache-state identity,
+direct submission evidence, bounded compile/upload/hidden-frame/present timings,
+signatures, and the same 32-hex GPU evidence ID observed by the same-instance
+trace. Capture completion never substitutes for presentation.
+Without those inputs the versioned `pulp.editor-first-visible.v1` startup result
+remains `incomplete`/`unverified`.
+
+Even a locally complete live snapshot is raw campaign evidence, not the A3
+acceptance decision. The closed A3 verifier independently binds the ratified
+budget and raw samples, product/host artifacts, exact trace and analyzer replay,
+blank negative, and audio-thread exclusion receipt before any B4 disposition is
+legal. `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` provides the deterministic blank
 first-frame negative control. Timeout, instance loss, event loss, invalid PNG,
-blank content, and missing adapter identity all fail closed. This runtime
-operation remains absent from the design-time agent capability manifest.
+blank content, malformed producer data, reused lifecycle identity, and missing
+adapter identity all fail closed. This runtime operation remains absent from the
+design-time agent capability manifest.
 
 ## Diagnose and audit
 

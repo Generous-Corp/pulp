@@ -367,6 +367,18 @@ RecipeRun run_renderer3d_recipe(const RunOptions& options) {
     render::HardcodedCubeRenderConfig config;
     config.width = recipe.dimensions.width;
     config.height = recipe.dimensions.height;
+    // The planted regression must affect bytes produced by the GPU. A 32x32
+    // render still exercises submission and readback while making the recipe's
+    // 1,500-pixel foreground floor impossible to satisfy.
+    if (options.apply_negative_mutation) {
+        config.width = 32;
+        config.height = 32;
+    }
+    run.result.dimensions = {
+        config.width,
+        config.height,
+        static_cast<std::uint64_t>(config.width) * config.height,
+    };
     const auto rendered = render::Renderer3D::render_hardcoded_textured_cube(config);
 
     run.result.adapter.status = rendered.adapter_info_available
@@ -397,14 +409,6 @@ RecipeRun run_renderer3d_recipe(const RunOptions& options) {
             ? "readback_completed" : "readback_incomplete"));
 
     auto observed = rendered.rgba;
-    if (options.apply_negative_mutation && observed.size() >= 4) {
-        const std::array background{observed[0], observed[1], observed[2]};
-        for (std::size_t i = 0; i + 3 < observed.size(); i += 4) {
-            observed[i] = background[0];
-            observed[i + 1] = background[1];
-            observed[i + 2] = background[2];
-        }
-    }
     const auto region = foreground_region(observed, rendered.width, rendered.height);
     const bool portable_structure = rendered.success &&
         region.count > renderer3d_oracle::kMinForegroundPixels &&
