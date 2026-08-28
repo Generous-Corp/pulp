@@ -60,7 +60,7 @@ pulp_add_test_suite(pulp-test-multi-channel-meter
     LIBRARIES pulp::signal pulp::audio)
 
 pulp_add_test_suite(pulp-test-signal-sub-oscillator
-    SOURCES test_signal_sub_oscillator.cpp
+    SOURCES test_signal_sub_oscillator.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
 
 add_executable(pulp-test-signal-sub-oscillator-no-exceptions
@@ -75,7 +75,7 @@ add_test(NAME signal-sub-oscillator-no-exceptions
     COMMAND pulp-test-signal-sub-oscillator-no-exceptions)
 
 pulp_add_test_suite(pulp-test-signal-blit-oscillator
-    SOURCES test_signal_blit_oscillator.cpp
+    SOURCES test_signal_blit_oscillator.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
 
 add_executable(pulp-test-signal-blit-oscillator-no-exceptions
