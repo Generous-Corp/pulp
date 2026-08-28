@@ -278,6 +278,7 @@ endif()
             -S "${_threejs_consumer_source}"
             -B "${_threejs_consumer_build}"
             "-DCMAKE_PREFIX_PATH=${_prefix}"
+            -DPULP_ALLOW_DEBUG_SDK=ON
             "-DEXPECTED_RUNTIME_DIR=${_threejs_runtime_root}"
             "-DEXPECTED_THREEJS_REVISION=077dd13c0e869d9f3dbe55875686f920367de457"
         RESULT_VARIABLE _threejs_consumer_rc
