@@ -73,6 +73,14 @@ those producers exist; do not manufacture identities, promote incomplete event
 captures, or advertise a live host capability before the exact product adapter
 can return a validated snapshot.
 
+The Pulp-owned live seam is `ControlGpuHealthProvider` plus
+`ControlGpuHealthViewAdapter`: product hosts supply existing back-buffer and
+`GpuSurface` callbacks, while exact generic present/source/shader/cache events
+remain Vellum work. A capture-confirmed upper bound may populate a validated
+snapshot but must keep the unratified startup verdict unverified. Route any
+request for a true present hook or generic pipeline instrumentation to Vellum
+instead of modifying generic window or render-lifecycle paths in Pulp.
+
 ## Validate the contract
 
 Run the closed eight-case suite and projection validator:

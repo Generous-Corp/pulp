@@ -394,3 +394,13 @@ Pulp SHAs, and preserve binary identity with the result artifacts. Exercise the
 same logical fixture at each requested DPR and mode; a rebuilt or substituted
 payload is a different trial. Do not publish a scale-policy conclusion from a
 planned/synthetic run or before the A2T trace and A3 budget dependencies exist.
+
+## Forge GPU-health canary
+
+Forge shells may reuse `ControlGpuHealthViewAdapter` by supplying their real
+back-buffer capture and `GpuSurface` callbacks. The provider is Pulp-owned and
+bounded, but a Forge canary still needs exact Forge/Pulp binary identity and a
+correlated trace. Treat its capture-confirmed first frame as an upper bound and
+leave the unratified startup budget unverified; never substitute a Pulp example
+for the requested Forge product. Exercise the seeded blank control before
+accepting a real-machine result.
