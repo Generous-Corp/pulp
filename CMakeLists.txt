@@ -583,11 +583,11 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
 endif()
 
-# ── CPU-only GPU-health contract model (desktop tooling) ──────────────────
+# ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
 # MCP remains available in GPU-disabled/package-stripped configurations, so
-# its closed result parser must not be hidden behind the native CLI/GPU guard.
+# the probe's closed result parser must not be hidden behind the native
+# CLI/GPU guard. GPU-health is defined above because Inspector also consumes it.
 if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
-    add_subdirectory(tools/cli/gpu_health)
     add_subdirectory(tools/cli/gpu_probe)
 endif()
 
