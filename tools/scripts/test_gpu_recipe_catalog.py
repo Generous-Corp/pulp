@@ -20,6 +20,16 @@ def registry_header(*ids: str) -> str:
     return f"inline constexpr std::array kRecipeIds{{\n{rows},\n}};\n"
 
 
+def conditional_registry_header(default: list[str], enabled: list[str]) -> str:
+    return (
+        "#if PULP_GPU_PROBE_THREEJS_CALLABLE\n"
+        + registry_header(*enabled)
+        + "#else\n"
+        + registry_header(*default)
+        + "#endif\n"
+    )
+
+
 def valid_document() -> dict:
     return {
         "$schema": "gpu-recipes.schema.json",
@@ -29,6 +39,10 @@ def valid_document() -> dict:
             {
                 "id": "gpu.renderer3d.cube",
                 "native_registry_index": 0,
+                "availability": {
+                    "required_features": [],
+                    "unavailable_exit_code": 2,
+                },
                 "version": 1,
                 "title": "Renderer3D cube",
                 "summary": "Prove bounded render and readback work.",
@@ -147,6 +161,26 @@ class CatalogContract(unittest.TestCase):
         problems = catalog.validate_registry_projection(document, list(reversed(native)))
         self.assertTrue(problems)
 
+    def test_conditional_threejs_registry_matches_only_with_runtime_and_v8(self) -> None:
+        document = catalog.load_and_validate(catalog.DEFAULT_CATALOG)
+        native = catalog.probe_registry_ids(
+            catalog.DEFAULT_REGISTRY_HEADER.read_text(encoding="utf-8")
+        )
+        variants = catalog.probe_registry_variants(
+            conditional_registry_header(native, [*native, "threejs.multi-pass.v1"])
+        )
+        self.assertEqual(catalog.validate_registry_variants(document, variants), [])
+        self.assertEqual(
+            catalog.catalog_probe_ids(document, frozenset()),
+            native,
+        )
+        self.assertEqual(
+            catalog.catalog_probe_ids(
+                document, frozenset({"pinned-threejs-runtime", "v8"})
+            ),
+            [*native, "threejs.multi-pass.v1"],
+        )
+
     def test_catalog_recipe_not_in_native_registry_is_rejected(self) -> None:
         document = catalog.load_and_validate(catalog.DEFAULT_CATALOG)
         native = catalog.probe_registry_ids(
@@ -172,6 +206,12 @@ class CatalogContract(unittest.TestCase):
             ],
         )
         self.assertEqual(selected[0]["entrypoints"]["trace"]["question"], "gpu-probe")
+        threejs = catalog.recipes_for_symptoms(document, ["threejs-runtime-unavailable"])
+        self.assertEqual([recipe["id"] for recipe in threejs], ["threejs.multi-pass.v1"])
+        self.assertEqual(
+            threejs[0]["availability"]["required_features"],
+            ["pinned-threejs-runtime", "v8"],
+        )
 
     def test_unknown_recipe_and_symptom_use_unavailable_exit_two(self) -> None:
         self.assertEqual(catalog.main(["--show", "missing.recipe"]), 2)
