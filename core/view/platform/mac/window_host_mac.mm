@@ -1429,14 +1429,11 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         layer.opaque = YES;
         layer.backgroundColor = pulp::view::mac_host::cg_host_clear_color();
 
-        // Pin the most-recent drawable to the top-left during a live resize
-        // instead of letting Core Animation's default kCAGravityResize STRETCH
-        // it to the new layer bounds. The default makes the canvas appear to
-        // zoom in/out as you drag a window edge (the old frame is scaled to the
-        // new size in the gap before the next Metal frame lands). With
-        // top-left gravity the content stays put at its native scale and the
-        // newly-exposed area shows the dark background until the next frame —
-        // i.e. the canvas "stays in its fixed position" as the user expects.
+        // Keep a settled drawable at native scale. During a live expansion,
+        // setFrameSize: temporarily selects Resize gravity only until the host
+        // synchronously presents the exact new-size GPU frame. That one-frame
+        // cover avoids exposing background strips while drawable acquisition
+        // waits for vsync, without restoring the old whole-gesture zoom.
         // Non-flipped NSView layer: max-Y is visually the top, so TopLeft is
         // the upper-left corner where our (0,0)-origin UI begins.
         layer.contentsGravity = kCAGravityTopLeft;
@@ -1475,6 +1472,17 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 }
 
 - (void)setFrameSize:(NSSize)newSize {
+    const NSSize oldSize = self.frame.size;
+    const BOOL expandingLiveResize =
+        self.inLiveResize &&
+        (newSize.width > oldSize.width || newSize.height > oldSize.height);
+    // AppKit commits the layer bounds before windowDidResize can acquire and
+    // paint the matching Metal drawable. Cover that sub-frame expansion gap
+    // with the retained drawable; handle_resize restores TopLeft immediately
+    // after the exact-size frame has presented.
+    self.metalLayer.contentsGravity = expandingLiveResize
+        ? kCAGravityResize
+        : kCAGravityTopLeft;
     [super setFrameSize:newSize];
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
@@ -2686,8 +2694,13 @@ private:
         // edge during the drag and batches the real frame at mouse-up. Paint the
         // just-committed size now; the display-link gate still owns animation
         // timing and may harmlessly coalesce a later requested frame.
-        if (gpu_surface_ && skia_surface_)
+        if (gpu_surface_ && skia_surface_) {
             render_frame();
+            // setFrameSize: may use Resize gravity to cover a live expansion's
+            // pre-present gap. The drawable now matches the committed bounds,
+            // so return to native-scale retention before the next transaction.
+            metal_view_.metalLayer.contentsGravity = kCAGravityTopLeft;
+        }
     }
 
     // A backing-scale (DPI) change at the SAME logical size — display move,
