@@ -1,14 +1,14 @@
 {
   "schema": "pulp.gpu-probe-result.v1",
   "version": 1,
-  "gpu_evidence_id": "742ffbf8acb75f7bf55d9245f5428c70",
+  "gpu_evidence_id": "9ed85ebc4ccff5b4aee1041adf2618e2",
   "recipe_id": "renderer3d.hardcoded-cube.v1",
   "source_digest": "d66c9d9583d3e6db88c9cf7c98b7aba0949975ad637e9158d74d6554a4d4f06e",
-  "signature_digest": "6280a6687e33be55a2dcc6771216b068095cd15b08128ee6417b9134d8515a37",
+  "signature_digest": "d7b831a9e4ca7a4aad64d13e6a8d4556ec030881145ca714aea1b37c5cd5d4d0",
   "dimensions": {
-    "width": 128,
-    "height": 128,
-    "work_items": 16384
+    "width": 32,
+    "height": 32,
+    "work_items": 1024
   },
   "seed": 5928230539327963137,
   "clock": "fixed-step-0",
@@ -30,7 +30,7 @@
     "device": null
   },
   "numeric_sample_count": 0,
-  "mutation": "post-readback-foreground-erasure",
+  "mutation": "pre-submit-framebuffer-downscale",
   "verdict": "fail",
   "passes": [
     {
@@ -79,22 +79,22 @@
       "name": "content-oracle.json",
       "kind": "json",
       "mime": "application/json",
-      "bytes": 190,
-      "sha256": "140260e9d2cbb9aa98bb96e982157d5d948e1d53fd1e465d7bb624f1655c77d8"
+      "bytes": 176,
+      "sha256": "675c03d4786b6d1cdd45cc4e6134c44e8d13c5bf4d30e71b3f687bce57c0bd03"
     },
     {
       "name": "final.png",
       "kind": "image",
       "mime": "image/png",
-      "bytes": 7212,
-      "sha256": "497f86ed7c374b21c3d4a16f5cd4dc5c590f588b579e03e80ff52c691ea3d832"
+      "bytes": 1298,
+      "sha256": "bd8025de40e8f6fdef16a95c1d47a19e0e0431aad9e8e4f4b8cf73d795360599"
     },
     {
       "name": "observed.rgba8",
       "kind": "image",
       "mime": "application/octet-stream",
-      "bytes": 65536,
-      "sha256": "ac1ebcdaa33348f745aa01ceb55d1013574a773085c78fa4f09973b023249490"
+      "bytes": 4096,
+      "sha256": "65364990ba777315a25f6ab4d21de27bf4b742ff9ce5f720ad47084c18e15f66"
     }
   ],
   "recommendations": [
