@@ -1316,6 +1316,54 @@ TEST_CASE("Tom preset application allocates nothing on the audio thread",
     REQUIRE(allocations == 0);
 }
 
+TEST_CASE("Tom ladder math is an idle-only semantic opt-in",
+          "[signal][drum][tom][math-profile]") {
+    using Profile = TomVoice::LadderMathProfile;
+    TomVoice voice;
+    REQUIRE(voice.ladder_math_profile() == Profile::reference);
+    REQUIRE_FALSE(voice.set_ladder_math_profile(
+        static_cast<Profile>(255)));
+    REQUIRE(voice.set_ladder_math_profile(Profile::realtime_efficient));
+    REQUIRE(voice.ladder_math_profile() == Profile::realtime_efficient);
+
+    voice.prepare(kFs);
+    voice.note_on(0.8f);
+    REQUIRE_FALSE(voice.set_ladder_math_profile(Profile::reference));
+    REQUIRE(voice.ladder_math_profile() == Profile::realtime_efficient);
+    voice.reset();
+    REQUIRE(voice.set_ladder_math_profile(Profile::reference));
+}
+
+TEST_CASE("Tom efficient ladder math preserves hit shape and block partition",
+          "[signal][drum][tom][math-profile]") {
+    auto configure = [](TomVoice& voice) {
+        voice.apply_preset(TomVoice::Preset::snary);
+        voice.prepare(kFs);
+    };
+
+    TomVoice reference;
+    configure(reference);
+    reference.note_on(1.0f);
+    const auto exact = render(reference, 36000, 32);
+
+    TomVoice candidate;
+    configure(candidate);
+    REQUIRE(candidate.set_ladder_math_profile(
+        TomVoice::LadderMathProfile::realtime_efficient));
+    candidate.note_on(1.0f);
+    const auto efficient = render(candidate, 36000, 32);
+
+    TomVoice partitioned;
+    configure(partitioned);
+    REQUIRE(partitioned.set_ladder_math_profile(
+        TomVoice::LadderMathProfile::realtime_efficient));
+    partitioned.note_on(1.0f);
+    REQUIRE(render(partitioned, 36000, 512) == efficient);
+
+    REQUIRE(std::fabs(peak(efficient) / peak(exact) - 1.0) < 0.001);
+    REQUIRE(std::fabs(rms(efficient) / rms(exact) - 1.0) < 0.001);
+}
+
 // -- Kit ---------------------------------------------------------------------
 
 TEST_CASE("A kit publishes and enforces one output latency",

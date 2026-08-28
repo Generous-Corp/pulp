@@ -283,11 +283,19 @@ public:
 #endif
 
 /// The ladder's `float` saturator, gated by `PULP_SIGNAL_FAST_LADDER_TANH`.
+template <bool RealtimeEfficient>
+inline float ladder_tanh_profiled(float x) {
+    if constexpr (RealtimeEfficient)
+        return FastMath::tanh(x);
+    else
+        return std::tanh(x);
+}
+
 inline float ladder_tanh(float x) {
 #if PULP_SIGNAL_FAST_LADDER_TANH
-    return FastMath::tanh(x);
+    return ladder_tanh_profiled<true>(x);
 #else
-    return std::tanh(x);
+    return ladder_tanh_profiled<false>(x);
 #endif
 }
 

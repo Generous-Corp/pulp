@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 57,
+  "inventory_version": 58,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -38,14 +38,14 @@
   ],
   "counts": {
     "public_headers": 442,
-    "reviewed_headers": 147,
-    "legacy_unreviewed_headers": 295,
+    "reviewed_headers": 149,
+    "legacy_unreviewed_headers": 293,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 96,
-      "capability_support": 38,
+      "capability_entrypoint": 97,
+      "capability_support": 39,
       "infrastructure": 11,
-      "legacy_unreviewed": 295,
+      "legacy_unreviewed": 293,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -75,8 +75,8 @@
       },
       "signal": {
         "public_headers": 263,
-        "reviewed_headers": 105,
-        "legacy_unreviewed_headers": 158,
+        "reviewed_headers": 107,
+        "legacy_unreviewed_headers": 156,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -2325,11 +2325,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/drum/tom.hpp",
-      "fingerprint": "sha256:2062cc8f015ed0352d5d14ad0d21537b2dc0a4cc2f226e59c3f16fe6768d4ffb",
+      "fingerprint": "sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
       "include": "pulp/signal/drum/tom.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.drum-tom-voice"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",
@@ -2454,7 +2456,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
-      "fingerprint": "sha256:419c6e831cfe4aa999c21f918ad453ecf03ae07ea8317c8def0be9cd4d67e698",
+      "fingerprint": "sha256:6fb9907ba6984a2b76af66bd3a8f9a4e3008f4f0f29526beb6fbed64cafa6400",
       "include": "pulp/signal/fast_math.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -2878,11 +2880,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/ladder_filter.hpp",
-      "fingerprint": "sha256:cedce46a708a23a603c81d8e5b6497f623a93e25a68e58b6d58c67169bb761d1",
+      "fingerprint": "sha256:1c586ff41aceec5c574002dbb5d9ae8b7d4a052c5e605a5fd27988fc7d7a7399",
       "include": "pulp/signal/ladder_filter.hpp",
-      "disposition": "legacy_unreviewed",
-      "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "disposition": "capability_support",
+      "capability_keys": [
+        "signal.drum-tom-voice"
+      ],
+      "rationale": "The generic ladder owns the compile-time saturation dispatch used by the measured tom consumer; it is not independently advertised."
     },
     {
       "domain": "signal",

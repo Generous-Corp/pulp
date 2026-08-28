@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 39,
+  "manifest_revision": 40,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 56
+        "capabilities": 57
       },
       "timebase": {
         "state": "partial",
@@ -2459,6 +2459,109 @@
         }
       },
       "contract_digest": "sha256:fee52792ad753f30822e0e2f7173b42ef27036b17308565abcac52d35799e2f7"
+    },
+    {
+      "key": "signal.drum-tom-voice",
+      "domain": "signal",
+      "summary": "Deterministic synthesized tom voice with an idle-only measured ladder-math opt-in.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "audio",
+        "release": "destruction off audio"
+      },
+      "state_model": "Pitch and amplitude envelopes, deterministic noise, a four-stage noise ladder, independent lo-fi paths, output-stage state, and an idle-published ladder profile.",
+      "seed_model": "fixed deterministic per-voice noise seed",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "velocity-triggered mono tom synthesis with bounded public controls",
+      "output_domain": "finite mono percussion audio",
+      "units": [
+        "samples",
+        "hertz",
+        "milliseconds",
+        "linear amplitude"
+      ],
+      "latency": "selected output-stage oversampling latency",
+      "tail": "finite configured envelopes, ladder state, lo-fi state, and output-stage tail",
+      "scheduling": "sample-continuous; ladder profile publishes only while idle",
+      "bindings": [
+        {
+          "role": "voice",
+          "kind": "cpp_type",
+          "include": "pulp/signal/drum/tom.hpp",
+          "qualified_name": "pulp::signal::drum::TomVoice",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "ladder_profile",
+          "kind": "cpp_type",
+          "include": "pulp/signal/drum/tom.hpp",
+          "qualified_name": "pulp::signal::drum::TomVoice::LadderMathProfile",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "set_ladder_profile",
+          "kind": "cpp_function",
+          "include": "pulp/signal/drum/tom.hpp",
+          "qualified_name": "pulp::signal::drum::TomVoice::set_ladder_math_profile",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "get_ladder_profile",
+          "kind": "cpp_function",
+          "include": "pulp/signal/drum/tom.hpp",
+          "qualified_name": "pulp::signal::drum::TomVoice::ladder_math_profile",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:c51c08227c374fbf2277707db2ec286a11cea1304bd1f4dae4ae2a33156d2ed9"
     },
     {
       "key": "signal.dynamic-eq",
@@ -6310,14 +6413,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 89,
+    "total": 90,
     "by_domain": {
       "audio": 7,
       "midi": 9,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 56,
+      "signal": 57,
       "timebase": 9
     }
   },
@@ -8240,6 +8343,8 @@
               "set_noise_cutoff_hz(double hz)",
               "set_noise_resonance(double amount)",
               "set_noise_color(NoiseColor color)",
+              "set_ladder_math_profile(LadderMathProfile profile)",
+              "ladder_math_profile()",
               "set_click_level(double level)",
               "set_click_cutoff_hz(double hz)",
               "set_click_decay_ms(double ms)",
@@ -8247,6 +8352,13 @@
               "body_lofi()"
             ],
             "enums": [
+              [
+                "LadderMathProfile",
+                [
+                  "reference",
+                  "realtime_efficient"
+                ]
+              ],
               [
                 "Wave",
                 [
@@ -9832,7 +9944,9 @@
               "reset()",
               "set_sample_rate(SampleType sr)",
               "set_frequency(SampleType hz)",
-              "set_resonance(SampleType r)"
+              "set_resonance(SampleType r)",
+              "process_reference(SampleType input)",
+              "process_realtime_efficient(SampleType input)"
             ],
             "enums": []
           }

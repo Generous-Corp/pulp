@@ -615,8 +615,12 @@ def public_methods(text: str, cls: str, *, source_is_code: bool = False):
     else:
         prioritized = first + [method for method in uniq if method not in first]
     # 14 rather than 7: the cap exists to keep the prompt readable, and half of
-    # these classes have more than seven methods worth knowing about.
-    return prioritized[:14]
+    # these classes have more than seven methods worth knowing about. TomVoice
+    # retains its existing 14-method compatibility surface while publishing the
+    # two measured ladder-profile controls; dropping established preset or
+    # lo-fi calls would break generator consumers for an unrelated opt-in.
+    limit = 16 if cls == "TomVoice" else 14
+    return prioritized[:limit]
 
 
 def _namespace_at(text: str, position: int) -> str:

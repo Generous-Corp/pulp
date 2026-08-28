@@ -25,25 +25,15 @@ public:
     }
 
     SampleType process(SampleType input) {
-        // Non-linear feedback
-        SampleType feedback =
-            resonance_ * SampleType{4.0f} * (stage_[3] - input * SampleType{0.5f});
-        SampleType x = input - feedback;
+        return process_with_profile<PULP_SIGNAL_FAST_LADDER_TANH != 0>(input);
+    }
 
-        // Cache each snapped stage's saturation. The next stage and next sample
-        // reuse exactly that value, avoiding repeated transcendental calls.
-        SampleType saturated_prev = saturate(x);
-        for (int i = 0; i < 4; ++i) {
-            // Snap each ladder stage: at high resonance the stages self-
-            // oscillate and their tails otherwise decay into denormals with
-            // no FTZ guard. No-op above 1e-15.
-            stage_[i] = snap_to_zero(
-                stage_[i] + g_ * (saturated_prev - saturated_stage_[i]));
-            saturated_stage_[i] = saturate(stage_[i]);
-            saturated_prev = saturated_stage_[i];
-        }
+    SampleType process_reference(SampleType input) {
+        return process_with_profile<false>(input);
+    }
 
-        return stage_[3];
+    SampleType process_realtime_efficient(SampleType input) {
+        return process_with_profile<true>(input);
     }
 
     void process(SampleType* buffer, int num_samples) {
@@ -57,6 +47,29 @@ public:
     }
 
 private:
+    template <bool RealtimeEfficient>
+    SampleType process_with_profile(SampleType input) {
+        // Non-linear feedback
+        SampleType feedback =
+            resonance_ * SampleType{4.0f} * (stage_[3] - input * SampleType{0.5f});
+        SampleType x = input - feedback;
+
+        // Cache each snapped stage's saturation. The next stage and next sample
+        // reuse exactly that value, avoiding repeated transcendental calls.
+        SampleType saturated_prev = saturate<RealtimeEfficient>(x);
+        for (int i = 0; i < 4; ++i) {
+            // Snap each ladder stage: at high resonance the stages self-
+            // oscillate and their tails otherwise decay into denormals with
+            // no FTZ guard. No-op above 1e-15.
+            stage_[i] = snap_to_zero(
+                stage_[i] + g_ * (saturated_prev - saturated_stage_[i]));
+            saturated_stage_[i] = saturate<RealtimeEfficient>(stage_[i]);
+            saturated_prev = saturated_stage_[i];
+        }
+
+        return stage_[3];
+    }
+
     /// Saturating non-linearity. The `float` path goes through
     /// `signal::ladder_tanh`, which is exact `std::tanh` by default and switches
     /// to the float-only Padé `FastMath::tanh` only when
@@ -64,9 +77,10 @@ private:
     /// rationale — the Padé form's +/-4 hard clamp alters the ladder's overdrive
     /// character, so exact saturation is the default). `LadderFilterT<double>`
     /// always uses libm: no double Padé exists and it is not on a hot path.
+    template <bool RealtimeEfficient>
     static SampleType saturate(SampleType x) {
         if constexpr (std::is_same_v<SampleType, float>)
-            return ladder_tanh(x);
+            return ladder_tanh_profiled<RealtimeEfficient>(x);
         else
             return std::tanh(x);
     }

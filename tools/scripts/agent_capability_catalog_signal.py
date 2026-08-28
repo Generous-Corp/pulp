@@ -480,6 +480,84 @@ EXPORTS = [
         ],
     ),
     capability(
+        key="signal.drum-tom-voice", domain="signal",
+        summary=(
+            "Deterministic synthesized tom voice with an idle-only measured ladder-math opt-in."
+        ),
+        rt_class="mixed",
+        lifecycle={"construction": "control", "prepare": "control",
+                   "process": "audio", "reset": "audio",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Pitch and amplitude envelopes, deterministic noise, a four-stage noise ladder, "
+            "independent lo-fi paths, output-stage state, and an idle-published ladder profile."
+        ),
+        seed_model="fixed deterministic per-voice noise seed",
+        determinism={"repeatability": "bit_exact", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="velocity-triggered mono tom synthesis with bounded public controls",
+        output_domain="finite mono percussion audio",
+        units=["samples", "hertz", "milliseconds", "linear amplitude"],
+        latency="selected output-stage oversampling latency",
+        tail="finite configured envelopes, ladder state, lo-fi state, and output-stage tail",
+        scheduling="sample-continuous; ladder profile publishes only while idle",
+        bindings=[
+            binding(
+                role="voice", kind="cpp_type", include="pulp/signal/drum/tom.hpp",
+                qualified_name="pulp::signal::drum::TomVoice", target="Pulp::signal",
+                header_fingerprint="sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+            ),
+            binding(
+                role="ladder_profile", kind="cpp_type", include="pulp/signal/drum/tom.hpp",
+                qualified_name="pulp::signal::drum::TomVoice::LadderMathProfile",
+                target="Pulp::signal",
+                header_fingerprint="sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+            ),
+            binding(
+                role="set_ladder_profile", kind="cpp_function",
+                include="pulp/signal/drum/tom.hpp",
+                qualified_name="pulp::signal::drum::TomVoice::set_ladder_math_profile",
+                target="Pulp::signal",
+                header_fingerprint="sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+                address_expression=(
+                    "static_cast<bool (pulp::signal::drum::TomVoice::*)("
+                    "pulp::signal::drum::TomVoice::LadderMathProfile) noexcept>("
+                    "&pulp::signal::drum::TomVoice::set_ladder_math_profile)"
+                ),
+            ),
+            binding(
+                role="get_ladder_profile", kind="cpp_function",
+                include="pulp/signal/drum/tom.hpp",
+                qualified_name="pulp::signal::drum::TomVoice::ladder_math_profile",
+                target="Pulp::signal",
+                header_fingerprint="sha256:66feaffef9ec91c1002150734abf7f1579e7a2213f8c650928050cbebc99f147",
+                address_expression=(
+                    "static_cast<pulp::signal::drum::TomVoice::LadderMathProfile "
+                    "(pulp::signal::drum::TomVoice::*)() const noexcept>("
+                    "&pulp::signal::drum::TomVoice::ladder_math_profile)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {"role": "voice", "binding": "pulp::signal::drum::TomVoice",
+             "operation": "member_call", "member": "reset", "arguments": ""},
+            {"role": "ladder_profile",
+             "binding": "pulp::signal::drum::TomVoice::LadderMathProfile",
+             "operation": "construct", "arguments": (
+                 "pulp::signal::drum::TomVoice::LadderMathProfile::reference")},
+            {"role": "set_ladder_profile",
+             "binding": "pulp::signal::drum::TomVoice::set_ladder_math_profile",
+             "operation": "member_function_call",
+             "object": "pulp::signal::drum::TomVoice{}",
+             "arguments": (
+                 "pulp::signal::drum::TomVoice::LadderMathProfile::realtime_efficient")},
+            {"role": "get_ladder_profile",
+             "binding": "pulp::signal::drum::TomVoice::ladder_math_profile",
+             "operation": "member_function_call",
+             "object": "pulp::signal::drum::TomVoice{}", "arguments": ""},
+        ],
+    ),
+    capability(
         key="signal.waveguide-primitives", domain="signal",
         summary=(
             "Prepared bidirectional waveguide rails, passive reflection boundaries, and "

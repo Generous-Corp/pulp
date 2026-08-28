@@ -67,6 +67,30 @@ if(PULP_BENCHMARK)
             PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER="${PULP_FAST_TRIG_LOCAL_CANDIDATES_HEADER}")
     endif()
 
+    # Advisory Release-only complete-hit timing and profiler driver for the
+    # production drum-engine registry. The executable contains no alternative
+    # math implementation and does not register a timing threshold with CTest.
+    add_executable(pulp-drum-whole-voice-benchmark
+        test_drum_whole_voice_benchmark.cpp)
+    target_link_libraries(pulp-drum-whole-voice-benchmark PRIVATE pulp::signal)
+
+    # A bounded companion for comparing the existing opt-in ladder saturator.
+    # Keeping it in a separate executable preserves the reference binary and
+    # leaves the production default unchanged.
+    add_executable(pulp-drum-whole-voice-fast-ladder-tanh-benchmark
+        test_drum_whole_voice_benchmark.cpp)
+    target_link_libraries(pulp-drum-whole-voice-fast-ladder-tanh-benchmark
+        PRIVATE pulp::signal)
+    target_compile_definitions(pulp-drum-whole-voice-fast-ladder-tanh-benchmark
+        PRIVATE PULP_SIGNAL_FAST_LADDER_TANH=1)
+    if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        foreach(target IN ITEMS pulp-drum-whole-voice-benchmark
+                                pulp-drum-whole-voice-fast-ladder-tanh-benchmark)
+            target_compile_options(${target} PRIVATE
+                -gline-tables-only -fno-omit-frame-pointer)
+        endforeach()
+    endif()
+
     if(APPLE AND NOT PULP_IOS)
         # Advisory Apple-only challenger screen plus actual AdditiveBankT
         # consumer matrix. Timing never gates CI.
