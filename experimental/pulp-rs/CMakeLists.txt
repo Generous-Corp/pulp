@@ -162,6 +162,31 @@ add_custom_command(TARGET pulp-rust-cli POST_BUILD
     VERBATIM)
 
 if(PULP_BUILD_TESTS AND BUILD_TESTING)
+    add_test(NAME pulp-rust-gpu-trace-analysis-unit
+        COMMAND ${CMAKE_COMMAND} -E env
+            "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+            ${CARGO_EXECUTABLE} test
+            --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
+            trace_gpu_analysis)
+    set_tests_properties(pulp-rust-gpu-trace-analysis-unit
+        PROPERTIES LABELS "trace;gpu;rust")
+    if(DEFINED ENV{PULP_TRACE_PROCESSOR}
+       AND EXISTS "$ENV{PULP_TRACE_PROCESSOR}")
+        add_test(NAME pulp-rust-gpu-trace-analysis-integration
+            COMMAND ${CMAKE_COMMAND} -E env
+                "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+                "PULP_TRACE_PROCESSOR=$ENV{PULP_TRACE_PROCESSOR}"
+                ${CARGO_EXECUTABLE} test
+                --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
+                --test trace_gpu_analysis_tool_test)
+        set_tests_properties(pulp-rust-gpu-trace-analysis-integration
+            PROPERTIES LABELS "trace;gpu;rust")
+    else()
+        message(STATUS
+            "pulp-rs: GPU trace integration CTest skipped; set "
+            "PULP_TRACE_PROCESSOR to a pinned executable before configure")
+    endif()
+
     # This is the installed user-facing CLI (unlike the C++ pulp-cpp delegate).
     # Keep its bytes inside the Product B absence boundary after cargo stages it.
     add_test(NAME control-product-b-rust-cli-absence COMMAND ${Python3_EXECUTABLE}

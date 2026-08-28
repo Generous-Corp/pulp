@@ -11,7 +11,9 @@ use crate::cmd::trace::{io_err, TraceCommandStatus, TraceProcessorStatus};
 use crate::error::{CliError, Result};
 
 const ROW_MARKER: &str = "__PULP_GPU_ROW__";
-const ROW_QUERY: &str = "SELECT '__PULP_GPU_ROW__' || hex(stage) || '|' || duration_ns || '|' || hex(COALESCE(evidence_id,'')) || '|' || hex(COALESCE(diagnostic_code,'')) || '|' || hex(COALESCE(health_state,'')) || '|' || COALESCE(sequence,-1) || '|' || COALESCE(frame_index,-1) || '|' || is_incomplete || '|' || is_failure FROM {view} ORDER BY is_incomplete DESC, duration_ns DESC LIMIT 16;";
+const CATEGORY_MARKER: &str = "__PULP_GPU_CATEGORY__";
+const ROW_QUERY: &str = "SELECT '__PULP_GPU_ROW__' || hex(stage) || '|' || duration_ns || '|' || hex(COALESCE(evidence_id,'')) || '|' || hex(COALESCE(diagnostic_code,'')) || '|' || hex(COALESCE(health_state,'')) || '|' || COALESCE(sequence,-1) || '|' || COALESCE(frame_index,-1) || '|' || is_incomplete || '|' || is_failure FROM (SELECT * FROM {view} ORDER BY is_incomplete DESC, is_failure DESC, CASE health_state WHEN 'failed' THEN 4 WHEN 'lost' THEN 4 WHEN 'unavailable' THEN 3 WHEN 'unverified' THEN 2 WHEN 'healthy' THEN 0 ELSE 1 END DESC, CASE WHEN evidence_id IS NULL OR length(evidence_id) != 32 OR lower(evidence_id) GLOB '*[^0-9a-f]*' THEN 1 ELSE 0 END DESC, duration_ns DESC LIMIT 16)";
+const CATEGORY_QUERY: &str = "SELECT '__PULP_GPU_CATEGORY__' || hex(category) FROM (SELECT DISTINCT category FROM slice WHERE category IS NOT NULL AND category != '' ORDER BY category LIMIT 64)";
 
 const STARTUP_SQL: &str =
     include_str!("../../../../.agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql");
@@ -118,6 +120,9 @@ struct GpuAnalysisResult {
     unavailable_reason: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     dominant_stage: Option<String>,
+    /// Categories independently observed in the parsed trace. These are not
+    /// inferred from contributor stage names or supplied by an adapter.
+    observed_categories: Vec<String>,
     contributors: Vec<Contributor>,
     evidence_ids: Vec<String>,
     next_actions: Vec<NextAction>,
@@ -241,6 +246,39 @@ fn parse_rows(output: &str) -> Result<Vec<RawRow>> {
     Ok(rows)
 }
 
+fn parse_categories(output: &str) -> Vec<String> {
+    let mut categories = Vec::new();
+    for occurrence in output
+        .match_indices(CATEGORY_MARKER)
+        .map(|(index, _)| index)
+    {
+        let encoded = &output[occurrence + CATEGORY_MARKER.len()..];
+        let encoded: String = encoded
+            .chars()
+            .take_while(|character| character.is_ascii_hexdigit())
+            .collect();
+        let Some(decoded) = decode_hex(&encoded) else {
+            continue;
+        };
+        for category in decoded
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if category.len() <= 64
+                && category
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+                && !categories.iter().any(|existing| existing == category)
+            {
+                categories.push(category.to_owned());
+            }
+        }
+    }
+    categories.sort();
+    categories
+}
+
 fn valid_evidence_id(value: &str) -> bool {
     value.len() == 32
         && value
@@ -287,10 +325,16 @@ fn action_for(stage: &str, diagnostic_code: Option<&str>) -> NextAction {
     }
 }
 
-fn result_from_rows(
+#[cfg(test)]
+fn result_from_rows(question: GpuQuestion, trace: &Path, rows: Vec<RawRow>) -> GpuAnalysisResult {
+    result_from_rows_and_categories(question, trace, rows, Vec::new())
+}
+
+fn result_from_rows_and_categories(
     question: GpuQuestion,
     trace: &Path,
     mut rows: Vec<RawRow>,
+    observed_categories: Vec<String>,
 ) -> GpuAnalysisResult {
     rows.sort_by(|a, b| b.duration_ns.max(0).cmp(&a.duration_ns.max(0)));
     let incomplete = rows.iter().any(|row| row.incomplete);
@@ -303,7 +347,21 @@ fn result_from_rows(
         question == GpuQuestion::GpuProbe && rows.iter().any(|row| row.evidence_id.is_none());
     let missing_startup_gpu_stage =
         question == GpuQuestion::GpuStartup && !rows.iter().any(|row| row.stage != "frame");
-    let unavailable_reason = if rows.is_empty() {
+    let health_state_required = matches!(question, GpuQuestion::GpuHealth | GpuQuestion::GpuProbe);
+    let invalid_health_state = health_state_required
+        && rows.iter().any(|row| {
+            !matches!(
+                row.health_state.as_deref(),
+                Some("healthy" | "failed" | "unavailable" | "unverified" | "lost")
+            )
+        });
+    let reported_unavailable = rows
+        .iter()
+        .any(|row| row.health_state.as_deref() == Some("unavailable"));
+    let reported_unverified = rows
+        .iter()
+        .any(|row| row.health_state.as_deref() == Some("unverified"));
+    let capture_unavailable_reason = if rows.is_empty() {
         Some("missing-question-category")
     } else if missing_startup_gpu_stage {
         Some("missing-question-category")
@@ -311,20 +369,33 @@ fn result_from_rows(
         Some("incomplete-capture")
     } else if evidence_malformed || missing_probe_evidence {
         Some("invalid-evidence-correlation")
+    } else if invalid_health_state {
+        Some("invalid-health-state")
     } else {
         None
     };
-    let capture_complete = unavailable_reason.is_none();
+    let capture_complete = capture_unavailable_reason.is_none();
     let any_failure = rows.iter().any(|row| row.failure);
-    let verdict = if unavailable_reason.is_some() {
+    let verdict = if capture_unavailable_reason.is_some() {
         "unavailable"
     } else if question == GpuQuestion::GpuStartup {
         "unverified"
     } else if any_failure {
         "fail"
+    } else if reported_unavailable {
+        "unavailable"
+    } else if reported_unverified {
+        "unverified"
     } else {
         "pass"
     };
+    let unavailable_reason = capture_unavailable_reason.or_else(|| {
+        if reported_unavailable {
+            Some("reported-unavailable")
+        } else {
+            None
+        }
+    });
 
     let dominant_stage = rows.first().map(|row| row.stage.clone());
     let contributors = rows
@@ -379,6 +450,7 @@ fn result_from_rows(
         capture_complete,
         unavailable_reason,
         dominant_stage,
+        observed_categories,
         contributors,
         evidence_ids,
         next_actions,
@@ -404,6 +476,14 @@ fn write_result(
     } else {
         writeln!(out, "{}: {}", result.question.as_str(), result.verdict).map_err(io_err)?;
         writeln!(out, "  capture complete: {}", result.capture_complete).map_err(io_err)?;
+        if !result.observed_categories.is_empty() {
+            writeln!(
+                out,
+                "  observed categories: {}",
+                result.observed_categories.join(", ")
+            )
+            .map_err(io_err)?;
+        }
         if let Some(stage) = &result.dominant_stage {
             writeln!(out, "  dominant stage: {stage}").map_err(io_err)?;
         }
@@ -454,8 +534,9 @@ pub(crate) fn run_gpu_analysis_with_processor(
         )
     })?;
     let sql = format!(
-        "{}\n{}\n",
+        "{}\n{}\nUNION ALL\n{};\n",
         args.question.sql(),
+        CATEGORY_QUERY,
         ROW_QUERY.replace("{view}", args.question.view())
     );
     let sql_path = write_sql_temp(&sql)
@@ -484,9 +565,11 @@ pub(crate) fn run_gpu_analysis_with_processor(
             String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
-    let rows = parse_rows(&String::from_utf8_lossy(&output.stdout))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let rows = parse_rows(&stdout)?;
+    let categories = parse_categories(&stdout);
     write_result(
-        &result_from_rows(args.question, &args.trace, rows),
+        &result_from_rows_and_categories(args.question, &args.trace, rows, categories),
         json,
         out,
     )
@@ -507,6 +590,12 @@ mod tests {
             rows[0].evidence_id.as_deref(),
             Some("0123456789abcdef0123456789abcdef")
         );
+    }
+
+    #[test]
+    fn parses_bounded_trace_categories_without_trusting_stage_names() {
+        let output = "__PULP_GPU_CATEGORY__677075\n__PULP_GPU_CATEGORY__72656E6465722C74657874\n__PULP_GPU_CATEGORY__2E2E2F756E73616665\n";
+        assert_eq!(parse_categories(output), vec!["gpu", "render", "text"]);
     }
 
     #[test]
@@ -641,6 +730,40 @@ mod tests {
             result.unavailable_reason,
             Some("invalid-evidence-correlation")
         );
+    }
+
+    #[test]
+    fn health_and_probe_never_launder_non_pass_states() {
+        for question in [GpuQuestion::GpuHealth, GpuQuestion::GpuProbe] {
+            for (state, verdict, reason) in [
+                (
+                    Some("unavailable"),
+                    "unavailable",
+                    Some("reported-unavailable"),
+                ),
+                (Some("unverified"), "unverified", None),
+                (None, "unavailable", Some("invalid-health-state")),
+            ] {
+                let row = RawRow {
+                    stage: "probe".to_owned(),
+                    duration_ns: 42,
+                    evidence_id: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()),
+                    diagnostic_code: None,
+                    health_state: state.map(str::to_owned),
+                    sequence: Some(1),
+                    frame_index: Some(0),
+                    incomplete: false,
+                    failure: false,
+                };
+                let result = result_from_rows(question, Path::new("/tmp/a.pftrace"), vec![row]);
+                assert_eq!(result.verdict, verdict);
+                assert_eq!(result.unavailable_reason, reason);
+                assert_ne!(result.verdict, "pass");
+                if state.is_some() {
+                    assert!(result.capture_complete);
+                }
+            }
+        }
     }
 
     #[test]

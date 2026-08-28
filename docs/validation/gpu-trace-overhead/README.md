@@ -20,22 +20,43 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --trace-processor "$HOME/.pulp/tools/trace-processor/v57.2/mac-arm64/trace_processor_shell" \
   --question gpu-health \
   --source-revision "$(git rev-parse HEAD)" \
+  --mcp-source-revision "$(git rev-parse HEAD)" \
   --a2t-implementation-revision "$A2T_REVISION" \
+  --a2t-implementation-revision "$A2T_HARDENING_REVISION" \
   --equivalent-a2t-revision "$A2T_ORIGINAL_REVISION" \
+  --plan-revision "$PLAN_REVISION" \
+  --plan-sha256 "$PLAN_SHA256" \
   --output /tmp/gpu-trace-overhead.json
 ```
 
 The script requires `pulp` and `pulp-mcp` to be regular sibling files. During
 measurement `PATH` excludes their prefix and all checkout build directories;
 MCP therefore succeeds only through its installed absolute-sibling binding.
-Semantic parity is checked on every warm-up and measured trial.
+Semantic parity is checked on every warm-up and measured trial. Both binaries
+must be built from the same source revision; a distinct
+`--mcp-source-revision` is required and accepted only when it exactly matches
+the lowercase 40-hex `--source-revision`. These fields are explicit build
+provenance declarations, not revisions extracted from the executable bytes;
+therefore generate the receipt only after rebuilding both siblings from one
+clean checkout at that revision. The receipt's independent binary digests and
+same-prefix proof make that rerun auditable, while A3 rejects unequal declared
+revisions.
 
-The Horizon-A A2T implementation revision is inventoried before measurement,
-and a stable patch ID binds pre-rebase and replayed commit identities.
+The Rust unit contract is always registered when the experimental Rust CLI is
+enabled. The real fixture integration CTest is registered only when
+`PULP_TRACE_PROCESSOR` names an existing pinned executable at configure time;
+this keeps a clean runner without Perfetto tooling from hard-failing while
+making the exercised processor identity explicit. The M3 acceptance run uses
+Pulp's pinned v57.2 binary.
+
+Every Horizon-A A2T implementation/hardening revision is inventoried before
+measurement, and a stable patch ID binds the original pre-rebase and replayed
+commit identities.
 It added offline CLI/MCP/SQL/docs/tests and no runtime/render/view/format or
 Inspector producer path. Therefore new-producer runtime overhead is
-`not-applicable-no-added-producer-cost`, not a timing pass. The canonical plan
-must explicitly accept that disposition before A2T is formally complete.
+`not-applicable-no-added-producer-cost`, not a timing pass. The receipt binds
+the exact canonical plan revision and digest that accepts this Horizon-A
+disposition while preserving the full producer/xrun protocol for B6.
 
 When B6 adds Vellum-owned render producer instrumentation, compare the same
 optimized product workload and adapter against the pre-change baseline in
