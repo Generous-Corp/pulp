@@ -6512,6 +6512,13 @@ TEST_CASE("web-compat overflow auto materializes a real ScrollView",
         panel.style.borderStyle = 'solid';
         panel.style.borderRadius = '8px';
         document.body.appendChild(panel);
+        var content = document.createElement('div');
+        content.style.position = 'absolute';
+        content.style.left = '8px';
+        content.style.top = '70px';
+        content.style.width = '80px';
+        content.style.height = '40px';
+        panel.appendChild(content);
         var scrollPanelNativeId = panel._id;
     )js");
     const auto native_id = engine.evaluate("scrollPanelNativeId")
@@ -6522,6 +6529,28 @@ TEST_CASE("web-compat overflow auto materializes a real ScrollView",
     REQUIRE(scroll->has_background_color());
     REQUIRE(scroll->has_border());
     REQUIRE(scroll->border_width() == Catch::Approx(1.0f));
+
+    // The materialized container needs no explicit setScrollContentSize call:
+    // its native ScrollView derives overflow from the child boxes it owns.
+    scroll->set_bounds({0.0f, 0.0f, 120.0f, 80.0f});
+    scroll->layout_children();
+    CHECK(scroll->content_size().width == Catch::Approx(120.0f));
+    CHECK(scroll->content_size().height == Catch::Approx(111.0f));
+    CHECK(scroll->wants_wheel_scroll());
+
+    // A materialized adapter may temporarily own an extent while replacing a
+    // captured container. Omitting dimensions restores automatic sizing and
+    // refreshes from the already-laid-out live descendants immediately.
+    bridge.load_script("setScrollContentSize(scrollPanelNativeId, 120, 240);");
+    REQUIRE(scroll->content_size().height == Catch::Approx(240.0f));
+    bridge.load_script("setScrollContentSize(scrollPanelNativeId);");
+    CHECK(scroll->content_size().height == Catch::Approx(111.0f));
+
+    bridge.load_script("content.style.display = 'none';");
+    scroll->layout_children();
+    CHECK(scroll->content_size().width == Catch::Approx(120.0f));
+    CHECK(scroll->content_size().height == Catch::Approx(80.0f));
+    CHECK_FALSE(scroll->wants_wheel_scroll());
 
     // Exercise the shared primitive independently of CSS longhand precedence:
     // a ScrollView must paint its own box before applying child scroll offset.
@@ -6543,4 +6572,177 @@ TEST_CASE("web-compat overflow auto materializes a real ScrollView",
 
     bridge.load_script("__domAppend('', 'hinted-scroll', 'div', 'scroll');");
     CHECK(dynamic_cast<ScrollView*>(bridge.widget("hinted-scroll")) != nullptr);
+}
+
+// ── Layout-pass elision (getLayoutRect / getLayoutBoxMetrics storm) ─────────
+//
+// The geometry queries used to force a full `layout_children()` on EVERY call.
+// A shipping scripted UI calls them dozens of times per frame and once per
+// pointer event, so a drag paid a whole tree layout per sample on the UI
+// thread. These cases pin the fix AND its correctness boundary: eliding a
+// layout is only safe while nothing has changed, and the counter that decides
+// that must see mutations from OUTSIDE the bridge too.
+
+TEST_CASE("repeated geometry reads with no mutation cost one layout pass",
+          "[view][bridge][layout][perf]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('outer', '');
+        setFlex('outer', 'width', 300);
+        setFlex('outer', 'height', 200);
+        createLabel('leaf', 'Leaf', 'outer');
+        setFlex('leaf', 'height', 24);
+        layout();
+    )");
+
+    const auto before = View::layout_pass_count();
+    for (int i = 0; i < 60; ++i) {
+        engine.evaluate("getLayoutRect('leaf').width");
+        engine.evaluate("getLayoutBoxMetrics('leaf').offsetHeight");
+    }
+    const auto passes = View::layout_pass_count() - before;
+
+    // 120 reads, nothing mutated: at most one pass. Before the fix this was 120.
+    INFO("layout passes for 120 reads: " << passes);
+    CHECK(passes <= 1);
+}
+
+TEST_CASE("replaying an identical flex value does not dirty geometry",
+          "[view][bridge][layout][perf]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('outer', '');
+        setFlex('outer', 'width', 300);
+        setFlex('outer', 'height', 200);
+        createLabel('leaf', 'Leaf', 'outer');
+        setFlex('leaf', 'height', 24);
+        layout();
+    )");
+
+    const auto before = View::layout_pass_count();
+    for (int i = 0; i < 60; ++i) {
+        engine.evaluate("setFlex('leaf', 'height', 24)");
+        engine.evaluate("getLayoutRect('leaf').height");
+    }
+    const auto passes = View::layout_pass_count() - before;
+
+    INFO("layout passes for 60 identical style writes: " << passes);
+    CHECK(passes <= 1);
+
+    engine.evaluate("setFlex('leaf', 'height', 72)");
+    const auto changed = engine.evaluate("getLayoutRect('leaf').height")
+                             .getWithDefault<double>(-1.0);
+    CHECK(changed == 72.0);
+}
+
+TEST_CASE("a mutation on a DEEP child still forces a fresh layout",
+          "[view][bridge][layout][perf]") {
+    // The reachable negative for the elision, and the reason the root's
+    // `layout_dirty_` flag cannot be the guard: invalidation does not propagate
+    // upward, so a flex change on a nested child leaves the ROOT's flag false
+    // while the tree is genuinely stale.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('outer', '');
+        setFlex('outer', 'direction', 'col');
+        setFlex('outer', 'width', 300);
+        setFlex('outer', 'height', 200);
+        createCol('mid', 'outer');
+        createLabel('leaf', 'Leaf', 'mid');
+        setFlex('leaf', 'height', 24);
+        layout();
+    )");
+
+    const auto h0 = engine.evaluate("getLayoutBoxMetrics('leaf').offsetHeight")
+                        .getWithDefault<double>(-1.0);
+    REQUIRE(h0 > 0.0);  // cold read must not be the stale 0x0
+
+    const auto before = View::layout_pass_count();
+    for (int i = 0; i < 25; ++i) engine.evaluate("getLayoutRect('leaf').height");
+    engine.evaluate("setFlex('leaf', 'height', 72);");   // deep child, not root
+    for (int i = 0; i < 25; ++i) engine.evaluate("getLayoutRect('leaf').height");
+    const auto passes = View::layout_pass_count() - before;
+
+    // Exactly the two passes that were needed: nothing before the mutation is
+    // stale, everything after it is.
+    INFO("layout passes across 50 reads with one mutation: " << passes);
+    CHECK(passes <= 2);
+
+    const auto h1 = engine.evaluate("getLayoutBoxMetrics('leaf').offsetHeight")
+                        .getWithDefault<double>(-1.0);
+    CHECK(h1 > h0);  // the post-mutation read sees the NEW geometry
+}
+
+TEST_CASE("a mutation from OUTSIDE the bridge still forces a fresh layout",
+          "[view][bridge][layout][perf]") {
+    // This is the case that catches a bridge-only counter. A host resize, C++
+    // widget code, or anything else that never passes through a bridge entry
+    // point still changes what a geometry query must return; a generation
+    // bumped only at bridge mutation sites would happily serve stale bounds.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('outer', '');
+        setFlex('outer', 'width', '100%');
+        setFlex('outer', 'height', '100%');
+        layout();
+    )");
+
+    const auto w0 = engine.evaluate("getLayoutRect('outer').width")
+                        .getWithDefault<double>(-1.0);
+    REQUIRE(w0 > 0.0);
+
+    root.set_bounds({0, 0, 800, 300});      // pure C++ path, no bridge call
+    const auto w1 = engine.evaluate("getLayoutRect('outer').width")
+                        .getWithDefault<double>(-1.0);
+
+    INFO("width before=" << w0 << " after non-bridge resize=" << w1);
+    CHECK(w1 > w0);
+}
+
+TEST_CASE("the first geometry read lays out rather than returning 0x0",
+          "[view][bridge][layout][perf]") {
+    // The stale-0x0 regression the getLayoutRect comment exists to prevent:
+    // a mount-time getBoundingClientRect that reads 0 gates an entire canvas
+    // paint pipeline, and it looks like a broken design import rather than a
+    // layout bug. A generation guard initialised wrong reintroduces it, so the
+    // cold read is pinned explicitly — note there is NO layout() below.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('outer', '');
+        setFlex('outer', 'width', 250);
+        setFlex('outer', 'height', 120);
+        createLabel('leaf', 'Leaf', 'outer');
+        setFlex('leaf', 'height', 30);
+    )");
+
+    const auto w = engine.evaluate("getLayoutRect('outer').width").getWithDefault<double>(-1.0);
+    const auto h = engine.evaluate("getLayoutRect('outer').height").getWithDefault<double>(-1.0);
+    INFO("cold read: " << w << "x" << h);
+    CHECK(w > 0.0);
+    CHECK(h > 0.0);
 }

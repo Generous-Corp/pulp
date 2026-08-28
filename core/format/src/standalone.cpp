@@ -642,6 +642,8 @@ void StandaloneApp::render_audio_block(
 }
 
 bool StandaloneApp::start() {
+    if (!tracing_.attached())
+        tracing_ = runtime::ScopedTracingAttachment{};
     // Create the processor once and reuse it across audio reconfigurations
     // (apply_config soft-restart). Recreating it on every settings change would
     // dangle an editor ViewBridge holding a Processor&; parameters are
@@ -958,6 +960,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // min_width/min_height propagate to platform window hosts that honor them.
     auto opts = detail::make_standalone_window_options(
         size_hints, chrome, desc.name + " — Standalone", use_gpu);
+    detail::add_standalone_settings_menu_command(opts, chrome);
     opts.initially_hidden = effective_config.headless;
     if (musical_typing_) musical_typing_->add_menu_command(opts);
 
@@ -1379,6 +1382,11 @@ void StandaloneApp::stop() {
         processor_->release();
         processor_.reset();
     }
+    // A standalone's primary-window close calls stop() before AppKit exits its
+    // run loop. End the tracing attachment here so the capture is durably
+    // flushed before the process can terminate; reset is idempotent and start()
+    // reattaches for a later run of the same StandaloneApp.
+    tracing_.reset();
 }
 
 // ── Persisted-config helpers ────────────────────────────────────────────────

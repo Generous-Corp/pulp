@@ -5,6 +5,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
+#include <memory>
 #include <string>
 
 using namespace pulp::state;
@@ -47,6 +48,130 @@ TEST_CASE("click callbacks can remove their own widget",
     bridge.widget("collector")->set_bounds({10, 10, 100, 80});
     root.simulate_click({20, 20});
     REQUIRE(removed_lifetime.expired());
+}
+
+TEST_CASE("a claimed overlay can remove itself during a synthetic click",
+          "[view][bridge][click][overlay][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 240, 140});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var underlay_hits = 0;
+        createLabel('underlay', 'Underlay', '');
+        createLabel('overlay', 'Overlay', '');
+        on('underlay', 'click', function () { underlay_hits += 1; });
+        on('overlay', 'click', function () { removeWidget('overlay'); });
+        registerClick('underlay');
+        registerClick('overlay');
+        claimOverlay('overlay');
+    )JS");
+
+    auto* underlay = bridge.widget("underlay");
+    auto* overlay = bridge.widget("overlay");
+    REQUIRE(underlay != nullptr);
+    REQUIRE(overlay != nullptr);
+    underlay->set_bounds({0, 0, 240, 140});
+    overlay->set_bounds({20, 20, 100, 80});
+
+    root.simulate_click({40, 40});
+    REQUIRE(bridge.widget("overlay") == nullptr);
+    REQUIRE(root.interaction().active_overlay == nullptr);
+
+    // The next click must route to the live tree. Before the subtree-removal
+    // guard, the root retained the detached overlay and overlay_contains()
+    // dereferenced it here after callback retirement reclaimed the object.
+    root.simulate_click({180, 100});
+    REQUIRE(engine.evaluate("underlay_hits").getWithDefault<int>(0) == 1);
+}
+
+TEST_CASE("a synthetic click preserves a replacement overlay claim",
+          "[view][bridge][click][overlay][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 240, 140});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var replacement_dismissals = 0;
+        createLabel('overlay', 'Overlay', '');
+        on('overlay', 'click', function () {
+            removeWidget('overlay');
+            createLabel('replacement', 'Replacement', '');
+            on('replacement', 'dismiss', function () {
+                replacement_dismissals += 1;
+            });
+            claimOverlay('replacement');
+        });
+        registerClick('overlay');
+        claimOverlay('overlay');
+    )JS");
+
+    auto* overlay = bridge.widget("overlay");
+    REQUIRE(overlay != nullptr);
+    overlay->set_bounds({20, 20, 100, 80});
+    root.simulate_click({40, 40});
+
+    auto* replacement = bridge.widget("replacement");
+    REQUIRE(replacement != nullptr);
+    replacement->set_bounds({20, 20, 100, 80});
+    REQUIRE(root.interaction().active_overlay == replacement);
+
+    root.simulate_click({180, 100});
+    REQUIRE(root.interaction().active_overlay == nullptr);
+    REQUIRE(engine.evaluate("replacement_dismissals").getWithDefault<int>(0) == 1);
+}
+
+TEST_CASE("a deferred pointer event is inert after its borrowed engine dies",
+          "[view][bridge][lifetime][engine]") {
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    StateStore store;
+    auto engine = std::make_unique<ScriptEngine>();
+    auto bridge = std::make_unique<WidgetBridge>(*engine, root, store);
+    bridge->load_script(R"JS(
+        var hits = 0;
+        createLabel('btn', 'Btn', '');
+        on('btn', 'pointerdown', function () { hits += 1; });
+        registerPointer('btn');
+    )JS");
+    auto* btn = bridge->widget("btn");
+    REQUIRE(btn != nullptr);
+    btn->set_bounds({10, 10, 100, 80});
+
+    MouseEvent down{};
+    down.is_down = true;
+    btn->on_dom_pointer_event(down, true);
+    REQUIRE(engine->evaluate("hits").getWithDefault<int>(0) == 1);
+
+    engine.reset();
+    REQUIRE_NOTHROW(btn->on_dom_pointer_event(down, true));
+    REQUIRE(bridge->widget("btn") == btn);
+}
+
+TEST_CASE("overlay dismissal may synchronously release its own callback",
+          "[view][bridge][lifetime][overlay]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"JS(
+        var dismissed = 0;
+        createLabel('pop', 'Pop', '');
+        on('pop', 'dismiss', function () {
+            dismissed += 1;
+            releaseOverlay('pop');
+        });
+        claimOverlay('pop');
+    )JS");
+
+    View::dismiss_active_overlay();
+    REQUIRE(engine.evaluate("dismissed").getWithDefault<int>(0) == 1);
+    REQUIRE(View::active_overlay_ == nullptr);
 }
 
 TEST_CASE("pointer callbacks can remove their own widget and siblings",

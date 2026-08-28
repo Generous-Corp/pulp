@@ -191,6 +191,13 @@ public:
     // Per-instance entry; usually invoked by `dispatch_global_key` below.
     void forward_key_event(int key_code, uint16_t modifiers, bool is_down);
 
+    /// Deliver a key only to the live bridge attached to `root`.
+    /// Returns whether a shortcut or JS listener consumed the event. Plugin
+    /// hosts use this instead of process-wide dispatch so one editor can never
+    /// deliver navigation into another editor in the same host process.
+    static bool dispatch_key_for_root(View& root, int key_code,
+                                      uint16_t modifiers, bool is_down);
+
     // Static fan-out: forward a key event to every live WidgetBridge.
     //
     // Platform hosts call this from their key-event paths so that any
@@ -294,6 +301,8 @@ public:
     void install_runtime_import_handlers();
 
 private:
+    bool forward_key_event_handled(int key_code, uint16_t modifiers,
+                                   bool is_down, View* focus_root = nullptr);
     // Internal helper used by __pulpRuntimeImport__. Forward-declared in
     // the design_import unit so the implementation lives next to the
     // related offline boot code. Installs navigator/HTML*Element/etc.
@@ -508,6 +517,10 @@ private:
     std::shared_ptr<QueryService> query_service_;
 
     std::vector<int> pending_frame_ids_;
+    // Requested by __pulpRuntimeSettle__ while QuickJS is inside a native
+    // callback. Drained only from the outer host-frame boundary; this is a
+    // budget, not a synchronous recursion request.
+    int pending_runtime_settle_rounds_ = 0;
     bool frame_preamble_loaded_ = false;
     // Identity of the most-recently loaded script (via
     // `load_script(code, script_id)` or `set_active_script_id`). When
@@ -727,6 +740,13 @@ private:
     // `set_repaint_callback`.
     void request_repaint();
 
+    // Temporarily lend this bridge's owning root to a materialized document
+    // interaction that handles only the host navigation-key allowlist. The
+    // implementation transfers/commits any prior text focus, records a single
+    // owner per root, and releases only its own claim.
+    bool claim_document_navigation_focus();
+    void release_document_navigation_focus() noexcept;
+
     // The ~75 bridge sub-API registrars used to be private member
     // declarations here. Every added API changed this PUBLIC header and forced
     // a recompile of the whole view/render/host surface that includes it.
@@ -736,6 +756,21 @@ private:
     // that internal header, the owning .cpp, and register_api()'s data table
     // in widget_bridge.cpp, never this header. The friend grants those statics
     // access to WidgetBridge's private state.
+    // ── Layout-pass elision ─────────────────────────────────────────────
+    //
+    // The geometry queries (getLayoutRect / getLayoutBoxMetrics /
+    // getLayoutAncestorRects) each used to force `root_.layout_children()`
+    // UNCONDITIONALLY. That is correct but quadratic in practice: a shipping
+    // scripted UI calls getBoundingClientRect and getLayoutBoxMetrics dozens of
+    // times per frame, and `valueFromEvent` calls one PER POINTER EVENT — so a
+    // drag paid a full tree layout per sample, on the UI thread, ahead of paint.
+    //
+    // `ensure_layout()` keeps the guarantee those call sites actually need —
+    // "the geometry you are about to read is current" — while paying for it
+    // only when something has changed since the last pass.
+    void ensure_layout();
+    std::uint64_t last_layout_generation_ = 0;  // 0 => always lay out once
+
     friend struct BridgeRegistrars;
     void register_api();
 

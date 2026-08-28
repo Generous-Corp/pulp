@@ -13,7 +13,9 @@
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/native_view_host.hpp>
 #include <pulp/view/modal.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/virtual_list.hpp>
 #include <pulp/view/virtual_grid.hpp>
 #include <web_compat_preludes_gen.hpp>
@@ -188,7 +190,7 @@ function __dispatch__(id, eventName) {
         var stats = globalThis.__pulpDispatchHits__;
         stats.total = (stats.total || 0) + 1;
         if (el && el.dispatchEvent &&
-            /^(pointerdown|pointermove|pointerup|pointercancel|click|mousedown|mousemove|mouseup|wheel)$/.test(eventName)) {
+            /^(pointerdown|pointermove|pointerup|pointercancel|click|mousedown|mousemove|mouseup|wheel|dismiss)$/.test(eventName)) {
             stats.byType[eventName] = (stats.byType[eventName] || 0) + 1;
             try {
                 var data = args && args.length ? args[0] : {};
@@ -391,6 +393,10 @@ std::unordered_set<WidgetBridge*>& all_bridges_set() {
     static std::unordered_set<WidgetBridge*> set;
     return set;
 }
+std::unordered_map<View*, WidgetBridge*>& document_navigation_owners() {
+    static std::unordered_map<View*, WidgetBridge*> owners;
+    return owners;
+}
 }  // namespace
 
 WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& store,
@@ -401,6 +407,7 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
       widgets_(owned_widgets_),
       callback_alive_(std::make_shared<BridgeCallbackState>(
           &callback_retired_widgets_, &callback_collectable_widgets_)) {
+    callback_alive_->track_engine(engine.liveness_token());
     if (detail::widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
     }
@@ -449,6 +456,8 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "web_compat_style_decl_helpers", preludes::web_compat_style_decl_helpers);
     eval_or_throw(engine_, "web_compat_animation", preludes::web_compat_animation);
     eval_or_throw(engine_, "web_compat_document", preludes::web_compat_document);
+    eval_or_throw(engine_, "web_compat_transient_interaction",
+                  preludes::web_compat_transient_interaction);
     // CSS selector engine must eval after document and Element so the
     // selector helpers are resolvable when document.querySelector /
     // .querySelectorAll dispatch into them.
@@ -487,10 +496,10 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
 }
 
 WidgetBridge::~WidgetBridge() {
+    release_document_navigation_focus();
     unregister_global_dispatch();
     if (callback_alive_) {
-        callback_alive_->store(false, std::memory_order_release);
-        callback_alive_->detach_retirement_queues();
+        callback_alive_->retire_dispatch();
     }
     release_all_param_gesture_routes();
     // quarantine_realm() already detached this bridge's callback. A replacement
@@ -509,6 +518,49 @@ WidgetBridge::~WidgetBridge() {
         } catch (...) {
             std::cerr << "WidgetBridge quarantine repaint error: unknown exception\n";
         }
+    }
+}
+
+bool WidgetBridge::claim_document_navigation_focus() {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    auto& owners = document_navigation_owners();
+    if (auto it = owners.find(&root_);
+        it != owners.end() && it->second != this) {
+        // A replacement realm for the same root supersedes the old claim.
+        // Clear it before transferring focus so only one bridge can ever make
+        // this editor navigation-capable.
+        it->second->release_document_navigation_focus();
+    }
+
+    root_.scripted_navigation_input_ = true;
+    const bool was_focusable = root_.focusable();
+    root_.set_focusable(true);
+    const bool claimed = transfer_input_focus(root_, &root_);
+    root_.set_focusable(was_focusable);
+    if (!claimed) {
+        root_.scripted_navigation_input_ = false;
+        return false;
+    }
+    root_.on_navigation_key = [this](const KeyEvent& event) {
+        return forward_key_event_handled(
+            static_cast<int>(event.key), event.modifiers, event.is_down,
+            &root_);
+    };
+    owners[&root_] = this;
+    return true;
+}
+
+void WidgetBridge::release_document_navigation_focus() noexcept {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    auto& owners = document_navigation_owners();
+    const auto it = owners.find(&root_);
+    if (it == owners.end() || it->second != this) return;
+    owners.erase(it);
+    root_.scripted_navigation_input_ = false;
+    root_.on_navigation_key = {};
+    if (focused_input_under_root(root_) == &root_) {
+        root_.release_input_focus();
+        root_.View::on_focus_changed(false);
     }
 }
 
@@ -655,6 +707,18 @@ void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is
     }
 }
 
+bool WidgetBridge::dispatch_key_for_root(View& root, int key_code,
+                                         uint16_t modifiers, bool is_down) {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    bool handled = false;
+    for (auto* bridge : all_bridges_set()) {
+        if (&bridge->root_ == &root)
+            handled = bridge->forward_key_event_handled(
+                          key_code, modifiers, is_down, &root) || handled;
+    }
+    return handled;
+}
+
 void WidgetBridge::dispatch_document_event(const std::string& event_type,
                                            const std::string& event_json_literal) {
     // FOOTGUN: both arguments are concatenated into a JS expression
@@ -690,6 +754,7 @@ void WidgetBridge::set_bench_counters(render::bench::PerfCounters* counters) {
 #endif
 
 void WidgetBridge::request_repaint() {
+    PULP_TRACE_SCOPE_NAMED("render", "repaint_request");
     if (repaint_callback_) repaint_callback_();
 }
 
@@ -747,6 +812,13 @@ void WidgetBridge::load_script(const std::string& code) {
     // expression value. Elements have circular references (_parentElement
     // ↔ _children) which cause infinite recursion in CHOC's toChocValue().
     eval_or_throw(engine_, "user_script", code + "\n;void 0");
+    // __pulpRuntimeSettle__ may be called by runtime-import code during the
+    // evaluation above. Its native callback only records this budget; drain it
+    // now that the outer QuickJS evaluation has returned, so startup remains
+    // synchronously materialized without recursively entering QuickJS.
+    const int settle_rounds = std::exchange(pending_runtime_settle_rounds_, 0);
+    for (int round = 0; round < settle_rounds; ++round)
+        service_frame_callbacks();
     // Flush any pending requestAnimationFrame callbacks
     eval_or_throw(engine_, "flush_frames", "if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
 }
@@ -916,6 +988,9 @@ void WidgetBridge::poll_async_results() {
 }
 
 void WidgetBridge::service_frame_callbacks() {
+    PULP_TRACE_SCOPE_NAMED("js", "frame_callback_pump");
+    if (pending_runtime_settle_rounds_ > 0)
+        --pending_runtime_settle_rounds_;
     // Declarative bindings first: pure C++ store→widget push, no JS crossing.
     service_param_bindings();
     // Then paramchange subscriptions, so a handler that inspects a bound
@@ -932,9 +1007,13 @@ void WidgetBridge::service_frame_callbacks() {
         engine_.pump_message_loop();
     }
     if (!pending_frame_ids_.empty()) {
+        PULP_TRACE_SCOPE_NAMED_ARGS("js", "raf_flush", "callbacks",
+                                    pending_frame_ids_.size());
         engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
         engine_.pump_message_loop();
     }
+    if (pending_runtime_settle_rounds_ > 0)
+        request_repaint();
 }
 
 #ifndef PULP_BRIDGE_EXEC_ENABLED

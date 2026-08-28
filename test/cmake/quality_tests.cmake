@@ -25,6 +25,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME doxygen-installed-header-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_doxygen_installed_header_check.py")
+    add_test(NAME transient-interaction-trace-budget-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_transient_interaction_trace.py")
     add_test(NAME agent-capability-manifest-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/agent_capability_manifest.py" --check)

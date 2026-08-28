@@ -56,6 +56,13 @@ struct BackBufferFrameCapture {
     std::vector<uint8_t> png;
 };
 
+struct LiveResizeCoverState {
+    bool resize_applied = false;
+    bool cover_before = false;
+    bool cover_after_present = false;
+    bool cover_after_compositor_interval = false;
+};
+
 /// Construct a hidden GPU-backed NSWindow + CAMetalLayer host suitable for
 /// unit tests. Must be called on the main thread. Forces
 /// `options.use_gpu = true` and
@@ -80,6 +87,15 @@ make_test_window(pulp::view::View& root,
 /// phase. Never throws.
 bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event);
 
+/// Deliver a key through NSApplication's production local-monitor chain.
+/// This differs from invoking the content view's keyDown: directly: standalone
+/// app monitors (for example Musical Typing) run first and may consume it.
+/// Returns false when no native window exists or the key is unknown.
+bool simulate_app_key(pulp::view::WindowHost& host,
+                      pulp::view::KeyCode key,
+                      bool is_down = true,
+                      uint16_t modifiers = 0);
+
 /// Wrapper over `WindowHost::capture_back_buffer_png` that drains the
 /// main queue once first so any pending render / deferred state mutations
 /// are ordered before the readback. Must be called on the main thread.
@@ -94,6 +110,19 @@ std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host);
 /// Returns {0, 0} when the handle is missing. Must be called on the main thread.
 pulp::view::WindowHost::ContentSize content_view_bounds(
     pulp::view::WindowHost& host);
+
+/// Apply a real AppKit content-size change and return only after
+/// windowDidResize has run. Unlike capture_back_buffer_png this does not pump a
+/// later frame, so callers can assert whether the resize path itself presented
+/// replacement content synchronously.
+bool resize_content_view(pulp::view::WindowHost& host,
+                         float width, float height);
+
+/// Exercise the production live-resize lifecycle and report whether the
+/// CAMetalLayer retained-frame cover survives Present() long enough for the
+/// compositor to display the replacement drawable, then releases.
+LiveResizeCoverState simulate_live_resize_cover(
+    pulp::view::WindowHost& host, float width, float height);
 
 /// Simulate AppKit having applied a new backing scale to the host's real
 /// CAMetalLayer, then invoke the production backing-change callback. This is a

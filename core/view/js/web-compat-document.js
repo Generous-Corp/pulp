@@ -346,6 +346,7 @@ __documentElement__._nativeCreated = true;
 var document = {
     body: __bodyElement__,
     documentElement: __documentElement__,
+    activeElement: null,
 
     createElement: function(tag) {
         var el = new Element(tag);
@@ -462,7 +463,6 @@ var document = {
     dispatchEvent: function(event) {
         if (!event || typeof event !== 'object' || typeof event.type !== 'string') return true;
         var list = this.__eventListeners__ && this.__eventListeners__[event.type];
-        if (!list || !list.length) return true;
         if (typeof event.preventDefault !== 'function') {
             event.preventDefault = function() { this.defaultPrevented = true; };
         }
@@ -477,7 +477,7 @@ var document = {
         }
         // Snapshot the list to tolerate handlers that
         // remove themselves during dispatch.
-        var snapshot = list.slice();
+        var snapshot = list ? list.slice() : [];
         for (var i = 0; i < snapshot.length; i++) {
             try { snapshot[i](event); }
             catch (e) {
@@ -487,6 +487,9 @@ var document = {
             }
             if (event._stoppedImmediate) break;
         }
+        if (!event.defaultPrevented
+            && typeof globalThis.__pulpPopupDefaultHandle__ === "function")
+            globalThis.__pulpPopupDefaultHandle__(event);
         return !event.defaultPrevented;
     }
 };
@@ -525,6 +528,254 @@ var window = {
 globalThis.window = window;
 globalThis.document = document;
 globalThis.self = window;
+
+// Default behavior for semantic popup controls. Apps own selection callbacks
+// and markup; Pulp owns native keyboard/pointer parity. Authors can opt out
+// with data-pulp-popup-default="off" or by preventing the incoming event.
+(function installPopupDefaults() {
+    var state = null;
+    var suppressOutsideSequence = false;
+    var suppressOutsideTimer = 0;
+    function optedOut(element) {
+        while (element) {
+            if (element.getAttribute
+                && element.getAttribute("data-pulp-popup-default") === "off") return true;
+            element = element._parentElement;
+        }
+        return false;
+    }
+    function triggerFrom(element) {
+        while (element) {
+            if (element.getAttribute && element.getAttribute("aria-haspopup")) return element;
+            element = element._parentElement;
+        }
+        return null;
+    }
+    function popupFor(trigger) {
+        var controlledId = trigger.getAttribute && trigger.getAttribute("aria-controls");
+        if (controlledId) {
+            var controlled = document.getElementById(controlledId);
+            var controlledRole = controlled && controlled.getAttribute
+                ? controlled.getAttribute("role") : "";
+            if (controlledRole === "listbox" || controlledRole === "menu")
+                return controlled;
+        }
+        var nodes = document.querySelectorAll('[role="listbox"]')
+            .concat(document.querySelectorAll('[role="menu"]'));
+        var ancestor = trigger._parentElement;
+        while (ancestor) {
+            var match = null;
+            for (var i = 0; i < nodes.length; ++i) {
+                if (!ancestor.contains || !ancestor.contains(nodes[i])) continue;
+                if (match) return null;
+                match = nodes[i];
+            }
+            if (match) return match;
+            ancestor = ancestor._parentElement;
+        }
+        return null;
+    }
+    function optionsFor(popup) {
+        var nodes = document.querySelectorAll('[role="option"]')
+            .concat(document.querySelectorAll('[role="menuitem"]'))
+            .concat(document.querySelectorAll('button'));
+        var options = [];
+        for (var i = 0; popup && i < nodes.length; ++i)
+            if (popup.contains(nodes[i]) && !nodes[i].disabled
+                && options.indexOf(nodes[i]) < 0) options.push(nodes[i]);
+        return options;
+    }
+    function currentTrigger(popupState) {
+        if (document.body.contains(popupState.trigger)) return popupState.trigger;
+        var id = popupState.triggerId;
+        if (id) {
+            var byId = document.getElementById(id);
+            if (byId) return byId;
+        }
+        var triggers = document.querySelectorAll('[aria-haspopup="'
+            + popupState.triggerKind + '"]');
+        return popupState.triggerOrdinal >= 0
+            ? triggers[popupState.triggerOrdinal] || null : null;
+    }
+    function paint() {
+        if (!state) return;
+        for (var i = 0; i < state.options.length; ++i) {
+            var active = i === state.activeIndex;
+            state.options[i].setAttribute("data-pulp-popup-active", active ? "true" : "false");
+            var background = active
+                ? "rgba(120,180,255,0.18)" : state.baseBackgrounds[i];
+            state.options[i].style.background = background;
+            state.options[i].style.backgroundColor = background;
+        }
+        globalThis.__pulpPopupDefaultState__ = state;
+    }
+    function activate(trigger, edge) {
+        if (state) dismiss(false);
+        var popup = popupFor(trigger);
+        var options = optionsFor(popup);
+        if (!popup || !options.length) return false;
+        var baseBackgrounds = [];
+        for (var i = 0; i < options.length; ++i)
+            baseBackgrounds.push(options[i].style.background || "");
+        var hoverHandlers = [];
+        var triggerKind = trigger.getAttribute("aria-haspopup");
+        var triggerPeers = document.querySelectorAll(
+            '[aria-haspopup="' + triggerKind + '"]');
+        state = { trigger: trigger, triggerId: trigger.id || "",
+                  triggerKind: triggerKind,
+                  triggerOrdinal: Array.prototype.indexOf.call(triggerPeers, trigger),
+                  popup: popup, options: options,
+                  baseBackgrounds: baseBackgrounds,
+                  hoverHandlers: hoverHandlers,
+                  activeIndex: edge === "last" ? options.length - 1 : 0 };
+        state.onNativeDismiss = function() {
+            if (!state || state.popup !== popup) return;
+            var liveTrigger = currentTrigger(state);
+            if (liveTrigger) liveTrigger.click();
+            dismiss(false);
+        };
+        popup.addEventListener("dismiss", state.onNativeDismiss);
+        if (typeof claimOverlay === "function") claimOverlay(popup._id, true);
+        for (var optionIndex = 0; optionIndex < options.length; ++optionIndex) {
+            (function(index) {
+                var onEnter = function() {
+                    if (!state || state.options[index] !== options[index]) return;
+                    state.activeIndex = index;
+                    paint();
+                };
+                hoverHandlers.push(onEnter);
+                options[index].addEventListener("pointerenter", onEnter);
+            })(optionIndex);
+        }
+        paint();
+        if (typeof claimDocumentNavigationFocus === "function")
+            claimDocumentNavigationFocus();
+        return true;
+    }
+    function dismiss(returnFocus) {
+        if (!state) return;
+        var dismissedState = state;
+        var trigger = currentTrigger(state);
+        state.popup.removeEventListener("dismiss", state.onNativeDismiss);
+        if (typeof releaseOverlay === "function") releaseOverlay(state.popup._id);
+        for (var i = 0; i < state.options.length; ++i) {
+            state.options[i].removeEventListener(
+                "pointerenter", state.hoverHandlers[i]);
+            state.options[i].style.background = state.baseBackgrounds[i];
+            state.options[i].style.backgroundColor = state.baseBackgrounds[i];
+            state.options[i].removeAttribute("data-pulp-popup-active");
+        }
+        state = null;
+        globalThis.__pulpPopupDefaultState__ = null;
+        if (typeof releaseDocumentNavigationFocus === "function")
+            releaseDocumentNavigationFocus();
+        if (returnFocus) {
+            if (trigger) trigger.focus();
+            requestAnimationFrame(function() {
+                var replacement = currentTrigger(dismissedState);
+                if (replacement && replacement !== trigger) replacement.focus();
+            });
+        }
+    }
+    function outsidePopupTarget(target) {
+        return state && !state.popup.contains(target)
+            && !state.trigger.contains(target);
+    }
+    function consumeOutsideSequence(event) {
+        if (event.type === "pointerdown" && outsidePopupTarget(event.target)) {
+            var trigger = currentTrigger(state);
+            if (trigger) trigger.click();
+            dismiss(false);
+            suppressOutsideSequence = true;
+            if (suppressOutsideTimer) clearTimeout(suppressOutsideTimer);
+            suppressOutsideTimer = setTimeout(function() {
+                suppressOutsideSequence = false;
+                suppressOutsideTimer = 0;
+            }, 1000);
+        }
+        if (!suppressOutsideSequence) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type === "click") {
+            suppressOutsideSequence = false;
+            if (suppressOutsideTimer) clearTimeout(suppressOutsideTimer);
+            suppressOutsideTimer = 0;
+        }
+    }
+    // Capture at the materialized root before the underlay target sees the
+    // event. Dismissing only from document bubbling is too late: a graph or
+    // other control has already mutated on the initiating press by then.
+    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(
+        function(type) { document.body.addEventListener(type, consumeOutsideSequence, true); });
+    globalThis.__pulpPopupDefaultHandle__ = function(event) {
+        if (state && (!document.body.contains(state.trigger)
+                      || !document.body.contains(state.popup))) dismiss(false);
+        if (event.type === "pointerdown") {
+            var pointerTrigger = triggerFrom(event.target);
+            if (pointerTrigger && !optedOut(pointerTrigger)) {
+                requestAnimationFrame(function() {
+                    if (!activate(pointerTrigger, "first")
+                        && state && state.trigger === pointerTrigger) dismiss(false);
+                });
+            }
+            return;
+        }
+        if (event.type === "pointermove") {
+            if (!state) return;
+            for (var i = 0; i < state.options.length; ++i)
+                if (state.options[i].contains(event.target)) {
+                    state.activeIndex = i;
+                    paint();
+                    return;
+                }
+            return;
+        }
+        if (event.type !== "keydown") return;
+        var trigger = triggerFrom(document.activeElement);
+        if (!state && trigger && !optedOut(trigger)
+            && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+            event.preventDefault();
+            trigger.click();
+            var edge = event.key === "ArrowUp" ? "last" : "first";
+            if (!activate(trigger, edge))
+                requestAnimationFrame(function() { activate(trigger, edge); });
+            return;
+        }
+        if (!state || optedOut(state.trigger)) return;
+        var count = state.options.length;
+        if (event.key === "Escape") {
+            event.preventDefault();
+            state.trigger.click();
+            dismiss(true);
+        } else if (event.key === "ArrowDown" || event.key === "ArrowUp"
+                   || event.key === "Home" || event.key === "End") {
+            event.preventDefault();
+            state.activeIndex = event.key === "Home" ? 0
+                : event.key === "End" ? count - 1
+                : event.key === "ArrowDown" ? (state.activeIndex + 1) % count
+                : (state.activeIndex - 1 + count) % count;
+            paint();
+            state.options[state.activeIndex].focus();
+        } else if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            var selectedState = state;
+            var option = state.options[state.activeIndex];
+            // Selection callbacks commonly replace both the popup and its
+            // trigger (for example a React commit that paints the selected
+            // value). Retire ownership while the authored nodes are still
+            // attached so cleanup cannot mutate a detached pre-commit tree.
+            dismiss(false);
+            option.click();
+            var replacement = currentTrigger(selectedState);
+            if (replacement) replacement.focus();
+            requestAnimationFrame(function() {
+                var settledTrigger = currentTrigger(selectedState);
+                if (settledTrigger && settledTrigger !== replacement)
+                    settledTrigger.focus();
+            });
+        }
+    };
+})();
 
 function __installGlobalIfMissing(name, value) {
     if (typeof globalThis[name] === "undefined") {

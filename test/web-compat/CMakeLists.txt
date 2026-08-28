@@ -88,6 +88,7 @@ catch_discover_tests(pulp-test-web-compat-prelude)
 # Browser Animation API shim tests
 add_executable(pulp-test-web-compat-animation
     test_web_compat_animation.cpp
+    test_web_compat_transient_interaction.cpp
 )
 target_link_libraries(pulp-test-web-compat-animation PRIVATE pulp::view Catch2::Catch2WithMain)
 target_include_directories(pulp-test-web-compat-animation PRIVATE ${WEBCOMPAT_INCLUDE_DIR})

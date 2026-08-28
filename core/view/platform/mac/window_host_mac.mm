@@ -27,6 +27,7 @@
 #import <Cocoa/Cocoa.h>
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <iostream>
 #include <memory>   // shared_ptr liveness token for deferred clicks
 #include <mutex>
@@ -199,6 +200,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     // -submitDragSample:modifiers:clickCount: for the ordering rules that
     // keep this from stranding or reordering input.
     pulp::view::PointerCoalescer _pointerCoalescer;
+    std::uint64_t _rawDragSamples;
+    std::uint64_t _coalescerFlushes;
+    std::uint64_t _deliveredDragSamples;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -520,10 +524,17 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 // Go through dismiss_active_overlay() (not the
                 // bare release_overlay()) so React state can flip
                 // setOpen(false) via on_overlay_dismissed. Falls through to
-                // the standard hit_test below so the click also activates
-                // whatever view is underneath, matching existing WebView
-                // behavior where outside-click closes-and-clicks-through.
-                pulp::view::View::dismiss_active_overlay();
+                // Some overlays deliberately suppress the initiating pointer
+                // sequence so dismissing a popup cannot also mutate its
+                // underlay. Others preserve the historical click-through.
+                const bool consumeOutsideClick =
+                    overlay->overlay_consumes_outside_click();
+                overlay->dismiss_claimed_overlay();
+                if (consumeOutsideClick) {
+                    _dragTargetCapture.reset();
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
             }
         }
 
@@ -578,6 +589,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 - (void)deliverDragAtPoint:(pulp::view::Point)pt
                  modifiers:(std::uint16_t)modifiers
                 clickCount:(int)clickCount {
+    PULP_TRACE_SCOPE_NAMED("state", "native_drag_dispatch");
+    PULP_TRACE_COUNTER("state", "delivered_drag_samples",
+                       ++_deliveredDragSamples);
     if (!self.rootView) return;
     auto* dragTarget = _dragTargetCapture.live_in(*self.rootView);
     if (!dragTarget) { _dragTargetCapture.reset(); return; }
@@ -628,7 +642,13 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // display-link block, and by any path that is about to hand this gesture
 // somewhere else (see mouseDragged:).
 - (void)flushCoalescedPointerInput {
-    for (const auto& s : _pointerCoalescer.flush_frame()) {
+    PULP_TRACE_SCOPE_NAMED("state", "pointer_coalescer_flush");
+    const auto pending = _pointerCoalescer.flush_frame();
+    PULP_TRACE_COUNTER("state", "pointer_coalescer_flushes",
+                       ++_coalescerFlushes);
+    PULP_TRACE_COUNTER("state", "pointer_samples_merged",
+                       _pointerCoalescer.total_merged());
+    for (const auto& s : pending) {
         [self deliverDragAtPoint:s.position
                        modifiers:s.modifiers
                       clickCount:s.click_count];
@@ -636,6 +656,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 }
 
 - (void)mouseDragged:(NSEvent*)event {
+    PULP_TRACE_SCOPE_NAMED("state", "mac_mouse_dragged");
+    PULP_TRACE_COUNTER("state", "raw_drag_samples", ++_rawDragSamples);
     @try {
         try {
             // Inspector intercept — route drag-ticks to the in-canvas overlay
@@ -1002,6 +1024,25 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             }
         }
 
+        // A materialized document may temporarily claim the owning root for a
+        // bounded navigation interaction (for example, an open semantic
+        // listbox). Route that capability before the legacy process-global
+        // script fan-out. A handled event belongs to this root only and must
+        // not also reach another editor or the focused-view path below.
+        if (self.rootView && self.rootView->accepts_navigation_input() &&
+            self.rootView->on_navigation_key) {
+            pulp::view::KeyEvent navigation_key;
+            navigation_key.key = key;
+            navigation_key.modifiers = mods;
+            navigation_key.is_down = true;
+            navigation_key.is_repeat = event.isARepeat;
+            if (self.rootView->on_navigation_key(navigation_key)) {
+                [self startAnimationTimerIfNeeded];
+                [self setNeedsDisplay:YES];
+                return;
+            }
+        }
+
         // Fan out to every live WidgetBridge so
         // `@pulp/react` apps (Spectr) receive bare-key shortcuts like
         // 'S' or Escape that React effects bind via
@@ -1050,11 +1091,14 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             // `<View overlay>` path has no widget-specific ESC owner — wire
             // it here so React popovers built from active_overlay_ close on
             // ESC like every other popover surface.
-            if (pulp::view::View::active_overlay_) {
-                pulp::view::View::dismiss_active_overlay();
-                [self startAnimationTimerIfNeeded];
-                [self setNeedsDisplay:YES];
-                return;
+            if (self.rootView) {
+                auto* overlay = self.rootView->interaction().active_overlay;
+                if (overlay) {
+                    overlay->dismiss_claimed_overlay();
+                    [self startAnimationTimerIfNeeded];
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
             }
         }
 
@@ -1318,7 +1362,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     // AppKit resizes us during a window resize. Push the new
     // bounds into the root View immediately and relayout so hit testing,
     // tracking-area updates, and the next paint all see the new geometry.
-    if (self.rootView) {
+    if (self.rootView && !self.hostOwnsRootLayout) {
         self.rootView->set_bounds({0, 0,
             static_cast<float>(newSize.width),
             static_cast<float>(newSize.height)});
@@ -1348,6 +1392,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // display move/hotplug at the same logical size — which does not go through
 // windowDidResize. The host recreates the GPU surfaces at the new physical size.
 @property (nonatomic, copy) dispatch_block_t backingChangedBlock;
+@property (nonatomic) BOOL pulpLiveResizeActive;
+@property (nonatomic) NSUInteger resizeCoverGeneration;
+- (void)releaseResizeCoverAfterPresent;
 // C++ render state is managed by MacGpuWindowHost, not the view
 @end
 
@@ -1356,6 +1403,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
+        self.hostOwnsRootLayout = YES;
         self.wantsLayer = YES;
 
         CAMetalLayer* layer = [CAMetalLayer layer];
@@ -1384,14 +1432,11 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         layer.opaque = YES;
         layer.backgroundColor = pulp::view::mac_host::cg_host_clear_color();
 
-        // Pin the most-recent drawable to the top-left during a live resize
-        // instead of letting Core Animation's default kCAGravityResize STRETCH
-        // it to the new layer bounds. The default makes the canvas appear to
-        // zoom in/out as you drag a window edge (the old frame is scaled to the
-        // new size in the gap before the next Metal frame lands). With
-        // top-left gravity the content stays put at its native scale and the
-        // newly-exposed area shows the dark background until the next frame —
-        // i.e. the canvas "stays in its fixed position" as the user expects.
+        // Keep a settled drawable at native scale. During a live expansion,
+        // setFrameSize: temporarily selects Resize gravity only until the host
+        // synchronously presents the exact new-size GPU frame. That one-frame
+        // cover avoids exposing background strips while drawable acquisition
+        // waits for vsync, without restoring the old whole-gesture zoom.
         // Non-flipped NSView layer: max-Y is visually the top, so TopLeft is
         // the upper-left corner where our (0,0)-origin UI begins.
         layer.contentsGravity = kCAGravityTopLeft;
@@ -1430,11 +1475,56 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 }
 
 - (void)setFrameSize:(NSSize)newSize {
+    const NSSize oldSize = self.frame.size;
+    self.resizeCoverGeneration += 1;
+    const BOOL expandingLiveResize =
+        (self.inLiveResize || self.pulpLiveResizeActive) &&
+        (newSize.width > oldSize.width || newSize.height > oldSize.height);
+    const BOOL unchangedLiveResize =
+        (self.inLiveResize || self.pulpLiveResizeActive) &&
+        newSize.width == oldSize.width && newSize.height == oldSize.height;
+    // AppKit commits the layer bounds before windowDidResize can acquire and
+    // paint the matching Metal drawable. Cover that sub-frame expansion gap
+    // with the retained drawable; handle_resize restores TopLeft immediately
+    // after the exact-size frame has presented.
+    if (expandingLiveResize) {
+        self.metalLayer.contentsGravity = kCAGravityResize;
+    } else if (!unchangedLiveResize) {
+        // AppKit commonly follows an expansion with a redundant same-size
+        // setFrameSize:. Preserve the cover for that callback; treating it as
+        // a contraction releases the cover before the queued drawable lands.
+        self.metalLayer.contentsGravity = kCAGravityTopLeft;
+    }
     [super setFrameSize:newSize];
     CGFloat scale = self.window ? self.window.backingScaleFactor
                                 : [NSScreen mainScreen].backingScaleFactor;
     self.metalLayer.contentsScale = scale;
     self.metalLayer.drawableSize = CGSizeMake(newSize.width * scale, newSize.height * scale);
+}
+
+- (void)viewWillStartLiveResize {
+    [super viewWillStartLiveResize];
+    self.pulpLiveResizeActive = YES;
+}
+
+- (void)viewDidEndLiveResize {
+    [super viewDidEndLiveResize];
+    self.pulpLiveResizeActive = NO;
+    [self releaseResizeCoverAfterPresent];
+}
+
+- (void)releaseResizeCoverAfterPresent {
+    const NSUInteger generation = self.resizeCoverGeneration;
+    PulpMetalView* view = self;
+    // GpuSurface::end_frame queues the drawable; it does not mean Core
+    // Animation has displayed it. Keep the retained-frame cover through the
+    // next compositor opportunity. A newer resize increments the generation,
+    // invalidating this release so a stale callback cannot expose the edge.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 64 * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), ^{
+        if (view.resizeCoverGeneration == generation)
+            view.metalLayer.contentsGravity = kCAGravityTopLeft;
+    });
 }
 
 - (void)viewDidChangeBackingProperties {
@@ -1875,6 +1965,12 @@ public:
             if (const char* env = std::getenv("PULP_PARTIAL_REPAINT")) {
                 partial_repaint_enabled_ = (env[0] == '1');
             }
+            if (const char* env = std::getenv("PULP_TEST_POINTER_DRAG")) {
+                test_pointer_drag_mode_ = std::strcmp(env, "minimap") == 0
+                    ? TestPointerDragMode::minimap
+                    : env[0] == '1' ? TestPointerDragMode::bands
+                                    : TestPointerDragMode::disabled;
+            }
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
 
             // Shared NSWindow construction (style, released-when-closed,
@@ -2193,12 +2289,24 @@ public:
         key_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:
                             (NSEventMaskKeyDown | NSEventMaskKeyUp)
                         handler:^NSEvent*(NSEvent* event) {
-            if (!app_key_handler_) return event;
             pulp::view::KeyEvent ke;
             ke.key = key_code_from_ns(event.keyCode);
             ke.modifiers = modifiers_from_ns_flags(event.modifierFlags);
             ke.is_down = (event.type == NSEventTypeKeyDown);
             ke.is_repeat = (event.type == NSEventTypeKeyDown) ? event.isARepeat : NO;
+
+            // Local monitors run before the responder chain. A standalone's
+            // Musical Typing monitor therefore sees arrow/Enter/Escape before
+            // PulpView::keyDown:. Give an owning root's explicit navigation
+            // claim first refusal here, matching keyDown: ordering. Consuming
+            // the event returns nil, so Musical Typing and AppKit cannot also
+            // act on the same key.
+            if (ke.is_down && root_.accepts_navigation_input() &&
+                root_.on_navigation_key && root_.on_navigation_key(ke)) {
+                repaint();
+                return nil;
+            }
+            if (!app_key_handler_) return event;
             return app_key_handler_(ke) ? nil : event;
         }];
     }
@@ -2446,6 +2554,84 @@ private:
     // invoked on main only.
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
+    enum class TestPointerDragMode { disabled, bands, minimap };
+    TestPointerDragMode test_pointer_drag_mode_ = TestPointerDragMode::disabled;
+    int test_pointer_drag_tick_ = 0;
+
+    void pump_test_pointer_drag() {
+        if (test_pointer_drag_mode_ == TestPointerDragMode::disabled
+            || !window_ || !metal_view_) return;
+        constexpr int kWarmupFrames = 45;
+        constexpr int kSamples = 180;
+        const int tick = test_pointer_drag_tick_++;
+        if (tick < kWarmupFrames) return;
+
+        const int workload_tick = tick - kWarmupFrames;
+        const NSSize size = metal_view_.bounds.size;
+        NSPoint location{};
+        NSEventType type{};
+        int event_number = workload_tick;
+        if (test_pointer_drag_mode_ == TestPointerDragMode::bands) {
+            if (workload_tick > kSamples) return;
+            const int sample = std::clamp(workload_tick, 0, kSamples);
+            const CGFloat t = static_cast<CGFloat>(sample) / kSamples;
+            location = NSMakePoint(
+                (0.073 + 0.848 * t) * size.width,
+                (1.0 - (0.453 + std::sin(t * M_PI * 5.0) * 0.198)) * size.height);
+            type = sample == 0 ? NSEventTypeLeftMouseDown
+                : sample == kSamples ? NSEventTypeLeftMouseUp
+                                     : NSEventTypeLeftMouseDragged;
+        } else {
+            // Three equal, independently hit-tested gestures exercise both
+            // resize handles and the selected-window pan. The normalized
+            // points are derived from the authored 56 px side padding and
+            // minimap y = height - 92 in Spectr's 1320 x 860 design viewport.
+            constexpr int kGestureSamples = 60;
+            constexpr int kGestureEvents = kGestureSamples + 1;
+            constexpr int kSettleFrames = 8;
+            constexpr int kGestureStride = kGestureEvents + kSettleFrames;
+            constexpr int kTotalTicks = 3 * kGestureStride;
+            if (workload_tick >= kTotalTicks) return;
+            const int gesture = workload_tick / kGestureStride;
+            const int sample = workload_tick % kGestureStride;
+            if (sample >= kGestureEvents) return;
+            const CGFloat t = static_cast<CGFloat>(sample) / kGestureSamples;
+            constexpr CGFloat kMiniY = 768.0 / 860.0;
+            const CGFloat start_x = gesture == 0 ? 56.0 / 1320.0
+                : gesture == 1 ? 1264.0 / 1320.0
+                               : 0.5;
+            const CGFloat end_x = gesture == 0 ? 0.18
+                : gesture == 1 ? 0.82
+                               : 0.58;
+            location = NSMakePoint(
+                (start_x + (end_x - start_x) * t) * size.width,
+                (1.0 - kMiniY) * size.height);
+            type = sample == 0 ? NSEventTypeLeftMouseDown
+                : sample == kGestureSamples ? NSEventTypeLeftMouseUp
+                                            : NSEventTypeLeftMouseDragged;
+            event_number = gesture * 1000 + sample;
+        }
+        NSEvent* event = [NSEvent mouseEventWithType:type
+                                           location:location
+                                      modifierFlags:0
+                                          timestamp:NSProcessInfo.processInfo.systemUptime
+                                       windowNumber:window_.windowNumber
+                                            context:nil
+                                        eventNumber:event_number
+                                         clickCount:1
+                                           pressure:type == NSEventTypeLeftMouseUp ? 0.0 : 1.0];
+        // Enter through PulpMetalView's real AppKit method so the exact native
+        // hit-test, pointer translation, and PointerCoalescer path execute. A
+        // queued synthetic event is silently discarded for non-key windows on
+        // unattended machines, which would produce a plausible GPU trace with
+        // no input workload at all.
+        if (type == NSEventTypeLeftMouseDown)
+            [metal_view_ mouseDown:event];
+        else if (type == NSEventTypeLeftMouseUp)
+            [metal_view_ mouseUp:event];
+        else
+            [metal_view_ mouseDragged:event];
+    }
 
     // The continuous-frame predicate and the widget/CSS animation walk are the
     // shared pulp::view::needs_continuous_frames() / advance_host_frame() —
@@ -2496,6 +2682,7 @@ private:
     }
 
     void handle_resize(float width, float height) {
+        PULP_TRACE_SCOPE_NAMED("render", "window_resize");
         width_ = width;
         height_ = height;
 
@@ -2512,12 +2699,19 @@ private:
                                    static_cast<float>(scale));
         }
         configured_scale_ = static_cast<float>(scale);
-        // Relayout the root view synchronously so hit testing
-        // and any user resize callback both see the new geometry. paint_scene
-        // also calls set_bounds + layout_children, but that runs at the next
-        // vsync — too late for input handlers fired during the resize drag.
-        root_.set_bounds({0, 0, width, height});
-        root_.layout_children();
+        // Keep hit testing and the user callback on the SAME geometry paint
+        // will use. A pinned design viewport must never pass through a
+        // window-sized root between AppKit's resize and the next GPU frame:
+        // that transient layout exposes cleared bottom/right bands during a
+        // live drag, then snaps back to the authored box on release.
+        const Rect desired_root_bounds =
+            design_viewport_w_ > 0.0f && design_viewport_h_ > 0.0f
+                ? Rect{0, 0, design_viewport_w_, design_viewport_h_}
+                : Rect{0, 0, width, height};
+        if (!(root_.bounds() == desired_root_bounds)) {
+            root_.set_bounds(desired_root_bounds);
+            root_.layout_children();
+        }
         if (resize_callback_) {
             auto alive_token = render_dispatch_alive_;
             resize_callback_(
@@ -2529,6 +2723,21 @@ private:
         needs_repaint_ = true;
         tracker_.set_viewport(width, height);
         tracker_.invalidate_all();
+
+        // AppKit runs live resize in an event-tracking loop. The CVDisplayLink
+        // callback reaches the main queue, but that queue is not guaranteed to
+        // present before AppKit exposes the newly enlarged CAMetalLayer. Waiting
+        // for the next ordinary dispatch therefore shows the layer's cleared
+        // edge during the drag and batches the real frame at mouse-up. Paint the
+        // just-committed size now; the display-link gate still owns animation
+        // timing and may harmlessly coalesce a later requested frame.
+        if (gpu_surface_ && skia_surface_) {
+            render_frame();
+            // Present() only queues the replacement drawable. Keep the retained
+            // cover until Core Animation has had a compositor interval to show
+            // it; releasing here races that display and exposes the background.
+            [metal_view_ releaseResizeCoverAfterPresent];
+        }
     }
 
     // A backing-scale (DPI) change at the SAME logical size — display move,
@@ -2650,14 +2859,26 @@ private:
                     (unsigned long long)pump_dirty_frames_);
         }
 
-        if (!gpu_surface_->begin_frame()) {
+        bool acquired = false;
+        {
+            // Drawable acquisition can block independently of paint/submit.
+            // Keep it explicit so a long frame's unaccounted parent time is
+            // not incorrectly attributed to its child paint span.
+            PULP_TRACE_SCOPE_NAMED("render", "gpu_acquire");
+            acquired = gpu_surface_->begin_frame();
+        }
+        if (!acquired) {
             frame_fail_count_++;
             if (frame_fail_count_ <= 3)
                 fprintf(stderr, "[gpu-host] begin_frame failed (%d)\n", frame_fail_count_);
             return false;
         }
 
-        auto* canvas = skia_surface_->begin_frame();
+        canvas::Canvas* canvas = nullptr;
+        {
+            PULP_TRACE_SCOPE_NAMED("render", "skia_begin");
+            canvas = skia_surface_->begin_frame();
+        }
         if (!canvas) {
             fprintf(stderr, "[gpu-host] skia begin_frame returned null\n");
             gpu_surface_->end_frame();
@@ -2726,14 +2947,21 @@ private:
                 pulp::view::needs_continuous_frames(&root_),
             std::memory_order_relaxed);
 
-        const auto outcome = skia_surface_->end_frame();  // submit Graphite recording
+        render::FrameOutcome outcome;
+        {
+            PULP_TRACE_SCOPE_NAMED("render", "gpu_submit");
+            outcome = skia_surface_->end_frame();  // submit Graphite recording
+        }
 
         bool captured = true;
         if (capture_pixels && capture_width && capture_height) {
             captured = skia_surface_->read_current_rgba(*capture_pixels, *capture_width, *capture_height);
         }
 
-        gpu_surface_->end_frame();    // present to Metal surface
+        {
+            PULP_TRACE_SCOPE_NAMED("render", "gpu_present");
+            gpu_surface_->end_frame();    // present to Metal surface
+        }
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
@@ -2816,6 +3044,7 @@ private:
                     // others. The invariant is cheap to state and was
                     // expensive to rediscover, so state it out loud. Once per
                     // process; this is the frame callback.
+                    self->pump_test_pointer_drag();
                     if (!self->metal_view_.coalescePointerInput) {
                         static std::once_flag warned_no_coalescing;
                         std::call_once(warned_no_coalescing, [] {

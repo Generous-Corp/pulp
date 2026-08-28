@@ -92,6 +92,8 @@ public:
     void on_mouse_event(const MouseEvent& event) override;
     void on_hover_move(Point local_pos) override;  // track hovered dropdown row
     bool on_key_event(const KeyEvent& event) override;
+    bool accepts_navigation_input() const override { return open_; }
+    void on_focus_changed(bool focused) override;
     View* hit_test(Point local_point) override;  // extend hit area over the open dropdown
     bool wants_mouse_input() const override { return true; }
 
@@ -166,6 +168,7 @@ private:
     void overlay_anchor_(float& out_x, float& out_y, float& out_viewport_h,
                          float& out_viewport_w) const;
     void move_hover(int delta);  // keyboard: move the highlighted row, skipping separators
+    void move_hover_to_edge(bool last);
 
     std::vector<std::string> items_;
     int selected_ = 0;
@@ -487,12 +490,15 @@ public:
     enum class Direction { vertical, horizontal, both };
 
     void set_direction(Direction d) { direction_ = d; }
-    void set_content_size(Size size) { content_size_ = size; }
+    /// Sets a caller-owned content extent and disables automatic child-derived
+    /// sizing. Materialized overflow containers use the automatic default;
+    /// native callers can continue to manage virtual or offscreen content.
+    void set_content_size(Size size);
+    /// Restores child-derived sizing after a caller-owned extent and refreshes
+    /// it immediately from the current laid-out descendant boxes.
+    void use_automatic_content_size();
     Size content_size() const { return content_size_; }
-    bool wants_wheel_scroll() const override {
-        const auto b = local_bounds();
-        return content_size_.height > b.height || content_size_.width > b.width;
-    }
+    bool wants_wheel_scroll() const override;
 
     float scroll_x() const { return smooth_scroll_x_.value(); }
     float scroll_y() const { return smooth_scroll_y_.value(); }
@@ -543,10 +549,16 @@ public:
     void advance_animations(float dt) override;
 
 private:
-    void clamp_scroll_targets();
+    static constexpr float kOverflowEpsilon = 1.0f;
+
+    void update_automatic_content_size();
+    void clamp_scroll_targets(bool clamp_current = false);
+    float max_scroll_x() const;
+    float max_scroll_y() const;
 
     Direction direction_ = Direction::vertical;
     Size content_size_{0, 0};
+    bool automatic_content_size_ = true;
     float target_scroll_x_ = 0, target_scroll_y_ = 0;
     ValueAnimation smooth_scroll_x_{0.0f};  // smoothly interpolated scroll position
     ValueAnimation smooth_scroll_y_{0.0f};
