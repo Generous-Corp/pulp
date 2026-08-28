@@ -19,6 +19,7 @@
         "additionalProperties": false,
         "required": [
           "id",
+          "native_registry_index",
           "version",
           "title",
           "summary",
@@ -36,6 +37,12 @@
             "minLength": 1,
             "maxLength": 96,
             "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+          },
+          "native_registry_index": {
+            "oneOf": [
+              { "type": "null" },
+              { "type": "integer", "minimum": 0, "maximum": 63 }
+            ]
           },
           "version": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
           "title": { "type": "string", "minLength": 1, "maxLength": 160 },

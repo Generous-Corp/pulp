@@ -28,6 +28,7 @@ def valid_document() -> dict:
         "recipes": [
             {
                 "id": "gpu.renderer3d.cube",
+                "native_registry_index": 0,
                 "version": 1,
                 "title": "Renderer3D cube",
                 "summary": "Prove bounded render and readback work.",
@@ -138,6 +139,14 @@ class CatalogContract(unittest.TestCase):
         )
         self.assertIn("missing=['threejs.multi-pass.v1']", "\n".join(problems))
 
+    def test_native_registry_reorder_is_rejected(self) -> None:
+        document = catalog.load_and_validate(catalog.DEFAULT_CATALOG)
+        native = catalog.probe_registry_ids(
+            catalog.DEFAULT_REGISTRY_HEADER.read_text(encoding="utf-8")
+        )
+        problems = catalog.validate_registry_projection(document, list(reversed(native)))
+        self.assertTrue(problems)
+
     def test_catalog_recipe_not_in_native_registry_is_rejected(self) -> None:
         document = catalog.load_and_validate(catalog.DEFAULT_CATALOG)
         native = catalog.probe_registry_ids(
@@ -208,6 +217,13 @@ class CatalogContract(unittest.TestCase):
             *catalog.validate_handoff_routing(handoff, catalog.ROOT),
         ]
         self.assertIn("differs from routed owner", "\n".join(problems))
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["entries"][0]["paths"][0] = "tools/cli/gpu_prove"
+        self.assertIn(
+            "path does not exist inside the repository",
+            "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+        )
 
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
         handoff["ownership_projection"] = "docs/status/alternate-ownership.json"
