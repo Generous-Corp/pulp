@@ -33,6 +33,16 @@ harness rule: check whether the span was running or blocked. A blocked present
 is fixed by reducing GPU work per frame or adjusting frame pacing — not by
 optimizing the code inside the span.
 
+The trace can localize the delayed stage without revealing the platform state
+machine that caused it. In one resize investigation, paint averaged about one
+millisecond while acquire/present and compositor timing consumed roughly one
+refresh interval. That ruled out paint optimization. The cause was established
+only after a platform harness reproduced a redundant same-size resize callback
+that released retained content before the queued frame became visible. Use
+Perfetto to falsify and localize, then an event-order harness plus a planted
+regression to prove platform causality. A recording or interaction check
+validates the resulting UX; it does not replace the deterministic harness.
+
 ```sql
 -- Per-pass GPU cost ranking:
 SELECT name, COUNT(*) AS n, SUM(dur)/1e6 AS total_ms, MAX(dur)/1e6 AS max_ms

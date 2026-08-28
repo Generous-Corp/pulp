@@ -36,6 +36,16 @@ the same `pulp.trace-gpu-analysis.v1` result and accept no raw SQL. Startup is
 `unverified` until A3 supplies a measured budget; missing categories,
 unfinished slices, and invalid evidence correlation are `unavailable`.
 
+For repeatable installed CLI/MCP timing and artifact-binding evidence, use
+`tools/scripts/gpu_trace_overhead_acceptance.py`; its receipt keeps five
+warm-ups, 30 paired samples, 20 fresh-process samples, host identity, raw
+durations, p95, noise, and confidence. This measures offline analysis only.
+Any new trace producer call sites still require compile-out,
+compiled-in/idle, and active 128 MiB capture trials on the real product
+workload. When an analyzer change touches no producer path, record that exact no-change
+inventory as `not-applicable`; do not relabel analyzer timing as product
+capture overhead.
+
 ### The L1 "explain" flow, spelled out
 
 ```
