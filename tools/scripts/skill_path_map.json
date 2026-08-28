@@ -239,7 +239,10 @@
         "tools/scripts/gpu_dpr_runner.py",
         "tools/scripts/test_gpu_dpr_runner.py",
         "tools/scripts/gpu_dpr_pulp_native_adapter.py",
-        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
+        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/verify_gpu_dpr_inconclusive_receipt.py",
+        "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py",
+        "docs/validation/gpu-dpr/**"
       ]
     },
     "decide": {
@@ -481,7 +484,10 @@
         "tools/scripts/gpu_dpr_runner.py",
         "tools/scripts/test_gpu_dpr_runner.py",
         "tools/scripts/gpu_dpr_pulp_native_adapter.py",
-        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
+        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/verify_gpu_dpr_inconclusive_receipt.py",
+        "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py",
+        "docs/validation/gpu-dpr/**"
       ]
     },
     "screenshot-sync": {
@@ -619,7 +625,10 @@
         "tools/scripts/gpu_dpr_runner.py",
         "tools/scripts/test_gpu_dpr_runner.py",
         "tools/scripts/gpu_dpr_pulp_native_adapter.py",
-        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
+        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/verify_gpu_dpr_inconclusive_receipt.py",
+        "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py",
+        "docs/validation/gpu-dpr/**"
       ]
     },
     "trace-sql": {
@@ -806,7 +815,10 @@
         "tools/scripts/gpu_dpr_runner.py",
         "tools/scripts/test_gpu_dpr_runner.py",
         "tools/scripts/gpu_dpr_pulp_native_adapter.py",
-        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
+        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/verify_gpu_dpr_inconclusive_receipt.py",
+        "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py",
+        "docs/validation/gpu-dpr/**"
       ]
     }
   }

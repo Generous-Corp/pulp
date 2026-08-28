@@ -385,6 +385,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_runner.py")
     add_test(NAME gpu-dpr-pulp-native-adapter-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_pulp_native_adapter.py")
+    add_test(NAME gpu-dpr-inconclusive-receipt-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py")
     if(UNIX AND PROJECT_IS_TOP_LEVEL)
         add_test(NAME gpu-health-cpu-only-configure
             COMMAND bash
