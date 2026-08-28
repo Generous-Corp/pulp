@@ -5,6 +5,7 @@
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -89,7 +90,8 @@ void write_artifacts(const fs::path& directory, const RecipeRun& run) {
     }
 }
 
-RecipeRun run_recipe(const std::string& recipe_id, const RunOptions& options) {
+RecipeRun run_recipe(const std::string& recipe_id, const RunOptions& options,
+                     const std::optional<std::string>& threejs_runtime_root) {
     if (recipe_id == "renderer3d.hardcoded-cube.v1") {
         return pulp::tooling::gpu_probe::run_renderer3d_recipe(options);
     }
@@ -99,12 +101,45 @@ RecipeRun run_recipe(const std::string& recipe_id, const RunOptions& options) {
     if (recipe_id == "gpu-audio.stft.v1") {
         return pulp::tooling::gpu_probe::run_gpu_audio_stft_recipe(options);
     }
+    if (recipe_id == "threejs.multi-pass.v1") {
+        return pulp::tooling::gpu_probe::run_threejs_multi_pass_recipe(
+            options, threejs_runtime_root);
+    }
     throw std::runtime_error("recipe is registered but not available in this build: " + recipe_id);
 }
 
 int cmd_gpu_probe(const std::vector<std::string>& args) {
     bool json = false;
     RunOptions options;
+    const auto executable_dir = current_executable_path().parent_path();
+    const std::array runtime_candidates{
+        executable_dir / "share" / "pulp" / "threejs",
+        executable_dir.parent_path() / "share" / "pulp" / "threejs",
+    };
+    std::optional<std::string> threejs_runtime_root;
+    std::error_code runtime_path_error;
+    for (const auto& candidate : runtime_candidates) {
+        if (fs::is_directory(candidate, runtime_path_error)) {
+            threejs_runtime_root = candidate.string();
+            break;
+        }
+        runtime_path_error.clear();
+    }
+    if (!threejs_runtime_root) {
+        auto build_root = executable_dir;
+        bool build_tree_invocation = false;
+        for (int depth = 0; depth < 4 && !build_root.empty(); ++depth) {
+            if (fs::is_regular_file(build_root / "CMakeCache.txt",
+                                    runtime_path_error)) {
+                build_tree_invocation = true;
+                break;
+            }
+            runtime_path_error.clear();
+            build_root = build_root.parent_path();
+        }
+        if (!build_tree_invocation)
+            threejs_runtime_root = runtime_candidates.front().string();
+    }
     std::string recipe_id;
     fs::path artifact_directory;
 
@@ -139,7 +174,7 @@ int cmd_gpu_probe(const std::vector<std::string>& args) {
     }
 
     try {
-        auto run = run_recipe(recipe_id, options);
+        auto run = run_recipe(recipe_id, options, threejs_runtime_root);
         std::string validation_error;
         if (!pulp::tooling::gpu_probe::validate(run, &validation_error)) {
             std::cerr << "pulp gpu probe: internal result validation failed: "

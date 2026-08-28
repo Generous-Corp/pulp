@@ -34,4 +34,10 @@ RecipeRun run_gpu_compute_magnitude_recipe(const RunOptions& options = {});
 /// audio device or Processor and must run from an offline tool/worker thread.
 RecipeRun run_gpu_audio_stft_recipe(const RunOptions& options = {});
 
+/// The optional runtime root supports installed CLI dispatch while direct
+/// source tests use the configured pinned runtime.
+RecipeRun run_threejs_multi_pass_recipe(
+    const RunOptions& options = {},
+    std::optional<std::string> threejs_runtime_root = std::nullopt);
+
 } // namespace pulp::tooling::gpu_probe

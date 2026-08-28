@@ -138,3 +138,9 @@ SkCanvas → View tree painting
   adapter identity, and bounded hash-declared artifacts. Run the matching
   `--negative-control` path to prove the oracle detects a real seeded mutation;
   its expected exit status is 1 with typed failure evidence.
+- In builds that advertise it, `threejs.multi-pass.v1` uses the hash-verified installed/source
+  `three.webgpu.js` runtime through V8 and Dawn. Its three bounded RGBA
+  readbacks show where background, intermediate, and final content first
+  diverge; the C++ color-region oracle does not consume Three.js's own expected
+  values. Run the baseline twice before the seeded mutation when diagnosing
+  nondeterminism.

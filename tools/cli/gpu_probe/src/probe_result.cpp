@@ -19,6 +19,10 @@ constexpr std::array compute_passes{
 constexpr std::array stft_passes{
     std::string_view{"prepare"}, std::string_view{"forward"},
     std::string_view{"magnitude"}, std::string_view{"oracle"}};
+constexpr std::array threejs_passes{
+    std::string_view{"adapter"}, std::string_view{"threejs-init"},
+    std::string_view{"background-pass"}, std::string_view{"left-swatch-pass"},
+    std::string_view{"final-swatch-pass"}, std::string_view{"oracle"}};
 
 constexpr std::array registry{
     RecipeDefinition{kRecipeIds[0], "pulp.renderer3d.hardcoded-cube", {128, 128, 16'384},
@@ -37,6 +41,16 @@ constexpr std::array registry{
                      AdapterPolicy::hardware_required, stft_passes,
                      {1024, 6, 8192, 32 * 1024}, "cpu-fft-magnitude-match",
                      "stockham-stage-output-half"},
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+    RecipeDefinition{kRecipeIds[3], "three.js@077dd13c/native-webgpu-multi-pass",
+                     {96, 96, 9'216}, 0x54485245454a5301ULL,
+                     "fixed-step-0", "threejs-esm-scene", "rgba8-srgb",
+                     "row-major-rgba8", {32.0 / 255.0, 0.0},
+                     AdapterPolicy::hardware_required, threejs_passes,
+                     {15, 4, 40 * 1024, 128 * 1024},
+                     "cpu-region-color-oracle-match",
+                     "seeded-final-swatch-channel"},
+#endif
 };
 
 bool is_lower_hex(std::string_view value, std::size_t size) {

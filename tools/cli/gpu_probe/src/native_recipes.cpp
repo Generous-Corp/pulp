@@ -10,6 +10,17 @@
 #if defined(PULP_ENABLE_SCENE3D)
 #include <pulp/render/renderer3d.hpp>
 #endif
+#if PULP_GPU_PROBE_HAS_THREEJS && PULP_GPU_PROBE_THREEJS_CALLABLE
+#include <pulp/render/gpu_surface.hpp>
+#include <pulp/render/skia_surface.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/js_engine.hpp>
+#include <pulp/view/script_engine.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
+#include <dawn/webgpu_cpp.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -17,6 +28,8 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -239,6 +252,103 @@ bool validation_fail(std::string* error, std::string message) {
     if (error) *error = std::move(message);
     return false;
 }
+
+#if PULP_GPU_PROBE_HAS_THREEJS && PULP_GPU_PROBE_THREEJS_CALLABLE
+std::optional<std::string> read_text(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) return std::nullopt;
+    return std::string(std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>());
+}
+
+struct SampleRgb {
+    std::uint8_t r = 0;
+    std::uint8_t g = 0;
+    std::uint8_t b = 0;
+};
+
+SampleRgb sample_rgb(std::span<const std::uint8_t> rgba, std::uint32_t width,
+                     std::uint32_t x, std::uint32_t y) {
+    const auto offset = (static_cast<std::size_t>(y) * width + x) * 4u;
+    if (offset + 2u >= rgba.size()) return {};
+    return {rgba[offset], rgba[offset + 1u], rgba[offset + 2u]};
+}
+
+bool near_rgb(SampleRgb value, SampleRgb expected, std::uint8_t tolerance = 24) {
+    const auto near = [tolerance](std::uint8_t actual, std::uint8_t target) {
+        return std::abs(static_cast<int>(actual) - static_cast<int>(target)) <= tolerance;
+    };
+    return near(value.r, expected.r) && near(value.g, expected.g) &&
+        near(value.b, expected.b);
+}
+
+bool is_red(SampleRgb value) {
+    return value.r > 140 && value.r > value.g + 60 && value.r > value.b + 60;
+}
+
+bool is_green(SampleRgb value) {
+    return value.g > 140 && value.g > value.r + 60 && value.g > value.b + 40;
+}
+
+template <typename Predicate>
+double region_match_fraction(std::span<const std::uint8_t> rgba, std::uint32_t width,
+                             std::uint32_t x0, std::uint32_t y0,
+                             std::uint32_t x1, std::uint32_t y1,
+                             Predicate&& predicate) {
+    std::uint32_t matched = 0;
+    std::uint32_t total = 0;
+    for (std::uint32_t y = y0; y < y1; ++y) {
+        for (std::uint32_t x = x0; x < x1; ++x) {
+            matched += predicate(sample_rgb(rgba, width, x, y)) ? 1u : 0u;
+            ++total;
+        }
+    }
+    return total == 0 ? 0.0 : static_cast<double>(matched) / total;
+}
+
+std::string dawn_adapter_string(wgpu::StringView value) {
+    if (value.data == nullptr || value.length == 0) return {};
+    return std::string(value.data, value.length);
+}
+
+std::string_view dawn_backend(wgpu::BackendType backend) {
+    switch (backend) {
+        case wgpu::BackendType::Metal: return "Metal";
+        case wgpu::BackendType::D3D12: return "D3D12";
+        case wgpu::BackendType::D3D11: return "D3D11";
+        case wgpu::BackendType::Vulkan: return "Vulkan";
+        case wgpu::BackendType::OpenGL: return "OpenGL";
+        case wgpu::BackendType::OpenGLES: return "OpenGLES";
+        case wgpu::BackendType::WebGPU: return "WebGPU";
+        case wgpu::BackendType::Null: return "Null";
+        default: return "Unknown";
+    }
+}
+
+AdapterClass dawn_adapter_class(wgpu::AdapterType type) {
+    if (type == wgpu::AdapterType::DiscreteGPU ||
+        type == wgpu::AdapterType::IntegratedGPU)
+        return AdapterClass::hardware;
+    if (type == wgpu::AdapterType::CPU) return AdapterClass::software;
+    return AdapterClass::unknown;
+}
+
+void populate_surface_adapter_identity(ProbeResult& result, render::GpuSurface& surface) {
+    auto* device = static_cast<wgpu::Device*>(surface.dawn_device_handle());
+    wgpu::AdapterInfo info{};
+    if (device == nullptr || device->GetAdapterInfo(&info) != wgpu::Status::Success) {
+        result.adapter.status = IdentityStatus::unverified;
+        return;
+    }
+    result.adapter.status = IdentityStatus::authentic;
+    result.adapter.classification = dawn_adapter_class(info.adapterType);
+    result.adapter.backend = bounded(dawn_backend(info.backendType));
+    result.adapter.name = bounded(dawn_adapter_string(info.device));
+    result.adapter.vendor = bounded(dawn_adapter_string(info.vendor));
+    result.adapter.architecture = bounded(dawn_adapter_string(info.architecture));
+    result.adapter.device = bounded(dawn_adapter_string(info.description));
+}
+#endif
 
 } // namespace
 
@@ -604,6 +714,302 @@ RecipeRun run_gpu_audio_stft_recipe(const RunOptions& options) {
         run.result.recommendations.emplace_back(
             "Inspect the forward, magnitude, and CPU-oracle artifacts for the first divergence.");
     return run;
+}
+
+RecipeRun run_threejs_multi_pass_recipe(
+    const RunOptions& options, std::optional<std::string> threejs_runtime_root) {
+#if !PULP_GPU_PROBE_THREEJS_CALLABLE
+    (void)options;
+    (void)threejs_runtime_root;
+    throw std::runtime_error(
+        "threejs.multi-pass.v1 requires a build with the pinned Three.js runtime and V8");
+#else
+    const auto& recipe = *find_recipe(kRecipeIds[3]);
+#if !PULP_GPU_PROBE_HAS_THREEJS
+    RecipeRun run;
+    run.result = base_result(recipe, options, recipe.source_identity);
+    unavailable_passes(run.result, recipe, "threejs_runtime_not_compiled");
+    run.result.recommendations.emplace_back(
+        "Use a GPU-enabled SDK carrying the pinned Three.js runtime.");
+    return run;
+#else
+    namespace fs = std::filesystem;
+    const fs::path runtime_root = threejs_runtime_root
+        ? fs::path(*threejs_runtime_root)
+        : fs::path(PULP_GPU_PROBE_THREEJS_SOURCE_DIR);
+    const auto webgpu = read_text(runtime_root / "build" / "three.webgpu.js");
+    const auto core = read_text(runtime_root / "build" / "three.core.js");
+
+    constexpr std::string_view module_template = R"JS(
+        import * as THREE from 'three/webgpu';
+
+        const canvas = document.createElement('canvas');
+        canvas.id = 'pulp-threejs-probe-canvas';
+        canvas.width = 96;
+        canvas.height = 96;
+        canvas.style.width = '96px';
+        canvas.style.height = '96px';
+        document.body.appendChild(canvas);
+
+        const context = canvas.getContext('webgpu');
+        const renderer = new THREE.WebGPURenderer({ canvas, context, antialias: false });
+        await renderer.init();
+        renderer.setSize(96, 96, false);
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x204080);
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+        camera.position.z = 2;
+        const geometry = new THREE.PlaneGeometry(0.78, 1.35);
+        const swatch = new THREE.Mesh(
+            geometry,
+            new THREE.MeshBasicMaterial({ color: 0xf03030, side: THREE.DoubleSide })
+        );
+        scene.add(swatch);
+
+        globalThis.__pulpProbeRender = (stage) => {
+            swatch.position.x = stage === 1 ? -0.5 : stage === 2 ? 0.5 : 0;
+            swatch.scale.set(stage === 0 ? 3 : 1, stage === 0 ? 2 : 1, 1);
+            swatch.material.color.set(stage === 0 ? 0x204080
+                : stage === 1 ? 0xf03030 : __RIGHT_COLOR__);
+            renderer.render(scene, camera);
+            if (typeof context.present === 'function') context.present();
+            renderer.render(scene, camera);
+            if (typeof context.present === 'function') context.present();
+            return JSON.stringify({
+                stage,
+                contextType: renderer.getContext() && renderer.getContext()._objectName || '',
+                backend: renderer.backend && renderer.backend.constructor
+                    ? renderer.backend.constructor.name : '',
+                bufferedSkipCount: (globalThis.__phase13BufferedSkips || []).length
+            });
+        };
+        globalThis.__pulpProbeReady = true;
+        export default true;
+    )JS";
+
+    std::string module(module_template);
+    const auto seeded_channel = static_cast<std::uint32_t>(recipe.seed ^ (recipe.seed >> 32u)) % 2u;
+    const std::string_view right_color = options.apply_negative_mutation
+        ? (seeded_channel == 0u ? "0x3040f0" : "0xf030d0")
+        : "0x30f060";
+    if (!replace_once(module, "__RIGHT_COLOR__", right_color))
+        throw std::runtime_error("Three.js probe module mutation seam drifted");
+
+    std::string source_identity;
+    if (webgpu) source_identity += *webgpu;
+    if (core) source_identity += *core;
+    source_identity += module;
+    RecipeRun run;
+    run.result = base_result(recipe, options, source_identity);
+
+    if (!webgpu || !core) {
+        unavailable_passes(run.result, recipe, "threejs_runtime_missing");
+        run.result.recommendations.emplace_back(
+            "Select an installed or source runtime containing the complete pinned Three.js payload.");
+        return run;
+    }
+    if (digest(*webgpu) != PULP_GPU_PROBE_THREEJS_WEBGPU_SHA256 ||
+        digest(*core) != PULP_GPU_PROBE_THREEJS_CORE_SHA256) {
+        unavailable_passes(run.result, recipe, "threejs_runtime_identity_mismatch");
+        run.result.recommendations.emplace_back(
+            "Restore the immutable Three.js runtime recorded by the SDK manifest.");
+        return run;
+    }
+    if (!view::is_engine_available(view::JsEngineType::v8)) {
+        unavailable_passes(run.result, recipe, "threejs_v8_unavailable");
+        run.result.recommendations.emplace_back(
+            "Run this recipe with a Pulp CLI built against the sealed V8 provider.");
+        return run;
+    }
+
+    auto gpu = render::GpuSurface::create_dawn();
+    render::GpuSurface::Config gpu_config{};
+    gpu_config.width = recipe.dimensions.width;
+    gpu_config.height = recipe.dimensions.height;
+    gpu_config.native_surface_handle = nullptr;
+    if (!gpu || !gpu->initialize(gpu_config)) {
+        unavailable_passes(run.result, recipe, "threejs_adapter_unavailable");
+        run.result.recommendations.emplace_back(
+            "Run pulp doctor gpu to inspect native Dawn adapter acquisition.");
+        return run;
+    }
+
+    const auto surface_adapter = gpu->adapter_info();
+    populate_surface_adapter_identity(run.result, *gpu);
+    const bool eligible_hardware = surface_adapter.available &&
+        surface_adapter.native_bridge &&
+        run.result.adapter.status == IdentityStatus::authentic &&
+        run.result.adapter.classification == AdapterClass::hardware;
+
+    auto skia = render::SkiaSurface::create(
+        *gpu, {.width = recipe.dimensions.width, .height = recipe.dimensions.height});
+    if (!skia || !skia->is_available()) {
+        unavailable_passes(run.result, recipe, "threejs_readback_unavailable");
+        run.result.recommendations.emplace_back(
+            "Use a GPU-enabled SDK with the Skia/Dawn readback path available.");
+        return run;
+    }
+    if (!eligible_hardware) {
+        for (std::uint32_t i = 0; i < recipe.semantic_passes.size(); ++i) {
+            run.result.passes.push_back(pass(
+                i, recipe.semantic_passes[i], Verdict::unverified,
+                i == 0 && surface_adapter.available,
+                "threejs_hardware_identity_required"));
+        }
+        run.result.verdict = Verdict::unverified;
+        run.result.recommendations.emplace_back(
+            "Repeat on a runtime that reports authentic hardware adapter identity.");
+        return run;
+    }
+
+    view::View root;
+    root.set_bounds({0, 0, 96, 96});
+    root.set_theme(view::Theme::dark());
+    view::ScriptEngine engine(view::JsEngineType::v8);
+    state::StateStore store;
+    view::WidgetBridge bridge(engine, root, store, gpu.get());
+    bridge.load_script("");
+
+    bool module_completed = false;
+    std::string module_error;
+    const auto resolver = [&](std::string_view path) -> std::optional<std::string> {
+        if (path == "three/webgpu") return *webgpu;
+        if (path == "./three.core.js" || path == "three.core.js") return *core;
+        return std::nullopt;
+    };
+    engine.run_module(module, resolver,
+        [&](const std::string& error, const choc::value::Value&) {
+            module_completed = true;
+            module_error = error;
+        });
+    for (int i = 0; i < 512 && !module_completed; ++i)
+        engine.pump_message_loop();
+
+    run.result.passes.push_back(pass(0, recipe.semantic_passes[0],
+        eligible_hardware ? Verdict::pass : Verdict::unverified,
+        surface_adapter.available, eligible_hardware
+            ? "threejs_hardware_adapter_verified" : "threejs_adapter_unverified"));
+    const bool module_ready = module_completed && module_error.empty() &&
+        engine.evaluate("globalThis.__pulpProbeReady === true")
+            .getWithDefault<bool>(false);
+    run.result.passes.push_back(pass(1, recipe.semantic_passes[1],
+        module_ready ? Verdict::pass : Verdict::fail, module_completed,
+        module_ready ? "threejs_module_initialized" : "threejs_module_initialization_failed"));
+    if (!module_ready) {
+        for (std::uint32_t i = 2; i < recipe.semantic_passes.size(); ++i)
+            run.result.passes.push_back(pass(i, recipe.semantic_passes[i], Verdict::fail,
+                                             false, "threejs_module_not_ready"));
+        run.result.verdict = Verdict::fail;
+        run.result.recommendations.emplace_back(
+            "Inspect the pinned Three.js module initialization and native WebGPU bridge.");
+        return run;
+    }
+
+    root.layout_children();
+    const auto native_canvas_id = std::string(engine.evaluate(
+        "document.getElementById('pulp-threejs-probe-canvas')._id")
+        .getWithDefault<std::string_view>(""));
+    auto* canvas_widget = dynamic_cast<view::CanvasWidget*>(
+        bridge.widget(native_canvas_id));
+    std::array<std::vector<std::uint8_t>, 3> frames;
+    std::array<bool, 3> captured{};
+    for (std::uint32_t stage = 0; stage < 3; ++stage) {
+        const auto state_json = std::string(engine.evaluate(
+            "globalThis.__pulpProbeRender(" + std::to_string(stage) + ")")
+            .getWithDefault<std::string_view>(""));
+        for (int i = 0; i < 8; ++i) engine.pump_message_loop();
+        std::uint32_t width = 0;
+        std::uint32_t height = 0;
+        bool ok = canvas_widget && skia && skia->is_available() && gpu->begin_frame();
+        if (ok) {
+            auto* canvas = skia->begin_frame();
+            ok = canvas != nullptr;
+            if (ok) canvas_widget->paint(*canvas);
+            ok = ok && canvas_widget->last_native_gpu_texture_draw_succeeded();
+            skia->end_frame();
+            ok = ok && skia->read_current_rgba(frames[stage], width, height);
+            gpu->end_frame();
+        }
+        captured[stage] = ok && width == 96 && height == 96 &&
+            frames[stage].size() == 96u * 96u * 4u &&
+            state_json.find("\"bufferedSkipCount\":0") != std::string_view::npos;
+    }
+
+    constexpr SampleRgb expected_background{0x20, 0x40, 0x80};
+    const auto background_coverage = region_match_fraction(
+        frames[0], 96, 8, 8, 88, 88,
+        [&](SampleRgb value) { return near_rgb(value, expected_background); });
+    const auto left_coverage = region_match_fraction(
+        frames[1], 96, 12, 20, 38, 76, is_red);
+    const auto left_right_background_coverage = region_match_fraction(
+        frames[1], 96, 58, 20, 84, 76,
+        [&](SampleRgb value) { return near_rgb(value, expected_background); });
+    const auto final_left_background_coverage = region_match_fraction(
+        frames[2], 96, 12, 20, 38, 76,
+        [&](SampleRgb value) { return near_rgb(value, expected_background); });
+    const auto final_right_coverage = region_match_fraction(
+        frames[2], 96, 58, 20, 84, 76, is_green);
+    const bool background_ok = captured[0] && background_coverage >= 0.95;
+    const bool left_ok = captured[1] && left_coverage >= 0.90 &&
+        left_right_background_coverage >= 0.95;
+    const bool final_render_ok = captured[2];
+    const bool oracle_ok = background_ok && left_ok && final_render_ok &&
+        final_left_background_coverage >= 0.95 && final_right_coverage >= 0.90;
+    run.result.numeric_sample_count = 5;
+    run.result.passes.push_back(pass(2, recipe.semantic_passes[2],
+        background_ok ? Verdict::pass : Verdict::fail, captured[0],
+        background_ok ? "background_region_match" : "background_region_mismatch"));
+    run.result.passes.push_back(pass(3, recipe.semantic_passes[3],
+        left_ok ? Verdict::pass : Verdict::fail, captured[1],
+        left_ok ? "left_swatch_region_match" : "left_swatch_region_mismatch"));
+    run.result.passes.push_back(pass(4, recipe.semantic_passes[4],
+        final_render_ok ? Verdict::pass : Verdict::fail, captured[2],
+        final_render_ok ? "final_swatch_readback_completed"
+                        : "final_swatch_readback_failed"));
+    auto oracle = pass(5, recipe.semantic_passes[5],
+        oracle_ok ? Verdict::pass : Verdict::fail, captured[2],
+        oracle_ok ? "cpu_region_color_oracle_match"
+                  : "cpu_region_color_oracle_mismatch");
+    oracle.expected = 5.0;
+    oracle.observed = static_cast<double>(background_ok) +
+                      static_cast<double>(captured[1] && left_coverage >= 0.90) +
+                      static_cast<double>(captured[1] &&
+                                          left_right_background_coverage >= 0.95) +
+                      static_cast<double>(captured[2] &&
+                                          final_left_background_coverage >= 0.95) +
+                      static_cast<double>(captured[2] && final_right_coverage >= 0.90);
+    oracle.absolute_error = std::abs(*oracle.expected - *oracle.observed);
+    run.result.passes.push_back(std::move(oracle));
+    run.result.verdict = (!background_ok || !left_ok || !final_render_ok || !oracle_ok)
+        ? Verdict::fail : (eligible_hardware ? Verdict::pass : Verdict::unverified);
+
+    attach(run, artifact("background.rgba8", ArtifactKind::image,
+                         "application/octet-stream", std::move(frames[0])));
+    attach(run, artifact("left-swatch.rgba8", ArtifactKind::image,
+                         "application/octet-stream", std::move(frames[1])));
+    attach(run, artifact("final.rgba8", ArtifactKind::image,
+                         "application/octet-stream", std::move(frames[2])));
+    std::ostringstream oracle_json;
+    oracle_json << std::fixed << std::setprecision(6)
+                << "{\"background_coverage\":" << background_coverage
+                << ",\"left_coverage\":" << left_coverage
+                << ",\"left_right_background_coverage\":"
+                << left_right_background_coverage
+                << ",\"final_left_background_coverage\":"
+                << final_left_background_coverage
+                << ",\"final_right_coverage\":" << final_right_coverage
+                << ",\"matched\":" << (oracle_ok ? "true" : "false") << '}';
+    const auto oracle_text = oracle_json.str();
+    attach(run, artifact("content-oracle.json", ArtifactKind::json,
+                         "application/json",
+                         std::vector<std::uint8_t>(oracle_text.begin(), oracle_text.end())));
+    if (!oracle_ok)
+        run.result.recommendations.emplace_back(
+            "Inspect the named intermediate readbacks and independent color-region oracle.");
+    return run;
+#endif
+#endif
 }
 
 bool validate(const RecipeRun& run, std::string* error) {

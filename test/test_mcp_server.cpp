@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -39,9 +40,10 @@ using namespace pulp_mcp;
 using namespace pulp_mcp::server;
 namespace gp = pulp::tooling::gpu_probe;
 
-gp::ProbeResult gpu_probe_evidence(gp::Verdict verdict, bool negative_control = false) {
-    const auto* recipe = gp::find_recipe("gpu-compute.magnitude.v1");
-    if (recipe == nullptr) throw std::runtime_error("missing magnitude probe recipe");
+gp::ProbeResult gpu_probe_evidence(gp::Verdict verdict, bool negative_control = false,
+                                   std::string_view recipe_id = "gpu-compute.magnitude.v1") {
+    const auto* recipe = gp::find_recipe(recipe_id);
+    if (recipe == nullptr) throw std::runtime_error("missing GPU probe recipe");
     gp::ProbeResult result;
     result.gpu_evidence_id = "0123456789abcdef0123456789abcdef";
     result.recipe_id = std::string(recipe->id);
@@ -60,7 +62,8 @@ gp::ProbeResult gpu_probe_evidence(gp::Verdict verdict, bool negative_control = 
     result.adapter.classification = verdict == gp::Verdict::pass
         ? gp::AdapterClass::hardware : gp::AdapterClass::unknown;
     result.adapter.backend = "test-backend";
-    result.numeric_sample_count = 16;
+    result.numeric_sample_count = std::min<std::uint32_t>(
+        16, recipe->bounds.max_numeric_samples);
     result.verdict = verdict;
     for (std::size_t i = 0; i < recipe->semantic_passes.size(); ++i) {
         const auto pass_verdict = i + 1 == recipe->semantic_passes.size()
@@ -889,6 +892,16 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status",
 
 TEST_CASE("MCP GPU probe preserves argv and typed status evidence",
           "[mcp][tools][gpu-probe]") {
+    const auto advertised = handle_request(
+        R"JSON({"jsonrpc":"2.0","id":57,"method":"tools/list"})JSON");
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+    require_contains(advertised,
+        R"JSON("recipe":{"type":"string","enum":["renderer3d.hardcoded-cube.v1","gpu-compute.magnitude.v1","gpu-audio.stft.v1","threejs.multi-pass.v1"]})JSON");
+#else
+    require_contains(advertised,
+        R"JSON("recipe":{"type":"string","enum":["renderer3d.hardcoded-cube.v1","gpu-compute.magnitude.v1","gpu-audio.stft.v1"]})JSON");
+#endif
+
     TempDir install;
     const auto bin = install.path / "bin";
     std::filesystem::create_directories(bin);
@@ -936,6 +949,7 @@ TEST_CASE("MCP GPU probe preserves argv and typed status evidence",
     require_contains(argv, "gpu\nprobe\n--recipe\ngpu-compute.magnitude.v1\n");
     require_contains(argv, "--artifacts\n" + artifacts + "\n--json\n");
 
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
     std::ofstream(evidence_path, std::ios::trunc)
         << gp::to_json(gpu_probe_evidence(gp::Verdict::fail, true));
     ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", "1");
@@ -949,11 +963,23 @@ TEST_CASE("MCP GPU probe preserves argv and typed status evidence",
                                     std::istreambuf_iterator<char>()};
     require_contains(negative_argv, "--negative-control\n");
 
+    std::ofstream(evidence_path, std::ios::trunc)
+        << gp::to_json(gpu_probe_evidence(gp::Verdict::pass, false,
+                                         "threejs.multi-pass.v1"));
+    ScopedEnvVar threejs_status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+    const auto threejs = handle_request(tool_call(
+        "60", "pulp_gpu_probe",
+        "{\"recipe\":\"threejs.multi-pass.v1\",\"artifacts\":" +
+            json_string(artifacts) + "}"));
+    require_contains(threejs, R"JSON("recipe_id":"threejs.multi-pass.v1")JSON");
+    REQUIRE(threejs.find(R"JSON("isError":true)JSON") == std::string::npos);
+#else
     const auto threejs = handle_request(tool_call(
         "60", "pulp_gpu_probe",
         "{\"recipe\":\"threejs.multi-pass.v1\",\"artifacts\":" +
             json_string(artifacts) + "}"));
     require_contains(threejs, "recipe is not in the closed catalog");
+#endif
 }
 
 TEST_CASE("MCP trace analyzer preserves typed verdicts and closed questions",

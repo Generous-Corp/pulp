@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <set>
+#include <stdexcept>
 
 namespace probe = pulp::tooling::gpu_probe;
 
@@ -180,6 +181,103 @@ TEST_CASE("Offline GPU STFT evidence is deterministic on one adapter",
         REQUIRE(second.payloads[i].bytes == first.payloads[i].bytes);
     }
 }
+
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+TEST_CASE("Three.js multi-pass recipe matches independent color regions",
+          "[gpu][gpu-probe][threejs]") {
+    const auto run = probe::run_threejs_multi_pass_recipe({false, kEvidenceId});
+    require_valid(run);
+    require_work_or_skip(run);
+    if (run.result.verdict == probe::Verdict::unverified) {
+        REQUIRE(probe::exit_code(run.result) == 2);
+        return;
+    }
+    REQUIRE(run.result.verdict == probe::Verdict::pass);
+    REQUIRE(run.result.adapter.status == probe::IdentityStatus::authentic);
+    REQUIRE(run.result.adapter.classification == probe::AdapterClass::hardware);
+    REQUIRE(run.result.numeric_sample_count == 5);
+    REQUIRE(run.payloads.size() == 4);
+    REQUIRE(run.result.passes[4].code == "final_swatch_readback_completed");
+    REQUIRE(run.result.passes[5].code == "cpu_region_color_oracle_match");
+}
+
+TEST_CASE("Three.js multi-pass recipe reports a missing runtime as unavailable",
+          "[gpu][gpu-probe][threejs][contract]") {
+    const auto run = probe::run_threejs_multi_pass_recipe(
+        {false, kEvidenceId}, "/pulp-test/missing-threejs-runtime");
+    require_valid(run);
+    REQUIRE(run.result.verdict == probe::Verdict::unavailable);
+    REQUIRE(probe::exit_code(run.result) == 2);
+    REQUIRE((run.result.passes[1].code == "threejs_runtime_missing" ||
+             run.result.passes[1].code == "threejs_runtime_not_compiled"));
+    REQUIRE(run.payloads.empty());
+}
+
+TEST_CASE("Three.js seeded mutation preserves GPU work and fails the color oracle",
+          "[gpu][gpu-probe][threejs][mutation]") {
+    const auto baseline = probe::run_threejs_multi_pass_recipe({false, kEvidenceId});
+    require_valid(baseline);
+    require_work_or_skip(baseline);
+    const auto mutation = probe::run_threejs_multi_pass_recipe({true, kEvidenceId});
+    require_valid(mutation);
+    require_work_or_skip(mutation);
+
+    REQUIRE(mutation.result.verdict == probe::Verdict::fail);
+    REQUIRE(mutation.result.mutation == "seeded-final-swatch-channel");
+    REQUIRE(mutation.result.passes[0].verdict == probe::Verdict::pass);
+    REQUIRE(mutation.result.passes[1].verdict == probe::Verdict::pass);
+    REQUIRE(mutation.result.passes[2].verdict == probe::Verdict::pass);
+    REQUIRE(mutation.result.passes[3].verdict == probe::Verdict::pass);
+    REQUIRE(mutation.result.passes[4].verdict == probe::Verdict::pass);
+    REQUIRE(mutation.result.passes[5].verdict == probe::Verdict::fail);
+    REQUIRE(mutation.result.passes[5].code == "cpu_region_color_oracle_mismatch");
+    REQUIRE(mutation.result.source_digest != baseline.result.source_digest);
+    REQUIRE(payload_named(mutation, "final.rgba8").bytes !=
+            payload_named(baseline, "final.rgba8").bytes);
+}
+
+TEST_CASE("Three.js multi-pass evidence is deterministic on one adapter",
+          "[gpu][gpu-probe][threejs][determinism]") {
+    const auto first = probe::run_threejs_multi_pass_recipe({false, kEvidenceId});
+    require_valid(first);
+    require_work_or_skip(first);
+    const auto second = probe::run_threejs_multi_pass_recipe({false, kEvidenceId});
+    require_valid(second);
+    require_work_or_skip(second);
+
+    REQUIRE(second.result.verdict == first.result.verdict);
+    REQUIRE(second.result.source_digest == first.result.source_digest);
+    REQUIRE(second.result.signature_digest == first.result.signature_digest);
+    REQUIRE(second.result.adapter.backend == first.result.adapter.backend);
+    REQUIRE(second.result.adapter.name == first.result.adapter.name);
+    REQUIRE(second.result.passes.size() == first.result.passes.size());
+    for (std::size_t i = 0; i < first.result.passes.size(); ++i) {
+        REQUIRE(second.result.passes[i].name == first.result.passes[i].name);
+        REQUIRE(second.result.passes[i].verdict == first.result.passes[i].verdict);
+        REQUIRE(second.result.passes[i].code == first.result.passes[i].code);
+        REQUIRE(second.result.passes[i].observed == first.result.passes[i].observed);
+    }
+    REQUIRE(second.payloads.size() == first.payloads.size());
+    for (std::size_t i = 0; i < first.payloads.size(); ++i) {
+        REQUIRE(second.payloads[i].artifact.name == first.payloads[i].artifact.name);
+        REQUIRE(second.payloads[i].artifact.sha256 == first.payloads[i].artifact.sha256);
+        REQUIRE(second.payloads[i].bytes == first.payloads[i].bytes);
+    }
+}
+#else
+TEST_CASE("Three.js multi-pass recipe rejects a build without V8 and its pinned runtime",
+          "[gpu][gpu-probe][threejs][contract]") {
+    bool rejected = false;
+    try {
+        (void)probe::run_threejs_multi_pass_recipe({false, kEvidenceId});
+    } catch (const std::runtime_error& error) {
+        rejected = true;
+        REQUIRE(std::string(error.what()) ==
+                "threejs.multi-pass.v1 requires a build with the pinned Three.js runtime and V8");
+    }
+    REQUIRE(rejected);
+}
+#endif
 
 TEST_CASE("RecipeRun validation binds artifact descriptors to exact payload bytes",
           "[gpu][gpu-probe][contract]") {

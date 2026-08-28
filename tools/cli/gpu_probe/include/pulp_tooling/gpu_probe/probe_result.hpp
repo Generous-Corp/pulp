@@ -19,11 +19,20 @@ inline constexpr std::uint32_t kMaxArtifacts = 16;
 inline constexpr std::uint64_t kMaxArtifactBytes = 16 * 1024 * 1024;
 inline constexpr std::uint64_t kMaxTotalArtifactBytes = 64 * 1024 * 1024;
 
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+inline constexpr std::array kRecipeIds{
+    std::string_view{"renderer3d.hardcoded-cube.v1"},
+    std::string_view{"gpu-compute.magnitude.v1"},
+    std::string_view{"gpu-audio.stft.v1"},
+    std::string_view{"threejs.multi-pass.v1"},
+};
+#else
 inline constexpr std::array kRecipeIds{
     std::string_view{"renderer3d.hardcoded-cube.v1"},
     std::string_view{"gpu-compute.magnitude.v1"},
     std::string_view{"gpu-audio.stft.v1"},
 };
+#endif
 
 enum class Verdict { pass, fail, unavailable, unverified };
 enum class AdapterPolicy { hardware_required, hardware_preferred, any_supported };
