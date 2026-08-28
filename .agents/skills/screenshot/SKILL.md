@@ -408,3 +408,12 @@ Use `tools/scripts/gpu_dpr_runner.py` to execute or ingest a matrix cell. A
 screenshot adapter must return the raw capture and content/fidelity oracles in
 the cell directory; SKIP, INCONCLUSIVE, timeout, or a rejected receipt remains
 resumable incomplete evidence.
+
+For the frozen Pulp-native fixtures,
+`tools/scripts/gpu_dpr_pulp_native_adapter.py` is the capture preflight adapter.
+Set `PULP_DPR_SCREENSHOT_BIN` to an exact-SHA `pulp-screenshot` binary and
+register it for `dense-text-thin-strokes`, `shader-heavy-controls`, and
+`meters-waveforms`. It verifies source and PNG dimensions and retains the real
+capture, but intentionally returns INCONCLUSIVE until product-specific A2T/A3,
+same-process adapter identity, metric, logical-input, and fidelity producers are
+available. Never rename its subprocess wall time to CPU/frame/interaction time.

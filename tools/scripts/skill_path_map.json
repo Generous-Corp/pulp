@@ -237,7 +237,9 @@
         "test/fixtures/gpu-ux/dpr/**",
         "tools/scripts/gpu_dpr_experiment.py",
         "tools/scripts/gpu_dpr_runner.py",
-        "tools/scripts/test_gpu_dpr_runner.py"
+        "tools/scripts/test_gpu_dpr_runner.py",
+        "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
       ]
     },
     "decide": {
@@ -477,7 +479,9 @@
         "test/fixtures/gpu-ux/dpr/**",
         "tools/scripts/gpu_dpr_experiment.py",
         "tools/scripts/gpu_dpr_runner.py",
-        "tools/scripts/test_gpu_dpr_runner.py"
+        "tools/scripts/test_gpu_dpr_runner.py",
+        "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
       ]
     },
     "screenshot-sync": {
@@ -613,7 +617,9 @@
         "test/fixtures/gpu-ux/dpr/**",
         "tools/scripts/gpu_dpr_experiment.py",
         "tools/scripts/gpu_dpr_runner.py",
-        "tools/scripts/test_gpu_dpr_runner.py"
+        "tools/scripts/test_gpu_dpr_runner.py",
+        "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
       ]
     },
     "trace-sql": {
@@ -798,7 +804,9 @@
         "test/fixtures/gpu-ux/dpr/**",
         "tools/scripts/gpu_dpr_experiment.py",
         "tools/scripts/gpu_dpr_runner.py",
-        "tools/scripts/test_gpu_dpr_runner.py"
+        "tools/scripts/test_gpu_dpr_runner.py",
+        "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
       ]
     }
   }
