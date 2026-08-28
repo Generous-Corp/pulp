@@ -56,6 +56,14 @@ struct BackBufferFrameCapture {
     std::vector<uint8_t> png;
 };
 
+struct LiveResizePresentationState {
+    bool display_sync_before = false;
+    bool display_sync_during = false;
+    bool display_sync_after_resize = false;
+    bool display_sync_after = false;
+    bool resize_applied = false;
+};
+
 /// Construct a hidden GPU-backed NSWindow + CAMetalLayer host suitable for
 /// unit tests. Must be called on the main thread. Forces
 /// `options.use_gpu = true` and
@@ -110,6 +118,13 @@ pulp::view::WindowHost::ContentSize content_view_bounds(
 /// replacement content synchronously.
 bool resize_content_view(pulp::view::WindowHost& host,
                          float width, float height);
+
+/// Exercise the production NSView live-resize lifecycle around a real AppKit
+/// content-size change and report whether CAMetalLayer display synchronization
+/// is enabled at each phase. The resize interval must avoid a FIFO drawable
+/// wait, then restore normal vsync immediately after the gesture.
+LiveResizePresentationState simulate_live_resize(
+    pulp::view::WindowHost& host, float width, float height);
 
 /// Simulate AppKit having applied a new backing scale to the host's real
 /// CAMetalLayer, then invoke the production backing-change callback. This is a

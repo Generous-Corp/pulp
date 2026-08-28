@@ -729,7 +729,12 @@ TEST_CASE("mac GPU resize keeps a pinned root and presents before returning",
     const int paints_before = root.paint_count;
     const auto layouts_before = View::layout_pass_count();
 
-    REQUIRE(pt::resize_content_view(*host, 400.0f, 300.0f));
+    const auto live_resize = pt::simulate_live_resize(*host, 400.0f, 300.0f);
+    REQUIRE(live_resize.resize_applied);
+    CHECK(live_resize.display_sync_before);
+    CHECK_FALSE(live_resize.display_sync_during);
+    CHECK_FALSE(live_resize.display_sync_after_resize);
+    CHECK(live_resize.display_sync_after);
     CHECK(callback_bounds == Rect{0.0f, 0.0f, 640.0f, 480.0f});
     CHECK(root.bounds() == Rect{0.0f, 0.0f, 640.0f, 480.0f});
     CHECK(root.paint_count > paints_before);
