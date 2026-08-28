@@ -25,6 +25,17 @@ if(Python3_Interpreter_FOUND)
         LABELS "rack;contract"
         TIMEOUT 60)
 
+    # Runs the generator's provider/output/rollback safety harness without a
+    # Rack SDK.  Registering it gives changed-surface validation a literal,
+    # inventory-bound test for edits to generate.py rather than forcing the
+    # entire native corpus or relying on an out-of-band Python invocation.
+    add_test(NAME rack-generator-safety
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_generate_safety.py)
+    set_tests_properties(rack-generator-safety PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 180)
+
     add_test(NAME rack-generation-eligibility
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_generation_eligibility.py)

@@ -4418,8 +4418,15 @@ GitHub UI on slow CI runs.
 
 Pulp's base-owned schema-v3 `[targets.mac.changed_surface_selection]`
 declaration records a mandatory kernel, complete literal tests and their
-reviewed CMake producer targets for one narrowly reviewed CLI projection family, medium-risk extended
-neighbors, and known full-required surfaces. Its protected-base execution
+reviewed CMake producer targets for narrowly reviewed families, medium-risk
+extended neighbors, and known full-required surfaces. Current bounded families
+include the Forge/DSP CLI projections, the isolated ChildProcess test source,
+and Forge Rack's `generate.py` plus its registered safety/endings contracts.
+The Rack family is deliberately exact: `patch.py`, provenance/preflight tools,
+and neighboring delivery skills still select full validation. Documentation
+under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`, and
+`docs/validation/**` runs the mandatory kernel and may omit the mobile compile
+gate; generated authority under `docs/status/**` remains fail-closed. Its protected-base execution
 template cannot activate itself: Shipyard reads
 `changed_surface_execution.mode` from the independent machine-global config,
 where missing or `off` preserves the ordinary full test stage byte-for-byte.
