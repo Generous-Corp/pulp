@@ -260,6 +260,8 @@ def validate_paths(cli: Path, mcp: Path, trace: Path, processor: Path) -> None:
 
 
 def commit_inventory(repository: Path, revision: str) -> dict[str, Any]:
+    if not valid_lower_hex(revision, 40):
+        raise ValueError("A2T implementation revision must be an exact lowercase 40-hex commit")
     run = subprocess.run(
         ["git", "-C", str(repository), "diff-tree", "--no-commit-id", "--name-only", "-r", revision],
         stdout=subprocess.PIPE,
@@ -301,6 +303,14 @@ def commit_inventory(repository: Path, revision: str) -> dict[str, Any]:
     }
 
 
+def valid_lower_hex(value: str, length: int) -> bool:
+    return len(value) == length and all(c in "0123456789abcdef" for c in value)
+
+
+def source_revisions_match(source_revision: str, mcp_source_revision: str) -> bool:
+    return bool(mcp_source_revision) and mcp_source_revision == source_revision
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cli", type=Path, required=True)
@@ -314,10 +324,15 @@ def main() -> int:
     parser.add_argument("--trials", type=int, default=30)
     parser.add_argument("--fresh-start-trials", type=int, default=20)
     parser.add_argument("--source-revision", required=True)
-    parser.add_argument("--mcp-source-revision", default="")
+    parser.add_argument("--mcp-source-revision", required=True)
     parser.add_argument("--repository", type=Path, default=Path.cwd())
-    parser.add_argument("--a2t-implementation-revision", required=True)
+    parser.add_argument(
+        "--a2t-implementation-revision", action="append", required=True,
+        help="Exact non-producer A2T implementation commit; repeat for hardening commits",
+    )
     parser.add_argument("--equivalent-a2t-revision", action="append", default=[])
+    parser.add_argument("--plan-revision", required=True)
+    parser.add_argument("--plan-sha256", required=True)
     parser.add_argument("--routing-inventory", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -329,6 +344,19 @@ def main() -> int:
     validate_paths(cli, mcp, trace, processor)
     if args.warmups < 0 or args.trials < 2 or args.fresh_start_trials < 1:
         parser.error("warmups >= 0, trials >= 2, and fresh-start-trials >= 1 are required")
+    if not valid_lower_hex(args.plan_revision, 40):
+        parser.error("plan-revision must be a lowercase 40-character Git revision")
+    if not valid_lower_hex(args.plan_sha256, 64):
+        parser.error("plan-sha256 must be a lowercase 64-character SHA-256 digest")
+    if not valid_lower_hex(args.source_revision, 40):
+        parser.error("source-revision must be a lowercase 40-character Git revision")
+    if not valid_lower_hex(args.mcp_source_revision, 40):
+        parser.error("mcp-source-revision must be a lowercase 40-character Git revision")
+    if not source_revisions_match(args.source_revision, args.mcp_source_revision):
+        parser.error(
+            "mcp-source-revision must equal source-revision; the measured CLI and "
+            "MCP must come from one source checkout"
+        )
 
     environment = os.environ.copy()
     environment["PULP_TRACE_PROCESSOR"] = str(processor)
@@ -421,27 +449,44 @@ def main() -> int:
         else "measurable"
     )
 
-    producer_inventory = commit_inventory(args.repository.resolve(), args.a2t_implementation_revision)
-    if not producer_inventory["no_added_producer_call_sites"]:
-        raise RuntimeError("A2T implementation revision contains producer paths; run the product overhead gate")
+    implementation_inventories = [
+        commit_inventory(args.repository.resolve(), revision)
+        for revision in args.a2t_implementation_revision
+    ]
+    if not all(item["no_added_producer_call_sites"] for item in implementation_inventories):
+        raise RuntimeError(
+            "an A2T implementation revision contains producer paths; run the product overhead gate"
+        )
     equivalent_revisions = []
     for revision in args.equivalent_a2t_revision:
         equivalent = commit_inventory(args.repository.resolve(), revision)
-        if equivalent["stable_patch_id"] != producer_inventory["stable_patch_id"]:
+        if equivalent["stable_patch_id"] != implementation_inventories[0]["stable_patch_id"]:
             raise RuntimeError(f"A2T revision {revision} is not patch-equivalent")
         equivalent_revisions.append(
             {"revision": revision, "stable_patch_id": equivalent["stable_patch_id"]}
         )
-    producer_inventory["patch_equivalent_revisions"] = equivalent_revisions
+    implementation_inventories[0]["patch_equivalent_revisions"] = equivalent_revisions
+    producer_inventory = {
+        "method": "per-commit git diff-tree inventory",
+        "implementation_revisions": implementation_inventories,
+        "no_added_producer_call_sites": True,
+        "added_or_changed_producer_paths": [],
+    }
     routing_inventory = None
     if args.routing_inventory:
-        routing_inventory = json.loads(args.routing_inventory.read_text())
+        routing_document = json.loads(args.routing_inventory.read_text())
+        if routing_document.get("schema") == "pulp.gpu-trace-overhead-acceptance.v1":
+            routing_inventory = routing_document["producer_overhead_disposition"].get(
+                "routing_inventory"
+            )
+        else:
+            routing_inventory = routing_document
 
     evidence = {
         "schema": "pulp.gpu-trace-overhead-acceptance.v1",
         "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_revision": args.source_revision,
-        "mcp_source_revision": args.mcp_source_revision or args.source_revision,
+        "mcp_source_revision": args.mcp_source_revision,
         "scope": "offline-installed-cli-mcp-analysis",
         "producer_overhead_disposition": {
             "status": "not-applicable-no-added-producer-cost",
@@ -449,8 +494,10 @@ def main() -> int:
             "evidence": producer_inventory,
             "routing_inventory": routing_inventory,
             "required_followup": "B6 must run the three-state 5-warmup/30-trial and 20 fresh-process protocol when Vellum producer instrumentation is added.",
-            "formal_plan_status": "requires-canonical-plan-closeout-approval",
-            "formal_plan_note": "The canonical A2T text literally requests product overhead trials. The no-producer disposition closes the implementation risk but must be recorded in planning before A2T is formally complete; timing data below is not product-capture evidence.",
+            "formal_plan_status": "accepted-canonical-plan",
+            "formal_plan_revision": args.plan_revision,
+            "formal_plan_sha256": args.plan_sha256,
+            "formal_plan_note": "The canonical plan accepts the no-added-producer disposition for Horizon A and preserves the full product producer/xrun protocol for B6; offline timing remains analyzer evidence, not product-capture evidence.",
         },
         "machine": system_profiler_identity(),
         "adapter_relevance": "recorded for host provenance only; saved-trace analysis performs no GPU work",

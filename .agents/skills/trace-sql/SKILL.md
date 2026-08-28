@@ -103,6 +103,17 @@ hand each time. Each `.sql` file carries a header comment explaining its shape.
 | `pulp_gpu_health_transitions` | health/device-loss evidence | `pulp trace gpu-health` |
 | `pulp_gpu_probe_correlation` | probe/readback evidence correlation | `pulp trace gpu-probe` |
 
+**Closed GPU cohort boundary.** The named GPU analyses do not currently accept
+an evidence-ID selector, so the SQL must not flatten unrelated runs. Startup
+selects the earliest valid render-frame lifecycle carrying `frame_index = 0`
+and returns only that lifecycle's unindexed setup plus frame-zero rows; the
+single-ID fallback exists only for legacy/incomplete traces with no indexed
+render frame. Health and probe inspect their full candidate set before the CLI's
+bounded contributor query and return no rows unless every candidate carries
+the same valid 32-lowercase-hex evidence ID. The closed analyzer interprets an
+empty mixed-ID result as unavailable. A future multi-run UX should add an
+explicit evidence-ID selector rather than weakening this singleton boundary.
+
 **One definition, three surfaces.** The L0 CLI preset names map **1:1** onto
 these views: `slowest-frames → pulp_slowest_frames`, `xruns → pulp_xruns`,
 `dsp-hotspots → pulp_dsp_node_cost`, `layout-vs-paint → pulp_layout_vs_paint`.

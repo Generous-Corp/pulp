@@ -66,8 +66,9 @@ void validate_recipe_discovery(const choc::value::Value& result, const std::stri
     const auto rows = result["recipes"];
     if (action == "show" && rows.size() != 1)
         throw std::runtime_error("show must return exactly one recipe");
-    if (action == "list" && !requested_symptom && rows.size() != 4)
-        throw std::runtime_error("unfiltered list must return the four catalog rows");
+    const auto native_recipes = pulp::tooling::gpu_probe::recipes();
+    if (action == "list" && !requested_symptom && rows.size() != native_recipes.size())
+        throw std::runtime_error("unfiltered list must match the native recipe registry");
 
     std::set<std::string> ids;
     std::set<int64_t> indexes;
@@ -88,14 +89,14 @@ void validate_recipe_discovery(const choc::value::Value& result, const std::stri
             throw std::runtime_error("recipe row is missing required catalog fields");
         const std::string id{recipe["id"].getString()};
         const auto native_index = recipe["native_registry_index"].getInt64();
-        if (native_index < 0 || native_index > 3 || !ids.insert(id).second ||
+        if (native_index < 0 || static_cast<std::size_t>(native_index) >= native_recipes.size() ||
+            !ids.insert(id).second ||
             !indexes.insert(native_index).second)
             throw std::runtime_error("recipe identifiers or registry indexes are incoherent");
         const auto* native = pulp::tooling::gpu_probe::find_recipe(id);
         if (row["callable"].getBool() != (native != nullptr))
             throw std::runtime_error("recipe callable value disagrees with the native registry");
         if (native) {
-            const auto native_recipes = pulp::tooling::gpu_probe::recipes();
             const auto position = static_cast<int64_t>(native - native_recipes.data());
             if (position != native_index)
                 throw std::runtime_error("recipe index disagrees with the native registry");
@@ -113,7 +114,7 @@ void validate_recipe_discovery(const choc::value::Value& result, const std::stri
         }
     }
     if (action == "list" && !requested_symptom) {
-        for (const auto& native : pulp::tooling::gpu_probe::recipes())
+        for (const auto& native : native_recipes)
             if (!ids.contains(std::string(native.id)))
                 throw std::runtime_error("discovery omitted an active native recipe");
     }
@@ -168,10 +169,27 @@ std::string handle_gpu_doctor(const std::string& params_json) {
                            "the sibling installed pulp-cpp executable was not found");
     }
 
-    auto command = shell_quote(cli.string()) + " doctor gpu --json";
+    std::vector<std::string> arguments{"doctor", "gpu", "--json"};
     if (no_render_token == "true")
-        command += " --no-render";
-    const auto run = exec_with_status(command);
+        arguments.emplace_back("--no-render");
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 5 * 60 * 1000;
+    options.max_output_bytes = 1 << 20;
+    const auto process = pulp::platform::ChildProcess::run(cli.string(), arguments, options);
+    const auto diagnostic_output = process.stdout_output.empty() ? process.stderr_output
+                                                                 : process.stdout_output;
+    if (process.timed_out)
+        return local_error(-1, "cli-timeout", "pulp-cpp doctor gpu exceeded its bounded timeout",
+                           diagnostic_output);
+    if (process.was_cancelled)
+        return local_error(-1, "cli-output-limit",
+                           "pulp-cpp doctor gpu exceeded its bounded output limit",
+                           diagnostic_output);
+    if (process.exit_code < 0)
+        return local_error(-1, "cli-unavailable",
+                           "the sibling installed pulp-cpp executable could not run",
+                           diagnostic_output);
+    const ExecResult run{process.exit_code, process.stdout_output};
 
     std::string parse_error;
     const auto evidence = pulp::tooling::gpu_health::from_json(run.output, &parse_error);
@@ -267,8 +285,16 @@ std::string handle_gpu_probe(const std::string& params_json) {
     options.timeout_ms = 5 * 60 * 1000;
     options.max_output_bytes = 1 << 20;
     const auto process = pulp::platform::ChildProcess::run(cli.string(), arguments, options);
-    const ExecResult run{process.timed_out || process.was_cancelled ? -1 : process.exit_code,
-                         process.stdout_output};
+    if (process.timed_out)
+        return local_error(-1, "cli-timeout", "pulp-cpp gpu probe exceeded its bounded timeout",
+                           process.stdout_output.empty() ? process.stderr_output
+                                                         : process.stdout_output);
+    if (process.was_cancelled)
+        return local_error(-1, "cli-output-limit",
+                           "pulp-cpp gpu probe exceeded its bounded output limit",
+                           process.stdout_output.empty() ? process.stderr_output
+                                                         : process.stdout_output);
+    const ExecResult run{process.exit_code, process.stdout_output};
 
     std::string parse_error;
     const auto evidence = pulp::tooling::gpu_probe::from_json(run.output, &parse_error);
@@ -360,7 +386,16 @@ std::string handle_gpu_recipes(const std::string& params_json) {
     options.timeout_ms = 30 * 1000;
     options.max_output_bytes = 1 << 20;
     const auto process = pulp::platform::ChildProcess::run(cli.string(), arguments, options);
-    const int status = process.timed_out || process.was_cancelled ? -1 : process.exit_code;
+    if (process.timed_out)
+        return local_error(-1, "cli-timeout",
+                           "pulp-cpp GPU recipe discovery exceeded its bounded timeout",
+                           process.stderr_output);
+    if (process.was_cancelled)
+        return local_error(-1, "cli-output-limit",
+                           "pulp-cpp GPU recipe discovery exceeded its bounded output limit",
+                           process.stdout_output.empty() ? process.stderr_output
+                                                         : process.stdout_output);
+    const int status = process.exit_code;
     if (status != 0)
         return local_error(status, status == 2 ? "not-found" : "cli-failed",
                            "pulp-cpp GPU recipe discovery failed", process.stderr_output);

@@ -34,6 +34,7 @@
 #include <pulp/tools/audio/excerpt_service.hpp>
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/service.hpp>
+#include <pulp_tooling/gpu_probe/probe_result.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -480,14 +481,17 @@ std::string pulp_mcp::server::tools_list_json() {
     out += pulp_mcp::kGpuHealthResultSchemaJson;
     out += R"JSON(}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_gpu_recipes","description":"Discover the canonical installed GPU evidence recipes by id or symptom. All four canonical rows are visible; callable reports whether the matched native CLI build can run each row. This tool never runs GPU work or scaffolds files.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"action":{"type":"string","enum":["list","show"],"description":"Discovery action; defaults to list"},"recipe":{"type":"string","description":"Canonical recipe id; required for show"},"symptom":{"type":"string","description":"Exact symptom token filter; valid for list"}}}},)JSON";
-#if PULP_GPU_PROBE_THREEJS_CALLABLE
+        R"JSON({"name":"pulp_gpu_recipes","description":"Discover the canonical installed GPU evidence recipes by id or symptom. Every canonical row is visible; callable reports whether the matched native CLI build can run it. This tool never runs GPU work or scaffolds files.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"action":{"type":"string","enum":["list","show"],"description":"Discovery action; defaults to list"},"recipe":{"type":"string","description":"Canonical recipe id; required for show"},"symptom":{"type":"string","description":"Exact symptom token filter; valid for list"}}},"outputSchema":{"type":"object","required":["schema","catalog_revision","recipes"],"properties":{"schema":{"type":"string","const":"pulp.gpu-recipes-discovery.v1"},"catalog_revision":{"type":"integer","const":1},"recipes":{"type":"array","items":{"type":"object"}}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_gpu_probe","description":"Run one installed deterministic GPU evidence recipe and return its typed result. The artifact directory must be absolute and may not traverse symlinks. Non-passing evidence remains an MCP error carrying the result.","inputSchema":{"type":"object","additionalProperties":false,"required":["recipe","artifacts"],"properties":{"recipe":{"type":"string","enum":["renderer3d.hardcoded-cube.v1","gpu-compute.magnitude.v1","gpu-audio.stft.v1","threejs.multi-pass.v1"]},"artifacts":{"type":"string","description":"Absolute output directory for bounded hash-declared artifacts"},"negative_control":{"type":"boolean","description":"Apply the recipe's seeded detectable mutation"}}},"outputSchema":{"type":"object","additionalProperties":false,"required":["exit_code","evidence"],"properties":{"exit_code":{"type":"integer","enum":[0,1,2],"description":"Native pulp-cpp process exit code: 0 pass, 1 completed failure, 2 unavailable or unverified"},"evidence":)JSON";
-#else
+        R"JSON({"name":"pulp_gpu_probe","description":"Run one installed deterministic GPU evidence recipe and return its typed result. The artifact directory must be absolute and may not traverse symlinks. Non-passing evidence remains an MCP error carrying the result.","inputSchema":{"type":"object","additionalProperties":false,"required":["recipe","artifacts"],"properties":{"recipe":{"type":"string","enum":[)JSON";
+    const auto gpu_probe_recipes = pulp::tooling::gpu_probe::recipes();
+    for (std::size_t index = 0; index < gpu_probe_recipes.size(); ++index) {
+        if (index != 0)
+            out += ',';
+        out += json_string(std::string(gpu_probe_recipes[index].id));
+    }
     out +=
-        R"JSON({"name":"pulp_gpu_probe","description":"Run one installed deterministic GPU evidence recipe and return its typed result. The artifact directory must be absolute and may not traverse symlinks. Non-passing evidence remains an MCP error carrying the result.","inputSchema":{"type":"object","additionalProperties":false,"required":["recipe","artifacts"],"properties":{"recipe":{"type":"string","enum":["renderer3d.hardcoded-cube.v1","gpu-compute.magnitude.v1","gpu-audio.stft.v1"]},"artifacts":{"type":"string","description":"Absolute output directory for bounded hash-declared artifacts"},"negative_control":{"type":"boolean","description":"Apply the recipe's seeded detectable mutation"}}},"outputSchema":{"type":"object","additionalProperties":false,"required":["exit_code","evidence"],"properties":{"exit_code":{"type":"integer","enum":[0,1,2],"description":"Native pulp-cpp process exit code: 0 pass, 1 completed failure, 2 unavailable or unverified"},"evidence":)JSON";
-#endif
+        R"JSON(]},"artifacts":{"type":"string","description":"Absolute output directory for bounded hash-declared artifacts"},"negative_control":{"type":"boolean","description":"Apply the recipe's seeded detectable mutation"}}},"outputSchema":{"type":"object","additionalProperties":false,"required":["exit_code","evidence"],"properties":{"exit_code":{"type":"integer","enum":[0,1,2],"description":"Native pulp-cpp process exit code: 0 pass, 1 completed failure, 2 unavailable or unverified"},"evidence":)JSON";
     out += pulp_mcp::kGpuProbeResultSchemaJson;
     out += R"JSON(}}},)JSON";
     out +=
@@ -584,7 +588,7 @@ std::string pulp_mcp::server::tools_list_json() {
     // sibling installed CLI and has no live-selection authority.
     out.insert(
         out.size() - 2,
-        R"JSON(,{"name":"pulp_trace_analyze","description":"Ask one closed GPU question over an already-flushed Perfetto trace. This offline operation does not use canonical capability-control or select a live target. It uses the same checked-in PerfettoSQL view and typed result as the CLI and accepts no free-form SQL.","inputSchema":{"type":"object","required":["question","trace"],"additionalProperties":false,"properties":{"question":{"type":"string","enum":["gpu-startup","gpu-health","gpu-probe"]},"trace":{"type":"string","description":"Path to an already-flushed .pftrace artifact"}}}})JSON");
+        R"JSON(,{"name":"pulp_trace_analyze","description":"Ask one closed GPU question over an already-flushed Perfetto trace. This offline operation does not use canonical capability-control or select a live target. It uses the same checked-in PerfettoSQL view and typed result as the CLI and accepts no free-form SQL.","inputSchema":{"type":"object","required":["question","trace"],"additionalProperties":false,"properties":{"question":{"type":"string","enum":["gpu-startup","gpu-health","gpu-probe"]},"trace":{"type":"string","description":"Path to an already-flushed .pftrace artifact"}}},"outputSchema":{"type":"object","required":["schema","question","verdict","capture_complete"],"properties":{"schema":{"type":"string","const":"pulp.trace-gpu-analysis.v1"},"question":{"type":"string","enum":["gpu-startup","gpu-health","gpu-probe"]},"verdict":{"type":"string","enum":["pass","fail","unavailable","unverified"]},"capture_complete":{"type":"boolean"}}}})JSON");
     return out;
 }
 

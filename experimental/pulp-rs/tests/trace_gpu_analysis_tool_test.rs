@@ -46,8 +46,7 @@ fn trace_processor() -> PathBuf {
     path
 }
 
-fn run(question: &str, fixture: &str, expected_exit: i32) -> Value {
-    let trace = repo_root().join("test/fixtures/perfetto-gpu").join(fixture);
+fn run_path(question: &str, trace: &Path, expected_exit: i32) -> Value {
     let output = Command::cargo_bin("pulp")
         .expect("pulp binary")
         .env("PULP_TRACE_PROCESSOR", trace_processor())
@@ -65,12 +64,18 @@ fn run(question: &str, fixture: &str, expected_exit: i32) -> Value {
     serde_json::from_slice(&output.stdout).expect("typed JSON analysis output")
 }
 
+fn run(question: &str, fixture: &str, expected_exit: i32) -> Value {
+    let trace = repo_root().join("test/fixtures/perfetto-gpu").join(fixture);
+    run_path(question, &trace, expected_exit)
+}
+
 #[test]
 fn healthy_fixture_preserves_question_specific_verdicts() {
     let startup = run("gpu-startup", "healthy.pftrace", 2);
     assert_eq!(startup["verdict"], "unverified");
     assert_eq!(startup["dominant_stage"], "pipeline-prepare");
     assert_eq!(startup["capture_complete"], true);
+    assert_eq!(startup["observed_categories"], serde_json::json!(["gpu"]));
     assert!(startup["ui_correlation"]["open_command"].as_str().is_some());
     assert_eq!(
         startup["ui_correlation"]["search_terms"][0],
@@ -125,6 +130,46 @@ fn healthy_diagnostic_codes_do_not_become_failures() {
         assert_eq!(result["verdict"], "pass");
         assert_eq!(result["capture_complete"], true);
     }
+}
+
+#[test]
+fn unavailable_and_unverified_health_states_never_become_pass() {
+    for question in ["gpu-health", "gpu-probe"] {
+        let unavailable = run(question, "unavailable-state.pftrace", 2);
+        assert_eq!(unavailable["verdict"], "unavailable");
+        assert_eq!(unavailable["unavailable_reason"], "reported-unavailable");
+        assert_eq!(unavailable["capture_complete"], true);
+
+        let unverified = run(question, "unverified-state.pftrace", 2);
+        assert_eq!(unverified["verdict"], "unverified");
+        assert_eq!(unverified["capture_complete"], true);
+    }
+}
+
+#[test]
+fn short_non_pass_state_survives_the_bounded_contributor_limit() {
+    use std::fmt::Write as _;
+
+    let trace = std::env::temp_dir().join(format!(
+        "pulp-gpu-analysis-over-limit-{}.pftrace",
+        std::process::id()
+    ));
+    let mut events = String::from("{\"traceEvents\":[");
+    for index in 0..17 {
+        if index > 0 {
+            events.push(',');
+        }
+        write!(events, "{{\"name\":\"gpu_health_transition_{index}\",\"cat\":\"gpu\",\"ph\":\"X\",\"ts\":{},\"dur\":{},\"pid\":13,\"tid\":13,\"args\":{{\"debug.gpu_evidence_id\":\"99999999999999999999999999999999\",\"debug.health_state\":\"healthy\",\"debug.sequence\":{index}}}}},{{\"name\":\"gpu_probe_over_limit_{index}\",\"cat\":\"gpu\",\"ph\":\"X\",\"ts\":{},\"dur\":{},\"pid\":13,\"tid\":13,\"args\":{{\"debug.gpu_evidence_id\":\"99999999999999999999999999999999\",\"debug.health_state\":\"healthy\",\"debug.sequence\":{index}}}}}", 1000 + index * 20, 1000 + index, 1010 + index * 20, 1000 + index).unwrap();
+    }
+    events.push(',');
+    events.push_str("{\"name\":\"gpu_health_transition_short\",\"cat\":\"gpu\",\"ph\":\"X\",\"ts\":5000,\"dur\":1,\"pid\":13,\"tid\":13,\"args\":{\"debug.gpu_evidence_id\":\"99999999999999999999999999999999\",\"debug.health_state\":\"unavailable\",\"debug.sequence\":18}},{\"name\":\"gpu_probe_short\",\"cat\":\"gpu\",\"ph\":\"X\",\"ts\":5010,\"dur\":1,\"pid\":13,\"tid\":13,\"args\":{\"debug.gpu_evidence_id\":\"99999999999999999999999999999999\",\"debug.health_state\":\"unavailable\",\"debug.sequence\":18}}]}");
+    std::fs::write(&trace, events).unwrap();
+    for question in ["gpu-health", "gpu-probe"] {
+        let result = run_path(question, &trace, 2);
+        assert_eq!(result["verdict"], "unavailable");
+        assert_eq!(result["unavailable_reason"], "reported-unavailable");
+    }
+    std::fs::remove_file(trace).unwrap();
 }
 
 #[test]
@@ -188,4 +233,127 @@ fn first_frame_stall_ranks_pipeline_before_upload() {
         result["evidence_ids"][0],
         "44444444444444444444444444444444"
     );
+}
+
+#[test]
+fn startup_uses_only_the_earliest_first_visible_lifecycle() {
+    let first_evidence = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let later_evidence = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let trace = tempfile::NamedTempFile::new().expect("mixed startup trace");
+    let fixture = serde_json::json!({
+        "traceEvents": [
+            {"name":"gpu_pipeline_prepare","cat":"gpu","ph":"X","ts":1000,
+             "dur":700,"pid":20,"tid":20,"args":{"debug.gpu_evidence_id":first_evidence,
+             "debug.health_state":"healthy","debug.sequence":1,"debug.frame_index":0}},
+            {"name":"gpu_resource_upload","cat":"gpu","ph":"X","ts":1200,
+             "dur":200,"pid":20,"tid":20,"args":{"debug.gpu_evidence_id":first_evidence,
+             "debug.health_state":"healthy","debug.sequence":2,"debug.frame_index":0}},
+            {"name":"frame","cat":"render","ph":"X","ts":1700,"dur":50,
+             "pid":20,"tid":20,"args":{"debug.gpu_evidence_id":first_evidence,
+             "debug.health_state":"healthy","debug.sequence":3,"debug.frame_index":0}},
+            {"name":"gpu_present_runtime","cat":"gpu","ph":"X","ts":2000,
+             "dur":30000,"pid":20,"tid":20,"args":{"debug.gpu_evidence_id":first_evidence,
+             "debug.health_state":"healthy","debug.sequence":4,"debug.frame_index":1}},
+            {"name":"gpu_pipeline_prepare_future_window","cat":"gpu","ph":"X","ts":500,
+             "dur":40000,"pid":20,"tid":20,"args":{"debug.gpu_evidence_id":later_evidence,
+             "debug.health_state":"healthy","debug.sequence":1,"debug.frame_index":0}},
+            {"name":"frame_later","cat":"render","ph":"X","ts":4500,"dur":50,
+             "pid":20,"tid":20,"args":{"debug.gpu_evidence_id":later_evidence,
+             "debug.health_state":"healthy","debug.sequence":2,"debug.frame_index":0}}
+        ]
+    });
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let result = run_path("gpu-startup", trace.path(), 2);
+    assert_eq!(result["verdict"], "unverified");
+    assert_eq!(result["capture_complete"], true);
+    assert_eq!(result["dominant_stage"], "pipeline-prepare");
+    assert_eq!(result["evidence_ids"], serde_json::json!([first_evidence]));
+    let contributors = result["contributors"].as_array().unwrap();
+    assert_eq!(contributors.len(), 3);
+    assert!(contributors
+        .iter()
+        .all(|row| row["evidence_id"] == first_evidence && row["frame_index"] == 0));
+}
+
+#[test]
+fn startup_rejects_an_uncorrelated_candidate_instead_of_ranking_partial_rows() {
+    let evidence = "abababababababababababababababab";
+    let trace = tempfile::NamedTempFile::new().expect("uncorrelated startup trace");
+    let fixture = serde_json::json!({
+        "traceEvents": [
+            {"name":"gpu_pipeline_prepare","cat":"gpu","ph":"X","ts":1000,
+             "dur":700,"pid":22,"tid":22,"args":{"debug.gpu_evidence_id":evidence,
+             "debug.health_state":"healthy","debug.sequence":1,"debug.frame_index":0}},
+            {"name":"frame","cat":"render","ph":"X","ts":1700,"dur":50,
+             "pid":22,"tid":22,"args":{"debug.gpu_evidence_id":evidence,
+             "debug.health_state":"healthy","debug.sequence":2,"debug.frame_index":0}},
+            {"name":"gpu_shader_compile_uncorrelated","cat":"gpu","ph":"X","ts":900,
+             "dur":40000,"pid":22,"tid":22,"args":{"debug.health_state":"healthy",
+             "debug.sequence":0,"debug.frame_index":0}}
+        ]
+    });
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let result = run_path("gpu-startup", trace.path(), 2);
+    assert_eq!(result["verdict"], "unavailable");
+    assert_eq!(result["capture_complete"], false);
+    assert_eq!(result["unavailable_reason"], "missing-question-category");
+    assert_eq!(result["contributors"], serde_json::json!([]));
+    assert_eq!(result["evidence_ids"], serde_json::json!([]));
+}
+
+#[test]
+fn health_and_probe_reject_mixed_evidence_before_the_row_cap() {
+    let first_evidence = "cccccccccccccccccccccccccccccccc";
+    let second_evidence = "dddddddddddddddddddddddddddddddd";
+    let trace = tempfile::NamedTempFile::new().expect("mixed evidence trace");
+    let mut events = Vec::new();
+    for index in 0..17 {
+        events.push(serde_json::json!({
+            "name": format!("gpu_health_transition_{index}"), "cat": "gpu", "ph": "X",
+            "ts": 1000 + index * 20, "dur": 1000 + index, "pid": 21, "tid": 21,
+            "args": {"debug.gpu_evidence_id": first_evidence,
+                     "debug.health_state": "healthy", "debug.sequence": index}
+        }));
+        events.push(serde_json::json!({
+            "name": format!("gpu_probe_{index}"), "cat": "gpu", "ph": "X",
+            "ts": 1010 + index * 20, "dur": 1000 + index, "pid": 21, "tid": 21,
+            "args": {"debug.gpu_evidence_id": first_evidence,
+                     "debug.health_state": "healthy", "debug.sequence": index}
+        }));
+    }
+    events.push(serde_json::json!({
+        "name": "gpu_health_transition_other", "cat": "gpu", "ph": "X",
+        "ts": 5000, "dur": 1, "pid": 21, "tid": 21,
+        "args": {"debug.gpu_evidence_id": second_evidence,
+                 "debug.health_state": "healthy", "debug.sequence": 1}
+    }));
+    events.push(serde_json::json!({
+        "name": "gpu_probe_other", "cat": "gpu", "ph": "X",
+        "ts": 5010, "dur": 1, "pid": 21, "tid": 21,
+        "args": {"debug.gpu_evidence_id": second_evidence,
+                 "debug.health_state": "healthy", "debug.sequence": 1}
+    }));
+    std::fs::write(
+        trace.path(),
+        serde_json::to_vec(&serde_json::json!({"traceEvents": events})).unwrap(),
+    )
+    .unwrap();
+
+    for question in ["gpu-health", "gpu-probe"] {
+        let singleton = run(question, "healthy.pftrace", 0);
+        assert_eq!(
+            singleton["evidence_ids"],
+            serde_json::json!(["0123456789abcdef0123456789abcdef"])
+        );
+
+        let mixed = run_path(question, trace.path(), 2);
+        assert_eq!(mixed["verdict"], "unavailable");
+        assert_eq!(mixed["capture_complete"], false);
+        assert_eq!(mixed["unavailable_reason"], "missing-question-category");
+        assert_eq!(mixed["observed_categories"], serde_json::json!(["gpu"]));
+        assert_eq!(mixed["contributors"], serde_json::json!([]));
+        assert_eq!(mixed["evidence_ids"], serde_json::json!([]));
+    }
 }
