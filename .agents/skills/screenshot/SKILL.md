@@ -403,3 +403,8 @@ with DPR. Record both sizes in the versioned result contract.
 prove small-text legibility, thin-stroke fidelity, or input correctness. Record
 those oracles separately. A planned or synthetic capture is automation proof
 only and must not select a scale-policy candidate.
+
+Use `tools/scripts/gpu_dpr_runner.py` to execute or ingest a matrix cell. A
+screenshot adapter must return the raw capture and content/fidelity oracles in
+the cell directory; SKIP, INCONCLUSIVE, timeout, or a rejected receipt remains
+resumable incomplete evidence.

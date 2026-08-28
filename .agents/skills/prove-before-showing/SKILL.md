@@ -186,3 +186,12 @@ correct material is not a strict check, it is a broken one.
 If any line is unchecked, say which and why, rather than showing the work as
 finished. Around twenty gates in this project were wrong the first time they met
 real material, and every one was found by running it. None by reading it.
+
+## DPR matrix proof
+
+For A4 DPR work, use `tools/scripts/gpu_dpr_runner.py` to preserve each raw
+sample and artifact receipt. Its deterministic self-test plants bad hashes,
+input scaling, content drift, software-GPU substitution, incomplete traces,
+fidelity failures, and adapter timeouts. Passing that test proves the harness,
+not the product: unfinished real adapters and SKIP/INCONCLUSIVE cells remain
+explicit incomplete dependencies.

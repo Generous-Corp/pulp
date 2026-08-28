@@ -70,6 +70,39 @@ may test automation but cannot justify `configured-max-candidate` or
 `adaptive-candidate`. Those dispositions identify later Vellum policy work;
 they do not authorize a Pulp render-policy change.
 
+### Execute and resume the matrix
+
+Initialize a durable run journal, then supply only the scenario adapters that
+exist on the machine. Each adapter is an absolute executable path and receives
+`--request <json> --receipt <json>`; it must preserve its raw samples, capture,
+Perfetto trace, input receipt, machine identity, and graphics-adapter identity
+inside the requested cell directory.
+
+```bash
+python3 tools/scripts/gpu_dpr_runner.py init \
+  --plan /tmp/pulp-dpr-plan.json --run-dir /tmp/pulp-dpr-run
+python3 tools/scripts/gpu_dpr_runner.py run \
+  --run-dir /tmp/pulp-dpr-run \
+  --adapter dense-text-thin-strokes=/absolute/path/to/pulp-capture-adapter \
+  --limit 1
+python3 tools/scripts/gpu_dpr_runner.py status \
+  --run-dir /tmp/pulp-dpr-run --json
+```
+
+Re-running `run` resumes incomplete cells. Missing adapters, adapter timeouts,
+SKIP, INCONCLUSIVE, rejected evidence, or failed exit/receipt agreement are
+durable incomplete attempts, never measurements. Existing Pulp screenshot,
+Three.js, Forge-native, real-DAW, browser, logical-input, and A2T tools may be
+wrapped as scenario adapters, but no generic adapter is implied: absent product
+legs remain explicit dependencies.
+
+`ingest` accepts an independently produced cell receipt and applies the same
+fidelity, logical-input, artifact-hash, identity, trace-category, and raw-sample
+checks. `finalize` requires all 84 cells plus exact A2T and A3 receipts. A
+`no-change` disposition cancels B5; either candidate leaves B5
+`waiting-trigger` on `B0-adopted-vellum-api-refresh`. Neither result authorizes
+a Pulp policy change.
+
 ## Verified (Real Hardware)
 
 | Platform | Backend | Surface | Rendering | Status |

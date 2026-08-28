@@ -395,6 +395,11 @@ same logical fixture at each requested DPR and mode; a rebuilt or substituted
 payload is a different trial. Do not publish a scale-policy conclusion from a
 planned/synthetic run or before the A2T trace and A3 budget dependencies exist.
 
+Register each real Forge shell with `tools/scripts/gpu_dpr_runner.py` as its
+scenario-specific executable adapter. The adapter receipt must bind the exact
+Forge/Pulp SHAs and binary; missing native, DAW, or browser legs stay explicit
+dependencies and must not be replaced with a Pulp example.
+
 ## Forge GPU-health canary
 
 Forge shells may reuse `ControlGpuHealthViewAdapter` by supplying their real

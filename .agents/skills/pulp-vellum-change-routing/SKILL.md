@@ -81,6 +81,13 @@ snapshot but must keep the unratified startup verdict unverified. Route any
 request for a true present hook or generic pipeline instrumentation to Vellum
 instead of modifying generic window or render-lifecycle paths in Pulp.
 
+Pulp also owns the A4 DPR runner, product-scenario adapters, evidence ingestion,
+and the B5 dependency receipt. The runner may classify a measured candidate,
+but B5 remains `waiting-trigger` until the adopted Vellum API refresh. Any
+generic DPR policy, render-lifecycle instrumentation, or framework adapter
+needed to act on that result originates in Vellum; do not implement it in this
+Pulp evidence lane.
+
 ## Validate the contract
 
 Run the closed eight-case suite and projection validator:
