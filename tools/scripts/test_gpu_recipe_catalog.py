@@ -192,6 +192,15 @@ class CatalogContract(unittest.TestCase):
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
         self.assertEqual(catalog.validate_handoff(handoff), [])
         self.assertEqual(catalog.validate_handoff_routing(handoff, catalog.ROOT), [])
+        followup = next(
+            entry
+            for entry in handoff["entries"]
+            if entry["id"] == "pulp-v8-threejs-release-followup"
+        )
+        self.assertEqual(followup["cutover_action"], "retain-pulp-followup")
+        self.assertIn("experimental/pulp-rs/src/install.rs", followup["paths"])
+        self.assertIn("tools/scripts/release_artifact_contents.py", followup["paths"])
+        self.assertIn("share/pulp/threejs", followup["reason"])
         handoff["boundary_change_authorized"] = True
         self.assertIn(
             "must not authorize",

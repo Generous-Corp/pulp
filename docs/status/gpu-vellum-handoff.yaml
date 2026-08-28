@@ -35,6 +35,25 @@
       "reason": "The catalog projects Pulp product workflows and remains the local discovery authority."
     },
     {
+      "id": "pulp-v8-threejs-release-followup",
+      "current_owner": "Generous-Corp/pulp",
+      "paths": [
+        ".github/workflows/release-cli.yml",
+        "experimental/pulp-rs/src/cmd/upgrade.rs",
+        "experimental/pulp-rs/src/install.rs",
+        "experimental/pulp-rs/src/install/tests.rs",
+        "tools/scripts/package_cli.py",
+        "tools/scripts/release_artifact_contents.py",
+        "tools/scripts/release_product_matrix.json",
+        "tools/scripts/test_package_cli.py",
+        "tools/scripts/test_release_artifact_contents.py"
+      ],
+      "cutover_action": "retain-pulp-followup",
+      "vellum_phase": null,
+      "delete_after": null,
+      "reason": "Queue Pulp-owned delivery proof for a standalone V8-bearing archive and prove Rust self-upgrade preserves its nested share/pulp/threejs runtime before installed discovery may claim the conditional Three.js recipe. This packaging work does not move generic rendering authority."
+    },
+    {
       "id": "generic-gpu-health-lifecycle",
       "current_owner": "Generous-Corp/vellum",
       "paths": [
