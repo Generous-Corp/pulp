@@ -1007,9 +1007,15 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
                  "dev.pulp.telemetry/subscribe@1", "dev.pulp.runtime/evaluate@1"})
             CHECK(encoded.find(capability) != std::string::npos);
     } else {
+#if PULP_TEST_INSTALLED_CONTROL_GPU_HEALTH
         REQUIRE(instance["capabilities"].size() == 3);
         CHECK(choc::json::toString(instance["capabilities"], false)
                   .find("dev.pulp.gpu/health.read@1") != std::string::npos);
+#else
+        REQUIRE(instance["capabilities"].size() == 2);
+        CHECK(choc::json::toString(instance["capabilities"], false)
+                  .find("dev.pulp.gpu/health.read@1") == std::string::npos);
+#endif
     }
     const int installed_host_process_id =
         author_host_environment ? -1 : wait_for_only_child_process(daemon_process.process_id());
