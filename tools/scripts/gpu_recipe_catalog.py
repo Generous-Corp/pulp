@@ -259,9 +259,13 @@ def validate_handoff(document: Any) -> list[str]:
                 problems.append(
                     f"handoff entries[{index}] owner/phase does not match cutover action"
                 )
-            if needs_delete_gate != isinstance(delete_after, str):
+            if needs_delete_gate and not isinstance(delete_after, str):
                 problems.append(
                     f"handoff entries[{index}] delete-after nullability does not match action"
+                )
+            elif not needs_delete_gate and delete_after is not None:
+                problems.append(
+                    f"handoff entries[{index}] delete-after must be null for retained Pulp work"
                 )
             elif isinstance(delete_after, str) and not delete_after.strip():
                 problems.append(f"handoff entries[{index}] has an empty delete-after proof")
@@ -280,9 +284,14 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
     """Bind handoff paths and digest to the frozen authoritative routing helper."""
 
     projection_value = document.get("ownership_projection")
-    if not isinstance(projection_value, str) or not _safe_relative(projection_value):
-        return ["handoff ownership_projection must be a safe relative path"]
+    if projection_value != ".github/vellum-ownership.json":
+        return [
+            "handoff ownership_projection must be the authoritative "
+            ".github/vellum-ownership.json path"
+        ]
     projection_path = root / projection_value
+    if projection_path.resolve() != (root.resolve() / ".github/vellum-ownership.json"):
+        return ["handoff ownership projection resolved outside its authoritative identity"]
     helper_path = (
         root
         / ".agents/skills/pulp-vellum-change-routing/scripts/routing_evidence.py"
