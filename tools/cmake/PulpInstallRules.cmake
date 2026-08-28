@@ -447,6 +447,35 @@ install(FILES "${_pulp_gpu_health_result_schema}"
     DESTINATION "share/pulp/contracts")
 unset(_pulp_gpu_health_result_schema)
 
+# Pinned native Three.js ESM runtime. Keep the upstream directory layout intact:
+# Pulp's V8 module resolver maps these exact specifiers and installed consumers
+# must not fall back to a test-only FetchContent checkout.
+if(PULP_HAS_THREEJS)
+    set(_pulp_threejs_install_root "share/pulp/threejs")
+    foreach(_pulp_threejs_runtime_file IN LISTS PULP_THREEJS_RUNTIME_FILES)
+        get_filename_component(_pulp_threejs_runtime_subdir
+            "${_pulp_threejs_runtime_file}" DIRECTORY)
+        if(_pulp_threejs_runtime_subdir STREQUAL "")
+            set(_pulp_threejs_runtime_destination
+                "${_pulp_threejs_install_root}")
+        else()
+            set(_pulp_threejs_runtime_destination
+                "${_pulp_threejs_install_root}/${_pulp_threejs_runtime_subdir}")
+        endif()
+        install(FILES
+            "${PULP_THREEJS_RUNTIME_DIR}/${_pulp_threejs_runtime_file}"
+            DESTINATION "${_pulp_threejs_runtime_destination}"
+            COMPONENT threejs-runtime)
+    endforeach()
+    install(FILES "${PULP_THREEJS_RUNTIME_MANIFEST}"
+        DESTINATION "${_pulp_threejs_install_root}"
+        COMPONENT threejs-runtime)
+    unset(_pulp_threejs_runtime_destination)
+    unset(_pulp_threejs_runtime_file)
+    unset(_pulp_threejs_runtime_subdir)
+    unset(_pulp_threejs_install_root)
+endif()
+
 # DSP capability registry.
 #
 # Ships the committed snapshot so a downstream consumer can discover the SDK's

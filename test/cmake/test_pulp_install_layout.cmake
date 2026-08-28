@@ -212,6 +212,66 @@ if(NOT _installed_config_text MATCHES "PulpMinOs\\.cmake")
         "min-OS floor would not be pinned for find_package(Pulp) consumers.")
 endif()
 
+# A configured Three.js runtime is part of the installed SDK, not a source-tree
+# convenience. Prove the complete resolver payload exists, then configure a
+# consumer in a separate directory and require find_package(Pulp) to resolve the
+# runtime back into this exact installation prefix.
+file(STRINGS "${PULP_BUILD_DIR}/CMakeCache.txt" _threejs_runtime_cache
+    REGEX "^PULP_ENABLE_THREEJS_RUNTIME:BOOL=")
+if(_threejs_runtime_cache MATCHES "=ON$")
+    set(_threejs_runtime_root "${_prefix}/share/pulp/threejs")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${CMAKE_CURRENT_LIST_DIR}/../../tools/cmake/threejs-runtime-manifest.json"
+            "${_threejs_runtime_root}/threejs-runtime-manifest.json"
+        RESULT_VARIABLE _threejs_manifest_compare_rc)
+    if(NOT _threejs_manifest_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed Three.js runtime manifest differs from the pinned source manifest.")
+    endif()
+
+    set(_threejs_consumer_source
+        "${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-installed-consumer")
+    set(_threejs_consumer_build
+        "${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-installed-consumer-build")
+    file(REMOVE_RECURSE "${_threejs_consumer_source}" "${_threejs_consumer_build}")
+    file(MAKE_DIRECTORY "${_threejs_consumer_source}")
+    file(WRITE "${_threejs_consumer_source}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.24)
+project(PulpThreeJsInstalledConsumer LANGUAGES CXX)
+find_package(Pulp CONFIG REQUIRED)
+if(NOT PULP_HAS_THREEJS_RUNTIME)
+    message(FATAL_ERROR "Installed Pulp package did not advertise Three.js runtime")
+endif()
+file(REAL_PATH "${PULP_THREEJS_RUNTIME_DIR}" _runtime_real)
+file(REAL_PATH "${EXPECTED_RUNTIME_DIR}" _expected_real)
+if(NOT _runtime_real STREQUAL _expected_real)
+    message(FATAL_ERROR
+        "Three.js runtime resolved outside selected SDK: "
+        "${_runtime_real} != ${_expected_real}")
+endif()
+if(NOT PULP_THREEJS_RUNTIME_REVISION STREQUAL "${EXPECTED_THREEJS_REVISION}")
+    message(FATAL_ERROR
+        "Unexpected Three.js revision: ${PULP_THREEJS_RUNTIME_REVISION}")
+endif()
+]=])
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}"
+            -S "${_threejs_consumer_source}"
+            -B "${_threejs_consumer_build}"
+            "-DCMAKE_PREFIX_PATH=${_prefix}"
+            "-DEXPECTED_RUNTIME_DIR=${_threejs_runtime_root}"
+            "-DEXPECTED_THREEJS_REVISION=077dd13c0e869d9f3dbe55875686f920367de457"
+        RESULT_VARIABLE _threejs_consumer_rc
+        OUTPUT_VARIABLE _threejs_consumer_stdout
+        ERROR_VARIABLE _threejs_consumer_stderr)
+    if(NOT _threejs_consumer_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed Three.js consumer configure failed:\n"
+            "${_threejs_consumer_stdout}${_threejs_consumer_stderr}")
+    endif()
+endif()
+
 # Pulp's installed Windows archives are built with the static MSVC runtime.
 # find_package(Pulp) must establish the same default before a consumer creates
 # targets, or their /MD objects fail to link against Pulp's /MT archives with
@@ -339,5 +399,6 @@ message(STATUS
     "Install layout: PulpUtils.cmake at ${_pulp_utils}, encoder at "
     "${_installed_encoder} (${_installed_size} bytes), PulpMinOs.cmake + "
     "min_os.json bundled and wired into PulpConfig.cmake, pulp::osc header + "
-    "target exported; GPU health contract installed byte-exactly; Ableton Link "
+    "target exported; GPU health contract and configured Three.js runtime "
+    "installed outside the source tree; Ableton Link "
     "header, target, and SDK path absent. All present.")

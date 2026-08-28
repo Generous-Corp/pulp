@@ -77,6 +77,26 @@ cmake -S . -B build-threejs-runtime-smoke -DCMAKE_BUILD_TYPE=Release \
   -DV8_LIBRARY_PATH=/opt/homebrew/opt/node@24/lib/libnode.137.dylib
 ```
 
+## Installed runtime
+
+GPU-enabled SDK builds install the pinned ESM files, supported addons, upstream
+license, and package metadata under `share/pulp/threejs`. An installed
+`PulpConfig.cmake` exposes the selected payload as
+`PULP_THREEJS_RUNTIME_DIR`, advertises `PULP_HAS_THREEJS_RUNTIME`, and records
+the immutable upstream commit in `PULP_THREEJS_RUNTIME_REVISION`.
+
+To prove a build uses that shipped payload rather than a source-tree or
+FetchContent substitute, configure with the selected SDK directory explicitly:
+
+```bash
+cmake -S . -B build-threejs-installed \
+  -DPULP_THREEJS_RUNTIME_DIR="$PULP_SDK_DIR/share/pulp/threejs" \
+  -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
+```
+
+Configuration fails if any resolver input is missing. Release archives at the
+runtime's version floor are also rejected when any required file is absent.
+
 ## Sealed v8-builder V8 provider
 
 Instead of a Homebrew `libnode`, the demo runs on a sealed V8 from the
