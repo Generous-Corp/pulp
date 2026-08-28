@@ -30,4 +30,3 @@ const bins = [];
 for (let i = 0; i < 96; ++i)
     bins.push(Math.max(0, 0.88 - i * 0.008 + Math.sin(i * 0.31) * 0.08));
 setSpectrumData("spectrum", bins);
-
