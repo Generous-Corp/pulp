@@ -279,7 +279,14 @@ raise SystemExit(code)
             "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
             "xrun_check": "not-applicable-offline-no-audio-thread",
         },
-        "human_perfetto_ui_correlation": {"artifact_sha256": trace_digest},
+        "human_perfetto_ui_correlation": {
+            "artifact_sha256": trace_digest,
+            "reviewer": "human reviewer",
+            "reviewed_utc": "2026-08-28T05:34:54Z",
+            "ui_revision": "v58.3-11fbaed8",
+            "delivery": "official localhost embedding protocol",
+            "observed_spans": [{"name": "gpu_pipeline_prepare", "duration_ns": 6_000_000}],
+        },
     })
     binding = {
         "schema": "pulp.gpu-first-visible-a2t-binding.v1",
@@ -606,6 +613,26 @@ def main() -> int:
         a2t_path.write_text(original_a2t, encoding="utf-8")
         binding_path.write_text(original_binding, encoding="utf-8")
 
+        for field in ("reviewer", "reviewed_utc", "ui_revision", "delivery", "observed_spans"):
+            mutated = copy.deepcopy(receipt)
+            a2t_ref = mutated["same_instance_a2t"]["a2t_receipt"]
+            binding_ref = mutated["same_instance_a2t"]["binding_receipt"]
+            a2t_path = root / a2t_ref["path"]
+            binding_path = root / binding_ref["path"]
+            original_a2t = a2t_path.read_text(encoding="utf-8")
+            original_binding = binding_path.read_text(encoding="utf-8")
+            stripped_a2t = json.loads(original_a2t)
+            del stripped_a2t["human_perfetto_ui_correlation"][field]
+            write_json(root, a2t_ref["path"], stripped_a2t)
+            rehash(mutated, root, a2t_ref)
+            binding = json.loads(original_binding)
+            binding["a2t_receipt_sha256"] = a2t_ref["sha256"]
+            write_json(root, binding_ref["path"], binding)
+            rehash(mutated, root, binding_ref)
+            expect_failure(mutated, root, "A2T human Perfetto review lacks")
+            a2t_path.write_text(original_a2t, encoding="utf-8")
+            binding_path.write_text(original_binding, encoding="utf-8")
+
         mutated = copy.deepcopy(receipt)
         mutated["campaigns"] = mutated["campaigns"][:-1]
         expect_failure(mutated, root, "every required role")
@@ -685,7 +712,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=6 planted_negatives=24 "
+            "gpu-first-visible-a3-acceptance: positive=6 planted_negatives=29 "
             "checked_in_nonterminal=verified"
         )
     return 0

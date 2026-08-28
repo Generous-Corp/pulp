@@ -26,6 +26,7 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --equivalent-a2t-revision "$A2T_ORIGINAL_REVISION" \
   --plan-revision "$PLAN_REVISION" \
   --plan-sha256 "$PLAN_SHA256" \
+  --prior-human-review-receipt /tmp/prior-accepted-gpu-startup-a2t.json \
   --output /tmp/gpu-trace-overhead.json
 ```
 
@@ -85,6 +86,17 @@ protocol with `localOnly` browser-memory handling; it was not uploaded or
 shared. Future receipts must retain the reviewer, date, artifact digest, UI
 revision, and observed span details; an executable open command is not itself
 visual inspection.
+
+Regenerating analyzer timings does not repeat or silently manufacture that
+visual acceptance. For a `gpu-startup` rerun, pass the prior accepted A2T
+receipt with `--prior-human-review-receipt`. The generator carries its
+`human_perfetto_ui_correlation` root object forward verbatim and records
+`acceptance.human_perfetto_ui_correlation: pass` only when the prior receipt is
+also a `gpu-startup` receipt with passing human acceptance and its trace
+artifact SHA-256 exactly matches the trace being measured. A missing object,
+different question, non-passing acceptance, or changed artifact fails closed.
+Do not pass this option for `gpu-health` or `gpu-probe`; those runs cannot
+inherit a startup UI review.
 
 Perfetto is a localization tool, not an oracle for every platform state
 machine. A real resize investigation demonstrated the correct evidence chain:

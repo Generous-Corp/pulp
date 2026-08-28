@@ -601,8 +601,19 @@ def validate_a2t_receipt(
     if canonical_analysis(payload["semantic_result"]) != canonical_analysis(derived):
         raise AcceptanceError("A2T semantic result differs from analyzer replay")
     human = payload["human_perfetto_ui_correlation"]
-    if not isinstance(human, dict) or human.get("artifact_sha256") != trace.sha256:
+    if (
+        not isinstance(human, dict)
+        or not isinstance(human.get("artifact_sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", human["artifact_sha256"]) is None
+        or human["artifact_sha256"] != artifacts["trace"]["sha256"]
+        or human["artifact_sha256"] != trace.sha256
+    ):
         raise AcceptanceError("A2T human Perfetto review is not bound to the trace")
+    for field in ("reviewer", "reviewed_utc", "ui_revision", "delivery"):
+        if not isinstance(human.get(field), str) or not human[field].strip():
+            raise AcceptanceError(f"A2T human Perfetto review lacks nonempty {field}")
+    if not isinstance(human.get("observed_spans"), list) or not human["observed_spans"]:
+        raise AcceptanceError("A2T human Perfetto review lacks observed span details")
     if same["gpu_evidence_id"] not in derived.get("evidence_ids", []):
         raise AcceptanceError("A2T analyzer replay lacks the same-instance GPU evidence id")
 
