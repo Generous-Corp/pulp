@@ -288,6 +288,13 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                               has_capability(*manifest, InspectorCapability::TraceControl) ||
                               has_capability(*manifest, InspectorCapability::RuntimeEval) ||
                               has_capability(*manifest, InspectorCapability::GpuHealthRead);
+        const bool needs_ui_executor =
+            has_capability(*manifest, InspectorCapability::CaptureImage) ||
+            has_capability(*manifest, InspectorCapability::UiInput) ||
+            has_capability(*manifest, InspectorCapability::RuntimeEval);
+        const bool needs_ui_targets =
+            has_capability(*manifest, InspectorCapability::CaptureImage) ||
+            has_capability(*manifest, InspectorCapability::UiInput);
         if (needs_ui && ui_mode == format::StandaloneControlUiMode::DeferToEditor &&
             !view_bridge_) {
             pending_bootstrap_ = std::move(bootstrap);
@@ -337,8 +344,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     .seed_blank_first_frame =
                         std::getenv("PULP_GPU_HEALTH_SEED_BLANK_FRAME") != nullptr});
             if (!gpu_health_provider_->begin_editor_open(
-                    ControlGpuHealthProvider::CacheState::cold,
-                    editor_open_requested_at))
+                    ControlGpuHealthProvider::CacheState::cold, editor_open_requested_at))
                 return false;
         }
         auto gpu_health_read = make_control_gpu_health_read_executor(
@@ -438,33 +444,37 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                 evaluator_ = std::move(evaluator);
             }
 
-            ui = ControlInstalledHostUiConfig{
-                .manifest = *manifest,
-                .make_targets = [this](const ControlHostOpenResult& binding)
-                    -> std::optional<ControlInstalledHostUiTargets> {
-                    if (!root_ || !window_)
-                        return std::nullopt;
-                    ui_adapter_ = ControlStandaloneUiAdapter::create({
-                        .root = *root_,
-                        .window = *window_,
-                        .instance_id = binding.instance_id,
-                        .instance_generation = binding.instance_generation,
-                        .view_generation = binding.publication_id,
-                        .capture_scale = 1.0f,
-                    });
-                    if (!ui_adapter_)
-                        return std::nullopt;
-                    return ControlInstalledHostUiTargets{
-                        .capture_source = ui_adapter_,
-                        .target_adapter = ui_adapter_,
-                        .view_generation = binding.publication_id,
+            if (needs_ui_executor) {
+                ControlInstalledHostUiConfig ui_config{
+                    .manifest = *manifest,
+                    .runtime_evaluator = evaluator_,
+                    .redact_runtime_eval_result = [](std::string_view) {
+                        return std::optional<std::string>{R"({"redacted":true})"};
+                    },
+                };
+                if (needs_ui_targets)
+                    ui_config.make_targets = [this](const ControlHostOpenResult& binding)
+                        -> std::optional<ControlInstalledHostUiTargets> {
+                        if (!root_ || !window_)
+                            return std::nullopt;
+                        ui_adapter_ = ControlStandaloneUiAdapter::create({
+                            .root = *root_,
+                            .window = *window_,
+                            .instance_id = binding.instance_id,
+                            .instance_generation = binding.instance_generation,
+                            .view_generation = binding.publication_id,
+                            .capture_scale = 1.0f,
+                        });
+                        if (!ui_adapter_)
+                            return std::nullopt;
+                        return ControlInstalledHostUiTargets{
+                            .capture_source = ui_adapter_,
+                            .target_adapter = ui_adapter_,
+                            .view_generation = binding.publication_id,
+                        };
                     };
-                },
-                .runtime_evaluator = evaluator_,
-                .redact_runtime_eval_result = [](std::string_view) {
-                    return std::optional<std::string>{R"({"redacted":true})"};
-                },
-            };
+                ui = std::move(ui_config);
+            }
 
             console_ = std::make_shared<ConsoleCapture>();
             view_bridge_->visit_scripted_ui([this](view::ScriptedUiSession* scripted) {

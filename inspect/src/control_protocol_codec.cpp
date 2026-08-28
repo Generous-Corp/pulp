@@ -586,6 +586,12 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 }
                 if (!message.artifact_publications.empty())
                     payload.addMember("artifact_publications", std::move(publications));
+                if (!message.evidence_ids.empty()) {
+                    auto evidence_ids = choc::value::createEmptyArray();
+                    for (const auto& evidence_id : message.evidence_ids)
+                        evidence_ids.addArrayElement(choc::value::createString(evidence_id));
+                    payload.addMember("evidence_ids", std::move(evidence_ids));
+                }
                 payload.addMember("cancellation_reason",
                                   choc::value::createString(message.cancellation_reason));
                 if (const auto detail = parse_bounded_control_json(message.detail_json,

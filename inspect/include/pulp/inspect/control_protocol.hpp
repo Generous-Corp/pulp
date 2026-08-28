@@ -417,6 +417,7 @@ struct ControlHostCompleteEnvelope {
     std::string explanation;
     std::string detail_json = "{}";
     std::string cancellation_reason;
+    std::vector<std::string> evidence_ids;
     std::vector<ControlHostArtifactPublication> artifact_publications;
     friend bool operator==(const ControlHostCompleteEnvelope&,
                            const ControlHostCompleteEnvelope&) = default;

@@ -873,6 +873,7 @@ TEST_CASE("host control frames round trip and enforce role direction",
     const ControlEnvelope completed{.payload = ControlHostCompleteEnvelope{
                                         .route_id = "route-1",
                                         .terminal_state = ControlReceiptState::Completed,
+                                        .evidence_ids = {"gpu-evidence-1"},
                                     }};
     REQUIRE(decode_control_envelope(encode_control_envelope(completed)) == completed);
     CHECK(control_envelope_allowed(completed, ControlEnvelopeDirection::HostToBroker));
@@ -886,6 +887,11 @@ TEST_CASE("host control frames round trip and enforce role direction",
     auto invalid = std::get<ControlHostCompleteEnvelope>(completed.payload);
     invalid.result_code = ControlResultCode::InternalError;
     CHECK(encode_control_envelope(ControlEnvelope{.payload = invalid}).empty());
+
+    auto oversized_evidence = std::get<ControlHostCompleteEnvelope>(completed.payload);
+    oversized_evidence.evidence_ids = {
+        std::string(kControlReceiptMaximumEvidenceIdBytes + 1, 'e')};
+    CHECK(encode_control_envelope(ControlEnvelope{.payload = oversized_evidence}).empty());
 
     auto artifact_complete = std::get<ControlHostCompleteEnvelope>(completed.payload);
     artifact_complete.detail_json = R"({"artifact_id": "host-publication-1"})";

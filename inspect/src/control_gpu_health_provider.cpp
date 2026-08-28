@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cmath>
 #include <utility>
+#include <vector>
 
 namespace pulp::inspect {
 namespace gh = tooling::gpu_health;
@@ -52,6 +54,32 @@ gh::ProbeEvidence initial_probe() {
     return probe;
 }
 
+void record_capture_event(gh::StartupCapture& capture) {
+    if (capture.event_count < capture.event_capacity) {
+        ++capture.event_count;
+    } else {
+        ++capture.dropped_event_count;
+        capture.truncated = true;
+    }
+}
+
+std::optional<double> trial_percentile(
+    const std::vector<gh::StartupTrial>& trials, double percentile,
+    std::optional<double> gh::StartupTrial::* measurement) {
+    std::vector<double> values;
+    values.reserve(trials.size());
+    for (const auto& trial : trials)
+        if (trial.*measurement)
+            values.push_back(*(trial.*measurement));
+    if (values.empty())
+        return std::nullopt;
+    std::ranges::sort(values);
+    const auto rank = std::clamp<std::size_t>(
+        static_cast<std::size_t>(std::ceil(percentile * values.size() / 100.0)),
+        1, values.size());
+    return values[rank - 1];
+}
+
 } // namespace
 
 struct ControlGpuHealthProvider::Impl {
@@ -64,6 +92,8 @@ struct ControlGpuHealthProvider::Impl {
         result->startup.budget.version = std::max<std::uint32_t>(1, config.budget_version);
         result->startup.capture.event_capacity =
             std::clamp<std::uint32_t>(config.event_capacity, 1, 4096);
+        result->startup.capture.missing_trace_categories = {
+            "frame_lifecycle", "a2t_correlation"};
         result->startup.identity.pulp_build_id = config.pulp_build_id;
         publish(std::move(result));
     }
@@ -151,7 +181,7 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
         : (result->health.verdict == gh::Verdict::pass ? gh::HealthState::healthy
                                                        : gh::HealthState::unverified);
     result->startup.identity.adapter_class = classify(frame.adapter);
-    result->startup.capture.event_count = 1;
+    record_capture_event(result->startup.capture);
     gh::StartupTrial trial;
     trial.sequence = static_cast<std::uint32_t>(result->startup.trials.size());
     trial.cache_state = impl_->cache_state == CacheState::cold ? gh::CacheState::cold
@@ -165,8 +195,12 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
     trial.verdict = blank ? gh::Verdict::fail : gh::Verdict::unverified;
     trial.diagnostic_code = blank ? "gpu.startup.blank" : "gpu.startup.unverified";
     result->startup.trials.push_back(std::move(trial));
-    result->startup.observed_percentile_ms = std::max(0.0, elapsed);
-    result->startup.interaction_hitch_percentile_ms = std::max(0.0, elapsed);
+    result->startup.observed_percentile_ms = trial_percentile(
+        result->startup.trials, result->startup.budget.percentile,
+        &gh::StartupTrial::editor_open_to_first_nonblank_ms);
+    result->startup.interaction_hitch_percentile_ms = trial_percentile(
+        result->startup.trials, result->startup.budget.percentile,
+        &gh::StartupTrial::interaction_hitch_ms);
     result->startup.correlation.gpu_evidence_id = result->health.run_id;
     impl_->requested_at.reset();
     impl_->publish(std::move(result));
@@ -193,7 +227,7 @@ bool ControlGpuHealthProvider::record_timeout(
     trial.verdict = gh::Verdict::unavailable;
     trial.diagnostic_code = "gpu.startup.timeout";
     result->startup.trials.push_back(std::move(trial));
-    result->startup.capture.event_count = 1;
+    record_capture_event(result->startup.capture);
     impl_->requested_at.reset();
     impl_->publish(std::move(result));
     return true;
@@ -218,7 +252,7 @@ bool ControlGpuHealthProvider::record_instance_lost() noexcept {
     trial.verdict = gh::Verdict::unavailable;
     trial.diagnostic_code = "gpu.startup.instance_lost";
     result->startup.trials.push_back(std::move(trial));
-    result->startup.capture.event_count = 1;
+    record_capture_event(result->startup.capture);
     impl_->requested_at.reset();
     impl_->publish(std::move(result));
     return true;

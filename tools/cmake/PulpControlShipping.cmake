@@ -53,9 +53,9 @@ set(_PULP_CONTROL_CAPABILITIES
 
 # Registry presence pre-stages schema/client compatibility but is not permission
 # for a product to advertise an operation whose host adapter does not exist yet.
-# A2/A2T must remove this gate only when they bind the exact product provider.
-set(_PULP_CONTROL_UNWIRED_CAPABILITIES
-    dev.pulp.gpu/health.read@1)
+# Keep this list as the fail-closed gate for any future registry-first operation;
+# GPU health is wired by the exact Standalone provider and view adapter.
+set(_PULP_CONTROL_UNWIRED_CAPABILITIES)
 
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.

@@ -110,6 +110,11 @@ TEST_CASE("control carrier paths are deterministic per runtime root",
     REQUIRE_FALSE(default_directory.empty());
     CHECK(default_directory.is_absolute());
     CHECK(default_endpoint == default_directory / "broker.sock");
+    std::error_code canonical_error;
+    const auto canonical_temporary_root =
+        std::filesystem::weakly_canonical(std::filesystem::temp_directory_path(), canonical_error);
+    REQUIRE_FALSE(canonical_error);
+    CHECK(default_directory == default_control_runtime_directory(canonical_temporary_root));
 }
 
 TEST_CASE("control carrier prepares only an owner-private absolute directory",
