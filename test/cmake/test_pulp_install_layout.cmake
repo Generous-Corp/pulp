@@ -117,6 +117,51 @@ if(NOT _gpu_probe_schema_compare_rc EQUAL 0)
         "Installed GPU probe result schema differs from the source contract.")
 endif()
 
+set(_installed_gpu_health_read_schema
+    "${_prefix}/share/pulp/contracts/gpu-health-read-result-v1.schema.json")
+if(NOT EXISTS "${_installed_gpu_health_read_schema}")
+    message(FATAL_ERROR
+        "GPU health-read result schema is missing from the installed SDK:\n"
+        "${_installed_gpu_health_read_schema}")
+endif()
+set(_source_gpu_health_read_schema
+    "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-health-read-result-v1.schema.json")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${_source_gpu_health_read_schema}"
+            "${_installed_gpu_health_read_schema}"
+    RESULT_VARIABLE _gpu_health_read_schema_compare_rc)
+if(NOT _gpu_health_read_schema_compare_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed GPU health-read result schema differs from the source contract.")
+endif()
+
+foreach(_gpu_health_model_header IN ITEMS health_result.hpp health_read_result.hpp)
+    set(_installed_gpu_health_model_header
+        "${_prefix}/include/pulp_tooling/gpu_health/${_gpu_health_model_header}")
+    set(_source_gpu_health_model_header
+        "${CMAKE_CURRENT_LIST_DIR}/../../tools/cli/gpu_health/include/pulp_tooling/gpu_health/${_gpu_health_model_header}")
+    if(NOT EXISTS "${_installed_gpu_health_model_header}")
+        message(FATAL_ERROR
+            "GPU health model header is missing from the installed SDK:\n"
+            "${_installed_gpu_health_model_header}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${_source_gpu_health_model_header}"
+                "${_installed_gpu_health_model_header}"
+        RESULT_VARIABLE _gpu_health_model_header_compare_rc)
+    if(NOT _gpu_health_model_header_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed GPU health model header differs from source: "
+            "${_gpu_health_model_header}")
+    endif()
+endforeach()
+unset(_gpu_health_model_header)
+unset(_installed_gpu_health_model_header)
+unset(_source_gpu_health_model_header)
+unset(_gpu_health_model_header_compare_rc)
+
 set(_gpu_health_front_args
     --prefix "${_prefix}")
 if(PULP_EXPECT_GPU_CLI)

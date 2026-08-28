@@ -37,6 +37,8 @@ versions, executors, publishers, publications, and instances fail closed.
 
 - plugin state, parameters, presets, authoring state, and host automation;
 - audio/MIDI fixtures, render output, screenshots, logs, traces, and telemetry;
+- GPU adapter/build/source/shader identities, target signatures, startup
+  timings, cache state, and correlated optimization evidence;
 - user consent decisions, publisher policy, grants, receipts, and audit records;
 - per-session and bootstrap credentials;
 - exact instance, slot, process-generation, and publication identity;
@@ -177,6 +179,7 @@ environment-delivered bootstrap credentials remain rejected.
 | Artifact or private-data exfiltration | Opaque handles, exact producer lineage, original-grant reauthorization, per-blob/chunk and aggregate quotas, bounded retention/collection, explicit redaction state, and content-free deletion audit; no same-UID at-rest secrecy claim |
 | Runtime evaluation becomes a mutation shortcut | Separate high-risk component and capability, `research-unsafe` profile, exact acknowledgement, dedicated evaluator, realm and size/time limits; never an implementation path for typed operations |
 | Denial of service against broker, host, or audio thread | Bounded clients, frames, queues, rates, subscriptions, jobs, receipts, per-blob/chunk and aggregate artifact sizes/counts; timeouts, cancellation, expiry, and orphan/partial cleanup; no JSON/network work on the audio thread |
+| GPU startup evidence is laundered into an optimization claim | Sensitive exact-instance read; closed typed schema; ratified budget provenance; bounded trials and event-loss accounting; content/signature negative controls; nullable GPU/Perfetto correlation; complete-capture and causal-attribution gates; no newest-instance or newest-trace fallback; no render, trace start, prewarm, or shader compile in the read executor |
 | Grant revoked while work is queued or executing | Admission and pre-apply revalidation, cancellable staged operations, truthful `mayHaveApplied`/receipt state, no automatic retry of ambiguous mutation |
 | Schema downgrade or scope smuggling | Namespaced versioned IDs, canonical serialization and digest, unknown-field rejection, no permissive downgrade, explicit manifest changes for new fields/directions/rates |
 | Removed build authority survives reconfiguration | Per-target profile, capability, and unsafe-evaluation declarations force-refresh on every configure; a two-configure regression proves critical authority is withdrawn without deleting the build tree |

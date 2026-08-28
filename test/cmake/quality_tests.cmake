@@ -372,6 +372,8 @@ if(Python3_Interpreter_FOUND)
     # contract even when no real adapter is available.
     add_test(NAME gpu-health-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_contract.py")
+    add_test(NAME gpu-health-read-contract-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_read_contract.py")
     if(UNIX AND PROJECT_IS_TOP_LEVEL)
         add_test(NAME gpu-health-cpu-only-configure
             COMMAND bash

@@ -154,7 +154,7 @@ Build profiles are artifact policy, not client grants:
 | `production-stripped` | Default. Endpoint and capability list must be empty. |
 | `developer-local` | Explicit developer capabilities; Standalone endpoint only. |
 | `test-deterministic` | Explicit deterministic test/T0 capabilities; never a production default. |
-| `support-diagnostics` | Explicit instance, state, diagnostics, or log reads only. |
+| `support-diagnostics` | Explicit instance, state, GPU-health, diagnostics, or log reads only. |
 | `research-unsafe` | Explicit research list; evaluation also needs the separate acknowledgement. |
 
 Runtime grant profiles are a different, smaller vocabulary:
@@ -162,6 +162,43 @@ Runtime grant profiles are a different, smaller vocabulary:
 is intersected with the exact live registration's declared capabilities. Empty
 intersection, missing consent, stale publication, or a dead session denies the
 request.
+
+### GPU startup-health snapshots
+
+`dev.pulp.gpu/health.read@1` is the exact-instance read operation for the
+versioned `pulp.gpu-health-read-result.v1` response. It is a sensitive,
+read-only background operation: calling it reads a bounded, already-produced
+snapshot. It does not open an editor, render a frame, compile a shader, start a
+trace, prewarm a cache, or run on the audio thread.
+
+The response preserves the complete `pulp.gpu-health-result.v1` device and
+render-health object under `health`. Its `startup` object binds the measurement
+clock and first-nonblank-present endpoint, cold/warm trials, content and target
+signatures, prepared/fallback state, adapter class, bounded event-loss fields,
+and nullable GPU/Perfetto evidence IDs. The budget freezes separate nonzero
+cold and warm trial counts whose sum and observed composition must match the
+total trial count. A performance verdict or final
+`queue-B4`, `queue-B4-investigation`, or `no-change` disposition is valid only
+after the budget is ratified and the required correlated capture is complete.
+An unratified budget fixes how future trials will be interpreted but cannot
+publish a performance pass or fail.
+
+Once the exact live product advertises the operation, read it through the
+existing generic control CLI:
+
+```sh
+pulp control call --instance "$INSTANCE_ID" dev.pulp.gpu/health.read@1 \
+  --profile inspect-readonly --params '{}' --json
+```
+
+Registry and MCP presence do not imply host availability. A host must not
+declare this capability until its product adapter has real first-visible-frame
+and trace producers and returns a typed, validated snapshot for that exact
+registration, instance, and publication. The current CMake shipping helper
+rejects that declaration explicitly; A2/A2T removes the gate only with the
+bound product provider. Until then, capability status and grant requests fail
+closed. This runtime operation is intentionally absent from the design-time
+agent capability manifest.
 
 ## Diagnose and audit
 

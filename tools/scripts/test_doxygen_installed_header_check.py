@@ -33,12 +33,15 @@ def fixture(root: Path) -> None:
     write(root / "inspect/include/pulp/inspect/protocol.hpp")
     write(root / "inspect/include/pulp/inspect/full_only.hpp")
     write(root / "inspect/include/pulp/inspect/methods.inc")
+    write(root / "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp")
+    write(root / "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp")
     for name in ("arranger_view.hpp", "piano_roll_view.hpp"):
         write(root / f"core/timeline_view/include/pulp/timeline_view/{name}")
     write(root / "core/timeline_view/include/pulp/timeline_view/detail/internal.hpp")
     write(root / "core/timeline_view/include/pulp/timeline_view/src/internal.hpp")
     write(root / "docs/doxygen/Doxyfile", """INPUT = ../../core/a/include \\
         ../../inspect/include \\
+        ../../tools/cli/gpu_health/include \\
         ../../core/runtime/include \\
         ../../core/timeline_view/include
 RECURSIVE = YES
@@ -56,6 +59,10 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
       FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
   endif()
 endforeach()
+install(DIRECTORY
+  "${CMAKE_CURRENT_SOURCE_DIR}/tools/cli/gpu_health/include/pulp_tooling/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp_tooling"
+  FILES_MATCHING PATTERN "*.hpp")
 elseif(TARGET pulp-inspect-protocol)
   install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"
@@ -103,6 +110,12 @@ def main() -> int:
         doxy.write_text(original.replace("../../core/a/include \\\n", ""))
         require(any("missing from Doxygen" in item for item in checker.check(root)),
                 "missing Doxygen root escaped")
+        doxy.write_text(original.replace(
+            "        ../../tools/cli/gpu_health/include \\\n", ""
+        ))
+        require(any("health_read_result.hpp" in item and "missing from Doxygen" in item
+                    for item in checker.check(root)),
+                "missing GPU health tooling Doxygen root escaped")
         doxy.write_text(original + "INPUT = ../../core/a/include\n")
         require(checker.check(root), "dynamic/duplicate Doxygen authority escaped")
         doxy.write_text(original)
@@ -146,6 +159,8 @@ def main() -> int:
         write(prefix / "include/pulp/runtime/build_info.hpp")
         write(prefix / "include/pulp/inspect/protocol.hpp")
         write(prefix / "include/pulp/inspect/methods.inc")
+        write(prefix / "include/pulp_tooling/gpu_health/health_result.hpp")
+        write(prefix / "include/pulp_tooling/gpu_health/health_read_result.hpp")
         require(not checker.check(root, prefix, "off"),
                 "matching inspector-off installed prefix failed")
         write(prefix / "include/pulp/inspect/full_only.hpp")
@@ -160,6 +175,16 @@ def main() -> int:
         require(any("unsupported public header" in item for item in checker.check(root, prefix, "on")),
                 "unexpected installed header escaped")
         (prefix / "include/pulp/a/rogue.hpp").unlink()
+        tooling = prefix / "include/pulp_tooling/gpu_health/health_read_result.hpp"
+        tooling.unlink()
+        require(any("health_read_result.hpp" in item for item in checker.check(root, prefix, "on")),
+                "missing installed pulp_tooling header escaped")
+        write(tooling)
+        write(prefix / "include/pulp_tooling/gpu_health/rogue.hpp")
+        require(any("unsupported public header" in item and "rogue.hpp" in item
+                    for item in checker.check(root, prefix, "on")),
+                "unexpected installed pulp_tooling header escaped")
+        (prefix / "include/pulp_tooling/gpu_health/rogue.hpp").unlink()
         (prefix / "include/pulp/a/a.hpp").unlink()
         require(any("missing authority header" in item for item in checker.check(root, prefix, "on")),
                 "missing installed header escaped")
@@ -300,6 +325,18 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/b/include/pulp/"
     require(any("unsupported independent public-header install authority" in item
                 for item in errors),
             "independent Pulp public-header install escaped")
+    temporary.cleanup()
+
+    def redirect_tooling_install(root: Path) -> None:
+        rules = root / checker.INSTALL_RULES
+        rules.write_text(rules.read_text().replace(
+            "tools/cli/gpu_health/include/pulp_tooling/",
+            "tools/cli/other/include/pulp_tooling/",
+        ))
+
+    temporary, root, errors = mutated(redirect_tooling_install)
+    require(any("pulp_tooling public-header install authority" in item for item in errors),
+            "redirected pulp_tooling install authority escaped")
     temporary.cleanup()
 
     def add_variable_install(root: Path) -> None:

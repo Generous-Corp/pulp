@@ -37,6 +37,7 @@ INPUT                  = ../../core/audio/include \
                          ../../core/timeline_view/include \
                          ../../core/view/include \
                          ../../tools/audio/analysis/include \
+                         ../../tools/cli/gpu_health/include \
                          ../../inspect/include
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp *.h *.inc *.hpp.in

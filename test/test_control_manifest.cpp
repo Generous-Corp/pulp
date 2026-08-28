@@ -31,7 +31,8 @@ bool schema_strings_are_bounded(choc::value::ValueView value) {
     if (value.isObject()) {
         const auto type = value["type"];
         if (type.isString() && type.getString() == "string" &&
-            !value.hasObjectMember("maxLength") && !value.hasObjectMember("pattern"))
+            !value.hasObjectMember("maxLength") &&
+            !value.hasObjectMember("pattern") && !value.hasObjectMember("enum"))
             return false;
         for (std::uint32_t index = 0; index < value.size(); ++index) {
             if (!schema_strings_are_bounded(value.getObjectMemberAt(index).value))
@@ -200,6 +201,8 @@ TEST_CASE("control profile validation is fail closed", "[inspect][control-manife
 
     auto support = developer_manifest();
     support.profile = ControlBuildProfile::SupportDiagnostics;
+    support.capabilities.push_back(InspectorCapability::GpuHealthRead);
+    REQUIRE(validate_control_manifest(support, error));
     support.capabilities.push_back(InspectorCapability::StateWrite);
     support.capabilities.push_back(InspectorCapability::SessionControl);
     REQUIRE_FALSE(validate_control_manifest(support, error));
@@ -387,6 +390,19 @@ TEST_CASE("control registry projects capability and operation metadata",
         if (operation.capability == InspectorCapability::TelemetryStream) {
             CHECK(operation.input_schema_json.find("\"maxItems\":32") != std::string_view::npos);
             CHECK(operation.input_schema_json.find("\"uniqueItems\":true") !=
+                  std::string_view::npos);
+        }
+        if (operation.capability == InspectorCapability::GpuHealthRead) {
+            CHECK(operation.id == "dev.pulp.gpu/health.read@1");
+            CHECK(operation.result_kind == "response");
+            CHECK(operation.input_schema_json.find("\"properties\":{}") !=
+                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find(
+                      "\"schema\": { \"const\": \"pulp.gpu-health-read-result.v1\" }") !=
+                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"dropped_event_count\"") !=
+                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"queue-B4-investigation\"") !=
                   std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::TraceControl) {

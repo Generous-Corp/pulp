@@ -1,0 +1,10 @@
+#pragma once
+
+#include <string_view>
+
+namespace pulp::inspect::detail {
+
+inline constexpr std::string_view kGpuHealthReadResultSchema =
+    R"PULP_SCHEMA(@PULP_GPU_HEALTH_READ_SCHEMA_JSON@)PULP_SCHEMA";
+
+} // namespace pulp::inspect::detail

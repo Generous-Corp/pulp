@@ -441,6 +441,11 @@ endfunction()
 _pulp_configure_standalone_target(pulp-standalone pulp::view)
 _pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
 
+# The GPU-health contracts are CPU-only and back Inspector's typed read
+# executor, so define the model before the optional Inspector runtime on every
+# supported SDK configuration. Native probes remain desktop-tooling-only.
+add_subdirectory(tools/cli/gpu_health)
+
 # The control manifest and protocol registry are CPU-only audit data and remain
 # available even when live Inspector support is disabled. inspect/CMakeLists.txt
 # returns after that foundation in production-stripped configurations.

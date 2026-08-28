@@ -93,6 +93,9 @@ endif()
 if(TARGET pulp-gpu-audio)
     list(APPEND PULP_SDK_TARGETS pulp-gpu-audio)
 endif()
+if(TARGET pulp-tool-gpu-health-model)
+    list(APPEND PULP_SDK_TARGETS pulp-tool-gpu-health-model)
+endif()
 
 if(TARGET pulp-inspect)
     list(APPEND PULP_SDK_TARGETS pulp-inspect)
@@ -308,6 +311,13 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp")
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 endif()
 
+# The exported CPU-only health model is the typed provider boundary for the
+# installed exact-instance GPU health-read executor.
+install(DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cli/gpu_health/include/pulp_tooling/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp_tooling"
+    FILES_MATCHING PATTERN "*.hpp")
+
 # The inspector protocol/session foundation is deliberately separate from the
 # desktop GPU overlay and remains available to installed CPU-only clients.
 if(TARGET pulp-inspect)
@@ -376,6 +386,7 @@ elseif(TARGET pulp-inspect-protocol)
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_ui_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_standalone_ui_adapter.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_main_thread_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_gpu_health_read_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_read_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_write_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trace_session_executor.hpp"
@@ -433,19 +444,22 @@ install(PROGRAMS
     "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
     DESTINATION "share/pulp/capability-control")
 
-# Stable machine-readable GPU health result contract. The CLI and MCP helper
-# emit this schema outside a source checkout, so consumers need the matching
-# versioned contract from the selected installed SDK rather than a floating
-# documentation URL or an inferred response shape.
-set(_pulp_gpu_health_result_schema
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json")
-if(NOT EXISTS "${_pulp_gpu_health_result_schema}")
-    message(FATAL_ERROR
-        "Required GPU health result schema is missing: ${_pulp_gpu_health_result_schema}")
-endif()
-install(FILES "${_pulp_gpu_health_result_schema}"
+# Stable machine-readable GPU health contracts. Installed CLI and MCP
+# consumers need the exact versioned shapes selected by their SDK, not a
+# floating documentation URL or an inferred response.
+set(_pulp_gpu_health_contracts
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-read-result-v1.schema.json")
+foreach(_pulp_gpu_health_contract IN LISTS _pulp_gpu_health_contracts)
+    if(NOT EXISTS "${_pulp_gpu_health_contract}")
+        message(FATAL_ERROR
+            "Required GPU health contract is missing: ${_pulp_gpu_health_contract}")
+    endif()
+endforeach()
+install(FILES ${_pulp_gpu_health_contracts}
     DESTINATION "share/pulp/contracts")
-unset(_pulp_gpu_health_result_schema)
+unset(_pulp_gpu_health_contract)
+unset(_pulp_gpu_health_contracts)
 
 # Stable machine-readable numeric GPU probe result contract. Keep this next to
 # the health contract so installed CLI/MCP consumers can validate evidence
