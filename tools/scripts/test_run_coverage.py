@@ -320,6 +320,20 @@ class ObjectDiscoveryTests(unittest.TestCase):
         self.assertIn("INVALID_PROFILE_SHARDS * 100", text)
         self.assertIn("PROFILE_SHARDS * 5", text)
 
+    def test_merge_uses_one_input_list_invocation(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -print > "${PROFILE_INPUTS}"',
+            text,
+        )
+        self.assertIn('--input-files="${PROFILE_INPUTS}"', text)
+        self.assertNotIn(
+            "xargs -0 llvm-profdata merge",
+            text,
+            "xargs may split a large shard set into multiple merges whose "
+            "shared output path causes later invocations to discard earlier data.",
+        )
+
 
 class StaleCacheTests(unittest.TestCase):
     """#570: the post-configure assert errors when the cache is stale.
