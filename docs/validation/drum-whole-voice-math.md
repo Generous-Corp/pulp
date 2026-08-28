@@ -10,12 +10,21 @@ whole-voice gain, so those voices remain on their reference paths.
 The generic and SDS-V-family toms were the sole exception: their noise ladder's
 exact `tanhf` accounted for 37.30% and 34.00% of sampled whole-voice time.
 Selecting the existing `FastMath::tanh` implementation at that consumer produced
-the following cross-process Release results across all 24 tom rate/block cells:
+the following complete-hit Release results across all 24 tom rate/block cells.
+Each cell reports the median paired gain from independent processes; each process
+itself uses 11 trials of three complete hits. Executable order was counterbalanced
+to limit temperature and frequency-order bias. The generic voice used three
+processes, while the narrower SDS-V-family margin was confirmed with five.
 
 | Voice | Minimum gain | Median gain | Maximum gain |
 |---|---:|---:|---:|
-| Generic tom | 13.50% | 17.29% | 18.69% |
-| SDS-V-family tom | 11.15% | 15.67% | 16.73% |
+| Generic tom | 14.87% | 16.84% | 19.19% |
+| SDS-V-family tom | 10.14% | 16.07% | 17.41% |
+
+No declared configuration lost after cross-process median aggregation. The
+narrowest cell was the SDS-V-family voice at 96 kHz with 32-frame blocks, so
+that cell's margin is the reopen trigger if compiler, architecture, or voice
+lifetime behavior changes.
 
 The 0.75-second acceptance corpus covered all eight tom presets, velocities
 0.2/0.82/1.0, all three rates, and 32/512 block partitions. Across 144 cells,
