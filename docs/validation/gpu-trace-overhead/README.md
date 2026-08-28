@@ -54,12 +54,16 @@ adds no xrun. Offline analysis cannot waive or stand in for that B6 gate.
 ## Human Perfetto correlation
 
 Automation proves that the typed result cites the saved artifact and emits an
-`ui_correlation.open_command` plus bounded search terms. Human acceptance still
-requires opening that exact SHA-256-identified artifact in Perfetto UI,
-searching the emitted dominant stage and evidence ID, and confirming the cited
-span is present on the expected track. Record the reviewer, date, artifact
-digest, and observed span; an executable open command is not itself visual
-inspection.
+`ui_correlation.open_command` plus bounded search terms. The committed M3
+receipt also records the completed visual acceptance against the exact
+`9fd7cf0d...` artifact: Perfetto UI selected `gpu_pipeline_prepare` (1.8 ms)
+and `gpu_resource_upload` (0.9 ms) on the expected GPU track and displayed the
+shared `4444...4444` evidence ID plus the expected frame and sequence fields.
+The fixture was delivered through Perfetto's official localhost embedding
+protocol with `localOnly` browser-memory handling; it was not uploaded or
+shared. Future receipts must retain the reviewer, date, artifact digest, UI
+revision, and observed span details; an executable open command is not itself
+visual inspection.
 
 Perfetto is a localization tool, not an oracle for every platform state
 machine. A real resize investigation demonstrated the correct evidence chain:
