@@ -28,6 +28,22 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         auto hint = args.get<std::string>(3, "");
         auto* existing = self.widget(childId);
         if (existing) {
+            // document.createElement('button') may eagerly materialize a
+            // ToggleButton through _ensureNative before appendChild reaches
+            // this fast path. Preserve the HTML element's implicit semantics
+            // on that already-created widget too; otherwise the early
+            // reparent return below skips the new-widget button defaults.
+            if (tag == "button") {
+                existing->set_implicit_access_role(View::AccessRole::button);
+                // _ensureNative currently represents an HTML button with a
+                // ToggleButton, whose constructor supplies the stock Pulp
+                // `toggle` role. That is an implementation default, not an
+                // authored ARIA override. Replace it with the HTML role here;
+                // __replayAriaAttributes runs immediately after append and
+                // restores any real explicit role from the DOM attributes.
+                existing->restore_implicit_access_role();
+                existing->set_default_hover_feedback(true);
+            }
             if (auto* p = existing->parent()) {
                 // Move the existing subtree to the new parent - don't erase widgets.
                 auto removed = p->remove_child(existing);
@@ -159,6 +175,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         // this implicit HTML role and its default hover feedback.
         if (tag == "button") {
             child->set_implicit_access_role(View::AccessRole::button);
+            child->restore_implicit_access_role();
             child->set_default_hover_feedback(true);
         }
         self.widgets_[childId] = child.get();
