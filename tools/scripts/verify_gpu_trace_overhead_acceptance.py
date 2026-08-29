@@ -245,6 +245,8 @@ def verify(
         required_semantic = set(contract.SEMANTIC_FIELDS) - {"unavailable_reason", "dominant_stage"}
         if not required_semantic.issubset(semantic):
             errors.append(f"fixture replay {case} omits required semantic fields")
+        if semantic.get("question") != question:
+            errors.append(f"fixture replay {case} semantic result has the wrong question")
         if semantic.get("verdict") != verdict or semantic.get("dominant_stage") != dominant:
             errors.append(f"fixture replay {case} has the wrong intended verdict/stage")
         if action is not None:

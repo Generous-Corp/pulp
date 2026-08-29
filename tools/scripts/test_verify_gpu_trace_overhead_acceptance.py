@@ -188,6 +188,12 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 mutate(receipt)
                 self.assertTrue(any(expected in error for error in MODULE.verify(receipt, ROOT)))
 
+    def test_fixture_semantic_question_cannot_be_relabelled(self):
+        receipt = self.terminal_receipt()
+        receipt["fixture_replay"][0]["semantic_result"]["question"] = "gpu-probe"
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("semantic result has the wrong question" in error for error in errors))
+
     def test_human_observation_must_match_current_semantics(self):
         receipt = self.terminal_receipt()
         receipt["human_perfetto_ui_correlation"]["observed_spans"][0]["duration_ns"] = 1
