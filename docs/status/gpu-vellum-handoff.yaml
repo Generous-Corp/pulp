@@ -13,7 +13,7 @@
     },
     "pulp": {
       "repo": "Generous-Corp/pulp",
-      "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62",
+      "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
       "path": ".github/vellum-ownership.json"
     },
     "vellum": {
@@ -49,6 +49,7 @@
     "a3-pulp-input-to-present-host",
     "a3-pulp-runtime-control",
     "a4-pulp-dpr-experiment",
+    "b0-adoption-authority-freeze",
     "b1-vellum-gpu-runtime",
     "b2-vellum-gpu-diagnostics",
     "b3-vellum-gpu-capture",
@@ -68,43 +69,57 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-probes",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "31dfac71e3c4d8cb208ac55d25ab4f08398b99bc",
+          "object_id": "58cb5dd92a8ebeec605f63325f1a37beaa85a1e4",
+          "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_health",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62",
+          "object_id": "b0c8c47cb7343bbae09ba26f9221d0ffb018366c",
+          "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62",
+          "object_id": "5aff4b9835071398e4640a6cc200284db5768bce",
+          "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_recipe_catalog_data.h.in",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "0715eacbf6e415c6785ad2ae9f9472d4cf52fa4b",
+          "object_id": "fa75b50198493a50e4439a6f071c4fd3dccf2246",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/mcp/mcp_gpu_tools.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "a7ed65628d52120c118a0b67727e3b17f927b7f7",
+          "object_id": "5e8b8e7483b22b21634db98205fbd41519d39ff4",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_recipe_catalog.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "60ce7abcd196f4be52f14a770aaf57d60d5b88e6",
+          "object_id": "9b2144a74ea3cca85019e48497a2830ad6069fad",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/verify_gpu_probe_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "cea0c49a4e3e809ebfe62f50cbdbeb3716cf4df1",
+          "object_id": "57514bc2d6b2c44b0722bd803840f36b0d85e48b",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [],
@@ -183,6 +198,27 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [],
+      "output_receipt": {
+        "id": "a2-pulp-product-probes.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/a2-pulp-product-probes.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "Pulp product evidence remains callable and equivalent or stronger.",
+          "a2-pulp-product-probes output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Wrong pass/resource/provider and unavailable-work controls must fail.",
+          "a2-pulp-product-probes planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -194,55 +230,73 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-analysis/references/hints_gpu.md",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "ba6bad559caf4223a93491b654b2bad992133873",
+          "object_id": "d378a699d84ad428917261d207d3c236612c5b5c",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "405b9ac7beee39fd2cbdce0e1d4d9fba404b2554",
+          "object_id": "1d1d6a9522d4aaa161f83cca13a8f9282c0222ec",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "2e728e75d2a54a0091464b5e216b1fa26874151b",
+          "object_id": "484374e1c29cb81b068f787d778dce09f02fa894",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "2e728e75d2a54a0091464b5e216b1fa26874151b",
+          "object_id": "653cc2a24fa4c06d88f2187bf7e6e8bdb2de5c1c",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-trace-overhead",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "4dfa3d4e5bdab497d3bb1fa58a1e98eaac0f9500",
+          "object_id": "397857d24daac81adc26110351838c5607ed13f0",
+          "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "405b9ac7beee39fd2cbdce0e1d4d9fba404b2554",
+          "object_id": "0e5b80237a021a247fe536029bbfd98b5626d98d",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/mcp/mcp_trace_tools.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "4f23d772971f04f3f832f54940351353f832dbb2",
+          "object_id": "918553b05ada3f27c4064f89b405d9b9298f90cc",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "4dfa3d4e5bdab497d3bb1fa58a1e98eaac0f9500",
+          "object_id": "64863a465561a4d6368a1ba1215ca388b406a10e",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "4dfa3d4e5bdab497d3bb1fa58a1e98eaac0f9500",
+          "object_id": "d7d7f3d4223ef2c881127a35a62b8b1cec5768a5",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [],
@@ -338,6 +392,31 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "a2-pulp-product-probes"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "a2-pulp-product-probes.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "a2t-pulp-trace-analysis.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/a2t-pulp-trace-analysis.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "Pulp questions replay equivalent typed evidence from the adopted producer.",
+          "a2t-pulp-trace-analysis output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Wrong process/build/session, lossy trace, invalid trace, and stale analyzer fail.",
+          "a2t-pulp-trace-analysis planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -349,31 +428,41 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/platform/mac/window_host_mac.mm",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "0e9bce4292c120b84597a364bd2e20b7b880f496",
+          "object_id": "f60f86d8f2206248d1eb2b7ef44ed797f6c3c2fa",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/editor_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "b4ba22f1d700621366afdbc72bb8615336964cd1",
+          "object_id": "215685aba4ac7a501a2d3609565e22142d0b9b72",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/view.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "3ae1c52c4b31a9ed2217da05befc53b5dd40bbda",
+          "object_id": "d435d03e8260acd6203c683d8ebdca1d4aa30a3e",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "33ddfc826497ef58c8c43550281514ea13581891",
+          "object_id": "79608b5813c42cbcca34e270e62911c49cec357d",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge/bridge_dispatch.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "b4ba22f1d700621366afdbc72bb8615336964cd1",
+          "object_id": "0c0ad6f12f40a64dc5fd59a63b064f114b79b833",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [],
@@ -482,6 +571,31 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "a2t-pulp-trace-analysis"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "a2t-pulp-trace-analysis.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "a3-pulp-input-to-present-host.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/a3-pulp-input-to-present-host.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "Host/product events and harnesses remain, with any generic mapping proven individually.",
+          "a3-pulp-input-to-present-host output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Signature/category omission, missing gpu_present, foreign process, audio TID, loss, and xrun fail.",
+          "a3-pulp-input-to-present-host planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -493,73 +607,153 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
+          "object_id": "2fd37d17725b335c54d2d267177825283ba44d9f",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "docs/contracts/gpu-health-read-result-v1.schema.json",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+          "object_id": "2d6539c370c7b4b61c2cb80036c8382be95b3301",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/validation/gpu-first-visible-a3-acceptance.json",
+          "state": "pulp-owned-retained",
+          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
+          "object_id": "b6bd5846bf66e0826a90a24538946938f348f6bb",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-first-visible-a3-acceptance.md",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "835f0cc70644e5ab1802caea1933f1c63bc945d4",
+          "object_id": "ed644eaa43783671a4f96742adcfe2cdba639ad7",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+          "object_id": "a42679b4cc7371547b5372f665a73c9df57ca14a",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "inspect/include/pulp/inspect/control_gpu_health_read_executor.hpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "19bfcc9b2a04ffad1ae5f02ba69213e2a5c90d80",
+          "object_id": "d9d537fcf9b98cab80e521ac299a05db921c783f",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "19bfcc9b2a04ffad1ae5f02ba69213e2a5c90d80",
+          "object_id": "af9d1af2307ba60c66d08fad94acc812777f910e",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_provider.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+          "object_id": "dd5aa47578d36c890cf10f93574f08549d9fb081",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_read_executor.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "78ae2e6d2a4660323a9c5eb138e9b65a32b09c42",
+          "object_id": "67bff8e79fc7ec22a2e92756c9e0730be821f9ad",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_view_adapter.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "0e8401eda380ed009c1e83383d7baf9974af2776",
+          "object_id": "127b356f4b2cdf87beef2d08f3014d8eb8fb3972",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "test/cmake/gpu_health_tests.cmake",
+          "state": "pulp-owned-retained",
+          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
+          "object_id": "dd6aa967fdc13e6d55cdaf378615bc93dab9c5ac",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "test/support/a3_control_build_identity.hpp",
+          "state": "pulp-owned-retained",
+          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
+          "object_id": "dcad679eb76d30dd2f0f882ad050899c8d7426f4",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "test/test_control_gpu_health_provider.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
+          "object_id": "d5b29aac09a84c3c6926d26f9d37420434b67c26",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "test/test_control_gpu_health_standalone_product.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
+          "object_id": "309a581b85d7747453644860d184b8dd258d0cbb",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+          "object_id": "160d75c92655bc8ac1180633e8e5e15a4c072264",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_health/src/health_read_result_json.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+          "object_id": "78ea3c686c654dad98b801c9bddac5e507cca373",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
+          "object_id": "0e962fea7df24c8e46fa85a896ff22f843da943d",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_campaign.py",
+          "state": "pulp-owned-retained",
+          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
+          "object_id": "79754efe1b6f5e41a7d0f3370cbde4f13b029226",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+          "state": "pulp-owned-retained",
+          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
+          "object_id": "6c02aea1b568e32cde699566370048adeb4df944",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [],
@@ -638,6 +832,7 @@
       "retained_paths": [
         "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
         "docs/contracts/gpu-health-read-result-v1.schema.json",
+        "docs/validation/gpu-first-visible-a3-acceptance.json",
         "docs/validation/gpu-first-visible-a3-acceptance.md",
         "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
         "inspect/include/pulp/inspect/control_gpu_health_read_executor.hpp",
@@ -645,9 +840,15 @@
         "inspect/src/control_gpu_health_provider.cpp",
         "inspect/src/control_gpu_health_read_executor.cpp",
         "inspect/src/control_gpu_health_view_adapter.cpp",
+        "test/cmake/gpu_health_tests.cmake",
+        "test/support/a3_control_build_identity.hpp",
+        "test/test_control_gpu_health_provider.cpp",
+        "test/test_control_gpu_health_standalone_product.cpp",
         "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
         "tools/cli/gpu_health/src/health_read_result_json.cpp",
-        "tools/scripts/gpu_first_visible_a3_acceptance.py"
+        "tools/scripts/gpu_first_visible_a3_acceptance.py",
+        "tools/scripts/gpu_first_visible_a3_campaign.py",
+        "tools/scripts/gpu_first_visible_a3_external_adapter.py"
       ],
       "terminal_result": {
         "pass": "All four roles, controls, trace replay, overhead, and one derived disposition pass.",
@@ -659,6 +860,33 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "a2t-pulp-trace-analysis",
+        "a3-pulp-input-to-present-host"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "a2t-pulp-trace-analysis.terminal.v1",
+        "a3-pulp-input-to-present-host.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "a3-pulp-runtime-control.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/a3-pulp-runtime-control.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "All four roles, controls, trace replay, overhead, and one derived disposition pass.",
+          "a3-pulp-runtime-control output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Blank frame, wrong instance, stale head, fake lifecycle, trace tamper, and audio-thread entry fail.",
+          "a3-pulp-runtime-control planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -670,43 +898,57 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/contracts/gpu-dpr-experiment-v1.schema.json",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "d403635668b45e01d37c50239b84f2b653df40ea",
+          "object_id": "1f211b8954fc06e32d34b01d0acd5057ba82d4e3",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-dpr",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "d403635668b45e01d37c50239b84f2b653df40ea",
+          "object_id": "46c7b420efb2657603ef1fa70d330bd5b5d8e409",
+          "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "test/fixtures/gpu-ux/dpr",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "d403635668b45e01d37c50239b84f2b653df40ea",
+          "object_id": "9bac446a7ba3db90f92ff1760179f4f14a5db413",
+          "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_evidence.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "d403635668b45e01d37c50239b84f2b653df40ea",
+          "object_id": "8b6c14831e7af5e7730859b8a178e783d8e37235",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_experiment.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "d403635668b45e01d37c50239b84f2b653df40ea",
+          "object_id": "d48c6f3bc7163f175159d90deb52ca15c854586d",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_pulp_native_adapter.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "b35401fccf46228f88e4486add0c9c134fe9eb5e",
+          "object_id": "d8ec957b4fe95d8c84c5fc766b8afe5eb3316627",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_runner.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "2e728e75d2a54a0091464b5e216b1fa26874151b",
+          "object_id": "802fcba3d3da4cda2a1bc7346e864acd215b19d2",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [],
@@ -797,6 +1039,167 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "a2-pulp-product-probes"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "a2-pulp-product-probes.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "a4-pulp-dpr-experiment.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/a4-pulp-dpr-experiment.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "One measured DPR candidate queues B5 with the complete corpus.",
+          "a4-pulp-dpr-experiment output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Stale scale, wrong input coordinates, blurred corpus, fake trace, and missing cell fail.",
+          "a4-pulp-dpr-experiment planted negative produces non-pass"
+        ]
+      }
+    },
+    {
+      "id": "b0-adoption-authority-freeze",
+      "phase": "B0 exact authority, receipt, path, and deletion freeze",
+      "trigger": "Run only after terminal Horizon A receipts and before any Vellum implementation or Pulp deletion.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".github/vellum-ownership.json",
+          "state": "pulp-owned-retained",
+          "revision": "dbd94869a55512365b3df0e7674682e78cbfbe7c",
+          "object_id": "ea026969b74b427fa4b6084e5e66582d1516ce7c",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/status/gpu-recipes.yaml",
+          "state": "pulp-owned-retained",
+          "revision": "9728a9ec0048be5e47fa18d9c74739c03690c02e",
+          "object_id": "76ec3ca2edb2fb4c41f237863b04996aeb2e48d3",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_recipe_catalog.py",
+          "state": "pulp-owned-retained",
+          "revision": "60ce7abcd196f4be52f14a770aaf57d60d5b88e6",
+          "object_id": "9b2144a74ea3cca85019e48497a2830ad6069fad",
+          "object_type": "blob"
+        }
+      ],
+      "vellum_paths": [],
+      "api_contract": {
+        "surfaces": [
+          "protected-tip authority freeze and package receipt DAG"
+        ],
+        "request": "Exact terminal A2/A2T/A3/A4 receipts, protected Pulp/Vellum tips, route expansion, and full path inventory.",
+        "result": "One immutable B0 receipt that freezes dependencies, accepted dispositions, path objects, retained paths, and an empty deletion grant.",
+        "errors": "Missing, stale, nonterminal, off-ancestry, object-mismatched, or unauthorized input blocks B1-B6.",
+        "availability": "No Vellum implementation or Pulp deletion begins without a passing B0 receipt."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Reviewed Pulp adoption owner",
+        "ownership": "B0 records authority only; it does not transfer or implement framework behavior.",
+        "lifetime": "The freeze remains valid only while every protected tip, path object, and input receipt is unchanged.",
+        "threads": "Receipt validation is offline and has no product runtime threads.",
+        "rt": "B0 performs no product, render, GPU, or audio-thread work."
+      },
+      "trace_contract": {
+        "producer": "none",
+        "events": [],
+        "required_fields": [],
+        "query_outputs": [],
+        "loss": "B0 consumes terminal trace receipts but emits no runtime trace."
+      },
+      "tests": {
+        "unit": [
+          "Receipt DAG, exact path object, authority, route, retained, and deletion-freeze checks."
+        ],
+        "planted": [
+          "Stale revision/blob/tree, missing dependency, changed protected tip, and nonempty deletion controls fail."
+        ],
+        "real_host": [
+          "Revalidate exact terminal M5, Forge, REAPER, Perfetto, and DPR receipt identities."
+        ],
+        "installed_prefix": [
+          "Bind the exact installed Vellum prefix only when the B0 cutover trigger is met."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "input receipt status and exact revision/object identity"
+        ],
+        "threshold": "Every required Horizon A input is terminal and every path object is current.",
+        "audio": "Consumes the passed xrun/audio-thread receipts without rerunning work.",
+        "failure": "Any mismatch preserves Horizon A ownership and leaves B1-B6 nonterminal."
+      },
+      "pulp_adoption": {
+        "adapter": "No adapter is installed at B0; it freezes the later package contract.",
+        "surfaces": [
+          "authority ledger",
+          "package receipt DAG",
+          "path inventory",
+          "route projection"
+        ],
+        "proof": "The B0 receipt binds all exact input and output receipt IDs before later work starts.",
+        "duplicate_rejection": "One B0 receipt is authoritative for one exact protected-tip pair."
+      },
+      "retained_paths": [
+        ".github/vellum-ownership.json",
+        "docs/status/gpu-recipes.yaml",
+        "tools/scripts/gpu_recipe_catalog.py"
+      ],
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      },
+      "terminal_result": {
+        "pass": "All Horizon A inputs and exact path identities are frozen with no deletion authority.",
+        "no_change": "Remain on Horizon A when any required input is not terminal.",
+        "nonterminal": "Any stale path, route, receipt, protected tip, or deletion ambiguity remains open."
+      },
+      "depends_on": [
+        "a2-pulp-product-probes",
+        "a2t-pulp-trace-analysis",
+        "a3-pulp-input-to-present-host",
+        "a3-pulp-runtime-control",
+        "a4-pulp-dpr-experiment"
+      ],
+      "accepted_dispositions": [
+        "pass"
+      ],
+      "input_receipts": [
+        "a2-pulp-product-probes.terminal.v1",
+        "a2t-pulp-trace-analysis.terminal.v1",
+        "a3-pulp-input-to-present-host.terminal.v1",
+        "a3-pulp-runtime-control.terminal.v1",
+        "a4-pulp-dpr-experiment.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "b0-adoption-authority-freeze.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/b0-adoption-authority-freeze.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "All Horizon A inputs and exact path identities are frozen with no deletion authority.",
+          "b0-adoption-authority-freeze output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Stale revision/blob/tree, missing dependency, changed protected tip, and nonempty deletion controls fail.",
+          "b0-adoption-authority-freeze planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -808,64 +1211,114 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/include/pulp/render/headless_surface.hpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "c27db8e984062b636c65af0086d7f10828595679",
+          "object_id": "0c00b51502809ab9274917371930eaea4edfc13b",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [
         {
           "repo": "Generous-Corp/vellum",
+          "path": "CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "82ece751dc36a9dd39baa2f2fed41c0739e42215",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/RunInstallConsumer.cmake",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "4167da313b93aa1c74dc5a810b645cfdc4b454e0",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/VellumConfig.cmake.in",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "7d67184812f84b37ce0ea6acbf7493a70dfdad8a",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
           "path": "cmake/VellumSkiaDawn.cmake",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "b797025ce86b0bf72e6b36a507986d869198ee66",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "95b84573e77f85b44e5d459a76590b3a9a15f9e7",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/gpu_runtime.hpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/skia_dawn_surface.hpp",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "67b176224228b0257a77416384bb8d75d97e1e95",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/gpu_runtime.mm",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/skia_dawn_surface.mm",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "b6f1bfeb00661eaee935256a008810036d01deb2",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_runtime_process_harness.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_runtime_test.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "provenance/third-party-lock.json",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "6fa97a114ff40c2dc4781fa46759f294430d064b",
+          "object_type": "blob"
         }
       ],
       "api_contract": {
         "surfaces": [
           "GpuRuntimeConfig, GpuRuntimeStatus, explicit initialize, and bounded diagnostic snapshot"
         ],
-        "request": "Skia-free policy, fixed workers/capacity, non-owning diagnostic/trace sinks, and exact provider identity.",
+        "request": "Skia-free policy, fixed workers/capacity, runtime-owned diagnostic/trace sink registration, and exact provider identity.",
         "result": "First success, idempotent reuse, foreign-handler refusal, conflict, unsupported, or partial failure.",
         "errors": "Conflicting initialization and foreign global handler are deterministic typed failures.",
         "availability": "Unsupported provider and partial initialization remain unavailable or unverified."
@@ -873,7 +1326,7 @@
       "ownership_lifetime_rt": {
         "owner": "Generous-Corp/vellum generic GPU runtime",
         "ownership": "Vellum owns one process-global SkLogHandler coordinator and bounded runtime state.",
-        "lifetime": "Installed handler is process-lifetime; borrowed sinks outlive initialized runtime use.",
+        "lifetime": "Runtime owns a revocable sink registration; callbacks quiesce before the registration and sink are destroyed, with no borrowed raw or process-lifetime sink assumption.",
         "threads": "Callback only enqueues bounded data; non-RT drain formats and projects diagnostics.",
         "rt": "No JSON, filesystem, network, unbounded lock, heavy formatting, or audio-thread drain."
       },
@@ -944,6 +1397,31 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "b0-adoption-authority-freeze"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "b0-adoption-authority-freeze.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "b1-vellum-gpu-runtime.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/b1-vellum-gpu-runtime.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "One installed Vellum runtime owns bounded diagnostics and Pulp consumes it thinly.",
+          "b1-vellum-gpu-runtime output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Foreign handler replacement, duplicate coordinator, oversized callback, and callback-after-teardown fail.",
+          "b1-vellum-gpu-runtime planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -955,33 +1433,75 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62",
+          "object_id": "5aff4b9835071398e4640a6cc200284db5768bce",
+          "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/mcp/mcp_gpu_tools.cpp",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "a7ed65628d52120c118a0b67727e3b17f927b7f7",
+          "object_id": "5e8b8e7483b22b21634db98205fbd41519d39ff4",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [
         {
           "repo": "Generous-Corp/vellum",
+          "path": "CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "82ece751dc36a9dd39baa2f2fed41c0739e42215",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/RunInstallConsumer.cmake",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "4167da313b93aa1c74dc5a810b645cfdc4b454e0",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/VellumConfig.cmake.in",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "7d67184812f84b37ce0ea6acbf7493a70dfdad8a",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "95b84573e77f85b44e5d459a76590b3a9a15f9e7",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/gpu_diagnostics.hpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/gpu_diagnostics.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_diagnostics_test.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         }
       ],
       "api_contract": {
@@ -1054,6 +1574,31 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "b1-vellum-gpu-runtime"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "b1-vellum-gpu-runtime.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "b2-vellum-gpu-diagnostics.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/b2-vellum-gpu-diagnostics.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "Installed Vellum diagnostics preserve authentic bounded fields through Pulp.",
+          "b2-vellum-gpu-diagnostics output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Malformed source, wrong stage/provider, missing location, source leak, oversize, timeout, and callback-after-teardown fail.",
+          "b2-vellum-gpu-diagnostics planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -1065,33 +1610,75 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-probes",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "31dfac71e3c4d8cb208ac55d25ab4f08398b99bc",
+          "object_id": "58cb5dd92a8ebeec605f63325f1a37beaa85a1e4",
+          "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/verify_gpu_probe_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "cea0c49a4e3e809ebfe62f50cbdbeb3716cf4df1",
+          "object_id": "57514bc2d6b2c44b0722bd803840f36b0d85e48b",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [
         {
           "repo": "Generous-Corp/vellum",
+          "path": "CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "82ece751dc36a9dd39baa2f2fed41c0739e42215",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/RunInstallConsumer.cmake",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "4167da313b93aa1c74dc5a810b645cfdc4b454e0",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/VellumConfig.cmake.in",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "7d67184812f84b37ce0ea6acbf7493a70dfdad8a",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "95b84573e77f85b44e5d459a76590b3a9a15f9e7",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/gpu_capture.hpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/gpu_capture.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_capture_test.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         }
       ],
       "api_contract": {
@@ -1177,6 +1764,33 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "b1-vellum-gpu-runtime",
+        "b2-vellum-gpu-diagnostics"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "b1-vellum-gpu-runtime.terminal.v1",
+        "b2-vellum-gpu-diagnostics.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "b3-vellum-gpu-capture.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/b3-vellum-gpu-capture.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "Installed Vellum capture gives equivalent or stronger A2 provenance.",
+          "b3-vellum-gpu-capture output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Wrong IDs, unknown point, oversize, saturation, timeout, stale prior-frame bytes, and callback-after-teardown fail.",
+          "b3-vellum-gpu-capture planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -1188,81 +1802,139 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/src/skia_surface.cpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "929941dfe689f18eb6e12c36e559180e638bab0a",
+          "object_id": "fb58828d9dc222b794016bca9c2c99ff6a81787e",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_provider.cpp",
           "state": "pulp-owned-adoption",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+          "object_id": "dd5aa47578d36c890cf10f93574f08549d9fb081",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [
         {
           "repo": "Generous-Corp/vellum",
+          "path": "CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "82ece751dc36a9dd39baa2f2fed41c0739e42215",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/RunInstallConsumer.cmake",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "4167da313b93aa1c74dc5a810b645cfdc4b454e0",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/VellumConfig.cmake.in",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "7d67184812f84b37ce0ea6acbf7493a70dfdad8a",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "95b84573e77f85b44e5d459a76590b3a9a15f9e7",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/gpu_runtime.hpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/gpu_trace.hpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/skia_dawn_surface.hpp",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "67b176224228b0257a77416384bb8d75d97e1e95",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/gpu_runtime.mm",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/gpu_trace.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/skia_dawn_surface.mm",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "b6f1bfeb00661eaee935256a008810036d01deb2",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_pipeline_harness.mm",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_runtime_test.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_style_test.cpp",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "dc471225469f9e5fc67dc60e3939d0aa7e73511a",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_trace_test.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/text_shaping_concurrency_test.cpp",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "1c278964f55b23e6cec6cb344749bfb5e8cf8880",
+          "object_type": "blob"
         }
       ],
       "api_contract": {
@@ -1277,7 +1949,7 @@
       "ownership_lifetime_rt": {
         "owner": "Generous-Corp/vellum Graphite context and trace runtime",
         "ownership": "Vellum owns one executor owner and typed generic events; Pulp selects product policy only.",
-        "lifetime": "Executor member precedes context; recorders/context drain and die before executor, then Dawn releases.",
+        "lifetime": "Executor precedes context; the runtime owns and quiesces trace registration, recorders, and context before sink/executor teardown, then releases Dawn.",
         "threads": "Fixed workers, bounded queue/backpressure, cancellation, failure, and queued shutdown are explicit.",
         "rt": "No executor queue/compile/shutdown wait, trace sink work, or diagnostic drain on audio threads."
       },
@@ -1285,15 +1957,18 @@
         "producer": "Vellum backend-neutral monotonic-nanosecond GPU trace",
         "events": [
           "vellum.gpu.context.create",
+          "vellum.gpu.device.loss",
           "vellum.gpu.drawable.acquire",
           "vellum.gpu.executor.saturation",
           "vellum.gpu.frame.paint",
           "vellum.gpu.frame.submit",
+          "vellum.gpu.health.transition",
           "vellum.gpu.pipeline.compile",
           "vellum.gpu.pipeline.queue",
           "vellum.gpu.pipeline.request",
           "vellum.gpu.present",
-          "vellum.gpu.readback"
+          "vellum.gpu.readback",
+          "vellum.gpu.resource.upload"
         ],
         "required_fields": [
           "build/provider",
@@ -1361,6 +2036,35 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "a3-pulp-runtime-control",
+        "b0-adoption-authority-freeze",
+        "b1-vellum-gpu-runtime"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "a3-pulp-runtime-control.terminal.v1",
+        "b0-adoption-authority-freeze.terminal.v1",
+        "b1-vellum-gpu-runtime.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "b4-vellum-observability-executor.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/b4-vellum-observability-executor.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "b4-vellum-observability-executor output receipt binds exact installed revisions and terminal disposition",
+          "background_bounded only after causal material benefit and every correctness/RT/performance gate."
+        ],
+        "planted": [
+          "Executor-before-context destruction, wrong instance, saturation, lost trace, and old policy controls fail distinctly.",
+          "b4-vellum-observability-executor planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -1372,45 +2076,91 @@
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_provider.cpp",
           "state": "pulp-owned-adoption",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+          "object_id": "dd5aa47578d36c890cf10f93574f08549d9fb081",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [
         {
           "repo": "Generous-Corp/vellum",
+          "path": "CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "82ece751dc36a9dd39baa2f2fed41c0739e42215",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/RunInstallConsumer.cmake",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "4167da313b93aa1c74dc5a810b645cfdc4b454e0",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/VellumConfig.cmake.in",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "7d67184812f84b37ce0ea6acbf7493a70dfdad8a",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "95b84573e77f85b44e5d459a76590b3a9a15f9e7",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/gpu_runtime.hpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/gpu_trace.hpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/gpu_runtime.mm",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/gpu_trace.cpp",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/skia_dawn_surface.mm",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "b6f1bfeb00661eaee935256a008810036d01deb2",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_pipeline_harness.mm",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
         }
       ],
       "api_contract": {
@@ -1497,6 +2247,31 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "b4-vellum-observability-executor"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "b4-vellum-observability-executor.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "b4-vellum-signature-prewarm.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/b4-vellum-signature-prewarm.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "One bounded signature-aware policy proves causal material benefit.",
+          "b4-vellum-signature-prewarm output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Wrong/stale signature, wrong context/build, unbounded queue, timeout, and old no-op prewarm fail.",
+          "b4-vellum-signature-prewarm planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -1508,39 +2283,83 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/include/pulp/render/skia_surface.hpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "99adf70238af5644b36048c34ae4fc278716a74a",
+          "object_id": "341fe72b16728e4b640da79ace2174751ffc247c",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_runner.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "2e728e75d2a54a0091464b5e216b1fa26874151b",
+          "object_id": "802fcba3d3da4cda2a1bc7346e864acd215b19d2",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [
         {
           "repo": "Generous-Corp/vellum",
+          "path": "CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "82ece751dc36a9dd39baa2f2fed41c0739e42215",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/RunInstallConsumer.cmake",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "4167da313b93aa1c74dc5a810b645cfdc4b454e0",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/VellumConfig.cmake.in",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "7d67184812f84b37ce0ea6acbf7493a70dfdad8a",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "95b84573e77f85b44e5d459a76590b3a9a15f9e7",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
           "path": "graphics/include/vellum/graphics/skia_dawn_surface.hpp",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "67b176224228b0257a77416384bb8d75d97e1e95",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/src/skia_dawn_surface.mm",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "b6f1bfeb00661eaee935256a008810036d01deb2",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/gpu_style_test.cpp",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "dc471225469f9e5fc67dc60e3939d0aa7e73511a",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "graphics/tests/text_shaping_concurrency_test.cpp",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "1c278964f55b23e6cec6cb344749bfb5e8cf8880",
+          "object_type": "blob"
         }
       ],
       "api_contract": {
@@ -1627,6 +2446,35 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "a4-pulp-dpr-experiment",
+        "b0-adoption-authority-freeze",
+        "b1-vellum-gpu-runtime"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "a4-pulp-dpr-experiment.terminal.v1",
+        "b0-adoption-authority-freeze.terminal.v1",
+        "b1-vellum-gpu-runtime.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "b5-vellum-dpr-policy.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/b5-vellum-dpr-policy.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "One Vellum scale policy passes the complete A4 matrix.",
+          "b5-vellum-dpr-policy output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Stale scale, blurred text, wrong coordinates, oscillation, and missing provenance fail.",
+          "b5-vellum-dpr-policy planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -1638,49 +2486,57 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/daw-smoke/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "835f0cc70644e5ab1802caea1933f1c63bc945d4",
+          "object_id": "e886579875858b21d6aaacd5c154a458df8e2e40",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/forge-app-delivery/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "835f0cc70644e5ab1802caea1933f1c63bc945d4",
+          "object_id": "8d18b7722e6f66813aa866f5d74b5666a6ccba20",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/skia-gpu-build/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "835f0cc70644e5ab1802caea1933f1c63bc945d4",
+          "object_id": "7fd00f320cdea79d1fca88296d0d4eddcc7e4a4b",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-analysis/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "835f0cc70644e5ab1802caea1933f1c63bc945d4",
+          "object_id": "9f0092a37087e360815f1df9d35b57d11825c9a7",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-sql/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "835f0cc70644e5ab1802caea1933f1c63bc945d4",
+          "object_id": "f182f9199270882ae7ed3a8d55e8e49278bdc7f8",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
-        },
-        {
-          "repo": "Generous-Corp/pulp",
-          "path": "docs/status/gpu-vellum-handoff.yaml",
-          "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "835f0cc70644e5ab1802caea1933f1c63bc945d4",
+          "object_id": "7037ffd9dbe6c8dac1f13122af1b8b448e1b4007",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-first-visible-a3-acceptance.md",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "835f0cc70644e5ab1802caea1933f1c63bc945d4",
+          "object_id": "ed644eaa43783671a4f96742adcfe2cdba639ad7",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [
@@ -1688,19 +2544,57 @@
           "repo": "Generous-Corp/vellum",
           "path": ".agents/skills/vellum-app-authoring/SKILL.md",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "798393e5d7e45ddd0b53db5e0f65fcee28e78a10",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "82ece751dc36a9dd39baa2f2fed41c0739e42215",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/RunInstallConsumer.cmake",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "4167da313b93aa1c74dc5a810b645cfdc4b454e0",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/VellumConfig.cmake.in",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "7d67184812f84b37ce0ea6acbf7493a70dfdad8a",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "docs/architecture/gpu-boundary.md",
           "state": "existing",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "6e71e3a0daeb7e02b254174a6ecca61b6388b873",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/vellum",
           "path": "docs/gpu-debugging.md",
           "state": "proposed",
-          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": null,
+          "object_type": "absent"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/CMakeLists.txt",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+          "object_id": "95b84573e77f85b44e5d459a76590b3a9a15f9e7",
+          "object_type": "blob"
         }
       ],
       "api_contract": {
@@ -1722,8 +2616,15 @@
       "trace_contract": {
         "producer": "Adopted Vellum generic events plus retained Pulp host/product events",
         "events": [
-          "versioned Pulp host vocabulary",
-          "versioned Vellum generic vocabulary"
+          "gpu_acquire -> vellum.gpu.drawable.acquire",
+          "gpu_device_loss -> vellum.gpu.device.loss",
+          "gpu_health_transition -> vellum.gpu.health.transition",
+          "gpu_pipeline_prepare -> vellum.gpu.pipeline.compile",
+          "gpu_present -> vellum.gpu.present",
+          "gpu_probe/gpu_readback -> vellum.gpu.readback",
+          "gpu_resource_upload -> vellum.gpu.resource.upload",
+          "gpu_submit -> vellum.gpu.frame.submit",
+          "retained Pulp AppKit/product host events remain Pulp-owned"
         ],
         "required_fields": [
           "build/provider",
@@ -1735,7 +2636,8 @@
         "query_outputs": [
           "before/after semantic parity",
           "duplicate-event rejection",
-          "exact retained event inventory"
+          "exact retained event inventory",
+          "old/new event mapping parity for health transition, device loss, resource upload, pipeline, acquire, submit, present, and readback"
         ],
         "loss": "No adoption claim passes with missing/lost events or ambiguous ownership."
       },
@@ -1744,7 +2646,8 @@
           "Path ledger, installed API, Doxygen, docs, control, CLI/MCP, capabilities, and skill checks."
         ],
         "planted": [
-          "Duplicate handler/executor/policy/event, stale provider, broad removal, and old adapter controls fail."
+          "Duplicate handler/executor/policy/event, stale provider, broad removal, and old adapter controls fail.",
+          "Old generic symbol/target survival after an authorized delete and missing migrated event mappings fail."
         ],
         "real_host": [
           "Standalone, real DAW, Forge Modular, Three.js, GPU-audio, resize/presentation, and Perfetto replay."
@@ -1755,7 +2658,8 @@
       },
       "performance_gate": {
         "metrics": [
-          "A3/A4 outcomes, producer overhead, query parity, frame/pixel/input fidelity, and xruns"
+          "A3/A4 outcomes, producer overhead, query parity, frame/pixel/input fidelity, and xruns",
+          "compile-out versus compiled-idle versus active producer overhead and xrun disposition"
         ],
         "threshold": "Every adopted package preserves or improves its ratified terminal gate.",
         "audio": "Zero forbidden audio-thread work and no xrun regression across real hosts.",
@@ -1781,7 +2685,6 @@
         ".agents/skills/trace-analysis/SKILL.md",
         ".agents/skills/trace-sql/SKILL.md",
         ".agents/skills/view-bridge/SKILL.md",
-        "docs/status/gpu-vellum-handoff.yaml",
         "docs/validation/gpu-first-visible-a3-acceptance.md"
       ],
       "terminal_result": {
@@ -1794,6 +2697,47 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "b0-adoption-authority-freeze",
+        "b1-vellum-gpu-runtime",
+        "b2-vellum-gpu-diagnostics",
+        "b3-vellum-gpu-capture",
+        "b4-vellum-observability-executor",
+        "b4-vellum-signature-prewarm",
+        "b5-vellum-dpr-policy"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "b0-adoption-authority-freeze.terminal.v1",
+        "b1-vellum-gpu-runtime.terminal.v1",
+        "b2-vellum-gpu-diagnostics.terminal.v1",
+        "b3-vellum-gpu-capture.terminal.v1",
+        "b4-vellum-observability-executor.terminal.v1",
+        "b4-vellum-signature-prewarm.terminal.v1",
+        "b5-vellum-dpr-policy.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "b6-pulp-vellum-adoption-skills.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/b6-pulp-vellum-adoption-skills.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "Installed Vellum owns generic behavior and Pulp retains thin product/host workflows with no duplicates.",
+          "b6-pulp-vellum-adoption-skills output receipt binds exact installed revisions and terminal disposition",
+          "compile-out, compiled-idle, and active trace overhead plus xrun receipt passes",
+          "migrated A2T/A3/real-host corpus is green against installed Vellum",
+          "old generic Pulp symbols and targets are absent for every separately authorized delete path"
+        ],
+        "planted": [
+          "Duplicate handler/executor/policy/event, stale provider, broad removal, and old adapter controls fail.",
+          "Old generic symbol/target survival after an authorized delete and missing migrated event mappings fail.",
+          "b6-pulp-vellum-adoption-skills planted negative produces non-pass"
+        ]
       }
     },
     {
@@ -1805,55 +2749,73 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "d6544372810d6c9235cbb21bbc3b8e31ac031098",
+          "object_id": "2d62dd0d7fe6b1770201407ad32683f0a921eed5",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/cmd/upgrade.rs",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "146e446b99eb54f82461d5bf2777307c6bcb720a",
+          "object_id": "6d6fad7d2d297c270c2603ea1016c26558e3339f",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/install.rs",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "07b3b15d22b41512661e447b5aaaa4c0fad923f0",
+          "object_id": "d5a5ce15eefb5e5fe50610b5b3a492624aeedded",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/install/tests.rs",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "07b3b15d22b41512661e447b5aaaa4c0fad923f0",
+          "object_id": "18160a2f316d3ef775354548efd8626eb6350896",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/package_cli.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "60aa0680021c46dc0a3a7fa7497a838b33c55c77",
+          "object_id": "95bbf8116580424ed44c2ec72c7c186cc923efad",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "0715eacbf6e415c6785ad2ae9f9472d4cf52fa4b",
+          "object_id": "67d29b09dc4ec0ab2e5ddc4970d3c15a35c34f16",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "0c7c387f0ba5e8bbf276664eff4dd909cb06e4e9",
+          "object_id": "05f99e82658bdb7d43d1050959689fda74ef3ab7",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_package_cli.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "60aa0680021c46dc0a3a7fa7497a838b33c55c77",
+          "object_id": "434925c91e4f46727b482a898b2ba853d01ca9dd",
+          "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+          "revision": "9770c166338fc03a14c7724a9ffd220ec89735df",
+          "object_id": "b8e5d57112bc83ba7513afe37ffe3cd0991965c0",
+          "object_type": "blob"
         }
       ],
       "vellum_paths": [],
@@ -1933,6 +2895,31 @@
         "authorized": false,
         "authority": "none",
         "required_evidence": []
+      },
+      "depends_on": [
+        "b0-adoption-authority-freeze"
+      ],
+      "accepted_dispositions": [
+        "no-change",
+        "pass"
+      ],
+      "input_receipts": [
+        "b0-adoption-authority-freeze.terminal.v1"
+      ],
+      "output_receipt": {
+        "id": "pulp-v8-threejs-release-followup.terminal.v1",
+        "schema": "pulp.gpu-vellum-package-terminal.v1",
+        "path": "docs/validation/gpu-vellum-adoption/pulp-v8-threejs-release-followup.json"
+      },
+      "terminal_evidence": {
+        "required": [
+          "Signed installed archive and self-upgrade preserve callable Three.js.",
+          "pulp-v8-threejs-release-followup output receipt binds exact installed revisions and terminal disposition"
+        ],
+        "planted": [
+          "Missing/corrupt nested runtime and upgrade-dropping-runtime controls fail.",
+          "pulp-v8-threejs-release-followup planted negative produces non-pass"
+        ]
       }
     }
   ],
@@ -1940,8 +2927,10 @@
     "adopted Vellum protected-tip SHA and installed-prefix identity",
     "clean-agent CLI, MCP, Perfetto, Forge, and DAW workflow evidence",
     "current Pulp protected-tip SHA and GPU catalog digest",
+    "exact per-path owning revision plus blob/tree identity for every Pulp path",
     "exact route results for every proposed and adoption path",
     "inventory of every retained path and exact deletion candidate",
+    "no Pulp deletion authority and an exact empty delete_paths freeze",
     "terminal A3 budget, campaign, overhead, A2T, and B4 disposition",
     "terminal A4 corpus digest and DPR disposition"
   ],
@@ -1949,6 +2938,12 @@
     "do not close unavailable or unverified evidence as pass",
     "do not delete any path while delete_paths is empty or deletion_gate is unauthorized",
     "do not infer Vellum APIs or path existence beyond pinned existing/proposed states",
-    "do not move, widen, narrow, or reverse authority during horizon A"
-  ]
+    "do not move, widen, narrow, or reverse authority during horizon A",
+    "do not treat a path object as current after its revision, object, or last-owner identity drifts"
+  ],
+  "self_binding": {
+    "path": "docs/status/gpu-vellum-handoff.yaml",
+    "policy": "excluded-from-path-inventory-to-avoid-circular-git-self-reference",
+    "validator": "tools/scripts/gpu_recipe_catalog.py"
+  }
 }
