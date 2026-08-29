@@ -40,6 +40,7 @@ import sys
 from typing import NamedTuple
 
 import attempt_artifacts
+import maker_intent
 from module_kinds import is_audio_interface
 
 
@@ -2847,120 +2848,18 @@ def render_inventory(
 
 
 def _affirmatively_names_maker(prompt: str, maker: str) -> bool:
-    """Whether a maker spelling is requested rather than locally negated."""
+    """Whether the shared maker resolver finds an affirmative request."""
     display = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", maker)
-    words = [re.escape(word) for word in re.findall(r"[A-Za-z0-9]+", display)]
-    if not words:
-        return False
-    pattern = re.compile(r"\b" + r"[\s_-]*".join(words) + r"\b", re.I)
-    for match in pattern.finditer(prompt):
-        # Limit negation to the sourcing phrase that immediately governs the
-        # maker.  A broad word window made an unrelated request such as
-        # "no delay, use Forge Modular" negate the later explicit choice.
-        clause = re.split(r"[,.;!?]", prompt[:match.start()])[-1]
-        conjunction_exclusion = False
-        conjunction = re.split(r"\b(but|and)\b", clause, flags=re.I)
-        if len(conjunction) >= 3:
-            left = conjunction[-3].rstrip()
-            word = conjunction[-2].lower()
-            right = conjunction[-1]
-            # "anything but Maker" is one exclusion phrase; ordinary
-            # contrastive conjunctions start a new local sourcing phrase. A
-            # sourcing verb after "but" makes that contrast explicit even if
-            # the prior clause itself says "all modules".
-            sourcing_predicate = re.search(
-                r"\b(?:use|include|select|choose|prefer)\b", right, re.I)
-            # Distinguish a new finite/imperative sourcing clause from a
-            # sourcing verb embedded in the noun phrase excluded by "all
-            # but".  Do not enumerate subjects or adverbs: "the patch should
-            # use", "I want to use", and "definitely use" all start new
-            # clauses.  Relative clauses and *ungoverned* participial phrases
-            # stay attached to the excluded noun ("patches designed to use",
-            # "a setup allowing you to use", "modules that include").
-            source_prefix = (right[:sourcing_predicate.start()]
-                             if sourcing_predicate else "")
-            relative_prefix = re.search(
-                r"\b(?:that|which|who|whose|where)\b", source_prefix, re.I)
-            finite_auxiliary = re.search(
-                r"\b(?:am|is|are|was|were|be|been|being|do|does|did|has|"
-                r"have|had|can|could|may|might|must|shall|should|will|would)\b",
-                source_prefix, re.I)
-            participle = re.search(
-                r"\b(?:[A-Za-z]+(?:ing|ed)|made|built|meant)\b",
-                source_prefix, re.I)
-            # A later auxiliary starts the main sourcing predicate unless a
-            # subordinator between it and the participle keeps it nested. Thus
-            # "the generated patch should use" is a main clause, while
-            # "modules designed so they can use" remains an excluded phrase.
-            auxiliary_governs_source = bool(finite_auxiliary)
-            if participle and finite_auxiliary and \
-                    finite_auxiliary.start() > participle.start():
-                between = source_prefix[participle.end():
-                                        finite_auxiliary.start()]
-                auxiliary_governs_source = not re.search(
-                    r"\b(?:so|that|which|who|whose|where)\b", between, re.I)
-            ungoverned_participle = bool(
-                participle and not auxiliary_governs_source)
-            starts_sourcing = bool(
-                sourcing_predicate and not relative_prefix and
-                not ungoverned_participle)
-            all_but = re.search(
-                r"\b(?:anything|everything|all)(?:\W+\w+){0,4}\s*$",
-                left, re.I)
-            if word == "but" and all_but and not starts_sourcing:
-                conjunction_exclusion = True
-            else:
-                clause = right
-        negated = conjunction_exclusion or any(
-            re.search(expression, clause, re.I) for expression in (
-            r"\b(?:do\s+not|don't|never|not)\s+"
-            r"(?:(?:want|prefer)(?:\W+\w+){0,3}\W+)?"
-            r"(?:use|include|select|choose|prefer)?"
-            r"(?:\W+\w+){0,4}\W*$",
-            r"\binstead\W+of\W*$",
-            r"\bnot\W+from\W*$",
-            r"\b(?:with|using)\W+no(?:\W+\w+){0,4}\W+from\W*$",
-            r"\bprefer(?:\W+\w+){1,6}\W+over\W*$",
-            r"\bwithout(?:\W+(?:using|including|any|the|a|an|custom|"
-            r"generated|modules?)){0,4}\W*$",
-            r"\b(?:avoid|exclude|excluding)(?:\W+(?:using|including|the|a|"
-            r"an|custom|generated|modules?)){0,4}\W*$",
-            r"\bno(?:\W+(?:the|a|an|custom|generated|modules?)){0,3}\W*$",
-            r"\bnot\W*$",
-            r"\bexcept\W*$",
-            r"\b(?:anything|everything|all)(?:\W+\w+){0,4}"
-            r"\W+(?:but|except)\W*$",
-            r"\b(?:anything|everything|all)\W+other\W+than\W*$",
-        ))
-        if negated:
-            continue
-        suffix = prompt[match.end():]
-        post_negated = any(re.match(expression, suffix, re.I)
-                           for expression in (
-            r"\s*(?:is|are)\s+not\s+(?:allowed|permitted|used|included|"
-            r"selected|chosen)\b",
-            r"\s*(?:isn't|aren't)\s+(?:allowed|permitted|used|included|"
-            r"selected|chosen)\b",
-            r"\s*(?:should|must|may|can)\s+not\s+(?:be\s+)?(?:allowed|"
-            r"permitted|used|included|selected|chosen)\b",
-            r"\s*(?:cannot|can't)\s+(?:be\s+)?(?:allowed|permitted|used|"
-            r"included|selected|chosen)\b",
-            r"\s*(?:should|must|may)\s+be\s+(?:avoided|excluded|forbidden|"
-            r"disallowed)\b",
-            r"\s+(?:is\s+)?(?:forbidden|excluded|disallowed)\b",
-            r"\s*\?\s*(?:no|not\s+allowed)\b",
-            r"\s*[- ]free\b",
-        ))
-        if post_negated:
-            continue
-        return True
-    return False
+    result = maker_intent.resolve(
+        prompt, {maker: {"brand": display}}).for_slug(maker)
+    return bool(result and result.decision == maker_intent.Decision.AFFIRMED)
 
 
 def intent_module_plan(prompt: str, inv: dict, idioms: dict | None = None,
                        selected: set[tuple[str, str]] | None = None,
                        allowed: set[tuple[str, str]] | None = None,
-                       module_source: str = "balanced") -> str:
+                       module_source: str = "balanced",
+                       maker_resolution: maker_intent.Resolution | None = None) -> str:
     """Port-complete installed choices for a deterministically claimed idiom.
 
     Tags answer what a module broadly is; they do not prove it has every jack
@@ -3134,9 +3033,21 @@ def intent_module_plan(prompt: str, inv: dict, idioms: dict | None = None,
             # actually sent to the model and spends attention on choices it is
             # forbidden to use.
             return "\n".join(lines) + "\n"
+    if maker_resolution is None:
+        synthetic_catalogue = {
+            plugin: {"brand": package.get("brand") or package.get("name") or
+                     re.sub(r"(?<=[a-z])(?=[A-Z])", " ", plugin)}
+            for plugin, package in inv.items()}
+        maker_resolution = maker_intent.resolve(prompt, synthetic_catalogue)
+    excluded_maker_slugs = {
+        slug for maker in maker_intent.excluded(maker_resolution)
+        for slug in maker.slugs}
+
     for role, required in sorted(needs.items()):
         choices = []
         for plugin, package in inv.items():
+            if plugin in excluded_maker_slugs:
+                continue
             for model, module in (package.get("modules") or {}).items():
                 if allowed is not None and (plugin, model) not in allowed:
                     continue
@@ -3153,7 +3064,9 @@ def intent_module_plan(prompt: str, inv: dict, idioms: dict | None = None,
                     # Rack slugs omit separators that product display names
                     # retain ("ForgeModular" versus "Forge Modular"). A
                     # locally negated mention is not a sourcing preference.
-                    named = _affirmatively_names_maker(prompt, plugin)
+                    resolved = maker_resolution.for_slug(plugin)
+                    named = bool(resolved and resolved.decision ==
+                                 maker_intent.Decision.AFFIRMED)
                     choices.append((not named, -exact_params, plugin, model))
         # ForgeModular is the generated user pack.  The app's module-source
         # setting is a product contract, not decorative prompt prose: under
@@ -3721,7 +3634,8 @@ def rack_library_token() -> str:
         return ""
 
 
-def _options_for(tags, inv: dict, midx: dict, cat: dict) -> dict:
+def _options_for(tags, inv: dict, midx: dict, cat: dict,
+                 excluded_plugins: set[str] | None = None) -> dict:
     """The modules that would provide each tag, best answer first.
 
     Ranked by RELEVANCE, not by the alphabet. The first version sorted
@@ -3737,10 +3651,13 @@ def _options_for(tags, inv: dict, midx: dict, cat: dict) -> dict:
     fourth is incidental.
     """
     owned = entitlements_cached()
+    excluded_plugins = excluded_plugins or set()
     options: dict = {}
     for tag in sorted(tags):
         cands = []
         for pslug, mods in midx.items():
+            if pslug in excluded_plugins:
+                continue
             p = cat.get(pslug, {})
             premium = bool(p.get("premium"))
             # An uninstalled plugin with no build for this machine is not a
@@ -3784,7 +3701,8 @@ def acquisition_cost(pslug: str, premium: bool, inv: dict, owned: set) -> int:
     return 3                        # premium, unowned: not ours to take
 
 
-def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
+def preflight(prompt: str, inv: dict, midx: dict, cat: dict,
+              maker_resolution: maker_intent.Resolution | None = None) -> dict:
     """Before spending anything, decide whether this request is buildable.
 
     The generator is already structurally safe -- its prompt is assembled from
@@ -3799,6 +3717,8 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
     Pure tag matching against local data: no model call, nothing spent.
     """
     import re
+    excluded_plugins = (excluded_maker_plugins(maker_resolution)
+                        if maker_resolution is not None else set())
     low = prompt.lower()
     # Whole words only. A plain substring test reads "hat" out of "that" and
     # decides an ambient drone needs a drum module, which stops a request that
@@ -3816,7 +3736,9 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
         return {"ok": True, "missing": {}}
 
     have = set()
-    for p in inv.values():
+    for pslug, p in inv.items():
+        if pslug in excluded_plugins:
+            continue
         for m in p["modules"].values():
             have.update(m.get("tags", []))
     # Tag spelling drifts across vendors ("VCO" vs "Oscillator", casing).
@@ -3870,7 +3792,8 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
                 for _role in _needed:
                     _have_role[_role] = any(
                         _ic._module_matches(_role, _e, _roles)
-                        for _p in inv.values()
+                        for _pslug, _p in inv.items()
+                        if _pslug not in excluded_plugins
                         for _e in (_p.get("modules") or {}).values())
                 if all(_have_role.values()):
                     idiom_covers = set()
@@ -3888,9 +3811,11 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
 
     if not missing:
         return {"ok": True, "missing": {}, "from_parts": from_parts,
-                "omitted": _options_for(omitted, inv, midx, cat)}
+                "omitted": _options_for(omitted, inv, midx, cat,
+                                        excluded_plugins)}
 
-    return {"ok": False, "missing": _options_for(missing, inv, midx, cat),
+    return {"ok": False, "missing": _options_for(
+                missing, inv, midx, cat, excluded_plugins),
             "from_parts": from_parts, "omitted": {}}
 
 
@@ -5380,192 +5305,73 @@ def brand_phrase_span(directory: dict) -> int:
     return max((len(e["brand"].split()) for e in directory.values()), default=1)
 
 
-def brand_mentions(prompt: str, cat: dict) -> dict:
-    """Which makers this prompt names, and how hard.
+def resolve_maker_intent(prompt: str, cat: dict) -> maker_intent.Resolution:
+    """One immutable maker interpretation shared by all generation consumers."""
+    return maker_intent.resolve(prompt, cat)
 
-    Returns display name -> {"slugs", "exhaustive", "exclusive"}, in the order
-    they were named.
 
-    ONE BEHAVIOUR, WHETHER THE MAKER ARRIVED AS A TOKEN OR AS WORDS. The @ list
-    inserts a maker as "@CV funk", which is the maker's own name with a marker
-    in front of it, so the same scan reads both and there is a single thing to
-    reason about. The marker only removes the burden of proof: an @ is somebody
-    picking a row, while bare prose has to look like a vendor rather than like
-    an ordinary word.
-    """
-    directory = brand_directory(cat)
-    if not directory:
-        return {}
-    raw = prompt.split()
-    # Module mentions are modules. "@CVfunk/Sphinx" names one module, and
-    # reading it as naming the maker is exactly the 43-module dump this whole
-    # distinction exists to prevent.
-    #
-    # UNLESS THE SLASH IS PART OF THE MAKER'S NAME. Two of the 375 makers in the
-    # library have one -- "Catro/Blanco" (8 modules) and "p.s.F/X" (7) -- and
-    # dropping every token with a slash in it made both of them unnameable, by
-    # any spelling, from prose and from the @ list alike. Checked against the
-    # directory rather than guessed, so it exempts a name that really is one and
-    # nothing else.
-    tokens = [w for w in raw
-              if "/" not in w or
-              fold_name(w.strip("@,.;:()[]\"'!?")) in directory]
-    stripped = [w.strip("@,.;:()[]\"'!?") for w in tokens]
-    folded = [fold_name(w) for w in stripped]
+class MakerMentions(dict):
+    """Compatibility mapping carrying the one resolution that produced it."""
+    def __init__(self, *args, resolution: maker_intent.Resolution, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.resolution = resolution
 
-    # Longest phrase first, and how long that is is read from the library
-    # rather than assumed -- see brand_phrase_span.
-    span = brand_phrase_span(directory)
 
-    found: dict = {}
-    accepted_hits: list[tuple[int, int, str]] = []
-    cue = False
-    active_exclusive = False
-    active_exclusive_start = -1
-    pending_exclusive_group = False
-    i = 0
-    while i < len(tokens):
-        hit = None
-        for n in range(span, 0, -1):
-            if i + n > len(tokens):
-                continue
-            phrase = " ".join(stripped[i:i + n])
-            key = fold_name(phrase)
-            entry = directory.get(key)
-            if not entry:
-                continue
-            explicit = tokens[i].startswith("@")
-            distinctive = (len(key) >= BRAND_BARE_FOLD and
-                           stripped[i][:1].isupper())
-            if explicit or cue or distinctive:
-                hit = (n, entry)
-            break
-        if not hit:
-            word = folded[i]
-            if word in EXCLUSIVE_WORDS:
-                cue = True
-                active_exclusive = True
-                active_exclusive_start = i
-                i += 1
-                continue
-            if word in BRAND_CUES:
-                cue = True
-            elif active_exclusive and word in {
-                    "the", "a", "an", "module", "modules", "maker", "makers",
-                    "brand", "brands", "vendor", "vendors", "from", "by",
-                    "use", "using", "want", "build", "make", "create"}:
-                cue = True
-            elif word not in BRAND_JOINERS and word:
-                cue = False
-                active_exclusive = False
-                pending_exclusive_group = False
-            i += 1
+def brand_mentions(prompt: str, cat: dict,
+                   resolution: maker_intent.Resolution | None = None) -> dict:
+    """Affirmed makers in the historical expansion/fetch contract shape."""
+    resolution = resolution or resolve_maker_intent(prompt, cat)
+    return MakerMentions({
+        maker.brand: {
+            "slugs": list(maker.slugs),
+            "exhaustive": maker.exhaustive,
+            "exclusive": maker.exclusive,
+        }
+        for maker in maker_intent.affirmed(resolution)
+    }, resolution=resolution)
+
+
+def excluded_maker_plugins(resolution: maker_intent.Resolution) -> set[str]:
+    return {slug for maker in maker_intent.excluded(resolution)
+            for slug in maker.slugs}
+
+
+def maker_intent_errors(candidate: dict,
+                        resolution: maker_intent.Resolution) -> list[str]:
+    """Enforce negative maker sourcing and fail-closed restrictive language."""
+    errors = list(resolution.restrictive_ambiguities)
+    denied = excluded_maker_plugins(resolution)
+    if not denied or not isinstance(candidate, dict):
+        return errors
+    for module in candidate.get("modules") or []:
+        if not isinstance(module, dict):
             continue
-        n, entry = hit
-        # What was asked for, read from the words in front of the name. The
-        # English is clearer than any syntax we could invent -- and a model
-        # reads "all modules from CV funk" reliably, which is more than it
-        # would do with "@all:CVfunk".
-        window = [w for w in folded[max(0, i - QUALIFIER_WINDOW):i]]
-        state = found.setdefault(entry["brand"], {
-            "slugs": entry["slugs"], "exhaustive": False, "exclusive": False})
-        if any(w in EXHAUSTIVE_WORDS for w in window):
-            state["exhaustive"] = True
-        # Exclusivity is clause state, not mere proximity. In "only one LFO
-        # from Bogaudio", the noun between "only" and the maker ends that
-        # state; treating any nearby "only" as maker-wide would incorrectly
-        # forbid the other makers requested by the sentence.
-        maker_end = i + n
-        next_word = folded[maker_end] if maker_end < len(folded) else ""
-        next_token = tokens[maker_end] if maker_end < len(tokens) else ""
-        clause_start = 0
-        for token_index in range(active_exclusive_start - 1, -1, -1):
-            if tokens[token_index].endswith((";", ".", "!", "?")):
-                clause_start = token_index + 1
-                break
-        exclusive_phrase = folded[active_exclusive_start:i]
-        after_maker = folded[maker_end:maker_end + 5]
-        role_scoped_after_maker = (
-            "for" in after_maker and
-            not ("patch" in after_maker and "this" in after_maker))
-        prefix_is_whole_patch = (
-            active_exclusive and
-            (active_exclusive_start == clause_start or
-             (active_exclusive_start > 0 and
-              folded[active_exclusive_start - 1]
-                  in {"use", "using", "build", "make", "want"} and
-              all(word in {"with", "from", "the", "module", "modules"}
-                  for word in folded[active_exclusive_start + 1:i])) or
-             (active_exclusive_start > 0 and
-              folded[active_exclusive_start - 1] == "with" and
-              any(word in {"make", "build", "create", "patch"}
-                  for word in folded[clause_start:active_exclusive_start])) or
-             (active_exclusive_start > 0 and
-              folded[active_exclusive_start - 1] == "patch" and
-              all(word in {"with", "from", "the", "module", "modules"}
-                  for word in folded[active_exclusive_start + 1:i])) or
-             any(word in {"use", "using"} for word in exclusive_phrase) or
-             any(word in {"module", "modules", "from"}
-                 for word in exclusive_phrase)) and
-            (not next_word or next_word in BRAND_JOINERS or
-             next_word in {"module", "modules", "patch", "nothing"} or
-             (next_word in {",", "nothing"}) or
-             tokens[maker_end - 1].endswith(",") or
-             (next_word == "to" and maker_end + 1 < len(folded) and
-              folded[maker_end + 1] in {"make", "build", "create"}) or
-             folded[maker_end:maker_end + 3] == ["for", "this", "patch"] or
-             next_token[:1] in ",;.!?" or
-             tokens[maker_end - 1].endswith((",", ";", ".", "!", "?"))) and
-            not role_scoped_after_maker)
-        accepted_hits.append((i, i + n, entry["brand"]))
-        is_list_continuation = (
-            next_word in BRAND_JOINERS or tokens[maker_end - 1].endswith(","))
-        pending_exclusive_group = pending_exclusive_group or prefix_is_whole_patch
-        if (pending_exclusive_group and
-                tokens[maker_end - 1].endswith((",", ";", ".", "!", "?")) and
-                (not is_list_continuation or next_word == "nothing")):
-            state["exclusive"] = True
-            pending_exclusive_group = False
-        if pending_exclusive_group and not is_list_continuation:
-            governed = [accepted_hits[-1]]
-            for previous in reversed(accepted_hits[:-1]):
-                if tokens[previous[1] - 1].endswith((";", ".", "!", "?")):
-                    break
-                between = folded[previous[1]:governed[-1][0]]
-                if not between or all(word in BRAND_JOINERS for word in between):
-                    governed.append(previous)
-                else:
-                    break
-            for _start, _end, brand in governed:
-                found[brand]["exclusive"] = True
-            pending_exclusive_group = False
-        exclusive_phrase_end = ",;.!?"
-        exclusive_index = maker_end
-        if (exclusive_index < len(folded) and
-                folded[exclusive_index] in {"module", "modules"}):
-            exclusive_index += 1
-        if (exclusive_index < len(folded) and
-                folded[exclusive_index] in EXCLUSIVE_WORDS and
-                ((exclusive_index + 1 >= len(folded) or
-                  tokens[exclusive_index].endswith(tuple(exclusive_phrase_end))) or
-                 folded[exclusive_index + 1:exclusive_index + 4] == ["for", "this", "patch"] or
-                 (exclusive_index + 2 < len(folded) and
-                  folded[exclusive_index + 1] == "to" and
-                  folded[exclusive_index + 2] in {"make", "build", "create"}))):
-            governed = [accepted_hits[-1]]
-            for previous in reversed(accepted_hits[:-1]):
-                if tokens[previous[1] - 1].endswith((";", ".", "!", "?")):
-                    break
-                between = folded[previous[1]:governed[-1][0]]
-                if not between or all(word in BRAND_JOINERS for word in between):
-                    governed.append(previous)
-                else:
-                    break
-            for _start, _end, brand in governed:
-                found[brand]["exclusive"] = True
-        cue = True                      # a list of makers keeps its qualifier
-        i += n
-    return found
+        plugin = module.get("plugin")
+        if plugin in denied:
+            maker = resolution.for_slug(plugin)
+            errors.append(
+                f"excluded maker constraint forbids {plugin}/"
+                f"{module.get('model')}; {maker.brand if maker else plugin} "
+                "was negatively requested")
+    return errors
+
+
+def excluded_named_module_conflicts(
+        prompt: str, inv: dict, cat: dict, midx: dict, mentions: dict,
+        resolution: maker_intent.Resolution) -> list[str]:
+    """Required exact modules whose catalogue maker is explicitly excluded."""
+    named = set()
+    for qualified in module_mentions(
+            prompt, cat, midx, inv, mentions, resolution).values():
+        plugin, _, model = qualified.partition("/")
+        if plugin and model:
+            named.add((plugin, model))
+    required = named_module_intent(prompt, named)["required"]
+    denied = excluded_maker_plugins(resolution)
+    return [
+        f"named module request conflicts with an excluded maker: {plugin}/{model}"
+        for plugin, model in sorted(required) if plugin in denied
+    ]
 
 
 def exclusive_maker_plugins(mentions: dict) -> set[str]:
@@ -5770,7 +5576,8 @@ def brand_brief(prompt: str, inv: dict, cat: dict, midx: dict,
     return "\n".join(out) + "\n"
 
 
-def retry_note(prompt: str, cat: dict, last: bool) -> str:
+def retry_note(prompt: str, cat: dict, last: bool,
+               mentions: dict | None = None) -> str:
     """What a rejected attempt is told about the makers that were named.
 
     A REJECTION IS NOT PERMISSION TO DROP THE MAKERS. Measured: a prompt naming
@@ -5786,7 +5593,7 @@ def retry_note(prompt: str, cat: dict, last: bool) -> str:
     held for every attempt but the last, and the last may substitute on
     condition that it says what it substituted and why.
     """
-    named = brand_mentions(prompt, cat)
+    named = mentions if mentions is not None else brand_mentions(prompt, cat)
     if not named:
         return ""
     exclusive = [brand for brand, state in named.items() if state["exclusive"]]
@@ -5874,7 +5681,8 @@ MODULE_MENTION_FOLD = 3
 
 
 def module_mentions(prompt: str, cat: dict, midx: dict, inv: dict,
-                    mentions: dict | None = None) -> dict:
+                    mentions: dict | None = None,
+                    maker_resolution: maker_intent.Resolution | None = None) -> dict:
     """The MODULES a prompt names outright: plugin slug -> "Plugin/Module".
 
     A module is named with an @ ("@Plaits"), or in slug form
@@ -5892,7 +5700,10 @@ def module_mentions(prompt: str, cat: dict, midx: dict, inv: dict,
     """
     named: dict = {}
     starts: set = set()
-    for brand in (mentions or {}):
+    identity_brands = set(mentions or {})
+    if maker_resolution is not None:
+        identity_brands.update(maker.brand for maker in maker_resolution.makers)
+    for brand in identity_brands:
         key = fold_name(brand)
         for n in range(1, len(key) + 1):
             starts.add(key[:n])
@@ -5936,8 +5747,25 @@ def module_mentions(prompt: str, cat: dict, midx: dict, inv: dict,
     return named
 
 
+def qualified_named_module_selection(prompt: str, inv: dict) -> set[tuple[str, str]]:
+    """Installed Plugin/Module tokens, requiring no catalogue or maker parse."""
+    selected = set()
+    for raw in prompt.split():
+        word = raw.strip(",.;:()[]\"'!?")
+        token = re.sub(r"(?:'s|’s)$", "", word.lstrip("@"), flags=re.I)
+        if "/" not in token:
+            continue
+        plugin, _, model = token.partition("/")
+        if model in (inv.get(plugin, {}).get("modules") or {}):
+            selected.add((plugin, model))
+    return selected
+
+
 def exact_named_module_selection(prompt: str, inv: dict, cat: dict | None = None,
-                                 midx: dict | None = None) -> set[tuple[str, str]]:
+                                 midx: dict | None = None,
+                                 makers: dict | None = None,
+                                 maker_resolution: maker_intent.Resolution | None = None
+                                 ) -> set[tuple[str, str]]:
     """Installed modules named outright, as a legal model-inventory subset."""
     # `module_mentions()` only admits an @ mention or a qualified Plugin/Model
     # token. Most prompts contain neither, so do not turn ordinary installed-
@@ -5945,16 +5773,13 @@ def exact_named_module_selection(prompt: str, inv: dict, cat: dict | None = None
     # also what keeps a first offline build usable before any library cache
     # exists.
     words = [raw.strip(",.;:()[]\"'!?") for raw in prompt.split()]
-    selected = set()
+    selected = qualified_named_module_selection(prompt, inv)
     needs_name_resolution = False
     for word in words:
         at = word.startswith("@")
         token = word.lstrip("@")
         token = re.sub(r"(?:'s|’s)$", "", token, flags=re.I)
         if "/" in token:
-            plugin, _, model = token.partition("/")
-            if model in (inv.get(plugin, {}).get("modules") or {}):
-                selected.add((plugin, model))
             # A qualified identity needs no catalogue interpretation. If it is
             # absent, the named-install/preflight path reports that fact; a
             # network lookup cannot make it installed inside generation.
@@ -5965,8 +5790,10 @@ def exact_named_module_selection(prompt: str, inv: dict, cat: dict | None = None
         return selected
     cat = catalog() if cat is None else cat
     midx = module_index() if midx is None else midx
-    makers = brand_mentions(prompt, cat)
-    for qualified in module_mentions(prompt, cat, midx, inv, makers).values():
+    makers = (makers if makers is not None else
+              brand_mentions(prompt, cat, maker_resolution))
+    for qualified in module_mentions(prompt, cat, midx, inv, makers,
+                                     maker_resolution).values():
         plugin, _, model = qualified.partition("/")
         if model in (inv.get(plugin, {}).get("modules") or {}):
             selected.add((plugin, model))
@@ -6217,7 +6044,8 @@ def closed_named_module_errors(
 
 
 def named_fetch_plan(prompt: str, inv: dict, cat: dict, midx: dict,
-                     mentions: dict, st: dict, owned: set) -> dict:
+                     mentions: dict, st: dict, owned: set,
+                     maker_resolution: maker_intent.Resolution | None = None) -> dict:
     """What has to be installed because the request NAMED it.
 
     Decides, and installs nothing: the plan is a function of the inventory, the
@@ -6233,10 +6061,14 @@ def named_fetch_plan(prompt: str, inv: dict, cat: dict, midx: dict,
     plan: dict = {"fetch": [], "blocked": []}
     may = st.get("auto_download", "entitled") != "none"
     seen: set = set()
+    maker_resolution = (maker_resolution or
+                        getattr(mentions, "resolution", None))
+    excluded_plugins = (excluded_maker_plugins(maker_resolution)
+                        if maker_resolution is not None else set())
 
     def consider(pslug: str, why: str, budget: list | None) -> bool:
         """True when it was added to the fetch list."""
-        if pslug in inv or pslug in seen:
+        if pslug in excluded_plugins or pslug in inv or pslug in seen:
             return False
         entry = cat.get(pslug)
         if not entry:
@@ -6278,7 +6110,7 @@ def named_fetch_plan(prompt: str, inv: dict, cat: dict, midx: dict,
     # A module named outright is exact: one plugin carries it and there is
     # nothing to rank or bound.
     for pslug, what in module_mentions(prompt, cat, midx, inv,
-                                       mentions).items():
+                                       mentions, maker_resolution).items():
         consider(pslug, what, None)
 
     # A maker is a preference over a range, so the fetch is bounded and ranked
@@ -6309,7 +6141,9 @@ def named_fetch_plan(prompt: str, inv: dict, cat: dict, midx: dict,
 
 
 def ensure_named_installed(prompt: str, inv: dict, cat: dict, midx: dict,
-                           mentions: dict) -> tuple:
+                           mentions: dict,
+                           maker_resolution: maker_intent.Resolution | None = None
+                           ) -> tuple:
     """Install what the request named, before a word of it reaches the model.
 
     Returns (inventory, fetched plugin slugs). The inventory is re-read after a
@@ -6324,8 +6158,9 @@ def ensure_named_installed(prompt: str, inv: dict, cat: dict, midx: dict,
     off.
     """
     st = settings()
+    maker_resolution = maker_resolution or getattr(mentions, "resolution", None)
     plan = named_fetch_plan(prompt, inv, cat, midx, mentions, st,
-                            entitlements_cached())
+                            entitlements_cached(), maker_resolution)
     if not plan["fetch"] and not plan["blocked"]:
         return inv, []
     for line in plan["blocked"]:
@@ -6351,7 +6186,8 @@ def ensure_named_installed(prompt: str, inv: dict, cat: dict, midx: dict,
     return inv, fetched
 
 
-def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
+def library_brief(prompt: str, inv: dict, limit: int = 70,
+                  mentions: dict | None = None) -> str:
     """What this machine can actually use, written for the model.
 
     THE MODEL WAS BLIND. It received a task and a vocabulary and no inventory,
@@ -6479,7 +6315,7 @@ def library_brief(prompt: str, inv: dict, limit: int = 70) -> str:
     # A maker the prompt named, expanded into that maker's modules. Last,
     # because it is the most specific thing said about this request and the
     # closest to the task that follows it.
-    out.append(brand_brief(prompt, inv, cat, module_index()))
+    out.append(brand_brief(prompt, inv, cat, module_index(), mentions))
     return "".join(out)
 
 
@@ -7251,7 +7087,9 @@ def _patch_semantics(patch: dict) -> dict:
 
 
 def refinement_errors(base: dict, candidate: dict, prompt: str,
-                      inv: dict) -> list[str]:
+                      inv: dict,
+                      named: set[tuple[str, str]] | None = None,
+                      named_intent: dict[str, set] | None = None) -> list[str]:
     """Fail closed when a follow-up is unchanged or silently starts over."""
     errors = []
     if _patch_semantics(base) == _patch_semantics(candidate):
@@ -7278,8 +7116,10 @@ def refinement_errors(base: dict, candidate: dict, prompt: str,
         errors.append("the refinement removed the working audio interface")
 
     lower = prompt.casefold()
-    named = exact_named_module_selection(prompt, inv)
-    named_intent = named_module_intent(prompt, named)
+    named = (exact_named_module_selection(prompt, inv)
+             if named is None else named)
+    named_intent = (named_module_intent(prompt, named)
+                    if named_intent is None else named_intent)
     for plugin, model in named:
         before = sum(module.get("plugin") == plugin and
                      module.get("model") == model
@@ -7325,7 +7165,8 @@ def refinement_errors(base: dict, candidate: dict, prompt: str,
 
 def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
               response_file: str | None = None,
-              base_patch: dict | None = None):
+              base_patch: dict | None = None,
+              maker_resolution: maker_intent.Resolution | None = None):
     """Prompt -> a patch that lints clean and makes a sound.
 
     Returns `(patch, why, shortfall)`. `shortfall` is None when the patch met
@@ -7336,14 +7177,32 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     import subprocess
     editable_base = refinement_model_base(base_patch, inv) \
         if base_patch is not None else None
-    named = exact_named_module_selection(prompt, inv)
-    named_intent = named_module_intent(prompt, named)
+    # A qualified installed identity is locally decidable. Preserve the cheap
+    # fresh-generation refusal without invoking either the catalogue or the
+    # maker parser; the complete exact selection below still runs only once and
+    # consumes the caller's shared maker resolution.
+    qualified = qualified_named_module_selection(prompt, inv)
     if base_patch is None:
         generation_errors = fresh_generation_errors(
-            named_intent["required"], inv)
+            named_module_intent(prompt, qualified)["required"], inv)
         if generation_errors:
             raise SystemExit("\n".join(generation_errors))
-    mentions = brand_mentions(prompt, catalog())
+    catalogue = catalog()
+    maker_resolution = maker_resolution or resolve_maker_intent(prompt, catalogue)
+    if maker_resolution.restrictive_ambiguities:
+        raise SystemExit("\n".join(maker_resolution.restrictive_ambiguities))
+    mentions = brand_mentions(prompt, catalogue, maker_resolution)
+    midx = module_index()
+    conflicts = excluded_named_module_conflicts(
+        prompt, inv, catalogue, midx, mentions, maker_resolution)
+    if conflicts:
+        raise SystemExit("\n".join(conflicts))
+    # Resolve exact modules once against the same immutable maker reading used
+    # by fetch planning, capability selection, model inventory and final lint.
+    named = exact_named_module_selection(prompt, inv, catalogue,
+                                         midx, mentions,
+                                         maker_resolution)
+    named_intent = named_module_intent(prompt, named)
     inventory_errors = exclusive_maker_inventory_errors(inv, mentions)
     if inventory_errors:
         raise SystemExit("\n".join(inventory_errors))
@@ -7369,9 +7228,7 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     idioms = idiom_check.load_idioms()
     claimed = claim_idiom(prompt, idioms)
     quality_contract = compile_runtime_quality_contract(prompt)
-    catalogue = catalog()
-    midx = module_index()
-    maker_mentions = brand_mentions(prompt, catalogue)
+    maker_mentions = mentions
     tag_references = intent_context.resolve_tag_references(prompt, inv, midx)
     closed_named = closed_named_module_selection(
         prompt, named_intent["required"])
@@ -7391,15 +7248,24 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
         (plugin, model) for plugin, package in inv.items()
         for model in (package.get("modules") or {})
         if plugin == "Core" or plugin in exclusive_plugins}
+    excluded_plugins = excluded_maker_plugins(maker_resolution)
+    nonexcluded_allowed = {
+        (plugin, model) for plugin, package in inv.items()
+        for model in (package.get("modules") or {})
+        if plugin not in excluded_plugins}
     allowed_modules = set(closed_named) if closed_named else None
     if exclusive_plugins:
         allowed_modules = (exclusive_allowed if allowed_modules is None
                            else allowed_modules & exclusive_allowed)
+    if excluded_plugins:
+        allowed_modules = (nonexcluded_allowed if allowed_modules is None
+                           else allowed_modules & nonexcluded_allowed)
     if module_idiom_contract is None:
         module_plan = intent_module_plan(
             prompt, inv, idioms, selected,
             allowed=allowed_modules,
-            module_source=settings().get("module_source", "prefer_existing"))
+            module_source=settings().get("module_source", "prefer_existing"),
+            maker_resolution=maker_resolution)
     else:
         module_plan = (
             "\n---\n\n## Verified module capability for this structure\n\n"
@@ -7421,6 +7287,10 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
         selected &= exclusive_allowed
         model_inventory = inventory_subset(
             inv, selected if selected else exclusive_allowed)
+    elif excluded_plugins:
+        selected &= nonexcluded_allowed
+        model_inventory = inventory_subset(
+            inv, selected if selected else nonexcluded_allowed)
     else:
         model_inventory = inventory_subset(inv, selected) if selected else inv
     with open(CONTRACT, encoding="utf-8") as source:
@@ -7494,7 +7364,7 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     for attempt in range(attempts):
         parts = [contract, module_plan,
                  runtime_quality_contract_prompt(quality_contract),
-                 library_brief(prompt, inv),
+                 library_brief(prompt, inv, mentions=mentions),
                  intent_context.render_tag_context(tag_references, model_inventory)]
         if base_patch is not None:
             parts.append(
@@ -7523,8 +7393,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             # of the safest modules on the machine. The maker survived the
             # prompt and not the retry, so the finished patch had none of what
             # was asked for and only the count at the end said so.
-            parts.append(retry_note(prompt, catalog(),
-                                    attempt >= attempts - 1))
+            parts.append(retry_note(prompt, catalogue,
+                                    attempt >= attempts - 1, mentions))
         # The enriched environment matters here, not only for finding claude:
         # claude runs its own plugin hooks with node, and a non-interactive SSH
         # session has no Homebrew on PATH. The hook dies naming node, which
@@ -7631,6 +7501,7 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
         except RuntimeError as error:
             errs = [str(error)]
         errs += intent_context.exclusive_maker_errors(patch, maker_mentions)
+        errs += maker_intent_errors(patch, maker_resolution)
         errs += intent_context.required_tag_errors(patch, inv, tag_references)
         activation_findings = module_activation_contract_errors(patch, inv)
         if activation_findings and base_patch is None:
@@ -7663,7 +7534,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
                 errs += ["deterministic activation repair refused: " + reason
                          for reason in repair.refusal]
         if base_patch is not None:
-            errs += refinement_errors(base_patch, patch, prompt, inv)
+            errs += refinement_errors(base_patch, patch, prompt, inv,
+                                      named, named_intent)
         if errs:
             # The LINT's reasons, not `report` -- that is the gate's, and the
             # gate has not run when a patch is rejected here. Passing it
@@ -7936,7 +7808,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
 
 def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
              response_file: str | None = None,
-             base_patch: dict | None = None):
+             base_patch: dict | None = None,
+             maker_resolution: maker_intent.Resolution | None = None):
     """Run generation with a per-call immutable attempt-artifact namespace."""
     global _ACTIVE_ATTEMPTS_DIR
     previous = _ACTIVE_ATTEMPTS_DIR
@@ -7948,7 +7821,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     _ACTIVE_ATTEMPTS_DIR = run.path
     try:
         return _generate(prompt, inv, prefer, retries, response_file,
-                         base_patch)
+                         base_patch, maker_resolution)
     finally:
         _ACTIVE_ATTEMPTS_DIR = previous
         run.close()
@@ -8221,13 +8094,20 @@ def main(argv):
         # than the best free stranger, and before the model call, because a
         # plugin that is not installed cannot appear in a patch however hard
         # the prompt asks for it.
-        mentions = brand_mentions(argv[2], cat)
-        inv, fetched_named = ensure_named_installed(argv[2], inv, cat, midx,
-                                                    mentions)
+        maker_resolution = resolve_maker_intent(argv[2], cat)
+        if maker_resolution.restrictive_ambiguities:
+            raise SystemExit("\n".join(maker_resolution.restrictive_ambiguities))
+        mentions = brand_mentions(argv[2], cat, maker_resolution)
+        conflicts = excluded_named_module_conflicts(
+            argv[2], inv, cat, midx, mentions, maker_resolution)
+        if conflicts:
+            raise SystemExit("\n".join(conflicts))
+        inv, fetched_named = ensure_named_installed(
+            argv[2], inv, cat, midx, mentions, maker_resolution)
         exclusive_inventory = exclusive_maker_inventory_errors(inv, mentions)
         if exclusive_inventory:
             raise SystemExit("\n".join(exclusive_inventory))
-        pf = preflight(argv[2], inv, midx, cat)
+        pf = preflight(argv[2], inv, midx, cat, maker_resolution)
         if not pf["ok"] and "--anyway" not in argv:
             # Free first, and with the link. A refusal whose remedy is a free
             # download should cost one click, not a search: the options were
@@ -8271,7 +8151,7 @@ def main(argv):
                 # the very module just installed is still missing to the
                 # generator that is about to run.
                 inv = inventory()
-                pf = preflight(argv[2], inv, midx, cat)
+                pf = preflight(argv[2], inv, midx, cat, maker_resolution)
             if pf["ok"]:
                 print("  gap closed — building.\n")
             fetched_named += fetched
@@ -8376,7 +8256,8 @@ def main(argv):
         try:
             patch, why, shortfall = generate(
                 argv[2], inv, prefer, retries=retries,
-                response_file=response_file, base_patch=base_patch)
+                response_file=response_file, base_patch=base_patch,
+                maker_resolution=maker_resolution)
         except BaseException:
             for reserved in reserved_outputs:
                 try:
@@ -8394,6 +8275,15 @@ def main(argv):
             raise SystemExit("the generated patch violated the exclusive "
                              "maker request:\n  - " +
                              "\n  - ".join(exclusive_errors))
+        excluded_errors = maker_intent_errors(patch, maker_resolution)
+        if excluded_errors:
+            for reserved in reserved_outputs:
+                try:
+                    os.unlink(reserved)
+                except OSError:
+                    pass
+            raise SystemExit("the generated patch violated maker intent:\n  - " +
+                             "\n  - ".join(excluded_errors))
         if out is None:
             slug = re.sub(r"[^a-z0-9]+", "-", argv[2].lower()).strip("-")[:40]
             if not slug:
