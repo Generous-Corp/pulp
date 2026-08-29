@@ -421,10 +421,20 @@ def run(request_path: Path, receipt_path: Path) -> int:
     artifacts["measurement_producer"] = artifact_ref(producer, run_dir)
     producer_receipt_path = artifact_directory / "producer-receipt.json"
     try:
+        producer_environment = dict(os.environ)
+        checked_in_support = producer_source.parent / "gpu_first_visible_a3_role_producer.py"
+        if (
+            "PULP_A3_ROLE_PRODUCER_SUPPORT" not in producer_environment
+            and checked_in_support.is_file()
+            and not checked_in_support.is_symlink()
+        ):
+            producer_environment["PULP_A3_ROLE_PRODUCER_SUPPORT"] = str(
+                checked_in_support.resolve()
+            )
         producer_exit = run_bounded(
             [str(producer), "--request", str(request_path.resolve()),
              "--receipt", str(producer_receipt_path.resolve())],
-            environment=dict(os.environ), cwd=artifact_directory,
+            environment=producer_environment, cwd=artifact_directory,
             timeout_seconds=780,
             log_prefix=artifact_directory / "logs" / "measurement-producer",
         )

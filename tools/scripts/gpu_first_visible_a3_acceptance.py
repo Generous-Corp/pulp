@@ -98,6 +98,12 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "tools/scripts/gpu_first_visible_a3_acceptance.py",
     "tools/scripts/gpu_first_visible_a3_campaign.py",
     "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/testing/daw-smoke/reaper_smoke.py",
 }
 AUDIO_PROVIDER_ENTRY_POINTS = [
     "pulp::inspect::ControlGpuHealthProvider::begin_editor_open",

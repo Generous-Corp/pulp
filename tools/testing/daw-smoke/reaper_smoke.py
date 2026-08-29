@@ -140,6 +140,17 @@ def find_reaper() -> Path | None:
     return Path(which) if which else None
 
 
+def exact_reaper(path: str) -> Path | None:
+    """Resolve a caller-selected REAPER executable without falling back."""
+    candidate = Path(os.path.expanduser(path))
+    if (
+        not candidate.is_absolute() or candidate.is_symlink()
+        or not candidate.is_file() or not os.access(candidate, os.X_OK)
+    ):
+        return None
+    return candidate.resolve()
+
+
 def load_config() -> dict:
     """Read ~/.config/pulp/daw-smoke.toml (enabled/gate/strict). Missing => all off."""
     cfg = {"enabled": False, "gate": False, "strict": False}
@@ -1152,6 +1163,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--plugin-path", required=True,
                     help="Path to the built .vst3/.clap/.component bundle.")
     ap.add_argument("--timeout", type=int, default=90, help="Per-phase wall-clock cap (s).")
+    ap.add_argument("--reaper-bin",
+                    help="Exact absolute REAPER executable; invalid paths fail instead of falling back.")
     ap.add_argument("--check-config", action="store_true",
                     help="Honor ~/.config/pulp/daw-smoke.toml: SKIP unless enabled.")
 
@@ -1229,8 +1242,11 @@ def main() -> int:
             log("daw-smoke.enabled is false (opt-in) — SKIP. Enable in ~/.config/pulp/daw-smoke.toml.")
             return EXIT_SKIP
 
-    reaper = find_reaper()
+    reaper = exact_reaper(args.reaper_bin) if args.reaper_bin else find_reaper()
     if reaper is None:
+        if args.reaper_bin:
+            log("the exact --reaper-bin is not a non-symlink executable — FAIL")
+            return EXIT_FAIL
         log("REAPER not installed — SKIP (this is not a PASS). See docs/guides/daw-smoke.md.")
         return EXIT_SKIP
 
