@@ -22,8 +22,8 @@
         { "type": "null" },
         {
           "type": "object",
-          "minProperties": 24,
-          "maxProperties": 24,
+          "minProperties": 26,
+          "maxProperties": 26,
           "propertyNames": { "type": "string", "minLength": 1, "maxLength": 512 },
           "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
         }

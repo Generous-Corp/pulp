@@ -96,6 +96,7 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
     "tools/cli/gpu_health/src/health_read_result_json.cpp",
     "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
     "tools/scripts/gpu_first_visible_a3_campaign.py",
     "tools/scripts/gpu_first_visible_a3_external_adapter.py",
     "tools/scripts/gpu_first_visible_a3_forge_producer.py",
@@ -103,6 +104,7 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
     "tools/scripts/gpu_first_visible_a3_role_producer.py",
     "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
     "tools/testing/daw-smoke/reaper_smoke.py",
 }

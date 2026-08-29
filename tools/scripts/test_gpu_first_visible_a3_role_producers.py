@@ -20,6 +20,7 @@ ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import test_gpu_first_visible_a3_acceptance as fixture  # noqa: E402
 import gpu_first_visible_a3_role_producer as producer_support  # noqa: E402
+import gpu_first_visible_a3_build_verifier as build_verifier  # noqa: E402
 
 PRODUCERS = {
     "standalone": SCRIPT_DIR / "gpu_first_visible_a3_standalone_producer.py",
@@ -284,7 +285,7 @@ raise SystemExit(exit_code)
     path.chmod(0o755)
 
 
-def make_pulp_root(path: Path, smoke: Path, driver: Path) -> str:
+def make_pulp_root(path: Path, smoke: Path, driver: Path, analyzer: Path) -> str:
     path.mkdir()
     sources = {
         "tools/scripts/gpu_first_visible_a3_role_producer.py": (
@@ -295,6 +296,10 @@ def make_pulp_root(path: Path, smoke: Path, driver: Path) -> str:
             smoke.parent / "insert_and_float.lua"
         ),
         "tools/testing/a3/role-driver.py": driver,
+        "tools/scripts/gpu_first_visible_a3_trace_analyzer.py": analyzer,
+        "tools/scripts/gpu_first_visible_a3_build_verifier.py": (
+            SCRIPT_DIR / "gpu_first_visible_a3_build_verifier.py"
+        ),
     }
     for relative, source in sources.items():
         destination = path / relative
@@ -469,7 +474,17 @@ def run_role(
         host = root / f"{role}-host-outside-bundle"
     else:
         host = product
-    product.write_bytes(f"product:{role}".encode())
+    embedded_identity = {
+        key: identity[key] for key in (
+            "pulp_revision", "forge_revision", "build_id", "product_id",
+            "product_name", "plugin_format",
+        )
+    }
+    if mutation == "embedded-build-identity":
+        embedded_identity["pulp_revision"] = "0" * 40
+    product.write_bytes(
+        f"product:{role}".encode() + build_verifier.encode_marker(embedded_identity)
+    )
     if host != product:
         host.write_bytes(f"host:{role}".encode())
     product.chmod(0o755)
@@ -479,7 +494,7 @@ def run_role(
         extra_executable.write_bytes(b"unrelated executable")
         extra_executable.chmod(0o755)
     driver = pulp_root / "tools/testing/a3/role-driver.py"
-    analyzer = root / "trace-analyzer"
+    analyzer = pulp_root / "tools/scripts/gpu_first_visible_a3_trace_analyzer.py"
     health = json.loads((evidence / f"{role}-health.json").read_text(encoding="utf-8"))
     gpu_evidence_id = health["startup"]["correlation"]["gpu_evidence_id"]
     provenance = root / f"{role}-{case_name}-build-provenance.receipt"
@@ -547,6 +562,9 @@ def run_role(
         ),
         "PULP_A3_PULP_ROOT": str(pulp_root),
         "PULP_A3_TRACE_ANALYZER": str(analyzer),
+        "PULP_A3_BUILD_VERIFIER": str(
+            pulp_root / "tools/scripts/gpu_first_visible_a3_build_verifier.py"
+        ),
         "PULP_A3_TEST_ROLE_FIXTURE": str(evidence),
         "PULP_A3_TEST_ROLE_MUTATION": mutation,
         "PULP_A3_TEST_GPU_EVIDENCE_ID": gpu_evidence_id,
@@ -613,6 +631,7 @@ def main() -> int:
         write_analyzer(root / "trace-analyzer")
         make_pulp_root(
             root / "pulp-root", root / "reaper-smoke", root / "role-driver.py",
+            root / "trace-analyzer",
         )
         make_git_root(root / "forge-root")
         assert_signal_cleanup(root)
@@ -662,6 +681,10 @@ def main() -> int:
             (
                 "standalone", "driver-provenance", "pass",
                 "does not bind the requested source, product, and driver",
+            ),
+            (
+                "standalone", "embedded-build-identity", "pass",
+                "build-verifier result does not bind the closed control",
             ),
             (
                 "standalone", "detached-host", "pass",
@@ -715,7 +738,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=4 planted_negatives=32 cleanup_controls=2"
+            "positive=4 planted_negatives=33 cleanup_controls=2"
         )
     return 0
 
