@@ -813,6 +813,19 @@ detector measures nothing however impressive the sample size.
 rather than git's view of it, which is how 113 MB of reference books once
 reached a signed installer.
 
+**Licence never opens the public-export boundary.** RackDocs and Patchstorage
+PDFs, images, patch bodies, titles, uploader identities, URLs, ids, hashes,
+source prose, and full per-patch module/cable topology remain private regardless
+of their licence. `tools/rack/corpus_export.py` is not a backup command: it
+writes one fixed-schema report containing only source-neutral aggregate counts,
+abstract functional-role vocabulary, independently worded criteria, and
+corroborated generic signal-prior buckets. It refuses an existing destination
+so an older source-shaped export cannot survive beside a new public report.
+Private backup or migration belongs in private-repository tooling; the research
+tools continue to read the machine-local corpus directly. Keep
+`rack-corpus-export` registered and its malicious synthetic fixtures green when
+changing this boundary.
+
 Fetched via the public beta API. Patchstorage publishes **no Terms of Service**;
 `robots.txt` carries `Crawl-delay: 10` and no `Disallow`, and **every patch
 carries its own licence in the API response**, which is a stronger permission

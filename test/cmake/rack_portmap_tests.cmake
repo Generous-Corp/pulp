@@ -50,6 +50,7 @@ if(Python3_Interpreter_FOUND)
             knowledge-admission
             recover-subset-font-pdf
             corpus-audit
+            corpus-export
             with-app-model-selection
             source-index)
         string(REPLACE "-" "_" _rack_safety_file "${_rack_safety_test}")
