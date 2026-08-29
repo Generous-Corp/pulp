@@ -132,6 +132,24 @@ missing-member negative control current, and preserve unknown-input exit 2.
 This stays in the existing CLI, GPU build, Three.js, trace, and routing skills;
 do not add a duplicate generic GPU-probe skill.
 
+The Catch2 native-recipe suite is portable unit/integration coverage: it emits a
+loud SKIP when a real adapter is unavailable so GPU-less build lanes remain
+usable. Fail-closed real-work acceptance belongs to the two EXCLUDE_FROM_ALL
+native acceptance executables and the digest-bound
+`gpu-probe-current-acceptance` receipt verifier, all of which reject
+unavailable evidence. Do not add a compile-time "require work" switch to the
+portable suite; that creates an unselected policy branch rather than a reachable
+acceptance surface.
+
+The public GPU tooling namespaces also carry an enforced Doxygen content
+contract in `health_result.hpp` and `probe_result.hpp`: ownership/lifetime,
+thread and real-time safety, determinism/units, and unavailable/error/result
+semantics. `gpu_health` is installed; `gpu_probe` remains a documented
+source-only build interface listed in
+`docs/doxygen/installed-public-header-policy.json`. Update the namespace
+contract and granular declaration docs when behavior changes. Do not install
+the probe headers merely to satisfy Doxygen parity.
+
 ### Testing a doctor-gated behaviour: stub `gh`, or the test is vacuous
 
 These checks query live GitHub state, so a test asserting "the command succeeds"

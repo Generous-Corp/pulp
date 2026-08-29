@@ -38,6 +38,7 @@ INPUT                  = ../../core/audio/include \
                          ../../core/view/include \
                          ../../tools/audio/analysis/include \
                          ../../tools/cli/gpu_health/include \
+                         ../../tools/cli/gpu_probe/include \
                          ../../inspect/include
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp *.h *.inc *.hpp.in

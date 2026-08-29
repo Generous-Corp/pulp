@@ -23,6 +23,21 @@ def write(path: Path, text: str = "// header\n") -> None:
     path.write_text(text)
 
 
+def tooling_contract(namespace: str) -> str:
+    return f"""/**
+ * @namespace {namespace}
+ * @par Ownership and lifetime
+ * Contract fixture.
+ * @par Threading and real-time safety
+ * Contract fixture.
+ * @par Determinism and units
+ * Contract fixture.
+ * @par Results, unavailable evidence, and errors
+ * Contract fixture.
+ */
+"""
+
+
 def fixture(root: Path) -> None:
     write(root / "core/a/include/pulp/a/a.hpp")
     write(root / "core/a/include/pulp/a/detail/support.hpp")
@@ -33,8 +48,16 @@ def fixture(root: Path) -> None:
     write(root / "inspect/include/pulp/inspect/protocol.hpp")
     write(root / "inspect/include/pulp/inspect/full_only.hpp")
     write(root / "inspect/include/pulp/inspect/methods.inc")
-    write(root / "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp")
+    write(
+        root / "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp",
+        tooling_contract("pulp::tooling::gpu_health"),
+    )
     write(root / "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp")
+    write(
+        root / "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+        tooling_contract("pulp::tooling::gpu_probe"),
+    )
+    write(root / "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp")
     for name in ("arranger_view.hpp", "piano_roll_view.hpp"):
         write(root / f"core/timeline_view/include/pulp/timeline_view/{name}")
     write(root / "core/timeline_view/include/pulp/timeline_view/detail/internal.hpp")
@@ -42,6 +65,7 @@ def fixture(root: Path) -> None:
     write(root / "docs/doxygen/Doxyfile", """INPUT = ../../core/a/include \\
         ../../inspect/include \\
         ../../tools/cli/gpu_health/include \\
+        ../../tools/cli/gpu_probe/include \\
         ../../core/runtime/include \\
         ../../core/timeline_view/include
 RECURSIVE = YES
@@ -73,6 +97,8 @@ elseif(TARGET pulp-inspect-protocol)
         "documented_source_only": [
             "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
             "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+            "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+            "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp",
         ],
     }))
 
@@ -91,6 +117,21 @@ def main() -> int:
         root = Path(directory)
         fixture(root)
         require(not checker.check(root), "positive fixture must pass")
+        contract = (
+            root
+            / "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp"
+        )
+        contract.write_text(
+            contract.read_text().replace(
+                "@par Threading and real-time safety",
+                "@par Threading",
+            )
+        )
+        require(
+            any("Threading and real-time safety" in item for item in checker.check(root)),
+            "missing GPU tooling Doxygen content escaped",
+        )
+        fixture(root)
         cli = subprocess.run(
             [sys.executable, str(Path(checker.__file__)), "--repo-root", str(root), "--check"],
             text=True, capture_output=True, check=False,

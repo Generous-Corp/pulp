@@ -15,6 +15,22 @@ POLICY = Path("docs/doxygen/installed-public-header-policy.json")
 DOXYFILE = Path("docs/doxygen/Doxyfile")
 INSTALL_RULES = Path("tools/cmake/PulpInstallRules.cmake")
 GPU_HEALTH_TOOLING_ROOT = "tools/cli/gpu_health/include"
+GPU_TOOLING_DOCUMENTATION_CONTRACTS = {
+    Path("tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp"): (
+        "@namespace pulp::tooling::gpu_health",
+        "@par Ownership and lifetime",
+        "@par Threading and real-time safety",
+        "@par Determinism and units",
+        "@par Results, unavailable evidence, and errors",
+    ),
+    Path("tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp"): (
+        "@namespace pulp::tooling::gpu_probe",
+        "@par Ownership and lifetime",
+        "@par Threading and real-time safety",
+        "@par Determinism and units",
+        "@par Results, unavailable evidence, and errors",
+    ),
+}
 
 
 def _reject_symlink_components(root: Path, relative: Path) -> None:
@@ -72,6 +88,23 @@ def _doxy_assignments(text: str) -> dict[str, str]:
             raise ValueError(f"Doxyfile has duplicate {key} assignments")
         assignments[key] = value.strip()
     return assignments
+
+
+def _gpu_tooling_documentation_errors(root: Path) -> list[str]:
+    errors: list[str] = []
+    for relative, markers in GPU_TOOLING_DOCUMENTATION_CONTRACTS.items():
+        path = root / relative
+        try:
+            text = path.read_text()
+        except OSError as error:
+            errors.append(f"GPU tooling Doxygen contract is unreadable: {relative}: {error}")
+            continue
+        for marker in markers:
+            if marker not in text:
+                errors.append(
+                    f"GPU tooling Doxygen contract missing {marker!r}: {relative}"
+                )
+    return errors
 
 
 def _doxygen_roots(root: Path) -> list[str]:
@@ -245,9 +278,11 @@ def check(root: Path, installed_prefix: Path | None = None,
             if "build_info.hpp.in" not in generated_cmake or "pulp/runtime/build_info.hpp" not in generated_cmake:
                 raise ValueError("generated build_info header authority is not statically readable")
             installed_on.add(GENERATED_HEADER)
+        tooling_documentation_errors = _gpu_tooling_documentation_errors(root)
     except (OSError, json.JSONDecodeError, ValueError) as error:
         return [str(error)]
 
+    errors.extend(tooling_documentation_errors)
     exception_set = set(exceptions)
     for path in sorted(exception_set):
         if path not in documented:

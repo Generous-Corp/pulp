@@ -2,6 +2,9 @@
   "schema_version": 1,
   "documented_source_only": [
     "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
-    "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp"
+    "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/dpr_measurement.hpp",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp"
   ]
 }
