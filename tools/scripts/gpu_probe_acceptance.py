@@ -157,12 +157,21 @@ def assert_directory_claim(
 
 
 class RetainedDirectoryClaim:
-    def __init__(self, path: Path, descriptor: int, identity: dict[str, int], label: str):
+    def __init__(
+        self,
+        path: Path,
+        descriptor: int,
+        identity: dict[str, int],
+        label: str,
+        *,
+        watch_links: bool = True,
+    ):
         self.path = path
         self.descriptor = descriptor
         self.identity = identity
         self.label = label
         self.closed = False
+        self.watch_links = watch_links
         self.file_claims: list[dict[str, Any]] = []
         self.ancestor_claims: list[dict[str, Any]] = []
         self.claimed_directory_identities = {
@@ -171,17 +180,17 @@ class RetainedDirectoryClaim:
         self.monitor: Any | None = None
         self._bind_ancestor_chain(path)
 
-    @staticmethod
-    def _file_vnode_flags() -> int:
-        required = (
+    def _file_vnode_flags(self) -> int:
+        required = [
             "KQ_NOTE_DELETE", "KQ_NOTE_WRITE", "KQ_NOTE_EXTEND",
-            "KQ_NOTE_ATTRIB", "KQ_NOTE_LINK", "KQ_NOTE_RENAME",
-            "KQ_NOTE_REVOKE",
-        )
+            "KQ_NOTE_ATTRIB", "KQ_NOTE_RENAME", "KQ_NOTE_REVOKE",
+        ]
+        if self.watch_links:
+            required.append("KQ_NOTE_LINK")
         if not hasattr(select, "kqueue") or any(
             not hasattr(select, name) for name in required
         ):
-            raise AcceptanceError("exact executable sealing requires macOS kqueue")
+            raise AcceptanceError("exact file sealing requires macOS kqueue")
         return sum(getattr(select, name) for name in required)
 
     @staticmethod
@@ -242,14 +251,17 @@ class RetainedDirectoryClaim:
             events = self.monitor.control(None, 64, 0)
             if events:
                 raise AcceptanceError(
-                    f"{self.label} or a retained executable had a mutation event"
+                    f"{self.label} or a retained file had a mutation event"
                 )
 
-    def bind_file(self, path: Path, label: str, expected_sha256: str) -> None:
+    def bind_file(
+        self, path: Path, label: str, expected_sha256: str | None = None
+    ) -> str:
         self._bind_ancestor_chain(path)
         descriptor = os.open(
             path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         )
+        claim: dict[str, Any] | None = None
         try:
             metadata = os.fstat(descriptor)
             named = os.stat(path, follow_symlinks=False)
@@ -257,22 +269,33 @@ class RetainedDirectoryClaim:
             if (
                 not stat_module.S_ISREG(metadata.st_mode)
                 or {"device": named.st_dev, "inode": named.st_ino} != identity
-                or sha256_descriptor(descriptor) != expected_sha256
             ):
-                raise AcceptanceError(f"{label} does not match its exact executable claim")
+                raise AcceptanceError(f"{label} does not match its exact file claim")
+            claim = {
+                "path": path,
+                "descriptor": descriptor,
+                "identity": identity,
+                "sha256": "",
+                "label": label,
+            }
+            self.file_claims.append(claim)
+            if self.monitor is not None:
+                self._register_monitor(descriptor, is_file=True)
+                self._assert_no_mutation_events()
+            actual_sha256 = sha256_descriptor(descriptor)
+            if expected_sha256 is not None and actual_sha256 != expected_sha256:
+                raise AcceptanceError(f"{label} does not match its exact file claim")
+            claim["sha256"] = actual_sha256
+            named = os.stat(path, follow_symlinks=False)
+            if {"device": named.st_dev, "inode": named.st_ino} != identity:
+                raise AcceptanceError(f"{label} does not match its exact file claim")
+            self._assert_no_mutation_events()
         except BaseException:
+            if claim is not None:
+                self.file_claims.remove(claim)
             os.close(descriptor)
             raise
-        self.file_claims.append({
-            "path": path,
-            "descriptor": descriptor,
-            "identity": identity,
-            "sha256": expected_sha256,
-            "label": label,
-        })
-        if self.monitor is not None:
-            self._register_monitor(descriptor, is_file=True)
-            self._assert_no_mutation_events()
+        return actual_sha256
 
     def assert_current(self) -> None:
         if self.closed:
@@ -295,7 +318,7 @@ class RetainedDirectoryClaim:
                 or sha256_descriptor(claim["descriptor"]) != claim["sha256"]
             ):
                 raise AcceptanceError(
-                    f"{claim['label']} no longer matches its retained executable claim"
+                    f"{claim['label']} no longer matches its retained file claim"
                 )
         self._assert_no_mutation_events()
 
@@ -784,9 +807,43 @@ def validate_generated_paths(
                 )
 
 
-def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
+def retain_staged_evidence(staging: Path) -> RetainedDirectoryClaim:
+    """Bind staged bytes before self-verification and retain that claim to publication."""
+    descriptor: int | None = None
+    claim: RetainedDirectoryClaim | None = None
+    try:
+        descriptor = os.open(staging, directory_open_flags())
+        identity = directory_identity(os.fstat(descriptor), "staging")
+        claim = RetainedDirectoryClaim(
+            staging, descriptor, identity, "staging", watch_links=False
+        )
+        descriptor = None
+        claim.seal()
+        names = sorted(os.listdir(claim.descriptor))
+        if "receipt.json" not in names:
+            raise AcceptanceError("staging must contain receipt.json")
+        for name in names:
+            if name in {"", ".", ".."} or Path(name).name != name:
+                raise AcceptanceError("staging contains an unsafe evidence filename")
+            claim.bind_file(staging / name, f"staged evidence {name}")
+        claim.assert_current()
+        return claim
+    except BaseException:
+        if claim is not None:
+            claim.close()
+        elif descriptor is not None:
+            os.close(descriptor)
+        raise
+
+
+def publish_receipt_directory_no_replace(
+    staging: Path, output: Path, staging_claim: RetainedDirectoryClaim
+) -> None:
     if output.name in {"", ".", ".."}:
         raise AcceptanceError("output-dir must have a safe final path component")
+    if staging_claim.path != staging or staging_claim.label != "staging":
+        raise AcceptanceError("publication requires the exact retained staging claim")
+    staging_claim.assert_current()
     parent_descriptor: int | None = None
     staging_descriptor: int | None = None
     output_descriptor: int | None = None
@@ -824,6 +881,22 @@ def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
             if not stat_module.S_ISREG(metadata.st_mode):
                 raise AcceptanceError("staging must contain only regular evidence files")
 
+        retained_files: dict[str, dict[str, Any]] = {}
+        for retained in staging_claim.file_claims:
+            try:
+                relative = retained["path"].relative_to(staging)
+            except ValueError as error:
+                raise AcceptanceError(
+                    "retained staging claim contains an out-of-tree file"
+                ) from error
+            if len(relative.parts) != 1 or relative.name in retained_files:
+                raise AcceptanceError("retained staging claim is ambiguous")
+            retained_files[relative.name] = retained
+        if set(retained_files) != set(names):
+            raise AcceptanceError(
+                "staged evidence inventory changed after pre-verification binding"
+            )
+
         try:
             os.mkdir(output.name, mode=0o700, dir_fd=parent_descriptor)
             output_descriptor = os.open(
@@ -860,7 +933,9 @@ def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
                     "output-dir path no longer names its claimed directory"
                 )
 
-        expected_digests: dict[str, str] = {}
+        expected_digests = {
+            name: retained_files[name]["sha256"] for name in names
+        }
 
         def link_verified_staged_file(name: str) -> None:
             source_descriptor = os.open(
@@ -879,7 +954,13 @@ def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
                     "device": source_metadata.st_dev,
                     "inode": source_metadata.st_ino,
                 }
-                expected_digests[name] = sha256_descriptor(source_descriptor)
+                if (
+                    source_identity != retained_files[name]["identity"]
+                    or sha256_descriptor(source_descriptor) != expected_digests[name]
+                ):
+                    raise AcceptanceError(
+                        f"staged evidence changed after self-verification: {name}"
+                    )
                 named_source = os.stat(
                     name, dir_fd=staging_descriptor, follow_symlinks=False
                 )
@@ -933,13 +1014,15 @@ def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
             link_verified_staged_file(name)
 
         os.fsync(output_descriptor)
+        staging_claim.assert_current()
         assert_named_output_claim()
 
-        link_verified_staged_file("receipt.json")
-        os.fsync(output_descriptor)
-        os.fsync(parent_descriptor)
-        assert_named_output_claim()
         try:
+            link_verified_staged_file("receipt.json")
+            os.fsync(output_descriptor)
+            os.fsync(parent_descriptor)
+            staging_claim.assert_current()
+            assert_named_output_claim()
             for name, expected_digest in expected_digests.items():
                 published_descriptor = os.open(
                     name,
@@ -963,6 +1046,7 @@ def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
                 finally:
                     os.close(published_descriptor)
             os.fsync(output_descriptor)
+            staging_claim.assert_current()
             assert_named_output_claim()
         except BaseException:
             try:
@@ -1138,10 +1222,20 @@ def main(argv: list[str] | None = None) -> int:
             (staging / "receipt.json").write_text(
                 json.dumps(receipt, indent=2, sort_keys=True) + "\n"
             )
-            problems = verifier.verify(staging)
-            if problems:
-                raise AcceptanceError("self-verification failed: " + "; ".join(problems))
-            publish_receipt_directory_no_replace(staging, output)
+            staging_claim = retain_staged_evidence(staging)
+            try:
+                problems = verifier.verify(staging)
+                staging_claim.assert_current()
+                if problems:
+                    raise AcceptanceError(
+                        "self-verification failed: " + "; ".join(problems)
+                    )
+                publish_receipt_directory_no_replace(
+                    staging, output, staging_claim
+                )
+                staging_claim.assert_current()
+            finally:
+                staging_claim.close()
             install_claim.assert_current()
             install_claim.close()
         print(json.dumps({"output": str(output), "integration_head": revision,

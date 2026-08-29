@@ -554,6 +554,16 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 'PULP_TRACE_SCOPE_NAMED("gpu", "pipeline_compile");'
             )
         )
+        self.assertTrue(
+            MODULE.is_product_producer_source(
+                'if (enabled) PULP_TRACE_SCOPE_NAMED("gpu", "pipeline_compile");'
+            )
+        )
+        self.assertTrue(
+            MODULE.is_product_producer_source(
+                'do { PULP_TRACE_COUNTER("gpu", "queued", count); } while (false);'
+            )
+        )
         self.assertFalse(
             MODULE.is_product_producer_source(
                 'config.gpu_evidence_id = "gpu_evidence_id";'
@@ -563,6 +573,21 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             MODULE.is_product_producer_source(
                 'PULP_TRACE_SCOPE_NAMED("state", "pointer_dispatch");'
             )
+        )
+        self.assertFalse(
+            MODULE.is_product_producer_source(
+                '// PULP_TRACE_SCOPE_NAMED("gpu", "not_a_call");\n'
+                'const char* text = "PULP_TRACE_SCOPE_NAMED(\\\"gpu\\\", '
+                '\\\"also_not_a_call\\\");";'
+            )
+        )
+        self.assertEqual(
+            MODULE.product_producer_signatures(
+                'PULP_TRACE_SCOPE_NAMED("gpu", /* incidental */ "gpu_submit");'
+            ),
+            MODULE.product_producer_signatures(
+                'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");'
+            ),
         )
 
     def test_product_producer_delta_catches_gpu_call_without_evidence_literal(self):

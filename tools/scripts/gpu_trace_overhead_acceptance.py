@@ -122,11 +122,17 @@ PRODUCT_PRODUCER_ROOTS = (
     "core/runtime", "core/render", "core/view", "core/format", "inspect",
 )
 PRODUCER_SOURCE_ANNOTATION = '"gpu_evidence_id"'
-PRODUCT_TRACE_CALL = re.compile(
-    r"(?ms)^[ \t]*(?!#)(PULP_TRACE_"
-    r"(?:SCOPE(?:_NAMED(?:_ARGS)?|_DYNAMIC)?|BEGIN(?:_ARGS)?|END|COUNTER)"
-    r"\s*\((?:(?!^[ \t]*PULP_TRACE_).){0,2048}?\)\s*;)"
-)
+PRODUCT_TRACE_MACROS = {
+    "PULP_TRACE_SCOPE",
+    "PULP_TRACE_SCOPE_NAMED",
+    "PULP_TRACE_SCOPE_NAMED_ARGS",
+    "PULP_TRACE_SCOPE_DYNAMIC",
+    "PULP_TRACE_BEGIN",
+    "PULP_TRACE_BEGIN_ARGS",
+    "PULP_TRACE_END",
+    "PULP_TRACE_COUNTER",
+}
+MAX_PRODUCT_TRACE_CALL_BYTES = 2048
 BUILD_TARGETS = ("pulp-rust-cli", "pulp-cli", "pulp-mcp")
 REQUIRED_BUILD_SETTINGS = {
     "CMAKE_BUILD_TYPE": "Release",
@@ -1262,19 +1268,169 @@ def _semantic_discovery_paths(
     return paths
 
 
+def _skip_cxx_quoted(text: str, index: int, quote: str) -> int:
+    index += 1
+    while index < len(text):
+        if text[index] == "\\":
+            index += 2
+        elif text[index] == quote:
+            return index + 1
+        else:
+            index += 1
+    return len(text)
+
+
+def _is_cxx_quote_start(text: str, index: int) -> bool:
+    if text[index] != "'":
+        return text[index] == '"'
+    return not (
+        index > 0
+        and index + 1 < len(text)
+        and text[index - 1].isalnum()
+        and text[index + 1].isalnum()
+    )
+
+
+def _bounded_product_trace_calls(text: str) -> tuple[str, ...]:
+    """Lex bounded macro calls outside comments and string/character literals."""
+    calls: list[str] = []
+    index = 0
+    while index < len(text):
+        if text.startswith("//", index):
+            newline = text.find("\n", index + 2)
+            index = len(text) if newline < 0 else newline + 1
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = len(text) if end < 0 else end + 2
+            continue
+        if text[index] in {'"', "'"} and _is_cxx_quote_start(text, index):
+            index = _skip_cxx_quoted(text, index, text[index])
+            continue
+        if not (text[index].isalpha() or text[index] == "_"):
+            index += 1
+            continue
+        token_start = index
+        index += 1
+        while index < len(text) and (text[index].isalnum() or text[index] == "_"):
+            index += 1
+        token = text[token_start:index]
+        if token not in PRODUCT_TRACE_MACROS:
+            continue
+        cursor = index
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor >= len(text) or text[cursor] != "(":
+            continue
+        depth = 0
+        call_end: int | None = None
+        while cursor < len(text) and cursor - token_start <= MAX_PRODUCT_TRACE_CALL_BYTES:
+            if text.startswith("//", cursor):
+                newline = text.find("\n", cursor + 2)
+                cursor = len(text) if newline < 0 else newline + 1
+                continue
+            if text.startswith("/*", cursor):
+                end = text.find("*/", cursor + 2)
+                cursor = len(text) if end < 0 else end + 2
+                continue
+            if text[cursor] in {'"', "'"} and _is_cxx_quote_start(text, cursor):
+                cursor = _skip_cxx_quoted(text, cursor, text[cursor])
+                continue
+            if text[cursor] == "(":
+                depth += 1
+            elif text[cursor] == ")":
+                depth -= 1
+                if depth == 0:
+                    call_end = cursor + 1
+                    break
+            cursor += 1
+        if call_end is None:
+            continue
+        cursor = call_end
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor < len(text) and text[cursor] == ";":
+            calls.append(text[token_start:cursor + 1])
+            index = cursor + 1
+    return tuple(calls)
+
+
+def _cxx_string_literals(text: str) -> tuple[str, ...]:
+    literals: list[str] = []
+    index = 0
+    while index < len(text):
+        if text.startswith("//", index):
+            newline = text.find("\n", index + 2)
+            index = len(text) if newline < 0 else newline + 1
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = len(text) if end < 0 else end + 2
+        elif text[index] == "'" and _is_cxx_quote_start(text, index):
+            index = _skip_cxx_quoted(text, index, "'")
+        elif text[index] == '"':
+            end = _skip_cxx_quoted(text, index, '"')
+            literals.append(text[index + 1:max(index + 1, end - 1)])
+            index = end
+        else:
+            index += 1
+    return tuple(literals)
+
+
+def _has_cxx_identifier(text: str, identifiers: set[str]) -> bool:
+    index = 0
+    while index < len(text):
+        if text.startswith("//", index):
+            newline = text.find("\n", index + 2)
+            index = len(text) if newline < 0 else newline + 1
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = len(text) if end < 0 else end + 2
+        elif text[index] in {'"', "'"} and _is_cxx_quote_start(text, index):
+            index = _skip_cxx_quoted(text, index, text[index])
+        elif text[index].isalpha() or text[index] == "_":
+            start = index
+            index += 1
+            while index < len(text) and (text[index].isalnum() or text[index] == "_"):
+                index += 1
+            if text[start:index].lower() in identifiers:
+                return True
+        else:
+            index += 1
+    return False
+
+
+def _normalize_product_trace_call(text: str) -> str:
+    pieces: list[str] = []
+    index = 0
+    while index < len(text):
+        if text.startswith("//", index):
+            newline = text.find("\n", index + 2)
+            index = len(text) if newline < 0 else newline + 1
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = len(text) if end < 0 else end + 2
+        elif text[index] in {'"', "'"} and _is_cxx_quote_start(text, index):
+            end = _skip_cxx_quoted(text, index, text[index])
+            pieces.append(text[index:end])
+            index = end
+        else:
+            pieces.append(text[index])
+            index += 1
+    return re.sub(r"\s+", " ", "".join(pieces)).strip()
+
+
 def product_producer_signatures(text: str) -> tuple[str, ...]:
     """Extract bounded GPU-relevant trace call sites independently of evidence keys."""
     signatures = []
-    for match in PRODUCT_TRACE_CALL.finditer(text):
-        call = match.group(1)
-        string_literals = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', call)
+    for call in _bounded_product_trace_calls(text):
+        string_literals = _cxx_string_literals(call)
         gpu_relevant = (
-            PRODUCER_SOURCE_ANNOTATION in call
+            PRODUCER_SOURCE_ANNOTATION.strip('"') in string_literals
             or (bool(string_literals) and string_literals[0] == "gpu")
-            or re.search(r"\bgpu_evidence(?:_id)?\b", call, re.IGNORECASE) is not None
+            or _has_cxx_identifier(call, {"gpu_evidence", "gpu_evidence_id"})
         )
         if gpu_relevant:
-            signatures.append(re.sub(r"\s+", " ", call).strip())
+            signatures.append(_normalize_product_trace_call(call))
     return tuple(signatures)
 
 

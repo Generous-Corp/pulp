@@ -49,6 +49,13 @@ def write_png(path: Path, *, patterned: bool = True) -> None:
 
 
 class GpuProbeAcceptanceTests(unittest.TestCase):
+    def publish(self, staging: Path, output: Path) -> None:
+        claim = RECORDER.retain_staged_evidence(staging)
+        try:
+            RECORDER.publish_receipt_directory_no_replace(staging, output, claim)
+        finally:
+            claim.close()
+
     def v2_fixture(self, directory: Path) -> dict:
         for group in RECORDER.RECIPES:
             for suffix in ("run1", "run2", "negative"):
@@ -332,12 +339,12 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             raced_output.mkdir()
             inode = raced_output.stat().st_ino
             with self.assertRaisesRegex(RECORDER.AcceptanceError, "appeared"):
-                RECORDER.publish_receipt_directory_no_replace(staging, raced_output)
+                self.publish(staging, raced_output)
             self.assertEqual(raced_output.stat().st_ino, inode)
             self.assertEqual(list(raced_output.iterdir()), [])
 
             output = root / "published"
-            RECORDER.publish_receipt_directory_no_replace(staging, output)
+            self.publish(staging, output)
             self.assertEqual(
                 sorted(path.name for path in output.iterdir()),
                 ["evidence.json", "receipt.json"],
@@ -368,7 +375,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 RECORDER.os, "link", side_effect=swap_after_first_link
             ):
                 with self.assertRaisesRegex(RECORDER.AcceptanceError, "no longer names"):
-                    RECORDER.publish_receipt_directory_no_replace(staging, output)
+                    self.publish(staging, output)
             self.assertFalse((moved / "receipt.json").exists())
             self.assertEqual(list(output.iterdir()), [])
 
@@ -399,7 +406,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 RECORDER.os, "link", side_effect=swap_parent_after_first_link
             ):
                 with self.assertRaisesRegex(RECORDER.AcceptanceError, "no longer names"):
-                    RECORDER.publish_receipt_directory_no_replace(staging, output)
+                    self.publish(staging, output)
             self.assertFalse((moved_parent / "published" / "receipt.json").exists())
             self.assertEqual(list(parent.iterdir()), [])
 
@@ -427,7 +434,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 RECORDER.os, "link", side_effect=swap_source_before_first_link
             ):
                 with self.assertRaisesRegex(RECORDER.AcceptanceError, "identity changed"):
-                    RECORDER.publish_receipt_directory_no_replace(staging, output)
+                    self.publish(staging, output)
             self.assertFalse((output / "receipt.json").exists())
             self.assertFalse((output / "evidence.json").exists())
 
@@ -455,10 +462,39 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 RECORDER.os, "link", side_effect=mutate_linked_receipt
             ):
                 with self.assertRaisesRegex(
-                    RECORDER.AcceptanceError, "bytes differ"
+                    RECORDER.AcceptanceError, "mutation event|bytes differ"
                 ):
-                    RECORDER.publish_receipt_directory_no_replace(staging, output)
+                    self.publish(staging, output)
             self.assertFalse((output / "receipt.json").exists())
+
+    def test_receipt_publication_rejects_post_verification_staging_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / "staging"
+            staging.mkdir()
+            evidence = staging / "evidence.json"
+            evidence.write_text('{"verified":true}\n', encoding="utf-8")
+            receipt = staging / "receipt.json"
+            receipt.write_text(
+                '{"raw_sha256":{"evidence.json":"verified"}}\n',
+                encoding="utf-8",
+            )
+            claim = RECORDER.retain_staged_evidence(staging)
+            try:
+                evidence.write_text('{"verified":false}\n', encoding="utf-8")
+                receipt.write_text(
+                    '{"raw_sha256":{"evidence.json":"forged"}}\n',
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    RECORDER.AcceptanceError, "mutation event|changed"
+                ):
+                    RECORDER.publish_receipt_directory_no_replace(
+                        staging, root / "published", claim
+                    )
+            finally:
+                claim.close()
+            self.assertFalse((root / "published" / "receipt.json").exists())
 
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -502,7 +538,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             binary.write_bytes(b"substituted executable")
             try:
                 with self.assertRaisesRegex(
-                    RECORDER.AcceptanceError, "retained executable claim"
+                    RECORDER.AcceptanceError, "retained file claim"
                 ):
                     claim.assert_current()
             finally:
