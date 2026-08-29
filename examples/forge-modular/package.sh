@@ -334,7 +334,14 @@ rebuild_forge_products "$BUILD_DIR" || exit 1
 "$REPO/tools/rack/build_shape_text.sh"
 FM_SHAPE_TEXT_SHA="$(/usr/bin/python3 \
     "$REPO/examples/forge-modular/binary_identity.py" "$REPO/build/shape_text")"
-"$REPO/tools/rack/build_rack_patch_decode.sh" "$REPO/build/rack_patch_decode"
+PULP_RACK_PATCH_DECODE_ARCH="$INSTALLER_ARCH" \
+    "$REPO/tools/rack/build_rack_patch_decode.sh" \
+    "$REPO/build/rack_patch_decode"
+DECODER_ARCHS="$(/usr/bin/lipo -archs "$REPO/build/rack_patch_decode")"
+if [[ "$DECODER_ARCHS" != "$INSTALLER_ARCH" ]]; then
+    echo "Rack saved-patch decoder architecture is $DECODER_ARCHS, not $INSTALLER_ARCH" >&2
+    exit 1
+fi
 FM_RACK_PATCH_DECODE_SHA="$(/usr/bin/python3 \
     "$REPO/examples/forge-modular/binary_identity.py" \
     "$REPO/build/rack_patch_decode")"

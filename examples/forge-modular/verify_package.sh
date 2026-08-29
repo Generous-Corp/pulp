@@ -169,8 +169,14 @@ EXPECTED_PULP_SDK_CONTENT="${FORGE_PULP_SDK_CONTENT_SHA256:-}"
 EXPECTED_PULP_SDK_VERSION="$(resolve_pulp_sdk_version \
     "$EXPECTED_PULP_SDK_PREFIX" "${FORGE_PULP_SDK_VERSION:-}")" || exit 1
 case "$EXPECTED_PLATFORM" in
-    mac-arm64) EXPECTED_PULP_SDK_PLATFORM="darwin-arm64" ;;
-    mac-x64) EXPECTED_PULP_SDK_PLATFORM="darwin-x64" ;;
+    mac-arm64)
+        EXPECTED_PULP_SDK_PLATFORM="darwin-arm64"
+        EXPECTED_DECODER_ARCH="arm64"
+        ;;
+    mac-x64)
+        EXPECTED_PULP_SDK_PLATFORM="darwin-x64"
+        EXPECTED_DECODER_ARCH="x86_64"
+        ;;
     *) echo "unsupported Rack platform in package: $EXPECTED_PLATFORM" >&2; exit 1 ;;
 esac
 EXPECTED_PULP_SDK_JSON="$(/usr/bin/python3 \
@@ -382,6 +388,13 @@ if [[ "$shipped_decoder_sha" == "$EXPECTED_RACK_PATCH_DECODE_SHA" ]]; then
     say_ok "the Rack saved-patch decoder is content-identical to the rebuilt Pulp helper"
 else
     say_bad "the Rack saved-patch decoder identity is $shipped_decoder_sha, not rebuilt helper $EXPECTED_RACK_PATCH_DECODE_SHA"
+fi
+shipped_decoder_archs="$(/usr/bin/lipo -archs \
+    "$ROOT/Contents/Resources/build/rack_patch_decode" 2>/dev/null || echo "")"
+if [[ "$shipped_decoder_archs" == "$EXPECTED_DECODER_ARCH" ]]; then
+    say_ok "the Rack saved-patch decoder targets $EXPECTED_DECODER_ARCH"
+else
+    say_bad "the Rack saved-patch decoder targets $shipped_decoder_archs, not $EXPECTED_DECODER_ARCH"
 fi
 
 # An empty vocabulary hands the model a contract with no DSP in it, and the run

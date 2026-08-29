@@ -285,6 +285,23 @@ class RackLaunchSafety(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
         return str(decoder)
 
+    @unittest.skipUnless(sys.platform == "darwin",
+                         "requested Mach-O architecture is a macOS surface")
+    def test_decoder_build_honors_requested_architecture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            decoder = pathlib.Path(tmp) / "rack_patch_decode"
+            environment = os.environ.copy()
+            environment["PULP_RACK_PATCH_DECODE_ARCH"] = "x86_64"
+            completed = subprocess.run(
+                [str(HERE / "build_rack_patch_decode.sh"), str(decoder)],
+                env=environment, capture_output=True, text=True, timeout=60)
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            architecture = subprocess.run(
+                ["/usr/bin/lipo", "-archs", str(decoder)],
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(0, architecture.returncode, architecture.stderr)
+            self.assertEqual("x86_64", architecture.stdout.strip())
+
     def launch_fixture(self, artifact_name="demo.vcv", module_count=1):
         temp = tempfile.TemporaryDirectory()
         root = pathlib.Path(temp.name)
