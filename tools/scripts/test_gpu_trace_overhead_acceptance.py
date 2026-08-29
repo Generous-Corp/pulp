@@ -307,6 +307,22 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     MODULE.atomic_write_json(output, {"status": "pass"})
             self.assertFalse(output.exists())
 
+    def test_output_publication_rejects_in_place_receipt_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "receipt.json"
+            real_link = MODULE.os.link
+
+            def mutate_after_link(source, destination, **kwargs):
+                result = real_link(source, destination, **kwargs)
+                output.write_text('{"forged":true}\n', encoding="utf-8")
+                return result
+
+            with mock.patch.object(MODULE.os, "link", side_effect=mutate_after_link):
+                with self.assertRaisesRegex(ValueError, "bytes differ"):
+                    MODULE.atomic_write_json(output, {"status": "pass"})
+            self.assertFalse(output.exists())
+
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

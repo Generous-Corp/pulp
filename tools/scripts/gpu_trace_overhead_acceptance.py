@@ -677,10 +677,15 @@ class RetainedDirectoryClaim:
         self.label = label
         self.closed = False
         self.file_claims: list[dict[str, Any]] = []
+        self.ancestor_claims: list[dict[str, Any]] = []
+        self.claimed_directory_identities = {
+            (identity["device"], identity["inode"])
+        }
         self.monitor: Any | None = None
+        self._bind_ancestor_chain(path)
 
     @staticmethod
-    def _vnode_flags() -> int:
+    def _file_vnode_flags() -> int:
         required = (
             "KQ_NOTE_DELETE", "KQ_NOTE_WRITE", "KQ_NOTE_EXTEND",
             "KQ_NOTE_ATTRIB", "KQ_NOTE_LINK", "KQ_NOTE_RENAME",
@@ -692,23 +697,57 @@ class RetainedDirectoryClaim:
             raise ValueError("exact executable sealing requires macOS kqueue")
         return sum(getattr(select, name) for name in required)
 
-    def _register_monitor(self, descriptor: int) -> None:
+    @staticmethod
+    def _directory_vnode_flags() -> int:
+        required = ("KQ_NOTE_DELETE", "KQ_NOTE_RENAME", "KQ_NOTE_REVOKE")
+        if any(not hasattr(select, name) for name in required):
+            raise ValueError("exact path sealing requires macOS kqueue")
+        return sum(getattr(select, name) for name in required)
+
+    def _register_monitor(self, descriptor: int, *, is_file: bool) -> None:
         assert self.monitor is not None
         event = select.kevent(
             descriptor,
             filter=select.KQ_FILTER_VNODE,
             flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
-            fflags=self._vnode_flags(),
+            fflags=(
+                self._file_vnode_flags() if is_file
+                else self._directory_vnode_flags()
+            ),
         )
         self.monitor.control([event], 0, 0)
+
+    def _bind_ancestor_chain(self, path: Path) -> None:
+        current = path.resolve().parent
+        while True:
+            descriptor = os.open(current, _directory_open_flags())
+            identity = _directory_identity(os.fstat(descriptor))
+            key = (identity["device"], identity["inode"])
+            if key in self.claimed_directory_identities:
+                os.close(descriptor)
+            else:
+                self.claimed_directory_identities.add(key)
+                claim = {
+                    "path": current,
+                    "descriptor": descriptor,
+                    "identity": identity,
+                }
+                self.ancestor_claims.append(claim)
+                if self.monitor is not None:
+                    self._register_monitor(descriptor, is_file=False)
+            if current.parent == current:
+                break
+            current = current.parent
 
     def seal(self) -> None:
         if self.monitor is not None:
             raise ValueError(f"{self.label} claim is already sealed")
         self.monitor = select.kqueue()
-        self._register_monitor(self.descriptor)
+        self._register_monitor(self.descriptor, is_file=False)
+        for claim in self.ancestor_claims:
+            self._register_monitor(claim["descriptor"], is_file=False)
         for claim in self.file_claims:
-            self._register_monitor(claim["descriptor"])
+            self._register_monitor(claim["descriptor"], is_file=True)
         self._assert_no_mutation_events()
 
     def _assert_no_mutation_events(self) -> None:
@@ -720,6 +759,7 @@ class RetainedDirectoryClaim:
                 )
 
     def bind_file(self, path: Path, label: str, expected_sha256: str) -> None:
+        self._bind_ancestor_chain(path)
         descriptor = os.open(
             path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         )
@@ -744,7 +784,7 @@ class RetainedDirectoryClaim:
             "label": label,
         })
         if self.monitor is not None:
-            self._register_monitor(descriptor)
+            self._register_monitor(descriptor, is_file=True)
             self._assert_no_mutation_events()
 
     def assert_current(self) -> None:
@@ -754,6 +794,11 @@ class RetainedDirectoryClaim:
         _assert_directory_path_identity(
             self.path, self.descriptor, self.identity, self.label
         )
+        for claim in self.ancestor_claims:
+            _assert_directory_path_identity(
+                claim["path"], claim["descriptor"], claim["identity"],
+                "path-ancestor",
+            )
         for claim in self.file_claims:
             metadata = os.fstat(claim["descriptor"])
             named = os.stat(claim["path"], follow_symlinks=False)
@@ -775,6 +820,8 @@ class RetainedDirectoryClaim:
                 self.monitor.close()
             for claim in self.file_claims:
                 os.close(claim["descriptor"])
+            for claim in self.ancestor_claims:
+                os.close(claim["descriptor"])
             os.close(self.descriptor)
             self.closed = True
 
@@ -790,6 +837,7 @@ def validate_output_path(output: Path, protected: tuple[Path, ...]) -> None:
 
 def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
     data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    expected_digest = hashlib.sha256(data).hexdigest()
     if output.name in {"", ".", ".."}:
         raise ValueError("output must have a safe final path component")
     parent_descriptor = os.open(output.parent, _directory_open_flags())
@@ -862,6 +910,27 @@ def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
             output_linked = False
             os.fsync(parent_descriptor)
             raise ValueError("A2T output no longer names the published receipt")
+        published_descriptor = os.open(
+            output.name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=parent_descriptor,
+        )
+        try:
+            metadata = os.fstat(published_descriptor)
+            named = os.stat(
+                output.name, dir_fd=parent_descriptor, follow_symlinks=False
+            )
+            if (
+                {"device": metadata.st_dev, "inode": metadata.st_ino}
+                != staged_identity
+                or {"device": named.st_dev, "inode": named.st_ino}
+                != staged_identity
+                or sha256_descriptor(published_descriptor) != expected_digest
+            ):
+                raise ValueError("A2T published receipt bytes differ from payload")
+        finally:
+            os.close(published_descriptor)
+        os.fsync(parent_descriptor)
     except BaseException:
         if output_linked:
             try:

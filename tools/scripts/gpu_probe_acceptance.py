@@ -164,10 +164,15 @@ class RetainedDirectoryClaim:
         self.label = label
         self.closed = False
         self.file_claims: list[dict[str, Any]] = []
+        self.ancestor_claims: list[dict[str, Any]] = []
+        self.claimed_directory_identities = {
+            (identity["device"], identity["inode"])
+        }
         self.monitor: Any | None = None
+        self._bind_ancestor_chain(path)
 
     @staticmethod
-    def _vnode_flags() -> int:
+    def _file_vnode_flags() -> int:
         required = (
             "KQ_NOTE_DELETE", "KQ_NOTE_WRITE", "KQ_NOTE_EXTEND",
             "KQ_NOTE_ATTRIB", "KQ_NOTE_LINK", "KQ_NOTE_RENAME",
@@ -179,23 +184,57 @@ class RetainedDirectoryClaim:
             raise AcceptanceError("exact executable sealing requires macOS kqueue")
         return sum(getattr(select, name) for name in required)
 
-    def _register_monitor(self, descriptor: int) -> None:
+    @staticmethod
+    def _directory_vnode_flags() -> int:
+        required = ("KQ_NOTE_DELETE", "KQ_NOTE_RENAME", "KQ_NOTE_REVOKE")
+        if any(not hasattr(select, name) for name in required):
+            raise AcceptanceError("exact path sealing requires macOS kqueue")
+        return sum(getattr(select, name) for name in required)
+
+    def _register_monitor(self, descriptor: int, *, is_file: bool) -> None:
         assert self.monitor is not None
         event = select.kevent(
             descriptor,
             filter=select.KQ_FILTER_VNODE,
             flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
-            fflags=self._vnode_flags(),
+            fflags=(
+                self._file_vnode_flags() if is_file
+                else self._directory_vnode_flags()
+            ),
         )
         self.monitor.control([event], 0, 0)
+
+    def _bind_ancestor_chain(self, path: Path) -> None:
+        current = path.resolve().parent
+        while True:
+            descriptor = os.open(current, directory_open_flags())
+            identity = directory_identity(os.fstat(descriptor), "path-ancestor")
+            key = (identity["device"], identity["inode"])
+            if key in self.claimed_directory_identities:
+                os.close(descriptor)
+            else:
+                self.claimed_directory_identities.add(key)
+                claim = {
+                    "path": current,
+                    "descriptor": descriptor,
+                    "identity": identity,
+                }
+                self.ancestor_claims.append(claim)
+                if self.monitor is not None:
+                    self._register_monitor(descriptor, is_file=False)
+            if current.parent == current:
+                break
+            current = current.parent
 
     def seal(self) -> None:
         if self.monitor is not None:
             raise AcceptanceError(f"{self.label} claim is already sealed")
         self.monitor = select.kqueue()
-        self._register_monitor(self.descriptor)
+        self._register_monitor(self.descriptor, is_file=False)
+        for claim in self.ancestor_claims:
+            self._register_monitor(claim["descriptor"], is_file=False)
         for claim in self.file_claims:
-            self._register_monitor(claim["descriptor"])
+            self._register_monitor(claim["descriptor"], is_file=True)
         self._assert_no_mutation_events()
 
     def _assert_no_mutation_events(self) -> None:
@@ -207,6 +246,7 @@ class RetainedDirectoryClaim:
                 )
 
     def bind_file(self, path: Path, label: str, expected_sha256: str) -> None:
+        self._bind_ancestor_chain(path)
         descriptor = os.open(
             path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         )
@@ -231,7 +271,7 @@ class RetainedDirectoryClaim:
             "label": label,
         })
         if self.monitor is not None:
-            self._register_monitor(descriptor)
+            self._register_monitor(descriptor, is_file=True)
             self._assert_no_mutation_events()
 
     def assert_current(self) -> None:
@@ -239,6 +279,11 @@ class RetainedDirectoryClaim:
             raise AcceptanceError(f"{self.label} claim closed before proof completion")
         self._assert_no_mutation_events()
         assert_directory_claim(self.path, self.identity, self.label, self.descriptor)
+        for claim in self.ancestor_claims:
+            assert_directory_claim(
+                claim["path"], claim["identity"], "path-ancestor",
+                claim["descriptor"],
+            )
         for claim in self.file_claims:
             metadata = os.fstat(claim["descriptor"])
             named = os.stat(claim["path"], follow_symlinks=False)
@@ -259,6 +304,8 @@ class RetainedDirectoryClaim:
             if self.monitor is not None:
                 self.monitor.close()
             for claim in self.file_claims:
+                os.close(claim["descriptor"])
+            for claim in self.ancestor_claims:
                 os.close(claim["descriptor"])
             os.close(self.descriptor)
             self.closed = True
@@ -813,6 +860,8 @@ def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
                     "output-dir path no longer names its claimed directory"
                 )
 
+        expected_digests: dict[str, str] = {}
+
         def link_verified_staged_file(name: str) -> None:
             source_descriptor = os.open(
                 name,
@@ -830,6 +879,7 @@ def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
                     "device": source_metadata.st_dev,
                     "inode": source_metadata.st_ino,
                 }
+                expected_digests[name] = sha256_descriptor(source_descriptor)
                 named_source = os.stat(
                     name, dir_fd=staging_descriptor, follow_symlinks=False
                 )
@@ -889,6 +939,39 @@ def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
         os.fsync(output_descriptor)
         os.fsync(parent_descriptor)
         assert_named_output_claim()
+        try:
+            for name, expected_digest in expected_digests.items():
+                published_descriptor = os.open(
+                    name,
+                    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=output_descriptor,
+                )
+                try:
+                    metadata = os.fstat(published_descriptor)
+                    identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+                    named = os.stat(
+                        name, dir_fd=output_descriptor, follow_symlinks=False
+                    )
+                    if (
+                        not stat_module.S_ISREG(metadata.st_mode)
+                        or {"device": named.st_dev, "inode": named.st_ino} != identity
+                        or sha256_descriptor(published_descriptor) != expected_digest
+                    ):
+                        raise AcceptanceError(
+                            f"published evidence bytes differ from staging: {name}"
+                        )
+                finally:
+                    os.close(published_descriptor)
+            os.fsync(output_descriptor)
+            assert_named_output_claim()
+        except BaseException:
+            try:
+                os.unlink("receipt.json", dir_fd=output_descriptor)
+                os.fsync(output_descriptor)
+                os.fsync(parent_descriptor)
+            except OSError:
+                pass
+            raise
     finally:
         if output_descriptor is not None:
             os.close(output_descriptor)

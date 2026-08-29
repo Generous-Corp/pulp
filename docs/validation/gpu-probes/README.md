@@ -28,12 +28,13 @@ not create or promote a receipt during an implementation turn.
   installing and binds its no-follow device/inode identity through the final
   proof. It also retains and rehashes the exact installed CLI, delegate, MCP,
   and Forge executable inodes around every launch and seals them with macOS
-  vnode mutation monitoring, so a replace-and-restore race is still detected.
+  vnode mutation monitoring across their complete path-ancestor chains, so a
+  replace-and-restore race is still detected.
   Receipt publication likewise
   uses retained directory descriptors,
   source/destination inode comparisons, relative no-replace links, and a
-  receipt-last identity check, so neither path or staged-file substitution nor
-  stale SDK files can be accepted.
+  receipt-last identity and final byte check, so neither path, staged-file, or
+  in-place content substitution nor stale SDK files can be accepted.
 - A fresh Forge worktree detached at
   `0750a88dea3af7fca927a8c02887e071109407ae`. The only allowed difference is
   the plan-required `PULP_SDK_REF` overlay containing the final Pulp SHA; it

@@ -431,6 +431,35 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             self.assertFalse((output / "receipt.json").exists())
             self.assertFalse((output / "evidence.json").exists())
 
+    def test_receipt_publication_rejects_in_place_receipt_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / "staging"
+            staging.mkdir()
+            (staging / "evidence.json").write_text("{}\n", encoding="utf-8")
+            (staging / "receipt.json").write_text(
+                '{"verified":true}\n', encoding="utf-8"
+            )
+            output = root / "published"
+            real_link = RECORDER.os.link
+
+            def mutate_linked_receipt(source, destination, **kwargs):
+                result = real_link(source, destination, **kwargs)
+                if source == "receipt.json":
+                    (output / "receipt.json").write_text(
+                        '{"verified":false}\n', encoding="utf-8"
+                    )
+                return result
+
+            with mock.patch.object(
+                RECORDER.os, "link", side_effect=mutate_linked_receipt
+            ):
+                with self.assertRaisesRegex(
+                    RECORDER.AcceptanceError, "bytes differ"
+                ):
+                    RECORDER.publish_receipt_directory_no_replace(staging, output)
+            self.assertFalse((output / "receipt.json").exists())
+
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -509,6 +538,52 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             try:
                 with mock.patch.object(
                     RECORDER.subprocess, "run", side_effect=swap_during_launch
+                ):
+                    with self.assertRaisesRegex(
+                        RECORDER.AcceptanceError, "mutation event"
+                    ):
+                        RECORDER.run_bounded(
+                            [str(binary)], cwd=root, environment={}, timeout=1,
+                            directory_claim=claim,
+                        )
+            finally:
+                claim.close()
+
+    def test_bounded_launch_detects_restored_ancestor_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            container = root / "container"
+            prefix = container / "prefix"
+            binary = prefix / "bin/pulp"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"claimed executable")
+            descriptor = RECORDER.os.open(prefix, RECORDER.directory_open_flags())
+            claim = RECORDER.RetainedDirectoryClaim(
+                prefix,
+                descriptor,
+                RECORDER.directory_identity(
+                    RECORDER.os.fstat(descriptor), "install-prefix"
+                ),
+                "install-prefix",
+            )
+            claim.bind_file(binary, "installed Rust CLI", RECORDER.sha256(binary))
+            claim.seal()
+
+            def swap_ancestor_during_launch(*_args, **_kwargs):
+                moved = root / "moved-container"
+                container.rename(moved)
+                substitute = container / "prefix/bin/pulp"
+                substitute.parent.mkdir(parents=True)
+                substitute.write_bytes(b"substituted executable")
+                shutil.rmtree(container)
+                moved.rename(container)
+                return RECORDER.subprocess.CompletedProcess([str(binary)], 0, "", "")
+
+            try:
+                with mock.patch.object(
+                    RECORDER.subprocess,
+                    "run",
+                    side_effect=swap_ancestor_during_launch,
                 ):
                     with self.assertRaisesRegex(
                         RECORDER.AcceptanceError, "mutation event"

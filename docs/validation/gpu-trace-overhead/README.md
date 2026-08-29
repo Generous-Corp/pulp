@@ -38,15 +38,16 @@ retains and checks its no-follow device/inode identity around every installed
 CLI/MCP execution through final publication, retains and rehashes the exact
 CLI, delegate, MCP, trace, and trace-processor inodes around every launch, and
 seals them with macOS vnode mutation monitoring so replace-and-restore races
-remain observable. Each installed executable must be byte-identical to its
-exact build-tree output. Its
+remain observable across their complete path-ancestor chains. Each installed
+executable must be byte-identical to its exact build-tree output. Its
 receipt binds the CMake cache digest, build settings, targets, installed/build
 digests, and positive byte counts in addition to the installed
 `build_info.hpp` source stamp; a current header beside stale or mixed binaries
 therefore fails closed. `--output` must likewise be a new nonsymlink path under
 an existing directory outside the Pulp, planning, build, and install trees; the
 recorder retains a no-follow parent descriptor and publishes a fsynced staged
-inode by a relative no-replace link, rejecting parent or staged-file swaps
+inode by a relative no-replace link, then rehashes the published bytes against
+the generated payload, rejecting parent, staged-file, or in-place content swaps
 without dirtying or overwriting measured source. During
 measurement `PATH` excludes their prefix and all checkout build directories;
 MCP therefore succeeds only through its installed absolute-sibling binding.
