@@ -141,29 +141,77 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             "bytes": 3,
             "manifest_sha256": "a" * 64,
         }
+        manifest_sha256, skia_assets = VERIFIER._pinned_provider_asset_digests(
+            "Skia"
+        )
+        _manifest_sha256, v8_assets = VERIFIER._pinned_provider_asset_digests("V8")
+        skia_asset = sorted(skia_assets)[0]
+        v8_asset = sorted(v8_assets)[0]
+        skia_stamp_sha256 = hashlib.sha256(
+            (skia_asset + "\n").encode()
+        ).hexdigest()
+        v8_stamp_sha256 = hashlib.sha256((v8_asset + "\n").encode()).hexdigest()
         providers = {
             "skia_dawn": {
                 "root_role": "resolved-skia-dawn-provider-root",
-                "resolution": "CMake SKIA_DIR or exact generated Ninja archive path",
+                "resolution": "exact CMake/Ninja Skia layout plus pinned asset generation",
+                "root_authority": {
+                    "method": "pinned-release-asset-stamp-and-exact-layout-v1",
+                    "dependency": "Skia",
+                    "dependency_manifest_path": VERIFIER.PROVIDER_MANIFEST_PATH,
+                    "dependency_manifest_sha256": manifest_sha256,
+                    "generation_stamp_path": ".skia-asset-sha256",
+                    "generation_asset_sha256": skia_asset,
+                    "generation_stamp_sha256": skia_stamp_sha256,
+                    "top_level_entries": [
+                        ".skia-asset-sha256", "build", "include"
+                    ],
+                    "cache_authority": "SKIA_DIR",
+                    "provider_layout": "build/<platform>-gpu/lib/Release",
+                    "consumed_skia_archives": [
+                        "build/mac-gpu/lib/Release/libskia.a"
+                    ],
+                },
                 "tree_claim": tree_claim,
                 "required_members": [
-                    {"path": "lib/libskia.a", "git_blob_sha1": "1" * 40, "bytes": 1},
-                    {"path": "lib/libdawn_combined.a", "git_blob_sha1": "2" * 40, "bytes": 1},
+                    {"path": ".skia-asset-sha256", "git_blob_sha1": "0" * 40,
+                     "sha256": skia_stamp_sha256, "bytes": 65},
+                    {"path": "lib/libskia.a", "git_blob_sha1": "1" * 40,
+                     "sha256": "1" * 64, "bytes": 1},
+                    {"path": "lib/libdawn_combined.a", "git_blob_sha1": "2" * 40,
+                     "sha256": "2" * 64, "bytes": 1},
                 ],
             },
             "v8": {
                 "root_role": "resolved-v8-provider-root",
-                "resolution": "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root",
+                "resolution": "exact CMake V8 runtime layout plus pinned asset generation",
+                "root_authority": {
+                    "method": "pinned-release-asset-stamp-and-exact-layout-v1",
+                    "dependency": "V8",
+                    "dependency_manifest_path": VERIFIER.PROVIDER_MANIFEST_PATH,
+                    "dependency_manifest_sha256": manifest_sha256,
+                    "generation_stamp_path": ".v8-asset-sha256",
+                    "generation_asset_sha256": v8_asset,
+                    "generation_stamp_sha256": v8_stamp_sha256,
+                    "top_level_entries": [".v8-asset-sha256", "include", "lib"],
+                    "cache_authority": "V8_RUNTIME_LIBRARY",
+                    "provider_layout": "lib/<runtime>",
+                    "consumed_runtime": "lib/libv8.dylib",
+                },
                 "tree_claim": tree_claim,
                 "required_members": [
-                    {"path": "include/v8.h", "git_blob_sha1": "3" * 40, "bytes": 1},
-                    {"path": "lib/libv8.dylib", "git_blob_sha1": "4" * 40, "bytes": 1},
+                    {"path": ".v8-asset-sha256", "git_blob_sha1": "5" * 40,
+                     "sha256": v8_stamp_sha256, "bytes": 65},
+                    {"path": "include/v8.h", "git_blob_sha1": "3" * 40,
+                     "sha256": "3" * 64, "bytes": 1},
+                    {"path": "lib/libv8.dylib", "git_blob_sha1": "4" * 40,
+                     "sha256": "4" * 64, "bytes": 1},
                 ],
             },
         }
         source_disposition = "not-present-at-configured-or-resolved-sibling"
         render_provider_claim = {
-            "method": "retained-resolved-render-provider-trees-v2",
+            "method": "retained-resolved-render-provider-trees-v3",
             "skia_source_disposition": source_disposition,
             "providers": providers,
             "manifest_sha256": hashlib.sha256(
@@ -338,20 +386,30 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             receipt = self.v2_fixture(root)
             errors = VERIFIER.verify(root, require_terminal=True)
             self.assertIn(VERIFIER.OFFLINE_TERMINAL_ERROR, errors)
-            with self.assertRaisesRegex(
-                RECORDER.AcceptanceError, "recorder-owned retained claims"
-            ):
-                RECORDER.certify_fresh_recording(
-                    ROOT,
-                    receipt["integration_head"],
-                    root,
-                    staging_claim=object(),
-                    output_parent_claim=object(),
-                    execution_claim=object(),
-                    source_tree_claim=object(),
-                    build_input_claim=object(),
-                    provider_input_claim=object(),
-                )
+            self.assertIsNone(getattr(RECORDER, "certify_fresh_recording", None))
+            directory_shell = object.__new__(RECORDER.RetainedDirectoryClaim)
+            directory_shell.closed = True
+            tree_shell = object.__new__(RECORDER.provenance.RetainedTreeClaim)
+            tree_shell.closed = True
+            shells = (
+                directory_shell,
+                tree_shell,
+                object.__new__(RECORDER.provenance.RetainedClaimSet),
+            )
+            self.assertEqual(len(shells), 3)
+            self.assertNotIn(
+                "fresh_recorder_certification", RECORDER.SCRIPT_DIR.joinpath(
+                    "gpu_probe_acceptance.py"
+                ).read_text()
+            )
+            source = RECORDER.SCRIPT_DIR.joinpath(
+                "gpu_probe_acceptance.py"
+            ).read_text()
+            after_claim_closure = source.rsplit(
+                "output_parent_claim.close()", 1
+            )[1].split("return 0", 1)[0]
+            self.assertIn("structural-evidence-written", after_claim_closure)
+            self.assertNotRegex(after_claim_closure, r"(?i)terminal|certif")
 
     def test_stale_parent_cannot_request_terminal_certification(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -542,6 +600,30 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             (root / "receipt.json").write_text(json.dumps(receipt))
             errors = VERIFIER.verify(root)
             self.assertTrue(any("exact root provenance" in error for error in errors))
+
+    def test_v2_rejects_render_provider_with_unrelated_monorepo_entry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt = self.v2_fixture(root)
+            claim = receipt["install_provenance"]["render_provider_input_claim"]
+            claim["providers"]["skia_dawn"]["root_authority"][
+                "top_level_entries"
+            ].append("unrelated-product")
+            claim["manifest_sha256"] = hashlib.sha256(
+                json.dumps(
+                    {
+                        "providers": claim["providers"],
+                        "skia_source_disposition": claim[
+                            "skia_source_disposition"
+                        ],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            (root / "receipt.json").write_text(json.dumps(receipt))
+            errors = VERIFIER.verify(root)
+            self.assertTrue(any("pinned generation authority" in error for error in errors))
 
     def test_png_content_cap_rejects_blank_even_when_digest_rebound(self):
         with tempfile.TemporaryDirectory() as temporary:

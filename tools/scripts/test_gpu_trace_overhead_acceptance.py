@@ -36,31 +36,36 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             }},
         }
 
-    def human_review_receipt(self, trace_digest="1" * 64):
+    def human_review_document(self, trace_digest="1" * 64):
         return {
-            "protocol": {"question": "gpu-startup"},
-            "acceptance": {"human_perfetto_ui_correlation": "pass"},
-            "artifacts": {"trace": {"sha256": trace_digest}},
-            "human_perfetto_ui_correlation": {
-                "artifact_sha256": trace_digest,
+            "schema": MODULE.HUMAN_REVIEW_SCHEMA,
+            "question": "gpu-startup",
+            "artifact_sha256": trace_digest,
+            "review_authority": {
+                "kind": "independent-human-same-artifact-review",
                 "reviewer_kind": "human",
                 "reviewer": "Daniel Raffel",
-                "reviewed_utc": "2026-08-28T05:34:54Z",
-                "ui_revision": "v58.3-11fbaed8",
-                "delivery": "official localhost embedding protocol",
-                "observed_spans": [
-                    {
-                        "name": "gpu_pipeline_prepare", "duration_ns": 1_800_000,
-                        "gpu_evidence_id": "44444444444444444444444444444444",
-                        "frame_index": 0, "sequence": 1, "health_state": "healthy",
-                    },
-                    {
-                        "name": "gpu_resource_upload", "duration_ns": 900_000,
-                        "gpu_evidence_id": "44444444444444444444444444444444",
-                        "frame_index": 0, "sequence": 2, "health_state": "healthy",
-                    },
-                ],
+                "git_commit_author": "Daniel Raffel <daniel@example.com>",
+                "attestation": (
+                    "I directly inspected this exact trace in Perfetto UI and "
+                    "recorded the visible spans below."
+                ),
             },
+            "reviewed_utc": "2026-08-28T05:34:54Z",
+            "ui_revision": "v58.3-11fbaed8",
+            "delivery": "official localhost embedding protocol",
+            "observed_spans": [
+                {
+                    "name": "gpu_pipeline_prepare", "duration_ns": 1_800_000,
+                    "gpu_evidence_id": "44444444444444444444444444444444",
+                    "frame_index": 0, "sequence": 1, "health_state": "healthy",
+                },
+                {
+                    "name": "gpu_resource_upload", "duration_ns": 900_000,
+                    "gpu_evidence_id": "44444444444444444444444444444444",
+                    "frame_index": 0, "sequence": 2, "health_state": "healthy",
+                },
+            ],
         }
 
     @staticmethod
@@ -80,13 +85,13 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             ]
         }
 
-    def test_preserves_exact_passing_human_review_for_same_startup_trace(self):
-        receipt = self.human_review_receipt()
-        result = MODULE.preserve_human_perfetto_ui_correlation(
-            receipt, question="gpu-startup", trace_sha256="1" * 64,
+    def test_validates_dedicated_human_review_for_same_startup_trace(self):
+        document = self.human_review_document()
+        result = MODULE.validate_independent_human_review_document(
+            document, question="gpu-startup", trace_sha256="1" * 64,
             semantic_result=self.semantic_result(),
         )
-        self.assertEqual(result, receipt["human_perfetto_ui_correlation"])
+        self.assertEqual(result, document)
 
     def test_mcp_response_timeout_terminates_the_child(self):
         session = MODULE.McpSession(Path("/bin/cat"), {})
@@ -139,92 +144,63 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 loaded = MODULE._load_local_source("planted_local_source", source.name)
             self.assertEqual(loaded.origin, "source")
 
-    def test_terminal_status_requires_the_exact_measurement_protocol(self):
-        human = {"reviewer": "independent"}
-        self.assertEqual(
-            MODULE.terminal_acceptance_status(
-                human, warmups=5, trials=30, fresh_start_trials=20
-            ),
-            "pass",
-        )
-        self.assertEqual(
-            MODULE.terminal_acceptance_status(
-                human, warmups=0, trials=2, fresh_start_trials=1
-            ),
-            "nonterminal-reduced-measurement-protocol",
-        )
-        self.assertEqual(
-            MODULE.terminal_acceptance_status(
-                None, warmups=5, trials=30, fresh_start_trials=20
-            ),
-            "nonterminal-missing-human-perfetto-correlation",
-        )
+    def test_recorder_exports_no_callable_terminal_authority(self):
+        self.assertIsNone(getattr(MODULE, "certify_fresh_recording", None))
+        self.assertIsNone(getattr(MODULE, "terminal_acceptance_status", None))
 
     def test_human_review_rejects_different_trace_digest(self):
         with self.assertRaisesRegex(ValueError, "not bound to the measured trace"):
-            MODULE.preserve_human_perfetto_ui_correlation(
-                self.human_review_receipt(),
+            MODULE.validate_independent_human_review_document(
+                self.human_review_document(),
                 question="gpu-startup", trace_sha256="2" * 64,
-                semantic_result=self.semantic_result(),
-            )
-
-    def test_human_review_rejects_mismatched_prior_trace_artifact(self):
-        receipt = self.human_review_receipt()
-        receipt["artifacts"]["trace"]["sha256"] = "2" * 64
-        with self.assertRaisesRegex(ValueError, "not bound to its receipt trace"):
-            MODULE.preserve_human_perfetto_ui_correlation(
-                receipt, question="gpu-startup", trace_sha256="1" * 64,
                 semantic_result=self.semantic_result(),
             )
 
     def test_human_review_rejects_non_startup_question(self):
         with self.assertRaisesRegex(ValueError, "only to gpu-startup"):
-            MODULE.preserve_human_perfetto_ui_correlation(
-                self.human_review_receipt(),
+            MODULE.validate_independent_human_review_document(
+                self.human_review_document(),
                 question="gpu-health", trace_sha256="1" * 64,
                 semantic_result=self.semantic_result(),
             )
 
-    def test_human_review_rejects_missing_acceptance_or_root_object(self):
-        missing_acceptance = self.human_review_receipt()
-        del missing_acceptance["acceptance"]
-        with self.assertRaisesRegex(ValueError, "lacks passing"):
-            MODULE.preserve_human_perfetto_ui_correlation(
-                missing_acceptance, question="gpu-startup", trace_sha256="1" * 64,
+    def test_human_review_rejects_old_receipt_or_missing_authority(self):
+        old_receipt = {"protocol": {"question": "gpu-startup"}}
+        with self.assertRaisesRegex(ValueError, "document schema"):
+            MODULE.validate_independent_human_review_document(
+                old_receipt, question="gpu-startup", trace_sha256="1" * 64,
                 semantic_result=self.semantic_result(),
             )
-        missing_root = self.human_review_receipt()
-        del missing_root["human_perfetto_ui_correlation"]
-        with self.assertRaisesRegex(ValueError, "lacks the root correlation object"):
-            MODULE.preserve_human_perfetto_ui_correlation(
-                missing_root, question="gpu-startup", trace_sha256="1" * 64,
+        missing_authority = self.human_review_document()
+        del missing_authority["review_authority"]
+        with self.assertRaisesRegex(ValueError, "lacks required fields: review_authority"):
+            MODULE.validate_independent_human_review_document(
+                missing_authority, question="gpu-startup", trace_sha256="1" * 64,
                 semantic_result=self.semantic_result(),
             )
-
-    def test_human_review_rejects_non_passing_prior_acceptance(self):
-        receipt = self.human_review_receipt()
-        receipt["acceptance"]["human_perfetto_ui_correlation"] = "unverified"
-        with self.assertRaisesRegex(ValueError, "lacks passing"):
-            MODULE.preserve_human_perfetto_ui_correlation(
-                receipt, question="gpu-startup", trace_sha256="1" * 64,
+        magic_marker = self.human_review_document()
+        magic_marker["terminal_status"] = "pass"
+        with self.assertRaisesRegex(ValueError, "only the exact review fields"):
+            MODULE.validate_independent_human_review_document(
+                magic_marker, question="gpu-startup", trace_sha256="1" * 64,
                 semantic_result=self.semantic_result(),
             )
 
     def test_human_review_rejects_stripped_visual_review_fields(self):
-        for field in ("reviewer", "reviewed_utc", "ui_revision", "delivery"):
+        for field in ("reviewed_utc", "ui_revision", "delivery"):
             with self.subTest(field=field):
-                receipt = self.human_review_receipt()
-                del receipt["human_perfetto_ui_correlation"][field]
-                with self.assertRaisesRegex(ValueError, f"lacks nonempty {field}"):
-                    MODULE.preserve_human_perfetto_ui_correlation(
-                        receipt, question="gpu-startup", trace_sha256="1" * 64,
+                document = self.human_review_document()
+                del document[field]
+                with self.assertRaisesRegex(ValueError, f"lacks required fields: {field}"):
+                    MODULE.validate_independent_human_review_document(
+                        document, question="gpu-startup", trace_sha256="1" * 64,
                         semantic_result=self.semantic_result(),
                     )
-        receipt = self.human_review_receipt()
-        receipt["human_perfetto_ui_correlation"]["observed_spans"] = []
+        document = self.human_review_document()
+        document["observed_spans"] = []
         with self.assertRaisesRegex(ValueError, "lacks observed span details"):
-            MODULE.preserve_human_perfetto_ui_correlation(
-                receipt, question="gpu-startup", trace_sha256="1" * 64,
+            MODULE.validate_independent_human_review_document(
+                document, question="gpu-startup", trace_sha256="1" * 64,
                 semantic_result=self.semantic_result(),
             )
 
@@ -234,23 +210,25 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             ("agent", "Daniel Raffel"),
             ("human", "Codex visual acceptance agent"),
             ("human", "automated review bot"),
+            ("human", "GPT-5 visual reviewer"),
+            ("human", "OpenAI reasoning assistant"),
         ):
             with self.subTest(
                 reviewer_kind=reviewer_kind, reviewer=reviewer
             ):
-                receipt = self.human_review_receipt()
+                document = self.human_review_document()
+                authority = document["review_authority"]
                 if reviewer_kind is None:
-                    del receipt["human_perfetto_ui_correlation"]["reviewer_kind"]
+                    del authority["reviewer_kind"]
                 else:
-                    receipt["human_perfetto_ui_correlation"][
-                        "reviewer_kind"
-                    ] = reviewer_kind
-                receipt["human_perfetto_ui_correlation"]["reviewer"] = reviewer
+                    authority["reviewer_kind"] = reviewer_kind
+                authority["reviewer"] = reviewer
                 with self.assertRaisesRegex(
-                    ValueError, "reviewer_kind=human|automated agent or model"
+                    ValueError,
+                    "human same-artifact authority|automated agent or model|identity fields",
                 ):
-                    MODULE.preserve_human_perfetto_ui_correlation(
-                        receipt,
+                    MODULE.validate_independent_human_review_document(
+                        document,
                         question="gpu-startup",
                         trace_sha256="1" * 64,
                         semantic_result=self.semantic_result(),
@@ -265,32 +243,119 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             ("health_state", "health_state", "mystery"),
         ):
             with self.subTest(field=semantic_field, invalid=invalid):
-                receipt = self.human_review_receipt()
+                document = self.human_review_document()
                 semantic = self.semantic_result()
                 if invalid is None:
                     del semantic["contributors"][0][semantic_field]
-                    del receipt["human_perfetto_ui_correlation"]["observed_spans"][0][
-                        observed_field
-                    ]
+                    del document["observed_spans"][0][observed_field]
                 else:
                     semantic["contributors"][0][semantic_field] = invalid
-                    receipt["human_perfetto_ui_correlation"]["observed_spans"][0][
-                        observed_field
-                    ] = invalid
+                    document["observed_spans"][0][observed_field] = invalid
                 with self.assertRaisesRegex(ValueError, "lacks typed"):
-                    MODULE.preserve_human_perfetto_ui_correlation(
-                        receipt, question="gpu-startup", trace_sha256="1" * 64,
+                    MODULE.validate_independent_human_review_document(
+                        document, question="gpu-startup", trace_sha256="1" * 64,
                         semantic_result=semantic,
                     )
 
-    def test_human_review_rejects_prior_non_startup_receipt(self):
-        receipt = self.human_review_receipt()
-        receipt["protocol"]["question"] = "gpu-health"
+    def test_human_review_rejects_non_startup_document(self):
+        document = self.human_review_document()
+        document["question"] = "gpu-health"
         with self.assertRaisesRegex(ValueError, "must be for gpu-startup"):
-            MODULE.preserve_human_perfetto_ui_correlation(
-                receipt, question="gpu-startup", trace_sha256="1" * 64,
+            MODULE.validate_independent_human_review_document(
+                document, question="gpu-startup", trace_sha256="1" * 64,
                 semantic_result=self.semantic_result(),
             )
+
+    def test_human_review_binds_prior_single_file_commit_and_exact_trace_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary) / "repository"
+            repository.mkdir()
+            for command in (
+                ["git", "init", "-q"],
+                ["git", "config", "user.email", "daniel@example.com"],
+                ["git", "config", "user.name", "Daniel Raffel"],
+            ):
+                MODULE.subprocess.run(command, cwd=repository, check=True)
+            (repository / "base").write_text("base\n")
+            MODULE.subprocess.run(["git", "add", "base"], cwd=repository, check=True)
+            MODULE.subprocess.run(
+                ["git", "commit", "-qm", "base"], cwd=repository, check=True
+            )
+            digest = "1" * 64
+            review_path = (
+                repository / MODULE.HUMAN_REVIEW_PATH_PREFIX / f"{digest}.json"
+            )
+            review_path.parent.mkdir(parents=True)
+            review_path.write_text(
+                json.dumps(self.human_review_document(digest), sort_keys=True) + "\n"
+            )
+            relative = review_path.relative_to(repository).as_posix()
+            MODULE.subprocess.run(["git", "add", relative], cwd=repository, check=True)
+            MODULE.subprocess.run(
+                ["git", "commit", "-qm", "human review"],
+                cwd=repository, check=True,
+            )
+            (repository / "source").write_text("source\n")
+            MODULE.subprocess.run(["git", "add", "source"], cwd=repository, check=True)
+            MODULE.subprocess.run(
+                ["git", "commit", "-qm", "source"], cwd=repository, check=True
+            )
+            source_revision = MODULE._git_text(repository, "rev-parse", "HEAD")
+            human, source = MODULE.bind_independent_human_review_document(
+                repository, source_revision, review_path,
+                question="gpu-startup", trace_sha256=digest,
+                semantic_result=self.semantic_result(),
+            )
+            self.assertEqual(human["artifact_sha256"], digest)
+            self.assertTrue(source["review_commit_changed_exactly_this_file"])
+            self.assertEqual(
+                source["review_commit_author"],
+                human["review_authority"]["git_commit_author"],
+            )
+
+    def test_human_review_rejects_mixed_publication_commit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary) / "repository"
+            repository.mkdir()
+            for command in (
+                ["git", "init", "-q"],
+                ["git", "config", "user.email", "daniel@example.com"],
+                ["git", "config", "user.name", "Daniel Raffel"],
+            ):
+                MODULE.subprocess.run(command, cwd=repository, check=True)
+            (repository / "base").write_text("base\n")
+            MODULE.subprocess.run(["git", "add", "base"], cwd=repository, check=True)
+            MODULE.subprocess.run(
+                ["git", "commit", "-qm", "base"], cwd=repository, check=True
+            )
+            digest = "1" * 64
+            review_path = (
+                repository / MODULE.HUMAN_REVIEW_PATH_PREFIX / f"{digest}.json"
+            )
+            review_path.parent.mkdir(parents=True)
+            review_path.write_text(
+                json.dumps(self.human_review_document(digest), sort_keys=True) + "\n"
+            )
+            (repository / "unrelated").write_text("mixed\n")
+            MODULE.subprocess.run(
+                ["git", "add", review_path.relative_to(repository).as_posix(), "unrelated"],
+                cwd=repository, check=True,
+            )
+            MODULE.subprocess.run(
+                ["git", "commit", "-qm", "mixed review"],
+                cwd=repository, check=True,
+            )
+            (repository / "source").write_text("source\n")
+            MODULE.subprocess.run(["git", "add", "source"], cwd=repository, check=True)
+            MODULE.subprocess.run(
+                ["git", "commit", "-qm", "source"], cwd=repository, check=True
+            )
+            with self.assertRaisesRegex(ValueError, "change exactly its review file"):
+                MODULE.bind_independent_human_review_document(
+                    repository, MODULE._git_text(repository, "rev-parse", "HEAD"),
+                    review_path, question="gpu-startup", trace_sha256=digest,
+                    semantic_result=self.semantic_result(),
+                )
 
     def test_plan_binding_requires_exact_lowercase_hex(self):
         self.assertTrue(MODULE.valid_lower_hex("a" * 40, 40))
@@ -307,20 +372,26 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertTrue(MODULE.valid_lower_hex(revision, 40))
         self.assertFalse(MODULE.valid_lower_hex("HEAD", 40))
 
-    def test_fresh_certification_rejects_synthetic_claim_objects(self):
-        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
-        with self.assertRaisesRegex(ValueError, "recorder-owned retained claims"):
-            MODULE.certify_fresh_recording(
-                {},
-                ROOT,
-                head,
-                Path("/tmp/synthetic-a2t-receipt.json"),
-                output_parent_claim=object(),
-                execution_claim=object(),
-                source_tree_claim=object(),
-                build_input_claim=object(),
-                provider_input_claim=object(),
-            )
+    def test_object_shells_and_replaced_globals_cannot_mint_local_authority(self):
+        directory_shell = object.__new__(MODULE.RetainedDirectoryClaim)
+        directory_shell.closed = True
+        tree_shell = object.__new__(MODULE.RetainedTreeClaim)
+        tree_shell.closed = True
+        shells = (
+            directory_shell,
+            object.__new__(MODULE.CombinedClaims),
+            tree_shell,
+            object.__new__(MODULE.RetainedClaimSet),
+        )
+        self.assertEqual(len(shells), 4)
+        with mock.patch.object(MODULE, "assert_exact_live_head", return_value="f" * 40):
+            self.assertIsNone(getattr(MODULE, "certify_fresh_recording", None))
+        self.assertNotIn("fresh_recorder_certification", SCRIPT.read_text())
+        after_claim_closure = SCRIPT.read_text().rsplit(
+            "output_parent_claim.close()", 1
+        )[1].split("return 0", 1)[0]
+        self.assertIn("structural-evidence-written", after_claim_closure)
+        self.assertNotRegex(after_claim_closure, r"(?i)terminal|certif")
 
     def test_fresh_certification_rejects_stale_parent_revision(self):
         parent = MODULE._git_text(ROOT, "rev-parse", "HEAD^")
@@ -616,12 +687,18 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             (v8 / "lib").mkdir(parents=True)
             (skia / "build/include/include/core/SkCanvas.h").write_text("skia")
             (skia_source / "src/core/SkCanvas.cpp").write_text("source")
+            _manifest, skia_assets = MODULE._pinned_provider_asset_digests("Skia")
+            _manifest, v8_assets = MODULE._pinned_provider_asset_digests("V8")
+            (skia / ".skia-asset-sha256").write_text(
+                sorted(skia_assets)[0] + "\n"
+            )
             skia_library = skia / "build/mac-gpu/lib/Release/libskia.a"
             skia_library.write_bytes(b"skia archive")
             (skia / "build/mac-gpu/lib/Release/libdawn_combined.a").write_bytes(
                 b"dawn archive"
             )
             (v8 / "include/v8.h").write_text("v8")
+            (v8 / ".v8-asset-sha256").write_text(sorted(v8_assets)[0] + "\n")
             runtime = v8 / "lib/libv8.dylib"
             runtime.write_bytes(b"v8 runtime")
             (build / "CMakeCache.txt").write_text(
@@ -650,6 +727,12 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     ],
                     "src/core/SkCanvas.cpp",
                 )
+                self.assertEqual(
+                    evidence["providers"]["skia_dawn"]["root_authority"][
+                        "provider_layout"
+                    ],
+                    "build/<platform>-gpu/lib/Release",
+                )
                 skia_library.write_bytes(b"substituted")
                 skia_library.write_bytes(b"skia archive")
                 with self.assertRaisesRegex(ValueError, "mutation event"):
@@ -668,19 +751,43 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "absolute symlink|symlink escape"):
                 MODULE.retain_current_regular_tree(provider, "test provider")
 
-    def test_provider_root_guard_rejects_broad_inventory_roots(self):
-        self.assertFalse(MODULE._provider_root_is_bounded(Path("/")))
-        self.assertFalse(MODULE._provider_root_is_bounded(Path.home()))
-        self.assertFalse(
-            MODULE._provider_root_is_bounded(Path("/Volumes/Workshop/Code"))
-        )
-        self.assertFalse(
-            MODULE._provider_root_is_bounded(Path("/Users/danielraffel/Code"))
-        )
+    def test_provider_resolution_rejects_organization_or_monorepo_roots(self):
         with tempfile.TemporaryDirectory() as temporary:
-            provider = Path(temporary) / "dependencies" / "skia-dawn"
-            provider.mkdir(parents=True)
-            self.assertTrue(MODULE._provider_root_is_bounded(provider))
+            root = Path(temporary)
+            organization = root / "organization"
+            nested = organization / "products/render-provider"
+            archive_dir = nested / "build/mac-gpu/lib/Release"
+            header_dir = nested / "build/include/include/core"
+            archive_dir.mkdir(parents=True)
+            header_dir.mkdir(parents=True)
+            (organization / "unrelated-product").mkdir()
+            (nested / ".skia-asset-sha256").write_text(
+                sorted(MODULE._pinned_provider_asset_digests("Skia")[1])[0] + "\n"
+            )
+            skia = archive_dir / "libskia.a"
+            skia.write_bytes(b"skia")
+            (archive_dir / "libdawn_combined.a").write_bytes(b"dawn")
+            (header_dir / "SkCanvas.h").write_text("header")
+            build = root / "build"
+            (build / "CMakeFiles").mkdir(parents=True)
+            (build / "CMakeCache.txt").write_text(
+                f"SKIA_DIR:PATH={organization}\n"
+            )
+            (build / "build.ninja").write_text(f"build x: link {skia}\n")
+            (build / "CMakeFiles/rules.ninja").write_text("rule link\n")
+            with self.assertRaisesRegex(ValueError, "exact-layout Skia/Dawn"):
+                MODULE._resolved_skia_root(
+                    build, MODULE._cmake_cache(build)
+                )
+
+            v8_org = root / "v8-organization"
+            runtime = v8_org / "products/v8/lib/libv8.dylib"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(b"v8")
+            (v8_org / "include").mkdir()
+            (v8_org / "include/v8.h").write_text("decoy")
+            with self.assertRaisesRegex(ValueError, "direct include/v8.h"):
+                MODULE._resolved_v8_root({"V8_RUNTIME_LIBRARY": str(runtime)})
 
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -799,10 +906,8 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         )
         trace_digest = receipt["artifacts"]["trace"]["sha256"]
         self.assertEqual(receipt["protocol"]["question"], "gpu-startup")
-        with self.assertRaisesRegex(
-            ValueError, "reviewer_kind=human|automated agent or model"
-        ):
-            MODULE.preserve_human_perfetto_ui_correlation(
+        with self.assertRaisesRegex(ValueError, "document schema"):
+            MODULE.validate_independent_human_review_document(
                 receipt,
                 question=receipt["protocol"]["question"],
                 trace_sha256=trace_digest,

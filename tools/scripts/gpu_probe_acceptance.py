@@ -1565,95 +1565,6 @@ def publish_receipt_directory_no_replace(
             owned_parent_claim.close()
 
 
-def certify_fresh_recording(
-    repository: Path,
-    revision: str,
-    output: Path,
-    *,
-    staging_claim: RetainedDirectoryClaim,
-    output_parent_claim: RetainedDirectoryClaim,
-    execution_claim: Any,
-    source_tree_claim: Any,
-    build_input_claim: Any,
-    provider_input_claim: Any,
-) -> dict[str, str]:
-    """Certify only the live recorder run with non-serializable retained claims."""
-    if (
-        type(staging_claim) is not RetainedDirectoryClaim
-        or type(output_parent_claim) is not RetainedDirectoryClaim
-        or type(execution_claim) is not provenance.CombinedClaims
-        or type(source_tree_claim) is not provenance.RetainedTreeClaim
-        or type(build_input_claim) is not provenance.RetainedTreeClaim
-        or type(provider_input_claim) is not provenance.RetainedClaimSet
-    ):
-        raise AcceptanceError(
-            "fresh A2 certification requires recorder-owned retained claims"
-        )
-    provenance.assert_exact_live_head(repository, revision)
-    staging_claim.assert_current()
-    output_parent_claim.assert_current()
-    execution_claim.assert_current()
-    source_tree_claim.assert_full()
-    build_input_claim.assert_full()
-    provider_input_claim.assert_full()
-
-    problems = verifier.verify(output, require_terminal=False)
-    if problems:
-        raise AcceptanceError(
-            "published structural self-verification failed: " + "; ".join(problems)
-        )
-    output_descriptor = os.open(output, directory_open_flags())
-    try:
-        published_names = sorted(os.listdir(output_descriptor))
-        claimed_by_name = {
-            Path(claim["path"]).name: claim for claim in staging_claim.file_claims
-        }
-        if set(published_names) != set(claimed_by_name):
-            raise AcceptanceError(
-                "fresh A2 certification requires the exact retained evidence set"
-            )
-        for name in published_names:
-            claim = claimed_by_name[name]
-            descriptor = os.open(
-                name,
-                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-                dir_fd=output_descriptor,
-            )
-            try:
-                metadata = os.fstat(descriptor)
-                named = os.stat(
-                    name, dir_fd=output_descriptor, follow_symlinks=False
-                )
-                identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
-                if (
-                    not stat_module.S_ISREG(metadata.st_mode)
-                    or identity != claim["identity"]
-                    or {"device": named.st_dev, "inode": named.st_ino} != identity
-                    or metadata.st_size != claim["bytes"]
-                    or sha256_descriptor(descriptor) != claim["sha256"]
-                ):
-                    raise AcceptanceError(
-                        f"published evidence differs from retained recorder artifact: {name}"
-                    )
-            finally:
-                os.close(descriptor)
-    finally:
-        os.close(output_descriptor)
-
-    provenance.assert_exact_live_head(repository, revision)
-    staging_claim.assert_current()
-    output_parent_claim.assert_current()
-    execution_claim.assert_current()
-    source_tree_claim.assert_full()
-    build_input_claim.assert_full()
-    provider_input_claim.assert_full()
-    return {
-        "fresh_recorder_certification": "pass",
-        "integration_head": revision,
-        "durable_receipt_status": verifier.OFFLINE_STRUCTURAL_STATUS,
-    }
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, required=True)
@@ -1833,17 +1744,18 @@ def main(argv: list[str] | None = None) -> int:
                     staging, output, staging_claim, output_parent_claim
                 )
                 staging_claim.assert_current()
-                certification = certify_fresh_recording(
-                    repository,
-                    revision,
-                    output,
-                    staging_claim=staging_claim,
-                    output_parent_claim=output_parent_claim,
-                    execution_claim=execution_claim,
-                    source_tree_claim=source_tree_claim,
-                    build_input_claim=build_input_claim,
-                    provider_input_claim=provider_input_claim,
-                )
+                problems = verifier.verify(output, require_terminal=False)
+                if problems:
+                    raise AcceptanceError(
+                        "published structural self-verification failed: "
+                        + "; ".join(problems)
+                    )
+                provenance.assert_exact_live_head(repository, revision)
+                output_parent_claim.assert_current()
+                execution_claim.assert_current()
+                source_tree_claim.assert_full()
+                build_input_claim.assert_full()
+                provider_input_claim.assert_full()
             finally:
                 staging_claim.close()
             install_claim.assert_current()
@@ -1858,7 +1770,7 @@ def main(argv: list[str] | None = None) -> int:
             output_parent_claim.close()
         print(json.dumps({
             "output": str(output),
-            **certification,
+            "result": "structural-evidence-written",
         }, sort_keys=True))
         return 0
     except (AcceptanceError, ValueError, OSError, subprocess.TimeoutExpired) as error:

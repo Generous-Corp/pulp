@@ -60,14 +60,11 @@ ANALYSIS_TIMEOUT_SECONDS = 300
 MCP_RESPONSE_LIMIT_BYTES = 1024 * 1024
 OFFLINE_STRUCTURAL_STATUS = "nonterminal-offline-structural-evidence"
 NON_HUMAN_REVIEWER = re.compile(
-    r"\b(?:agent|bot|codex|claude|chatgpt|gemini|copilot|llm|model|"
+    r"\b(?:agent|assistant|bot|codex|claude|chatgpt|gpt(?:-[0-9.]+)?|"
+    r"gemini|copilot|llm|model|openai|reasoning[ -]system|"
     r"automation|automated|artificial[ -]intelligence)\b",
     re.IGNORECASE,
 )
-BROAD_PROVIDER_ROOT_NAMES = frozenset({
-    "code", "projects", "repositories", "repos", "source", "src",
-    "workspace", "workspaces",
-})
 A2T_ANALYZER_SOURCE_PATHS = {
     "CMakeLists.txt",
     ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
@@ -87,6 +84,8 @@ A2T_ANALYZER_SOURCE_PATHS = {
     "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
     "tools/deps/manifest.json",
     "tools/cli/CMakeLists.txt",
+    "tools/cmake/FindSkia.cmake",
+    "tools/cmake/FindV8.cmake",
     "tools/cmake/PulpInstallRules.cmake",
     "tools/mcp/CMakeLists.txt",
     "tools/mcp/mcp_tools.hpp",
@@ -95,6 +94,8 @@ A2T_ANALYZER_SOURCE_PATHS = {
     "tools/mcp/mcp_trace_tools.cpp",
     "tools/mcp/pulp_mcp.cpp",
     "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fetch_v8_for_release.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/sdk_capability_handoff.py",
@@ -229,8 +230,19 @@ FIXTURE_SOURCE_PATHS = {
     for _case, filename, _question, _verdict, _dominant, _action in FIXTURE_REPLAY
 }
 PLAN_PATH = "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md"
-HUMAN_REVIEW_PATH_PREFIX = "docs/validation/gpu-trace-overhead/"
-HUMAN_REVIEW_MAX_BYTES = 4 * 1024 * 1024
+HUMAN_REVIEW_SCHEMA = "pulp.gpu-trace-human-review.v1"
+HUMAN_REVIEW_PATH_PREFIX = "docs/validation/gpu-trace-overhead/human-reviews/"
+HUMAN_REVIEW_MAX_BYTES = 256 * 1024
+PROVIDER_MANIFEST_PATH = "tools/deps/manifest.json"
+SKIA_PROVIDER_TOP_LEVEL = frozenset({
+    ".skia-asset-sha256", "VERSION.md", "build", "include", "lib",
+    "modules", "share",
+})
+V8_PROVIDER_TOP_LEVEL = frozenset({
+    ".v8-asset-sha256", "LICENSE", "LICENSE.txt", "README", "README.md",
+    "VERSION", "VERSION.md", "bin", "data", "icudtl.dat", "include",
+    "jniLibs", "lib", "share", "snapshot_blob.bin",
+})
 
 
 def sha256(path: Path) -> str:
@@ -1516,37 +1528,137 @@ class RetainedClaimSet:
             claim.close()
 
 
-def _provider_root_is_bounded(path: Path) -> bool:
-    """Reject filesystem-, volume-, and account-wide provider inventories."""
-    try:
-        resolved = path.resolve(strict=True)
-    except (OSError, RuntimeError):
-        return False
-    if not resolved.is_dir() or len(resolved.parts) < 4:
-        return False
-    try:
-        account_root = Path.home().resolve(strict=True)
-    except (OSError, RuntimeError):
-        account_root = Path.home().resolve()
-    if resolved == account_root or resolved.parent == account_root:
-        return False
-    if resolved.name.casefold() in BROAD_PROVIDER_ROOT_NAMES:
-        return False
-    return True
-
-
 def _absolute_lexical_path(path: Path) -> Path:
     return Path(os.path.abspath(os.fspath(path)))
 
 
-def _resolved_skia_root(build_dir: Path, cache: dict[str, str]) -> Path:
-    candidates: list[Path] = []
+def _pinned_provider_asset_digests(dependency_name: str) -> tuple[str, set[str]]:
+    manifest_path = SCRIPT_DIR.parents[1] / PROVIDER_MANIFEST_PATH
+    try:
+        data = manifest_path.read_bytes()
+        manifest = json.loads(data)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("cannot read the pinned render-provider manifest") from error
+    if len(data) > 4 * 1024 * 1024:
+        raise ValueError("render-provider manifest exceeds 4 MiB")
+    dependency = next(
+        (
+            row for row in manifest.get("dependencies", [])
+            if isinstance(row, dict) and row.get("name") == dependency_name
+        ),
+        None,
+    )
+    assets = (
+        dependency.get("determinism", {}).get("release_assets", {})
+        if isinstance(dependency, dict) else {}
+    )
+    digests = {
+        row.get("sha256") for row in assets.values()
+        if isinstance(row, dict)
+        and isinstance(row.get("sha256"), str)
+        and valid_lower_hex(row["sha256"], 64)
+        and row.get("library", True) is not False
+    }
+    if not digests:
+        raise ValueError(f"pinned {dependency_name} release assets are unavailable")
+    return hashlib.sha256(data).hexdigest(), digests
+
+
+def _provider_generation_authority(
+    root: Path,
+    *,
+    dependency_name: str,
+    stamp_name: str,
+    allowed_top_level: frozenset[str],
+    allow_platform_gpu_directories: bool = False,
+) -> dict[str, Any]:
+    """Bind a provider to one pinned release generation and package layout."""
+    try:
+        entries = sorted(root.iterdir(), key=lambda path: path.name)
+    except OSError as error:
+        raise ValueError(f"cannot inventory {dependency_name} provider root") from error
+    unexpected = [
+        entry.name for entry in entries
+        if entry.name not in allowed_top_level
+        and not (
+            allow_platform_gpu_directories
+            and re.fullmatch(r"[A-Za-z0-9_+-]+-gpu", entry.name)
+        )
+    ]
+    if unexpected:
+        raise ValueError(
+            f"{dependency_name} provider root contains unrelated top-level data: "
+            + ", ".join(unexpected[:5])
+        )
+    stamp = root / stamp_name
+    if not stamp.is_file() or stamp.is_symlink():
+        raise ValueError(
+            f"{dependency_name} provider lacks its pinned generation stamp"
+        )
+    try:
+        stamp_bytes = stamp.read_bytes()
+        asset_sha256 = stamp_bytes.decode("ascii").strip()
+    except (OSError, UnicodeDecodeError) as error:
+        raise ValueError(
+            f"{dependency_name} provider generation stamp is unreadable"
+        ) from error
+    manifest_sha256, pinned_digests = _pinned_provider_asset_digests(
+        dependency_name
+    )
+    if len(stamp_bytes) > 128 or asset_sha256 not in pinned_digests:
+        raise ValueError(
+            f"{dependency_name} provider generation is not pinned by the manifest"
+        )
+    return {
+        "method": "pinned-release-asset-stamp-and-exact-layout-v1",
+        "dependency": dependency_name,
+        "dependency_manifest_path": PROVIDER_MANIFEST_PATH,
+        "dependency_manifest_sha256": manifest_sha256,
+        "generation_stamp_path": stamp_name,
+        "generation_asset_sha256": asset_sha256,
+        "generation_stamp_sha256": hashlib.sha256(stamp_bytes).hexdigest(),
+        "top_level_entries": [entry.name for entry in entries],
+    }
+
+
+def _skia_archive_layout(library: Path) -> tuple[Path, str] | None:
+    if library.name not in {"libskia.a", "skia.lib"}:
+        return None
+    parents = library.parents
+    if (
+        len(parents) >= 5
+        and parents[0].name == "Release"
+        and parents[1].name == "lib"
+        and parents[2].name.endswith("-gpu")
+        and parents[3].name == "build"
+    ):
+        return parents[4], "build/<platform>-gpu/lib/Release"
+    if (
+        len(parents) >= 4
+        and parents[0].name == "Release"
+        and parents[1].name == "lib"
+        and parents[2].name.endswith("-gpu")
+    ):
+        return parents[3], "<platform>-gpu/lib/Release"
+    if (
+        len(parents) >= 3
+        and parents[0].name == "lib"
+        and re.fullmatch(
+            r"(?:mac|win|linux|android|ios|wasm)(?:[-_][A-Za-z0-9_+-]+)?",
+            parents[1].name,
+        )
+    ):
+        return parents[2], "<platform>/lib"
+    if len(parents) >= 2 and parents[0].name == "lib":
+        return parents[1], "lib"
+    return None
+
+
+def _resolved_skia_root(
+    build_dir: Path, cache: dict[str, str]
+) -> tuple[Path, dict[str, Any]]:
+    graph_libraries: list[Path] = []
     configured = cache.get("SKIA_DIR", "")
-    if configured and Path(configured).is_absolute():
-        candidates.append(Path(configured))
-    icu = cache.get("PULP_SKIA_ICUDTL_FILE", "")
-    if icu and Path(icu).is_absolute():
-        candidates.extend(Path(icu).parents)
     for graph in (build_dir / "build.ninja", build_dir / "CMakeFiles/rules.ninja"):
         try:
             data = graph.read_bytes()
@@ -1557,90 +1669,147 @@ def _resolved_skia_root(build_dir: Path, cache: dict[str, str]) -> Path:
         for raw in re.findall(
             rb"/[A-Za-z0-9_./+@%$:-]+/(?:libskia\.a|skia\.lib)", data
         ):
-            library = Path(os.fsdecode(raw).replace("$ ", " "))
-            candidates.extend(library.parents)
-    seen: set[Path] = set()
-    for candidate in candidates:
-        lexical_root = _absolute_lexical_path(candidate)
+            graph_libraries.append(
+                _absolute_lexical_path(Path(os.fsdecode(raw).replace("$ ", " ")))
+            )
+    configured_root: Path | None = None
+    if configured:
+        configured_path = Path(configured)
+        if not configured_path.is_absolute():
+            raise ValueError("CMake SKIA_DIR must be an exact absolute provider root")
+        configured_root = _absolute_lexical_path(configured_path)
+        if configured_root.is_symlink():
+            raise ValueError("CMake SKIA_DIR provider root must not be a symlink")
         try:
-            resolved_root = lexical_root.resolve(strict=True)
-        except OSError:
+            configured_root.resolve(strict=True)
+        except OSError as error:
+            raise ValueError("CMake SKIA_DIR provider root does not exist") from error
+    candidates = [
+        library for library in graph_libraries
+        if library.is_file() and not library.is_symlink()
+    ]
+    if not candidates and configured_root is not None:
+        candidates = (
+            list(configured_root.glob("build/*-gpu/lib/Release/libskia.a"))
+            + list(configured_root.glob("build/*-gpu/lib/Release/skia.lib"))
+            + list(configured_root.glob("*-gpu/lib/Release/libskia.a"))
+            + list(configured_root.glob("*-gpu/lib/Release/skia.lib"))
+            + list(configured_root.glob("*/lib/libskia.a"))
+            + list(configured_root.glob("*/lib/skia.lib"))
+            + [configured_root / "lib/libskia.a", configured_root / "lib/skia.lib"]
+        )
+        candidates = [path for path in candidates if path.is_file() and not path.is_symlink()]
+    derived: list[tuple[Path, str, Path]] = []
+    for library in candidates:
+        layout = _skia_archive_layout(library)
+        if layout is None:
             continue
-        if (
-            resolved_root in seen
-            or lexical_root.is_symlink()
-            or not _provider_root_is_bounded(lexical_root)
-        ):
+        root, layout_name = layout
+        if configured_root is not None and root != configured_root:
             continue
-        seen.add(resolved_root)
-        headers = (
-            lexical_root / "build/include/include/core/SkCanvas.h",
+        derived.append((root, layout_name, library))
+    roots = {root for root, _layout, _library in derived}
+    if len(roots) != 1:
+        raise ValueError(
+            "cannot resolve one exact-layout Skia/Dawn provider root from CMake/Ninja"
+        )
+    lexical_root = roots.pop()
+    layouts = {layout for root, layout, _library in derived if root == lexical_root}
+    if len(layouts) != 1:
+        raise ValueError("Skia/Dawn provider has mixed consumed archive layouts")
+    layout_name = layouts.pop()
+    consumed = sorted(
+        {library for root, _layout, library in derived if root == lexical_root}
+    )
+    for library in consumed:
+        dawn_name = (
+            "dawn_combined.lib" if library.name == "skia.lib"
+            else "libdawn_combined.a"
+        )
+        dawn = library.with_name(dawn_name)
+        if not dawn.is_file() or dawn.is_symlink():
+            raise ValueError("Skia provider layout lacks the matching Dawn archive")
+    header_roots = (
+        (lexical_root / "build/include/include/core/SkCanvas.h",)
+        if layout_name.startswith("build/")
+        else (
             lexical_root / "include/include/core/SkCanvas.h",
             lexical_root / "include/core/SkCanvas.h",
         )
-        skia = tuple(lexical_root.glob("build/*-gpu/lib/Release/libskia.a")) + tuple(
-            lexical_root.glob("*-gpu/lib/Release/libskia.a")
-        ) + tuple(lexical_root.glob("*/lib/libskia.a")) + (
-            lexical_root / "lib/libskia.a",
-        )
-        dawn = tuple(
-            lexical_root.glob("build/*-gpu/lib/Release/libdawn_combined.a")
-        ) + tuple(
-            lexical_root.glob("*-gpu/lib/Release/libdawn_combined.a")
-        ) + tuple(lexical_root.glob("*/lib/libdawn_combined.a")) + (
-            lexical_root / "lib/libdawn_combined.a",
-        )
-        if any(path.is_file() and not path.is_symlink() for path in headers) and any(
-            path.is_file() and not path.is_symlink() for path in skia
-        ) and any(path.is_file() for path in dawn):
-            return lexical_root
-    raise ValueError(
-        "cannot resolve one self-contained Skia/Dawn provider root from CMake/Ninja"
     )
+    if not any(path.is_file() and not path.is_symlink() for path in header_roots):
+        raise ValueError("Skia provider layout lacks its exact include root")
+    authority = _provider_generation_authority(
+        lexical_root,
+        dependency_name="Skia",
+        stamp_name=".skia-asset-sha256",
+        allowed_top_level=SKIA_PROVIDER_TOP_LEVEL,
+        allow_platform_gpu_directories=True,
+    )
+    authority.update({
+        "cache_authority": "SKIA_DIR" if configured_root is not None else "generated-ninja",
+        "provider_layout": layout_name,
+        "consumed_skia_archives": [
+            library.relative_to(lexical_root).as_posix() for library in consumed
+        ],
+    })
+    return lexical_root, authority
 
 
-def _resolved_v8_root(cache: dict[str, str]) -> tuple[Path, Path]:
+def _resolved_v8_root(cache: dict[str, str]) -> tuple[Path, Path, dict[str, Any]]:
     runtime_value = cache.get("V8_RUNTIME_LIBRARY", "")
+    if not runtime_value or not Path(runtime_value).is_absolute():
+        raise ValueError("CMake cache lacks one exact absolute V8 runtime library")
     runtime = _absolute_lexical_path(Path(runtime_value))
     if not runtime.is_absolute() or not runtime.is_file() or runtime.is_symlink():
         raise ValueError("CMake cache lacks one resolved regular V8 runtime library")
-    for root in runtime.parents:
-        if (
-            _provider_root_is_bounded(root)
-            and not root.is_symlink()
-            and (root / "include/v8.h").is_file()
-            and not (root / "include/v8.h").is_symlink()
-        ):
-            return root, runtime
-    raise ValueError("resolved V8 provider is not a self-contained header/library root")
+    if runtime.name not in {"libv8.dylib", "libv8.so", "v8.dll"}:
+        raise ValueError("resolved V8 runtime is not the pinned sealed V8 library")
+    if runtime.parent.name == "lib":
+        root = runtime.parent.parent
+        layout = "lib/<runtime>"
+    elif (
+        runtime.parent.name == "arm64-v8a"
+        and runtime.parent.parent.name == "jniLibs"
+    ):
+        root = runtime.parent.parent.parent
+        layout = "jniLibs/arm64-v8a/<runtime>"
+    else:
+        raise ValueError("resolved V8 runtime does not match an exact provider layout")
+    if root.is_symlink():
+        raise ValueError("resolved V8 provider root is substituted")
+    root.resolve(strict=True)
+    header = root / "include/v8.h"
+    if not header.is_file() or header.is_symlink():
+        raise ValueError("resolved V8 provider lacks direct include/v8.h")
+    configured_include = cache.get("V8_INCLUDE_DIR", "")
+    if configured_include and _absolute_lexical_path(Path(configured_include)) != root / "include":
+        raise ValueError("CMake V8_INCLUDE_DIR does not name the resolved provider include root")
+    authority = _provider_generation_authority(
+        root,
+        dependency_name="V8",
+        stamp_name=".v8-asset-sha256",
+        allowed_top_level=V8_PROVIDER_TOP_LEVEL,
+    )
+    authority.update({
+        "cache_authority": "V8_RUNTIME_LIBRARY",
+        "provider_layout": layout,
+        "consumed_runtime": runtime.relative_to(root).as_posix(),
+    })
+    return root, runtime, authority
 
 
 def _resolved_skia_source_root(cache: dict[str, str], skia_root: Path) -> Path | None:
-    candidates: list[Path] = []
-    configured = cache.get("SKIA_DIR", "")
-    if configured and Path(configured).is_absolute():
-        candidates.append(_absolute_lexical_path(Path(configured)).parent / "skia-src")
-    candidates.append(skia_root.parent / "skia-src")
-    seen: set[Path] = set()
-    for candidate in candidates:
-        lexical_root = _absolute_lexical_path(candidate)
-        if not (lexical_root / "src/core").is_dir():
-            continue
-        try:
-            resolved_root = lexical_root.resolve(strict=True)
-        except (OSError, RuntimeError) as error:
-            raise ValueError("adjacent Skia source provider cannot be resolved") from error
-        if (
-            resolved_root in seen
-            or lexical_root.is_symlink()
-            or not _provider_root_is_bounded(lexical_root)
-        ):
-            if resolved_root in seen:
-                continue
-            raise ValueError("adjacent Skia source provider root is unsafe or too broad")
-        seen.add(resolved_root)
-        return lexical_root
-    return None
+    lexical_root = _absolute_lexical_path(skia_root.parent / "skia-src")
+    if not (lexical_root / "src/core").is_dir():
+        return None
+    try:
+        if lexical_root.is_symlink():
+            raise ValueError("adjacent Skia source provider root is substituted")
+        lexical_root.resolve(strict=True)
+    except OSError as error:
+        raise ValueError("adjacent Skia source provider cannot be resolved") from error
+    return lexical_root
 
 
 def retain_resolved_render_provider_inputs(
@@ -1650,19 +1819,31 @@ def retain_resolved_render_provider_inputs(
     cache = _cmake_cache(build_dir)
     if cache.get("PULP_HAS_SKIA") != "TRUE" or cache.get("PULP_JS_ENGINE") != "v8":
         raise ValueError("render provider sealing requires the exact GPU + V8 build")
-    skia_root = _resolved_skia_root(build_dir, cache)
-    v8_root, v8_runtime = _resolved_v8_root(cache)
+    skia_root, skia_authority = _resolved_skia_root(build_dir, cache)
+    v8_root, v8_runtime, v8_authority = _resolved_v8_root(cache)
     skia_source_root = _resolved_skia_source_root(cache, skia_root)
-    provider_specs: list[tuple[str, Path, int, int]] = [
-        ("skia_dawn", skia_root, 32768, 8 * 1024 * 1024 * 1024),
-        ("v8", v8_root, 32768, 2 * 1024 * 1024 * 1024),
+    provider_specs: list[tuple[str, Path, int, int, dict[str, Any]]] = [
+        (
+            "skia_dawn", skia_root, 32768, 8 * 1024 * 1024 * 1024,
+            skia_authority,
+        ),
+        ("v8", v8_root, 32768, 2 * 1024 * 1024 * 1024, v8_authority),
     ]
     if skia_source_root is not None:
         provider_specs.append(
-            ("skia_source", skia_source_root, 65536, 16 * 1024 * 1024 * 1024)
+            (
+                "skia_source", skia_source_root, 65536,
+                16 * 1024 * 1024 * 1024,
+                {
+                    "method": "exact-adjacent-skia-source-layout-v1",
+                    "cache_authority": "SKIA_DIR/../skia-src",
+                    "provider_layout": "src/core",
+                },
+            )
         )
     resolved_roots = {
-        role: root.resolve(strict=True) for role, root, _, _ in provider_specs
+        role: root.resolve(strict=True)
+        for role, root, _, _, _authority in provider_specs
     }
     for index, (left_role, left_root) in enumerate(resolved_roots.items()):
         for right_role, right_root in list(resolved_roots.items())[index + 1:]:
@@ -1678,7 +1859,7 @@ def retain_resolved_render_provider_inputs(
     claims: dict[str, RetainedTreeClaim] = {}
     rows: dict[str, Any] = {}
     try:
-        for role, root, maximum_files, maximum_bytes in provider_specs:
+        for role, root, maximum_files, maximum_bytes, root_authority in provider_specs:
             claim, tree_evidence = retain_current_regular_tree(
                 root,
                 f"{label} {role}",
@@ -1703,17 +1884,21 @@ def retain_resolved_render_provider_inputs(
                     for path in required_paths
                 ):
                     raise ValueError("retained Skia/Dawn provider lacks the Dawn archive")
-                resolution = "CMake SKIA_DIR or exact generated Ninja archive path"
+                required_paths.append(".skia-asset-sha256")
+                required_paths = sorted(set(required_paths))
+                resolution = "exact CMake/Ninja Skia layout plus pinned asset generation"
             elif role == "v8":
                 runtime_relative = v8_runtime.relative_to(v8_root).as_posix()
-                required_paths = ["include/v8.h", runtime_relative]
+                required_paths = [
+                    ".v8-asset-sha256", "include/v8.h", runtime_relative
+                ]
                 if any(
                     path not in by_relative
                     or by_relative[path]["mode"] == "120000"
                     for path in required_paths
                 ):
                     raise ValueError("retained V8 provider lacks its resolved headers/runtime")
-                resolution = "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root"
+                resolution = "exact CMake V8 runtime layout plus pinned asset generation"
             else:
                 required_paths = sorted(
                     relative for relative, member in by_relative.items()
@@ -1728,18 +1913,22 @@ def retain_resolved_render_provider_inputs(
             rows[role] = {
                 "root_role": f"resolved-{role.replace('_', '-')}-provider-root",
                 "resolution": resolution,
+                "root_authority": root_authority,
                 "tree_claim": tree_evidence,
                 "required_members": [
                     {
                         "path": path,
                         "git_blob_sha1": by_relative[path]["blob"],
+                        "sha256": sha256_descriptor(
+                            by_relative[path]["descriptor"]
+                        ),
                         "bytes": os.fstat(by_relative[path]["descriptor"]).st_size,
                     }
                     for path in required_paths
                 ],
             }
         evidence = {
-            "method": "retained-resolved-render-provider-trees-v2",
+            "method": "retained-resolved-render-provider-trees-v3",
             "skia_source_disposition": (
                 "retained-complete-adjacent-source-tree"
                 if skia_source_root is not None
@@ -3169,20 +3358,6 @@ def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any
     }
 
 
-def terminal_acceptance_status(
-    human_correlation: dict[str, Any] | None,
-    *,
-    warmups: int,
-    trials: int,
-    fresh_start_trials: int,
-) -> str:
-    if human_correlation is None:
-        return "nonterminal-missing-human-perfetto-correlation"
-    if (warmups, trials, fresh_start_trials) != (5, 30, 20):
-        return "nonterminal-reduced-measurement-protocol"
-    return "pass"
-
-
 def valid_lower_hex(value: str, length: int) -> bool:
     return len(value) == length and all(c in "0123456789abcdef" for c in value)
 
@@ -3307,72 +3482,147 @@ def source_revisions_match(source_revision: str, mcp_source_revision: str) -> bo
     return bool(mcp_source_revision) and mcp_source_revision == source_revision
 
 
-def preserve_human_perfetto_ui_correlation(
-    prior_receipt: Any,
+def validate_independent_human_review_document(
+    review_document: Any,
     *,
     question: str,
     trace_sha256: str,
     semantic_result: dict[str, Any],
 ) -> dict[str, Any]:
-    """Carry an already accepted visual review across an exact-trace rerun."""
+    """Validate a dedicated same-artifact review document structurally.
+
+    This function deliberately does not certify terminal acceptance.  The
+    caller must additionally bind the document to its independently published
+    Git blob; final authority lives outside this recorder and verifier.
+    """
     if question != "gpu-startup":
         raise ValueError("human Perfetto UI correlation applies only to gpu-startup")
-    if not isinstance(prior_receipt, dict):
-        raise ValueError("prior human-review receipt must be an object")
-    protocol = prior_receipt.get("protocol")
-    acceptance = prior_receipt.get("acceptance")
-    artifacts = prior_receipt.get("artifacts")
-    human = prior_receipt.get("human_perfetto_ui_correlation")
-    if not isinstance(protocol, dict) or protocol.get("question") != "gpu-startup":
-        raise ValueError("prior human-review receipt must be for gpu-startup")
-    if (
-        not isinstance(acceptance, dict)
-        or acceptance.get("human_perfetto_ui_correlation") != "pass"
-    ):
-        raise ValueError("prior human-review receipt lacks passing human Perfetto UI acceptance")
-    if not isinstance(human, dict):
-        raise ValueError("prior human-review receipt lacks the root correlation object")
-    human_digest = human.get("artifact_sha256")
-    prior_trace = artifacts.get("trace") if isinstance(artifacts, dict) else None
-    prior_trace_digest = prior_trace.get("sha256") if isinstance(prior_trace, dict) else None
+    if not isinstance(review_document, dict):
+        raise ValueError("independent human-review document must be an object")
+    if review_document.get("schema") != HUMAN_REVIEW_SCHEMA:
+        raise ValueError(
+            f"independent human-review document schema must be {HUMAN_REVIEW_SCHEMA}"
+        )
+    expected_document_fields = {
+        "schema", "question", "artifact_sha256", "review_authority",
+        "reviewed_utc", "ui_revision", "delivery", "observed_spans",
+    }
+    missing_document_fields = expected_document_fields - set(review_document)
+    if missing_document_fields:
+        raise ValueError(
+            "independent human-review document lacks required fields: "
+            + ", ".join(sorted(missing_document_fields))
+        )
+    if set(review_document) != expected_document_fields:
+        raise ValueError(
+            "independent human-review document must contain only the exact review fields"
+        )
+    if review_document.get("question") != "gpu-startup":
+        raise ValueError("independent human-review document must be for gpu-startup")
+    human_digest = review_document.get("artifact_sha256")
     if not isinstance(human_digest, str) or not valid_lower_hex(human_digest, 64):
-        raise ValueError("prior human-review receipt has an invalid artifact SHA-256")
-    if prior_trace_digest != human_digest:
-        raise ValueError("prior human review is not bound to its receipt trace artifact")
+        raise ValueError("independent human-review document has an invalid artifact SHA-256")
     if human_digest != trace_sha256:
-        raise ValueError("prior human-review receipt is not bound to the measured trace")
-    if human.get("reviewer_kind") != "human":
+        raise ValueError("independent human-review document is not bound to the measured trace")
+    authority = review_document.get("review_authority")
+    if not isinstance(authority, dict):
+        raise ValueError("independent human-review document lacks review_authority")
+    expected_authority_fields = {
+        "kind", "reviewer_kind", "reviewer", "git_commit_author", "attestation"
+    }
+    missing_authority_fields = expected_authority_fields - set(authority)
+    if missing_authority_fields:
         raise ValueError(
-            "prior human-review receipt must declare reviewer_kind=human"
+            "independent human-review authority lacks required identity fields: "
+            + ", ".join(sorted(missing_authority_fields))
         )
-    for field in ("reviewer", "reviewed_utc", "ui_revision", "delivery"):
-        if not isinstance(human.get(field), str) or not human[field].strip():
-            raise ValueError(f"prior human-review receipt lacks nonempty {field}")
-    reviewer = human["reviewer"].strip()
-    if len(reviewer) > 200 or NON_HUMAN_REVIEWER.search(reviewer):
+    if set(authority) != expected_authority_fields:
         raise ValueError(
-            "prior human-review reviewer identity names an automated agent or model"
+            "independent human-review authority must contain only the exact identity fields"
         )
-    if not isinstance(human.get("observed_spans"), list) or not human["observed_spans"]:
-        raise ValueError("prior human-review receipt lacks observed span details")
+    if (
+        authority.get("kind") != "independent-human-same-artifact-review"
+        or authority.get("reviewer_kind") != "human"
+    ):
+        raise ValueError(
+            "independent review must declare human same-artifact authority"
+        )
+    for field in ("reviewer", "git_commit_author", "attestation"):
+        if not isinstance(authority.get(field), str) or not authority[field].strip():
+            raise ValueError(
+                f"independent human-review document lacks nonempty review_authority.{field}"
+            )
+    reviewer = authority["reviewer"].strip()
+    git_author = authority["git_commit_author"].strip()
+    if (
+        len(reviewer) > 200
+        or NON_HUMAN_REVIEWER.search(reviewer)
+        or NON_HUMAN_REVIEWER.search(git_author)
+    ):
+        raise ValueError(
+            "independent human-review identity names an automated agent or model"
+        )
+    if len(git_author) > 320:
+        raise ValueError("independent human-review Git author identity is too long")
+    attestation = authority["attestation"].strip()
+    if len(attestation) < 32 or len(attestation) > 2000:
+        raise ValueError(
+            "independent human-review attestation must be a bounded substantive statement"
+        )
+    for field in ("reviewed_utc", "ui_revision", "delivery"):
+        if (
+            not isinstance(review_document.get(field), str)
+            or not review_document[field].strip()
+        ):
+            raise ValueError(f"independent human-review document lacks nonempty {field}")
+        if len(review_document[field].strip()) > 500:
+            raise ValueError(f"independent human-review document {field} is too long")
+    if re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+        review_document["reviewed_utc"],
+    ) is None:
+        raise ValueError("independent human-review reviewed_utc is not exact UTC")
+    if (
+        not isinstance(review_document.get("observed_spans"), list)
+        or not review_document["observed_spans"]
+        or len(review_document["observed_spans"]) > 64
+    ):
+        raise ValueError("independent human-review document lacks observed span details")
     contributors = semantic_result.get("contributors")
     if not isinstance(contributors, list) or len(contributors) < 2:
         raise ValueError("current semantic result lacks two ranked contributors")
     observed_by_stage: dict[str, dict[str, Any]] = {}
-    for observed in human["observed_spans"]:
+    for observed in review_document["observed_spans"]:
         if not isinstance(observed, dict):
-            raise ValueError("prior human-review observed span must be an object")
+            raise ValueError("independent human-review observed span must be an object")
+        expected_observed_fields = {
+            "name", "duration_ns", "gpu_evidence_id", "frame_index",
+            "sequence", "health_state",
+        }
+        missing_observed_fields = expected_observed_fields - set(observed)
+        if missing_observed_fields:
+            raise ValueError(
+                "independent human-review observed span lacks typed fields: "
+                + ", ".join(sorted(missing_observed_fields))
+            )
+        if set(observed) != expected_observed_fields:
+            raise ValueError(
+                "independent human-review observed span has noncanonical fields"
+            )
         name = observed.get("name")
         if not isinstance(name, str) or not name.startswith("gpu_"):
-            raise ValueError("prior human-review observed span has no canonical GPU name")
-        observed_by_stage[name.removeprefix("gpu_").replace("_", "-")] = observed
+            raise ValueError("independent human-review observed span has no canonical GPU name")
+        stage = name.removeprefix("gpu_").replace("_", "-")
+        if stage in observed_by_stage:
+            raise ValueError("independent human-review observed spans contain a duplicate stage")
+        observed_by_stage[stage] = observed
     for contributor in contributors[:2]:
         if not isinstance(contributor, dict) or not isinstance(contributor.get("stage"), str):
             raise ValueError("current semantic contributor is malformed")
         observed = observed_by_stage.get(contributor["stage"])
         if observed is None:
             raise ValueError(
-                f"prior human review did not observe current contributor {contributor['stage']}"
+                f"independent human review did not observe current contributor {contributor['stage']}"
             )
         compared = {
             "duration_ns": "duration_ns",
@@ -3395,7 +3645,7 @@ def preserve_human_perfetto_ui_correlation(
                     or observed_value < minimum
                 ):
                     raise ValueError(
-                        f"prior human review lacks typed {contributor['stage']} "
+                        f"independent human review lacks typed {contributor['stage']} "
                         f"{semantic_field}"
                     )
             elif semantic_field == "evidence_id":
@@ -3406,7 +3656,7 @@ def preserve_human_perfetto_ui_correlation(
                     or re.fullmatch(r"[0-9a-f]{32}", observed_value) is None
                 ):
                     raise ValueError(
-                        f"prior human review lacks typed {contributor['stage']} "
+                        f"independent human review lacks typed {contributor['stage']} "
                         "evidence_id"
                     )
             elif (
@@ -3420,18 +3670,18 @@ def preserve_human_perfetto_ui_correlation(
                 }
             ):
                 raise ValueError(
-                    f"prior human review lacks typed {contributor['stage']} "
+                    f"independent human review lacks typed {contributor['stage']} "
                     "health_state"
                 )
             if observed_value != semantic_value:
                 raise ValueError(
-                    f"prior human review disagrees with current {contributor['stage']} "
+                    f"independent human review disagrees with current {contributor['stage']} "
                     f"{semantic_field}"
                 )
-    return human
+    return review_document
 
 
-def bind_tracked_human_review_receipt(
+def bind_independent_human_review_document(
     repository: Path,
     source_revision: str,
     prior_path: Path,
@@ -3440,39 +3690,43 @@ def bind_tracked_human_review_receipt(
     trace_sha256: str,
     semantic_result: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Bind an independently published review receipt as an immutable Git blob."""
+    """Bind a dedicated independently published review as an immutable Git blob."""
     repository = repository.resolve()
     resolved = prior_path.resolve()
     try:
         relative = resolved.relative_to(repository).as_posix()
     except ValueError as error:
-        raise ValueError("prior human-review receipt must be tracked in this repository") from error
+        raise ValueError("independent human-review document must be tracked in this repository") from error
     if (
         prior_path.is_symlink()
         or not relative.startswith(HUMAN_REVIEW_PATH_PREFIX)
         or not relative.endswith(".json")
         or ".." in Path(relative).parts
     ):
-        raise ValueError("prior human-review receipt has an unsafe repository path")
+        raise ValueError("independent human-review document has an unsafe repository path")
+    if Path(relative).name != f"{trace_sha256}.json":
+        raise ValueError(
+            "independent human-review filename must equal the reviewed trace SHA-256"
+        )
     try:
         data = resolved.read_bytes()
     except OSError as error:
-        raise ValueError(f"cannot read prior human-review receipt: {error}") from error
+        raise ValueError(f"cannot read independent human-review document: {error}") from error
     if len(data) > HUMAN_REVIEW_MAX_BYTES:
-        raise ValueError("prior human-review receipt exceeds 4 MiB")
+        raise ValueError("independent human-review document exceeds 256 KiB")
     historical = subprocess.run(
         ["git", "show", f"{source_revision}:{relative}"],
         cwd=repository, check=False, capture_output=True,
     )
     if historical.returncode != 0 or historical.stdout != data:
         raise ValueError(
-            "prior human-review receipt is not the exact source-revision Git blob"
+            "independent human-review document is not the exact source-revision Git blob"
         )
     blob = _git_blob_digest_bytes(data)
     if _git_text(repository, "rev-parse", f"{source_revision}:{relative}") != blob:
-        raise ValueError("prior human-review receipt Git blob identity disagrees")
+        raise ValueError("independent human-review Git blob identity disagrees")
     if _git_text(repository, "rev-parse", f"HEAD:{relative}") != blob:
-        raise ValueError("prior human-review receipt differs at current HEAD")
+        raise ValueError("independent human-review document differs at current HEAD")
     parents = _git_text(repository, "rev-list", "--parents", "-n", "1", source_revision)
     parent_revisions = parents.split()[1:]
     if not parent_revisions or not any(
@@ -3483,111 +3737,60 @@ def bind_tracked_human_review_receipt(
         for parent in parent_revisions
     ):
         raise ValueError(
-            "prior human-review receipt was not independently published before source revision"
+            "independent human-review document was not published before source revision"
         )
+    review_revision = _git_text(
+        repository, "log", "-1", "--format=%H", source_revision, "--", relative
+    )
+    review_parents = _git_text(
+        repository, "rev-list", "--parents", "-n", "1", review_revision
+    ).split()
+    if len(review_parents) != 2:
+        raise ValueError(
+            "independent human-review publication must be a single-parent commit"
+        )
+    changed = subprocess.run(
+        [
+            "git", "diff", "--name-only", "--no-renames",
+            review_parents[1], review_revision,
+        ],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    changed_paths = [line for line in changed.stdout.splitlines() if line]
+    if changed.returncode != 0 or changed_paths != [relative]:
+        raise ValueError(
+            "independent human-review publication commit must change exactly its review file"
+        )
+    commit_author = _git_text(
+        repository, "show", "-s", "--format=%an <%ae>", review_revision
+    )
     try:
-        prior_receipt = json.loads(data)
+        review_document = json.loads(data)
     except json.JSONDecodeError as error:
-        raise ValueError("prior human-review receipt is malformed JSON") from error
-    human = preserve_human_perfetto_ui_correlation(
-        prior_receipt,
+        raise ValueError("independent human-review document is malformed JSON") from error
+    human = validate_independent_human_review_document(
+        review_document,
         question=question,
         trace_sha256=trace_sha256,
         semantic_result=semantic_result,
     )
+    authority = human["review_authority"]
+    if authority["git_commit_author"] != commit_author:
+        raise ValueError(
+            "independent human-review Git author does not match its publication commit"
+        )
     return human, {
-        "method": "preexisting-tracked-git-blob-v1",
+        "method": "independently-committed-single-file-git-blob-v1",
         "repository_path": relative,
         "source_revision": source_revision,
+        "review_revision": review_revision,
+        "review_commit_parent": review_parents[1],
+        "review_commit_author": commit_author,
         "git_blob_sha1": blob,
         "sha256": hashlib.sha256(data).hexdigest(),
         "bytes": len(data),
         "existed_unchanged_in_direct_parent": True,
-    }
-
-
-def certify_fresh_recording(
-    evidence: dict[str, Any],
-    repository: Path,
-    source_revision: str,
-    output: Path,
-    *,
-    output_parent_claim: RetainedDirectoryClaim,
-    execution_claim: CombinedClaims,
-    source_tree_claim: RetainedTreeClaim,
-    build_input_claim: RetainedTreeClaim,
-    provider_input_claim: RetainedClaimSet,
-) -> dict[str, str]:
-    """Certify only the live recorder run while every retained claim is open.
-
-    The returned result is deliberately process-local.  It is printed by the
-    recorder, never serialized into the offline receipt, because a standalone
-    JSON file cannot attest that the commands and retained descriptors existed.
-    """
-    if (
-        type(output_parent_claim) is not RetainedDirectoryClaim
-        or type(execution_claim) is not CombinedClaims
-        or type(source_tree_claim) is not RetainedTreeClaim
-        or type(build_input_claim) is not RetainedTreeClaim
-        or type(provider_input_claim) is not RetainedClaimSet
-    ):
-        raise ValueError(
-            "fresh A2T certification requires recorder-owned retained claims"
-        )
-    assert_exact_live_head(repository, source_revision)
-    execution_claim.assert_current()
-    source_tree_claim.assert_full()
-    build_input_claim.assert_full()
-    provider_input_claim.assert_full()
-    output_parent_claim.assert_current()
-
-    expected_bytes = (
-        json.dumps(evidence, indent=2, sort_keys=True) + "\n"
-    ).encode("utf-8")
-    expected_digest = hashlib.sha256(expected_bytes).hexdigest()
-    matching_claims = [
-        claim for claim in output_parent_claim.file_claims
-        if claim.get("path") == output
-        and claim.get("sha256") == expected_digest
-        and claim.get("bytes") == len(expected_bytes)
-    ]
-    if len(matching_claims) != 1:
-        raise ValueError(
-            "fresh A2T certification requires the retained published receipt bytes"
-        )
-
-    structural_verifier = _load_local_source(
-        "verify_gpu_trace_overhead_acceptance_fresh_run",
-        "verify_gpu_trace_overhead_acceptance.py",
-    )
-    problems = structural_verifier.verify(
-        evidence, repository, require_terminal=False
-    )
-    if problems:
-        raise ValueError("A2T structural self-verification failed: " + "; ".join(problems))
-    acceptance = evidence.get("acceptance")
-    protocol = evidence.get("protocol")
-    if not isinstance(acceptance, dict) or not isinstance(protocol, dict):
-        raise ValueError("fresh A2T certification lacks acceptance/protocol objects")
-    status = terminal_acceptance_status(
-        evidence.get("human_perfetto_ui_correlation"),
-        warmups=protocol.get("warmups"),
-        trials=protocol.get("measured_paired_trials"),
-        fresh_start_trials=protocol.get("fresh_start_paired_trials"),
-    )
-    if status != "pass":
-        raise ValueError(f"fresh A2T recording is {status}")
-
-    assert_exact_live_head(repository, source_revision)
-    execution_claim.assert_current()
-    source_tree_claim.assert_full()
-    build_input_claim.assert_full()
-    provider_input_claim.assert_full()
-    output_parent_claim.assert_current()
-    return {
-        "fresh_recorder_certification": "pass",
-        "source_revision": source_revision,
-        "durable_receipt_status": OFFLINE_STRUCTURAL_STATUS,
+        "review_commit_changed_exactly_this_file": True,
     }
 
 
@@ -3611,10 +3814,10 @@ def main() -> int:
     parser.add_argument("--planning-repository", type=Path, required=True)
     parser.add_argument("--routing-inventory", type=Path)
     parser.add_argument(
-        "--prior-human-review-receipt", type=Path,
+        "--human-review-document", type=Path,
         help=(
-            "Preexisting tracked gpu-startup A2T receipt whose immutable Git blob "
-            "and exact root visual-review object are carried forward"
+            "Dedicated docs/validation/gpu-trace-overhead/human-reviews/<trace-sha>.json "
+            "whose prior single-file Git commit and same-artifact observations are bound"
         ),
     )
     parser.add_argument("--output", type=Path, required=True)
@@ -3811,21 +4014,21 @@ def main() -> int:
         raise RuntimeError("measured trials produced no reference semantic result")
     human_perfetto_ui_correlation = None
     human_perfetto_ui_review_source = None
-    if args.prior_human_review_receipt is not None:
+    if args.human_review_document is not None:
         try:
             (
                 human_perfetto_ui_correlation,
                 human_perfetto_ui_review_source,
-            ) = bind_tracked_human_review_receipt(
+            ) = bind_independent_human_review_document(
                 repository,
                 args.source_revision,
-                args.prior_human_review_receipt,
+                args.human_review_document,
                 question=args.question,
                 trace_sha256=trace_sha256,
                 semantic_result=reference_projection,
             )
         except ValueError as error:
-            parser.error(f"invalid prior-human-review-receipt: {error}")
+            parser.error(f"invalid human-review-document: {error}")
 
     try:
         execution_claim.assert_current()
@@ -3920,7 +4123,8 @@ def main() -> int:
             "terminal_status": OFFLINE_STRUCTURAL_STATUS,
             "semantic_parity": "pass", "same_installed_prefix": "pass",
             "human_perfetto_ui_correlation": (
-                "pass" if human_perfetto_ui_correlation is not None
+                "bound-independent-review-evidence"
+                if human_perfetto_ui_correlation is not None
                 else "unverified-no-human-perfetto-ui-correlation"
             ),
             "offline_latency_budget": "unverified-no-ratified-budget",
@@ -3942,17 +4146,21 @@ def main() -> int:
     build_input_claim.assert_full()
     provider_input_claim.assert_full()
     output_parent_claim.assert_current()
-    certification = certify_fresh_recording(
-        evidence,
-        repository,
-        args.source_revision,
-        output,
-        output_parent_claim=output_parent_claim,
-        execution_claim=execution_claim,
-        source_tree_claim=source_tree_claim,
-        build_input_claim=build_input_claim,
-        provider_input_claim=provider_input_claim,
+    structural_verifier = _load_local_source(
+        "verify_gpu_trace_overhead_acceptance_recording",
+        "verify_gpu_trace_overhead_acceptance.py",
     )
+    problems = structural_verifier.verify(
+        evidence, repository, require_terminal=False
+    )
+    if problems:
+        parser.error("A2T structural self-verification failed: " + "; ".join(problems))
+    assert_exact_live_head(repository, args.source_revision)
+    execution_claim.assert_current()
+    source_tree_claim.assert_full()
+    build_input_claim.assert_full()
+    provider_input_claim.assert_full()
+    output_parent_claim.assert_current()
     install_claim.close()
     provider_input_claim.close()
     build_input_claim.close()
@@ -3960,8 +4168,7 @@ def main() -> int:
     output_parent_claim.close()
     print(json.dumps({
         "output": str(output),
-        "acceptance": evidence["acceptance"],
-        **certification,
+        "result": "structural-evidence-written",
     }))
     return 0
 

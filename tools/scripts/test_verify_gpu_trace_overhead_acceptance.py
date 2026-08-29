@@ -89,29 +89,79 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "bytes": 3,
             "manifest_sha256": "7" * 64,
         }
+        manifest_sha256, skia_assets = CONTRACT._pinned_provider_asset_digests(
+            "Skia"
+        )
+        _manifest_sha256, v8_assets = CONTRACT._pinned_provider_asset_digests("V8")
+        skia_asset = sorted(skia_assets)[0]
+        v8_asset = sorted(v8_assets)[0]
+        skia_stamp_sha256 = CONTRACT.hashlib.sha256(
+            (skia_asset + "\n").encode()
+        ).hexdigest()
+        v8_stamp_sha256 = CONTRACT.hashlib.sha256(
+            (v8_asset + "\n").encode()
+        ).hexdigest()
         providers = {
             "skia_dawn": {
                 "root_role": "resolved-skia-dawn-provider-root",
-                "resolution": "CMake SKIA_DIR or exact generated Ninja archive path",
+                "resolution": "exact CMake/Ninja Skia layout plus pinned asset generation",
+                "root_authority": {
+                    "method": "pinned-release-asset-stamp-and-exact-layout-v1",
+                    "dependency": "Skia",
+                    "dependency_manifest_path": CONTRACT.PROVIDER_MANIFEST_PATH,
+                    "dependency_manifest_sha256": manifest_sha256,
+                    "generation_stamp_path": ".skia-asset-sha256",
+                    "generation_asset_sha256": skia_asset,
+                    "generation_stamp_sha256": skia_stamp_sha256,
+                    "top_level_entries": [
+                        ".skia-asset-sha256", "build", "include"
+                    ],
+                    "cache_authority": "SKIA_DIR",
+                    "provider_layout": "build/<platform>-gpu/lib/Release",
+                    "consumed_skia_archives": [
+                        "build/mac-gpu/lib/Release/libskia.a"
+                    ],
+                },
                 "tree_claim": provider_tree,
                 "required_members": [
-                    {"path": "lib/libskia.a", "git_blob_sha1": "1" * 40, "bytes": 1},
-                    {"path": "lib/libdawn_combined.a", "git_blob_sha1": "2" * 40, "bytes": 1},
+                    {"path": ".skia-asset-sha256", "git_blob_sha1": "0" * 40,
+                     "sha256": skia_stamp_sha256, "bytes": 65},
+                    {"path": "lib/libskia.a", "git_blob_sha1": "1" * 40,
+                     "sha256": "1" * 64, "bytes": 1},
+                    {"path": "lib/libdawn_combined.a", "git_blob_sha1": "2" * 40,
+                     "sha256": "2" * 64, "bytes": 1},
                 ],
             },
             "v8": {
                 "root_role": "resolved-v8-provider-root",
-                "resolution": "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root",
+                "resolution": "exact CMake V8 runtime layout plus pinned asset generation",
+                "root_authority": {
+                    "method": "pinned-release-asset-stamp-and-exact-layout-v1",
+                    "dependency": "V8",
+                    "dependency_manifest_path": CONTRACT.PROVIDER_MANIFEST_PATH,
+                    "dependency_manifest_sha256": manifest_sha256,
+                    "generation_stamp_path": ".v8-asset-sha256",
+                    "generation_asset_sha256": v8_asset,
+                    "generation_stamp_sha256": v8_stamp_sha256,
+                    "top_level_entries": [".v8-asset-sha256", "include", "lib"],
+                    "cache_authority": "V8_RUNTIME_LIBRARY",
+                    "provider_layout": "lib/<runtime>",
+                    "consumed_runtime": "lib/libv8.dylib",
+                },
                 "tree_claim": provider_tree,
                 "required_members": [
-                    {"path": "include/v8.h", "git_blob_sha1": "3" * 40, "bytes": 1},
-                    {"path": "lib/libv8.dylib", "git_blob_sha1": "4" * 40, "bytes": 1},
+                    {"path": ".v8-asset-sha256", "git_blob_sha1": "5" * 40,
+                     "sha256": v8_stamp_sha256, "bytes": 65},
+                    {"path": "include/v8.h", "git_blob_sha1": "3" * 40,
+                     "sha256": "3" * 64, "bytes": 1},
+                    {"path": "lib/libv8.dylib", "git_blob_sha1": "4" * 40,
+                     "sha256": "4" * 64, "bytes": 1},
                 ],
             },
         }
         source_disposition = "not-present-at-configured-or-resolved-sibling"
         provider_claim = {
-            "method": "retained-resolved-render-provider-trees-v2",
+            "method": "retained-resolved-render-provider-trees-v3",
             "skia_source_disposition": source_disposition,
             "providers": providers,
             "manifest_sha256": CONTRACT.hashlib.sha256(
@@ -467,6 +517,29 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("exact root provenance" in error for error in errors))
 
+    def test_render_provider_generation_rejects_unrelated_monorepo_entry(self):
+        receipt = self.structural_receipt()
+        claim = receipt["installed_source_identity"]["build_provenance"][
+            "render_provider_input_claim"
+        ]
+        claim["providers"]["skia_dawn"]["root_authority"][
+            "top_level_entries"
+        ].append("unrelated-product")
+        claim["manifest_sha256"] = CONTRACT.hashlib.sha256(
+            json.dumps(
+                {
+                    "providers": claim["providers"],
+                    "skia_source_disposition": claim[
+                        "skia_source_disposition"
+                    ],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("pinned generation authority" in error for error in errors))
+
     def test_no_producer_disposition_is_recomputed_from_git(self):
         receipt = self.structural_receipt()
         inventory = receipt["producer_overhead_disposition"]["evidence"]
@@ -501,7 +574,8 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.attach_historical_agent_review(receipt)
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any(
-            "reviewer_kind=human" in error or "automated agent or model" in error
+            "unsafe repository path" in error
+            or "structural review evidence" in error
             for error in errors
         ))
 
@@ -510,14 +584,19 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.attach_historical_agent_review(receipt)
         del receipt["human_perfetto_ui_review_source"]
         errors = MODULE.verify(receipt, ROOT)
-        self.assertTrue(any("human Perfetto UI correlation" in error for error in errors))
+        self.assertTrue(any(
+            "human Perfetto UI correlation" in error
+            or "structural review evidence" in error
+            for error in errors
+        ))
 
         receipt = self.structural_receipt()
         self.attach_historical_agent_review(receipt)
         receipt["human_perfetto_ui_review_source"]["git_blob_sha1"] = "0" * 40
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any(
-            "reviewer_kind=human" in error or "automated agent or model" in error
+            "unsafe repository path" in error
+            or "structural review evidence" in error
             for error in errors
         ))
 

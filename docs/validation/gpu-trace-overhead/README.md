@@ -24,13 +24,14 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --plan-revision "$PLAN_REVISION" \
   --plan-sha256 "$PLAN_SHA256" \
   --planning-repository "$PWD/planning" \
-  --prior-human-review-receipt "$HUMAN_REVIEW_RECEIPT" \
+  --human-review-document "$HUMAN_REVIEW_DOCUMENT" \
   --output /tmp/gpu-trace-overhead.json
 ```
 
-`$HUMAN_REVIEW_RECEIPT` must name an independently committed genuine-human
-same-artifact review satisfying the contract below. The historical M3 agent
-receipt is not a valid value.
+`$HUMAN_REVIEW_DOCUMENT` must name a dedicated, independently committed
+same-artifact review document satisfying the contract below. The historical M3
+agent receipt is not a valid value. Binding such a document remains structural;
+it is not local terminal authority.
 
 The recorder requires an exact clean canonical Pulp worktree at
 `--source-revision` and an external single-config Release build configured from
@@ -47,7 +48,10 @@ measured outputs to be absent before rebuilding them. The source and generated
 input descriptors remain live across clean, build, install, replay, timing,
 and publication. It also resolves and retains the complete selected Skia/Dawn
 and V8 provider trees (including the exact Skia/Dawn archives, V8 headers, and
-V8 runtime) before the clean build. If FindSkia consumes the adjacent
+V8 runtime) before the clean build. Each binary provider must resolve from the
+exact CMake/Ninja-consumed package root, match a fixed supported layout, carry
+the release-asset generation stamp pinned by `tools/deps/manifest.json`, and
+contain no unrelated top-level organization/monorepo data. If FindSkia consumes the adjacent
 `SKIA_DIR/../skia-src` layout, the recorder retains that complete source tree as
 a third provider; broad provider roots and escaping symlinks fail closed. Those
 provider descriptors stay live through every measured launch. Immediately
@@ -185,26 +189,71 @@ browser-memory handling; it was not uploaded or shared. Current evidence
 therefore remains nonterminal until a named person reviews that same artifact.
 
 Regenerating analyzer timings does not repeat or silently manufacture visual
-acceptance. For a `gpu-startup` rerun, pass a prior accepted A2T receipt
-that is already tracked below `docs/validation/gpu-trace-overhead/` with
-`--prior-human-review-receipt`. The generator requires the checkout bytes to be
-the exact Git blob at the final source revision, requires that same blob to have
-existed unchanged in a direct parent, records its path/blob/SHA-256/byte-count
-provenance, and carries its `human_perfetto_ui_correlation` root object forward
-verbatim. The review object must declare `reviewer_kind: human`, name the person
-who directly performed the inspection, and retain the date, artifact digest,
-UI revision, delivery, and observed-span details. Reviewer identities naming
-Codex, another model, an agent, automation, or a bot fail closed. The structural
-verifier independently re-reads that prior Git blob; it never treats the new
-receipt's own fields as review authority. It records
-`acceptance.human_perfetto_ui_correlation: pass` only when the prior receipt is
-also a `gpu-startup` receipt with genuine human acceptance and its trace
-artifact SHA-256 exactly matches the trace being measured. A missing object,
-different question, non-passing acceptance, or changed artifact fails closed.
+acceptance. For a `gpu-startup` rerun, pass a dedicated document at
+`docs/validation/gpu-trace-overhead/human-reviews/<trace-sha256>.json` with
+`--human-review-document`. Its schema is
+`pulp.gpu-trace-human-review.v1`; it binds the question, artifact SHA-256,
+review date, Perfetto UI revision/delivery, exact observed spans, and a bounded
+review authority object naming the person and Git author. The document's
+last-touch commit must be a prior single-parent commit that changes exactly that
+one review file, and the blob must remain identical at the measured source
+revision, one of its direct parents, current `HEAD`, and the checkout. The
+filename must equal the trace digest. Reviewer identities naming Codex, GPT,
+OpenAI, another model, an assistant, an agent, automation, or a bot fail closed,
+but the name filter is only defense in depth: the dedicated path, immutable
+single-file publication commit, exact blob, and same-artifact observations are
+the actual local evidence boundary. The structural verifier re-reads that Git
+blob; it never treats the new receipt's own fields as authority. It records
+`acceptance.human_perfetto_ui_correlation: bound-independent-review-evidence`
+when that structural binding succeeds. A missing object, different question,
+mixed publication commit, changed artifact, or mismatched Git author fails
+closed.
 The current top two typed contributors must also match the human-observed span
 name, duration, evidence ID, frame index, sequence, and health state exactly.
 Do not pass this option for `gpu-health` or `gpu-probe`; those runs cannot
 inherit a startup UI review.
+
+The dedicated document shape is:
+
+```json
+{
+  "schema": "pulp.gpu-trace-human-review.v1",
+  "question": "gpu-startup",
+  "artifact_sha256": "<64 lowercase hex>",
+  "review_authority": {
+    "kind": "independent-human-same-artifact-review",
+    "reviewer_kind": "human",
+    "reviewer": "<person who directly inspected the trace>",
+    "git_commit_author": "Git Name <email@example.com>",
+    "attestation": "<bounded first-person statement describing the direct inspection>"
+  },
+  "reviewed_utc": "<UTC timestamp>",
+  "ui_revision": "<Perfetto UI revision>",
+  "delivery": "<how the local artifact reached Perfetto UI>",
+  "observed_spans": [
+    {
+      "name": "gpu_pipeline_prepare",
+      "duration_ns": 1800000,
+      "gpu_evidence_id": "<32 lowercase hex>",
+      "frame_index": 0,
+      "sequence": 1,
+      "health_state": "healthy"
+    },
+    {
+      "name": "gpu_resource_upload",
+      "duration_ns": 900000,
+      "gpu_evidence_id": "<same 32 lowercase hex>",
+      "frame_index": 0,
+      "sequence": 2,
+      "health_state": "healthy"
+    }
+  ]
+}
+```
+
+The Git identity and attestation are immutable structural claims, not proof of
+personhood. Protected final acceptance must verify the human and integration
+authority independently.
 
 After recording, replay structural integrity from the exact integration
 checkout:
@@ -214,13 +263,15 @@ python3 tools/scripts/verify_gpu_trace_overhead_acceptance.py \
   /tmp/gpu-trace-overhead.json --repository "$PWD"
 ```
 
-The standalone verifier is always nonterminal. `--terminal` intentionally fails
-with instructions to rerun the recorder; no caller-selected JSON field, copied
-directory, or recomputed hash can attest execution. Terminal A2T proof is the
-fresh recorder process's `fresh_recorder_certification: pass` output while the
-installed binaries, trace, SDK-matched processor, source/build/provider trees,
-published receipt inode, and exact live `HEAD` remain descriptor-bound in that
-process. The existing `m3-a2t-offline-analysis-20260828.json` is historical: it
+The standalone verifier and recorder are always nonterminal. `--terminal`
+intentionally fails; no caller-selected JSON field, copied directory, recomputed
+hash, importable Python function, or recorder stdout can attest terminal
+execution. The recorder prints only `result: structural-evidence-written` after
+closing its retained claims. Final A2T acceptance requires a separate protected
+cross-system package that independently binds the exact protected integration
+authority, the recorder run and retained bytes, and an independently committed
+genuine-human review of that same trace. This repository does not mint that
+package. The existing `m3-a2t-offline-analysis-20260828.json` is historical: it
 predates v3 installed
 provider provenance, complete fixture replay, expanded semantic parity, and
 exact same-artifact contributor correlation, so it is not terminal evidence.

@@ -34,6 +34,16 @@ json_schema_lite = _load_local_source("json_schema_lite", "json_schema_lite.py")
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PROVIDER_MANIFEST_PATH = "tools/deps/manifest.json"
+SKIA_PROVIDER_TOP_LEVEL = frozenset({
+    ".skia-asset-sha256", "VERSION.md", "build", "include", "lib",
+    "modules", "share",
+})
+V8_PROVIDER_TOP_LEVEL = frozenset({
+    ".v8-asset-sha256", "LICENSE", "LICENSE.txt", "README", "README.md",
+    "VERSION", "VERSION.md", "bin", "data", "icudtl.dat", "include",
+    "jniLibs", "lib", "share", "snapshot_blob.bin",
+})
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -106,12 +116,17 @@ EXPECTED_SOURCE_BLOBS_V2 = EXPECTED_SOURCE_BLOBS | {
     "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
     "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp",
     "tools/cli/gpu_recipe_catalog_data.h.in",
+    "tools/cmake/FindSkia.cmake",
+    "tools/cmake/FindV8.cmake",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
     "tools/mcp/CMakeLists.txt",
     "tools/mcp/mcp_gpu_tools.cpp",
     "tools/mcp/pulp_mcp.cpp",
     "tools/scripts/gpu_probe_acceptance.py",
     "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fetch_v8_for_release.py",
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",
@@ -125,8 +140,8 @@ EXPECTED_FORGE_ROOT_TREE = "b31fb3effd109b30381007f43de208f81d6926a7"
 EXPECTED_FORGE_PULP_REF_BLOB = "3e54500140a1dc5de0dbefaab29612916f257ecd"
 OFFLINE_STRUCTURAL_STATUS = "nonterminal-offline-structural-evidence"
 OFFLINE_TERMINAL_ERROR = (
-    "standalone GPU-probe verification is structural-only; terminal "
-    "certification requires a fresh gpu_probe_acceptance.py recorder run"
+    "standalone GPU-probe verification and recording are structural-only; "
+    "terminal acceptance requires a separate protected cross-system authority"
 )
 RESULT_SCHEMA = (
     Path(__file__).resolve().parents[2]
@@ -289,6 +304,30 @@ def _verify_complete_tree_claim(value: Any, label: str, errors: list[str]) -> No
         errors.append(f"{label} was not retained as one complete exact tree")
 
 
+def _pinned_provider_asset_digests(dependency_name: str) -> tuple[str, set[str]]:
+    data = (ROOT / PROVIDER_MANIFEST_PATH).read_bytes()
+    manifest = json.loads(data)
+    dependency = next(
+        (
+            row for row in manifest.get("dependencies", [])
+            if isinstance(row, dict) and row.get("name") == dependency_name
+        ),
+        None,
+    )
+    assets = (
+        dependency.get("determinism", {}).get("release_assets", {})
+        if isinstance(dependency, dict) else {}
+    )
+    digests = {
+        row.get("sha256") for row in assets.values()
+        if isinstance(row, dict)
+        and isinstance(row.get("sha256"), str)
+        and SHA256.fullmatch(row["sha256"])
+        and row.get("library", True) is not False
+    }
+    return hashlib.sha256(data).hexdigest(), digests
+
+
 def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
     claim = _mapping(value, "render_provider_input_claim", errors)
     providers = _mapping(claim.get("providers"), "render providers", errors)
@@ -299,7 +338,7 @@ def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
     elif disposition != "not-present-at-configured-or-resolved-sibling":
         errors.append("Pulp render providers lack an exact Skia source disposition")
     if (
-        claim.get("method") != "retained-resolved-render-provider-trees-v2"
+        claim.get("method") != "retained-resolved-render-provider-trees-v3"
         or set(providers) != expected_roles
         or SHA256.fullmatch(str(claim.get("manifest_sha256", ""))) is None
         or claim.get("manifest_sha256") != hashlib.sha256(
@@ -318,11 +357,11 @@ def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
     expected_metadata = {
         "skia_dawn": (
             "resolved-skia-dawn-provider-root",
-            "CMake SKIA_DIR or exact generated Ninja archive path",
+            "exact CMake/Ninja Skia layout plus pinned asset generation",
         ),
         "v8": (
             "resolved-v8-provider-root",
-            "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root",
+            "exact CMake V8 runtime layout plus pinned asset generation",
         ),
         "skia_source": (
             "resolved-skia-source-provider-root",
@@ -337,12 +376,85 @@ def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
             or row.get("resolution") != expected_resolution
         ):
             errors.append(f"render provider {role} lacks exact root provenance")
+        authority = _mapping(
+            row.get("root_authority"),
+            f"render provider {role} root authority", errors,
+        )
+        if role in {"skia_dawn", "v8"}:
+            dependency = "Skia" if role == "skia_dawn" else "V8"
+            stamp = (
+                ".skia-asset-sha256"
+                if role == "skia_dawn" else ".v8-asset-sha256"
+            )
+            allowed = (
+                SKIA_PROVIDER_TOP_LEVEL
+                if role == "skia_dawn" else V8_PROVIDER_TOP_LEVEL
+            )
+            manifest_sha256, asset_digests = _pinned_provider_asset_digests(
+                dependency
+            )
+            entries = authority.get("top_level_entries")
+            if (
+                authority.get("method")
+                != "pinned-release-asset-stamp-and-exact-layout-v1"
+                or authority.get("dependency") != dependency
+                or authority.get("dependency_manifest_path")
+                != PROVIDER_MANIFEST_PATH
+                or authority.get("dependency_manifest_sha256") != manifest_sha256
+                or authority.get("generation_stamp_path") != stamp
+                or authority.get("generation_asset_sha256") not in asset_digests
+                or SHA256.fullmatch(
+                    str(authority.get("generation_stamp_sha256", ""))
+                ) is None
+                or not isinstance(entries, list)
+                or any(
+                    not isinstance(entry, str)
+                    or (
+                        entry not in allowed
+                        and not (
+                            role == "skia_dawn"
+                            and re.fullmatch(r"[A-Za-z0-9_+-]+-gpu", entry)
+                        )
+                    )
+                    for entry in entries
+                )
+                or len(entries) != len(set(entries))
+                or stamp not in entries
+            ):
+                errors.append(
+                    f"render provider {role} lacks pinned generation authority"
+                )
+            if role == "skia_dawn" and (
+                authority.get("cache_authority") not in {"SKIA_DIR", "generated-ninja"}
+                or authority.get("provider_layout") not in {
+                    "build/<platform>-gpu/lib/Release",
+                    "<platform>-gpu/lib/Release", "<platform>/lib", "lib",
+                }
+                or not isinstance(authority.get("consumed_skia_archives"), list)
+                or not authority["consumed_skia_archives"]
+            ):
+                errors.append("render provider skia_dawn lacks exact consumed layout")
+            if role == "v8" and (
+                authority.get("cache_authority") != "V8_RUNTIME_LIBRARY"
+                or authority.get("provider_layout") not in {
+                    "lib/<runtime>", "jniLibs/arm64-v8a/<runtime>",
+                }
+                or not isinstance(authority.get("consumed_runtime"), str)
+            ):
+                errors.append("render provider v8 lacks exact consumed layout")
+        elif (
+            authority.get("method") != "exact-adjacent-skia-source-layout-v1"
+            or authority.get("cache_authority") != "SKIA_DIR/../skia-src"
+            or authority.get("provider_layout") != "src/core"
+        ):
+            errors.append("render provider skia_source lacks exact adjacent layout")
         _verify_complete_tree_claim(row.get("tree_claim"), f"render provider {role}", errors)
         members = row.get("required_members")
         if not isinstance(members, list) or not members or any(
             not isinstance(member, dict)
             or not isinstance(member.get("path"), str)
             or GIT_SHA.fullmatch(str(member.get("git_blob_sha1", ""))) is None
+            or SHA256.fullmatch(str(member.get("sha256", ""))) is None
             or not isinstance(member.get("bytes"), int)
             or isinstance(member.get("bytes"), bool)
             or member["bytes"] <= 0
@@ -361,6 +473,20 @@ def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
             and names & {"libv8.dylib", "libv8.so", "v8.dll"}
         ):
             errors.append("render provider v8 lacks its consumed headers/runtime")
+        if role in {"skia_dawn", "v8"}:
+            stamp = (
+                ".skia-asset-sha256"
+                if role == "skia_dawn" else ".v8-asset-sha256"
+            )
+            stamp_members = [member for member in members if member["path"] == stamp]
+            if (
+                len(stamp_members) != 1
+                or stamp_members[0].get("sha256")
+                != authority.get("generation_stamp_sha256")
+            ):
+                errors.append(
+                    f"render provider {role} generation stamp is not retained"
+                )
         if role == "skia_source" and not any(
             member["path"].startswith("src/core/") for member in members
         ):
@@ -1086,8 +1212,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--terminal", action="store_true",
         help=(
-            "Fail with guidance: terminal certification is available only from "
-            "the fresh recorder process"
+            "Fail with guidance: no local recorder or offline verifier can issue "
+            "terminal acceptance"
         ),
     )
     args = parser.parse_args(argv)

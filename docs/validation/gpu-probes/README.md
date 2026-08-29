@@ -1,7 +1,7 @@
-# Final A2 GPU-probe acceptance
+# A2 GPU-probe structural evidence
 
-`tools/scripts/gpu_probe_acceptance.py` is the A2 fresh-run certification
-orchestrator. It refreshes
+`tools/scripts/gpu_probe_acceptance.py` is the A2 exact-head structural-evidence
+recorder. It refreshes
 one exact-head Release Pulp build/install, then runs all four canonical recipes
 twice plus their seeded negative controls through installed Rust `pulp`. It
 replays every positive and negative through installed `pulp-mcp`, rebuilds the
@@ -13,11 +13,12 @@ and Three.js rows are recorded as additional Pulp path canaries rather than
 Forge evidence. The recorder writes to a new directory outside all checkouts,
 self-verifies, atomically claims the destination without replacement, links all
 regular evidence files, and publishes `receipt.json` last. The durable receipt
-is structural evidence, not a self-authenticating terminal certificate. Only
-the still-running recorder can emit `fresh_recorder_certification: pass`, after
-it rechecks the exact live `HEAD`, every retained descriptor/inode/digest, the
-published hard-link identities, and the structural verifier in that same
-process.
+is structural evidence, not a self-authenticating terminal certificate. The
+recorder rechecks the exact live `HEAD`, every retained descriptor/inode/digest,
+the published hard-link identities, and the structural verifier while those
+claims remain live, then emits only `result: structural-evidence-written` after
+closing them. No importable Python function, stdout string, saved marker, or
+offline verifier result from this repository constitutes terminal authority.
 
 The recorder must run only after the final integration SHA is fixed. It does
 not create or promote a receipt during an implementation turn.
@@ -26,8 +27,9 @@ not create or promote a receipt during an implementation turn.
 
 - A fresh, classified, completely clean Pulp worktree at the final integration
   SHA, with the accepted plan object available in its `planning` checkout.
-- The pinned macOS Skia/Dawn GPU build and Homebrew `node@24` V8 inputs. Do not
-  mix headers and libraries from different Skia builds.
+- The pinned macOS Skia/Dawn GPU build and milestone-matched sealed V8 release
+  inputs, each with the asset stamp written by Pulp's canonical fetch tool. Do
+  not mix headers and libraries from different provider generations.
 - A dedicated Pulp build directory and a not-yet-created install-prefix path
   outside the worktree. The recorder atomically claims the empty prefix before
   installing by no-replace renaming an unpredictable staging directory and
@@ -38,7 +40,11 @@ not create or promote a receipt during an implementation turn.
   complete selected Skia/Dawn and V8 provider trees (including both GPU
   archives, V8 headers, and the V8 runtime). When FindSkia activates the
   adjacent `SKIA_DIR/../skia-src` include layout, that complete source-provider
-  tree is retained too; broad roots and escaping provider symlinks fail closed.
+  tree is retained too. Each binary provider must be the exact CMake/Ninja
+  consumed package root, match a fixed supported directory layout, carry a
+  release-asset generation stamp pinned by `tools/deps/manifest.json`, and
+  contain no unrelated top-level organization/monorepo data. Escaping provider
+  symlinks fail closed.
   The recorder then forces a CMake clean, removes
   the Rust Cargo target cache, and requires all three measured outputs absent
   before rebuilding. Those exact source and build-input descriptors remain
@@ -89,9 +95,7 @@ cmake -S . -B "$PULP_BUILD_DIR" -G Ninja \
   -DPULP_ENABLE_THREEJS_RUNTIME=ON \
   -DPULP_ENABLE_JS=ON \
   -DPULP_JS_ENGINE=v8 \
-  -DV8_INCLUDE_DIR=/opt/homebrew/opt/node@24/include/node \
-  -DV8_LIB_DIR=/opt/homebrew/opt/node@24/lib \
-  -DV8_LIBRARY_PATH=/opt/homebrew/opt/node@24/lib/libnode.137.dylib \
+  -DV8_DIR=/absolute/path/to/pinned/v8-build \
   -DPULP_BUILD_RUST_CLI=ON \
   -DPULP_RUST_CLI_PROFILE=release
 cmake --build "$PULP_BUILD_DIR" --target pulp-rust-cli pulp-cli pulp-mcp --parallel
@@ -101,9 +105,9 @@ git worktree add --detach "$FORGE_ROOT" \
 printf '%s\n' "$PULP_FINAL_SHA" > "$FORGE_ROOT/PULP_SDK_REF"
 ```
 
-The exact V8 dylib filename is part of the local node@24 installation; confirm
-it rather than copying the example blindly. Pulp configure must leave
-`PULP_HAS_THREEJS=TRUE`. Do not pre-create `$PULP_PREFIX` or
+The V8 provider must be one of the platform roots materialized by
+`tools/scripts/fetch_v8_for_release.py`, including its `.v8-asset-sha256`
+stamp. Pulp configure must leave `PULP_HAS_THREEJS=TRUE`. Do not pre-create `$PULP_PREFIX` or
 `$FORGE_BUILD_DIR`; the recorder claims the prefix, installs Pulp, then
 configures Forge with `Pulp_DIR` resolved to
 `$PULP_PREFIX/lib/cmake/Pulp`.
@@ -139,11 +143,12 @@ recipe parity, direct C++ substitutions for the
 Rust front, stale source blobs, forged plan/build stamps, non-authentic hardware,
 blank screenshots, missing negative controls, Forge drift, and non-passing
 structural fields, but it cannot prove that a saved directory came from a live
-recorder. `--terminal` therefore fails closed with instructions to rerun the
-orchestrator; no JSON marker or recomputed hash can upgrade an offline directory.
-Terminal A2 proof is the successful recorder process and its
-`fresh_recorder_certification: pass` output at the final live `HEAD`, captured
-by the independent campaign runner together with this structural receipt.
+recorder. `--terminal` therefore fails closed; rerunning this recorder still
+does not create terminal authority, and no JSON marker or recomputed hash can
+upgrade an offline directory. Final A2 acceptance requires a separate protected
+cross-system acceptance package that independently binds the recorder run,
+retained receipt bytes, and exact protected integration authority. That package
+is not implemented or minted by these local scripts.
 
 Publication never replaces an output directory that appears during the run.
 Before any build or recipe execution the recorder retains the exact existing
@@ -153,9 +158,9 @@ directory with a no-replace `mkdir`, publishes regular files by no-replace hard
 links, fsyncs them, and links `receipt.json` only after the other evidence is
 durable. A raced parent/destination or partial interrupted directory is
 nonterminal and must not be promoted. A copied or hand-built directory may pass
-structural checks when its internal bytes are coherent, but cannot request
-terminal certification because it has no process-local retained-claim
-capability.
+structural checks when its internal bytes are coherent; the same is true of a
+fresh recorder-produced directory. Both remain structural inputs to the
+separate cross-system acceptance package.
 
 Expected recorder runtime is roughly 10–30 minutes with warm build caches and
 45–90 minutes from cold dependencies. The bounded subprocess timeouts are one

@@ -239,7 +239,7 @@ def _verify_installed_build_provenance(
         errors.append("installed build provenance lacks a Skia source disposition")
     if (
         provider_claim.get("method")
-        != "retained-resolved-render-provider-trees-v2"
+        != "retained-resolved-render-provider-trees-v3"
         or set(providers) != expected_roles
         or not contract.valid_lower_hex(
             str(provider_claim.get("manifest_sha256", "")), 64
@@ -259,11 +259,11 @@ def _verify_installed_build_provenance(
     expected_metadata = {
         "skia_dawn": (
             "resolved-skia-dawn-provider-root",
-            "CMake SKIA_DIR or exact generated Ninja archive path",
+            "exact CMake/Ninja Skia layout plus pinned asset generation",
         ),
         "v8": (
             "resolved-v8-provider-root",
-            "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root",
+            "exact CMake V8 runtime layout plus pinned asset generation",
         ),
         "skia_source": (
             "resolved-skia-source-provider-root",
@@ -282,6 +282,78 @@ def _verify_installed_build_provenance(
             errors.append(
                 f"installed render provider {role} lacks exact root provenance"
             )
+        authority = _object(
+            row.get("root_authority"),
+            f"installed render provider {role} root authority", errors,
+        )
+        if role in {"skia_dawn", "v8"}:
+            dependency = "Skia" if role == "skia_dawn" else "V8"
+            stamp = (
+                ".skia-asset-sha256"
+                if role == "skia_dawn" else ".v8-asset-sha256"
+            )
+            allowed = (
+                contract.SKIA_PROVIDER_TOP_LEVEL
+                if role == "skia_dawn" else contract.V8_PROVIDER_TOP_LEVEL
+            )
+            entries = authority.get("top_level_entries")
+            manifest_sha256, asset_digests = contract._pinned_provider_asset_digests(
+                dependency
+            )
+            if (
+                authority.get("method")
+                != "pinned-release-asset-stamp-and-exact-layout-v1"
+                or authority.get("dependency") != dependency
+                or authority.get("dependency_manifest_path")
+                != contract.PROVIDER_MANIFEST_PATH
+                or authority.get("dependency_manifest_sha256") != manifest_sha256
+                or authority.get("generation_stamp_path") != stamp
+                or authority.get("generation_asset_sha256") not in asset_digests
+                or not contract.valid_lower_hex(
+                    str(authority.get("generation_stamp_sha256", "")), 64
+                )
+                or not isinstance(entries, list)
+                or any(
+                    not isinstance(entry, str)
+                    or (
+                        entry not in allowed
+                        and not (
+                            role == "skia_dawn"
+                            and re.fullmatch(r"[A-Za-z0-9_+-]+-gpu", entry)
+                        )
+                    )
+                    for entry in entries
+                )
+                or len(entries) != len(set(entries))
+                or stamp not in entries
+            ):
+                errors.append(
+                    f"installed render provider {role} lacks pinned generation authority"
+                )
+            if role == "skia_dawn" and (
+                authority.get("cache_authority") not in {"SKIA_DIR", "generated-ninja"}
+                or authority.get("provider_layout") not in {
+                    "build/<platform>-gpu/lib/Release",
+                    "<platform>-gpu/lib/Release", "<platform>/lib", "lib",
+                }
+                or not isinstance(authority.get("consumed_skia_archives"), list)
+                or not authority["consumed_skia_archives"]
+            ):
+                errors.append("installed Skia/Dawn provider lacks exact consumed layout")
+            if role == "v8" and (
+                authority.get("cache_authority") != "V8_RUNTIME_LIBRARY"
+                or authority.get("provider_layout") not in {
+                    "lib/<runtime>", "jniLibs/arm64-v8a/<runtime>",
+                }
+                or not isinstance(authority.get("consumed_runtime"), str)
+            ):
+                errors.append("installed V8 provider lacks exact consumed layout")
+        elif (
+            authority.get("method") != "exact-adjacent-skia-source-layout-v1"
+            or authority.get("cache_authority") != "SKIA_DIR/../skia-src"
+            or authority.get("provider_layout") != "src/core"
+        ):
+            errors.append("installed Skia source provider lacks exact adjacent layout")
         tree = _object(
             row.get("tree_claim"), f"installed render provider {role} tree", errors
         )
@@ -304,6 +376,7 @@ def _verify_installed_build_provenance(
             or not contract.valid_lower_hex(
                 str(member.get("git_blob_sha1", "")), 40
             )
+            or not contract.valid_lower_hex(str(member.get("sha256", "")), 64)
             or not isinstance(member.get("bytes"), int)
             or isinstance(member.get("bytes"), bool)
             or member["bytes"] <= 0
@@ -322,6 +395,20 @@ def _verify_installed_build_provenance(
             and names & {"libv8.dylib", "libv8.so", "v8.dll"}
         ):
             errors.append("installed V8 provider lacks its consumed headers/runtime")
+        if role in {"skia_dawn", "v8"}:
+            stamp = (
+                ".skia-asset-sha256"
+                if role == "skia_dawn" else ".v8-asset-sha256"
+            )
+            stamp_members = [member for member in members if member["path"] == stamp]
+            if (
+                len(stamp_members) != 1
+                or stamp_members[0].get("sha256")
+                != authority.get("generation_stamp_sha256")
+            ):
+                errors.append(
+                    f"installed render provider {role} generation stamp is not retained"
+                )
         if role == "skia_source" and not any(
             member["path"].startswith("src/core/") for member in members
         ):
@@ -638,11 +725,19 @@ def verify(
             errors.append(f"acceptance {field} differs from the Horizon-A contract")
     human = receipt.get("human_perfetto_ui_correlation")
     human_source = receipt.get("human_perfetto_ui_review_source")
+    expected_human_status = (
+        "bound-independent-review-evidence"
+        if human is not None
+        else "unverified-no-human-perfetto-ui-correlation"
+    )
+    if acceptance.get("human_perfetto_ui_correlation") != expected_human_status:
+        errors.append(
+            "acceptance human_perfetto_ui_correlation differs from structural review evidence"
+        )
     if require_terminal:
         errors.append(
-            "standalone A2T verification is structural-only; terminal "
-            "certification requires a fresh gpu_trace_overhead_acceptance.py "
-            "recorder run"
+            "standalone A2T verification and recording are structural-only; "
+            "terminal acceptance requires a separate protected cross-system authority"
         )
         completed = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=repository, check=False,
@@ -662,7 +757,7 @@ def verify(
                 human_source, "human_perfetto_ui_review_source", errors
             )
             prior_path = repository / str(source.get("repository_path", ""))
-            expected_human, expected_source = contract.bind_tracked_human_review_receipt(
+            expected_human, expected_source = contract.bind_independent_human_review_document(
                 repository,
                 str(source_revision),
                 prior_path,
@@ -690,8 +785,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--terminal", action="store_true",
         help=(
-            "Fail with guidance: terminal certification is available only from "
-            "the fresh recorder process"
+            "Fail with guidance: no local recorder or offline verifier can issue "
+            "terminal acceptance"
         ),
     )
     args = parser.parse_args(argv)
