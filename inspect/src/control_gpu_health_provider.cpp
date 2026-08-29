@@ -251,11 +251,17 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
                                 "gpu.adapter.unverified",
                                 "capture lacks an authentic native GPU adapter identity"});
     }
-    probe.events.push_back({sequence++, gh::Stage::submit,
-                            frame.gpu_submission_observed ? gh::Verdict::pass
-                                                          : gh::Verdict::unavailable,
-                            frame.gpu_submission_observed ? "gpu.submit.pass"
-                                                          : "gpu.submit.unavailable",
+    const auto submission_verdict = frame.gpu_submission_observed
+        ? gh::Verdict::pass
+        : (!capture_unavailable && adapter.status == gh::IdentityStatus::authentic
+               ? gh::Verdict::unverified
+               : gh::Verdict::unavailable);
+    probe.events.push_back({sequence++, gh::Stage::submit, submission_verdict,
+                            submission_verdict == gh::Verdict::pass
+                                ? "gpu.submit.pass"
+                                : (submission_verdict == gh::Verdict::unverified
+                                       ? "gpu.submit.unverified"
+                                       : "gpu.submit.unavailable"),
                             frame.gpu_submission_observed
                                 ? "GPU submission was observed by the host producer"
                                 : "GPU submission was not proven by capture"});
@@ -274,10 +280,13 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
                             : (blank ? "blank-first-frame negative control triggered"
                                      : "captured frame passed the content floor")});
     probe.verdict = blank ? gh::Verdict::fail
-        : (capture_unavailable || !frame.gpu_submission_observed)
+        : capture_unavailable
             ? gh::Verdict::unavailable
             : (adapter.status == gh::IdentityStatus::authentic
-                   ? gh::Verdict::pass : gh::Verdict::unverified);
+                   ? (frame.gpu_submission_observed ? gh::Verdict::pass
+                                                    : gh::Verdict::unverified)
+                   : (frame.gpu_submission_observed ? gh::Verdict::unverified
+                                                    : gh::Verdict::unavailable));
     result->health.run_id = bounded_string(impl_->config.campaign_id, 128)
                                 ? impl_->config.campaign_id
                                 : "editor-open";

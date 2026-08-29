@@ -31,6 +31,37 @@ Artifact paths are relative to the evidence root and may not contain `..`.
 Generation hashes the referenced files, applies the full schema and semantic
 checks, and writes atomically only after validation.
 
+## Current standalone production boundary
+
+The standalone control host binds `dev.pulp.gpu/health.read@1` to the broker's
+exact registration, instance, and publication identifiers. Its first ordinary
+UI-loop observation can also carry that installed lifecycle identifier, native
+adapter identity, back-buffer content statistics, capture-completion upper
+bound, and observed image signature. An authentic nonblank capture without
+direct GPU-submission proof is `unverified`; it is neither a startup pass nor
+an unavailable capture.
+
+The host may publish before that first UI-loop observation. A one-shot read in
+that window returns the pending snapshot and is not campaign evidence; an
+acceptance harness must wait for the post-capture snapshot before preserving
+the response artifact.
+
+The host does not claim an observed cold/warm cache boundary, GPU submission,
+native presentation timestamp, compile/prepare/upload/hidden/present stage
+timings, source or shader identity, or same-instance trace correlation. The
+generic render lifecycle producers for those facts route to Vellum after
+framework adoption. If a ratified campaign misses its budget and the existing
+trace cannot separate compile or prepare, upload, hidden-frame, and native
+present work from the unattributed interval, those fields remain
+`missing_evidence`. After those product-evidence gaps are closed, only a
+validated over-budget campaign whose permitted same-instance A2T analysis
+remains causally incomplete can cause the verifier to derive
+`queue-B4-investigation`.
+
+Until a validated campaign actually misses the ratified budget, the B4
+disposition remains unset. Missing transferred producers do not by themselves
+justify prewarm or permit a hand-authored investigation disposition.
+
 ## Terminal evidence
 
 A complete receipt must bind the exact planning revision and digest, Pulp and

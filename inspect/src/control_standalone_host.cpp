@@ -428,6 +428,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     },
                     .frame_evidence = [this] {
                         ControlGpuHealthProvider::FrameObservation frame;
+                        frame.lifecycle_id = gpu_health_lifecycle_id_;
                         const auto* surface = window_ ? window_->gpu_surface() : nullptr;
                         if (!surface)
                             return frame;
@@ -642,6 +643,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             stop();
             return false;
         }
+        if (gpu_health_provider_)
+            gpu_health_lifecycle_id_ = installed_->binding().instance_id;
         return true;
     }
 
@@ -674,6 +677,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         ui_adapter_.reset();
         gpu_health_view_adapter_.reset();
         gpu_health_provider_.reset();
+        gpu_health_lifecycle_id_.clear();
         evaluator_.reset();
         motion_.reset();
         if (owned_root_ && root_)
@@ -738,6 +742,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     std::shared_ptr<ControlStandaloneUiAdapter> ui_adapter_;
     std::shared_ptr<ControlGpuHealthProvider> gpu_health_provider_;
     std::unique_ptr<ControlGpuHealthViewAdapter> gpu_health_view_adapter_;
+    std::string gpu_health_lifecycle_id_;
     std::shared_ptr<RuntimeEvaluator> evaluator_;
     std::shared_ptr<ConsoleCapture> console_;
     view::ScriptedUiSession* log_session_ = nullptr;

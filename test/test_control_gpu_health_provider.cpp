@@ -82,6 +82,38 @@ TEST_CASE("GPU health provider publishes authentic capture without overstating s
             "gpu.startup.trace_incomplete");
 }
 
+TEST_CASE("GPU health provider keeps an authentic capture-only upper bound unverified") {
+    pulp::inspect::ControlGpuHealthProvider provider({.pulp_build_id = "test-build"});
+    REQUIRE(provider.begin_editor_open(
+        pulp::inspect::ControlGpuHealthProvider::CacheState::cold,
+        std::chrono::steady_clock::time_point{}));
+    auto observed = frame(true);
+    observed.lifecycle_id = "instance-capture-upper-bound";
+    observed.gpu_submission_observed = false;
+    REQUIRE(provider.record_presented_frame(observed));
+    require_valid(provider);
+    const auto snapshot = provider.snapshot();
+    REQUIRE(snapshot);
+    REQUIRE(snapshot->health.run_id == "editor-open");
+    REQUIRE(snapshot->health.verdict == gh::Verdict::unverified);
+    REQUIRE(snapshot->health.health_state == gh::HealthState::unverified);
+    REQUIRE(snapshot->health.probes.front().events.size() == 4);
+    REQUIRE(snapshot->health.probes.front().events[1].verdict == gh::Verdict::unverified);
+    REQUIRE(snapshot->health.probes.front().events[1].code == "gpu.submit.unverified");
+    REQUIRE(snapshot->health.probes.front().measurements.readback_completed);
+    REQUIRE(snapshot->health.probes.front().measurements.content_floor_passed);
+    REQUIRE_FALSE(snapshot->health.probes.front().measurements.command_submitted);
+    REQUIRE(snapshot->startup.status == gh::MeasurementStatus::incomplete);
+    REQUIRE(snapshot->startup.verdict == gh::Verdict::unverified);
+    REQUIRE(snapshot->startup.budget.status == gh::BudgetStatus::unratified);
+    REQUIRE_FALSE(snapshot->startup.correlation.gpu_evidence_id);
+    REQUIRE_FALSE(snapshot->startup.correlation.trace_evidence_id);
+    REQUIRE(snapshot->startup.trials.front().editor_open_to_first_nonblank_ms == 12.0);
+    REQUIRE(snapshot->startup.trials.front().verdict == gh::Verdict::unverified);
+    REQUIRE(snapshot->startup.trials.front().diagnostic_code ==
+            "gpu.startup.trace_incomplete");
+}
+
 TEST_CASE("GPU health provider can complete a ratified native lifecycle campaign") {
     const auto target_signature = std::string(64, 'a');
     pulp::inspect::ControlGpuHealthProvider provider({
