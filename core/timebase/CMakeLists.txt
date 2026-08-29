@@ -12,7 +12,9 @@ target_include_directories(pulp-timebase
         $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(pulp-timebase PUBLIC pulp::runtime)
+# pulp::foundation carries Result, the only runtime header this module uses,
+# and none of runtime's object code or its mbedTLS link items.
+target_link_libraries(pulp-timebase PUBLIC pulp::foundation)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(pulp-timebase PRIVATE -fno-exceptions -fno-rtti)

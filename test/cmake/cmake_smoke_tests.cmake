@@ -239,13 +239,13 @@ endif()
 # excluded dependencies this SDK could realize at all) and a DSP-only one whose
 # link closure is held to the clean-consumer contract.
 #
-# The contract is violated on this branch. The violation is recorded in
-# test/fixtures/clean_consumer/exclusion_policy.cmake together with the edge
-# that carries it, and this gate holds that record in both directions: a new
-# violation fails, and a recorded violation that is no longer reachable also
-# fails so the record cannot outlive its subject. Configure with
-# PULP_CLEAN_CONSUMER_STRICT=ON to run the contract with no baseline, which is
-# the assertion an SDK partition has to make pass.
+# Violations are recorded in test/fixtures/clean_consumer/exclusion_policy.cmake
+# together with the edge that carries each one, and this gate holds that record
+# in both directions: a new violation fails, and a recorded violation that is no
+# longer reachable also fails so the record cannot outlive its subject. The
+# record is currently empty, so the baseline forgives nothing and this runs as
+# the contract itself; PULP_CLEAN_CONSUMER_STRICT=ON asserts the same thing with
+# the baseline mechanism bypassed entirely.
 add_test(NAME cmake-clean-consumer-fixture
     COMMAND ${CMAKE_COMMAND}
         -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
