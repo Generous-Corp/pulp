@@ -45,7 +45,8 @@ artifacts = {{
     "health_result": None, "raw_cold": None, "raw_warm": None,
     "product_artifact": None, "host_artifact": None, "trace": None,
     "trace_analysis": None, "blank_negative": None,
-    "audio_thread_exclusion": None,
+    "audio_thread_exclusion": None, "measurement_producer": None,
+    "blank_control_binary": None, "audio_control_binary": None,
 }}
 outcome = "inconclusive" if MUTATION == "inconclusive" else "pass"
 reason = "external product is unavailable" if outcome != "pass" else None
@@ -63,10 +64,13 @@ if outcome == "pass":
         "host_artifact": SOURCE / f"{{role}}-host.bin",
         "trace": SOURCE / f"{{role}}-trace.pftrace",
         "trace_analysis": SOURCE / f"{{role}}-trace-analysis.json",
+        "measurement_producer": SOURCE / f"{{role}}-product.bin",
     }}
     if request["require_controls"] and MUTATION != "missing-controls":
         sources["blank_negative"] = SOURCE / "blank.json"
         sources["audio_thread_exclusion"] = SOURCE / "audio.json"
+        sources["blank_control_binary"] = SOURCE / f"{{role}}-product.bin"
+        sources["audio_control_binary"] = SOURCE / f"{{role}}-host.bin"
     for name, source_path in sources.items():
         suffix = source_path.suffix or ".bin"
         destination = root / f"{{name}}{{suffix}}"
@@ -160,6 +164,9 @@ def main() -> int:
         assert result["campaign"]["role"] == "standalone"
         assert result["controls"]["blank_negative"] is not None
         assert result["controls"]["audio_thread_exclusion"] is not None
+        assert result["controls"]["blank_control_binary"] is not None
+        assert result["controls"]["audio_control_binary"] is not None
+        assert result["measurement_producer"] is not None
         assert result["campaign"]["identity"] == identity
 
         run, result = run_adapter(root, evidence, identity_path, "", controls=False)

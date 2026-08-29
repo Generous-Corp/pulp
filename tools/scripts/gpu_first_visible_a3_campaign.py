@@ -38,7 +38,8 @@ OUTCOME_EXIT = {"pass": 0, "fail": 1, "inconclusive": 2, "skip": 3}
 ADAPTER_ARTIFACT_KEYS = {
     "health_result", "raw_cold", "raw_warm", "product_artifact",
     "host_artifact", "trace", "trace_analysis", "blank_negative",
-    "audio_thread_exclusion",
+    "audio_thread_exclusion", "measurement_producer",
+    "blank_control_binary", "audio_control_binary",
 }
 
 
@@ -299,15 +300,23 @@ def validate_adapter_receipt(
 
     artifacts = receipt["artifacts"]
     a3.exact_keys(artifacts, ADAPTER_ARTIFACT_KEYS, "adapter receipt artifacts")
-    core_artifacts = ADAPTER_ARTIFACT_KEYS - {
-        "blank_negative", "audio_thread_exclusion",
+    core_artifacts = {
+        "health_result", "raw_cold", "raw_warm", "product_artifact",
+        "host_artifact", "trace", "trace_analysis", "measurement_producer",
+    }
+    control_artifacts = {
+        "blank_negative", "audio_thread_exclusion", "blank_control_binary",
+        "audio_control_binary",
     }
     resolved = {
         name: validate_adapter_ref(
             value, run_dir, f"adapter.{name}",
             required=(
                 outcome == "pass"
-                and (name in core_artifacts or request["require_controls"])
+                and (
+                    name in core_artifacts
+                    or (request["require_controls"] and name in control_artifacts)
+                )
             ),
         )
         for name, value in artifacts.items()
@@ -315,7 +324,7 @@ def validate_adapter_receipt(
     if outcome != "pass":
         return outcome, None, resolved
     require_controls = request["require_controls"]
-    for name in ("blank_negative", "audio_thread_exclusion"):
+    for name in control_artifacts:
         if require_controls and resolved[name] is None:
             raise CampaignError(f"requested control artifact is missing: {name}")
         if not require_controls and resolved[name] is not None:
@@ -323,7 +332,7 @@ def validate_adapter_receipt(
 
     assert all(resolved[name] is not None for name in (
         "health_result", "raw_cold", "raw_warm", "product_artifact",
-        "host_artifact", "trace", "trace_analysis",
+        "host_artifact", "trace", "trace_analysis", "measurement_producer",
     ))
     campaign = {
         "role": request["role"],
@@ -513,12 +522,15 @@ def run_role(args: argparse.Namespace) -> int:
         {
             "blank_negative": artifacts["blank_negative"],
             "audio_thread_exclusion": artifacts["audio_thread_exclusion"],
+            "blank_control_binary": artifacts["blank_control_binary"],
+            "audio_control_binary": artifacts["audio_control_binary"],
         }
         if args.require_controls else None
     )
     atomic_json(output_path, {
         **base, "status": "pass", "reason": None, "dependencies": [],
         "campaign": campaign, "controls": controls,
+        "measurement_producer": artifacts["measurement_producer"],
     })
     return 0
 
