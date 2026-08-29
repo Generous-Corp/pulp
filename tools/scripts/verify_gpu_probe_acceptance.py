@@ -436,16 +436,18 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
             "mcp_positive_response_id": 8, "mcp_negative_response_id": 9,
         },
     }
-    if forge.get("missing_path_canaries") != expected_canaries:
+    if "missing_path_canaries" in forge:
+        errors.append("Pulp path canaries must not be claimed as Forge downstream evidence")
+    if receipt.get("additional_pulp_path_canaries") != expected_canaries:
         errors.append(
-            "Forge proof does not bind the missing-path Three.js/GPU-audio claims "
+            "A2 proof does not bind the additional Pulp Three.js/GPU-audio paths "
             "to their executed CLI/MCP evidence"
         )
     acceptance = _mapping(receipt.get("acceptance"), "acceptance", errors)
     expected_acceptance = {
         "terminal_status": "pass", "all_four_installed_cli": "pass",
         "all_four_installed_mcp": "pass", "seeded_negative_controls": "pass",
-        "forge_modular_and_missing_path_canaries": "pass",
+        "forge_modular_and_additional_pulp_path_canaries": "pass",
     }
     if acceptance != expected_acceptance:
         errors.append("v2 terminal acceptance fields are incomplete or non-passing")

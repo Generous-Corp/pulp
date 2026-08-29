@@ -5,9 +5,12 @@ one exact-head Release Pulp build/install, then runs all four canonical recipes
 twice plus their seeded negative controls through installed Rust `pulp`. It
 replays every positive and negative through installed `pulp-mcp`, rebuilds the
 exact Forge Modular standalone against that same SDK, captures its real GPU
-shell, and runs the installed GPU doctor from the Forge checkout. The recorder
-writes to a new directory outside all checkouts and self-verifies before
-publishing it.
+shell, and runs the installed GPU doctor from the Forge checkout. Forge Modular
+is the Forge downstream proof. The plan separately permits maintained Pulp
+examples for paths that Forge Modular does not exercise, so the executed STFT
+and Three.js rows are recorded as additional Pulp path canaries rather than
+Forge evidence. The recorder writes to a new directory outside all checkouts
+and self-verifies before publishing it.
 
 The recorder must run only after the final integration SHA is fixed. It does
 not create or promote a receipt during an implementation turn.

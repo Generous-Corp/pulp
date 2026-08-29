@@ -30,7 +30,7 @@ RECIPES = {
     "renderer": "renderer3d.hardcoded-cube.v1",
     "threejs": "threejs.multi-pass.v1",
 }
-MISSING_FORGE_PATH_CANARIES = {
+ADDITIONAL_PULP_PATH_CANARIES = {
     "gpu_audio": "stft",
     "threejs": "threejs",
 }
@@ -178,13 +178,13 @@ def canonical_result(value: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
-def bind_missing_forge_path_canaries(
+def bind_additional_pulp_path_canaries(
     cli_results: dict[str, dict[str, dict[str, Any]]],
     mcp_results: dict[str, dict[str, dict[str, Any]]],
 ) -> dict[str, dict[str, Any]]:
-    """Bind Forge's missing paths to the A2 executions that actually cover them."""
+    """Bind plan-allowed Pulp path canaries to the A2 rows that execute them."""
     canaries: dict[str, dict[str, Any]] = {}
-    for canary, group in MISSING_FORGE_PATH_CANARIES.items():
+    for canary, group in ADDITIONAL_PULP_PATH_CANARIES.items():
         cli = cli_results.get(group, {})
         mcp = mcp_results.get(group, {})
         recipe = RECIPES[group]
@@ -199,7 +199,7 @@ def bind_missing_forge_path_canaries(
             or canonical_result(cli.get("negative", {}))
             != canonical_result(mcp.get("negative", {}))
         ):
-            raise AcceptanceError(f"{canary} missing-path canary was not actually exercised")
+            raise AcceptanceError(f"{canary} Pulp path canary was not actually exercised")
         group_index = list(RECIPES).index(group)
         canaries[canary] = {
             "status": "pass",
@@ -576,14 +576,13 @@ def main(argv: list[str] | None = None) -> int:
             (staging / "mcp-transcript.jsonl").write_text(
                 "".join(json.dumps(row, sort_keys=True) + "\n" for row in session.transcript)
             )
-            missing_path_canaries = bind_missing_forge_path_canaries(
+            additional_pulp_path_canaries = bind_additional_pulp_path_canaries(
                 cli_results, mcp_results
             )
             forge = prove_forge(
                 forge_repository, forge_build, prefix, revision, staging,
                 build_environment, runtime_environment,
             )
-            forge["missing_path_canaries"] = missing_path_canaries
             raw_names = {
                 *(f"{group}-{suffix}.json" for group in RECIPES
                   for suffix in ("run1", "run2", "negative")),
@@ -610,12 +609,13 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 "raw_sha256": {name: sha256(staging / name) for name in sorted(raw_names)},
                 "forge_downstream": forge,
+                "additional_pulp_path_canaries": additional_pulp_path_canaries,
                 "acceptance": {
                     "terminal_status": "pass",
                     "all_four_installed_cli": "pass",
                     "all_four_installed_mcp": "pass",
                     "seeded_negative_controls": "pass",
-                    "forge_modular_and_missing_path_canaries": "pass",
+                    "forge_modular_and_additional_pulp_path_canaries": "pass",
                 },
             }
             if provenance.clean_source_identity(repository, revision) != source_identity:
