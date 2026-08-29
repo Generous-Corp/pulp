@@ -1,0 +1,38 @@
+"""Unit tests for the Skia m153 link-probe discovery and fail-closed paths."""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+import unittest
+from unittest import mock
+
+from tools.scripts import verify_skia_m153_capabilities as probe
+
+
+class SkiaM153CapabilityProbeTests(unittest.TestCase):
+    def test_discovers_published_archive_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            header = root / "build/include/include/utils/SkLogHandler.h"
+            library = root / "build/mac-gpu/lib/Release/libskia.a"
+            header.parent.mkdir(parents=True)
+            library.parent.mkdir(parents=True)
+            header.write_text("// header\n", encoding="utf-8")
+            library.write_bytes(b"archive")
+            self.assertEqual(probe._find_include_root(root), root / "build/include")
+            self.assertEqual(probe._find_skia_library(root), library)
+
+    def test_missing_header_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(RuntimeError, "SkLogHandler.h not found"):
+                probe._find_include_root(Path(temp))
+
+    def test_wrong_manifest_release_is_rejected_before_compile(self) -> None:
+        with mock.patch.object(probe, "_manifest_release", return_value="chrome/m152"):
+            with self.assertRaisesRegex(RuntimeError, "requires chrome/m153"):
+                probe.verify(Path("/does/not/matter"))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -125,6 +125,9 @@ available.
 7. Run the manifest mirror/audit tests and both fetch-script suites. Fetch a real native
    Skia asset and matched V8 asset, configure with GPU + Lottie + V8, and run the
    provider-identity/ODR validation. A pixel-only test is insufficient.
+   For m153+, run `python3 tools/scripts/verify_skia_m153_capabilities.py
+   --skia-dir <materialized-generation>` to prove `SkLogHandler` and Graphite's
+   executor field are backed by linkable provider symbols, not headers alone.
 8. Measure every Apple slice actually selected by the manifest. A same-tag asset can
    leak a higher deployment target than its universal sibling; use the verified
    universal slice or rebuild rather than publishing a false minimum-OS claim.
@@ -139,6 +142,13 @@ available.
     seed the canonical cache by rsyncing a checkout merely because
     `external/skia-build/build` exists. Keep release x64/universal destinations
     isolated from the host arm64 cache.
+11. After merge, prewarm every active build host through the fetcher's normal
+    immutable cache-owner path. For each M3, M5, M1, Mac mini, and Mac Pro host,
+    record the exact asset SHA, materialized `libskia.a` plus
+    `libdawn_combined.a`, and a second invocation that reports the complete
+    generation and performs no download. Skip or defer a host only with an
+    explicit offline/retired disposition; never copy a checkout cache between
+    machines.
 
 ## Common traps
 
