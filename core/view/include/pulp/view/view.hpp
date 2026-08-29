@@ -439,6 +439,16 @@ public:
     bool is_hovered() const { return hovered_; }
     void set_hovered(bool h);
 
+    /// Baseline pointer feedback for semantic controls that keep an authored
+    /// painter (for example imported lowercase HTML buttons). Widget
+    /// subclasses with their own hover paint leave this disabled. Importers
+    /// may disable it when the authored design supplies a complete hover
+    /// treatment.
+    void set_default_hover_feedback(bool enabled) {
+        default_hover_feedback_ = enabled;
+    }
+    bool default_hover_feedback() const { return default_hover_feedback_; }
+
     // ── Frame clock ─────────────────────────────────────────────────────
 
     /// Set the frame clock on the root view. Children access via frame_clock().
@@ -756,6 +766,13 @@ public:
 
     void set_access_role(AccessRole role) { access_role_ = role; }
     AccessRole access_role() const { return access_role_; }
+    void set_implicit_access_role(AccessRole role) {
+        implicit_access_role_ = role;
+        access_role_ = role;
+    }
+    void restore_implicit_access_role() {
+        access_role_ = implicit_access_role_;
+    }
 
     /// The AUTHOR-SET accessible name (what `aria-label` maps to). An explicit
     /// name WINS over the view's content — ARIA 1.2 §5.2.7 (accname step 2B:
@@ -2435,6 +2452,7 @@ private:
     std::uint32_t last_paint_self_ns_ = 0;
     std::uint32_t last_paint_with_children_ns_ = 0;
     AccessRole access_role_ = AccessRole::none;
+    AccessRole implicit_access_role_ = AccessRole::none;
     RuntimeViewKind runtime_view_kind_ = RuntimeViewKind::generic;
     std::string access_label_;          // author-set (aria-label) — wins
     std::string derived_access_label_;  // content-derived (visible text)
@@ -2459,6 +2477,7 @@ private:
     // keyboard sinks, and the bridge clears the capability on release/teardown.
     bool scripted_navigation_input_ = false;
     bool hovered_ = false;
+    bool default_hover_feedback_ = false;
     bool hit_testable_ = true;
     PointerEvents pointer_events_ = PointerEvents::auto_;
     bool backface_visible_ = true;
