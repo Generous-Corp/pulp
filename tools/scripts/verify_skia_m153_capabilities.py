@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform as host_platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -27,6 +28,13 @@ except ModuleNotFoundError:  # Direct script execution from outside the repo roo
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "tools/deps/manifest.json"
 REQUIRED_RELEASE = "chrome/m153"
+NATIVE_PLATFORMS = {
+    "darwin-arm64",
+    "darwin-x64",
+    "darwin-universal",
+    "linux-arm64",
+    "linux-x64",
+}
 
 PROBE_SOURCE = r"""
 #include "include/core/SkExecutor.h"
@@ -97,7 +105,24 @@ def _compiler() -> str:
     return compiler
 
 
+def _require_native_host(platform: str) -> None:
+    machine = host_platform.machine().lower()
+    if sys.platform == "darwin":
+        native = {"darwin-universal"}
+        native.add("darwin-arm64" if machine in {"arm64", "aarch64"} else "darwin-x64")
+    elif sys.platform.startswith("linux"):
+        native = {"linux-arm64" if machine in {"arm64", "aarch64"} else "linux-x64"}
+    else:
+        native = set()
+    if platform not in native:
+        raise RuntimeError(
+            f"host {sys.platform}/{machine} cannot compile and execute the "
+            f"{platform} provider probe; run it natively on the matching desktop host"
+        )
+
+
 def verify(skia_dir: Path, platform: str) -> None:
+    _require_native_host(platform)
     dependency = _manifest_skia()
     release = str(dependency.get("version", ""))
     if release != REQUIRED_RELEASE:
@@ -172,8 +197,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--platform",
         required=True,
-        choices=sorted(skia_fetch.MATRIX_TO_MANIFEST),
-        help="release matrix platform whose exact manifest asset is materialized",
+        choices=sorted(NATIVE_PLATFORMS),
+        help="matching native desktop platform whose exact manifest asset is materialized",
     )
     args = parser.parse_args(argv)
     try:

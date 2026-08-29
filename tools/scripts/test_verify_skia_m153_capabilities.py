@@ -57,6 +57,16 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "verified darwin-arm64"):
                 probe.verify(Path("/does/not/matter"), "darwin-arm64")
 
+    def test_cross_host_and_non_native_platforms_fail_closed(self) -> None:
+        with mock.patch.object(probe.sys, "platform", "darwin"), \
+             mock.patch.object(probe.host_platform, "machine", return_value="arm64"):
+            probe._require_native_host("darwin-arm64")
+            probe._require_native_host("darwin-universal")
+            with self.assertRaisesRegex(RuntimeError, "cannot compile and execute"):
+                probe._require_native_host("darwin-x64")
+            with self.assertRaisesRegex(RuntimeError, "cannot compile and execute"):
+                probe._require_native_host("wasm")
+
 
 if __name__ == "__main__":
     unittest.main()

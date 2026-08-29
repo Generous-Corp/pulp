@@ -5158,7 +5158,7 @@ hand-sync typo is a silent behavioural bug rather than a doc lag. When bumping
 - `tools/harness/visual/pins.py` ← `test_skia_determinism.py`
 
 For m153+, the pin checks are necessary but not sufficient: run
-`tools/scripts/verify_skia_m153_capabilities.py --platform <matrix-platform>
+`tools/scripts/verify_skia_m153_capabilities.py --platform <matching-native-desktop-platform>
 --skia-dir <generation>` against the exact stamped manifest generation so
 `SkLogHandler` and Graphite's executor field are proven through the archive's
 exported symbols. After the pin lands, each active Mac build host

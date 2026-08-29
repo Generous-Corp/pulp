@@ -128,7 +128,10 @@ available.
    Skia asset and matched V8 asset, configure with GPU + Lottie + V8, and run the
    provider-identity/ODR validation. A pixel-only test is insufficient.
    For m153+, run `python3 tools/scripts/verify_skia_m153_capabilities.py
-   --platform <matrix-platform> --skia-dir <materialized-generation>`. The
+   --platform <matching-native-desktop-platform> --skia-dir
+   <materialized-generation>`. Run each architecture on its matching host; the
+   compile-and-execute probe intentionally rejects mobile, WASM, Windows, and
+   cross-architecture assets. The
    probe must reject a directory unless its verified asset stamp matches that
    platform's manifest digest and both Skia and Dawn archives are materialized.
    It proves the new API and exported-symbol surface against the exact provider;

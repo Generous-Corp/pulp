@@ -666,7 +666,7 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn(
-            "if((PULP_BUILD_TESTS OR PULP_BUILD_EXAMPLES) AND PULP_ENABLE_GPU)",
+            "if((PULP_BUILD_TESTS OR (PULP_BUILD_EXAMPLES AND NOT ANDROID AND NOT IOS AND NOT PULP_IOS))",
             dependencies,
         )
 
