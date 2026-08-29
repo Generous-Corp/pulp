@@ -244,7 +244,7 @@ FindV8 resolves the fetched artifact automatically — no `V8_INCLUDE_DIR`/
 local-experiment overrides** (point at a hand-built V8). `V8_DIR` points at
 a baked V8 (golden VMs: `V8_DIR=~/pulp-v8-build`).
 
-**Two behavior rules:**
+**Three behavior rules:**
 - `PULP_JS_ENGINE=auto` **never** pulls in V8 — V8 is strictly opt-in via
   `=v8`. (Previously `auto` + `V8_INCLUDE_DIR` silently enabled it.)
 - `PULP_JS_ENGINE=v8` on **iOS** is a configure-time `FATAL_ERROR`. The pinned

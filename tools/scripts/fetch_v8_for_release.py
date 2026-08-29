@@ -31,20 +31,28 @@ The iOS simulator release contains a jitless framework, but Pulp deliberately
 marks it `library: false`: it is fetched only to validate the published provider
 and headers, and is never selectable as an iOS runtime backend.
 
+Same-platform publishers coordinate through a bounded lock. Each publisher
+downloads and seals a unique private sibling generation, then swaps that fully
+validated generation into the live path; FindV8 never considers private staging.
+
 Avoids stderr-only output so the workflow log shows progress on stdout
 for either bash or PowerShell.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 import shutil
+import socket
 import sys
+import tempfile
+import time
 import urllib.request
 import urllib.parse
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 # Matrix platform → manifest release_assets key. Matrix uses `darwin-*`
 # and `windows-*`; the manifest uses `mac-*` and `win-*`.
@@ -65,6 +73,79 @@ GENERATION_SCHEMA = 1
 GENERATION_METADATA = {
     GENERATION_RECEIPT, ".v8-asset-sha256", ".v8-release-metadata-sha256",
 }
+PUBLICATION_LOCK_TIMEOUT_SECS = 300.0
+
+
+@contextmanager
+def publication_lock(dest: Path, timeout_secs: float):
+    """Serialize publishers for one platform destination.
+
+    A directory creation is the cross-platform atomic lock operation. A waiter
+    rechecks the live generation only after acquiring ownership, and a dead
+    same-host owner can be recovered without trusting any private staging it
+    may have left behind.
+    """
+    absolute_dest = dest.absolute()
+    absolute_dest.parent.mkdir(parents=True, exist_ok=True)
+    lock_dir = absolute_dest.parent / f".{absolute_dest.name}.fetch.lock"
+    owner_path = lock_dir / "owner.json"
+    deadline = time.monotonic() + timeout_secs
+    owner = {
+        "pid": os.getpid(),
+        "host": socket.gethostname(),
+        "dest": str(absolute_dest),
+    }
+    while True:
+        try:
+            lock_dir.mkdir()
+            try:
+                owner_path.write_text(
+                    json.dumps(owner, sort_keys=True) + "\n", encoding="utf-8"
+                )
+            except OSError:
+                lock_dir.rmdir()
+                raise
+            break
+        except FileExistsError:
+            stale = False
+            try:
+                current = json.loads(owner_path.read_text(encoding="utf-8"))
+                if current.get("host") == socket.gethostname():
+                    try:
+                        os.kill(int(current["pid"]), 0)
+                    except ProcessLookupError:
+                        stale = True
+                    except PermissionError:
+                        pass
+            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                # A live owner may still be writing owner.json. Only recover an
+                # unreadable lock after the bounded wait has elapsed.
+                stale = time.monotonic() >= deadline
+            if stale:
+                try:
+                    owner_path.unlink(missing_ok=True)
+                    lock_dir.rmdir()
+                    continue
+                except OSError:
+                    pass
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"timed out after {timeout_secs:g}s waiting for V8 publication "
+                    f"lock {lock_dir}"
+                )
+            time.sleep(0.1)
+    try:
+        yield
+    finally:
+        try:
+            owner_path.unlink(missing_ok=True)
+            lock_dir.rmdir()
+        except OSError as error:
+            print(
+                f"WARNING: could not release V8 publication lock {lock_dir}: {error}",
+                file=sys.stderr,
+            )
+
 
 PAIR_FIELD_MAP = {
     "pair_kind": "pair_kind",
@@ -403,6 +484,216 @@ def expected_library_path(manifest_key: str) -> Path | None:
     raise SystemExit(f"unknown manifest key: {manifest_key!r}")
 
 
+def _archive_member_target(dest: Path, member_name: str) -> Path:
+    """Resolve a ZIP member below private staging or reject path traversal."""
+    posix_name = member_name.replace("\\", "/")
+    relative = PurePosixPath(posix_name)
+    if (not posix_name or relative.is_absolute() or ".." in relative.parts
+            or PureWindowsPath(member_name).is_absolute()):
+        raise ValueError(f"unsafe V8 archive member path: {member_name!r}")
+    target = dest.joinpath(*relative.parts)
+    try:
+        target.resolve(strict=False).relative_to(dest.resolve())
+    except ValueError as error:
+        raise ValueError(
+            f"V8 archive member escapes private staging: {member_name!r}"
+        ) from error
+    return target
+
+
+def generation_valid(root: Path, manifest: dict, v8_entry: dict,
+                     manifest_key: str, expected_sha: str) -> bool:
+    """Deep-verify one complete materialized provider generation."""
+    matched_milestone = (
+        v8_entry.get("determinism", {}).get("pair_kind") == "chromium-milestone"
+    )
+    metadata_sha = (
+        v8_entry.get("determinism", {}).get("release_metadata_sha256")
+        if matched_milestone else None
+    )
+    required = required_materialized_paths(root, manifest_key, matched_milestone)
+    asset_stamp = root / ".v8-asset-sha256"
+    metadata_stamp = root / ".v8-release-metadata-sha256"
+    try:
+        if not all(path.is_file() for path in required):
+            return False
+        if (not asset_stamp.is_file()
+                or asset_stamp.read_text(encoding="utf-8").strip() != expected_sha):
+            return False
+        if matched_milestone and (
+                not metadata_stamp.is_file()
+                or metadata_stamp.read_text(encoding="utf-8").strip() != metadata_sha):
+            return False
+        validate_generation_receipt(
+            root, manifest_key, expected_sha, metadata_sha
+        )
+        if matched_milestone:
+            validate_materialized_manifest(root, manifest, v8_entry, manifest_key)
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+        return False
+    return True
+
+
+def _download_and_seal_generation(
+    stage: Path,
+    archive_path: Path,
+    url: str,
+    expected_sha: str,
+    manifest: dict,
+    v8_entry: dict,
+    manifest_key: str,
+    has_library: bool,
+) -> None:
+    """Populate and fully validate private staging without touching live state."""
+    matched_milestone = (
+        v8_entry.get("determinism", {}).get("pair_kind") == "chromium-milestone"
+    )
+    print(f"Downloading -> {archive_path}")
+    with urllib.request.urlopen(url) as response, archive_path.open("wb") as output:
+        for chunk in iter(lambda: response.read(1024 * 1024), b""):
+            output.write(chunk)
+
+    actual_sha = file_sha256(archive_path)
+    if actual_sha != expected_sha:
+        raise ValueError(
+            f"sha256 mismatch\n  expected: {expected_sha}\n  actual:   {actual_sha}"
+        )
+    print(f"sha256 verified: {actual_sha}")
+
+    metadata_sha = verify_release_metadata(v8_entry, url)
+    if metadata_sha:
+        print(f"release metadata verified: {metadata_sha}")
+
+    print(f"Unpacking privately -> {stage}")
+    with zipfile.ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            _archive_member_target(stage, member.filename)
+        if matched_milestone:
+            validate_embedded_manifest(archive, manifest, v8_entry, manifest_key)
+        archive.extractall(stage)
+
+    expected = expected_library_path(manifest_key) if has_library else None
+    if expected is not None:
+        stage_expected = stage / expected.relative_to(DEST_ROOT / manifest_key)
+        if not stage_expected.is_file():
+            raise ValueError(
+                f"expected library not found at {stage_expected} after private unpack"
+            )
+    required = required_materialized_paths(stage, manifest_key, matched_milestone)
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise ValueError(
+            f"required V8 payload files missing after private unpack: {missing}"
+        )
+
+    write_generation_receipt(stage, manifest_key, expected_sha, metadata_sha)
+    if metadata_sha:
+        (stage / ".v8-release-metadata-sha256").write_text(
+            metadata_sha + "\n", encoding="utf-8"
+        )
+    # The asset stamp is the final trust marker. FindV8 will reject staging or
+    # live state unless every prior receipt and payload check is also present.
+    (stage / ".v8-asset-sha256").write_text(expected_sha + "\n", encoding="utf-8")
+    if not generation_valid(stage, manifest, v8_entry, manifest_key, expected_sha):
+        raise ValueError("private V8 generation failed final receipt validation")
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.exists():
+        shutil.rmtree(path)
+
+
+def _publish_generation(stage: Path, dest: Path) -> None:
+    """Swap a sealed same-filesystem stage into the live provider path.
+
+    Readers can see the previous generation, a temporarily absent provider, or
+    the complete new generation; private staging is never a FindV8 candidate.
+    If publication fails after retiring the old path, restore it when possible.
+    """
+    retired: Path | None = None
+    if dest.exists() or dest.is_symlink():
+        retired = dest.parent / (
+            f".{dest.name}.retired-{os.getpid()}-{time.time_ns()}"
+        )
+        dest.rename(retired)
+    try:
+        stage.rename(dest)
+    except OSError as publish_error:
+        if retired is not None and retired.exists() and not dest.exists():
+            try:
+                retired.rename(dest)
+            except OSError as rollback_error:
+                raise RuntimeError(
+                    f"V8 publication failed and the prior generation could not be "
+                    f"restored; it remains at {retired}: {rollback_error}"
+                ) from publish_error
+        raise
+    if retired is not None:
+        try:
+            _remove_path(retired)
+        except OSError as error:
+            print(
+                f"WARNING: published V8 but could not remove retired generation "
+                f"{retired}: {error}",
+                file=sys.stderr,
+            )
+
+
+def _fetch_and_publish_generation(
+    dest: Path,
+    url: str,
+    expected_sha: str,
+    manifest: dict,
+    v8_entry: dict,
+    manifest_key: str,
+    has_library: bool,
+) -> None:
+    """Download privately, seal completely, then publish under the caller's lock."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    stage: Path | None = None
+    archive_path: Path | None = None
+    archive_fd: int | None = None
+    try:
+        stage = Path(tempfile.mkdtemp(
+            prefix=f".{dest.name}.staging-", dir=dest.parent
+        ))
+        archive_fd, archive_name = tempfile.mkstemp(
+            prefix=f".{dest.name}.download-", suffix=".zip", dir=dest.parent
+        )
+        archive_path = Path(archive_name)
+        os.close(archive_fd)
+        archive_fd = None
+        _download_and_seal_generation(
+            stage, archive_path, url, expected_sha, manifest, v8_entry,
+            manifest_key, has_library,
+        )
+        _publish_generation(stage, dest)
+        print(f"OK: atomically published V8 generation at {dest}")
+    finally:
+        # Every ZipFile/response context above is closed before cleanup, which
+        # keeps both happy and rejected paths valid on Windows.
+        if archive_fd is not None:
+            try:
+                os.close(archive_fd)
+            except OSError as error:
+                print(f"WARNING: could not close private V8 archive: {error}",
+                      file=sys.stderr)
+        if archive_path is not None:
+            try:
+                archive_path.unlink(missing_ok=True)
+            except OSError as error:
+                print(f"WARNING: could not remove private V8 archive {archive_path}: {error}",
+                      file=sys.stderr)
+        if stage is not None and (stage.exists() or stage.is_symlink()):
+            try:
+                _remove_path(stage)
+            except OSError as error:
+                print(f"WARNING: could not remove private V8 staging {stage}: {error}",
+                      file=sys.stderr)
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print(f"usage: {argv[0]} <matrix-platform>", file=sys.stderr)
@@ -445,16 +736,9 @@ def main(argv: list[str]) -> int:
 
     url = asset["url"]
     expected_sha = asset["sha256"]
-    matched_milestone = (
-        v8_entry.get("determinism", {}).get("pair_kind") == "chromium-milestone"
-    )
     has_library = asset.get("library", True)
     expected_lib = expected_library_path(manifest_key) if has_library else None
     dest = DEST_ROOT / manifest_key
-    stamp_path = dest / ".v8-asset-sha256"
-    metadata_stamp_path = dest / ".v8-release-metadata-sha256"
-    required_dest_paths = required_materialized_paths(
-        dest, manifest_key, matched_milestone)
 
     print(f"V8 fetch: matrix={matrix_platform}, manifest={manifest_key}")
     print(f"  url: {url}")
@@ -472,38 +756,14 @@ def main(argv: list[str]) -> int:
     baked_dir = os.environ.get("V8_DIR", "").strip()
     if os.environ.get("PULP_USE_BAKED_V8") and baked_dir:
         baked_root = Path(baked_dir) / manifest_key
-        baked_stamp = baked_root / ".v8-asset-sha256"
-        baked_metadata_stamp = baked_root / ".v8-release-metadata-sha256"
-        baked_ok = (
-            baked_stamp.is_file()
-            and baked_stamp.read_text(encoding="utf-8").strip() == expected_sha
-            and (not matched_milestone or (
-                baked_metadata_stamp.is_file()
-                and baked_metadata_stamp.read_text(encoding="utf-8").strip()
-                    == v8_entry.get("determinism", {}).get("release_metadata_sha256")
-            ))
-            and all(path.is_file() for path in required_materialized_paths(
-                baked_root, manifest_key, matched_milestone))
-        )
-        if baked_ok:
-            try:
-                validate_generation_receipt(
-                    baked_root, manifest_key, expected_sha,
-                    v8_entry.get("determinism", {}).get("release_metadata_sha256")
-                        if matched_milestone else None,
-                )
-                if matched_milestone:
-                    validate_materialized_manifest(
-                        baked_root, manifest, v8_entry, manifest_key)
-            except ValueError as error:
-                print(f"Baked V8 provenance is stale: {error}; re-fetching.")
-            else:
-                print(
-                    f"OK: using baked V8 at {baked_root} "
-                    f"(sha256 {expected_sha} and embedded provenance match pin); "
-                    f"skipping fetch (PULP_USE_BAKED_V8)"
-                )
-                return 0
+        if generation_valid(
+                baked_root, manifest, v8_entry, manifest_key, expected_sha):
+            print(
+                f"OK: using baked V8 at {baked_root} "
+                f"(sha256 {expected_sha} and embedded provenance match pin); "
+                f"skipping fetch (PULP_USE_BAKED_V8)"
+            )
+            return 0
         print(
             "PULP_USE_BAKED_V8 set but baked V8 is missing or stale "
             "(receipt, provenance, header, or required binary mismatch); "
@@ -513,122 +773,38 @@ def main(argv: list[str]) -> int:
     # Idempotency stamp: skip the download when the already-unpacked asset
     # matches the current pin. A pin bump changes expected_sha, the stamp no
     # longer matches, and the asset is re-fetched — never silently stale.
-    payload_present = all(path.is_file() for path in required_dest_paths)
-    if payload_present and stamp_path.is_file():
-        metadata_stamp_ok = (
-            not matched_milestone
-            or (
-                metadata_stamp_path.is_file()
-                and metadata_stamp_path.read_text(encoding="utf-8").strip()
-                    == v8_entry.get("determinism", {}).get("release_metadata_sha256")
-            )
+    if generation_valid(dest, manifest, v8_entry, manifest_key, expected_sha):
+        print(
+            f"OK: V8 already unpacked from the pinned asset "
+            f"(sha256 {expected_sha} and embedded provenance match); "
+            "skipping download"
         )
-        if (stamp_path.read_text(encoding="utf-8").strip() == expected_sha
-                and metadata_stamp_ok):
-            try:
-                validate_generation_receipt(
-                    dest, manifest_key, expected_sha,
-                    v8_entry.get("determinism", {}).get("release_metadata_sha256")
-                        if matched_milestone else None,
-                )
-                if matched_milestone:
-                    validate_materialized_manifest(dest, manifest, v8_entry, manifest_key)
-            except ValueError as error:
-                print(f"V8 materialized provenance is stale: {error}; re-downloading.")
-            else:
-                print(
-                    f"OK: V8 already unpacked from the pinned asset "
-                    f"(sha256 {expected_sha} and embedded provenance match); "
-                    "skipping download"
-                )
-                return 0
+        return 0
+    if dest.exists() or dest.is_symlink():
         print(
             "V8 cached generation is incomplete or does not match the pinned "
             "asset/provenance receipts; re-downloading."
         )
 
-    zip_path = Path(f"v8-release-asset-{manifest_key}.zip")
-    print(f"Downloading -> {zip_path}")
-    with urllib.request.urlopen(url) as resp, zip_path.open("wb") as fp:
-        while True:
-            chunk = resp.read(1024 * 1024)
-            if not chunk:
-                break
-            fp.write(chunk)
-
-    # Verify sha256 BEFORE unpacking.
-    h = hashlib.sha256()
-    with zip_path.open("rb") as fp:
-        for chunk in iter(lambda: fp.read(1024 * 1024), b""):
-            h.update(chunk)
-    actual_sha = h.hexdigest()
-    if actual_sha != expected_sha:
-        print(
-            f"ERROR: sha256 mismatch\n  expected: {expected_sha}\n  actual:   {actual_sha}",
-            file=sys.stderr,
-        )
-        zip_path.unlink(missing_ok=True)
-        return 1
-    print(f"sha256 verified: {actual_sha}")
     try:
-        metadata_sha = verify_release_metadata(v8_entry, url)
-    except (OSError, ValueError) as error:
+        with publication_lock(dest, PUBLICATION_LOCK_TIMEOUT_SECS):
+            # Another same-platform publisher may have completed while this
+            # process waited. Deep-verify its exact generation before skipping.
+            if generation_valid(
+                    dest, manifest, v8_entry, manifest_key, expected_sha):
+                print(
+                    f"OK: concurrent V8 publisher completed the pinned generation "
+                    f"at {dest}; skipping download"
+                )
+                return 0
+            _fetch_and_publish_generation(
+                dest, url, expected_sha, manifest, v8_entry, manifest_key,
+                has_library,
+            )
+    except (OSError, RuntimeError, TimeoutError, ValueError,
+            zipfile.BadZipFile) as error:
         print(f"ERROR: {error}", file=sys.stderr)
-        zip_path.unlink(missing_ok=True)
         return 1
-    if metadata_sha:
-        print(f"release metadata verified: {metadata_sha}")
-
-    # Unpack into a clean per-platform dir so a pin bump never leaves stale
-    # files behind alongside the new ones.
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True, exist_ok=True)
-    print(f"Unpacking -> {dest}")
-    embedded_error = None
-    with zipfile.ZipFile(zip_path) as zf:
-        try:
-            if matched_milestone:
-                validate_embedded_manifest(zf, manifest, v8_entry, manifest_key)
-        except ValueError as error:
-            embedded_error = error
-        else:
-            zf.extractall(dest)
-    if embedded_error is not None:
-        print(f"ERROR: {embedded_error}", file=sys.stderr)
-        # On Windows an open ZipFile prevents deletion. Clean up only after the
-        # context manager has closed the archive so provenance failures remain
-        # deterministic instead of being masked by PermissionError.
-        zip_path.unlink(missing_ok=True)
-        return 1
-    zip_path.unlink(missing_ok=True)
-
-    # Sanity check: the expected library MUST be present except when the
-    # manifest deliberately disables runtime consumption (iOS simulator).
-    if expected_lib is not None and not expected_lib.is_file():
-        print(
-            f"ERROR: expected library not found at {expected_lib} after unpack",
-            file=sys.stderr,
-        )
-        print(f"Contents of {dest}/ (depth 3):", file=sys.stderr)
-        for p in sorted(dest.rglob("*"))[:50]:
-            print(f"  {p}", file=sys.stderr)
-        return 1
-    missing_payload = [str(path) for path in required_dest_paths if not path.is_file()]
-    if missing_payload:
-        print(f"ERROR: required V8 payload files missing after unpack: {missing_payload}",
-              file=sys.stderr)
-        return 1
-
-    try:
-        write_generation_receipt(dest, manifest_key, expected_sha, metadata_sha)
-    except (OSError, ValueError) as error:
-        print(f"ERROR: could not seal V8 generation: {error}", file=sys.stderr)
-        return 1
-
-    stamp_path.write_text(expected_sha + "\n", encoding="utf-8")
-    if metadata_sha:
-        metadata_stamp_path.write_text(metadata_sha + "\n", encoding="utf-8")
 
     if expected_lib is not None:
         print(f"OK: {expected_lib} present ({expected_lib.stat().st_size:,} bytes)")

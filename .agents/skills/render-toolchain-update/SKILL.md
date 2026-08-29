@@ -215,7 +215,10 @@ retain those fields in the PR/landing evidence.
   `JavaScriptCore.framework` on Apple; `v8` selects the sealed prebuilt. JSC is
   **opt-in**, never implied by "Apple". Older text said "default is QuickJS, JSC
   on Apple", which reads as JSC being automatic on Apple platforms and is wrong.
-  Likewise iOS is no longer "JSC-only": V8 is excluded there because JIT is
-  forbidden, but QuickJS is the default and JSC stays opt-in. When a pin or
-  min-OS note is edited, keep these three files saying the same thing — they are
-  the only place the engine contract is written down outside the CMake modules.
+  Likewise iOS is no longer "JSC-only": Pulp has no device/AUv3 V8 runtime
+  acceptance or packaging contract. The m153 V8 release includes a jitless
+  simulator framework only for provider/header provenance validation; it is not
+  selectable as an iOS runtime. QuickJS is the default and JSC stays opt-in.
+  When a pin or min-OS note is edited, keep these three files saying the same
+  thing — they are the only place the engine contract is written down outside
+  the CMake modules.

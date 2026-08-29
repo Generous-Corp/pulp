@@ -27,6 +27,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 from unittest import mock
@@ -228,17 +229,41 @@ class EmbeddedPairManifest(unittest.TestCase):
             (td / "tools/deps").mkdir(parents=True)
             (td / "tools/deps/manifest.json").write_text(
                 json.dumps(manifest), encoding="utf-8")
+            open_archives = set()
+            real_zip_file = zipfile.ZipFile
+            real_unlink = pathlib.Path.unlink
+
+            class WindowsTrackedZipFile(real_zip_file):
+                def __init__(self, file, *args, **kwargs):
+                    self._tracked_path = pathlib.Path(file).resolve()
+                    super().__init__(file, *args, **kwargs)
+                    open_archives.add(self._tracked_path)
+
+                def close(self):
+                    try:
+                        super().close()
+                    finally:
+                        open_archives.discard(self._tracked_path)
+
+            def windows_unlink(path, *args, **kwargs):
+                if path.resolve() in open_archives:
+                    raise PermissionError("Windows rejects unlink of an open ZIP")
+                return real_unlink(path, *args, **kwargs)
+
             err = io.StringIO()
             with contextlib.redirect_stderr(err), mock.patch.object(
                     fetch_v8, "verify_release_metadata",
-                    return_value="2" * 64):
+                    return_value="2" * 64), mock.patch.object(
+                    fetch_v8.zipfile, "ZipFile", WindowsTrackedZipFile), \
+                    mock.patch.object(pathlib.Path, "unlink", new=windows_unlink):
                 rc = fetch_v8.main(
                     ["fetch_v8_for_release.py", "darwin-arm64"])
             self.assertEqual(rc, 1)
             self.assertIn("artifact arch", err.getvalue())
-            self.assertFalse(
-                (td / "v8-release-asset-mac-arm64.zip").exists(),
-                "rejected archive must be closed before Windows-compatible cleanup")
+            private_root = td / "external/v8-build"
+            self.assertEqual(list(private_root.glob(".mac-arm64.download-*.zip")), [])
+            self.assertEqual(list(private_root.glob(".mac-arm64.staging-*")), [])
+            self.assertFalse((private_root / "mac-arm64").exists())
 
     def test_builder_release_tag_must_resolve_to_pinned_source(self):
         with tempfile.TemporaryDirectory() as td:
@@ -331,8 +356,10 @@ class HappyPath(unittest.TestCase):
             self.assertEqual(lib.read_bytes(), b"fake-dylib")
             stamp = td / "external/v8-build/mac-arm64/.v8-asset-sha256"
             self.assertEqual(stamp.read_text(encoding="utf-8").strip(), sha)
-            # Download artifact cleaned up.
-            self.assertFalse((td / "v8-release-asset-mac-arm64.zip").exists())
+            # The unique private download and staging generation are cleaned up.
+            private_root = td / "external/v8-build"
+            self.assertEqual(list(private_root.glob(".mac-arm64.download-*.zip")), [])
+            self.assertEqual(list(private_root.glob(".mac-arm64.staging-*")), [])
 
     def test_windows_unpacks_dll_and_implib(self):
         with _in_tempdir() as td:
@@ -449,6 +476,177 @@ class IdempotencyStamp(unittest.TestCase):
             self.assertEqual(
                 fetch_v8.main(["fetch_v8_for_release.py", "darwin-arm64"]), 0)
             self.assertEqual(lib.read_bytes(), b"authentic")
+
+
+class PublicationLock(unittest.TestCase):
+    def test_live_owner_times_out_bounded(self):
+        with _in_tempdir() as td:
+            dest = td / "external/v8-build/mac-arm64"
+            with fetch_v8.publication_lock(dest, 1):
+                with self.assertRaises(TimeoutError):
+                    with fetch_v8.publication_lock(dest, 0.05):
+                        pass
+
+    def test_dead_same_host_owner_is_recovered(self):
+        with _in_tempdir() as td:
+            dest = td / "external/v8-build/mac-arm64"
+            lock = dest.parent / ".mac-arm64.fetch.lock"
+            lock.mkdir(parents=True)
+            (lock / "owner.json").write_text(json.dumps({
+                "pid": 999_999_999,
+                "host": fetch_v8.socket.gethostname(),
+                "dest": str(dest),
+            }), encoding="utf-8")
+            with fetch_v8.publication_lock(dest, 1):
+                self.assertTrue(lock.is_dir())
+            self.assertFalse(lock.exists())
+
+
+class AtomicPublication(unittest.TestCase):
+    def _asset(self, root: pathlib.Path, name: str, payload: bytes) -> str:
+        archive = root / f"v8-{name}.zip"
+        sha = _make_zip(archive, {
+            "include/v8.h": b"header-" + payload,
+            "lib/libv8.dylib": payload,
+        })
+        _write_manifest(root, archive.as_uri(), sha, "mac-arm64")
+        return sha
+
+    def _assert_no_private_artifacts(self, root: pathlib.Path) -> None:
+        publication_root = root / "external/v8-build"
+        self.assertEqual(
+            list(publication_root.glob(".mac-arm64.download-*.zip")), [])
+        self.assertEqual(
+            list(publication_root.glob(".mac-arm64.staging-*")), [])
+        self.assertFalse((publication_root / ".mac-arm64.fetch.lock").exists())
+
+    def test_two_cold_publishers_converge_after_waiting_for_same_lock(self):
+        with _in_tempdir() as td:
+            sha = self._asset(td, "concurrent", b"x" * (2 * 1024 * 1024))
+            dest = td / "external/v8-build/mac-arm64"
+            argv = [sys.executable, str(SCRIPT.resolve()), "darwin-arm64"]
+            env = dict(os.environ)
+            env.pop("PULP_USE_BAKED_V8", None)
+            env.pop("V8_DIR", None)
+            with fetch_v8.publication_lock(dest, 1):
+                first = subprocess.Popen(
+                    argv, cwd=td, env=env, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True)
+                second = subprocess.Popen(
+                    argv, cwd=td, env=env, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True)
+                time.sleep(0.2)
+                self.assertIsNone(first.poll())
+                self.assertIsNone(second.poll())
+            first_out, first_err = first.communicate(timeout=15)
+            second_out, second_err = second.communicate(timeout=15)
+            self.assertEqual(first.returncode, 0, first_err + first_out)
+            self.assertEqual(second.returncode, 0, second_err + second_out)
+            manifest = json.loads(
+                (td / "tools/deps/manifest.json").read_text(encoding="utf-8"))
+            entry = manifest["dependencies"][0]
+            self.assertTrue(fetch_v8.generation_valid(
+                dest, manifest, entry, "mac-arm64", sha))
+            combined = first_out + second_out
+            self.assertEqual(combined.count("Downloading ->"), 1)
+            self.assertIn("concurrent V8 publisher completed", combined)
+            self._assert_no_private_artifacts(td)
+
+    def test_interrupted_private_seal_preserves_previous_live_generation(self):
+        with _in_tempdir() as td:
+            old_sha = self._asset(td, "old", b"old-generation")
+            self.assertEqual(
+                fetch_v8.main(["fetch_v8_for_release.py", "darwin-arm64"]), 0)
+            dest = td / "external/v8-build/mac-arm64"
+            before = {
+                path.relative_to(dest).as_posix(): path.read_bytes()
+                for path in dest.rglob("*") if path.is_file()
+            }
+
+            new_sha = self._asset(td, "new", b"new-generation")
+            self.assertNotEqual(old_sha, new_sha)
+            errors = io.StringIO()
+            with mock.patch.object(
+                    fetch_v8, "write_generation_receipt",
+                    side_effect=OSError("planted staging interruption")), \
+                    contextlib.redirect_stderr(errors):
+                rc = fetch_v8.main(
+                    ["fetch_v8_for_release.py", "darwin-arm64"])
+            self.assertEqual(rc, 1)
+            self.assertIn("planted staging interruption", errors.getvalue())
+            after = {
+                path.relative_to(dest).as_posix(): path.read_bytes()
+                for path in dest.rglob("*") if path.is_file()
+            }
+            self.assertEqual(after, before)
+            manifest = json.loads(
+                (td / "tools/deps/manifest.json").read_text(encoding="utf-8"))
+            self.assertFalse(fetch_v8.generation_valid(
+                dest, manifest, manifest["dependencies"][0],
+                "mac-arm64", new_sha))
+            self._assert_no_private_artifacts(td)
+
+    def test_interrupted_private_allocation_cleans_staging(self):
+        with _in_tempdir() as td:
+            self._asset(td, "allocation", b"provider")
+            errors = io.StringIO()
+            with mock.patch.object(
+                    fetch_v8.tempfile, "mkstemp",
+                    side_effect=OSError("planted archive allocation interruption")), \
+                    contextlib.redirect_stderr(errors):
+                rc = fetch_v8.main(
+                    ["fetch_v8_for_release.py", "darwin-arm64"])
+            self.assertEqual(rc, 1)
+            self.assertIn(
+                "planted archive allocation interruption", errors.getvalue())
+            self.assertFalse((td / "external/v8-build/mac-arm64").exists())
+            self._assert_no_private_artifacts(td)
+
+    def test_interrupted_live_swap_restores_previous_generation(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            dest = root / "mac-arm64"
+            stage = root / ".mac-arm64.staging-planted"
+            dest.mkdir()
+            stage.mkdir()
+            (dest / "generation").write_text("old", encoding="utf-8")
+            (stage / "generation").write_text("new", encoding="utf-8")
+            real_rename = pathlib.Path.rename
+
+            def planted_interruption(source, target):
+                if source == stage:
+                    raise OSError("planted publication interruption")
+                return real_rename(source, target)
+
+            with mock.patch.object(
+                    pathlib.Path, "rename", new=planted_interruption):
+                with self.assertRaisesRegex(
+                        OSError, "planted publication interruption"):
+                    fetch_v8._publish_generation(stage, dest)
+            self.assertEqual(
+                (dest / "generation").read_text(encoding="utf-8"), "old")
+            self.assertEqual(
+                (stage / "generation").read_text(encoding="utf-8"), "new")
+            self.assertEqual(list(root.glob(".mac-arm64.retired-*")), [])
+
+    def test_archive_path_traversal_is_rejected_before_writing(self):
+        with _in_tempdir() as td:
+            archive = td / "v8-malicious.zip"
+            sha = _make_zip(archive, {
+                "include/v8.h": b"header",
+                "lib/libv8.dylib": b"provider",
+                "../../escaped": b"must-not-exist",
+            })
+            _write_manifest(td, archive.as_uri(), sha, "mac-arm64")
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                rc = fetch_v8.main(
+                    ["fetch_v8_for_release.py", "darwin-arm64"])
+            self.assertEqual(rc, 1)
+            self.assertIn("unsafe V8 archive member path", errors.getvalue())
+            self.assertFalse((td / "escaped").exists())
+            self.assertFalse((td / "external/v8-build/mac-arm64").exists())
+            self._assert_no_private_artifacts(td)
 
 
 class BakedV8FastPath(unittest.TestCase):
@@ -593,6 +791,53 @@ class FindV8ReceiptSelection(unittest.TestCase):
             (baked / "mac-arm64/lib/libv8.dylib").write_bytes(b"mutated")
             selected = self._configure(root, baked, asset_sha, metadata_sha)
             self.assertEqual(selected, checkout / "lib/libv8.dylib")
+
+    def test_configure_rejects_planted_partial_live_publication(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp_root = root / "pulp-root"
+            asset_sha, metadata_sha = "a" * 64, "b" * 64
+            partial = pulp_root / "external/v8-build/mac-arm64"
+            (partial / "include").mkdir(parents=True)
+            (partial / "lib").mkdir()
+            (partial / "include/v8.h").write_bytes(b"partial-header")
+            (partial / "lib/libv8.dylib").write_bytes(b"partial-provider")
+            (partial / ".v8-asset-sha256").write_text(
+                asset_sha + "\n", encoding="utf-8")
+            (partial / ".v8-release-metadata-sha256").write_text(
+                metadata_sha + "\n", encoding="utf-8")
+
+            manifest = {"dependencies": [{"name": "V8", "determinism": {
+                "pair_kind": "chromium-milestone",
+                "release_metadata_sha256": metadata_sha,
+                "release_assets": {"mac-arm64": {"sha256": asset_sha}},
+            }}]}
+            (pulp_root / "tools/deps").mkdir(parents=True)
+            (pulp_root / "tools/deps/manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8")
+            consumer = root / "consumer"
+            consumer.mkdir()
+            module = SCRIPT.parent.parent / "cmake" / "FindV8.cmake"
+            (consumer / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.24)\n"
+                "project(find_v8_partial NONE)\n"
+                f"set(PULP_ROOT_DIR \"{pulp_root.as_posix()}\")\n"
+                "set(APPLE TRUE)\nset(IOS FALSE)\nset(ANDROID FALSE)\n"
+                "set(CMAKE_SYSTEM_PROCESSOR arm64)\n"
+                "set(CMAKE_OSX_ARCHITECTURES arm64)\n"
+                f"include(\"{module.as_posix()}\")\n"
+                "if(PULP_V8_FOUND)\n"
+                "  message(FATAL_ERROR \"partial V8 publication was trusted\")\n"
+                "endif()\n",
+                encoding="utf-8")
+            env = dict(os.environ)
+            env.pop("V8_DIR", None)
+            completed = subprocess.run(
+                ["cmake", "-S", str(consumer), "-B", str(root / "build")],
+                env=env, text=True, capture_output=True, check=False)
+            output = completed.stdout + completed.stderr
+            self.assertEqual(completed.returncode, 0, output)
+            self.assertIn("rejecting unverified or stale provider", output)
 
 
 if __name__ == "__main__":
