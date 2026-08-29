@@ -1108,6 +1108,29 @@ def git_file_sha256(repository: Path, revision: str, path: str) -> str:
     return sha256_bytes(run.stdout)
 
 
+TRACE_PRODUCER_MACRO = re.compile(
+    r'PULP_TRACE_(SCOPE_NAMED(?:_ARGS)?|COUNTER)\s*\('
+    r'\s*"([^"]+)"\s*,\s*"([^"]+)"(?:\s*,\s*"([^"]+)")?'
+)
+
+
+def added_trace_signatures(delta: str) -> list[tuple[str, str, str, tuple[str, ...]]]:
+    """Return exact typed signatures from trace macros added by one commit."""
+    added_source = "\n".join(
+        line[1:] for line in delta.splitlines() if line.startswith("+")
+    )
+    signatures = []
+    for macro, category, name, field in TRACE_PRODUCER_MACRO.findall(added_source):
+        if macro == "COUNTER":
+            kind = "counter"
+            fields = ("value",)
+        else:
+            kind = "slice"
+            fields = (field,) if field else ()
+        signatures.append((kind, category, name, fields))
+    return sorted(signatures)
+
+
 def validate_trace_producer_overhead(
     receipt: dict[str, Any], evidence_root: Path, repository: Path, *, require_pass: bool,
     allow_fixture_overhead: bool = False,
@@ -1193,17 +1216,20 @@ def validate_trace_producer_overhead(
             cwd=repository, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, check=False,
         )
-        expected_signatures = {
-            f'PULP_TRACE_SCOPE_NAMED("render", "{name}")': 1
-            for name in ("gpu_acquire", "gpu_submit", "gpu_present")
-        }
-        added = [line[1:] for line in delta.stdout.splitlines() if line.startswith("+")]
-        if delta.returncode != 0 or any(
-            sum(signature in line for line in added) != count
-            for signature, count in expected_signatures.items()
+        expected_signatures = sorted(
+            (
+                signature["kind"], signature["category"], signature["name"],
+                tuple(signature["fields"]),
+            )
+            for signature in trace_producer_overhead.B4BA_SIGNATURES
+        )
+        if (
+            delta.returncode != 0
+            or len(expected_signatures) != 20
+            or added_trace_signatures(delta.stdout) != expected_signatures
         ):
             raise AcceptanceError(
-                "input-to-present producer package lacks its exact three trace signatures"
+                "input-to-present producer package differs from its exact 20-signature inventory"
             )
         driver = payload["measurement_driver"]
         declared_digest = driver["sha256"]

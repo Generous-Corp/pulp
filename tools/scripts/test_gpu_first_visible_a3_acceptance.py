@@ -877,6 +877,14 @@ def main() -> int:
         for state, data in original_raw.items():
             raw_paths[state].write_bytes(data)
 
+        with mock.patch.object(
+            a3.trace_producer_overhead, "B4BA_SIGNATURES",
+            a3.trace_producer_overhead.B4BA_SIGNATURES[:-1],
+        ):
+            expect_failure(
+                copy.deepcopy(receipt), root, "exact 20-signature inventory",
+            )
+
         mutated = copy.deepcopy(receipt)
         mutated["budget"]["status"] = "unratified"
         expect_failure(mutated, root, "ratified budget")
@@ -1217,7 +1225,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         ) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=50 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=51 "
             "checked_in_nonterminal=verified"
         )
     return 0
