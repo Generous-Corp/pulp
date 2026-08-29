@@ -146,6 +146,28 @@ separate defects were found and fixed there in the time one model call takes.
 If a failure is not diagnosable from what is on disk, fix the harness first —
 that is cheaper than another run, every time.
 
+## A Rack-saved `.vcv` is not the JSON Forge originally wrote
+
+Forge emits a new patch as plain JSON, but Rack 2 saves that patch back as a
+Zstandard-compressed tar archive containing `./` and `./patch.json`. Reading a
+Rack-saved file with `json.load()` therefore reports a misleading UTF-8 error;
+moving or renaming the file is unrelated.
+
+`rack_open.py` distinguishes the two formats from the immutable input bytes.
+Archived patches are decoded only by the adjacent `rack_patch_decode` helper,
+built from the pinned vendored zstd decoder. The helper parses the tar in
+memory, accepts exactly one regular root `patch.json` plus Rack's zero-byte root
+directory entry, caps both input and expanded data, and rejects traversal,
+links, nested directories, duplicates, bad checksums and trailing ambiguity.
+It never extracts a member and never depends at runtime on Homebrew, `tar`,
+`zstd`, Python extensions, or Rack itself.
+
+Do not load `libRack.dylib` through Python `ctypes` to decode this format.
+Rack's library expects application runtime initialization; an exploratory call
+reached OpenSSL `BIO_new_ex` with invalid state and crashed Python with
+`EXC_BAD_ACCESS`. Keep the crash boundary out of the app process and preserve
+the packaged-helper tests under a minimal Finder-style `PATH`.
+
 ## Reading the patch gate's trace
 
 - `out0=...` is the **instantaneous** voltage at the end of the run. The
