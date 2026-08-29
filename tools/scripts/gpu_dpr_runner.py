@@ -554,6 +554,36 @@ def policy_readiness(observations: list[dict[str, Any]], similarity_minimum: flo
     return fidelity_passed and all_metrics_available
 
 
+def b5_gate_document(disposition: str, manifest: dict[str, Any]) -> dict[str, Any]:
+    """Project the inert B5 gate that follows an externally validated A4 result."""
+    if disposition not in experiment.POLICY_DISPOSITIONS:
+        raise EvidenceError(f"unsupported A4 disposition: {disposition}")
+    if disposition == "no-change":
+        return {
+            "schema": B5_SCHEMA,
+            "a4_disposition": disposition,
+            "status": "cancelled-no-change",
+            "requires": [],
+            "authorizes_policy_change": False,
+        }
+    gate = {
+        "schema": B5_SCHEMA,
+        "a4_disposition": disposition,
+        "status": "waiting-trigger",
+        "requires": ["B0-adopted-vellum-api-refresh"],
+        "authorizes_policy_change": False,
+    }
+    if disposition == "configured-max-candidate":
+        gate["measured_candidate"] = {
+            "configured_max_dpr": manifest["configured_max_dpr"]
+        }
+    else:
+        gate["measured_candidate"] = {
+            "adaptive_profile": manifest["adaptive_profile"]
+        }
+    return gate
+
+
 def finalize(
     run_dir: Path, disposition: str, a2t: str, a3_budget: str, a3: str
 ) -> dict[str, Any]:
@@ -585,28 +615,7 @@ def finalize(
         raise EvidenceError("; ".join(problems))
     _, result_path, b5_path = run_paths(run_dir)
     atomic_json(result_path, result)
-    if disposition == "no-change":
-        b5 = {
-            "schema": B5_SCHEMA,
-            "a4_disposition": disposition,
-            "status": "cancelled-no-change",
-            "requires": [],
-            "authorizes_policy_change": False,
-        }
-    else:
-        b5 = {
-            "schema": B5_SCHEMA,
-            "a4_disposition": disposition,
-            "status": "waiting-trigger",
-            "requires": ["B0-adopted-vellum-api-refresh"],
-            "authorizes_policy_change": False,
-        }
-        if disposition == "configured-max-candidate":
-            b5["measured_candidate"] = {"configured_max_dpr": manifest["configured_max_dpr"]}
-        else:
-            b5["measured_candidate"] = {
-                "adaptive_profile": manifest["adaptive_profile"]
-            }
+    b5 = b5_gate_document(disposition, manifest)
     atomic_json(b5_path, b5)
     return b5
 

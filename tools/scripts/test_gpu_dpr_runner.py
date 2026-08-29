@@ -11,16 +11,18 @@ import subprocess
 import tempfile
 import zlib
 from pathlib import Path
+from unittest import mock
 
+import gpu_first_visible_a3_acceptance as a3_acceptance
 import gpu_dpr_experiment as experiment
 import gpu_dpr_evidence as evidence
 import gpu_dpr_runner as runner
 import test_gpu_first_visible_a3_acceptance as a3_fixture
 from gpu_dpr_test_support import (
-    dependency_receipts, exact_binary, forged_minimal_dependencies,
-    malformed_adapter_script, no_receipt_adapter_script, test_adapter_script,
-    noisy_adapter_script, timeout_adapter_script, trace_analyzer_script,
-    wrong_nonce_adapter_script,
+    exact_binary, forged_minimal_dependencies, malformed_adapter_script,
+    no_receipt_adapter_script, test_adapter_script, noisy_adapter_script,
+    timeout_adapter_script, trace_analyzer_script,
+    structural_dependency_receipts, wrong_nonce_adapter_script,
 )
 
 SHA_A = "3" * 40
@@ -1319,12 +1321,42 @@ def main() -> int:
             readiness_observations,
             manifest["trial_contract"]["capture_similarity_minimum"],
         )
-        a2t_receipt, budget_id, a3_receipt = dependency_receipts(root)
+        # A checked-in self-test must not manufacture the live collector and
+        # independent review evidence required for terminal A3 acceptance.
+        # First prove production finalization rejects that synthetic shape;
+        # then mock only the terminal verdict while exercising A4's own
+        # dependency bindings, projections, and planted negatives below.
+        a2t_receipt, budget_id, a3_receipt = structural_dependency_receipts(root)
         assert "machine_id" not in runner.load_json(a2t_receipt)["machine"]
-        _, _, unratified_a3 = dependency_receipts(root, ratified=False)
+        _, _, unratified_a3 = structural_dependency_receipts(root, ratified=False)
         try:
             runner.finalize(
-                complete_run, "adaptive-candidate", "a2t:selftest",
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("synthetic terminal-shaped A3 receipt was accepted")
+
+        real_a3_validate = a3_acceptance.validate_receipt
+
+        def finalize_structural(
+            disposition: str, a2t: str, budget: str, a3: str,
+        ) -> dict[str, object]:
+            with mock.patch.object(
+                a3_acceptance, "validate_receipt",
+                side_effect=lambda receipt, evidence_root: real_a3_validate(
+                    receipt, evidence_root, allow_fixture_overhead=True,
+                ),
+            ):
+                return runner.finalize(
+                    complete_run, disposition, a2t, budget, a3,
+                )
+
+        try:
+            finalize_structural(
+                "adaptive-candidate", "a2t:selftest",
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1343,8 +1375,8 @@ def main() -> int:
         else:
             raise AssertionError("forged minimal A2T/A3 receipts were accepted")
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 budget_id, str(unratified_a3),
             )
         except runner.EvidenceError:
@@ -1352,8 +1384,8 @@ def main() -> int:
         else:
             raise AssertionError("unratified A3 budget was accepted")
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 "different-budget", str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1367,8 +1399,8 @@ def main() -> int:
         wrong_plan_a2t["producer_overhead_disposition"]["formal_plan_revision"] = "0" * 40
         write_json(a2t_receipt, wrong_plan_a2t)
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1386,8 +1418,8 @@ def main() -> int:
         causal_campaign["identity"]["machine_id"] = "different-machine"
         write_json(a3_receipt, cross_machine_a3)
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1399,8 +1431,8 @@ def main() -> int:
         mismatched_a2t.write_bytes(a2t_receipt.read_bytes() + b"\n")
         write_json(a3_receipt, a3_original)
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(mismatched_a2t),
+            finalize_structural(
+                "adaptive-candidate", str(mismatched_a2t),
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1413,8 +1445,8 @@ def main() -> int:
         capture_path = runner.cell_directory(complete_run, dense) / "capture.png"
         capture_bytes = capture_path.read_bytes()
         capture_path.write_bytes(capture_bytes + b"mutated")
-        runner.finalize(
-            complete_run, "adaptive-candidate", str(a2t_receipt),
+        finalize_structural(
+            "adaptive-candidate", str(a2t_receipt),
             budget_id, str(a3_receipt),
         )
         snapshot_capture = complete_run / next(
@@ -1426,8 +1458,8 @@ def main() -> int:
         snapshot_capture.chmod(0o644)
         snapshot_capture.write_bytes(snapshot_bytes + b"mutated")
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1443,8 +1475,8 @@ def main() -> int:
         projected_mutation["cells"][dense]["observation"]["physical_size"]["width"] += 1
         runner.save_state(complete_run, projected_mutation)
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1457,8 +1489,8 @@ def main() -> int:
         plan_mutation["plan"]["pulp_sha"] = "0" * 40
         runner.save_state(complete_run, plan_mutation)
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1471,8 +1503,8 @@ def main() -> int:
         mutated_manifest["trial_contract"]["capture_similarity_minimum"] = 0.98
         write_json(manifest_path, mutated_manifest)
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1483,8 +1515,8 @@ def main() -> int:
 
         binary_bytes = binary.read_bytes()
         binary.write_bytes(binary_bytes + b"# mutation\n")
-        runner.finalize(
-            complete_run, "adaptive-candidate", str(a2t_receipt),
+        finalize_structural(
+            "adaptive-candidate", str(a2t_receipt),
             budget_id, str(a3_receipt),
         )
         web_key = runner.cell_key("super-convolver-web", "exact", 1)
@@ -1500,8 +1532,8 @@ def main() -> int:
         pinned_web_data.chmod(0o644)
         pinned_web_data.write_bytes(pinned_web_bytes + b"# mutation\n")
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1521,8 +1553,8 @@ def main() -> int:
         pinned_binary.chmod(0o755)
         pinned_binary.write_bytes(pinned_binary_bytes + b"# mutation\n")
         try:
-            runner.finalize(
-                complete_run, "adaptive-candidate", str(a2t_receipt),
+            finalize_structural(
+                "adaptive-candidate", str(a2t_receipt),
                 budget_id, str(a3_receipt),
             )
         except runner.EvidenceError:
@@ -1534,8 +1566,8 @@ def main() -> int:
         binary.write_bytes(binary_bytes)
         binary.chmod(0o755)
 
-        b5 = runner.finalize(
-            complete_run, "adaptive-candidate", str(a2t_receipt),
+        b5 = finalize_structural(
+            "adaptive-candidate", str(a2t_receipt),
             budget_id, str(a3_receipt)
         )
         assert b5["status"] == "waiting-trigger"
@@ -1557,16 +1589,16 @@ def main() -> int:
         )
         ingest_receipt(complete_run, failed_receipt)
         try:
-            runner.finalize(
-                complete_run, "configured-max-candidate", str(a2t_receipt),
+            finalize_structural(
+                "configured-max-candidate", str(a2t_receipt),
                 budget_id, str(a3_receipt)
             )
         except runner.EvidenceError:
             planted += 1
         else:
             raise AssertionError("candidate crossed a planted fidelity failure")
-        b5 = runner.finalize(
-            complete_run, "no-change", str(a2t_receipt),
+        b5 = finalize_structural(
+            "no-change", str(a2t_receipt),
             budget_id, str(a3_receipt)
         )
         assert b5["status"] == "cancelled-no-change"

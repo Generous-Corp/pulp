@@ -7,8 +7,9 @@ import gpu_first_visible_a3_acceptance as a3_acceptance
 import test_gpu_first_visible_a3_acceptance as a3_fixture
 
 
-def dependency_receipts(root: Path, *, ratified: bool = True) -> tuple[Path, str, Path]:
-    """Build the real terminal A3/A2T fixture used by the checked-in validator."""
+def _dependency_receipts(
+    root: Path, *, ratified: bool, structural_terminal_shape: bool,
+) -> tuple[Path, str, Path]:
     budget_id = "pulp.editor-first-visible.v1"
     template = a3_fixture.make_fixture(root)
     a2t_path = root / "a2t.json"
@@ -36,11 +37,48 @@ def dependency_receipts(root: Path, *, ratified: bool = True) -> tuple[Path, str
     a3_fixture.write_json(root, b4_path.name, b4_payload)
     receipt = a3_acceptance.materialize_auto_hashes(template, root)
     a2t = root / receipt["same_instance_a2t"]["a2t_receipt"]["path"]
-    a3 = root / ("a3-receipt.json" if ratified else "a3-unratified.json")
+    if not structural_terminal_shape:
+        receipt["status"] = "incomplete"
+        receipt["missing_evidence"] = [
+            "live trace-producer overhead collector receipt"
+        ]
+        receipt["trace_producer_overhead"] = {
+            "status": "unavailable",
+            "reason": (
+                "Live product collector evidence is intentionally unavailable "
+                "in the A4 structural self-test."
+            ),
+            "receipt": None,
+        }
+        receipt["b4"] = {
+            "disposition": None,
+            "status": "withheld",
+            "reason": "Acceptance is incomplete.",
+            "evidence": None,
+        }
+    shape = "structural" if structural_terminal_shape else "nonterminal"
+    suffix = "" if ratified else "-unratified"
+    a3 = root / f"a3-{shape}{suffix}.json"
     if not ratified:
         receipt["budget"]["status"] = "unratified"
     a3_fixture.write_json(root, a3.name, receipt)
     return a2t, budget_id, a3
+
+
+def dependency_receipts(root: Path, *, ratified: bool = True) -> tuple[Path, str, Path]:
+    """Build a strict-valid nonterminal A3/A2T dependency fixture."""
+    return _dependency_receipts(
+        root, ratified=ratified, structural_terminal_shape=False,
+    )
+
+
+def structural_dependency_receipts(
+    root: Path, *, ratified: bool = True,
+) -> tuple[Path, str, Path]:
+    """Build synthetic terminal-shaped inputs for test-only structural checks."""
+    return _dependency_receipts(
+        root, ratified=ratified, structural_terminal_shape=True,
+    )
 
 
 def forged_minimal_dependencies(root: Path) -> tuple[Path, Path]:
