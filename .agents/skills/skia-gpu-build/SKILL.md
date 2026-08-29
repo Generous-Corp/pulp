@@ -110,6 +110,14 @@ outlive the Graphite context. Generic installation and executor policy are
 Vellum-owned; a Pulp build should consume those contracts rather than install a
 second global handler or duplicate context policy.
 
+For a universal macOS generation, use `--platform darwin-universal --result
+<receipt.json>` on an Apple-Silicon host. That is deliberately a dual-slice
+gate: arm64 runs natively and x86_64 runs through explicit Rosetta, and the
+single result binds both compile/link/run records to the exact universal asset,
+generation receipt, probe source, and checkout SHA. A successful universal
+product link alone does not prove these currently-unused m153 symbols exist in
+both slices.
+
 ## Verify it's REALLY a GPU build (necessary AND sufficient)
 
 Configure log must show BOTH:

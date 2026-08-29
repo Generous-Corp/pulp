@@ -2207,6 +2207,13 @@ Intel nightly watchdog                        : SUCCESS
 every night**. The Intel signal was there the whole time, buried under a run-level
 conclusion poisoned by a *different* leg.
 
+For m153+, that job has a fourth required component before the universal build:
+one JSON capability receipt compile/links/runs the universal provider's arm64
+slice natively and its x86_64 slice through explicit Rosetta. `Compute result`
+must count the capability status with build, lipo, and auval. A universal product
+link can otherwise stay green while currently-unused m153 symbols are missing
+from one slice, so neither a partial receipt nor a skipped probe is acceptable.
+
 `native-intel` on `macos-15-intel` had **never once completed**: that image CPU-pegs,
 so the job hit its 120-minute limit every run. **GitHub reports a job timeout as
 `cancelled`, and a cancelled job cancels the whole RUN.** So a leg producing zero

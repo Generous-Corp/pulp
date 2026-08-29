@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -16,6 +17,14 @@ from tools.scripts import verify_skia_m153_capabilities as probe
 
 
 class SkiaM153CapabilityProbeTests(unittest.TestCase):
+    def test_universal_source_binding_rejects_dirty_checkout(self) -> None:
+        dirty = subprocess.CompletedProcess(
+            ["git", "status"], 0, " M tools/scripts/verify_skia_m153_capabilities.py\n", ""
+        )
+        with mock.patch.object(probe.subprocess, "run", return_value=dirty):
+            with self.assertRaisesRegex(RuntimeError, "clean exact source checkout"):
+                probe._source_sha()
+
     def test_discovers_published_archive_layout(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -89,14 +98,118 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
         with mock.patch.object(probe.sys, "platform", "darwin"), \
              mock.patch.object(probe.host_platform, "machine", return_value="arm64"):
             probe._require_native_host("darwin-arm64")
-            with self.assertRaisesRegex(
-                RuntimeError, "separate arm64 and x86_64 compile/link/run receipts"
-            ):
-                probe._require_native_host("darwin-universal")
+            probe._require_native_host("darwin-universal")
             with self.assertRaisesRegex(RuntimeError, "cannot compile and execute"):
                 probe._require_native_host("darwin-x64")
             with self.assertRaisesRegex(RuntimeError, "cannot compile and execute"):
                 probe._require_native_host("wasm")
+
+    def test_universal_rejects_intel_host_without_arm64_runtime_proof(self) -> None:
+        with mock.patch.object(probe.sys, "platform", "darwin"), \
+             mock.patch.object(probe.host_platform, "machine", return_value="x86_64"):
+            with self.assertRaisesRegex(RuntimeError, "requires a darwin-arm64 host"):
+                probe._require_native_host("darwin-universal")
+
+    def test_universal_result_binds_both_arches_to_one_generation(self) -> None:
+        dependency = {
+            "version": "chrome/m153",
+            "determinism": {
+                "release_assets": {"mac-universal": {"sha256": "a" * 64}}
+            },
+        }
+        calls: list[list[str]] = []
+
+        def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            header = root / "build/include/include/utils/SkLogHandler.h"
+            library = root / "build/mac-gpu/lib/Release/libskia.a"
+            receipt = root / probe.skia_fetch.GENERATION_RECEIPT
+            header.parent.mkdir(parents=True)
+            library.parent.mkdir(parents=True)
+            header.write_text("// header\n", encoding="utf-8")
+            library.write_bytes(b"fat archive")
+            receipt.write_text('{"platform":"darwin-universal"}\n', encoding="utf-8")
+
+            with mock.patch.object(probe, "_manifest_skia", return_value=dependency), \
+                 mock.patch.object(probe, "_require_native_host"), \
+                 mock.patch.object(probe, "_compiler", return_value="clang++"), \
+                 mock.patch.object(probe, "_source_sha", return_value="b" * 40), \
+                 mock.patch.object(
+                     probe.skia_fetch, "cache_generation_valid", return_value=True
+                 ), mock.patch.object(probe.subprocess, "run", side_effect=run):
+                result = probe.verify(root, "darwin-universal")
+
+        self.assertEqual(result["source_sha"], "b" * 40)
+        self.assertEqual(result["asset_sha256"], "a" * 64)
+        self.assertEqual(result["platform"], "darwin-universal")
+        self.assertEqual(
+            [item["architecture"] for item in result["probes"]],
+            ["arm64", "x86_64"],
+        )
+        compile_calls = [call for call in calls if "-o" in call]
+        self.assertEqual(len(compile_calls), 2)
+        self.assertIn("arm64", compile_calls[0])
+        self.assertIn("x86_64", compile_calls[1])
+        self.assertTrue(any(call[:2] == ["/usr/bin/arch", "-x86_64"] for call in calls))
+
+    def test_universal_rejects_failed_rosetta_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            include = root / "include"
+            library = root / "libskia.a"
+            include.mkdir()
+            library.write_bytes(b"fat archive")
+
+            def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+                failed = command[:2] == ["/usr/bin/arch", "-x86_64"]
+                return subprocess.CompletedProcess(command, 1 if failed else 0, "", "")
+
+            with mock.patch.object(probe.subprocess, "run", side_effect=run):
+                with self.assertRaisesRegex(RuntimeError, "x86_64 capability probe exited 1"):
+                    probe._compile_and_run(
+                        include, library, "clang++", root, "x86_64"
+                    )
+
+    def test_universal_rejects_generation_change_after_both_probes(self) -> None:
+        dependency = {
+            "version": "chrome/m153",
+            "determinism": {
+                "release_assets": {"mac-universal": {"sha256": "a" * 64}}
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            header = root / "build/include/include/utils/SkLogHandler.h"
+            library = root / "build/mac-gpu/lib/Release/libskia.a"
+            receipt = root / probe.skia_fetch.GENERATION_RECEIPT
+            header.parent.mkdir(parents=True)
+            library.parent.mkdir(parents=True)
+            header.write_text("// header\n", encoding="utf-8")
+            library.write_bytes(b"fat archive")
+            receipt.write_text('{"platform":"darwin-universal"}\n', encoding="utf-8")
+            passed = {
+                "architecture": "arm64",
+                "compile": "pass",
+                "link": "pass",
+                "run": "pass",
+                "run_mode": "native",
+            }
+            with mock.patch.object(probe, "_manifest_skia", return_value=dependency), \
+                 mock.patch.object(probe, "_require_native_host"), \
+                 mock.patch.object(probe, "_compiler", return_value="clang++"), \
+                 mock.patch.object(probe, "_source_sha", return_value="b" * 40), \
+                 mock.patch.object(probe, "_compile_and_run", return_value=passed), \
+                 mock.patch.object(
+                     probe.skia_fetch,
+                     "cache_generation_valid",
+                     side_effect=[True, False],
+                 ):
+                with self.assertRaisesRegex(RuntimeError, "generation changed"):
+                    probe.verify(root, "darwin-universal")
 
 
 if __name__ == "__main__":

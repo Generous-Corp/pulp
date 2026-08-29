@@ -234,6 +234,17 @@ jobs:
         shell: bash
         run: python3 tools/scripts/fetch_skia_for_release.py darwin-universal
 
+      - name: Verify both universal Skia m153 capability slices
+        id: capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/verify_skia_m153_capabilities.py \
+            --platform darwin-universal \
+            --skia-dir external/skia-build \
+            --result skia-m153-universal-capabilities.json
+          echo "status=pass" >> "$GITHUB_OUTPUT"
+
       - name: Configure (universal arm64;x86_64)
         shell: bash
         run: |
@@ -345,25 +356,29 @@ jobs:
           build='${{ steps.build.outputs.status }}'
           lipo='${{ steps.lipo.outputs.status }}'
           auval='${{ steps.auval.outputs.status }}'
+          capabilities='${{ steps.capabilities.outputs.status }}'
           # auval counts. It did not before — the step printed its output, threw the
           # result away, and this line never read it, so a genuinely failing auval
           # scored a green nightly. This is the only place dual-arch auval is
           # asserted now that the release gate is gone, so a silent pass here would
           # mean no Intel auval coverage at all.
-          if [ "$build" = "pass" ] && [ "$lipo" = "pass" ] && [ "$auval" = "pass" ]; then
+          if [ "$capabilities" = "pass" ] && [ "$build" = "pass" ] && \
+             [ "$lipo" = "pass" ] && [ "$auval" = "pass" ]; then
             result="success"
           else
             result="failure"
           fi
           echo "result=${result}" >> "$GITHUB_OUTPUT"
-          echo "universal-crosscheck: build=${build} lipo=${lipo} auval=${auval} -> ${result}"
+          echo "universal-crosscheck: capabilities=${capabilities} build=${build} lipo=${lipo} auval=${auval} -> ${result}"
 
       - name: Upload universal logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nightly-intel-universal-logs
-          path: build-universal.log
+          path: |
+            build-universal.log
+            skia-m153-universal-capabilities.json
           retention-days: 14
           if-no-files-found: ignore
 

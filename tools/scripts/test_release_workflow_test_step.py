@@ -1552,6 +1552,18 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
         self.assertIn("steps.auval.outputs.status", self.text)
         self.assertIn('[ "$auval" = "pass" ]', self.text)
 
+    def test_universal_capability_proof_precedes_build(self) -> None:
+        proof = self.text.index("Verify both universal Skia m153 capability slices")
+        configure = self.text.index("Configure (universal arm64;x86_64)")
+        self.assertLess(proof, configure)
+        self.assertIn("--platform darwin-universal", self.text[proof:configure])
+        self.assertIn("--result skia-m153-universal-capabilities.json", self.text[proof:configure])
+
+    def test_nightly_result_counts_universal_capabilities(self) -> None:
+        self.assertIn("steps.capabilities.outputs.status", self.text)
+        self.assertIn('[ "$capabilities" = "pass" ]', self.text)
+        self.assertIn("skia-m153-universal-capabilities.json", self.text)
+
 
 class EveryLegIsIndividuallyRoutable(unittest.TestCase):
     """Each release leg must pick its runner from the resolver map.

@@ -150,6 +150,12 @@ retain those fields in the PR/landing evidence.
    It proves the new API and exported-symbol surface against the exact provider;
    actual Graphite executor dispatch belongs to the integration's measured
    behavior gate, not this toolchain probe.
+   A `darwin-universal` provider is the deliberate aggregate exception: run it
+   on darwin-arm64 so the probe compile/links/runs arm64 natively and x86_64
+   explicitly through Rosetta. Its single JSON result binds both records to the
+   same universal asset digest, generation receipt, probe source, and Pulp
+   source SHA. A universal build/lipo check without that dual-slice receipt is
+   not m153 capability evidence.
 8. Measure every Apple slice actually selected by the manifest. A same-tag asset can
    leak a higher deployment target than its universal sibling. Measure the exact
    thin archive when the manifest selects a thin archive; evidence from a
