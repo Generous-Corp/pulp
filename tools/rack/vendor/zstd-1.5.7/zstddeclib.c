@@ -912,7 +912,7 @@ unsigned char* ZSTD_maybeNullPtrAdd(unsigned char* ptr, ptrdiff_t add)
     return add > 0 ? ptr + add : ptr;
 }
 
-/* Issue #3240 reports an ASAN failure on an llvm-mingw build. Out of an
+/* An upstream ASAN failure was reported on an llvm-mingw build. Out of an
  * abundance of caution, disable our custom poisoning on mingw. */
 #ifdef __MINGW32__
 #ifndef ZSTD_ASAN_DONT_POISON_WORKSPACE
