@@ -16,6 +16,7 @@ import os
 import platform
 import random
 import re
+import select
 import statistics
 import subprocess
 import sys
@@ -30,6 +31,7 @@ import sdk_provenance
 
 
 EXPECTED_EXIT = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
+ANALYSIS_TIMEOUT_SECONDS = 300
 A2T_ANALYZER_SOURCE_PATHS = {
     ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
     ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
@@ -219,6 +221,17 @@ class McpSession:
         if self.process.stdin is None or self.process.stdout is None:
             raise RuntimeError("failed to open pulp-mcp pipes")
         self._next_id = 1
+        self._terminated_for_timeout = False
+
+    def _terminate_bounded(self) -> None:
+        if self.process.poll() is not None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
 
     def _request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         request_id = self._next_id
@@ -230,6 +243,15 @@ class McpSession:
         assert self.process.stdout is not None
         self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
         self.process.stdin.flush()
+        ready, _, _ = select.select(
+            [self.process.stdout], [], [], ANALYSIS_TIMEOUT_SECONDS
+        )
+        if not ready:
+            self._terminated_for_timeout = True
+            self._terminate_bounded()
+            raise RuntimeError(
+                f"pulp-mcp response exceeded {ANALYSIS_TIMEOUT_SECONDS} seconds"
+            )
         line = self.process.stdout.readline()
         if not line:
             stderr = self.process.stderr.read() if self.process.stderr else ""
@@ -270,15 +292,18 @@ class McpSession:
         return elapsed, structured
 
     def close(self) -> None:
-        if self.process.stdin:
+        if self.process.stdin and not self.process.stdin.closed:
             self.process.stdin.close()
         try:
             self.process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            self.process.terminate()
-            self.process.wait(timeout=5)
+            self._terminate_bounded()
         stderr = self.process.stderr.read() if self.process.stderr else ""
-        if self.process.returncode != 0:
+        if self.process.stdout:
+            self.process.stdout.close()
+        if self.process.stderr:
+            self.process.stderr.close()
+        if self.process.returncode != 0 and not self._terminated_for_timeout:
             raise RuntimeError(f"pulp-mcp exited {self.process.returncode}: {stderr}")
 
 
@@ -293,6 +318,7 @@ def run_cli(
         text=True,
         env=environment,
         check=False,
+        timeout=ANALYSIS_TIMEOUT_SECONDS,
     )
     elapsed = time.perf_counter_ns() - start
     try:

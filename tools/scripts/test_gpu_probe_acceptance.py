@@ -246,6 +246,15 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             errors = VERIFIER.verify(root)
             self.assertTrue(any("malformed IHDR" in error for error in errors))
 
+    def test_non_object_gpu_doctor_returns_a_verifier_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.v2_fixture(root)
+            (root / "forge-gpu-doctor.json").write_text("[]\n")
+            self.rebind(root, "forge-gpu-doctor.json")
+            errors = VERIFIER.verify(root)
+            self.assertTrue(any("GPU doctor evidence must be an object" in error for error in errors))
+
     def test_release_build_contract_rejects_missing_threejs(self):
         with tempfile.TemporaryDirectory() as temporary:
             build = Path(temporary)

@@ -85,6 +85,14 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(result, receipt["human_perfetto_ui_correlation"])
 
+    def test_mcp_response_timeout_terminates_the_child(self):
+        session = MODULE.McpSession(Path("/bin/cat"), {})
+        with mock.patch.object(MODULE.select, "select", return_value=([], [], [])):
+            with self.assertRaisesRegex(RuntimeError, "response exceeded"):
+                session._request("initialize")
+        session.close()
+        self.assertIsNotNone(session.process.returncode)
+
     def test_human_review_rejects_different_trace_digest(self):
         with self.assertRaisesRegex(ValueError, "not bound to the measured trace"):
             MODULE.preserve_human_perfetto_ui_correlation(

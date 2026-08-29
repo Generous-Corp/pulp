@@ -364,16 +364,17 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         if metrics != forge.get("screenshot_metrics"):
             errors.append("Forge screenshot metrics differ from decoded PNG content")
     try:
-        doctor = _load(root / "forge-gpu-doctor.json")
+        doctor_payload = _load(root / "forge-gpu-doctor.json")
     except (OSError, json.JSONDecodeError) as error:
         errors.append(f"cannot parse Forge GPU doctor evidence: {error}")
     else:
+        doctor = _mapping(doctor_payload, "Forge GPU doctor evidence", errors)
         try:
             health_schema = _load(HEALTH_SCHEMA)
         except (OSError, json.JSONDecodeError) as error:
             errors.append(f"cannot read GPU health schema: {error}")
         else:
-            for problem in json_schema_lite.validate(doctor, health_schema):
+            for problem in json_schema_lite.validate(doctor_payload, health_schema):
                 errors.append(f"Forge GPU doctor schema: {problem}")
         if (
             doctor.get("schema") != "pulp.gpu-health-result.v1"
