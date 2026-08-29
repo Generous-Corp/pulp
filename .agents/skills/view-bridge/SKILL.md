@@ -2174,3 +2174,8 @@ request and must preserve the actual `begin_editor_open` lifecycle, cache
 boundary, endpoint, and evidence IDs in its artifacts. The envelope validates
 and retains those artifacts but never calls `begin_editor_open`, captures a
 frame, or invents a presentation timestamp itself.
+The four checked-in role entry points turn this into an executable handoff:
+each invokes one exact external lifecycle driver, requires a predecessor for
+every warm same-process reopen, and retains the closed driver protocol in the
+host evidence tar. That driver must use the real product/host bridge; a loop of
+capture calls without editor lifecycle evidence is rejected.

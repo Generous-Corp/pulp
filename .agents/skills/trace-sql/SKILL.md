@@ -117,6 +117,10 @@ IDs. `gpu_first_visible_a3_external_adapter.py` pins that producer and passes
 its digest-bound artifacts onward; it is not another analyzer and cannot turn
 an empty named view, a different process cohort, or hand-written SQL into a
 passing campaign analysis.
+The checked-in role producers additionally pin the external lifecycle driver
+and retain its closed request/receipt; they compare the driver's trace digest
+and evidence IDs with the health result before the shared verifier replays the
+named query.
 
 **Closed GPU cohort boundary.** The named GPU analyses do not currently accept
 an evidence-ID selector, so the SQL must not flatten unrelated runs. Startup

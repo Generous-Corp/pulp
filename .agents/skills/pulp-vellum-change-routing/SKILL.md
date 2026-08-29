@@ -105,6 +105,11 @@ does not move ownership of the producer's generic present, shader, pipeline,
 upload, or cache events. When those facts are unavailable through existing
 product seams, the producer must report the exact transferred gap rather than
 adding a Pulp-side render hook.
+The checked-in standalone, constrained-headless, REAPER, and Forge producers
+are orchestration adapters inside that boundary. They may pin exact source,
+product, host, and lifecycle-driver identities and reject missing endpoint
+truth; their existence does not authorize a Pulp implementation of a missing
+generic native-present or cache event.
 
 Pulp also owns the A4 DPR runner, product-scenario adapters, evidence ingestion,
 and the B5 dependency receipt. The runner may classify a measured candidate,

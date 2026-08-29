@@ -244,7 +244,7 @@ focused real-Standalone test command in
 `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` does not bind a control artifact. Keep
 SKIP/INCONCLUSIVE and absent format scans as pending, never PASS.
 
-Use `reaper_smoke.py --mode editor-open` as the exact-format prerequisite for a
+Use `reaper_smoke.py --mode editor-open --reaper-bin /exact/REAPER` as the exact-format prerequisite for a
 DAW A3 adapter, then execute that adapter through
 `gpu_first_visible_a3_campaign.py run-role --role daw`. The smoke result cannot
 be copied into the campaign: the adapter still owes 10 real cold and 10 real
@@ -255,9 +255,10 @@ retain their names. An adapter timeout, SKIP, or INCONCLUSIVE produces a
 nonterminal `run.json`, never a passing campaign.
 
 Use the checked-in `gpu_first_visible_a3_external_adapter.py` as the immutable
-envelope and set `PULP_A3_CAMPAIGN_PRODUCER` to the exact REAPER lifecycle
-producer. The producer remains DAW-specific: it performs the qualified-format
-preflight and all 20 editor opens, then reports native compositor timing and
-the same-instance trace. The envelope only pins and validates that producer;
-it cannot promote the `editor-open` smoke or a screenshot completion into
-campaign evidence.
+envelope and select `gpu_first_visible_a3_reaper_producer.py`. Configure its
+exact REAPER, plugin binary/bundle, and role-driver paths; the producer runs the
+qualified-format preflight and then requires the driver to perform all 20
+editor opens. It retains the exact driver request/receipt and binaries in the
+host evidence tar. Missing automation or native-present truth is nonterminal;
+the producer cannot promote the `editor-open` smoke or a screenshot completion
+into campaign evidence.

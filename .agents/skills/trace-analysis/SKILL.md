@@ -553,6 +553,10 @@ For an A3 external role, the executable selected by
 adapter snapshots that producer but does not run substitute SQL or create an
 evidence ID. Final same-instance A2T replay and human Perfetto UI correlation
 are added only from the selected causal campaign after all role runs complete.
+Use one of the four checked-in role entry points, which also pins its lifecycle
+driver and rejects trace-analysis IDs that differ from the exact health
+instance. The driver still owns capture; the entry point cannot manufacture a
+Perfetto file or native-present event.
 
 ## Correlate a catalog recipe with Perfetto
 

@@ -60,19 +60,38 @@ After ratifying the budget, run all four roles with their exact identity files
 and role-specific executables:
 
 ```bash
-A3_EVIDENCE=/absolute/path/to/a3-evidence
+: "${A3_EVIDENCE:?new empty absolute evidence directory}"
+: "${PULP_PLANNING_ROOT:?clean pulp-planning checkout}"
+: "${BLANK_CONTROL_BIN:?exact final-head standalone blank-control test binary}"
+: "${AUDIO_CONTROL_BIN:?exact final-head audio-thread-control test binary}"
 PULP_REVISION=$(git rev-parse HEAD)
-PLAN_REVISION=$(git -C /absolute/path/to/pulp-planning rev-parse HEAD)
+PLAN_REVISION=$(git -C "$PULP_PLANNING_ROOT" rev-parse HEAD)
 A3_ADAPTER="$PWD/tools/scripts/gpu_first_visible_a3_external_adapter.py"
+A3_SUPPORT="$PWD/tools/scripts/gpu_first_visible_a3_role_producer.py"
+: "${STANDALONE_PRODUCT_BIN:?exact final-head Standalone executable}"
+: "${STANDALONE_DRIVER:?exact executable that automates the 20 Standalone lifecycles}"
+: "${HEADLESS_PRODUCT_BIN:?exact final-head constrained-headless executable}"
+: "${HEADLESS_DRIVER:?exact executable that automates the 20 headless lifecycles}"
+: "${DAW_PRODUCT_BIN:?exact final-head plugin Mach-O or DLL}"
+: "${DAW_PLUGIN_BUNDLE:?exact .vst3, .clap, or .component bundle}"
+: "${REAPER_DRIVER:?exact executable that automates the 20 REAPER lifecycles}"
+: "${FORGE_APP_BIN:?exact final-head Forge app executable}"
+: "${FORGE_DRIVER:?exact executable that automates the 20 Forge lifecycles}"
+: "${FORGE_ROOT:?clean Forge source checkout at the identity revision}"
 
 python3 tools/scripts/gpu_first_visible_a3_acceptance.py ratify-budget \
   --cold budget-cold.json --warm budget-warm.json \
   --plan-revision "$PLAN_REVISION" --pulp-revision "$PULP_REVISION" \
   --evidence-root "$A3_EVIDENCE" --output "$A3_EVIDENCE/budget.json"
 
-PULP_A3_CAMPAIGN_PRODUCER=/absolute/path/to/standalone-a3-producer \
-PULP_A3_BLANK_CONTROL_BIN=/absolute/path/to/pulp-test-control-gpu-health-standalone-product \
-PULP_A3_AUDIO_CONTROL_BIN=/absolute/path/to/pulp-test-control-gpu-health-provider \
+PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
+PULP_A3_PULP_ROOT="$PWD" \
+PULP_A3_STANDALONE_PRODUCT_BIN="$STANDALONE_PRODUCT_BIN" \
+PULP_A3_STANDALONE_HOST_BIN="$STANDALONE_PRODUCT_BIN" \
+PULP_A3_STANDALONE_DRIVER="$STANDALONE_DRIVER" \
+PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_standalone_producer.py" \
+PULP_A3_BLANK_CONTROL_BIN="$BLANK_CONTROL_BIN" \
+PULP_A3_AUDIO_CONTROL_BIN="$AUDIO_CONTROL_BIN" \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role standalone --identity "$A3_EVIDENCE/standalone-identity.json" \
   --budget-receipt "$A3_EVIDENCE/budget.json" \
@@ -81,7 +100,12 @@ python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --adapter "$A3_ADAPTER" \
   --output-dir "$A3_EVIDENCE/standalone-run" --require-controls
 
-PULP_A3_CAMPAIGN_PRODUCER=/absolute/path/to/headless-a3-producer \
+PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
+PULP_A3_PULP_ROOT="$PWD" \
+PULP_A3_HEADLESS_PRODUCT_BIN="$HEADLESS_PRODUCT_BIN" \
+PULP_A3_HEADLESS_HOST_BIN="$HEADLESS_PRODUCT_BIN" \
+PULP_A3_HEADLESS_DRIVER="$HEADLESS_DRIVER" \
+PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_headless_producer.py" \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role headless-constrained \
   --identity "$A3_EVIDENCE/headless-identity.json" \
@@ -91,7 +115,14 @@ python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --adapter "$A3_ADAPTER" \
   --output-dir "$A3_EVIDENCE/headless-run"
 
-PULP_A3_CAMPAIGN_PRODUCER=/absolute/path/to/reaper-a3-producer \
+PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
+PULP_A3_PULP_ROOT="$PWD" \
+PULP_A3_REAPER_PRODUCT_BIN="$DAW_PRODUCT_BIN" \
+PULP_A3_REAPER_HOST_BIN=/Applications/REAPER.app/Contents/MacOS/REAPER \
+PULP_A3_REAPER_DRIVER="$REAPER_DRIVER" \
+PULP_A3_REAPER_PLUGIN_BUNDLE="$DAW_PLUGIN_BUNDLE" \
+PULP_A3_REAPER_SMOKE="$PWD/tools/testing/daw-smoke/reaper_smoke.py" \
+PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_reaper_producer.py" \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role daw --identity "$A3_EVIDENCE/daw-identity.json" \
   --budget-receipt "$A3_EVIDENCE/budget.json" \
@@ -100,7 +131,13 @@ python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --adapter "$A3_ADAPTER" \
   --output-dir "$A3_EVIDENCE/daw-run"
 
-PULP_A3_CAMPAIGN_PRODUCER=/absolute/path/to/exact-forge-shell-a3-producer \
+PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
+PULP_A3_PULP_ROOT="$PWD" \
+PULP_A3_FORGE_ROOT="$FORGE_ROOT" \
+PULP_A3_FORGE_PRODUCT_BIN="$FORGE_APP_BIN" \
+PULP_A3_FORGE_HOST_BIN="$FORGE_APP_BIN" \
+PULP_A3_FORGE_DRIVER="$FORGE_DRIVER" \
+PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_forge_producer.py" \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role forge --identity "$A3_EVIDENCE/forge-identity.json" \
   --budget-receipt "$A3_EVIDENCE/budget.json" \
@@ -110,11 +147,21 @@ python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --output-dir "$A3_EVIDENCE/forge-run"
 ```
 
+On the M5 endpoint, reserve 60–90 minutes after the exact final-head products
+and drivers exist. The ratification and four campaigns comprise at least 100
+editor/capture lifecycles (20 budget observations plus 80 role observations),
+with one additional REAPER scan/editor-open preflight, trace replay, and human
+Perfetto UI correlation. Driver timeouts keep any one role bounded; do not
+compress the run by reusing lifecycle IDs, omitting cold process boundaries, or
+relabeling capture completion as native presentation.
+
 The checked-in external adapter is an evidence envelope, not a substitute for
-the product lifecycle. It snapshots the executable named by
+the product lifecycle. It snapshots the checked-in role entry point named by
 `PULP_A3_CAMPAIGN_PRODUCER`, runs that immutable copy, bounds its output and
-runtime, and preserves its exact digest in `run.json`. A role producer accepts
-the same `--request PATH --receipt PATH` argv, writes
+runtime, and preserves its exact digest in `run.json`. The four entry points
+share `gpu_first_visible_a3_role_producer.py`; the engine snapshots itself,
+the configured role driver, and exact product and host executable bytes before
+the campaign. A role producer accepts the same `--request PATH --receipt PATH`, writes
 `pulp.gpu-first-visible-campaign-producer.v1`, and uses the supplied
 `artifact_directory`. Its receipt has the adapter receipt's identity and
 outcome fields but exactly these artifacts: `health_result`, `raw_cold`,
@@ -123,17 +170,33 @@ outcome fields but exactly these artifacts: `health_result`, `raw_cold`,
 producer configuration, timeout, schema drift, exit mismatch, or an omitted
 artifact cannot become a pass.
 
-The producer owns the facts only its product can observe: 10 real cold and 10
-real warm lifecycles, the declared cache reset/reopen boundary, first nonblank
-native-compositor presentation (or constrained headless capture completion),
-exact product/host identity, and same-campaign GPU/trace evidence IDs. The
-envelope never manufactures those fields. For the one `--require-controls`
-role, it separately snapshots and runs the two focused harness binaries named
-above and rejects a passing producer when either independent control is absent.
+The role driver is the product/host automation seam. It accepts the closed
+`pulp.gpu-first-visible-role-driver-request.v1` request and writes
+`pulp.gpu-first-visible-role-driver-receipt.v1`. A pass requires 20 ordered
+lifecycle-provenance rows, including the observed cache boundary, unique
+lifecycle and process identities, a predecessor for every same-process warm
+reopen, and explicit endpoint/native-present truth. It also returns the five
+measured artifacts beneath its issued directory. The role producer rejects a
+short campaign, a relabeled cache state, a visible trial without independent
+native presentation, a headless trial claiming presentation, mutation of any
+configured binary, or a trace ID that differs from the health result. The
+digest-bound `host_artifact` tar retains the exact host, driver, producer
+support, closed driver request/receipt, and role preflight. The driver may be
+external because native AppKit/REAPER/Forge automation is product-specific;
+absence is a nonterminal dependency, never synthesized evidence.
+
+The producer therefore owns the facts only its product can observe: 10 real
+cold and 10 real warm lifecycles, the declared cache reset/reopen boundary,
+first nonblank native-compositor presentation (or constrained headless capture
+completion), exact product/host identity, and same-campaign GPU/trace evidence
+IDs. For the one `--require-controls` role, the envelope separately snapshots
+and runs the two focused harness binaries named above and rejects a passing
+producer when either independent control is absent.
 
 The DAW adapter must first prove the exact format scans and opens in REAPER;
 for example, a VST3 preflight uses `reaper_smoke.py --mode editor-open --format
-vst3 --plugin-name NAME --plugin-path /absolute/product.vst3`. That smoke is a
+vst3 --plugin-name NAME --plugin-path /absolute/product.vst3 --reaper-bin
+/Applications/REAPER.app/Contents/MacOS/REAPER`. That smoke is a
 prerequisite, not the 20-trial campaign: SKIP/INCONCLUSIVE remains pending, and
 capture completion cannot substitute for native compositor presentation. The
 Forge adapter likewise drives the exact standalone shell and binds both Pulp
