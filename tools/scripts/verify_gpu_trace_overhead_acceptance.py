@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,94 @@ def _artifact_trace_path(receipt: dict[str, Any], repository: Path) -> Path | No
     if not isinstance(role, str) or not role.startswith("repository/"):
         return None
     return repository / role.removeprefix("repository/")
+
+
+def _verify_producer_disposition(
+    receipt: dict[str, Any], repository: Path, source_revision: Any, errors: list[str]
+) -> None:
+    disposition = _object(
+        receipt.get("producer_overhead_disposition"),
+        "producer_overhead_disposition", errors,
+    )
+    expected_fields = {
+        "status": "not-applicable-no-added-producer-cost",
+        "formal_plan_status": "accepted-canonical-plan",
+        "formal_plan_revision": EXPECTED_PLAN_REVISION,
+        "formal_plan_sha256": EXPECTED_PLAN_SHA256,
+        "required_followup": (
+            "B6 must run the three-state 5-warmup/30-trial and 20 fresh-process "
+            "protocol when Vellum producer instrumentation is added."
+        ),
+    }
+    for field, expected in expected_fields.items():
+        if disposition.get(field) != expected:
+            errors.append(f"producer overhead disposition {field} is not the accepted contract")
+    evidence = _object(
+        disposition.get("evidence"), "producer overhead disposition evidence", errors
+    )
+    if (
+        evidence.get("method") != "per-commit git diff-tree inventory"
+        or evidence.get("no_added_producer_call_sites") is not True
+        or evidence.get("added_or_changed_producer_paths") != []
+    ):
+        errors.append("producer overhead disposition lacks a passing per-commit inventory")
+    inventories = evidence.get("implementation_revisions")
+    if not isinstance(inventories, list) or not inventories:
+        errors.append("producer overhead disposition has no implementation revisions")
+        return
+    for index, declared in enumerate(inventories):
+        if not isinstance(declared, dict):
+            errors.append(f"A2T implementation inventory {index} must be an object")
+            continue
+        revision = declared.get("implementation_revision")
+        if not isinstance(revision, str) or not contract.valid_lower_hex(revision, 40):
+            errors.append(f"A2T implementation inventory {index} lacks an exact revision")
+            continue
+        try:
+            expected = contract.commit_inventory(repository, revision)
+        except ValueError as error:
+            errors.append(f"cannot recompute A2T implementation inventory {revision}: {error}")
+            continue
+        equivalents = declared.get("patch_equivalent_revisions")
+        declared_base = dict(declared)
+        declared_base.pop("patch_equivalent_revisions", None)
+        if declared_base != expected:
+            errors.append(f"A2T implementation inventory {revision} differs from Git")
+        if expected.get("no_added_producer_call_sites") is not True:
+            errors.append(f"A2T implementation revision {revision} touches producer paths")
+        if isinstance(source_revision, str):
+            ancestor = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", revision, source_revision],
+                cwd=repository, check=False, capture_output=True, text=True,
+            )
+            if ancestor.returncode != 0:
+                errors.append(f"A2T implementation revision {revision} is not in source history")
+        if index == 0:
+            if not isinstance(equivalents, list):
+                errors.append("primary A2T inventory lacks its patch-equivalent revision list")
+                equivalents = []
+            for equivalent in equivalents:
+                if not isinstance(equivalent, dict):
+                    errors.append("A2T patch-equivalent revision entry must be an object")
+                    continue
+                equivalent_revision = equivalent.get("revision")
+                try:
+                    equivalent_inventory = contract.commit_inventory(
+                        repository, str(equivalent_revision)
+                    )
+                except ValueError as error:
+                    errors.append(f"cannot recompute patch-equivalent A2T revision: {error}")
+                    continue
+                expected_equivalent = {
+                    "revision": equivalent_revision,
+                    "stable_patch_id": equivalent_inventory["stable_patch_id"],
+                }
+                if equivalent != expected_equivalent or (
+                    equivalent_inventory["stable_patch_id"] != expected["stable_patch_id"]
+                ):
+                    errors.append("A2T patch-equivalent revision does not match the primary patch")
+        elif equivalents is not None:
+            errors.append("only the primary A2T inventory may name patch-equivalent revisions")
 
 
 def verify(
@@ -88,6 +177,7 @@ def verify(
     for key, expected in expected_plan.items():
         if plan.get(key) != expected:
             errors.append(f"accepted plan {key} does not match the canonical plan")
+    _verify_producer_disposition(receipt, repository, source_revision, errors)
     artifacts = _object(receipt.get("artifacts"), "artifacts", errors)
     sibling = _object(artifacts.get("sibling_binding"), "sibling_binding", errors)
     if sibling.get("verified_same_resolved_parent") is not True:
@@ -267,9 +357,16 @@ def verify(
         errors.append("measured semantic result is not the same-artifact replay result")
 
     acceptance = _object(receipt.get("acceptance"), "acceptance", errors)
-    for field in ("semantic_parity", "same_installed_prefix"):
-        if acceptance.get(field) != "pass":
-            errors.append(f"acceptance {field} did not pass")
+    expected_acceptance = {
+        "semantic_parity": "pass",
+        "same_installed_prefix": "pass",
+        "offline_latency_budget": "unverified-no-ratified-budget",
+        "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
+        "xrun_check": "not-applicable-offline-no-audio-thread",
+    }
+    for field, expected in expected_acceptance.items():
+        if acceptance.get(field) != expected:
+            errors.append(f"acceptance {field} differs from the Horizon-A contract")
     human = receipt.get("human_perfetto_ui_correlation")
     if require_terminal:
         if acceptance.get("terminal_status") != "pass":

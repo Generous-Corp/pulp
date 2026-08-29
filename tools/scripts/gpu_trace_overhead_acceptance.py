@@ -712,7 +712,9 @@ def source_binding_errors(receipt: Any, repository: Path) -> list[str]:
         errors.append("integration_head must be an exact Git SHA")
     elif integration_head != revision:
         errors.append("integration_head does not match source_revision")
-    role = ((receipt.get("artifacts") or {}).get("trace") or {}).get("role")
+    artifacts = receipt.get("artifacts")
+    trace_artifact = artifacts.get("trace") if isinstance(artifacts, dict) else None
+    role = trace_artifact.get("role") if isinstance(trace_artifact, dict) else None
     if not isinstance(role, str) or not role.startswith("repository/"):
         errors.append("trace role does not identify a repository fixture")
         return errors

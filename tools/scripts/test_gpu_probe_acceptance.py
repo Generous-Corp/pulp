@@ -255,6 +255,31 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             errors = VERIFIER.verify(root)
             self.assertTrue(any("GPU doctor evidence must be an object" in error for error in errors))
 
+    def test_non_object_receipt_result_and_transcript_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt_root = Path(temporary) / "receipt"
+            receipt_root.mkdir()
+            (receipt_root / "receipt.json").write_text("[]\n")
+            self.assertEqual(
+                VERIFIER.verify(receipt_root), ["receipt.json must contain an object"]
+            )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.v2_fixture(root)
+            (root / "compute-run1.json").write_text("[]\n")
+            self.rebind(root, "compute-run1.json")
+            errors = VERIFIER.verify(root)
+            self.assertTrue(any("probe result must be an object" in error for error in errors))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.v2_fixture(root)
+            rows = (root / "mcp-transcript.jsonl").read_text().splitlines()
+            rows[1] = "[]"
+            (root / "mcp-transcript.jsonl").write_text("\n".join(rows) + "\n")
+            self.rebind(root, "mcp-transcript.jsonl")
+            errors = VERIFIER.verify(root)
+            self.assertTrue(any("all-four" in error for error in errors))
+
     def test_release_build_contract_rejects_missing_threejs(self):
         with tempfile.TemporaryDirectory() as temporary:
             build = Path(temporary)

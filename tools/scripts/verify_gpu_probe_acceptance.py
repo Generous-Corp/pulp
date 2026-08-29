@@ -172,6 +172,8 @@ def _png_metrics(path: Path) -> dict[str, int]:
     import struct
     import zlib
 
+    if path.is_symlink():
+        raise ValueError("Forge screenshot must be an in-receipt regular file")
     data = path.read_bytes()
     if len(data) > 8 * 1024 * 1024 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ValueError("Forge screenshot is not a bounded PNG")
@@ -364,9 +366,14 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         if metrics != forge.get("screenshot_metrics"):
             errors.append("Forge screenshot metrics differ from decoded PNG content")
     try:
-        doctor_payload = _load(root / "forge-gpu-doctor.json")
+        doctor_path = root / "forge-gpu-doctor.json"
+        if doctor_path.is_symlink():
+            raise ValueError("Forge GPU doctor must be an in-receipt regular file")
+        doctor_payload = _load(doctor_path)
     except (OSError, json.JSONDecodeError) as error:
         errors.append(f"cannot parse Forge GPU doctor evidence: {error}")
+    except ValueError as error:
+        errors.append(str(error))
     else:
         doctor = _mapping(doctor_payload, "Forge GPU doctor evidence", errors)
         try:
@@ -394,17 +401,21 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
             if not required_probes:
                 errors.append("Forge-cwd GPU doctor lacks a required real probe")
             elif any(
-                probe.get("adapter", {}).get("status") != "authentic"
-                or probe.get("adapter", {}).get("class") != "hardware"
+                not isinstance(probe.get("adapter"), dict)
+                or probe["adapter"].get("status") != "authentic"
+                or probe["adapter"].get("class") != "hardware"
                 or "Metal" not in (
-                    str(probe.get("adapter", {}).get("backend", ""))
-                    + str(probe.get("adapter", {}).get("architecture", ""))
+                    str(probe["adapter"].get("backend", ""))
+                    + str(probe["adapter"].get("architecture", ""))
                 )
                 for probe in required_probes
             ):
                 errors.append("Forge-cwd GPU doctor did not use authentic Metal hardware")
             else:
-                measurements = [probe.get("measurements", {}) for probe in required_probes]
+                measurements = [
+                    value if isinstance(value, dict) else {}
+                    for value in (probe.get("measurements") for probe in required_probes)
+                ]
                 for field in (
                     "command_submitted", "readback_completed", "pixel_output_produced",
                     "content_floor_passed", "compute_initialized", "compute_oracle_passed",
@@ -451,6 +462,8 @@ def verify(root: Path) -> list[str]:
         receipt = _load(receipt_path)
     except (OSError, json.JSONDecodeError) as error:
         return [f"cannot read receipt.json: {error}"]
+    if not isinstance(receipt, dict):
+        return ["receipt.json must contain an object"]
 
     schema = receipt.get("schema")
     v2 = schema == "pulp.gpu-probe-acceptance-receipt.v2"
@@ -522,12 +535,16 @@ def verify(root: Path) -> list[str]:
         errors.append(
             f"raw_sha256 does not name the exact {len(expected_files)}-file evidence set"
         )
-    for name, digest in declared.items():
+    for name in sorted(expected_files):
+        digest = declared.get(name)
         path = root / name
         try:
             limit = 8 * 1024 * 1024 if name in {
                 "mcp-transcript.jsonl", "forge-modular-screenshot.png"
             } else 1024 * 1024
+            if path.is_symlink() or not path.is_file():
+                errors.append(f"{name} must be a regular in-receipt evidence file")
+                continue
             if path.stat().st_size > limit:
                 errors.append(f"{name} exceeds its {limit}-byte evidence cap")
                 continue
@@ -557,10 +574,16 @@ def verify(root: Path) -> list[str]:
         for suffix in ("run1", "run2", "negative"):
             path = root / f"{group}-{suffix}.json"
             try:
-                result = _load(path)
+                result_payload = _load(path)
             except (OSError, json.JSONDecodeError) as error:
                 errors.append(f"cannot parse {path.name}: {error}")
                 continue
+            for problem in json_schema_lite.validate(result_payload, result_schema):
+                errors.append(f"{path.name}: schema: {problem}")
+            if not isinstance(result_payload, dict):
+                errors.append(f"{path.name}: probe result must be an object")
+                continue
+            result = result_payload
             runs[suffix] = result
             evidence_id = result.get("gpu_evidence_id")
             if not GPU_EVIDENCE_ID.fullmatch(str(evidence_id)):
@@ -569,8 +592,6 @@ def verify(root: Path) -> list[str]:
                 errors.append(f"{path.name}: gpu_evidence_id was reused by another A2 run")
             else:
                 seen_evidence_ids.add(evidence_id)
-            for problem in json_schema_lite.validate(result, result_schema):
-                errors.append(f"{path.name}: schema: {problem}")
             if result.get("recipe_id") != recipe:
                 errors.append(f"{path.name}: recipe mismatch")
             expected_dimensions = (
@@ -580,10 +601,25 @@ def verify(root: Path) -> list[str]:
             )
             if result.get("dimensions") != expected_dimensions:
                 errors.append(f"{path.name}: execution dimensions are not recipe-bound")
-            if not result.get("passes") or not all(p.get("work_completed") for p in result["passes"]):
+            passes = result.get("passes")
+            if (
+                not isinstance(passes, list) or not passes
+                or not all(isinstance(item, dict) and item.get("work_completed") for item in passes)
+            ):
                 errors.append(f"{path.name}: work was not proven complete")
-            artifacts = result.get("artifacts", [])
-            if not artifacts or sum(int(a.get("bytes", 0)) for a in artifacts) > 512 * 1024:
+            artifacts_value = result.get("artifacts")
+            artifacts = (
+                artifacts_value
+                if isinstance(artifacts_value, list)
+                and all(isinstance(item, dict) for item in artifacts_value)
+                else []
+            )
+            artifact_bytes = [item.get("bytes") for item in artifacts]
+            if (
+                not artifacts
+                or any(type(value) is not int or value < 0 for value in artifact_bytes)
+                or sum(artifact_bytes) > 512 * 1024
+            ):
                 errors.append(f"{path.name}: artifacts are absent or exceed 512 KiB")
             for artifact in artifacts:
                 if not SHA256.fullmatch(str(artifact.get("sha256", ""))):
@@ -600,7 +636,8 @@ def verify(root: Path) -> list[str]:
                     )
             if result.get("numeric_sample_count") != EXPECTED_SAMPLE_COUNTS[group]:
                 errors.append(f"{path.name}: numeric sample count changed")
-            adapter = result.get("adapter", {})
+            adapter_value = result.get("adapter")
+            adapter = adapter_value if isinstance(adapter_value, dict) else {}
             if group in HARDWARE_REQUIRED and (
                 adapter.get("status") != "authentic"
                 or adapter.get("class") != "hardware"
@@ -619,7 +656,11 @@ def verify(root: Path) -> list[str]:
         if runs["run1"].get("verdict") != "pass" or runs["run2"].get("verdict") != "pass":
             errors.append(f"{group}: both positive runs must pass")
         for label in ("run1", "run2"):
-            if not all(p.get("verdict") == "pass" for p in runs[label].get("passes", [])):
+            passes = runs[label].get("passes")
+            if not isinstance(passes, list) or not all(
+                isinstance(item, dict) and item.get("verdict") == "pass"
+                for item in passes
+            ):
                 errors.append(f"{group}: {label} contains a non-passing semantic pass")
         if _canonical_repeat(runs["run1"]) != _canonical_repeat(runs["run2"]):
             errors.append(f"{group}: positive rerun is not deterministic")
@@ -628,17 +669,33 @@ def verify(root: Path) -> list[str]:
             errors.append(f"{group}: seeded negative control did not fail")
         if group == "renderer" and negative.get("mutation") != RENDERER_NEGATIVE_MUTATION:
             errors.append("renderer: negative mutation is not the exact pre-submit mutation")
-        if not any(p.get("verdict") == "fail" and p.get("work_completed") for p in negative.get("passes", [])):
+        negative_passes = negative.get("passes")
+        if not isinstance(negative_passes, list) or not any(
+            isinstance(item, dict)
+            and item.get("verdict") == "fail"
+            and item.get("work_completed")
+            for item in negative_passes
+        ):
             errors.append(f"{group}: negative control lacks a completed causal failure")
 
     try:
-        transcript = [json.loads(line) for line in (root / "mcp-transcript.jsonl").read_text().splitlines()]
+        transcript_path = root / "mcp-transcript.jsonl"
+        if transcript_path.is_symlink() or transcript_path.stat().st_size > 8 * 1024 * 1024:
+            raise ValueError("MCP transcript is not a bounded regular evidence file")
+        transcript = [json.loads(line) for line in transcript_path.read_text().splitlines()]
     except (OSError, json.JSONDecodeError) as error:
         errors.append(f"cannot parse MCP transcript: {error}")
         transcript = []
+    except ValueError as error:
+        errors.append(str(error))
+        transcript = []
     expected_transcript_length = 1 + (2 * len(GROUPS) if v2 else 2)
-    if len(transcript) != expected_transcript_length or [row.get("id") for row in transcript] != list(
-        range(1, expected_transcript_length + 1)
+    if (
+        len(transcript) != expected_transcript_length
+        or not all(isinstance(row, dict) for row in transcript)
+        or [row.get("id") for row in transcript] != list(
+            range(1, expected_transcript_length + 1)
+        )
     ):
         errors.append(
             "MCP transcript must contain initialize plus all-four positive/negative responses"
@@ -646,6 +703,14 @@ def verify(root: Path) -> list[str]:
             "MCP transcript must contain initialize, positive, and negative responses"
         )
     else:
+        if any(row.get("jsonrpc") != "2.0" for row in transcript):
+            errors.append("MCP transcript contains a non-JSON-RPC response")
+        initialize_result = transcript[0].get("result")
+        if (
+            not isinstance(initialize_result, dict)
+            or initialize_result.get("protocolVersion") != "2024-11-05"
+        ):
+            errors.append("MCP transcript lacks the accepted initialize response")
         mcp_evidence: dict[str, Any] = {}
         pairs = []
         if v2:
@@ -655,7 +720,8 @@ def verify(root: Path) -> list[str]:
         else:
             pairs = [("positive", transcript[1]), ("negative", transcript[2])]
         for label, row in pairs:
-            result = row.get("result", {})
+            result_value = row.get("result")
+            result = result_value if isinstance(result_value, dict) else {}
             positive = label.endswith("positive") or label == "positive"
             expected_exit = 0 if positive else 1
             if bool(result.get("isError", False)) != (not positive):
@@ -665,15 +731,19 @@ def verify(root: Path) -> list[str]:
                     errors.append("MCP completed failure did not preserve isError=true")
                 else:
                     errors.append(f"MCP {label} did not preserve typed isError status")
-            if result.get("structuredContent", {}).get("exit_code") != expected_exit:
+            structured_value = result.get("structuredContent")
+            structured = structured_value if isinstance(structured_value, dict) else {}
+            if structured.get("exit_code") != expected_exit:
                 errors.append(f"MCP {label} did not preserve exit {expected_exit}")
-            evidence = row.get("result", {}).get("structuredContent", {}).get("evidence")
+            evidence = structured.get("evidence")
             for problem in json_schema_lite.validate(evidence, result_schema):
                 errors.append(f"MCP {label} evidence schema: {problem}")
             if isinstance(evidence, dict):
                 mcp_evidence[label] = evidence
-            content = row.get("result", {}).get("content", [])
+            content = result.get("content")
             try:
+                if not isinstance(content, list):
+                    raise TypeError("MCP content is not an array")
                 text_evidence = json.loads(content[0]["text"])
             except (IndexError, KeyError, TypeError, json.JSONDecodeError):
                 errors.append(f"MCP {label} text evidence is missing or malformed")
@@ -689,7 +759,13 @@ def verify(root: Path) -> list[str]:
         for label, raw_name in comparisons:
             if label not in mcp_evidence:
                 continue
-            raw = _load(root / raw_name)
+            try:
+                raw = _load(root / raw_name)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(raw, dict):
+                errors.append(f"{raw_name}: probe result must be an object")
+                continue
             if _canonical_repeat(mcp_evidence[label]) != _canonical_repeat(raw):
                 errors.append(f"MCP {label} evidence is not the installed CLI recipe result")
     if v2:

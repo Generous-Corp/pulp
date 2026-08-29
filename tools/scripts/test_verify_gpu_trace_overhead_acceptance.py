@@ -74,6 +74,14 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         measured_mcp = [1] * 30
         fresh_cli = [1] * 20
         fresh_mcp = [1] * 20
+        implementation_revision = CONTRACT._git_text(
+            ROOT, "rev-list", "--no-merges", "-1", head, "--",
+            "tools/scripts/gpu_trace_overhead_acceptance.py",
+        )
+        implementation_inventory = CONTRACT.commit_inventory(
+            ROOT, implementation_revision
+        )
+        implementation_inventory["patch_equivalent_revisions"] = []
         return {
             "schema": "pulp.gpu-trace-overhead-acceptance.v2",
             "source_revision": head,
@@ -98,6 +106,22 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "path": CONTRACT.PLAN_PATH,
                 "blob": "2d1c461d3ea640f75786a72c312d074f68f59028",
                 "sha256": MODULE.EXPECTED_PLAN_SHA256,
+            },
+            "producer_overhead_disposition": {
+                "status": "not-applicable-no-added-producer-cost",
+                "required_followup": (
+                    "B6 must run the three-state 5-warmup/30-trial and 20 "
+                    "fresh-process protocol when Vellum producer instrumentation is added."
+                ),
+                "formal_plan_status": "accepted-canonical-plan",
+                "formal_plan_revision": MODULE.EXPECTED_PLAN_REVISION,
+                "formal_plan_sha256": MODULE.EXPECTED_PLAN_SHA256,
+                "evidence": {
+                    "method": "per-commit git diff-tree inventory",
+                    "implementation_revisions": [implementation_inventory],
+                    "no_added_producer_call_sites": True,
+                    "added_or_changed_producer_paths": [],
+                },
             },
             "artifacts": {
                 "sibling_binding": {"verified_same_resolved_parent": True},
@@ -159,6 +183,9 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "terminal_status": "pass", "semantic_parity": "pass",
                 "same_installed_prefix": "pass",
                 "human_perfetto_ui_correlation": "pass",
+                "offline_latency_budget": "unverified-no-ratified-budget",
+                "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
+                "xrun_check": "not-applicable-offline-no-audio-thread",
             },
         }
 
@@ -193,6 +220,16 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         receipt["installed_source_identity"]["build_info"]["kGitSha"] = ""
         errors = MODULE.verify(receipt, ROOT)
         self.assertIn("installed build stamp is not bound to source_revision", errors)
+
+    def test_no_producer_disposition_is_recomputed_from_git(self):
+        receipt = self.terminal_receipt()
+        inventory = receipt["producer_overhead_disposition"]["evidence"][
+            "implementation_revisions"
+        ][0]
+        inventory["changed_paths"] = ["core/render/src/forged.cpp"]
+        inventory["no_added_producer_call_sites"] = False
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("differs from Git" in error for error in errors))
 
     def test_fixture_semantic_question_cannot_be_relabelled(self):
         receipt = self.terminal_receipt()
