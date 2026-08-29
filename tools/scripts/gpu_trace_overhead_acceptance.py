@@ -48,6 +48,21 @@ A2T_ANALYZER_SOURCE_PATHS = {
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
 }
+A2T_HISTORY_BASE = "add4c8779e54113cc8cb4aa486b839788759e891"
+A2T_HISTORY_PATHS = {
+    ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+    ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+    ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+    "docs/validation/gpu-trace-overhead/README.md",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
+    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+    "tools/mcp/mcp_trace_tools.cpp",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+}
 
 PINNED_PROCESSOR_VERSION = "v57.2"
 PROCESSOR_PLATFORM = {
@@ -637,6 +652,43 @@ def commit_inventory(repository: Path, revision: str) -> dict[str, Any]:
     }
 
 
+def a2t_history_revisions(repository: Path, source_revision: str) -> list[str]:
+    """Derive the complete integrated A2T change set from immutable history."""
+    if not valid_lower_hex(source_revision, 40):
+        raise ValueError("A2T history source revision must be exact lowercase 40-hex")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", A2T_HISTORY_BASE, source_revision],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if ancestor.returncode != 0:
+        raise ValueError("immutable pre-A2T history base is not in source history")
+    completed = subprocess.run(
+        [
+            "git", "rev-list", "--first-parent", "--reverse",
+            f"{A2T_HISTORY_BASE}..{source_revision}", "--", *sorted(A2T_HISTORY_PATHS),
+        ],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    revisions = completed.stdout.splitlines() if completed.returncode == 0 else []
+    if not revisions or any(not valid_lower_hex(revision, 40) for revision in revisions):
+        raise ValueError("cannot derive the complete A2T implementation history")
+    return revisions
+
+
+def terminal_acceptance_status(
+    human_correlation: dict[str, Any] | None,
+    *,
+    warmups: int,
+    trials: int,
+    fresh_start_trials: int,
+) -> str:
+    if human_correlation is None:
+        return "nonterminal-missing-human-perfetto-correlation"
+    if (warmups, trials, fresh_start_trials) != (5, 30, 20):
+        return "nonterminal-reduced-measurement-protocol"
+    return "pass"
+
+
 def valid_lower_hex(value: str, length: int) -> bool:
     return len(value) == length and all(c in "0123456789abcdef" for c in value)
 
@@ -841,8 +893,11 @@ def main() -> int:
     parser.add_argument("--mcp-source-revision", required=True)
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument(
-        "--a2t-implementation-revision", action="append", required=True,
-        help="Exact non-producer A2T implementation commit; repeat for hardening commits",
+        "--a2t-implementation-revision", action="append", default=[],
+        help=(
+            "Optional assertion of the complete derived A2T revision sequence; "
+            "normally omit because the recorder derives it from immutable history"
+        ),
     )
     parser.add_argument("--equivalent-a2t-revision", action="append", default=[])
     parser.add_argument("--plan-revision", required=True)
@@ -891,6 +946,40 @@ def main() -> int:
         accepted_plan = plan_identity(
             args.planning_repository, args.plan_revision, args.plan_sha256
         )
+        derived_implementation_revisions = a2t_history_revisions(
+            repository, args.source_revision
+        )
+        if (
+            args.a2t_implementation_revision
+            and args.a2t_implementation_revision != derived_implementation_revisions
+        ):
+            raise ValueError(
+                "a2t-implementation-revision assertions differ from derived A2T history"
+            )
+        implementation_inventories = [
+            commit_inventory(repository, revision)
+            for revision in derived_implementation_revisions
+        ]
+        if not all(
+            item["no_added_producer_call_sites"] for item in implementation_inventories
+        ):
+            raise ValueError(
+                "an A2T history revision contains producer paths; run the product overhead gate"
+            )
+        equivalent_revisions = []
+        for revision in args.equivalent_a2t_revision:
+            equivalent = commit_inventory(repository, revision)
+            if (
+                equivalent["stable_patch_id"]
+                != implementation_inventories[0]["stable_patch_id"]
+            ):
+                raise ValueError(f"A2T revision {revision} is not patch-equivalent")
+            equivalent_revisions.append(
+                {"revision": revision, "stable_patch_id": equivalent["stable_patch_id"]}
+            )
+        implementation_inventories[0][
+            "patch_equivalent_revisions"
+        ] = equivalent_revisions
     except ValueError as error:
         parser.error(str(error))
 
@@ -989,23 +1078,6 @@ def main() -> int:
     mcp_summary = summary(mcp_samples)
     confidence = paired_delta_confidence(cli_samples, mcp_samples)
 
-    implementation_inventories = [
-        commit_inventory(args.repository.resolve(), revision)
-        for revision in args.a2t_implementation_revision
-    ]
-    if not all(item["no_added_producer_call_sites"] for item in implementation_inventories):
-        raise RuntimeError(
-            "an A2T implementation revision contains producer paths; run the product overhead gate"
-        )
-    equivalent_revisions = []
-    for revision in args.equivalent_a2t_revision:
-        equivalent = commit_inventory(args.repository.resolve(), revision)
-        if equivalent["stable_patch_id"] != implementation_inventories[0]["stable_patch_id"]:
-            raise RuntimeError(f"A2T revision {revision} is not patch-equivalent")
-        equivalent_revisions.append(
-            {"revision": revision, "stable_patch_id": equivalent["stable_patch_id"]}
-        )
-    implementation_inventories[0]["patch_equivalent_revisions"] = equivalent_revisions
     producer_inventory = {
         "method": "per-commit git diff-tree inventory",
         "implementation_revisions": implementation_inventories,
@@ -1110,10 +1182,11 @@ def main() -> int:
             "raw_samples": fresh_rows,
         },
         "acceptance": {
-            "terminal_status": (
-                "pass"
-                if human_perfetto_ui_correlation is not None
-                else "nonterminal-missing-human-perfetto-correlation"
+            "terminal_status": terminal_acceptance_status(
+                human_perfetto_ui_correlation,
+                warmups=args.warmups,
+                trials=args.trials,
+                fresh_start_trials=args.fresh_start_trials,
             ),
             "semantic_parity": "pass", "same_installed_prefix": "pass",
             "human_perfetto_ui_correlation": (

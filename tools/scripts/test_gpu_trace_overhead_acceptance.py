@@ -93,6 +93,27 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         session.close()
         self.assertIsNotNone(session.process.returncode)
 
+    def test_terminal_status_requires_the_exact_measurement_protocol(self):
+        human = {"reviewer": "independent"}
+        self.assertEqual(
+            MODULE.terminal_acceptance_status(
+                human, warmups=5, trials=30, fresh_start_trials=20
+            ),
+            "pass",
+        )
+        self.assertEqual(
+            MODULE.terminal_acceptance_status(
+                human, warmups=0, trials=2, fresh_start_trials=1
+            ),
+            "nonterminal-reduced-measurement-protocol",
+        )
+        self.assertEqual(
+            MODULE.terminal_acceptance_status(
+                None, warmups=5, trials=30, fresh_start_trials=20
+            ),
+            "nonterminal-missing-human-perfetto-correlation",
+        )
+
     def test_human_review_rejects_different_trace_digest(self):
         with self.assertRaisesRegex(ValueError, "not bound to the measured trace"):
             MODULE.preserve_human_perfetto_ui_correlation(

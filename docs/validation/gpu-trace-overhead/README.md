@@ -21,8 +21,6 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --question gpu-startup \
   --source-revision "$(git rev-parse HEAD)" \
   --mcp-source-revision "$(git rev-parse HEAD)" \
-  --a2t-implementation-revision "$A2T_REVISION" \
-  --a2t-implementation-revision "$A2T_HARDENING_REVISION" \
   --equivalent-a2t-revision "$A2T_ORIGINAL_REVISION" \
   --plan-revision "$PLAN_REVISION" \
   --plan-sha256 "$PLAN_SHA256" \
@@ -74,9 +72,11 @@ text/structured MCP identity, all semantic fields, and the intended
 verdict/stage/action. The terminal verifier correlates the timed result to that
 same replay row and checked-in artifact digest.
 
-Every Horizon-A A2T implementation/hardening revision is inventoried before
-measurement, and a stable patch ID binds the original pre-rebase and replayed
-commit identities.
+Every Horizon-A A2T implementation/hardening revision is derived from the
+immutable pre-A2T history boundary and the bound analyzer/SQL/acceptance paths,
+then inventoried before measurement. A caller cannot omit a revision by
+selecting a shorter list. A stable patch ID binds the original pre-rebase and
+replayed commit identities.
 It added offline CLI/MCP/SQL/docs/tests and no runtime/render/view/format or
 Inspector producer path. Therefore new-producer runtime overhead is
 `not-applicable-no-added-producer-cost`, not a timing pass. The receipt binds

@@ -20,6 +20,9 @@ CONTRACT = MODULE.contract
 
 
 class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
+    _inventory_key: tuple[str, ...] | None = None
+    _inventories: list[dict] | None = None
+
     def terminal_receipt(self):
         head = CONTRACT._git_text(ROOT, "rev-parse", "HEAD")
         trace = ROOT / "test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace"
@@ -74,14 +77,16 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         measured_mcp = [1] * 30
         fresh_cli = [1] * 20
         fresh_mcp = [1] * 20
-        implementation_revision = CONTRACT._git_text(
-            ROOT, "rev-list", "--no-merges", "-1", head, "--",
-            "tools/scripts/gpu_trace_overhead_acceptance.py",
-        )
-        implementation_inventory = CONTRACT.commit_inventory(
-            ROOT, implementation_revision
-        )
-        implementation_inventory["patch_equivalent_revisions"] = []
+        history_revisions = CONTRACT.a2t_history_revisions(ROOT, head)
+        history_key = tuple(history_revisions)
+        if self.__class__._inventory_key != history_key:
+            self.__class__._inventory_key = history_key
+            self.__class__._inventories = [
+                CONTRACT.commit_inventory(ROOT, revision)
+                for revision in history_revisions
+            ]
+        implementation_inventories = copy.deepcopy(self.__class__._inventories)
+        implementation_inventories[0]["patch_equivalent_revisions"] = []
         return {
             "schema": "pulp.gpu-trace-overhead-acceptance.v2",
             "source_revision": head,
@@ -118,7 +123,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "formal_plan_sha256": MODULE.EXPECTED_PLAN_SHA256,
                 "evidence": {
                     "method": "per-commit git diff-tree inventory",
-                    "implementation_revisions": [implementation_inventory],
+                    "implementation_revisions": implementation_inventories,
                     "no_added_producer_call_sites": True,
                     "added_or_changed_producer_paths": [],
                 },
@@ -230,6 +235,15 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         inventory["no_added_producer_call_sites"] = False
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("differs from Git" in error for error in errors))
+
+    def test_no_producer_inventory_cannot_omit_a2t_history(self):
+        receipt = self.terminal_receipt()
+        inventories = receipt["producer_overhead_disposition"]["evidence"][
+            "implementation_revisions"
+        ]
+        inventories.pop(1)
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("complete derived history" in error for error in errors))
 
     def test_fixture_semantic_question_cannot_be_relabelled(self):
         receipt = self.terminal_receipt()

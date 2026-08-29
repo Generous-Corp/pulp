@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import re
@@ -19,6 +20,7 @@ EXPECTED_PLAN_REVISION = "641649b7e7fece6baae34380b6e719904506af22"
 EXPECTED_PLAN_SHA256 = "00bdb8bd55fb90fb42d98a09442d2b168505a23a4208cb5b9edb67b01de69f07"
 EXPECTED_PLAN_BLOB = "2d1c461d3ea640f75786a72c312d074f68f59028"
 SOURCE_STAMP = re.compile(r"^[0-9a-f]{7,40}$")
+_INVENTORY_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
 
 
 def _object(value: Any, label: str, errors: list[str]) -> dict[str, Any]:
@@ -35,6 +37,13 @@ def _artifact_trace_path(receipt: dict[str, Any], repository: Path) -> Path | No
     if not isinstance(role, str) or not role.startswith("repository/"):
         return None
     return repository / role.removeprefix("repository/")
+
+
+def _commit_inventory(repository: Path, revision: str) -> dict[str, Any]:
+    key = (str(repository.resolve()), revision)
+    if key not in _INVENTORY_CACHE:
+        _INVENTORY_CACHE[key] = contract.commit_inventory(repository, revision)
+    return copy.deepcopy(_INVENTORY_CACHE[key])
 
 
 def _verify_producer_disposition(
@@ -70,6 +79,24 @@ def _verify_producer_disposition(
     if not isinstance(inventories, list) or not inventories:
         errors.append("producer overhead disposition has no implementation revisions")
         return
+    try:
+        expected_revisions = contract.a2t_history_revisions(
+            repository, str(source_revision)
+        )
+    except ValueError as error:
+        errors.append(f"cannot derive complete A2T implementation history: {error}")
+        expected_revisions = []
+    declared_revisions = [
+        row.get("implementation_revision") if isinstance(row, dict) else None
+        for row in inventories
+    ]
+    if declared_revisions != expected_revisions:
+        errors.append(
+            "A2T implementation inventories do not equal the complete derived history"
+        )
+    if len(inventories) > 64:
+        errors.append("A2T implementation inventory exceeds the 64-commit cap")
+        inventories = inventories[:64]
     for index, declared in enumerate(inventories):
         if not isinstance(declared, dict):
             errors.append(f"A2T implementation inventory {index} must be an object")
@@ -79,7 +106,7 @@ def _verify_producer_disposition(
             errors.append(f"A2T implementation inventory {index} lacks an exact revision")
             continue
         try:
-            expected = contract.commit_inventory(repository, revision)
+            expected = _commit_inventory(repository, revision)
         except ValueError as error:
             errors.append(f"cannot recompute A2T implementation inventory {revision}: {error}")
             continue
@@ -107,7 +134,7 @@ def _verify_producer_disposition(
                     continue
                 equivalent_revision = equivalent.get("revision")
                 try:
-                    equivalent_inventory = contract.commit_inventory(
+                    equivalent_inventory = _commit_inventory(
                         repository, str(equivalent_revision)
                     )
                 except ValueError as error:
