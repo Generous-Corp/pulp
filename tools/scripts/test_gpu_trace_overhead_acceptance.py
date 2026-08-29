@@ -500,19 +500,39 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(
             [row["path"] for row in external],
-            ["inspect/src/control_gpu_health_provider.cpp"],
+            [
+                "core/view/platform/mac/window_host_mac.mm",
+                "inspect/src/control_gpu_health_provider.cpp",
+            ],
         )
         self.assertEqual(
             external[0]["introducing_revision"],
-            "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+            "b4ba22f1d700621366afdbc72bb8615336964cd1",
         )
-        self.assertTrue(
+        self.assertEqual(
+            external[0]["owner_package"],
+            "input-to-present-latency-tracing",
+        )
+        self.assertEqual(
+            external[0]["scope_authority"]["kind"],
+            "immutable-git-commit-boundary",
+        )
+        self.assertFalse(
             external[0]["scope_authority"][
                 "producer_introduction_touched_authority_path"
             ]
         )
         self.assertEqual(
-            external[0]["owner_evidence_status"],
+            external[1]["introducing_revision"],
+            "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+        )
+        self.assertTrue(
+            external[1]["scope_authority"][
+                "producer_introduction_touched_authority_path"
+            ]
+        )
+        self.assertEqual(
+            external[1]["owner_evidence_status"],
             "external-not-evaluated-by-a2t",
         )
 
@@ -524,6 +544,24 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         with mock.patch.object(MODULE.json, "loads", return_value=manifest):
             with self.assertRaisesRegex(ValueError, "independently discovered"):
                 MODULE._load_a2t_scope_manifest(ROOT, head)
+
+    def test_scope_manifest_cannot_omit_external_product_producer_authority(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        with mock.patch.object(
+            MODULE, "_non_a2t_producer_authorities", return_value={}
+        ):
+            with self.assertRaisesRegex(ValueError, "unclassified product producer"):
+                MODULE.authoritative_a2t_scope_paths(ROOT, head)
+
+    def test_external_product_producer_authority_rejects_signature_tamper(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        manifest = json.loads((ROOT / MODULE.A2T_SCOPE_MANIFEST_PATH).read_text())
+        manifest["non_a2t_product_producer_authorities"][0][
+            "added_producer_signatures"
+        ]["core/view/platform/mac/window_host_mac.mm"].pop()
+        with mock.patch.object(MODULE.json, "loads", return_value=manifest):
+            with self.assertRaisesRegex(ValueError, "signature delta does not match"):
+                MODULE._non_a2t_producer_authorities(ROOT, head)
 
     def test_semantic_discovery_uses_exact_identifiers_not_incidental_symptoms(self):
         self.assertTrue(
@@ -554,6 +592,12 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 'PULP_TRACE_SCOPE_NAMED("gpu", "pipeline_compile");'
             )
         )
+        for stage in ("gpu_acquire", "gpu_submit", "gpu_present"):
+            self.assertTrue(
+                MODULE.is_product_producer_source(
+                    f'PULP_TRACE_SCOPE_NAMED("render", "{stage}");'
+                )
+            )
         self.assertTrue(
             MODULE.is_product_producer_source(
                 'if (enabled) PULP_TRACE_SCOPE_NAMED("gpu", "pipeline_compile");'
@@ -573,6 +617,23 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             MODULE.is_product_producer_source(
                 'PULP_TRACE_SCOPE_NAMED("state", "pointer_dispatch");'
             )
+        )
+        self.assertFalse(
+            MODULE.is_product_producer_source(
+                'PULP_TRACE_SCOPE_NAMED_ARGS("render", "frame", '
+                '"description", "gpu_present");'
+            )
+        )
+        async_pair = (
+            'PULP_TRACE_BEGIN("gpu", "gpu_async_submit");\n'
+            'PULP_TRACE_END("gpu");'
+        )
+        self.assertEqual(
+            MODULE.product_producer_signatures(async_pair),
+            ('PULP_TRACE_BEGIN("gpu", "gpu_async_submit");',),
+        )
+        self.assertFalse(
+            MODULE.is_product_producer_source('PULP_TRACE_END("gpu");')
         )
         self.assertFalse(
             MODULE.is_product_producer_source(
@@ -596,6 +657,18 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "exceeds the bounded scan"):
             MODULE.product_producer_signatures(oversized)
+        with self.assertRaisesRegex(ValueError, "adjacent string literals"):
+            MODULE.product_producer_signatures(
+                'PULP_TRACE_SCOPE_NAMED("render", "g" "pu_submit");'
+            )
+        with self.assertRaisesRegex(ValueError, "literal event name"):
+            MODULE.product_producer_signatures(
+                'PULP_TRACE_SCOPE_NAMED("render", GPU_STAGE_NAME);'
+            )
+        with self.assertRaisesRegex(ValueError, "dynamic trace call"):
+            MODULE.product_producer_signatures(
+                'PULP_TRACE_SCOPE_DYNAMIC("render", stage_name);'
+            )
 
     def test_product_producer_delta_catches_gpu_call_without_evidence_literal(self):
         before = 'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");'
@@ -616,7 +689,10 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
     def test_product_producer_must_have_independent_package_authority(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
         path = "inspect/src/control_gpu_health_provider.cpp"
-        with mock.patch.object(MODULE, "_a3_authority_paths", return_value=(set(), "a" * 40)):
+        with (
+            mock.patch.object(MODULE, "_a3_authority_paths", return_value=(set(), "a" * 40)),
+            mock.patch.object(MODULE, "_non_a2t_producer_authorities", return_value={}),
+        ):
             with self.assertRaisesRegex(ValueError, "unclassified product producer"):
                 MODULE.classify_non_a2t_product_producers(ROOT, head, {path})
 
@@ -632,6 +708,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 return_value=("b" * 40, "feat(gpu): unrelated producer"),
             ),
             mock.patch.object(MODULE, "_revision_changed_paths", return_value={path}),
+            mock.patch.object(MODULE, "_non_a2t_producer_authorities", return_value={}),
         ):
             with self.assertRaisesRegex(ValueError, "unclassified product producer"):
                 MODULE.classify_non_a2t_product_producers(ROOT, head, {path})

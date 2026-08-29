@@ -129,7 +129,6 @@ PRODUCT_TRACE_MACROS = {
     "PULP_TRACE_SCOPE_DYNAMIC",
     "PULP_TRACE_BEGIN",
     "PULP_TRACE_BEGIN_ARGS",
-    "PULP_TRACE_END",
     "PULP_TRACE_COUNTER",
 }
 MAX_PRODUCT_TRACE_CALL_BYTES = 2048
@@ -1359,6 +1358,7 @@ def _bounded_product_trace_calls(text: str) -> tuple[str, ...]:
 
 def _cxx_string_literals(text: str) -> tuple[str, ...]:
     literals: list[str] = []
+    previous_end: int | None = None
     index = 0
     while index < len(text):
         if text.startswith("//", index):
@@ -1370,12 +1370,71 @@ def _cxx_string_literals(text: str) -> tuple[str, ...]:
         elif text[index] == "'" and _is_cxx_quote_start(text, index):
             index = _skip_cxx_quoted(text, index, "'")
         elif text[index] == '"':
+            raw_prefix = text[max(0, index - 3):index]
+            if re.search(r"(?:u8|u|U|L)?R$", raw_prefix):
+                raise ValueError(
+                    "recognized product trace call uses an unsupported raw string literal"
+                )
+            if previous_end is not None:
+                separator = re.sub(
+                    r"//[^\n]*(?:\n|$)|/\*.*?\*/", "", text[previous_end:index],
+                    flags=re.DOTALL,
+                )
+                if re.sub(r"\s+", "", separator) in {"", "u8", "u", "U", "L"}:
+                    raise ValueError(
+                        "recognized product trace call uses unsupported adjacent string literals"
+                    )
             end = _skip_cxx_quoted(text, index, '"')
-            literals.append(text[index + 1:max(index + 1, end - 1)])
+            literal = text[index + 1:max(index + 1, end - 1)]
+            if "\\" in literal:
+                raise ValueError(
+                    "recognized product trace call uses an unsupported escaped string literal"
+                )
+            literals.append(literal)
+            previous_end = end
             index = end
         else:
             index += 1
     return tuple(literals)
+
+
+def _product_trace_call_identity(call: str) -> tuple[str, str]:
+    """Return literal category/event names or reject an ambiguous source form."""
+    macro = call[:call.find("(")].strip()
+    normalized = _normalize_product_trace_call(call)
+    literal = r'(?:u8|u|U|L)?"([^"\\]*)"'
+    if macro == "PULP_TRACE_SCOPE":
+        match = re.match(
+            rf"^{re.escape(macro)}\(\s*{literal}\s*\)", normalized
+        )
+        if match is None:
+            raise ValueError(
+                "recognized product trace call has an unsupported literal category"
+            )
+        return match.group(1), ""
+    category_match = re.match(
+        rf"^{re.escape(macro)}\(\s*{literal}\s*,", normalized
+    )
+    if category_match is None:
+        raise ValueError(
+            "recognized product trace call has an unsupported literal category"
+        )
+    category = category_match.group(1)
+    if macro == "PULP_TRACE_SCOPE_DYNAMIC":
+        if category != "gpu":
+            raise ValueError(
+                "recognized dynamic trace call has an unsupported non-GPU category"
+            )
+        return category, ""
+    named_match = re.match(
+        rf"^{re.escape(macro)}\(\s*{literal}\s*,\s*{literal}\s*(?:,|\))",
+        normalized,
+    )
+    if named_match is None:
+        raise ValueError(
+            "recognized product trace call has an unsupported literal event name"
+        )
+    return named_match.group(1), named_match.group(2)
 
 
 def _has_cxx_identifier(text: str, identifiers: set[str]) -> bool:
@@ -1426,9 +1485,11 @@ def product_producer_signatures(text: str) -> tuple[str, ...]:
     signatures = []
     for call in _bounded_product_trace_calls(text):
         string_literals = _cxx_string_literals(call)
+        category, event_name = _product_trace_call_identity(call)
         gpu_relevant = (
             PRODUCER_SOURCE_ANNOTATION.strip('"') in string_literals
-            or (bool(string_literals) and string_literals[0] == "gpu")
+            or category == "gpu"
+            or event_name.startswith("gpu_")
             or _has_cxx_identifier(call, {"gpu_evidence", "gpu_evidence_id"})
         )
         if gpu_relevant:
@@ -1582,34 +1643,170 @@ def _revision_changed_paths(repository: Path, revision: str) -> set[str]:
     return paths
 
 
+def _non_a2t_producer_authorities(
+    repository: Path, source_revision: str
+) -> dict[str, dict[str, Any]]:
+    """Load bounded, immutable-commit package authorities for external producers."""
+    blob = subprocess.run(
+        ["git", "show", f"{source_revision}:{A2T_SCOPE_MANIFEST_PATH}"],
+        cwd=repository, check=False, capture_output=True,
+    )
+    if blob.returncode != 0 or len(blob.stdout) > 64 * 1024:
+        raise ValueError("cannot read bounded non-A2T producer authorities")
+    try:
+        manifest = json.loads(blob.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot parse non-A2T producer authorities: {error}") from error
+    rows = manifest.get("non_a2t_product_producer_authorities")
+    if not isinstance(rows, list) or len(rows) > 16:
+        raise ValueError("non-A2T producer authorities must be a bounded list")
+    expected_keys = {
+        "owner_package", "introducing_revision", "introducing_parent",
+        "introducing_subject", "changed_paths", "added_producer_signatures",
+    }
+    authorities: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != expected_keys:
+            raise ValueError("non-A2T producer authority has an invalid schema")
+        revision = row["introducing_revision"]
+        parent = row["introducing_parent"]
+        subject = row["introducing_subject"]
+        owner = row["owner_package"]
+        changed = row["changed_paths"]
+        signatures = row["added_producer_signatures"]
+        if (
+            not valid_lower_hex(revision, 40)
+            or not valid_lower_hex(parent, 40)
+            or not isinstance(subject, str)
+            or not subject
+            or not isinstance(owner, str)
+            or not owner
+            or not isinstance(changed, list)
+            or len(changed) > 64
+            or any(not isinstance(path, str) for path in changed)
+            or len(set(changed)) != len(changed)
+            or not isinstance(signatures, dict)
+            or not signatures
+            or len(signatures) > 16
+        ):
+            raise ValueError("non-A2T producer authority is unsafe or unbounded")
+        all_paths = changed + list(signatures)
+        if any(
+            not isinstance(path, str)
+            or not path
+            or path.startswith("/")
+            or ".." in Path(path).parts
+            for path in all_paths
+        ) or not set(signatures).issubset(changed):
+            raise ValueError("non-A2T producer authority has an unsafe path contract")
+        if any(
+            not isinstance(values, list)
+            or not values
+            or len(values) > 32
+            or any(not isinstance(value, str) or not value for value in values)
+            for values in signatures.values()
+        ):
+            raise ValueError("non-A2T producer authority has invalid signatures")
+        identity = subprocess.run(
+            ["git", "show", "-s", "--format=%H%x00%P%x00%s", revision],
+            cwd=repository, check=False, capture_output=True, text=True,
+        )
+        if (
+            identity.returncode != 0
+            or len(identity.stdout.encode()) > 4096
+            or identity.stdout.rstrip("\n") != f"{revision}\x00{parent}\x00{subject}"
+            or _revision_changed_paths(repository, revision) != set(changed)
+        ):
+            raise ValueError("non-A2T producer authority does not match its immutable commit")
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", revision, source_revision],
+            cwd=repository, check=False, capture_output=True,
+        )
+        if ancestor.returncode != 0:
+            raise ValueError("non-A2T producer authority is not in source history")
+        for path, declared in signatures.items():
+            before = subprocess.run(
+                ["git", "show", f"{parent}:{path}"], cwd=repository,
+                check=False, capture_output=True,
+            )
+            after = subprocess.run(
+                ["git", "show", f"{revision}:{path}"], cwd=repository,
+                check=False, capture_output=True,
+            )
+            if len(before.stdout) > 2 * 1024 * 1024 or len(after.stdout) > 2 * 1024 * 1024:
+                raise ValueError("non-A2T producer authority source is unbounded")
+            before_signatures = product_producer_signatures(
+                before.stdout.decode(errors="replace")
+            ) if before.returncode == 0 else ()
+            after_signatures = product_producer_signatures(
+                after.stdout.decode(errors="replace")
+            ) if after.returncode == 0 else ()
+            added = Counter(after_signatures) - Counter(before_signatures)
+            if added != Counter(declared):
+                raise ValueError("non-A2T producer authority signature delta does not match")
+            if path in authorities:
+                raise ValueError("non-A2T producer authority path is duplicated")
+            authorities[path] = row
+    return authorities
+
+
 def classify_non_a2t_product_producers(
     repository: Path, source_revision: str, producer_paths: set[str]
 ) -> list[dict[str, Any]]:
     """Expose later package-owned producers without attributing them to A2T."""
     a3_paths, authority_blob = _a3_authority_paths(repository, source_revision)
+    commit_authorities = _non_a2t_producer_authorities(repository, source_revision)
+    if not set(commit_authorities).issubset(producer_paths):
+        raise ValueError("non-A2T producer authority does not name a discovered delta")
     source_blobs = git_blobs(repository, source_revision, producer_paths)
     base_blobs = git_blobs(repository, A2T_SCOPE_BASE, producer_paths)
     rows: list[dict[str, Any]] = []
     for path in sorted(producer_paths):
         revision, subject = _producer_introduction(repository, source_revision, path)
         introduction_paths = _revision_changed_paths(repository, revision)
-        if (
-            path not in a3_paths
-            or path not in introduction_paths
-            or A3_SCOPE_AUTHORITY_PATH not in introduction_paths
-        ):
+        is_a3_producer = (
+            path in a3_paths
+            and path in introduction_paths
+            and A3_SCOPE_AUTHORITY_PATH in introduction_paths
+        )
+        commit_authority = commit_authorities.get(path)
+        if is_a3_producer and commit_authority is not None:
+            raise ValueError(f"product producer has overlapping package authorities: {path}")
+        if not is_a3_producer and commit_authority is None:
             raise ValueError(f"unclassified product producer path cannot use A2T disposition: {path}")
-        rows.append({
-            "path": path,
-            "base_blob": base_blobs.get(path),
-            "source_blob": source_blobs.get(path),
-            "owner_package": "A3-first-visible-product-evidence",
-            "scope_authority": {
+        if commit_authority is not None and (
+            revision != commit_authority["introducing_revision"]
+            or subject != commit_authority["introducing_subject"]
+        ):
+            raise ValueError(f"product producer introduction differs from authority: {path}")
+        if is_a3_producer:
+            owner_package = "A3-first-visible-product-evidence"
+            scope_authority = {
+                "kind": "immutable-package-path-set",
                 "path": A3_SCOPE_AUTHORITY_PATH,
                 "source_blob": authority_blob,
                 "symbol": "A3_IMPLEMENTATION_SOURCE_PATHS",
                 "producer_introduction_touched_authority_path": True,
-            },
+            }
+        else:
+            owner_package = commit_authority["owner_package"]
+            scope_authority = {
+                "kind": "immutable-git-commit-boundary",
+                "manifest_path": A2T_SCOPE_MANIFEST_PATH,
+                "introducing_revision": commit_authority["introducing_revision"],
+                "introducing_parent": commit_authority["introducing_parent"],
+                "changed_paths": commit_authority["changed_paths"],
+                "added_producer_signatures": commit_authority[
+                    "added_producer_signatures"
+                ][path],
+                "producer_introduction_touched_authority_path": False,
+            }
+        rows.append({
+            "path": path,
+            "base_blob": base_blobs.get(path),
+            "source_blob": source_blobs.get(path),
+            "owner_package": owner_package,
+            "scope_authority": scope_authority,
             "introducing_revision": revision,
             "introducing_subject": subject,
             "overhead_evidence_required_from_owner": True,
@@ -2341,15 +2538,15 @@ def main() -> int:
         "scope": "offline-installed-cli-mcp-analysis",
         "producer_overhead_disposition": {
             "status": "not-applicable-no-a2t-scoped-producer-cost",
-            "reason": "The exact A2T-scoped delta adds offline analysis and no product producer call site; the later A3-owned producer is disclosed separately and is not graded here.",
+            "reason": "The exact A2T-scoped delta adds offline analysis and no product producer call site; the later input-to-present and A3 producers are disclosed separately and are not graded here.",
             "evidence": producer_inventory,
             "routing_inventory": routing_inventory,
-            "non_a2t_owner_followup": "A3 must provide or bind tracing-off, tracing-on/idle, and active-capture overhead/control evidence for its later product producer; A2T does not evaluate that owner evidence.",
+            "non_a2t_owner_followup": "The input-to-present latency tracing and A3 packages must each provide or bind tracing-off, tracing-on/idle, and active-capture overhead/control evidence for their later product producers; A2T does not evaluate that owner evidence.",
             "required_followup": "B6 must run the three-state 5-warmup/30-trial and 20 fresh-process protocol when Vellum producer instrumentation is added.",
             "formal_plan_status": "accepted-canonical-plan",
             "formal_plan_revision": args.plan_revision,
             "formal_plan_sha256": args.plan_sha256,
-            "formal_plan_note": "The canonical plan accepts the no-added-producer disposition for the original A2T implementation and preserves the full product producer/xrun protocol for B6; the later A3-owned producer remains separately accountable, and offline timing is analyzer evidence rather than product-capture evidence.",
+            "formal_plan_note": "The canonical plan accepts the no-added-producer disposition for the original A2T implementation and preserves the full product producer/xrun protocol for B6; later non-A2T producer packages remain separately accountable, and offline timing is analyzer evidence rather than product-capture evidence.",
         },
         "machine": system_profiler_identity(),
         "adapter_relevance": "recorded for host provenance only; saved-trace analysis performs no GPU work",
