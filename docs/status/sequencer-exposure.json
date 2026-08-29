@@ -15,21 +15,28 @@
         "id": "historical-release-census-incomplete",
         "surface": "historical_census",
         "owner": "sequencer-exposure-audit",
-        "dependencies": ["historical-release-census"],
+        "dependencies": [
+          "historical-release-census"
+        ],
         "rationale": "The initial ledger contains only releases whose protected head, merge, and source evidence were reverified; older planning RELEASE prose still requires protected-main reconciliation before the audit may be called complete."
       },
       {
         "id": "live-product-control-semantic-zero",
         "surface": "live_product_control",
         "owner": "sequencer-control-closure",
-        "dependencies": ["product-a-timeline-document-session", "product-a-sequencer-control-tranche"],
+        "dependencies": [
+          "product-a-timeline-document-session",
+          "product-a-sequencer-control-tranche"
+        ],
         "rationale": "The Product A registry has generic state and test-input operations, including a transport-shaped test event, but no sequencer or timeline document capability ID, operation, executor, or policy projection."
       },
       {
         "id": "p2-21-ios-simulator-acceptance-held",
         "surface": "historical_census",
         "owner": "sequencer-p2-21-acceptance",
-        "dependencies": ["p2-21-ios-simulator-roundtrip"],
+        "dependencies": [
+          "p2-21-ios-simulator-roundtrip"
+        ],
         "rationale": "PR #7644 protected-delivered the backend, but planning acceptance remains held until a fresh PULP_IOS_REQUIRE_SIMULATOR=1 run captures the live virtual-CoreMIDI source/destination enumeration, bidirectional I/O, teardown, and disappearance artifact. A released delivery row records merge provenance only and does not release that planning claim."
       }
     ]
@@ -56,7 +63,10 @@
       "evidence": [
         {
           "path": "core/state/include/pulp/state/sequencer_state_channel.hpp",
-          "needles": ["class SequencerStateChannelT", "using SequencerStateChannel"]
+          "needles": [
+            "class SequencerStateChannelT",
+            "using SequencerStateChannel"
+          ]
         }
       ],
       "surfaces": {
@@ -67,7 +77,10 @@
             {
               "kind": "sdk_header",
               "path": "core/state/include/pulp/state/sequencer_state_channel.hpp",
-              "needles": ["class SequencerStateChannelT", "using SequencerStateChannel"]
+              "needles": [
+                "class SequencerStateChannelT",
+                "using SequencerStateChannel"
+              ]
             }
           ]
         },
@@ -82,7 +95,9 @@
         "live_product_control": {
           "disposition": "gap",
           "rationale": "Product A has no typed operation and executor for sequencer grid snapshots or edits.",
-          "dependencies": ["product-a-sequencer-state-operation"],
+          "dependencies": [
+            "product-a-sequencer-state-operation"
+          ],
           "owner": "sequencer-control-closure"
         },
         "design_time_agent_manifest": {
@@ -113,7 +128,10 @@
       "evidence": [
         {
           "path": "core/timeline/include/pulp/timeline/clip.hpp",
-          "needles": ["class MidiContent", "using ClipContent"]
+          "needles": [
+            "class MidiContent",
+            "using ClipContent"
+          ]
         }
       ],
       "surfaces": {
@@ -124,7 +142,9 @@
             {
               "kind": "sdk_header",
               "path": "core/timeline/include/pulp/timeline/clip.hpp",
-              "needles": ["class MidiContent"]
+              "needles": [
+                "class MidiContent"
+              ]
             }
           ]
         },
@@ -135,12 +155,17 @@
             {
               "kind": "cli_definition",
               "path": "core/timeline/schema/timeline_cli_verbs.json",
-              "needles": ["pulp.timeline.command.replace_note_content"]
+              "needles": [
+                "pulp.timeline.command.replace_note_content"
+              ]
             },
             {
               "kind": "cli_handler",
               "path": "tools/cli/cmd_seq.cpp",
-              "needles": ["command_apply", "ProjectSource::file"]
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
             }
           ]
         },
@@ -151,19 +176,27 @@
             {
               "kind": "mcp_definition",
               "path": "core/timeline/schema/timeline_mcp_tools.json",
-              "needles": ["pulp_timeline_command_apply", "pulp.timeline.command.replace_note_content"]
+              "needles": [
+                "pulp_timeline_command_apply",
+                "pulp.timeline.command.replace_note_content"
+              ]
             },
             {
               "kind": "mcp_handler",
               "path": "tools/mcp/mcp_timeline_tools.cpp",
-              "needles": ["handle_timeline_command_apply", "kTimelineCommandApplyToolName"]
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
             }
           ]
         },
         "live_product_control": {
           "disposition": "gap",
           "rationale": "Offline document commands are not Product A grants; no live typed note-content operation is registered.",
-          "dependencies": ["product-a-timeline-document-session"],
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
           "owner": "sequencer-control-closure"
         },
         "design_time_agent_manifest": {
@@ -193,7 +226,10 @@
       "evidence": [
         {
           "path": "core/timeline/include/pulp/timeline/tuning.hpp",
-          "needles": ["struct TuningReference", "valid_tuning_reference"]
+          "needles": [
+            "struct TuningReference",
+            "valid_tuning_reference"
+          ]
         }
       ],
       "surfaces": {
@@ -204,26 +240,35 @@
             {
               "kind": "sdk_header",
               "path": "core/timeline/include/pulp/timeline/tuning.hpp",
-              "needles": ["struct TuningReference"]
+              "needles": [
+                "struct TuningReference"
+              ]
             }
           ]
         },
         "offline_timeline_cli": {
           "disposition": "gap",
           "rationale": "The CLI can read and validate tuning in a project, but the typed command vocabulary has no tuning mutation.",
-          "dependencies": ["offline-timeline-tuning-command"],
+          "dependencies": [
+            "offline-timeline-tuning-command"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
           "rationale": "The MCP schema advertises tuning documents but has no typed tuning mutation command.",
-          "dependencies": ["offline-timeline-tuning-command"],
+          "dependencies": [
+            "offline-timeline-tuning-command"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "live_product_control": {
           "disposition": "gap",
           "rationale": "Product A has no typed tuning read or mutation operation for a live sequencer document.",
-          "dependencies": ["product-a-timeline-document-session", "offline-timeline-tuning-command"],
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "offline-timeline-tuning-command"
+          ],
           "owner": "sequencer-control-closure"
         },
         "design_time_agent_manifest": {
@@ -254,7 +299,10 @@
       "evidence": [
         {
           "path": "core/timeline/include/pulp/timeline/modulation.hpp",
-          "needles": ["struct Modulator", "struct MacroControl"]
+          "needles": [
+            "struct Modulator",
+            "struct MacroControl"
+          ]
         }
       ],
       "surfaces": {
@@ -265,26 +313,36 @@
             {
               "kind": "sdk_header",
               "path": "core/timeline/include/pulp/timeline/modulation.hpp",
-              "needles": ["struct Modulator", "struct MacroControl"]
+              "needles": [
+                "struct Modulator",
+                "struct MacroControl"
+              ]
             }
           ]
         },
         "offline_timeline_cli": {
           "disposition": "gap",
           "rationale": "The CLI can read and validate modulation state but has no typed modulator, macro, or route mutation command.",
-          "dependencies": ["offline-timeline-modulation-commands"],
+          "dependencies": [
+            "offline-timeline-modulation-commands"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
           "rationale": "The MCP document schema includes modulation types but its command enum has no typed modulation mutation.",
-          "dependencies": ["offline-timeline-modulation-commands"],
+          "dependencies": [
+            "offline-timeline-modulation-commands"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "live_product_control": {
           "disposition": "gap",
           "rationale": "Product A has no typed live timeline macro or modulation-route operation.",
-          "dependencies": ["product-a-timeline-document-session", "offline-timeline-modulation-commands"],
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "offline-timeline-modulation-commands"
+          ],
           "owner": "sequencer-control-closure"
         },
         "design_time_agent_manifest": {
@@ -313,7 +371,10 @@
       "evidence": [
         {
           "path": "core/timeline_agent_view/include/pulp/timeline_agent_view/agent_view.hpp",
-          "needles": ["class AgentView", "kAgentViewVersion"]
+          "needles": [
+            "class AgentView",
+            "kAgentViewVersion"
+          ]
         }
       ],
       "surfaces": {
@@ -324,26 +385,36 @@
             {
               "kind": "sdk_header",
               "path": "core/timeline_agent_view/include/pulp/timeline_agent_view/agent_view.hpp",
-              "needles": ["class AgentView", "kAgentViewVersion"]
+              "needles": [
+                "class AgentView",
+                "kAgentViewVersion"
+              ]
             }
           ]
         },
         "offline_timeline_cli": {
           "disposition": "gap",
           "rationale": "The offline CLI has project open and explain but no bounded AgentView paging/diff projection.",
-          "dependencies": ["offline-agent-view-projection"],
+          "dependencies": [
+            "offline-agent-view-projection"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
           "rationale": "The offline MCP tools do not expose AgentView outline, paging, or dirty-set projection.",
-          "dependencies": ["offline-agent-view-projection"],
+          "dependencies": [
+            "offline-agent-view-projection"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "live_product_control": {
           "disposition": "gap",
           "rationale": "Product A state read is parameter-oriented and has no exact-document AgentView executor binding.",
-          "dependencies": ["product-a-timeline-document-session", "offline-agent-view-projection"],
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "offline-agent-view-projection"
+          ],
           "owner": "sequencer-control-closure"
         },
         "design_time_agent_manifest": {
@@ -371,7 +442,10 @@
       "evidence": [
         {
           "path": "core/timeline/include/pulp/timeline/compile_context.hpp",
-          "needles": ["kCompileContextKindCount = 5", "using Bits = std::uint16_t"]
+          "needles": [
+            "kCompileContextKindCount = 5",
+            "using Bits = std::uint16_t"
+          ]
         }
       ],
       "surfaces": {
@@ -382,7 +456,10 @@
             {
               "kind": "sdk_header",
               "path": "core/timeline/include/pulp/timeline/compile_context.hpp",
-              "needles": ["kCompileContextKindCount = 5", "using Bits = std::uint16_t"]
+              "needles": [
+                "kCompileContextKindCount = 5",
+                "using Bits = std::uint16_t"
+              ]
             }
           ]
         },
@@ -427,11 +504,17 @@
       "evidence": [
         {
           "path": "core/timeline/include/pulp/timeline/device_placement.hpp",
-          "needles": ["struct DevicePlacement", "DeviceConfiguration"]
+          "needles": [
+            "struct DevicePlacement",
+            "DeviceConfiguration"
+          ]
         },
         {
           "path": "core/timeline/include/pulp/timeline/command.hpp",
-          "needles": ["struct InsertDevice", "struct SetDeviceState"]
+          "needles": [
+            "struct InsertDevice",
+            "struct SetDeviceState"
+          ]
         }
       ],
       "surfaces": {
@@ -442,7 +525,9 @@
             {
               "kind": "sdk_header",
               "path": "core/timeline/include/pulp/timeline/device_placement.hpp",
-              "needles": ["struct DevicePlacement"]
+              "needles": [
+                "struct DevicePlacement"
+              ]
             }
           ]
         },
@@ -453,12 +538,18 @@
             {
               "kind": "cli_definition",
               "path": "core/timeline/schema/timeline_cli_verbs.json",
-              "needles": ["pulp.timeline.command.insert_device", "pulp.timeline.command.set_device_state"]
+              "needles": [
+                "pulp.timeline.command.insert_device",
+                "pulp.timeline.command.set_device_state"
+              ]
             },
             {
               "kind": "cli_handler",
               "path": "tools/cli/cmd_seq.cpp",
-              "needles": ["command_apply", "ProjectSource::file"]
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
             }
           ]
         },
@@ -469,12 +560,18 @@
             {
               "kind": "mcp_definition",
               "path": "core/timeline/schema/timeline_mcp_tools.json",
-              "needles": ["pulp.timeline.command.insert_device", "pulp.timeline.command.set_device_state"]
+              "needles": [
+                "pulp.timeline.command.insert_device",
+                "pulp.timeline.command.set_device_state"
+              ]
             },
             {
               "kind": "mcp_handler",
               "path": "tools/mcp/mcp_timeline_tools.cpp",
-              "needles": ["handle_timeline_command_apply", "kTimelineCommandApplyToolName"]
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
             }
           ]
         },
@@ -482,7 +579,10 @@
           "disposition": "gap",
           "rationale": "Offline typed device commands are not live Product A device-chain authority.",
           "owner": "sequencer-control-closure",
-          "dependencies": ["product-a-timeline-document-session", "product-a-device-chain-operations"]
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "product-a-device-chain-operations"
+          ]
         },
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
@@ -513,7 +613,10 @@
       "evidence": [
         {
           "path": "core/host/src/timeline_device_resolver.cpp",
-          "needles": ["PluginFormat::BuiltIn", "DeviceKind::BuiltIn"]
+          "needles": [
+            "PluginFormat::BuiltIn",
+            "DeviceKind::BuiltIn"
+          ]
         }
       ],
       "surfaces": {
@@ -524,7 +627,9 @@
             {
               "kind": "sdk_header",
               "path": "core/host/include/pulp/host/timeline_device_resolver.hpp",
-              "needles": ["load_builtin_plugin"]
+              "needles": [
+                "load_builtin_plugin"
+              ]
             }
           ]
         },
@@ -568,11 +673,17 @@
       "evidence": [
         {
           "path": "examples/timeline-phase1/timeline_example_engine.cpp",
-          "needles": ["CompileInvalidationInput", "committed"]
+          "needles": [
+            "CompileInvalidationInput",
+            "committed"
+          ]
         },
         {
           "path": "examples/timeline-phase1/test_timeline_phase1_examples.cpp",
-          "needles": ["sparse recompile reuses the clean sentinel track", "sentinel_after.get() == sentinel_before.get()"]
+          "needles": [
+            "sparse recompile reuses the clean sentinel track",
+            "sentinel_after.get() == sentinel_before.get()"
+          ]
         }
       ],
       "surfaces": {
@@ -592,7 +703,9 @@
           "disposition": "gap",
           "rationale": "The example proves in-process adoption but Product A has no live sequencer document session that can drive it.",
           "owner": "sequencer-control-closure",
-          "dependencies": ["product-a-timeline-document-session"]
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ]
         },
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
@@ -623,7 +736,10 @@
       "evidence": [
         {
           "path": "core/midi/platform/mac/coremidi_device.mm",
-          "needles": ["TARGET_OS_IPHONE", "create_midi_system"]
+          "needles": [
+            "TARGET_OS_IPHONE",
+            "create_midi_system"
+          ]
         }
       ],
       "surfaces": {
@@ -670,7 +786,10 @@
       "evidence": [
         {
           "path": "core/timeline/include/pulp/timeline/model.hpp",
-          "needles": ["class DynamicsLane", "with_dynamics_lane"]
+          "needles": [
+            "class DynamicsLane",
+            "with_dynamics_lane"
+          ]
         }
       ],
       "surfaces": {
@@ -681,26 +800,36 @@
             {
               "kind": "sdk_header",
               "path": "core/timeline/include/pulp/timeline/model.hpp",
-              "needles": ["class DynamicsLane", "with_dynamics_lane"]
+              "needles": [
+                "class DynamicsLane",
+                "with_dynamics_lane"
+              ]
             }
           ]
         },
         "offline_timeline_cli": {
           "disposition": "gap",
           "rationale": "The CLI can persist and inspect the lane but has no typed dynamics-lane mutation command.",
-          "dependencies": ["offline-timeline-dynamics-command"],
+          "dependencies": [
+            "offline-timeline-dynamics-command"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
           "rationale": "The MCP command vocabulary has no typed dynamics-lane mutation.",
-          "dependencies": ["offline-timeline-dynamics-command"],
+          "dependencies": [
+            "offline-timeline-dynamics-command"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "live_product_control": {
           "disposition": "gap",
           "rationale": "Product A has no typed live dynamics-lane operation or executor.",
-          "dependencies": ["product-a-timeline-document-session", "offline-timeline-dynamics-command"],
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "offline-timeline-dynamics-command"
+          ],
           "owner": "sequencer-control-closure"
         },
         "design_time_agent_manifest": {
@@ -729,7 +858,10 @@
       "evidence": [
         {
           "path": "core/host/include/pulp/host/timeline_offline_renderer.hpp",
-          "needles": ["render_timeline_offline", "TimelineOfflineRenderResult"]
+          "needles": [
+            "render_timeline_offline",
+            "TimelineOfflineRenderResult"
+          ]
         }
       ],
       "surfaces": {
@@ -740,26 +872,35 @@
             {
               "kind": "sdk_header",
               "path": "core/host/include/pulp/host/timeline_offline_renderer.hpp",
-              "needles": ["render_timeline_offline"]
+              "needles": [
+                "render_timeline_offline"
+              ]
             }
           ]
         },
         "offline_timeline_cli": {
           "disposition": "gap",
           "rationale": "The existing render command still uses ArrangementAudioRenderer and does not call this transport-aware hosted renderer.",
-          "dependencies": ["x-a6-hosted-render-tool-integration"],
+          "dependencies": [
+            "x-a6-hosted-render-tool-integration"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
           "rationale": "The existing MCP render handler still uses ArrangementAudioRenderer and does not call this transport-aware hosted renderer.",
-          "dependencies": ["x-a6-hosted-render-tool-integration"],
+          "dependencies": [
+            "x-a6-hosted-render-tool-integration"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "live_product_control": {
           "disposition": "gap",
           "rationale": "Product A's generic offline-audio executor does not accept or render a live sequencer document through this timeline path.",
-          "dependencies": ["product-a-timeline-document-session", "product-a-timeline-render-operation"],
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "product-a-timeline-render-operation"
+          ],
           "owner": "sequencer-control-closure"
         },
         "design_time_agent_manifest": {
@@ -789,7 +930,10 @@
       "evidence": [
         {
           "path": "tools/scripts/timeline_fixture_coverage_check.py",
-          "needles": ["every persisted sequence schema version", "versions lacking a corpus document"]
+          "needles": [
+            "every persisted sequence schema version",
+            "versions lacking a corpus document"
+          ]
         }
       ],
       "surfaces": {
@@ -834,7 +978,10 @@
       "evidence": [
         {
           "path": "core/playback/include/pulp/playback/buffered_content_source.hpp",
-          "needles": ["class BufferedContentSource", "BufferedContentSourceConfig"]
+          "needles": [
+            "class BufferedContentSource",
+            "BufferedContentSourceConfig"
+          ]
         }
       ],
       "surfaces": {
@@ -845,7 +992,10 @@
             {
               "kind": "sdk_header",
               "path": "core/playback/include/pulp/playback/buffered_content_source.hpp",
-              "needles": ["class BufferedContentSource", "BufferedContentSourceConfig"]
+              "needles": [
+                "class BufferedContentSource",
+                "BufferedContentSourceConfig"
+              ]
             }
           ]
         },
@@ -887,11 +1037,17 @@
       "evidence": [
         {
           "path": "test/test_timeline_scale.cpp",
-          "needles": ["missing performance budget", "kAutomationPointsPerLane = 10'000"]
+          "needles": [
+            "missing performance budget",
+            "kAutomationPointsPerLane = 10'000"
+          ]
         },
         {
           "path": "test/test_timeline_agent_view.cpp",
-          "needles": ["missing performance budget", "kPagingFirstTrackId = 10'000"]
+          "needles": [
+            "missing performance budget",
+            "kPagingFirstTrackId = 10'000"
+          ]
         }
       ],
       "surfaces": {
@@ -940,7 +1096,11 @@
       "evidence": [
         {
           "path": "tools/scripts/sequencer_exposure_check.py",
-          "needles": ["validate_transition", "validate_release_evidence", "validate_tombstone_provenance"]
+          "needles": [
+            "validate_transition",
+            "validate_release_evidence",
+            "validate_tombstone_provenance"
+          ]
         },
         {
           "path": ".github/workflows/version-skill-check.yml",
@@ -1652,19 +1812,25 @@
         "offline_timeline_cli": {
           "disposition": "gap",
           "rationale": "The offline Timeline CLI does not yet issue proposal-safe commands through restricted writer identities.",
-          "dependencies": ["P0-40"],
+          "dependencies": [
+            "P0-40"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
           "rationale": "The offline Timeline MCP server does not yet bind sessions to restricted writer masks and quotas.",
-          "dependencies": ["P0-40"],
+          "dependencies": [
+            "P0-40"
+          ],
           "owner": "timeline-cli-mcp"
         },
         "live_product_control": {
           "disposition": "gap",
           "rationale": "Product A has no live Timeline document-session authority that consumes these writer masks.",
-          "dependencies": ["product-a-timeline-document-session"],
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
           "owner": "sequencer-control-closure"
         },
         "design_time_agent_manifest": {
@@ -1711,6 +1877,101 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "Diagnostic redaction does not describe an offline authoring capability."
+        }
+      }
+    },
+    {
+      "id": "timebase-foundation-link-boundary",
+      "title": "Timebase links the header-only foundation target instead of the full runtime",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "dsp-foundation-link-boundary-20260829",
+      "owned_paths": [
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/runtime/CMakeLists.txt",
+        "core/timebase/CMakeLists.txt",
+        "docs/guides/timeline-sdk.md",
+        "examples/timeline-sdk-consumer/CMakeLists.txt",
+        "tools/cmake/PulpInstallRules.cmake",
+        "tools/scripts/timeline_engine_dependency_floor_check.py"
+      ],
+      "evidence": [
+        {
+          "path": "examples/timeline-sdk-consumer/CMakeLists.txt",
+          "needles": [
+            "Pulp::foundation"
+          ]
+        },
+        {
+          "path": "docs/guides/timeline-sdk.md",
+          "needles": [
+            "Pulp::foundation"
+          ]
+        },
+        {
+          "path": "tools/scripts/timeline_engine_dependency_floor_check.py",
+          "needles": [
+            "FORBIDDEN_LINKS"
+          ]
+        },
+        {
+          "path": ".agents/skills/timeline/SKILL.md",
+          "needles": [
+            "Pulp::foundation"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "FORBIDDEN_LINKS"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "Pulp::foundation is a new exported target in PULP_SDK_TARGETS, and Pulp::timebase's exported link interface changes from Pulp::runtime to Pulp::foundation. The engine closure a timeline consumer links therefore changes, which is why the exact closure lists in the timeline SDK consumer and the target table in the timeline SDK guide had to change with it. No header moves and no engine API is added, removed, or altered: the change is which target carries the header-only Result and queue primitives, so a consumer of the timebase no longer acquires libpulp-runtime.a or the mbedTLS link items its PRIVATE dependencies propagate.",
+          "evidence": [
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "pulp-foundation"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "core/runtime/CMakeLists.txt",
+              "needles": [
+                "add_library(pulp-foundation INTERFACE)",
+                "pulp::foundation"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "core/timebase/CMakeLists.txt",
+              "needles": [
+                "pulp::foundation"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline command, argument, or handler changes; this is a link-graph and export-set change with no CLI projection."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation, schema, or handler changes; the affected targets carry no MCP projection."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "No capability, operation, executor binding, or profile policy is added or changed, so no live control grant is created or widened."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No authoring capability is described or altered; the agent capability manifest is unchanged by this slice."
         }
       }
     }
