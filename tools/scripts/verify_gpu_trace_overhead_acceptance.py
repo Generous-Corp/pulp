@@ -104,9 +104,10 @@ def _verify_producer_disposition(
         "formal_plan_revision": EXPECTED_PLAN_REVISION,
         "formal_plan_sha256": EXPECTED_PLAN_SHA256,
         "non_a2t_owner_followup": (
-            "The input-to-present latency tracing and A3 packages must each provide or "
-            "bind tracing-off, tracing-on/idle, and active-capture overhead/control "
-            "evidence for their later product producers; A2T does not evaluate that "
+            "The pre-base input-to-present latency tracing package and post-base A3 "
+            "package must each provide or bind tracing-off, tracing-on/idle, and "
+            "active-capture overhead/control evidence for their product producers; "
+            "A2T does not evaluate that "
             "owner evidence."
         ),
         "required_followup": (

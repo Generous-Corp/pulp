@@ -1,5 +1,11 @@
 # A4 Pulp-owned and maintained Three.js DPR corpus — 2026-08-28
 
+> **SUPERSEDED / NONCOUNTED.** These are preserved historical producer
+> receipts, not accepted A4 cells. The validity ledger records zero counted
+> cells because timer-control, metric-provenance, frozen-input,
+> capture-oracle, and adaptive-transition requirements were not satisfied.
+> None of this corpus can select an A4 or B5 disposition.
+
 This is the corrected compact corpus for the 48 Pulp-owned A4 cells captured
 against these independent authorities:
 
@@ -16,7 +22,7 @@ count toward A4.
 
 ## Result
 
-- Terminal cells: **48 / 48** across four scenarios, three modes, and four
+- Historical producer receipts: **48 / 48** across four scenarios, three modes, and four
   requested DPRs.
 - Pulp native fixtures: **36 pass, 0 fail**.
 - Maintained `threejs-audio-reactive` canary: **0 pass, 12 fail**.
@@ -28,8 +34,9 @@ count toward A4.
 The 12 Three.js failures are the independent Pulp capture fidelity verdict:
 the animated native Three.js canvas did not meet the content/similarity oracle.
 The same cells passed hardware identity, same-process metric, logical-input,
-and correlated Perfetto checks. The scenario therefore contributes a terminal
-Three.js **NO-GO** unless a changed immutable implementation is recaptured.
+and correlated Perfetto checks. The scenario recorded a historical Three.js
+capture failure. It is not an A4 **NO-GO** because the corpus is superseded and
+noncounted; a valid recapture is required before policy selection.
 
 The machine identity was `Daniels-Mac-Studio.local:arm64`. Every receipt binds
 `Native Dawn Adapter (Metal)`, backend `Dawn/WebGPU`, the exact Pulp head,

@@ -267,9 +267,10 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "producer_overhead_disposition": {
                 "status": "not-applicable-no-a2t-scoped-producer-cost",
                 "non_a2t_owner_followup": (
-                    "The input-to-present latency tracing and A3 packages must each provide or "
-                    "bind tracing-off, tracing-on/idle, and active-capture overhead/control "
-                    "evidence for their later product producers; A2T does not evaluate that "
+                    "The pre-base input-to-present latency tracing package and post-base A3 "
+                    "package must each provide or bind tracing-off, tracing-on/idle, and "
+                    "active-capture overhead/control evidence for their product producers; "
+                    "A2T does not evaluate that "
                     "owner evidence."
                 ),
                 "required_followup": (

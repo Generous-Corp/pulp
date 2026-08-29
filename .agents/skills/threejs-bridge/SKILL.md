@@ -41,18 +41,26 @@ Not supported by this skill:
 
 ## Critical Build Requirements
 
-1. **V8 engine required** — Three.js needs typed arrays, promises, and full ES module support. Use Homebrew `node@24` on macOS for this lane. The unversioned `node` formula may point at a newer V8 ABI; `libnode.147.dylib` has compiled but aborted during embedded V8 / Three.js evaluation. Configure with:
+1. **V8 engine required** — Three.js needs typed arrays, promises, and full ES
+   module support. Use Pulp's pinned, sealed v8-builder provider; do not use a
+   Homebrew `libnode` for acceptance. Fetch the matched platform asset once and
+   enable the strict provider gate:
    ```bash
+   python3 tools/scripts/fetch_v8_for_release.py darwin-arm64
    cmake -S . -B build -DPULP_JS_ENGINE=v8 \
-     -DV8_INCLUDE_DIR=/opt/homebrew/opt/node@24/include/node \
-     -DV8_LIB_DIR=/opt/homebrew/opt/node@24/lib \
-     -DV8_LIBRARY_PATH=/opt/homebrew/opt/node@24/lib/libnode.137.dylib \
+     -DPULP_VALIDATE_V8_PROVIDER_STRICT=ON \
      -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
    ```
-   Verify the linked dylib before trusting a local Three.js failure:
+   Verify the linked dylib and run the no-skip identity/capture gate before
+   trusting a local Three.js result:
    ```bash
-   otool -L build/test/web-compat/pulp-test-threejs-bridge | grep libnode
+   otool -L build/examples/threejs-native-demo/pulp-threejs-native-demo | grep libv8
+   ctest --test-dir build -R '^v8_provider_identity_strict$' --output-on-failure
    ```
+   `V8_DIR` may select a baked sealed provider. The legacy `V8_INCLUDE_DIR`,
+   `V8_LIB_DIR`, and `V8_LIBRARY_PATH` overrides are for explicit local
+   experimentation only; results from Homebrew `libnode` are not acceptance
+   evidence because its external ICU/Abseil surface can collide with Skia.
 
 2. **gpu_surface MUST be passed to WidgetBridge** — The native GPU bridge only initializes when WidgetBridge receives a non-null GpuSurface pointer. Without it, Three.js gets no WebGPU device and the 3D canvas renders black. This is the `attach_gpu_surface()` call in the demo.
 

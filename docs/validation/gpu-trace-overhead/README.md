@@ -110,16 +110,16 @@ source annotation `"gpu_evidence_id"` (serialized by Perfetto as
 Generic symptom prose such as “slow GPU startup” is not an identifier and
 cannot expand the scope by substring accident.
 
-The final Horizon-A tree does contain later product producers outside A2T: the
-input-to-present latency package adds the render-category `gpu_acquire`,
-`gpu_submit`, and `gpu_present` stages, and A3 adds its health producer in
-`inspect/src/control_gpu_health_provider.cpp`. The recorder exposes each exact
-blob and introducing revision under `non_a2t_product_producers`. It binds the
-first package to its immutable five-path Git commit and exact three-signature
-delta, and binds A3 to its immutable-source path authority; it does not hide
-either path or use either to justify A2T's disposition. Any product producer
-without independently checked package authority fails closed. Each owner
-package must provide its own
+The rebased immutable A2T base already contains the input-to-present latency
+package's render-category `gpu_acquire`, `gpu_submit`, and `gpu_present`
+stages. That pre-base package remains bound through A3's immutable authority,
+but it is not a post-base producer delta. A3's health producer in
+`inspect/src/control_gpu_health_provider.cpp` is the sole post-base producer
+exposed under `non_a2t_product_producers`, with its exact blob, introducing
+revision, and immutable-source path authority. The recorder neither hides that
+path nor uses it to justify A2T's disposition. Any post-base product producer
+without independently checked package authority fails closed. Both owner
+packages must provide their own
 tracing-off, tracing-on/idle, and active-capture overhead/control evidence;
 A2T records that obligation as external rather than pretending to evaluate it.
 
