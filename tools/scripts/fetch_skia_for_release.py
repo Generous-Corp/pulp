@@ -19,7 +19,7 @@ Usage:
         --cache-root ~/.cache/pulp/skia --cache-lock-timeout 300
 
 `--cache-root` is the host/worktree mode: it resolves an immutable
-`<platform>-<asset-sha256>-receipt-v1` generation, downloads into private sibling staging,
+`<platform>-<asset-sha256>-receipt-v2` generation, downloads into private sibling staging,
 and atomically renames the validated generation into place. Release workflows
 continue to use the default or explicit `--dest` mode for isolated matrix trees.
 
@@ -196,7 +196,7 @@ def keyed_cache_dest(cache_root: str, matrix_platform: str, asset_sha: str) -> P
     # Receipt format is part of the immutable generation identity. Adding a
     # stronger validator must publish beside old generations, never mutate one
     # that an active compiler may still have open.
-    return Path(cache_root).absolute() / f"{matrix_platform}-{asset_sha.lower()}-receipt-v1"
+    return Path(cache_root).absolute() / f"{matrix_platform}-{asset_sha.lower()}-receipt-v2"
 
 
 _ASSET_STAMP = ".skia-asset-sha256"

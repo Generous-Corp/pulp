@@ -218,7 +218,7 @@ class ImmutableKeyedCache(unittest.TestCase):
         c = fetch_skia.keyed_cache_dest("/cache", "linux-x64", "a" * 64)
         self.assertNotEqual(a, b)
         self.assertNotEqual(a, c)
-        self.assertTrue(a.name.endswith("-receipt-v1"))
+        self.assertTrue(a.name.endswith("-receipt-v2"))
 
     def test_private_stage_is_atomically_published_and_removed(self):
         with _in_tempdir() as td:
@@ -230,6 +230,27 @@ class ImmutableKeyedCache(unittest.TestCase):
             dest = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha)
             self.assertTrue(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
             self.assertEqual(list(root.glob(".*.staging-*")), [])
+
+    def test_stronger_receipt_generation_publishes_beside_legacy_v1(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"format-v2")
+            root = td / "cache"
+            legacy = root / f"darwin-arm64-{sha}-receipt-v1"
+            legacy.mkdir(parents=True)
+            sentinel = legacy / "legacy-generation"
+            sentinel.write_text("retained", encoding="utf-8")
+
+            self.assertEqual(
+                fetch_skia.main([
+                    "fetch", "darwin-arm64", "--cache-root", str(root),
+                    "--cache-lock-timeout", "1",
+                ]),
+                0,
+            )
+
+            current = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha)
+            self.assertTrue(fetch_skia.cache_generation_valid(current, "darwin-arm64", sha))
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "retained")
 
     def test_pin_rotation_retains_old_generation_and_publishes_new(self):
         with _in_tempdir() as td:
