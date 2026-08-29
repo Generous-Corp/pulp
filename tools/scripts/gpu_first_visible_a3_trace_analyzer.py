@@ -155,6 +155,11 @@ def prepare(argv: list[str]) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(built, output)
     output.chmod(0o500)
+    # Retain the prepared binary and provenance, not a role-local duplicate of
+    # Cargo's potentially multi-gigabyte target/cache state.
+    shutil.rmtree(target)
+    shutil.rmtree(cargo_home)
+    shutil.rmtree(temporary)
     atomic_json(receipt, {
         "schema": RECEIPT_SCHEMA,
         "version": 1,

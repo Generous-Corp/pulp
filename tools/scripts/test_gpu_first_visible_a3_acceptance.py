@@ -821,6 +821,31 @@ def main() -> int:
         expect_failure(mutated, root, "passing trace-producer overhead controls")
 
         mutated = copy.deepcopy(receipt)
+        overhead_ref = mutated["trace_producer_overhead"]["receipt"]
+        overhead_path = root / overhead_ref["path"]
+        original_overhead = overhead_path.read_bytes()
+        raw_paths = {
+            state: root / f"{state}.json" for state in trace_producer_overhead.STATES
+        }
+        original_raw = {state: path.read_bytes() for state, path in raw_paths.items()}
+        for path in raw_paths.values():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw["campaign_id"] = "different-campaign"
+            write_json(root, path.name, raw)
+        write_json(
+            root, overhead_ref["path"],
+            trace_producer_overhead.build_receipt(
+                raw_paths, evidence_root=root,
+                generated_utc="2026-08-28T12:00:00Z",
+            ),
+        )
+        rehash(mutated, root, overhead_ref)
+        expect_failure(mutated, root, "product identity differs from its measured campaign")
+        overhead_path.write_bytes(original_overhead)
+        for state, data in original_raw.items():
+            raw_paths[state].write_bytes(data)
+
+        mutated = copy.deepcopy(receipt)
         mutated["budget"]["status"] = "unratified"
         expect_failure(mutated, root, "ratified budget")
 
@@ -1158,7 +1183,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=48 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=49 "
             "checked_in_nonterminal=verified"
         )
     return 0
