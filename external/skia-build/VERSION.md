@@ -142,7 +142,7 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `428750198cca64307914ebec5adac41be5ae7e07c3ab3c2ddcba047838cbdc3b` |
 | `skia-build-linux-arm64-gpu-release.zip` | `a829984ce35141ac1e8f608e29496f69ad24bd2e5215f2899a071dc6c2e0ed0e` |
 | `skia-build-linux-x64-gpu-release.zip` | `b132db47979f116a2b35720c6e4e8c7128505499e52b218cc64546f87b0bb363` |
-| `skia-build-mac-arm64-gpu-release.zip` | `0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9` |
+| `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9` |
 | `skia-build-mac-universal-gpu-release.zip` | `0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9` |
 | `skia-build-mac-x86_64-gpu-release.zip` | `0aeb3a4879d59bf42bb4a42a21cda292b6c5401fa24377b241623a600664471d` |
 | `skia-build-wasm-wasm32-gpu-release.zip` | `a5218b84266b0d79dd9c1ce514be6d06f8898085aaa9309a9830442f29ca4887` |

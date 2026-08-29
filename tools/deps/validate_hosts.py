@@ -32,9 +32,9 @@ def current_branch() -> str:
     return result.stdout.strip()
 
 
-def current_sha() -> str:
+def resolve_ref_sha(ref: str) -> str:
     result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
+        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -44,6 +44,10 @@ def current_sha() -> str:
     if len(value) != 40 or any(character not in "0123456789abcdef" for character in value):
         raise RuntimeError(f"could not bind remote validation to exact source SHA: {value!r}")
     return value
+
+
+def current_sha() -> str:
+    return resolve_ref_sha("HEAD")
 
 
 def run(label: str, cmd: list[str]) -> bool:
@@ -63,7 +67,8 @@ def unix_remote_command(
     render_toolchain: bool = False,
     expected_sha: str | None = None,
 ) -> str:
-    validate = "./validate-build.sh --quiet"
+    validate_ref = expected_sha if render_toolchain else branch
+    validate = f"./validate-build.sh --quiet --ref {shlex.quote(validate_ref)}"
     if skip_tests:
         validate += " --no-tests"
     repo = shlex.quote(repo_path)
@@ -79,7 +84,18 @@ if [ "$actual_sha" != {expected_sha_q} ]; then
     echo "ERROR: render-toolchain remote source $actual_sha does not match expected {expected_sha}" >&2
     exit 1
 fi
+{validate}
+actual_sha="$(git rev-parse HEAD)"
+if [ "$actual_sha" != {expected_sha_q} ]; then
+    echo "ERROR: render-toolchain remote source moved during detached validation: $actual_sha" >&2
+    exit 1
+fi
 python3 tools/deps/validate_render_update.py --cache-only
+actual_sha="$(git rev-parse HEAD)"
+if [ "$actual_sha" != {expected_sha_q} ]; then
+    echo "ERROR: render-toolchain remote source moved during provider validation: $actual_sha" >&2
+    exit 1
+fi
 """
     return f"""
 set -e
@@ -103,7 +119,7 @@ else
         echo "warning: no origin remote configured; validating current checkout" >&2
     fi
 fi
-{validate}{render_validate}
+{render_validate if render_toolchain else validate}
 """.strip()
 
 
@@ -155,10 +171,19 @@ def main() -> int:
 
     config = load_config(Path(args.config))
     branch = args.branch or current_branch()
-    expected_sha = current_sha() if args.render_toolchain else None
+    expected_sha = resolve_ref_sha(branch) if args.render_toolchain else None
+    local_sha = current_sha() if args.render_toolchain else None
+    if args.render_toolchain and local_sha != expected_sha:
+        print(
+            f"ERROR: --branch {branch!r} resolves to {expected_sha}, but the local "
+            f"render validator is running from {local_sha}; check out the exact ref first",
+            file=sys.stderr,
+        )
+        return 1
 
     ok = True
-    local_cmd = ["bash", "./validate-build.sh", "--quiet", "--ref", branch]
+    local_ref = expected_sha if expected_sha is not None else branch
+    local_cmd = ["bash", "./validate-build.sh", "--quiet", "--ref", local_ref]
     if args.skip_tests:
         local_cmd.append("--no-tests")
     ok &= run("local", local_cmd)

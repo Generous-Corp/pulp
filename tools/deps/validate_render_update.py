@@ -89,6 +89,7 @@ def expected_v8_version() -> str:
 
 
 def validate(cache_root: Path, build_dir: Path, cache_only: bool) -> dict[str, object]:
+    initial_source_sha = source_sha()
     matrix_platform = native_platform()
     _, asset = skia_fetch.manifest_asset(matrix_platform)
     if asset is None:
@@ -163,9 +164,16 @@ def validate(cache_root: Path, build_dir: Path, cache_only: bool) -> dict[str, o
             "v8_version": expected_v8_version(),
         }
 
+    final_source_sha = source_sha()
+    if final_source_sha != initial_source_sha:
+        raise RuntimeError(
+            "render-update source changed during validation: "
+            f"started at {initial_source_sha}, finished at {final_source_sha}"
+        )
+
     return {
         "schema_version": 1,
-        "source_sha": source_sha(),
+        "source_sha": initial_source_sha,
         "platform": matrix_platform,
         "asset_sha256": asset_sha,
         "generation": str(generation),

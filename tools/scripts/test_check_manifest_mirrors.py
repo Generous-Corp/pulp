@@ -69,6 +69,19 @@ class ManifestMirrorTests(unittest.TestCase):
         with self.assertRaises(cmm.CheckError):
             cmm.version_md_asset_shas(md)
 
+    def test_version_md_parses_explicit_manifest_alias_without_false_filename(self) -> None:
+        md = self.root / "VERSION.md"
+        md.write_text(
+            "| Asset | SHA-256 |\n|--|--|\n"
+            "| `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `%s` |\n"
+            "| `skia-build-mac-universal-gpu-release.zip` | `%s` |\n"
+            % ("a" * 64, "a" * 64),
+            encoding="utf-8",
+        )
+        got = cmm.version_md_asset_shas(md)
+        self.assertEqual(got["mac-arm64"], "a" * 64)
+        self.assertEqual(got["mac-universal"], "a" * 64)
+
     # --- DEPENDENCIES.md parser --------------------------------------------
 
     def test_dependencies_md_versions(self) -> None:

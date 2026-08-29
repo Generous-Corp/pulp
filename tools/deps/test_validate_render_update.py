@@ -96,6 +96,7 @@ class RenderUpdateValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, \
              mock.patch.object(validator, "native_platform", return_value="linux-x64"), \
              mock.patch.object(validator.skia_fetch, "manifest_asset", return_value=("linux-x64", asset)), \
+             mock.patch.object(validator, "source_sha", return_value="c" * 40), \
              mock.patch.object(
                  validator,
                  "run_checked",
@@ -106,6 +107,24 @@ class RenderUpdateValidationTests(unittest.TestCase):
              ):
             with self.assertRaisesRegex(RuntimeError, "no-download warm hit"):
                 validator.validate(Path(temp), Path(temp) / "build", cache_only=True)
+
+    def test_source_change_during_validation_fails_closed(self) -> None:
+        asset = {"sha256": "f" * 64}
+        with tempfile.TemporaryDirectory() as temp:
+            cache_root = Path(temp)
+            self._write_receipt(cache_root, "darwin-arm64", asset["sha256"])
+
+            def run(command: list[str]) -> str:
+                if command[1:2] == ["tools/scripts/fetch_skia_for_release.py"]:
+                    return "OK: immutable Skia cache generation ready at /cache\n"
+                return "OK\n"
+
+            with mock.patch.object(validator, "native_platform", return_value="darwin-arm64"), \
+                 mock.patch.object(validator.skia_fetch, "manifest_asset", return_value=("mac-arm64", asset)), \
+                 mock.patch.object(validator, "run_checked", side_effect=run), \
+                 mock.patch.object(validator, "source_sha", side_effect=["a" * 40, "b" * 40]):
+                with self.assertRaisesRegex(RuntimeError, "source changed during validation"):
+                    validator.validate(cache_root, Path(temp) / "build", cache_only=True)
 
     def test_full_arm64_path_builds_and_records_real_capture(self) -> None:
         asset = {"sha256": "c" * 64}
