@@ -42,6 +42,45 @@ print(f'Screenshot saved to {out} ({w}x{h} @{scale:g}x, backend={value("--backen
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+def fake_measurement_producer(path: Path, *, complete_scope: bool = True) -> None:
+    scope_value = "True" if complete_scope else "False"
+    path.write_text(
+        f'''#!/usr/bin/env python3
+import argparse, hashlib, json, struct
+from pathlib import Path
+p=argparse.ArgumentParser(); p.add_argument('--request'); p.add_argument('--receipt'); a=p.parse_args()
+r=json.loads(Path(a.request).read_text()); root=Path(a.receipt).parent
+dpr=float(r['requested_dpr'])
+if r['mode']=='configured_max': dpr=min(dpr, 2.0)
+logical=r['scenario']['logical_size']; w=round(logical['width']*dpr); h=round(logical['height']*dpr)
+capture=root/'measured-capture.png'
+capture.write_bytes(b'\\x89PNG\\r\\n\\x1a\\n'+struct.pack('>I',13)+b'IHDR'+struct.pack('>II',w,h))
+trace=root/'measured-trace.pftrace'; trace.write_bytes(b'real-perfetto-trace')
+raw=root/'measured-raw.json'; raw.write_text(json.dumps({{'schema':'pulp.gpu-dpr-raw-samples.v1','version':1}})+'\\n')
+inputs=root/'measured-input.json'; inputs.write_text(json.dumps({{'logical_input':True}})+'\\n')
+def artifact(kind, file): return {{'kind':kind,'path':file.name,'sha256':hashlib.sha256(file.read_bytes()).hexdigest()}}
+receipt={{
+ 'schema':'pulp.gpu-dpr-cell-receipt.v1','version':1,
+ 'attempt_nonce':r['attempt_nonce'],'scenario_id':r['scenario']['id'],
+ 'scenario_kind':r['scenario']['kind'],'mode':r['mode'],'requested_dpr':r['requested_dpr'],
+ 'observed_dpr':dpr,'physical_size':{{'width':w,'height':h}},
+ 'content_digest':r['expected_content_digest'],'outcome':'pass','reason':None,'dependencies':[],
+ 'machine':{{'id':'selftest-m3','os':'macos','architecture':'arm64'}},
+ 'adapter':{{'class':'hardware','name':'Selftest GPU','backend':'Metal','driver':'selftest-1','authentic_identity':True}},
+ 'build_identity':{{'pulp_sha':r['pulp_sha']}},
+ 'measurement_scope':{{'schema':'pulp.gpu-dpr-native-measurement-scope.v1',
+   'same_process':{{'adapter_identity':True,'capture':True,'frame_metrics':True,
+     'memory_metrics':True,'logical_input':True,'trace_correlation':{scope_value}}},
+   'audio_device_opened':False}},
+ 'artifacts':[artifact('capture',capture),artifact('trace',trace),
+              artifact('raw_samples',raw),artifact('input_receipt',inputs)]}}
+Path(a.receipt).write_text(json.dumps(receipt)+'\\n')
+''',
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
 def request(root: Path, expected_digest: str) -> dict:
     return {
         "schema": "pulp.gpu-dpr-cell-request.v1",
@@ -110,7 +149,50 @@ def main() -> int:
         assert "native-capture:dense-text-thin-strokes" in receipt["dependencies"]
         assert not (tmp / "capture.png").exists()
 
-    print("gpu_dpr_pulp_native_adapter_selftest=true real_capture_protocol=pass planted_digest_drift=pass")
+        # A measured producer is pinned before execution and may produce a
+        # terminal receipt only after attesting every same-process evidence
+        # field. The outer runner still validates raw samples and Perfetto.
+        document["expected_content_digest"] = digest(source)
+        write_json(request_path, document)
+        producer = tmp / "native-measurement-producer"
+        fake_measurement_producer(producer)
+        measured_env = dict(env)
+        measured_env["PULP_DPR_NATIVE_MEASUREMENT_BIN"] = str(producer.resolve())
+        completed = subprocess.run(
+            [sys.executable, str(ADAPTER), "--request", str(request_path),
+             "--receipt", str(receipt_path)],
+            env=measured_env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert completed.returncode == 0, completed
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        assert receipt["outcome"] == "pass"
+        identity = receipt["build_identity"]["measurement_producer"]
+        pinned = Path(identity["path"])
+        assert pinned.is_file() and not pinned.is_symlink()
+        assert identity["sha256"] == digest(pinned) == digest(producer)
+        attestation = receipt["measurement_attestation"]
+        assert attestation["producer_sha256"] == identity["sha256"]
+        assert all(attestation["same_process"].values())
+
+        # Negative control: one missing same-process claim must become a
+        # durable inconclusive result, never a terminal pass.
+        fake_measurement_producer(producer, complete_scope=False)
+        completed = subprocess.run(
+            [sys.executable, str(ADAPTER), "--request", str(request_path),
+             "--receipt", str(receipt_path)],
+            env=measured_env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert completed.returncode == 3, completed
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        assert receipt["outcome"] == "inconclusive"
+        assert "did not attest every same-process evidence field" in receipt["reason"]
+        assert "native-measurement-producer:dense-text-thin-strokes" in receipt["dependencies"]
+
+    print(
+        "gpu_dpr_pulp_native_adapter_selftest=true real_capture_protocol=pass "
+        "measured_producer_protocol=pass planted_digest_drift=pass "
+        "planted_partial_scope=pass"
+    )
     return 0
 
 

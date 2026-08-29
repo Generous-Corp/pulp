@@ -27,6 +27,11 @@ TRACE_QUESTIONS = {"gpu-startup", "gpu-health", "gpu-probe"}
 TRACE_ANALYSIS_SCHEMA = "pulp.trace-gpu-analysis.v1"
 A2T_RECEIPT_SCHEMA = "pulp.gpu-trace-overhead-acceptance.v1"
 A3_RECEIPT_SCHEMA = "dev.pulp.gpu-first-visible-a3-acceptance"
+MEASUREMENT_ATTESTATION_SCHEMA = "pulp.gpu-dpr-native-measurement-attestation.v1"
+SAME_PROCESS_FIELDS = {
+    "adapter_identity", "capture", "frame_metrics", "memory_metrics",
+    "logical_input", "trace_correlation",
+}
 NONCE_HEX_LENGTH = 32
 METRIC_UNITS = {
     "cpu_frame_time": "ms",
@@ -406,6 +411,27 @@ def validate_identity(
     if not isinstance(build, dict) or build.get("pulp_sha") != plan["pulp_sha"]:
         raise EvidenceError("receipt is not bound to the planned Pulp SHA")
 
+    attestation = receipt.get("measurement_attestation")
+    if attestation is not None:
+        if (
+            not isinstance(attestation, dict)
+            or attestation.get("schema") != MEASUREMENT_ATTESTATION_SCHEMA
+            or attestation.get("audio_device_opened") is not False
+        ):
+            raise EvidenceError("native measurement attestation is malformed")
+        same_process = attestation.get("same_process")
+        if (
+            not isinstance(same_process, dict)
+            or set(same_process) != SAME_PROCESS_FIELDS
+            or any(same_process[field] is not True for field in SAME_PROCESS_FIELDS)
+        ):
+            raise EvidenceError("native measurement attestation is not fully same-process")
+        _, producer_digest = exact_executable(
+            build.get("measurement_producer"), "native measurement producer"
+        )
+        if attestation.get("producer_sha256") != producer_digest:
+            raise EvidenceError("native measurement attestation names different producer bytes")
+
     requirements = set(scenario["required_oracles"])
     if "authentic_gpu" in requirements:
         if adapter["class"] != "hardware" or adapter.get("authentic_identity") is not True:
@@ -652,6 +678,19 @@ def snapshot_receipt_bundle(
             )
             binary["path"] = str(pinned_binary.resolve())
             binary["sha256"] = binary_digest
+        if isinstance(build, dict) and receipt.get("measurement_attestation") is not None:
+            producer_path, producer_digest = exact_executable(
+                build.get("measurement_producer"), "native measurement producer"
+            )
+            pinned_producer = evidence_dir / "measurement-producer"
+            snapshot_file(
+                producer_path, pinned_producer, "native measurement producer",
+                executable=True, expected_sha256=producer_digest,
+            )
+            build["measurement_producer"] = {
+                "path": str(pinned_producer.resolve()),
+                "sha256": producer_digest,
+            }
 
     receipt_snapshot = evidence_dir / "receipt.json"
     atomic_json(receipt_snapshot, receipt)

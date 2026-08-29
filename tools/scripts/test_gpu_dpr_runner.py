@@ -88,6 +88,7 @@ def make_receipt(
     fidelity_ok: bool = True,
     capture_similarity: float = 0.99,
     attempt_nonce: str | None = None,
+    measurement_producer: Path | None = None,
 ) -> Path:
     cell = state["cells"][key]
     scenario = runner.scenario_map(manifest)[cell["scenario_id"]]
@@ -201,6 +202,23 @@ def make_receipt(
         "audio_thread_excluded": True,
         "artifacts": artifacts,
     }
+    if measurement_producer is not None:
+        producer_digest = runner.sha256_file(measurement_producer)
+        receipt["build_identity"]["measurement_producer"] = {
+            "path": str(measurement_producer.resolve()),
+            "sha256": producer_digest,
+        }
+        receipt["measurement_attestation"] = {
+            "schema": "pulp.gpu-dpr-native-measurement-attestation.v1",
+            "producer_sha256": producer_digest,
+            "same_process": {
+                field: True for field in {
+                    "adapter_identity", "capture", "frame_metrics",
+                    "memory_metrics", "logical_input", "trace_correlation",
+                }
+            },
+            "audio_device_opened": False,
+        }
     path = cell_dir / "receipt.json"
     write_json(path, receipt)
     return path
@@ -549,6 +567,57 @@ def main() -> int:
             forge_receipt, state, manifest, run_dir,
             "nonexistent exact Forge binary",
         )
+        planted += 1
+
+        # Native measurement producers are copied into runner-owned evidence.
+        # The adapter's source path can disappear or change after ingest, while
+        # any mutation of the pinned producer invalidates the receipt.
+        producer = root / "native-measurement-producer"
+        shutil.copy2(binary, producer)
+        producer.chmod(0o755)
+        producer_run = root / "native-producer-run"
+        producer_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(producer_run, producer_state)
+        producer_nonce, _ = runner.issue_attempt(
+            producer_run, producer_state, manifest, dense
+        )
+        producer_receipt = make_receipt(
+            producer_run, producer_state, manifest, dense,
+            analyzer=analyzer, binary=binary, attempt_nonce=producer_nonce,
+            measurement_producer=producer,
+        )
+        ingest_receipt(producer_run, producer_receipt)
+        producer_state = runner.load_state(producer_run)
+        frozen_producer_receipt = Path(
+            producer_state["cells"][dense]["attempts"][-1]["receipt"]
+        )
+        frozen_producer_document = runner.regular_json(
+            frozen_producer_receipt, "native producer receipt"
+        )
+        pinned_producer = Path(
+            frozen_producer_document["build_identity"]["measurement_producer"]["path"]
+        )
+        assert pinned_producer != producer.resolve()
+        assert "frozen-evidence" in pinned_producer.parts
+        original_producer_bytes = producer.read_bytes()
+        producer.write_bytes(original_producer_bytes + b"# source mutation\n")
+        runner.receipt_observation(
+            frozen_producer_receipt, producer_state, manifest,
+            Path(producer_state["manifest_path"]), producer_run,
+        )
+        pinned_producer_bytes = pinned_producer.read_bytes()
+        pinned_producer.chmod(0o755)
+        pinned_producer.write_bytes(pinned_producer_bytes + b"# pinned mutation\n")
+        expect_rejected(
+            frozen_producer_receipt, producer_state, manifest, producer_run,
+            "runner-owned native measurement producer mutation",
+        )
+        pinned_producer.write_bytes(pinned_producer_bytes)
+        pinned_producer.chmod(0o555)
+        producer.write_bytes(original_producer_bytes)
+        producer.chmod(0o755)
         planted += 1
 
         # The fixed executable protocol calls a scenario adapter without a shell.
