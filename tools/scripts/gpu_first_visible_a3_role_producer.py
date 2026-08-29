@@ -39,6 +39,11 @@ BUILD_VERIFIER_REQUEST_SCHEMA = "pulp.gpu-first-visible-build-verification-reque
 BUILD_VERIFIER_RECEIPT_SCHEMA = "pulp.gpu-first-visible-build-verification-receipt.v1"
 BUILD_VERIFIER_SOURCE_PATH = "tools/scripts/gpu_first_visible_a3_build_verifier.py"
 TRACE_ANALYZER_SOURCE_PATH = "tools/scripts/gpu_first_visible_a3_trace_analyzer.py"
+TRACE_ANALYZER_RECEIPT_SCHEMA = "pulp.gpu-first-visible-prepared-trace-analyzer.v1"
+TRACE_ANALYZER_SOURCE_FILES = {
+    "experimental/pulp-rs/Cargo.toml",
+    "experimental/pulp-rs/Cargo.lock",
+}
 OUTCOME_EXIT = {"pass": 0, "fail": 1, "inconclusive": 2, "skip": 3}
 ENDPOINT_BY_ROLE = {
     "standalone": "native-compositor-presentation",
@@ -107,6 +112,13 @@ BUILD_VERIFIER_RECEIPT_KEYS = {
     "schema", "version", "attempt_nonce", "control", "outcome", "reason",
     "verification_method", "product_identity", "product_sha256",
     "observed_product_sha256", "marker_sha256",
+}
+TRACE_ANALYZER_RECEIPT_KEYS = {
+    "schema", "version", "pulp_revision", "source_files", "cargo", "rustc",
+    "cargo_home_mode", "target_directory_fresh", "analyzer_sha256",
+}
+TRACE_ANALYZER_TOOL_KEYS = {
+    "command_path", "resolved_path", "sha256", "version",
 }
 
 
@@ -737,6 +749,71 @@ def run_build_verifier(
     return real_receipt_digest, retained
 
 
+def validate_analyzer_tool(value: Any, label: str) -> None:
+    exact_keys(value, TRACE_ANALYZER_TOOL_KEYS, label)
+    command = Path(value["command_path"])
+    resolved = Path(value["resolved_path"])
+    if (
+        not command.is_absolute() or not command.is_file()
+        or command.resolve() != resolved
+        or not resolved.is_absolute() or not resolved.is_file()
+        or not os.access(command, os.X_OK)
+        or value["sha256"] != file_sha256(resolved, label)
+        or not isinstance(value["version"], str) or not value["version"]
+        or "\n" in value["version"]
+    ):
+        raise ProducerError(f"{label} does not bind an exact executable toolchain")
+
+
+def prepare_trace_analyzer(
+    *, wrapper: Path, request: dict[str, Any], pulp_root: Path,
+    artifact_directory: Path,
+) -> tuple[Path, str, list[Path]]:
+    workspace = artifact_directory / "tooling" / "prepared-trace-analyzer"
+    analyzer = workspace / "pulp"
+    receipt_path = workspace / "receipt.json"
+    stdout_path = artifact_directory / "logs" / "trace-analyzer-prepare.stdout.log"
+    stderr_path = artifact_directory / "logs" / "trace-analyzer-prepare.stderr.log"
+    environment = {
+        "PULP_A3_PULP_ROOT": str(pulp_root),
+        "PULP_A3_PULP_REVISION": request["identity"]["pulp_revision"],
+    }
+    exit_code = bounded_run(
+        [sys.executable, str(wrapper), "prepare", "--workspace", str(workspace),
+         "--output", str(analyzer), "--receipt", str(receipt_path)],
+        cwd=artifact_directory, environment=environment, timeout_seconds=660,
+        stdout_path=stdout_path, stderr_path=stderr_path,
+    )
+    if exit_code != 0 or not analyzer.is_file() or analyzer.is_symlink():
+        raise ProducerError("source-bound trace analyzer preparation failed closed")
+    receipt = regular_json(receipt_path, "prepared trace analyzer receipt")
+    exact_keys(receipt, TRACE_ANALYZER_RECEIPT_KEYS, "prepared trace analyzer receipt")
+    source_files = receipt["source_files"]
+    exact_keys(source_files, TRACE_ANALYZER_SOURCE_FILES, "prepared analyzer sources")
+    revision = request["identity"]["pulp_revision"]
+    expected_sources = {
+        relative: sha256_bytes(git_file_bytes(
+            pulp_root, revision, relative, f"prepared analyzer source {relative}",
+        ))
+        for relative in TRACE_ANALYZER_SOURCE_FILES
+    }
+    validate_analyzer_tool(receipt["cargo"], "prepared analyzer Cargo")
+    validate_analyzer_tool(receipt["rustc"], "prepared analyzer rustc")
+    analyzer_digest = file_sha256(analyzer, "prepared trace analyzer")
+    if (
+        receipt["schema"] != TRACE_ANALYZER_RECEIPT_SCHEMA
+        or receipt["version"] != 1
+        or receipt["pulp_revision"] != revision
+        or source_files != expected_sources
+        or receipt["cargo_home_mode"] != "fresh-config-free-linked-locked-cache"
+        or receipt["target_directory_fresh"] is not True
+        or receipt["analyzer_sha256"] != analyzer_digest
+        or not os.access(analyzer, os.X_OK)
+    ):
+        raise ProducerError("prepared trace analyzer is not sealed to the requested source/toolchain")
+    return analyzer, analyzer_digest, [receipt_path, stdout_path, stderr_path]
+
+
 def analyzer_payload(path: Path, exit_code: int, label: str) -> dict[str, Any]:
     payload = regular_json(path, label)
     expected_exit = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
@@ -1317,7 +1394,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             "host_runtime_path": str(host_binary),
             "host_sha256": host_digest,
             "driver_sha256": driver_digest,
-            "trace_analyzer_sha256": analyzer_digest,
+            "trace_analyzer_wrapper_sha256": analyzer_digest,
             "build_verifier_sha256": build_verifier_digest,
             "producer_support_sha256": support_digest,
         }
@@ -1337,7 +1414,22 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         )
         if build_verifier_source_digest != build_verifier_digest:
             raise ProducerError("build verifier snapshot differs from reviewed source")
+        prepared_analyzer, prepared_analyzer_digest, prepared_analyzer_evidence = (
+            prepare_trace_analyzer(
+                wrapper=analyzer_snapshot, request=request, pulp_root=pulp_root,
+                artifact_directory=artifact_directory,
+            )
+        )
+        immutable_files.append((
+            prepared_analyzer, prepared_analyzer_digest, "prepared trace analyzer",
+        ))
+        for path in prepared_analyzer_evidence:
+            immutable_files.append((
+                path, file_sha256(path, f"prepared analyzer artifact {path.name}"),
+                f"prepared analyzer artifact {path.name}",
+            ))
         preflight.update({
+            "trace_analyzer_sha256": prepared_analyzer_digest,
             "trace_analyzer_source": {
                 "authority": "pulp",
                 "revision": request["identity"]["pulp_revision"],
@@ -1352,6 +1444,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             },
         })
         extra_members: list[Path] = []
+        extra_members.extend(prepared_analyzer_evidence)
         directory_guards: list[tuple[Path, str, str]] = []
         bundle_tree_digest: str | None = None
         role_context: dict[str, Any] = {"preflight": role}
@@ -1526,13 +1619,13 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         validate_build_provenance(
             build_provenance, request=request, product_digest=product_digest,
             bundle_digest=bundle_tree_digest, driver_digest=driver_digest,
-            analyzer_digest=analyzer_digest,
+            analyzer_digest=prepared_analyzer_digest,
         )
         validate_build_attestation(
             regular_json(build_attestation_snapshot, "product build attestation"),
             request=request, product_digest=product_digest,
             bundle_digest=bundle_tree_digest, driver_digest=driver_digest,
-            analyzer_digest=analyzer_digest,
+            analyzer_digest=prepared_analyzer_digest,
             provenance_digest=build_provenance_digest,
         )
         immutable_files.extend([
@@ -1563,7 +1656,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         role_context.update({
             "product_build_attestation_sha256": build_attestation_digest,
             "product_build_verification_sha256": build_verification_digest,
-            "trace_analyzer_sha256": analyzer_digest,
+            "trace_analyzer_sha256": prepared_analyzer_digest,
         })
 
         driver_root = artifact_directory / "role-driver-artifacts"
@@ -1645,7 +1738,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             lifecycle_provenance=lifecycle_provenance,
         )
         trace_analysis_path, analyzer_evidence = derive_trace_analysis(
-            analyzer=analyzer_snapshot, request=request,
+            analyzer=prepared_analyzer, request=request,
             trace_path=measured_paths["trace"],
             health_path=measured_paths["health_result"], health=health,
             artifact_directory=artifact_directory,
@@ -1670,7 +1763,8 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         members = [
             ("host-executable", host_snapshot),
             ("lifecycle-driver", driver_snapshot),
-            ("trace-analyzer", analyzer_snapshot),
+            ("trace-analyzer", prepared_analyzer),
+            ("trace-analyzer-wrapper", analyzer_snapshot),
             ("build-verifier", build_verifier_snapshot),
             ("producer-support.py", support_snapshot),
             ("driver-request.json", driver_request_path),

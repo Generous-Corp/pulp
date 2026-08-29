@@ -233,8 +233,54 @@ def write_smoke(path: Path) -> None:
 def write_analyzer(path: Path) -> None:
     path.write_text(
         r'''#!/usr/bin/env python3
-import argparse, json, os
+import argparse, hashlib, json, os, shutil, sys
 from pathlib import Path
+
+if len(sys.argv) > 1 and sys.argv[1] == "prepare":
+    prepare = argparse.ArgumentParser()
+    prepare.add_argument("prepare")
+    prepare.add_argument("--workspace", required=True, type=Path)
+    prepare.add_argument("--output", required=True, type=Path)
+    prepare.add_argument("--receipt", required=True, type=Path)
+    prepared = prepare.parse_args()
+    prepared.workspace.mkdir(parents=True)
+    shutil.copyfile(Path(__file__), prepared.output)
+    prepared.output.chmod(0o500)
+    root = Path(os.environ["PULP_A3_PULP_ROOT"])
+    executable = Path(sys.executable).resolve()
+    tool = {
+        "command_path": str(executable),
+        "resolved_path": str(executable),
+        "sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+        "version": "Python fixture toolchain",
+    }
+    source_files = {
+        relative: hashlib.sha256((root / relative).read_bytes()).hexdigest()
+        for relative in (
+            "experimental/pulp-rs/Cargo.toml",
+            "experimental/pulp-rs/Cargo.lock",
+        )
+    }
+    mutation = next(
+        (name for name in ("prepared-analyzer-source", "prepared-analyzer-target")
+         if name in str(prepared.workspace)),
+        "",
+    )
+    if mutation == "prepared-analyzer-source":
+        source_files["experimental/pulp-rs/Cargo.lock"] = "0" * 64
+    payload = {
+        "schema": "pulp.gpu-first-visible-prepared-trace-analyzer.v1",
+        "version": 1,
+        "pulp_revision": os.environ["PULP_A3_PULP_REVISION"],
+        "source_files": source_files,
+        "cargo": tool,
+        "rustc": tool,
+        "cargo_home_mode": "fresh-config-free-linked-locked-cache",
+        "target_directory_fresh": mutation != "prepared-analyzer-target",
+        "analyzer_sha256": hashlib.sha256(prepared.output.read_bytes()).hexdigest(),
+    }
+    prepared.receipt.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    raise SystemExit(0)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("command")
@@ -306,6 +352,13 @@ def make_pulp_root(path: Path, smoke: Path, driver: Path, analyzer: Path) -> str
         destination = path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    for relative in (
+        "experimental/pulp-rs/Cargo.toml",
+        "experimental/pulp-rs/Cargo.lock",
+    ):
+        destination = path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(f"fixture:{relative}\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "a3@example.invalid"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.name", "A3 Test"], cwd=path, check=True)
@@ -666,6 +719,14 @@ def main() -> int:
             ("standalone", "analyzer-scope", "pass", "pinned trace replay"),
             ("standalone", "analyzer-process", "pass", "pinned trace replay"),
             (
+                "standalone", "prepared-analyzer-source", "pass",
+                "not sealed to the requested source/toolchain",
+            ),
+            (
+                "standalone", "prepared-analyzer-target", "pass",
+                "not sealed to the requested source/toolchain",
+            ),
+            (
                 "standalone", "analyzer-artifact-mutation", "pass",
                 "role-driver health_result changed",
             ),
@@ -754,7 +815,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=4 planted_negatives=34 cleanup_controls=2"
+            "positive=4 planted_negatives=36 cleanup_controls=2"
         )
     return 0
 
