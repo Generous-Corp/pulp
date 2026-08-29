@@ -23,6 +23,12 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 using namespace pulp::platform;
 namespace fs = std::filesystem;
 
@@ -44,6 +50,43 @@ bool binary_exists() {
     return !bin.empty() && fs::exists(bin);
 }
 
+class UniqueChildCoverageProfile {
+public:
+    UniqueChildCoverageProfile() {
+        const char* profile = std::getenv("LLVM_PROFILE_FILE");
+        if (!profile || !*profile) return;
+        original_ = profile;
+#ifdef _WIN32
+        const auto parent_process_id = _getpid();
+#else
+        const auto parent_process_id = getpid();
+#endif
+        static unsigned child_sequence = 0;
+        const auto child_profile =
+            (fs::path(profile).parent_path() /
+             ("pulp-import-design-" + std::to_string(parent_process_id) +
+              "-" + std::to_string(child_sequence++) + "-%p.profraw"))
+                .string();
+#ifdef _WIN32
+        _putenv_s("LLVM_PROFILE_FILE", child_profile.c_str());
+#else
+        setenv("LLVM_PROFILE_FILE", child_profile.c_str(), 1);
+#endif
+    }
+
+    ~UniqueChildCoverageProfile() {
+        if (!original_) return;
+#ifdef _WIN32
+        _putenv_s("LLVM_PROFILE_FILE", original_->c_str());
+#else
+        setenv("LLVM_PROFILE_FILE", original_->c_str(), 1);
+#endif
+    }
+
+private:
+    std::optional<std::string> original_;
+};
+
 ProcessResult run_import_design(const std::vector<std::string>& args, int timeout_ms = 30000) {
     const auto bin = tool_binary();
     if (bin.empty() || !fs::exists(bin)) {
@@ -52,6 +95,7 @@ ProcessResult run_import_design(const std::vector<std::string>& args, int timeou
         r.stderr_output = "pulp-import-design binary not at " + bin.string();
         return r;
     }
+    UniqueChildCoverageProfile coverage_profile;
     return exec(bin.string(), args, timeout_ms);
 }
 
@@ -72,6 +116,7 @@ ProcessResult run_import_design_in(const fs::path& cwd,
     ProcessOptions opts;
     opts.working_directory = cwd.string();
     opts.timeout_ms = timeout_ms;
+    UniqueChildCoverageProfile coverage_profile;
     return ChildProcess::run(fs::absolute(bin).string(), args, opts);
 }
 
@@ -307,6 +352,7 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         REQUIRE(r.stdout_output.find("--emit {js|ir-json|cpp|swiftui}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--mode {live|baked}") != std::string::npos);
         REQUIRE(r.stdout_output.find("--snapshot-semantics {fail|warn|accept}") != std::string::npos);
+        REQUIRE(r.stdout_output.find("--fit-authored-frame") != std::string::npos);
         REQUIRE(r.stdout_output.find("Precompiled React JSX runtime bundle") != std::string::npos);
         REQUIRE(r.stdout_output.find("baked emits IR or C++ artifacts") != std::string::npos);
         REQUIRE(r.stdout_output.find("Built-in default is --mode live --emit js") != std::string::npos);
@@ -330,6 +376,66 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         REQUIRE(r.exit_code != 0);
         REQUIRE(r.stderr_output.find("unknown source 'not-a-source'") != std::string::npos);
         REQUIRE(r.stderr_output.find("Valid sources") != std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects an explicit render size") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--render-size", "640x480"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --render-size") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects browser interactions") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--browser-interactions", "plan.json"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --browser-interactions") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects the offline parser") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--offline"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --offline") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects token export mode") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--export-tokens", "--dry-run"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --export-tokens") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects detect mode") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--detect-only"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame cannot be combined with --detect-only") !=
+                std::string::npos);
+    }
+
+    SECTION("authored-frame fitting rejects a non-browser source") {
+        auto r = run_import_design(
+            {"--fit-authored-frame", "--from", "figma", "--file", "missing.json"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(
+                    "--fit-authored-frame applies only to browser-solved runnable HTML") !=
+                std::string::npos);
     }
 }
 

@@ -1319,6 +1319,9 @@ commands:
       - name: --browser
         kind: option
         description: "Explicit Chromium/Chrome executable for browser-solved HTML import; overrides PULP_DESIGN_BROWSER, browser mode, managed Chrome for Testing, and system discovery"
+      - name: --fit-authored-frame
+        kind: flag
+        description: "For standard runnable browser-backed HTML imports, derive a bounded viewport from the first occupying body child, reload the same Chromium target once, and accept only a contained authored-frame fixed point. Mutually exclusive with an explicit --render-size, --browser-interactions, --offline, token export, and detect/report modes; non-browser input is rejected, while other safe refusals leave the normal viewport workflow available by rerunning without this opt-in."
       - name: --browser-interactions
         kind: option
         description: "Versioned bounded click/context-click/type/wait JSON plan applied before browser evidence capture; defaults to the settled initial state"

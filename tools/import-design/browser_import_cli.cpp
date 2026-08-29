@@ -610,6 +610,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .importer_executable = request.importer_executable,
          .browser_executable = request.browser_executable,
          .browser_interactions = request.browser_interactions,
+         .fit_authored_frame = request.fit_authored_frame,
          .source = request.source,
          .pinned_width = request.pinned_width,
          .initial_width = request.initial_width,
@@ -681,6 +682,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         return BrowserImportFailure{failure->exit_code};
     } else if (std::holds_alternative<BrowserHtmlLegacyFallback>(
                    browser_import)) {
+        if (request.fit_authored_frame) {
+            std::cerr
+                << "Error: --fit-authored-frame requires browser-solved "
+                   "runnable HTML and cannot be combined with --offline\n";
+            return BrowserImportFailure{2};
+        }
         if (request.browser_interactions) {
             std::cerr
                 << "Error: --browser-interactions requires browser-solved "
@@ -693,6 +700,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
                "not match the browser.\n";
         return BrowserImportNotApplicable{};
     } else {
+        if (request.fit_authored_frame) {
+            std::cerr
+                << "Error: --fit-authored-frame applies only to "
+                   "browser-solved runnable HTML\n";
+            return BrowserImportFailure{2};
+        }
         if (request.browser_interactions) {
             std::cerr
                 << "Error: --browser-interactions applies only to "

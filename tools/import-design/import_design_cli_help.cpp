@@ -55,6 +55,11 @@ void print_usage() {
     std::cout << "  --browser-interactions <json>\n";
     std::cout << "                    Apply a versioned bounded click/context-click/type/wait plan before capture\n";
     std::cout << "                    Typed text may appear in capture evidence; never type secrets\n";
+    std::cout << "  --fit-authored-frame\n";
+    std::cout << "                    Resolve the authored root in one Chromium session, reload once at\n";
+    std::cout << "                    that viewport, and accept only a contained exact fixed point;\n";
+    std::cout << "                    standard browser-backed imports only; incompatible with\n";
+    std::cout << "                    --render-size, --browser-interactions, and --offline\n";
     std::cout << "  --materialized-canvas-composition\n";
     std::cout << "                    Keep the accepted Chromium frame as native Skia paint and\n";
     std::cout << "                    emit transparent, hit-testable canvas behavior targets\n";

@@ -25,6 +25,7 @@ struct BrowserImportCliRequest {
     std::filesystem::path importer_executable;
     std::optional<std::filesystem::path> browser_executable;
     std::optional<std::filesystem::path> browser_interactions;
+    bool fit_authored_frame = false;
     pulp::view::DesignSource source = pulp::view::DesignSource::claude;
     std::optional<int> pinned_width;
     int initial_width = 1280;
@@ -48,6 +49,18 @@ struct BrowserImportCliRequest {
     /// and diff files beside the primary output.
     bool validate = false;
 };
+
+/// Reject browser-specific CLI options before a non-browser command path can
+/// silently ignore them. Returns the CLI exit code after printing a diagnostic.
+std::optional<int> validate_browser_import_cli_options(
+    bool fit_authored_frame, bool render_size_explicit,
+    bool has_browser_interactions, bool offline, bool export_tokens,
+    bool detect_only, bool native_panel_lowering,
+    bool materialized_canvas_composition);
+
+/// Reject an explicit source that cannot enter browser-backed HTML import.
+std::optional<int> validate_fit_authored_frame_source_cli(
+    bool fit_authored_frame, std::string_view source);
 
 struct BrowserImportNotApplicable {};
 
