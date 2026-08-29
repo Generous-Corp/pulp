@@ -258,4 +258,3 @@
                     PROPERTIES
                     PASS_REGULAR_EXPRESSION
                         "native_renderer_boundary_contract_case=valid-current-link-boundary.*native_renderer_boundary_contract_case=forbidden-view-link-token.*native_renderer_boundary_contract_case=forbidden-widget-link-token.*native_renderer_boundary_contract_case=missing-scene-parser-token.*native_renderer_boundary_contract_case=missing-render-webgpu-token.*native_renderer_boundary_contract_case=missing-required-link-file.*native_renderer_boundary_contract_verified=true")
-            endif()
