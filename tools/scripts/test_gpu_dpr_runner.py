@@ -296,9 +296,9 @@ def main() -> int:
         _, adaptive_request_path = runner.issue_attempt(
             request_run, request_state, manifest, adaptive_request_key
         )
-        assert runner.load_json(adaptive_request_path)["adaptive_profile"] == (
-            manifest["adaptive_profile"]
-        )
+        adaptive_request = runner.load_json(adaptive_request_path)
+        assert adaptive_request["adaptive_profile"] == manifest["adaptive_profile"]
+        assert adaptive_request["pulp_source_root"] == str(experiment.ROOT.resolve())
 
         initialized_run = root / "initialized-run"
         initialized_run.mkdir()

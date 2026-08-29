@@ -231,6 +231,7 @@ def write_request(
         "trial_contract": manifest["trial_contract"],
         "pulp_sha": state["plan"]["pulp_sha"],
         "forge_sha": state["plan"]["forge_sha"],
+        "pulp_source_root": str(experiment.ROOT.resolve()),
         "cell_directory": str(cell_dir.resolve()),
     }
     path = cell_dir / "request.json"

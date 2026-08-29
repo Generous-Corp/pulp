@@ -289,9 +289,14 @@ def effective_dpr(request: dict[str, Any]) -> float:
     raise ValueError(f"unsupported experiment mode: {mode}")
 
 
-def source_root() -> Path:
-    override = os.environ.get("PULP_DPR_SOURCE_ROOT")
-    return Path(override).resolve() if override else Path(__file__).resolve().parents[2]
+def source_root(request: dict[str, Any]) -> Path:
+    value = request.get("pulp_source_root")
+    if not isinstance(value, str) or not value:
+        raise ValueError("DPR request lacks an exact Pulp source root")
+    path = Path(value)
+    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+        raise ValueError("Pulp source root must be an absolute, non-symlink directory")
+    return path.resolve()
 
 
 def screenshot_binary(root: Path) -> Path:
@@ -366,7 +371,6 @@ def run(request_path: Path, receipt_path: Path) -> int:
         return 3
 
     scenario_id = scenario["id"]
-    root = source_root()
     dependencies = [
         "a2t:correlated-cell-trace",
         "a3:ratified-budget-receipt",
@@ -383,6 +387,7 @@ def run(request_path: Path, receipt_path: Path) -> int:
 
     producer_requested = bool(os.environ.get("PULP_DPR_NATIVE_MEASUREMENT_BIN"))
     try:
+        root = source_root(request)
         head = git_head(root)
         if head != request["pulp_sha"]:
             raise ValueError(

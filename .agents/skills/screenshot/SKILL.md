@@ -437,7 +437,10 @@ For the frozen Pulp-native fixtures,
 `tools/scripts/gpu_dpr_pulp_native_adapter.py` is the capture preflight adapter.
 Set `PULP_DPR_SCREENSHOT_BIN` to an exact-SHA `pulp-screenshot` binary and
 register it for `dense-text-thin-strokes`, `shader-heavy-controls`, and
-`meters-waveforms`. It verifies source and PNG dimensions and retains the real
-capture, but intentionally returns INCONCLUSIVE until product-specific A2T/A3,
-same-process adapter identity, metric, logical-input, and fidelity producers are
-available. Never rename its subprocess wall time to CPU/frame/interaction time.
+`meters-waveforms`. The runner binds the exact Pulp source root into every cell
+request before it snapshots the adapter, so the canonical command does not need
+`PULP_DPR_SOURCE_ROOT`. The adapter verifies source and PNG dimensions and
+retains the real capture, but intentionally returns INCONCLUSIVE until
+product-specific A2T/A3, same-process adapter identity, metric, logical-input,
+and fidelity producers are available. Never rename its subprocess wall time to
+CPU/frame/interaction time.

@@ -100,6 +100,7 @@ def request(root: Path, expected_digest: str) -> dict:
         "pulp_sha": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=root, text=True
         ).strip(),
+        "pulp_source_root": str(root.resolve()),
     }
 
 
@@ -114,7 +115,6 @@ def main() -> int:
         document = request(ROOT, digest(source))
         write_json(request_path, document)
         env = dict(os.environ)
-        env["PULP_DPR_SOURCE_ROOT"] = str(ROOT)
         env["PULP_DPR_SCREENSHOT_BIN"] = str(executable)
         completed = subprocess.run(
             [sys.executable, str(ADAPTER), "--request", str(request_path),
@@ -133,10 +133,26 @@ def main() -> int:
         assert preflight["capture_backend_requested"] == "skia"
         assert "gpu_frame_time" in preflight["not_claimed"]
 
+        # Runner-pinned adapters cannot discover the checkout from __file__.
+        # The issued request must bind an absolute source root instead.
+        document["pulp_source_root"] = "relative/source"
+        write_json(request_path, document)
+        (tmp / "capture.png").unlink(missing_ok=True)
+        completed = subprocess.run(
+            [sys.executable, str(ADAPTER), "--request", str(request_path),
+             "--receipt", str(receipt_path)],
+            env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert completed.returncode == 3
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        assert "source root must be an absolute" in receipt["reason"]
+        assert not (tmp / "capture.png").exists()
+        document["pulp_source_root"] = str(ROOT.resolve())
+
         # Negative control: a changed source digest is rejected before capture.
         document["expected_content_digest"] = "0" * 64
         write_json(request_path, document)
-        (tmp / "capture.png").unlink()
+        (tmp / "capture.png").unlink(missing_ok=True)
         completed = subprocess.run(
             [sys.executable, str(ADAPTER), "--request", str(request_path),
              "--receipt", str(receipt_path)],
