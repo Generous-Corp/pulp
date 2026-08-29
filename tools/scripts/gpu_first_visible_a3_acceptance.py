@@ -22,6 +22,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import json_schema_lite  # noqa: E402
+import gpu_trace_overhead_acceptance as a2t_acceptance  # noqa: E402
 
 SCHEMA_PATH = ROOT / "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json"
 HEALTH_SCHEMA_PATH = ROOT / "docs/contracts/gpu-health-read-result-v1.schema.json"
@@ -571,8 +572,10 @@ def validate_campaigns(
             raise AcceptanceError("headless-constrained campaign must use headless format")
         if role == "standalone" and identity["plugin_format"] != "standalone":
             raise AcceptanceError("standalone campaign must use standalone format")
-        if role in {"daw", "forge"} and identity["plugin_format"] not in {"auv2", "vst3", "clap"}:
-            raise AcceptanceError(f"{label} must use a real plugin format")
+        if role == "daw" and identity["plugin_format"] not in {"auv2", "vst3", "clap"}:
+            raise AcceptanceError("DAW campaign must use a real plugin format")
+        if role == "forge" and identity["plugin_format"] != "standalone":
+            raise AcceptanceError("Forge campaign must bind the standalone shell")
         cold_payload = artifact_json(campaign["raw_cold"], evidence_root, f"{label}.raw_cold")
         warm_payload = artifact_json(campaign["raw_warm"], evidence_root, f"{label}.raw_warm")
         cold = validate_raw_samples(
@@ -644,13 +647,16 @@ def validate_a2t_receipt(
         "acceptance", "adapter_relevance", "artifacts", "fresh_start", "generated_utc",
         "human_perfetto_ui_correlation", "machine", "mcp_source_revision", "measured",
         "measurement_environment", "producer_overhead_disposition", "protocol", "schema",
-        "scope", "semantic_result", "source_revision",
+        "scope", "semantic_result", "source_revision", "integration_head", "source_blobs",
     }
     exact_keys(payload, root_keys, "same_instance_a2t.a2t_receipt")
     if payload["schema"] != "pulp.gpu-trace-overhead-acceptance.v1":
         raise AcceptanceError("same_instance_a2t.a2t_receipt has the wrong schema")
     if payload["source_revision"] != receipt["identity"]["pulp_revision"]:
         raise AcceptanceError("A2T source revision does not match the A3 Pulp revision")
+    binding_errors = a2t_acceptance.source_binding_errors(payload, ROOT)
+    if binding_errors:
+        raise AcceptanceError(f"A2T source binding failed: {binding_errors[0]}")
     if payload["mcp_source_revision"] != payload["source_revision"]:
         raise AcceptanceError("A2T CLI and MCP source revisions differ")
     if payload["scope"] != "offline-installed-cli-mcp-analysis":

@@ -16,11 +16,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import gpu_first_visible_a3_acceptance as a3  # noqa: E402
+import gpu_trace_overhead_acceptance as a2t  # noqa: E402
 from test_gpu_health_read_contract import startup_document  # noqa: E402
 
-PULP_REVISION = "1" * 40
+PULP_REVISION = subprocess.check_output(
+    ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
+).strip()
 FORGE_REVISION = "2" * 40
 PLAN_REVISION = "3" * 40
+TRACE_SOURCE_PATH = Path("test/fixtures/perfetto-gpu/healthy.pftrace")
 REFERENCE_HOST = {
     "host_id": "m5-blackbook", "machine_id": "Mac15,14", "refresh_rate_hz": 60,
 }
@@ -41,7 +45,7 @@ def identity(role: str, index: int) -> dict[str, Any]:
         "standalone": "standalone",
         "headless-constrained": "headless",
         "daw": "vst3",
-        "forge": "auv2",
+        "forge": "standalone",
     }[role]
     return {
         "pulp_revision": PULP_REVISION,
@@ -184,7 +188,10 @@ def make_fixture(root: Path) -> dict[str, Any]:
         write_json(root, f"{role}-health.json", result)
         (root / f"{role}-product.bin").write_bytes(f"product:{role}".encode())
         (root / f"{role}-host.bin").write_bytes(f"host:{role}".encode())
-        trace_bytes = b"PERFETTO-SAME-INSTANCE" if role == "forge" else f"trace:{role}".encode()
+        trace_bytes = (
+            (ROOT / TRACE_SOURCE_PATH).read_bytes()
+            if role == "forge" else f"trace:{role}".encode()
+        )
         (root / f"{role}-trace.pftrace").write_bytes(trace_bytes)
         correlation = result["startup"]["correlation"]
         write_json(root, f"{role}-trace-analysis.json", {
@@ -240,10 +247,11 @@ def make_fixture(root: Path) -> dict[str, Any]:
         "evidence_ids": [gpu_id],
     }
     write_json(root, "trace-analysis.json", analysis)
+    forge_trace_digest = a3.sha256_bytes((root / "forge-trace.pftrace").read_bytes())
     analyzer_source = f'''#!/usr/bin/python3
-import json, pathlib, sys
+import hashlib, json, pathlib, sys
 trace = pathlib.Path(sys.argv[sys.argv.index("--trace") + 1]).read_bytes()
-if trace == b"PERFETTO-SAME-INSTANCE":
+if hashlib.sha256(trace).hexdigest() == {forge_trace_digest!r}:
     payload = {analysis!r}
     code = 0
 else:
@@ -256,11 +264,14 @@ raise SystemExit(code)
     (root / "pulp-analyzer").chmod(0o700)
     analyzer_digest = a3.sha256_bytes((root / "pulp-analyzer").read_bytes())
     trace_digest = a3.sha256_bytes((root / "forge-trace.pftrace").read_bytes())
+    source_binding = a2t.source_binding(ROOT, PULP_REVISION, ROOT / TRACE_SOURCE_PATH)
     write_json(root, "a2t.json", {
         "schema": "pulp.gpu-trace-overhead-acceptance.v1",
         "generated_utc": "2026-08-28T12:00:00Z",
         "source_revision": PULP_REVISION,
         "mcp_source_revision": PULP_REVISION,
+        "integration_head": source_binding["integration_head"],
+        "source_blobs": source_binding["source_blobs"],
         "scope": "offline-installed-cli-mcp-analysis",
         "producer_overhead_disposition": {
             "status": "not-applicable-no-added-producer-cost",
@@ -275,7 +286,11 @@ raise SystemExit(code)
             "sibling_binding": {"verified_same_resolved_parent": True, "mechanism": "same prefix"},
             "cli": {"role": "installed-prefix/bin/pulp", "sha256": analyzer_digest, "bytes": len(analyzer_source.encode())},
             "mcp": {"role": "installed-prefix/bin/pulp-mcp", "sha256": "8" * 64, "bytes": 1},
-            "trace": {"role": "captured trace", "sha256": trace_digest, "bytes": len(b"PERFETTO-SAME-INSTANCE")},
+            "trace": {
+                "role": f"repository/{TRACE_SOURCE_PATH.as_posix()}",
+                "sha256": trace_digest,
+                "bytes": (root / "forge-trace.pftrace").stat().st_size,
+            },
             "trace_processor": {"role": "pinned trace processor", "sha256": "9" * 64, "bytes": 1},
         },
         "protocol": {
@@ -510,10 +525,11 @@ def make_partial_causal_fixture(root: Path, *, budget_fail: bool) -> dict[str, A
         "evidence_ids": [gpu_id],
     }
     write_json(root, "trace-analysis.json", analysis)
+    forge_trace_digest = a3.sha256_bytes((root / "forge-trace.pftrace").read_bytes())
     analyzer_source = f'''#!/usr/bin/python3
-import json, pathlib, sys
+import hashlib, json, pathlib, sys
 trace = pathlib.Path(sys.argv[sys.argv.index("--trace") + 1]).read_bytes()
-if trace == b"PERFETTO-SAME-INSTANCE":
+if hashlib.sha256(trace).hexdigest() == {forge_trace_digest!r}:
     payload = {analysis!r}
 else:
     payload = {{"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup","verdict":"unavailable","capture_complete":False,"evidence_ids":[]}}
@@ -884,6 +900,39 @@ def main() -> int:
         expect_failure(mutated, root, "every required role")
 
         mutated = copy.deepcopy(receipt)
+        forge = next(campaign for campaign in mutated["campaigns"] if campaign["role"] == "forge")
+        forge["identity"]["plugin_format"] = "auv2"
+        expect_failure(mutated, root, "standalone shell")
+
+        for mutation, needle in (
+            (lambda payload: payload.pop("integration_head"), "keys differ"),
+            (
+                lambda payload: payload["source_blobs"].__setitem__(
+                    sorted(payload["source_blobs"])[0], "0" * 40,
+                ),
+                "source blob mismatch",
+            ),
+        ):
+            mutated = copy.deepcopy(receipt)
+            a2t_ref = mutated["same_instance_a2t"]["a2t_receipt"]
+            binding_ref = mutated["same_instance_a2t"]["binding_receipt"]
+            a2t_path = root / a2t_ref["path"]
+            binding_path = root / binding_ref["path"]
+            original_a2t = a2t_path.read_text(encoding="utf-8")
+            original_binding = binding_path.read_text(encoding="utf-8")
+            a2t_payload = json.loads(original_a2t)
+            mutation(a2t_payload)
+            write_json(root, a2t_ref["path"], a2t_payload)
+            rehash(mutated, root, a2t_ref)
+            binding = json.loads(original_binding)
+            binding["a2t_receipt_sha256"] = a2t_ref["sha256"]
+            write_json(root, binding_ref["path"], binding)
+            rehash(mutated, root, binding_ref)
+            expect_failure(mutated, root, needle)
+            a2t_path.write_text(original_a2t, encoding="utf-8")
+            binding_path.write_text(original_binding, encoding="utf-8")
+
+        mutated = copy.deepcopy(receipt)
         mutated["budget"]["raw_cold"]["sha256"] = "0" * 64
         expect_failure(mutated, root, "digest mismatch")
 
@@ -958,7 +1007,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=35 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=38 "
             "checked_in_nonterminal=verified"
         )
     return 0
