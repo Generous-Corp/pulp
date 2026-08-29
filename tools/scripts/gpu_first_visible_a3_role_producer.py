@@ -922,6 +922,7 @@ def run_independent_source_build(
     if any(
         artifact_root == Path(value["path"]).resolve()
         or artifact_root in Path(value["path"]).resolve().parents
+        or Path(value["path"]).resolve() in artifact_root.parents
         for value in source_roots.values()
     ):
         raise ProducerError("independent source roots overlap the measured artifact directory")

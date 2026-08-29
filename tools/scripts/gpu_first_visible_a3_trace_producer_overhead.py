@@ -350,12 +350,11 @@ def validate_collection(
         driver_request.get("schema") != COLLECTION_DRIVER_REQUEST_SCHEMA
         or driver_request.get("version") != 1
         or not common
-        or binary != {
-            "runtime_path": binary.get("runtime_path") if isinstance(binary, dict) else None,
-            "sha256": payload["binary_sha256"],
-        }
         or not isinstance(binary, dict)
+        or set(binary) != {"runtime_path", "sha256"}
         or not isinstance(binary.get("runtime_path"), str)
+        or not binary["runtime_path"]
+        or binary.get("sha256") != payload["binary_sha256"]
         or counts != {"warmups": 5, "measured": 30, "fresh_process": 20}
         or driver_request.get("tracing") != payload["tracing"]
         or driver_request.get("trace_session_config") != payload["trace_session_config"]
@@ -1403,7 +1402,7 @@ def main() -> int:
         print("A3 trace producer overhead: pass")
         return 0
     except (OverheadError, ValueError) as error:
-        print(f"A3 trace producer overhead: FAIL: {error}", file=os.sys.stderr)
+        print(f"A3 trace producer overhead: FAIL: {error}", file=sys.stderr)
         return 1
 
 

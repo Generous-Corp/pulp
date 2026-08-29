@@ -695,13 +695,19 @@ def run_role(
     root: Path, evidence: Path, role: str, *, mutation: str = "",
     smoke: str = "pass", omit_driver: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
-    run_dir = root / f"run-{role}-{mutation or smoke}"
+    pulp_root = root / "pulp-root"
+    if mutation == "source-build-source-overlap":
+        exclusion = pulp_root / ".git" / "info" / "exclude"
+        with exclusion.open("a", encoding="utf-8") as handle:
+            handle.write("\n/a3-overlap-negative/\n")
+        run_dir = pulp_root / "a3-overlap-negative"
+    else:
+        run_dir = root / f"run-{role}-{mutation or smoke}"
     artifact_directory = run_dir / "adapter-output" / "artifacts"
     artifact_directory.mkdir(parents=True)
     source_receipt = json.loads((evidence / "fixture-receipt.json").read_text())
     campaign = next(item for item in source_receipt["campaigns"] if item["role"] == role)
     identity = dict(campaign["identity"])
-    pulp_root = root / "pulp-root"
     identity["pulp_revision"] = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=pulp_root, text=True,
     ).strip()
@@ -1017,6 +1023,10 @@ def main() -> int:
                 "output root is not a fresh directory",
             ),
             (
+                "standalone", "source-build-source-overlap", "pass",
+                "source roots overlap the measured artifact directory",
+            ),
+            (
                 "forge", "source-build-extra-output", "pass",
                 "retained unrelated output",
             ),
@@ -1080,7 +1090,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=4 planted_negatives=38 cleanup_controls=2"
+            "positive=4 planted_negatives=39 cleanup_controls=2"
         )
     return 0
 
