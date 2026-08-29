@@ -268,6 +268,23 @@ class CatalogContract(unittest.TestCase):
         self.assertIn("b0-adoption-authority-freeze", handoff["required_package_ids"])
         self.assertIn("b4-vellum-observability-executor", handoff["required_package_ids"])
         self.assertIn("b4-vellum-signature-prewarm", handoff["required_package_ids"])
+        self.assertEqual(
+            handoff["authorities"]["plan"]["revision"],
+            "25e574d7f229bf50948b0b8ddbbdff9e89543c05",
+        )
+        self.assertEqual(handoff["upstream"]["current_comment_id"], 5462803929)
+        comments = {
+            comment["id"]: comment
+            for comment in handoff["upstream"]["comments"]
+        }
+        self.assertEqual(comments[5462803929]["status"], "current")
+        self.assertEqual(
+            comments[5462803929]["supersedes"],
+            [5461645539, 5462069172],
+        )
+        for superseded in (5461645539, 5462069172):
+            self.assertEqual(comments[superseded]["status"], "superseded")
+            self.assertEqual(comments[superseded]["superseded_by"], 5462803929)
         host = next(
             entry
             for entry in handoff["entries"]
@@ -436,6 +453,20 @@ class CatalogContract(unittest.TestCase):
         handoff["authorities"]["plan"]["revision"] = "0" * 40
         self.assertIn(
             "must pin the reviewed plan/Pulp/Vellum revisions",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["upstream"]["current_comment_id"] = 5462069172
+        self.assertIn(
+            "upstream issue/comment IDs differ from the reviewed authority",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["upstream"]["comments"][-1]["status"] = "superseded"
+        self.assertIn(
+            "upstream issue/comment IDs differ from the reviewed authority",
             "\n".join(catalog.validate_handoff(handoff)),
         )
 

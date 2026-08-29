@@ -49,7 +49,7 @@ HANDOFF_PACKAGE_IDS = (
 HANDOFF_AUTHORITIES = {
     "plan": {
         "repo": "danielraffel/pulp-planning",
-        "revision": "dfa347d59f6ec7ededc01de5c2aba36b52cfcd42",
+        "revision": "25e574d7f229bf50948b0b8ddbbdff9e89543c05",
         "path": "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md",
     },
     "pulp": {
@@ -70,6 +70,7 @@ HANDOFF_UPSTREAM = {
         "node_id": "I_kwDOTgkcHM8AAAABOw9JNg",
         "url": "https://github.com/Generous-Corp/vellum/issues/26",
     },
+    "current_comment_id": 5462803929,
     "comments": [
         {
             "id": 5461645539,
@@ -78,6 +79,8 @@ HANDOFF_UPSTREAM = {
                 "https://github.com/Generous-Corp/vellum/issues/26"
                 "#issuecomment-5461645539"
             ),
+            "status": "superseded",
+            "superseded_by": 5462803929,
         },
         {
             "id": 5462069172,
@@ -86,6 +89,18 @@ HANDOFF_UPSTREAM = {
                 "https://github.com/Generous-Corp/vellum/issues/26"
                 "#issuecomment-5462069172"
             ),
+            "status": "superseded",
+            "superseded_by": 5462803929,
+        },
+        {
+            "id": 5462803929,
+            "node_id": "IC_kwDOTgkcHM8AAAABRZvF2Q",
+            "url": (
+                "https://github.com/Generous-Corp/vellum/issues/26"
+                "#issuecomment-5462803929"
+            ),
+            "status": "current",
+            "supersedes": [5461645539, 5462069172],
         },
     ],
 }
