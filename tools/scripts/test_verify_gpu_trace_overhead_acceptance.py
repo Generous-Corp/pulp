@@ -372,7 +372,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         receipt = self.structural_receipt()
         errors = MODULE.verify(receipt, ROOT, require_terminal=True)
         self.assertTrue(any(
-            "standalone A2T verification is structural-only" in error
+            "standalone A2T verification and recording are structural-only" in error
             for error in errors
         ))
 
