@@ -7,9 +7,11 @@ import hashlib
 import json
 import math
 import os
+import re
 import stat
 import statistics
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,7 @@ TRACE_ANALYSIS_SCHEMA = "pulp.trace-gpu-analysis.v1"
 A2T_RECEIPT_SCHEMA = "pulp.gpu-trace-overhead-acceptance.v1"
 A3_RECEIPT_SCHEMA = "dev.pulp.gpu-first-visible-a3-acceptance"
 MEASUREMENT_ATTESTATION_SCHEMA = "pulp.gpu-dpr-native-measurement-attestation.v1"
+BROWSER_MEASUREMENT_ATTESTATION_SCHEMA = "pulp.gpu-dpr-browser-measurement-attestation.v1"
 SAME_PROCESS_FIELDS = {
     "adapter_identity", "capture", "frame_metrics", "memory_metrics",
     "logical_input", "trace_correlation",
@@ -379,6 +382,43 @@ def exact_executable(identity: Any, label: str) -> tuple[Path, str]:
     return path, actual
 
 
+def validate_browser_product(path: Path, product: Any) -> None:
+    if not isinstance(product, dict) or set(product) != {
+        "version", "codesign_identifier", "team_identifier",
+    }:
+        raise EvidenceError("browser product identity is missing")
+    completed = subprocess.run(
+        [str(path), "--version"], text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, timeout=15,
+    )
+    version = completed.stdout.strip()
+    if (
+        completed.returncode != 0 or product.get("version") != version
+        or not any(name in version for name in ("Google Chrome", "Chromium"))
+    ):
+        raise EvidenceError("browser product version is not bound to Chrome/Chromium")
+    if sys.platform == "darwin":
+        verified = subprocess.run(
+            ["/usr/bin/codesign", "--verify", "--strict", str(path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+        )
+        details = subprocess.run(
+            ["/usr/bin/codesign", "-dv", "--verbose=4", str(path)],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30,
+        )
+        expected = product.get("codesign_identifier")
+        team = product.get("team_identifier")
+        if (
+            verified.returncode != 0 or details.returncode != 0
+            or expected not in {"com.google.Chrome", "org.chromium.Chromium"}
+            or f"Identifier={expected}" not in details.stdout
+            or not isinstance(team, str) or not team
+            or team == "not set" or f"TeamIdentifier={team}" not in details.stdout
+            or (expected == "com.google.Chrome" and team != "EQHXZ8M8AV")
+        ):
+            raise EvidenceError("browser product signature is not accepted")
+
+
 def analyze_trace(
     analyzer_identity: dict[str, str], trace_path: Path, expected_evidence_id: str,
 ) -> tuple[list[str], set[str], dict[str, Any]]:
@@ -456,10 +496,63 @@ def analyze_trace(
 def validate_trace(
     raw: dict[str, Any], manifest: dict[str, Any], trace_path: Path,
     analyzer_identity: dict[str, str], expected_evidence_id: str,
+    scenario_kind: str,
 ) -> list[str]:
     trace = raw.get("trace")
     if not isinstance(trace, dict) or trace.get("complete") is not True:
         raise EvidenceError("trace receipt is absent or incomplete")
+    if scenario_kind == "maintained_web_canary":
+        expected_trace = {
+            "complete", "kind", "process_pid",
+        }
+        if set(trace) != expected_trace or trace.get("kind") != "browser-devtools":
+            raise EvidenceError("web trace metadata lacks the typed DevTools contract")
+        try:
+            document = json.loads(regular_file_bytes(trace_path, "browser trace"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise EvidenceError("browser trace is not valid Chrome trace JSON") from error
+        events = document.get("traceEvents") if isinstance(document, dict) else None
+        if not isinstance(events, list):
+            raise EvidenceError("browser trace lacks traceEvents")
+        marker_prefix = f"pulp.dpr.{expected_evidence_id}."
+        categories: set[str] = set()
+        pids: set[int] = set()
+        foreign_ids: set[str] = set()
+        marker_re = re.compile(r"^pulp\.dpr\.([0-9a-f]{32})\.([a-z]+)$")
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            name = event.get("name")
+            if not isinstance(name, str):
+                continue
+            match = marker_re.fullmatch(name)
+            if not match:
+                continue
+            evidence_id, category = match.groups()
+            if evidence_id != expected_evidence_id:
+                foreign_ids.add(evidence_id)
+                continue
+            pid = event.get("pid")
+            duration = event.get("dur")
+            if (
+                event.get("ph") not in {"X", "b", "e", "R", "I"}
+                or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+                or (event.get("ph") == "X" and (
+                    isinstance(duration, bool)
+                    or not isinstance(duration, (int, float)) or duration < 0
+                ))
+            ):
+                raise EvidenceError("browser trace contains a malformed correlated span")
+            categories.add(category)
+            pids.add(pid)
+        if foreign_ids:
+            raise EvidenceError("browser trace contains a foreign DPR evidence id")
+        if len(pids) != 1 or next(iter(pids), None) != trace.get("process_pid"):
+            raise EvidenceError("browser trace categories are not scoped to one renderer process")
+        missing = set(manifest["trial_contract"]["required_trace_categories"]) - categories
+        if missing:
+            raise EvidenceError(f"trace categories are missing: {sorted(missing)}")
+        return [expected_evidence_id]
     if set(trace) != {"complete"}:
         raise EvidenceError("trace metadata must be derived by the pinned analyzer")
     evidence_ids, categories, _ = analyze_trace(
@@ -490,14 +583,21 @@ def validate_identity(
     if not isinstance(build, dict) or build.get("pulp_sha") != plan["pulp_sha"]:
         raise EvidenceError("receipt is not bound to the planned Pulp SHA")
 
+    browser = scenario.get("kind") == "maintained_web_canary"
     attestation = receipt.get("measurement_attestation")
+    if browser and attestation is None:
+        raise EvidenceError("browser measurement attestation is missing")
     if attestation is not None:
+        expected_schema = (
+            BROWSER_MEASUREMENT_ATTESTATION_SCHEMA
+            if browser else MEASUREMENT_ATTESTATION_SCHEMA
+        )
         if (
             not isinstance(attestation, dict)
-            or attestation.get("schema") != MEASUREMENT_ATTESTATION_SCHEMA
+            or attestation.get("schema") != expected_schema
             or attestation.get("audio_device_opened") is not False
         ):
-            raise EvidenceError("native measurement attestation is malformed")
+            raise EvidenceError("measurement attestation is malformed")
         same_process = attestation.get("same_process")
         if (
             not isinstance(same_process, dict)
@@ -505,18 +605,35 @@ def validate_identity(
             or any(same_process[field] is not True for field in SAME_PROCESS_FIELDS)
         ):
             raise EvidenceError("native measurement attestation is not fully same-process")
-        _, producer_digest = exact_executable(
-            build.get("measurement_producer"), "native measurement producer"
+        producer, producer_digest = exact_executable(
+            build.get("measurement_producer"),
+            "browser executable" if browser else "native measurement producer",
         )
         if attestation.get("producer_sha256") != producer_digest:
-            raise EvidenceError("native measurement attestation names different producer bytes")
+            raise EvidenceError("measurement attestation names different producer bytes")
+        if browser:
+            validate_browser_product(producer, build.get("browser_product"))
+            script, script_digest = exact_executable(
+                build.get("measurement_script"), "browser measurement script"
+            )
+            del script
+            if attestation.get("script_sha256") != script_digest:
+                raise EvidenceError("browser attestation names different script bytes")
 
     requirements = set(scenario["required_oracles"])
     if "authentic_gpu" in requirements:
         if adapter["class"] != "hardware" or adapter.get("authentic_identity") is not True:
             raise EvidenceError("scenario requires an authentic hardware GPU adapter")
     if "authentic_webgl" in requirements:
-        if adapter["class"] != "hardware" or adapter.get("api") != "webgl2":
+        identity = " ".join(str(adapter.get(key, "")) for key in ("name", "driver"))
+        software = any(
+            marker in identity.lower()
+            for marker in ("swiftshader", "llvmpipe", "software", "lavapipe")
+        )
+        if (
+            adapter["class"] != "hardware" or adapter.get("api") != "webgl2"
+            or adapter.get("authentic_identity") is not True or software
+        ):
             raise EvidenceError("web canary requires authentic WebGL2 hardware evidence")
     if "exact_binary_identity" in requirements:
         exact_executable(build.get("binary"), "Forge binary")
@@ -616,7 +733,8 @@ def receipt_observation(
     trace_artifact = next(item for item in artifacts if item["kind"] == "trace")
     trace_path = safe_artifact(artifact_root, trace_artifact["path"])
     trace_ids = validate_trace(
-        raw, manifest, trace_path, state["trace_analyzer"], receipt["attempt_nonce"]
+        raw, manifest, trace_path, state["trace_analyzer"], receipt["attempt_nonce"],
+        scenario["kind"],
     )
 
     logical_input_passed = validate_logical_input(raw)

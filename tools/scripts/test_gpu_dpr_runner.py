@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 import gpu_dpr_experiment as experiment
+import gpu_dpr_evidence as evidence
 import gpu_dpr_runner as runner
 from gpu_dpr_test_support import (
     dependency_receipts, exact_binary, forged_minimal_dependencies,
@@ -118,6 +119,11 @@ def make_receipt(
         fidelity_ok=fidelity_ok,
         capture_similarity=capture_similarity,
     )
+    is_web = scenario["kind"] == "maintained_web_canary"
+    if is_web:
+        raw["trace"] = {
+            "complete": True, "kind": "browser-devtools", "process_pid": 77,
+        }
     if cell["mode"] == "adaptive_simulation":
         profile = manifest["adaptive_profile"]
         raw["adaptive_policy_evidence"] = {
@@ -140,9 +146,12 @@ def make_receipt(
                 "budget_fraction": profile["upshift_budget_fraction"],
             },
         }
+    browser_trace = json.dumps({"traceEvents": [{
+        "name": f"pulp.dpr.{nonce}.{category}", "ph": "X", "pid": 77, "dur": 1,
+    } for category in manifest["trial_contract"]["required_trace_categories"]]}).encode()
     files = {
         "capture": ("capture.png", b"real-capture-bytes"),
-        "trace": ("trace.pftrace", b"real-trace-bytes:" + nonce.encode("ascii")),
+        "trace": ("trace.pftrace", browser_trace if is_web else b"real-trace-bytes:" + nonce.encode("ascii")),
         "raw_samples": ("raw-samples.json", None),
         "input_receipt": ("input-receipt.json", b'{"logical":true}\n'),
     }
@@ -221,6 +230,34 @@ def make_receipt(
             },
             "audio_device_opened": False,
         }
+    elif is_web:
+        browser_digest = runner.sha256_file(binary)
+        script_digest = runner.sha256_file(analyzer)
+        receipt["build_identity"].update({
+            "measurement_producer": {
+                "path": str(binary.resolve()), "sha256": browser_digest,
+            },
+            "measurement_script": {
+                "path": str(analyzer.resolve()), "sha256": script_digest,
+            },
+            "browser_product": {
+                "version": "Google Chrome selftest",
+                "codesign_identifier": "com.google.Chrome",
+                "team_identifier": "EQHXZ8M8AV",
+            },
+        })
+        receipt["measurement_attestation"] = {
+            "schema": "pulp.gpu-dpr-browser-measurement-attestation.v1",
+            "producer_sha256": browser_digest,
+            "script_sha256": script_digest,
+            "same_process": {
+                field: True for field in {
+                    "adapter_identity", "capture", "frame_metrics",
+                    "memory_metrics", "logical_input", "trace_correlation",
+                }
+            },
+            "audio_device_opened": False,
+        }
     producer_digest = runner.sha256_file(measurement_producer or binary)
     raw["producer_pid"] = 9999
     raw["fresh_process_trials"] = [{
@@ -262,6 +299,9 @@ def ingest_receipt(run_dir: Path, receipt: Path) -> str:
 
 
 def main() -> int:
+    # The matrix projection uses generated executable fixtures, not an installed
+    # browser. Product-signature rejection has its own focused adapter test.
+    evidence.validate_browser_product = lambda _path, _product: None
     with tempfile.TemporaryDirectory(prefix="pulp-dpr-runner-") as temporary:
         root = Path(temporary)
         manifest_path = root / "manifest.json"

@@ -1030,6 +1030,25 @@ and collapses on a phone).
 
 A full-canvas editor lays itself out in code, so a phone-width bug (overlapping header,
 sheared slider labels) never surfaces in a unit test — only in a browser, at that width.
+### A4 browser DPR evidence
+
+The maintained `super-convolver-web` A4 cells use
+`tools/scripts/gpu_dpr_web_adapter.py` with the exact executable
+`tools/scripts/gpu_dpr_web_measurement.mjs`. Set
+`PULP_DPR_WEB_MEASUREMENT_BIN`, `PULP_DPR_BROWSER_BIN`, and
+`PULP_DPR_WEB_BUILD_DIR` to absolute paths before passing the adapter to
+`gpu_dpr_runner.py`. The build directory must contain the exact
+`PulpSuperConvolverUi.js`/wasm output for the planned Pulp SHA.
+
+This lane requires hardware WebGL2, `EXT_disjoint_timer_query_webgl2`, 30
+strictly positive timer-query samples, 20 unique Chrome process IDs, WebGL call
+instrumentation for upload/resident-byte ledgers, real pointer delivery, PNG
+fidelity, and nonce-scoped DevTools user-timing spans from one renderer PID.
+SwiftShader/software renderers, zero timings, repeated browser PIDs, mixed
+trace PIDs/nonces, native adapters, or handwritten category claims are invalid.
+The checked-in Python tests prove those rejection paths; they do not replace a
+real browser run.
+
 Every full-canvas editor MUST handle these, all learned the hard way on SuperConvolver:
 
 - **Narrow breakpoint.** The UI `scale()` keys off HEIGHT, so a tall skinny phone canvas
