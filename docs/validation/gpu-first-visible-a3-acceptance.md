@@ -63,45 +63,73 @@ and role-specific executables:
 A3_EVIDENCE=/absolute/path/to/a3-evidence
 PULP_REVISION=$(git rev-parse HEAD)
 PLAN_REVISION=$(git -C /absolute/path/to/pulp-planning rev-parse HEAD)
+A3_ADAPTER="$PWD/tools/scripts/gpu_first_visible_a3_external_adapter.py"
 
 python3 tools/scripts/gpu_first_visible_a3_acceptance.py ratify-budget \
   --cold budget-cold.json --warm budget-warm.json \
   --plan-revision "$PLAN_REVISION" --pulp-revision "$PULP_REVISION" \
   --evidence-root "$A3_EVIDENCE" --output "$A3_EVIDENCE/budget.json"
 
+PULP_A3_CAMPAIGN_PRODUCER=/absolute/path/to/standalone-a3-producer \
+PULP_A3_BLANK_CONTROL_BIN=/absolute/path/to/pulp-test-control-gpu-health-standalone-product \
+PULP_A3_AUDIO_CONTROL_BIN=/absolute/path/to/pulp-test-control-gpu-health-provider \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role standalone --identity "$A3_EVIDENCE/standalone-identity.json" \
   --budget-receipt "$A3_EVIDENCE/budget.json" \
   --budget-cold "$A3_EVIDENCE/budget-cold.json" \
   --budget-warm "$A3_EVIDENCE/budget-warm.json" \
-  --adapter /absolute/path/to/standalone-a3-adapter \
+  --adapter "$A3_ADAPTER" \
   --output-dir "$A3_EVIDENCE/standalone-run" --require-controls
 
+PULP_A3_CAMPAIGN_PRODUCER=/absolute/path/to/headless-a3-producer \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role headless-constrained \
   --identity "$A3_EVIDENCE/headless-identity.json" \
   --budget-receipt "$A3_EVIDENCE/budget.json" \
   --budget-cold "$A3_EVIDENCE/budget-cold.json" \
   --budget-warm "$A3_EVIDENCE/budget-warm.json" \
-  --adapter /absolute/path/to/headless-a3-adapter \
+  --adapter "$A3_ADAPTER" \
   --output-dir "$A3_EVIDENCE/headless-run"
 
+PULP_A3_CAMPAIGN_PRODUCER=/absolute/path/to/reaper-a3-producer \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role daw --identity "$A3_EVIDENCE/daw-identity.json" \
   --budget-receipt "$A3_EVIDENCE/budget.json" \
   --budget-cold "$A3_EVIDENCE/budget-cold.json" \
   --budget-warm "$A3_EVIDENCE/budget-warm.json" \
-  --adapter /absolute/path/to/reaper-a3-adapter \
+  --adapter "$A3_ADAPTER" \
   --output-dir "$A3_EVIDENCE/daw-run"
 
+PULP_A3_CAMPAIGN_PRODUCER=/absolute/path/to/exact-forge-shell-a3-producer \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role forge --identity "$A3_EVIDENCE/forge-identity.json" \
   --budget-receipt "$A3_EVIDENCE/budget.json" \
   --budget-cold "$A3_EVIDENCE/budget-cold.json" \
   --budget-warm "$A3_EVIDENCE/budget-warm.json" \
-  --adapter /absolute/path/to/exact-forge-shell-a3-adapter \
+  --adapter "$A3_ADAPTER" \
   --output-dir "$A3_EVIDENCE/forge-run"
 ```
+
+The checked-in external adapter is an evidence envelope, not a substitute for
+the product lifecycle. It snapshots the executable named by
+`PULP_A3_CAMPAIGN_PRODUCER`, runs that immutable copy, bounds its output and
+runtime, and preserves its exact digest in `run.json`. A role producer accepts
+the same `--request PATH --receipt PATH` argv, writes
+`pulp.gpu-first-visible-campaign-producer.v1`, and uses the supplied
+`artifact_directory`. Its receipt has the adapter receipt's identity and
+outcome fields but exactly these artifacts: `health_result`, `raw_cold`,
+`raw_warm`, `product_artifact`, `host_artifact`, `trace`, and
+`trace_analysis`. It uses the same outcome exit map. Missing or invalid
+producer configuration, timeout, schema drift, exit mismatch, or an omitted
+artifact cannot become a pass.
+
+The producer owns the facts only its product can observe: 10 real cold and 10
+real warm lifecycles, the declared cache reset/reopen boundary, first nonblank
+native-compositor presentation (or constrained headless capture completion),
+exact product/host identity, and same-campaign GPU/trace evidence IDs. The
+envelope never manufactures those fields. For the one `--require-controls`
+role, it separately snapshots and runs the two focused harness binaries named
+above and rejects a passing producer when either independent control is absent.
 
 The DAW adapter must first prove the exact format scans and opens in REAPER;
 for example, a VST3 preflight uses `reaper_smoke.py --mode editor-open --format
@@ -114,9 +142,9 @@ preflight but remains one observation; it is not a role adapter until a real
 lifecycle harness supplies all 20 trials and role-appropriate presentation
 evidence.
 
-The standalone adapter selected for `--require-controls` can produce both
-closed control receipts with the focused, built harness binaries. Set each
-output path beneath the `artifact_directory` from the issued campaign request:
+The external adapter selected for `--require-controls` produces both closed
+control receipts with the focused, built harness binaries. Its equivalent
+direct commands, useful for a preflight before the campaign, are:
 
 ```bash
 PULP_A3_BLANK_NEGATIVE_RECEIPT_PATH="$ARTIFACT_DIRECTORY/blank-negative.json" \

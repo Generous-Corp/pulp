@@ -98,6 +98,14 @@ identity through an existing seam, leave the fields null, record the exact
 `render-skia-dawn` gap, and route the post-adoption producer to Vellum. Never
 make a warm label or a zero duration stand in for the missing boundary.
 
+The checkout-owned `gpu_first_visible_a3_external_adapter.py` is within the
+same Pulp evidence boundary: it may pin a role-specific executable, validate
+its closed producer receipt, and run the independent blank/audio controls. It
+does not move ownership of the producer's generic present, shader, pipeline,
+upload, or cache events. When those facts are unavailable through existing
+product seams, the producer must report the exact transferred gap rather than
+adding a Pulp-side render hook.
+
 Pulp also owns the A4 DPR runner, product-scenario adapters, evidence ingestion,
 and the B5 dependency receipt. The runner may classify a measured candidate,
 but B5 remains `waiting-trigger` until the adopted Vellum API refresh. Any

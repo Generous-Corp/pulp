@@ -2167,3 +2167,10 @@ editor reopens. `gpu_first_visible_a3_campaign.py` validates the external
 standalone host's ordinary first observation is therefore a truthful preflight
 and remains nonterminal until a real role adapter supplies all opens and the
 role-appropriate endpoint.
+
+`gpu_first_visible_a3_external_adapter.py` gives product teams one pinned
+producer boundary for that missing work. A producer receives the fixed 10+10
+request and must preserve the actual `begin_editor_open` lifecycle, cache
+boundary, endpoint, and evidence IDs in its artifacts. The envelope validates
+and retains those artifacts but never calls `begin_editor_open`, captures a
+frame, or invents a presentation timestamp itself.

@@ -534,3 +534,11 @@ not a 20-trial campaign. When the adapter owns the controls, use the two
 receipt-producing focused test invocations in
 `docs/validation/gpu-first-visible-a3-acceptance.md`; setting a seed alone is
 not durable evidence.
+
+The checked-in `gpu_first_visible_a3_external_adapter.py` is the reusable
+Pulp-owned envelope for those roles. Configure the exact role producer with
+`PULP_A3_CAMPAIGN_PRODUCER`; for the one controls run, also configure the two
+focused built test binaries documented in the acceptance guide. The envelope
+pins all three executables and fails closed on missing configuration or
+protocol drift. It does not provide generic present/cache instrumentation and
+must not be used to relabel capture completion as native presentation.

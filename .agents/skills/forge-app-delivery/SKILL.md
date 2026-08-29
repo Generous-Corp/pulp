@@ -431,3 +431,11 @@ The runner owns the immutable adapter/budget snapshot and closed artifact
 validation. Preserve timeout, unavailable shell delivery, and missing
 post-Vellum instrumentation as explicit dependencies rather than substituting
 another executable.
+
+For the executable handoff, use
+`gpu_first_visible_a3_external_adapter.py` and set
+`PULP_A3_CAMPAIGN_PRODUCER` to the exact Forge-shell lifecycle producer. The
+envelope snapshots its bytes and records the digest; the producer still owns
+real shell reopen/reset semantics, native compositor observation, exact
+Forge/Pulp/product/host identity, and same-instance Perfetto evidence. A
+different Forge build or a Pulp demo cannot be supplied as a fallback.

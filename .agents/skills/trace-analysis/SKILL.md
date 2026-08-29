@@ -547,6 +547,13 @@ FILE`. Preserve the corresponding `pulp trace ... --json` output for the A2T
 receipt. A human Perfetto UI inspection is useful additional evidence but does
 not replace the digest-bound machine result or its invalid-trace negative.
 
+For an A3 external role, the executable selected by
+`PULP_A3_CAMPAIGN_PRODUCER` must emit the campaign trace and the typed
+`gpu-startup` analysis with the exact health IDs. The checked-in external
+adapter snapshots that producer but does not run substitute SQL or create an
+evidence ID. Final same-instance A2T replay and human Perfetto UI correlation
+are added only from the selected causal campaign after all role runs complete.
+
 ## Correlate a catalog recipe with Perfetto
 
 Begin with `pulp gpu recipes list --symptom <exact-token> --json`, run the

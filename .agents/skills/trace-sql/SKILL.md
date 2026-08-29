@@ -111,6 +111,13 @@ Keep SQL joins on the exact GPU ID and stable process instance. The named
 these checked-in views through the same installed analyzer used by A2T. Do not
 replace a missing named result with one-off SQL in a terminal receipt.
 
+The producer behind `PULP_A3_CAMPAIGN_PRODUCER` owns the raw trace capture for
+its real role and must preserve the health response's GPU and trace evidence
+IDs. `gpu_first_visible_a3_external_adapter.py` pins that producer and passes
+its digest-bound artifacts onward; it is not another analyzer and cannot turn
+an empty named view, a different process cohort, or hand-written SQL into a
+passing campaign analysis.
+
 **Closed GPU cohort boundary.** The named GPU analyses do not currently accept
 an evidence-ID selector, so the SQL must not flatten unrelated runs. Startup
 selects the earliest valid render-frame lifecycle carrying `frame_index = 0`

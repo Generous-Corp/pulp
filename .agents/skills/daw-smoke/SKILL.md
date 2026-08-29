@@ -253,3 +253,11 @@ and host artifacts, the same-instance trace, and durable cache provenance.
 Translate REAPER's `--format au` identity to the receipt's `auv2`; VST3 and CLAP
 retain their names. An adapter timeout, SKIP, or INCONCLUSIVE produces a
 nonterminal `run.json`, never a passing campaign.
+
+Use the checked-in `gpu_first_visible_a3_external_adapter.py` as the immutable
+envelope and set `PULP_A3_CAMPAIGN_PRODUCER` to the exact REAPER lifecycle
+producer. The producer remains DAW-specific: it performs the qualified-format
+preflight and all 20 editor opens, then reports native compositor timing and
+the same-instance trace. The envelope only pins and validates that producer;
+it cannot promote the `editor-open` smoke or a screenshot completion into
+campaign evidence.
