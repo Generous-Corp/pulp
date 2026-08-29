@@ -919,7 +919,7 @@ def receipt_observation(
     if (
         not isinstance(comparison, dict)
         or comparison.get("method") not in {
-            "pulp-png-pixel-comparison", "browser-canvas-repeat"
+            "pulp-png-pixel-comparison", "cpu-raster-scaled-vs-webgl-canvas"
         }
         or comparison.get("reference_sha256") != reference_digest
         or comparison.get("capture_sha256") != capture_digest

@@ -325,6 +325,25 @@ struct Session {
             capture_width == physical_width && capture_height == physical_height;
     }
 
+    bool calibration_frame(std::uint32_t repeats, double& cpu_ms, double& gpu_ms) {
+        if (repeats == 0) return false;
+        const auto started = Clock::now();
+        if (!surfaces.gpu->begin_frame()) return false;
+        auto* canvas = surfaces.skia->begin_frame();
+        if (!canvas) {
+            surfaces.gpu->end_frame();
+            return false;
+        }
+        for (std::uint32_t repeat = 0; repeat < repeats; ++repeat)
+            view::paint_plugin_scene(*canvas, root, geometry, nullptr);
+        const auto outcome = surfaces.skia->end_frame();
+        surfaces.gpu->end_frame();
+        cpu_ms = elapsed_ms(started);
+        gpu_ms = surfaces.skia->gpu_render_time_ms();
+        return render::frame_reached_output(outcome) &&
+            surfaces.skia->gpu_render_timing_available();
+    }
+
     bool route_physical_pointer(view::Point physical, view::Point& logical,
                                 std::string& target_name) {
         if (!std::isfinite(physical.x) || !std::isfinite(physical.y) ||
@@ -662,25 +681,19 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
     std::vector<double> calibration_baseline, calibration_extra;
     for (std::uint32_t trial = 0; trial < request.gpu_timer_calibration_trials;
          ++trial) {
-        if (!session.frame(request, 1000 + trial, false, cpu, gpu) ||
+        if (!session.calibration_frame(1, cpu, gpu) ||
             !std::isfinite(gpu) || gpu <= 0.0) {
             message = "GPU timer baseline calibration did not complete";
             break;
         }
         calibration_baseline.push_back(gpu);
-        double extra_gpu = 0.0;
-        for (std::uint32_t repeat = 0;
-             repeat < request.gpu_timer_extra_work_multiplier; ++repeat) {
-            if (!session.frame(request, 2000 + trial *
-                    request.gpu_timer_extra_work_multiplier + repeat,
-                    false, cpu, gpu) || !std::isfinite(gpu) || gpu <= 0.0) {
-                message = "GPU timer extra-work calibration did not complete";
-                break;
-            }
-            extra_gpu += gpu;
+        if (!session.calibration_frame(request.gpu_timer_extra_work_multiplier,
+                                       cpu, gpu) ||
+            !std::isfinite(gpu) || gpu <= 0.0) {
+            message = "GPU timer extra-work calibration did not complete";
+            break;
         }
-        if (!message.empty()) break;
-        calibration_extra.push_back(extra_gpu);
+        calibration_extra.push_back(gpu);
     }
     auto calibration_values = calibration_baseline;
     calibration_values.insert(calibration_values.end(), calibration_extra.begin(),
