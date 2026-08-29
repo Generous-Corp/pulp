@@ -1,13 +1,17 @@
 if(NOT DEFINED PULP_CLI OR NOT DEFINED CLI_INSTALL_SCRIPT OR
-   NOT DEFINED V8_RUNTIME_LIBRARY OR NOT DEFINED WEBGPU_RUNTIME_LIB OR
+   NOT DEFINED WEBGPU_RUNTIME_LIB OR
    NOT DEFINED PYTHON OR NOT DEFINED JOURNEY_SCRIPT OR NOT DEFINED SOURCE_ROOT OR
    NOT DEFINED BUILD_ROOT)
     message(FATAL_ERROR
         "built CLI, install script, runtime libraries, Python, journey, source, and build are required")
 endif()
 if(NOT EXISTS "${PULP_CLI}" OR NOT EXISTS "${CLI_INSTALL_SCRIPT}" OR
-   NOT EXISTS "${V8_RUNTIME_LIBRARY}" OR NOT EXISTS "${WEBGPU_RUNTIME_LIB}")
+   NOT EXISTS "${WEBGPU_RUNTIME_LIB}")
     message(FATAL_ERROR "built CLI installation inputs are unavailable")
+endif()
+if(DEFINED V8_RUNTIME_LIBRARY AND NOT V8_RUNTIME_LIBRARY STREQUAL "" AND
+   NOT EXISTS "${V8_RUNTIME_LIBRARY}")
+    message(FATAL_ERROR "configured V8 runtime is unavailable")
 endif()
 
 get_filename_component(temp_root "$ENV{TMPDIR}" REALPATH)
@@ -29,9 +33,14 @@ execute_process(
 if(NOT install_rc EQUAL 0)
     message(FATAL_ERROR "could not stage the installed CLI: ${install_stderr}")
 endif()
-file(COPY "${V8_RUNTIME_LIBRARY}" "${WEBGPU_RUNTIME_LIB}"
+file(COPY "${WEBGPU_RUNTIME_LIB}"
     DESTINATION "${test_root}/installed/lib"
     FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+if(DEFINED V8_RUNTIME_LIBRARY AND NOT V8_RUNTIME_LIBRARY STREQUAL "")
+    file(COPY "${V8_RUNTIME_LIBRARY}"
+        DESTINATION "${test_root}/installed/lib"
+        FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+endif()
 set(installed_cpp_cli "${test_root}/installed/bin/pulp-cpp")
 set(installed_cli "${test_root}/installed/bin/pulp")
 if(NOT EXISTS "${installed_cpp_cli}")

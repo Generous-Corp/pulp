@@ -110,7 +110,10 @@ cmake -DCMAKE_INSTALL_PREFIX="$PROOF_ROOT/installed" \
 V8_RUNTIME_LIBRARY="$(sed -n 's/^V8_RUNTIME_LIBRARY:[^=]*=//p' "$BUILD_ROOT/CMakeCache.txt")"
 WEBGPU_RUNTIME_LIB="$(sed -n 's/^WEBGPU_RUNTIME_LIB:[^=]*=//p' "$BUILD_ROOT/CMakeCache.txt")"
 mkdir -p "$PROOF_ROOT/installed/lib"
-install -m 0644 "$V8_RUNTIME_LIBRARY" "$WEBGPU_RUNTIME_LIB" "$PROOF_ROOT/installed/lib/"
+install -m 0644 "$WEBGPU_RUNTIME_LIB" "$PROOF_ROOT/installed/lib/"
+if [ -n "$V8_RUNTIME_LIBRARY" ]; then
+  install -m 0644 "$V8_RUNTIME_LIBRARY" "$PROOF_ROOT/installed/lib/"
+fi
 install -m 0755 "$PROOF_ROOT/installed/bin/pulp-cpp" "$PROOF_ROOT/installed/bin/pulp"
 
 HARNESS="$SOURCE_ROOT/tools/scripts/gpu_clean_agent_journey.py"
