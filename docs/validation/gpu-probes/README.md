@@ -9,8 +9,10 @@ shell, and runs the installed GPU doctor from the Forge checkout. Forge Modular
 is the Forge downstream proof. The plan separately permits maintained Pulp
 examples for paths that Forge Modular does not exercise, so the executed STFT
 and Three.js rows are recorded as additional Pulp path canaries rather than
-Forge evidence. The recorder writes to a new directory outside all checkouts
-and self-verifies before publishing it.
+Forge evidence. The recorder writes to a new directory outside all checkouts,
+self-verifies, atomically claims the destination without replacement, links all
+regular evidence files, and publishes `receipt.json` last as the terminal
+marker.
 
 The recorder must run only after the final integration SHA is fixed. It does
 not create or promote a receipt during an implementation turn.
@@ -21,13 +23,17 @@ not create or promote a receipt during an implementation turn.
   SHA, with the accepted plan object available in its `planning` checkout.
 - The pinned macOS Skia/Dawn GPU build and Homebrew `node@24` V8 inputs. Do not
   mix headers and libraries from different Skia builds.
-- A dedicated Pulp build directory and install prefix outside the worktree.
+- A dedicated Pulp build directory and a not-yet-created install-prefix path
+  outside the worktree. The recorder atomically claims the empty prefix before
+  installing, so stale SDK files cannot survive from an earlier build.
 - A fresh Forge worktree detached at
   `0750a88dea3af7fca927a8c02887e071109407ae`. The only allowed difference is
   the plan-required `PULP_SDK_REF` overlay containing the final Pulp SHA; it
   must be unstaged, with no untracked or other modified files.
-- A dedicated single-config Release Forge build consuming that exact Pulp
-  prefix.
+- A not-yet-created Forge build path outside every checkout. The recorder
+  configures its single-config Release build only after the fresh Pulp install
+  exists. Pulp build, install, Forge build, and output paths must be mutually
+  non-overlapping.
 
 Example preparation (replace the three dependency paths with the host's
 verified pinned inputs):
@@ -54,19 +60,17 @@ cmake -S . -B "$PULP_BUILD_DIR" -G Ninja \
   -DPULP_BUILD_RUST_CLI=ON \
   -DPULP_RUST_CLI_PROFILE=release
 cmake --build "$PULP_BUILD_DIR" --target pulp-rust-cli pulp-cli pulp-mcp --parallel
-cmake --install "$PULP_BUILD_DIR" --prefix "$PULP_PREFIX"
 
 git worktree add --detach "$FORGE_ROOT" \
   0750a88dea3af7fca927a8c02887e071109407ae
 printf '%s\n' "$PULP_FINAL_SHA" > "$FORGE_ROOT/PULP_SDK_REF"
-cmake -S "$FORGE_ROOT" -B "$FORGE_BUILD_DIR" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="$PULP_PREFIX"
 ```
 
 The exact V8 dylib filename is part of the local node@24 installation; confirm
 it rather than copying the example blindly. Pulp configure must leave
-`PULP_HAS_THREEJS=TRUE`, and Forge's `Pulp_DIR` cache entry must resolve to
+`PULP_HAS_THREEJS=TRUE`. Do not pre-create `$PULP_PREFIX` or
+`$FORGE_BUILD_DIR`; the recorder claims the prefix, installs Pulp, then
+configures Forge with `Pulp_DIR` resolved to
 `$PULP_PREFIX/lib/cmake/Pulp`.
 
 ## Record and verify
@@ -99,6 +103,12 @@ The verifier rejects missing recipe parity, direct C++ substitutions for the
 Rust front, stale source blobs, forged plan/build stamps, non-authentic hardware,
 blank screenshots, missing negative controls, Forge drift, and non-passing
 terminal fields.
+
+Publication never replaces an output directory that appears during the run.
+The recorder claims the directory with a no-replace `mkdir`, publishes regular
+files by no-replace hard links, fsyncs them, and links `receipt.json` only after
+the other evidence is durable. A raced destination or partial interrupted
+directory is nonterminal and must not be promoted.
 
 Expected recorder runtime is roughly 10–30 minutes with warm build caches and
 45–90 minutes from cold dependencies. The bounded subprocess timeouts are one

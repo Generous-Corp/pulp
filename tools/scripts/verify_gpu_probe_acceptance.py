@@ -307,6 +307,8 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         errors.append("v2 installed CLI provenance is not the exact clean Release source")
     if install.get("build_install_binary_identity") != "pass":
         errors.append("v2 installed binaries were not byte-identical to refreshed build outputs")
+    if install.get("install_prefix_initial_state") != "absent-and-atomically-claimed":
+        errors.append("v2 install prefix was not fresh and atomically claimed")
     for field in ("cmake_cache_sha256", "build_info_sha256"):
         if not SHA256.fullmatch(str(install.get(field, ""))):
             errors.append(f"v2 installed provenance lacks exact {field}")

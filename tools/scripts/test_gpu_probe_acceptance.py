@@ -106,6 +106,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             "install_provenance": {
                 "cmake_home_revision": head, "cmake_build_type": "Release",
                 "rust_profile": "release", "build_install_binary_identity": "pass",
+                "install_prefix_initial_state": "absent-and-atomically-claimed",
                 "cmake_cache_sha256": "7" * 64, "build_info_sha256": "8" * 64,
                 "feature_contract": {
                     "PULP_ENABLE_GPU": "ON", "PULP_ENABLE_SCENE3D": "ON",
@@ -209,12 +210,14 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             receipt = self.v2_fixture(root)
             receipt["accepted_plan"]["revision"] = "0" * 40
             receipt["install_provenance"]["build_info"]["kGitSha"] = "0" * 12
+            receipt["install_provenance"]["install_prefix_initial_state"] = "preexisting"
             receipt["forge_downstream"]["bundle_build_info"]["pulp_sdk"] = "wrong"
             receipt["acceptance"]["terminal_status"] = "draft"
             (root / "receipt.json").write_text(json.dumps(receipt))
             errors = VERIFIER.verify(root)
             self.assertTrue(any("accepted plan revision" in error for error in errors))
             self.assertTrue(any("installed CLI provenance" in error for error in errors))
+            self.assertTrue(any("install prefix was not fresh" in error for error in errors))
             self.assertTrue(any("Forge bundle stamp" in error for error in errors))
 
     def test_v2_rejects_empty_installed_source_stamp(self):
@@ -295,6 +298,49 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(RECORDER.AcceptanceError, "PULP_HAS_THREEJS=TRUE"):
                 RECORDER.require_release_pulp_build(build, ROOT)
+
+    def test_generated_paths_require_fresh_distinct_install_and_forge_trees(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build = root / "pulp-build"
+            build.mkdir()
+            prefix = root / "pulp-prefix"
+            forge = root / "forge-build"
+            output = root / "receipt"
+            RECORDER.validate_generated_paths(build, prefix, forge, output)
+
+            prefix.mkdir()
+            with self.assertRaisesRegex(RECORDER.AcceptanceError, "install-prefix"):
+                RECORDER.validate_generated_paths(build, prefix, forge, output)
+            prefix.rmdir()
+
+            with self.assertRaisesRegex(RECORDER.AcceptanceError, "must not overlap"):
+                RECORDER.validate_generated_paths(
+                    build, build / "prefix", forge, output
+                )
+
+    def test_receipt_publication_claims_directory_without_replacement(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / "staging"
+            staging.mkdir()
+            (staging / "evidence.json").write_text("{}\n", encoding="utf-8")
+            (staging / "receipt.json").write_text("{}\n", encoding="utf-8")
+
+            raced_output = root / "raced-output"
+            raced_output.mkdir()
+            inode = raced_output.stat().st_ino
+            with self.assertRaisesRegex(RECORDER.AcceptanceError, "appeared"):
+                RECORDER.publish_receipt_directory_no_replace(staging, raced_output)
+            self.assertEqual(raced_output.stat().st_ino, inode)
+            self.assertEqual(list(raced_output.iterdir()), [])
+
+            output = root / "published"
+            RECORDER.publish_receipt_directory_no_replace(staging, output)
+            self.assertEqual(
+                sorted(path.name for path in output.iterdir()),
+                ["evidence.json", "receipt.json"],
+            )
 
     def test_additional_pulp_path_claim_must_bind_executed_canary_rows(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -113,6 +113,12 @@ def refresh_install(
     )
     if build.returncode != 0:
         raise AcceptanceError(f"Pulp CLI/MCP refresh failed: {build.stderr[-2000:]}")
+    try:
+        prefix.mkdir()
+    except OSError as error:
+        raise AcceptanceError(
+            "install-prefix was not fresh when the recorder atomically claimed it"
+        ) from error
     install = run_bounded(
         ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
         cwd=repository, environment=build_environment, timeout=1800,
@@ -168,6 +174,7 @@ def refresh_install(
         },
         "build_info": installed_identity["build_info"],
         "build_info_sha256": installed_identity["build_info_sha256"],
+        "install_prefix_initial_state": "absent-and-atomically-claimed",
         "build_install_binary_identity": "pass",
     }, binaries)
 
@@ -381,12 +388,29 @@ def prove_forge(
     runtime_environment: dict[str, str],
 ) -> dict[str, Any]:
     identity = forge_source_identity(repository, pulp_revision)
+    try:
+        build_dir.mkdir()
+    except OSError as error:
+        raise AcceptanceError(
+            "Forge build directory was not fresh when the recorder claimed it"
+        ) from error
+    expected_pulp_dir = (prefix / "lib/cmake/Pulp").resolve()
+    configure = run_bounded(
+        [
+            "cmake", "-S", str(repository), "-B", str(build_dir), "-G", "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            f"-DCMAKE_PREFIX_PATH={prefix}",
+            f"-DPulp_DIR={expected_pulp_dir}",
+        ],
+        cwd=repository, environment=build_environment, timeout=1800,
+    )
+    if configure.returncode != 0:
+        raise AcceptanceError(f"Forge Modular configure failed: {configure.stderr[-2000:]}")
     cache = cmake_cache(build_dir)
     if Path(cache.get("CMAKE_HOME_DIRECTORY", "")).resolve() != repository.resolve():
         raise AcceptanceError("Forge build is not configured from the exact Forge checkout")
     if cache.get("CMAKE_BUILD_TYPE") != "Release":
         raise AcceptanceError("Forge build must be single-config Release")
-    expected_pulp_dir = (prefix / "lib/cmake/Pulp").resolve()
     if Path(cache.get("Pulp_DIR", "")).resolve() != expected_pulp_dir:
         raise AcceptanceError("Forge build does not consume the accepted Pulp install")
     build = run_bounded(
@@ -474,6 +498,86 @@ def ensure_outside_checkout(path: Path, repositories: tuple[Path, ...]) -> None:
         raise AcceptanceError("A2 output/execution path must be outside every checkout")
 
 
+def paths_overlap(first: Path, second: Path) -> bool:
+    first = first.resolve()
+    second = second.resolve()
+    for child, parent in ((first, second), (second, first)):
+        try:
+            child.relative_to(parent)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def validate_generated_paths(
+    build_dir: Path, prefix: Path, forge_build: Path, output: Path
+) -> None:
+    if not build_dir.is_dir() or build_dir.is_symlink():
+        raise AcceptanceError("Pulp build-dir must be an existing external directory")
+    for label, path in (
+        ("install-prefix", prefix),
+        ("forge-build-dir", forge_build),
+        ("output-dir", output),
+    ):
+        if path.exists() or path.is_symlink() or not path.parent.is_dir():
+            raise AcceptanceError(
+                f"{label} must be a new path under an existing external directory"
+            )
+    generated = {
+        "build-dir": build_dir,
+        "install-prefix": prefix,
+        "forge-build-dir": forge_build,
+        "output-dir": output,
+    }
+    names = list(generated)
+    for index, first_name in enumerate(names):
+        for second_name in names[index + 1:]:
+            if paths_overlap(generated[first_name], generated[second_name]):
+                raise AcceptanceError(
+                    f"{first_name} and {second_name} must not overlap"
+                )
+
+
+def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
+    entries = sorted(staging.iterdir(), key=lambda path: path.name)
+    receipt = staging / "receipt.json"
+    if receipt not in entries or any(
+        not path.is_file() or path.is_symlink() for path in entries
+    ):
+        raise AcceptanceError("staging must contain only regular evidence files")
+    try:
+        output.mkdir()
+    except OSError as error:
+        raise AcceptanceError("output-dir appeared before no-replace publication") from error
+    for source in (path for path in entries if path != receipt):
+        with source.open("rb") as handle:
+            os.fsync(handle.fileno())
+        try:
+            os.link(source, output / source.name, follow_symlinks=False)
+        except OSError as error:
+            raise AcceptanceError(
+                f"no-replace publication failed for {source.name}"
+            ) from error
+    descriptor = os.open(output, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    with receipt.open("rb") as handle:
+        os.fsync(handle.fileno())
+    try:
+        os.link(receipt, output / receipt.name, follow_symlinks=False)
+    except OSError as error:
+        raise AcceptanceError("no-replace publication failed for receipt.json") from error
+    for directory_path in (output, output.parent):
+        descriptor = os.open(directory_path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, required=True)
@@ -494,8 +598,6 @@ def main(argv: list[str] | None = None) -> int:
     forge_repository = args.forge_repository.resolve()
     forge_build = args.forge_build_dir.resolve()
     output = args.output_dir.absolute()
-    if output.exists() or output.is_symlink() or not output.parent.is_dir():
-        parser.error("output-dir must be a new path under an existing directory")
     try:
         script_repository = SCRIPT_DIR.parents[1].resolve()
         if repository != script_repository:
@@ -507,6 +609,7 @@ def main(argv: list[str] | None = None) -> int:
                 generated_path, (repository, planning, forge_repository)
             )
         ensure_outside_checkout(output, (repository, planning, forge_repository))
+        validate_generated_paths(build_dir, prefix, forge_build, output)
         revision = provenance._git_text(repository, "rev-parse", "HEAD")
         source_identity = provenance.clean_source_identity(repository, revision)
         accepted_plan = provenance.plan_identity(
@@ -628,7 +731,7 @@ def main(argv: list[str] | None = None) -> int:
             problems = verifier.verify(staging)
             if problems:
                 raise AcceptanceError("self-verification failed: " + "; ".join(problems))
-            Path(staging_name).rename(output)
+            publish_receipt_directory_no_replace(staging, output)
         print(json.dumps({"output": str(output), "integration_head": revision,
                           "terminal_status": "pass"}, sort_keys=True))
         return 0
