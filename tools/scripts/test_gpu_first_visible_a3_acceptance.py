@@ -673,8 +673,12 @@ def main() -> int:
              "--evidence-root", str(root)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
         )
-        assert run.returncode == 0, run.stderr
-        receipt = json.loads(output.read_text(encoding="utf-8"))
+        assert run.returncode == 1, run.stderr
+        assert "lacks a live collector receipt" in run.stderr
+        receipt = a3.materialize_implementation_source_binding(
+            generation_template, ROOT,
+        )
+        receipt = a3.materialize_auto_hashes(receipt, root)
         assert receipt["implementation_head"] == PULP_REVISION
         assert receipt["source_blobs"] == template["source_blobs"]
         assert a3.validate_receipt(receipt, root, allow_fixture_overhead=True) is True
