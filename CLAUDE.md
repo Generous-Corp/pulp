@@ -519,14 +519,15 @@ finding.
 target that MUST return non-zero. If the control also returns zero, your instrument is broken —
 report nothing.**
 
-Three real instances from a single night, each by a different agent, each caught only by the
-control:
+Four real instances, each caught only by the control — the first three from a single night, each
+by a different agent:
 
 | what was run | what it returned | what was actually wrong |
 |---|---|---|
 | `rg -l "merge-stall" .github/workflows/` | 0 files → "the workflow does not exist" | the worktree was on a feature branch, not `main` |
 | `strings $(which shipyard) \| grep …` | 0 hits → "Shipyard does not consume this" | `which` resolved to a shell function; `strings` read nothing |
 | `git ls-tree origin/main …` | 0 files → "the path is empty" | cwd had drifted into the `planning` submodule |
+| `check.py \| tail -15` then `echo $?` | 0 → "the check passed" | a pipeline's status is the LAST command's; the checker exited 1 while printing the failures |
 
 In the first case the control was *present but misread*: `runs-on` matched 56 files, which looked
 like a healthy instrument — but the same control returns 72 on `main`. **A control that returns
@@ -543,6 +544,16 @@ git grep -c "<a-pattern-that-must-exist>" origin/main -- <path>   # the control
 # absence of a live resource — a level value cannot prove "never"
 # one reading of an empty queue / idle pool / zero count is a SNAPSHOT.
 # To claim "never", sample over time or find the mechanism that forbids it.
+
+# "no failures" from a filtered command — a pipeline exits with its LAST
+# command's status, so a filter reports ITS success, not the checker's.
+some_check.py | tail -15; echo $?      # 0 even when some_check.py exited 1
+some_check.py; echo $?                 # measure it unpiped, or:
+set -o pipefail                        # the pipeline now fails as a whole
+# PIPESTATUS can work too, but it has two failure modes that are themselves
+# silent: the name differs by shell (bash ${PIPESTATUS[0]}, zsh
+# ${pipestatus[1]}) and the wrong one expands to EMPTY rather than erroring;
+# and the NEXT command resets it — in bash even `rc=$?` does.
 ```
 
 **A destruction or absence claim deserves MORE verification than a routine one**, not less — it

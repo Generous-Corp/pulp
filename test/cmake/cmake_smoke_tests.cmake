@@ -233,6 +233,55 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
         TIMEOUT 180)
 endif()
 
+# What does adopting ONE piece of Pulp cost an outside project? Stages an
+# install, then configures two independent consumers against the prefix: an
+# ordinary one that must pass (the positive control, which also reports which
+# excluded dependencies this SDK could realize at all) and a DSP-only one whose
+# link closure is held to the clean-consumer contract.
+#
+# The contract is violated on this branch. The violation is recorded in
+# test/fixtures/clean_consumer/exclusion_policy.cmake together with the edge
+# that carries it, and this gate holds that record in both directions: a new
+# violation fails, and a recorded violation that is no longer reachable also
+# fails so the record cannot outlive its subject. Configure with
+# PULP_CLEAN_CONSUMER_STRICT=ON to run the contract with no baseline, which is
+# the assertion an SDK partition has to make pass.
+add_test(NAME cmake-clean-consumer-fixture
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+        "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+        "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+        "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+        "-DPULP_PARENT_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+        "-DPULP_CLEAN_CONSUMER_STRICT=${PULP_CLEAN_CONSUMER_STRICT}"
+        "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+        "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_clean_consumer_fixture.cmake)
+set_tests_properties(cmake-clean-consumer-fixture PROPERTIES
+    # `slow`: stages a full `cmake --install` and configures plus builds two
+    # external projects against it. Same cost class as the other installed-SDK
+    # proofs beside it, which carry the same label.
+    LABELS "cmake;sdk;modularity;slow"
+    TIMEOUT 900)
+
+# The auditor behind that fixture, proven over synthetic targets. `slow` takes
+# the fixture itself off the fast gate, so without this the instrument would
+# reach the required lane unexercised and a `clean` verdict from it would rest
+# on nothing. This configures a NONE-language project in about a second and
+# carries no label that excludes it, so the fast gate still holds the part that
+# can silently rot: LINK_ONLY traversal, and the unenforceable-vs-clean
+# distinction that keeps a narrow SDK from scoring a free pass.
+add_test(NAME cmake-clean-consumer-auditor-selftest
+    COMMAND ${CMAKE_COMMAND}
+        -S ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/clean_consumer/selftest
+        -B ${CMAKE_CURRENT_BINARY_DIR}/clean-consumer-auditor-selftest
+        "-DPULP_CLEAN_CONSUMER_CLOSURE_MODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpConsumerClosure.cmake")
+set_tests_properties(cmake-clean-consumer-auditor-selftest PROPERTIES
+    LABELS "cmake;sdk;modularity"
+    TIMEOUT 120)
+
 # Installed inspector component consumer. This compiles the public headers,
 # links the complete desktop inspector composition through find_package(Pulp),
 # and executes the result outside the source tree. The fixture requires the UI
