@@ -1,109 +1,46 @@
 {
-  "adapter": {
-    "architecture": "metal-3",
-    "backend": "Metal",
-    "class": "hardware",
-    "device": "vendor=0x106b,device=0x0",
-    "name": "Apple M3 Ultra",
-    "status": "authentic",
-    "vendor": "apple"
+  "acceptance_gate_satisfied": false,
+  "invalidation": {
+    "nonterminal_effect": "cannot satisfy Horizon-A A5",
+    "reason": "The historical driver inserted --negative-control and removed it itself. It did not bind an independently launched agent transcript or an actual agent-authored workspace edit."
   },
-  "applied_fix": {
-    "kind": "remove-seeded-negative-control-argument",
-    "removed_argument": "--negative-control",
-    "source": "scaffold/README.md"
-  },
-  "catalog_revision": 1,
-  "changed_output_artifacts": [
-    "observed.f32"
-  ],
-  "pulp_binary_sha256": "197d5be743d7ad8677413c7571fc3026fabb1e7e4930707c0c91b9bc8b269830",
-  "reference_proof": {
-    "artifact_contract": {
-      "expected.f32": {
-        "bytes": 1024,
-        "kind": "numeric-samples",
-        "mime": "application/octet-stream"
+  "prior_artifact": {
+    "filename": "m3-a5-clean-agent-20260828.json",
+    "historical_provenance": {
+      "adapter": {
+        "architecture": "metal-3",
+        "backend": "Metal",
+        "class": "hardware",
+        "device": "vendor=0x106b,device=0x0",
+        "name": "Apple M3 Ultra",
+        "status": "authentic",
+        "vendor": "apple"
       },
-      "input.complex-f32": {
-        "bytes": 2048,
-        "kind": "numeric-samples",
-        "mime": "application/octet-stream"
-      },
-      "observed.f32": {
-        "bytes": 1024,
-        "kind": "numeric-samples",
-        "mime": "application/octet-stream"
-      }
+      "catalog_revision": 1,
+      "evidence_ids": [
+        "c29882d8a596fdb701949e64da0cbce4",
+        "0b14bad60cdc51fd4528dcbbb7a13401",
+        "525c863527b5d52d3531408100af6779"
+      ],
+      "pulp_binary_sha256": "197d5be743d7ad8677413c7571fc3026fabb1e7e4930707c0c91b9bc8b269830",
+      "recipe_id": "gpu-compute.magnitude.v1",
+      "symptom": "compute-readback-mismatch"
     },
-    "artifacts_sha256": {
-      "expected.f32": "c17abc3d9b24045d6139af603dba1724d2de8f0bae7de552e4dd702dbe42e052",
-      "input.complex-f32": "ae89f2440d71bf125f34e5e8e3f40a28ed7fa207c6379aa59effe2bfbaf50301",
-      "observed.f32": "3ca88393f8148e757804d6d67d30d6730bc12929eb385104aa775735209c4ddf"
-    },
-    "exit_code": 0,
-    "gpu_evidence_id": "c29882d8a596fdb701949e64da0cbce4",
-    "pass_contract": [
-      "adapter",
-      "dispatch",
-      "oracle"
-    ],
-    "result_json_sha256": "ea6f3a18919199958f4d3e29a6f3ce0cb698913ba52d8fce1f2e297886e8e80e",
-    "signature_digest": "c98f59ffc79dc5d091494a67d790c2d8586f3543963f1a984ed7cd577516611e",
-    "source_digest": "d74e462867a390c5fdd246ba2617d024bd8a7cd413cbeb67b4e346faea371837",
-    "verdict": "pass"
+    "schema": "pulp.gpu-clean-agent-journey.v1",
+    "sha256": "87cf751cff303d130d75ee4db1ad8d91e60209b8e5093d31a6619a7b271bd915"
   },
-  "repaired_proof": {
-    "artifacts_sha256": {
-      "expected.f32": "c17abc3d9b24045d6139af603dba1724d2de8f0bae7de552e4dd702dbe42e052",
-      "input.complex-f32": "ae89f2440d71bf125f34e5e8e3f40a28ed7fa207c6379aa59effe2bfbaf50301",
-      "observed.f32": "3ca88393f8148e757804d6d67d30d6730bc12929eb385104aa775735209c4ddf"
-    },
-    "exit_code": 0,
-    "gpu_evidence_id": "525c863527b5d52d3531408100af6779",
-    "result_json_sha256": "94f952fee81a5892c40494d8d0141a1829cae56bd920a3335bf2636c1f7e12ff",
-    "signature_digest": "c98f59ffc79dc5d091494a67d790c2d8586f3543963f1a984ed7cd577516611e",
-    "source_digest": "d74e462867a390c5fdd246ba2617d024bd8a7cd413cbeb67b4e346faea371837",
-    "verdict": "pass"
+  "recorded_date": "2026-08-28",
+  "replacement_gate": {
+    "required_new_filename": "m3-a5-clean-agent-independent-20260828.json",
+    "required_schema": "pulp.gpu-clean-agent-verification.v2",
+    "required_status": "independent-agent-accepted",
+    "requirements": [
+      "prepare a seeded workspace outside all source trees",
+      "launch one fresh no-context agent in workspace-write sandbox",
+      "bind the full prompt, tool and command transcript plus model and session identity",
+      "externally verify the exact one-line edit, before and after trees, and all three GPU proofs"
+    ]
   },
-  "scaffold": {
-    "documented_commands": [
-      "pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts \"$PWD/artifacts/baseline-1\" --json",
-      "pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts \"$PWD/artifacts/baseline-2\" --json",
-      "pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts \"$PWD/artifacts/negative\" --negative-control --json"
-    ],
-    "readme_sha256": "ba32f56cc87443b3aa7f47f8208166c15b1cbd7bf84206d6f7554bf688bdc1a4",
-    "selection_sha256": "cb1fa75edc0a38106cf23b76fc844971aec4ebed71ff4e2d8ce56f5830a05e42"
-  },
-  "schema": "pulp.gpu-clean-agent-journey.v1",
-  "seeded_failure": {
-    "artifacts_sha256": {
-      "expected.f32": "c17abc3d9b24045d6139af603dba1724d2de8f0bae7de552e4dd702dbe42e052",
-      "input.complex-f32": "ae89f2440d71bf125f34e5e8e3f40a28ed7fa207c6379aa59effe2bfbaf50301",
-      "observed.f32": "a690280d06aedf94a5c97825bbfde8220dccb4f83d0d92f4e1eae0ac60ff42ed"
-    },
-    "diagnosis": {
-      "absolute_error": 2.5247395038604736,
-      "code": "cpu_oracle_mismatch",
-      "expected": 0.0,
-      "mutation": "wgsl-imaginary-weight",
-      "observed": 2.5247395038604736,
-      "pass": "oracle"
-    },
-    "exit_code": 1,
-    "gpu_evidence_id": "0b14bad60cdc51fd4528dcbbb7a13401",
-    "result_json_sha256": "478dab16f0fa121efe96f45e9ca01ea0601aaba79256ccdeef3786751fc8ac8c",
-    "signature_digest": "44cc5562df93cf2f3f9f1bfcb1f7a12a9bb9b660601b087f8d7f7a132075ce03",
-    "source_digest": "67776f97713928cd81605519b6a31a110a33d18ac813678e3db2468993e01e2f"
-  },
-  "selection": {
-    "callable": true,
-    "catalog_schema": "pulp.gpu-recipes.v1",
-    "recipe_id": "gpu-compute.magnitude.v1"
-  },
-  "stable_reference_artifacts": [
-    "expected.f32",
-    "input.complex-f32"
-  ],
-  "symptom": "compute-readback-mismatch"
+  "schema": "pulp.gpu-clean-agent-disposition.v1",
+  "status": "superseded-nonterminal"
 }

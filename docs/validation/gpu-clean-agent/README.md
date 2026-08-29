@@ -1,53 +1,92 @@
-# GPU clean-agent journey
+# GPU clean-agent acceptance
 
-This is the Horizon-A A5 usability gate. It proves a fresh investigator can
-start with an exact symptom token and complete the workflow without reading the
-Pulp source tree or remembering a recipe ID:
+Horizon-A A5 is a two-party acceptance gate. A deterministic driver, a replay,
+or an implementing agent correcting its own option does not satisfy it.
 
-1. `pulp gpu recipes list --symptom ... --json` selects exactly one callable
-   recipe from the CLI's embedded canonical catalog.
-2. `pulp gpu recipes scaffold ...` creates the bounded evidence workspace and
-   records the selection.
-3. An unmutated reference run binds the selected native recipe's exact ordered
-   semantic passes, artifact identities, adapter, source, and signature.
-4. The selected recipe's real `pulp gpu probe` command runs with its seeded
-   negative control. Exit 1 must carry one completed, typed failing pass and
-   hash-declared artifacts, with no unavailable or unverified pass hidden by
-   the aggregate failure.
-5. The agent applies the scaffold-documented correction: remove only
-   `--negative-control`, leaving the input and independent oracle unchanged.
-6. The same recipe reruns successfully. Its typed receipt must prove work
-   completed, reproduce the reference pass/artifact/source/signature contract,
-   and reproduce every non-output reference artifact exactly. Every artifact
-   changed by the seeded mutation is named explicitly rather than inferred from
-   its filename.
+The checked-in `m3-a5-clean-agent-20260828.json` is only a schema-validated
+`superseded-nonterminal` disposition for the former self-run receipt. It
+preserves that file's historical provenance but explicitly cannot satisfy A5.
+Only a separately named `pulp.gpu-clean-agent-verification.v2` receipt with
+`status: independent-agent-accepted` and `acceptance_gate_satisfied: true` is
+terminal evidence.
 
-Run it against a built or installed CLI from an arbitrary directory. The
-workspace must be an absolute path that does not exist, with a real existing
-parent (not a symlink):
+## State boundary
+
+`gpu_clean_agent_journey.py` has three separate subcommands:
+
+1. `prepare` creates an isolated public workspace and a private verifier case.
+   The workspace contains `TASK.md` and an executable `run-probe.sh` with
+   exactly one planted error: `seeded_option="--negative-control"`. Preparation
+   privately selects the recipe from the symptom and records an authentic
+   unmutated reference run. Its state is `awaiting-independent-agent`; it never
+   emits acceptance.
+2. `record` verifies that the workspace is pristine and launches one fresh
+   Codex session. It uses `workspace-write`, a disposable HOME/config root,
+   `--ephemeral`, `--ignore-user-config`, `--ignore-rules`, and a sanitized
+   environment/PATH. The agent sees only the installed CLI, exact symptom,
+   workspace, and public documentation. It receives neither a recipe ID nor a
+   source checkout/private-plan path. The session remains nonterminal.
+3. `verify` is external to the fresh agent. It checks the full prompt/tool/
+   command transcript, model and session identity, cwd/PATH, installed binary
+   and source/plan revisions, before/after tree hashes and exact one-line diff,
+   unique negative/repaired/reference evidence IDs, typed diagnosis, adapter
+   identity, and every artifact digest. Only this subcommand can create the
+   terminal receipt.
+
+Subprocess stdout, stderr, workspace, and artifact growth are capped while a
+producer is running. A cap or timeout terminates the whole process group.
+Symlink, special-file, path-escape, undeclared-artifact, unavailable,
+unverified, untyped, replayed, or extra-edit evidence fails closed.
+
+## Terminal independent run
+
+Run this only after the harness commit is the shared source HEAD and the
+canonical plan is committed. The person orchestrating the proof prepares and
+verifies it; the `record` command itself launches the fresh no-context agent.
+Do not give that agent this source checkout, the private case, a recipe ID, or
+prior task context.
 
 ```sh
-mkdir -p /private/tmp/pulp-gpu-agent-proof
-python3 /path/to/pulp/tools/scripts/gpu_clean_agent_journey.py \
-  --pulp /absolute/path/to/pulp \
+SOURCE_ROOT=/absolute/path/to/the/shared-pulp-worktree
+PLAN_ROOT=/absolute/path/to/the/canonical-pulp-planning-worktree
+PROOF_ROOT="$(mktemp -d /private/tmp/pulp-gpu-a5-independent.XXXXXX)"
+
+cmake --build "$SOURCE_ROOT/build" --target pulp-cli
+cmake -DCMAKE_INSTALL_PREFIX="$PROOF_ROOT/installed" \
+  -P "$SOURCE_ROOT/build/tools/cli/cmake_install.cmake"
+V8_RUNTIME_LIBRARY="$(sed -n 's/^V8_RUNTIME_LIBRARY:[^=]*=//p' "$SOURCE_ROOT/build/CMakeCache.txt")"
+WEBGPU_RUNTIME_LIB="$(sed -n 's/^WEBGPU_RUNTIME_LIB:[^=]*=//p' "$SOURCE_ROOT/build/CMakeCache.txt")"
+mkdir -p "$PROOF_ROOT/installed/lib"
+install -m 0644 "$V8_RUNTIME_LIBRARY" "$WEBGPU_RUNTIME_LIB" "$PROOF_ROOT/installed/lib/"
+install -m 0755 "$PROOF_ROOT/installed/bin/pulp-cpp" "$PROOF_ROOT/installed/bin/pulp"
+
+SOURCE_REVISION="$(git -C "$SOURCE_ROOT" rev-parse HEAD)"
+PLAN_REVISION="$(git -C "$PLAN_ROOT" rev-parse HEAD)"
+HARNESS="$SOURCE_ROOT/tools/scripts/gpu_clean_agent_journey.py"
+
+python3 "$HARNESS" prepare \
+  --pulp "$PROOF_ROOT/installed/bin/pulp" \
   --symptom compute-readback-mismatch \
-  --workspace /private/tmp/pulp-gpu-agent-proof/journey \
-  --json
+  --workspace "$PROOF_ROOT/workspace" \
+  --case-dir "$PROOF_ROOT/private-case" \
+  --source-revision "$SOURCE_REVISION" \
+  --plan-revision "$PLAN_REVISION" \
+  --forbidden-root "$SOURCE_ROOT" \
+  --forbidden-root "$PLAN_ROOT"
+
+python3 "$HARNESS" record \
+  --case "$PROOF_ROOT/private-case/case.json" \
+  --agent-bin "$(command -v codex)" \
+  --model gpt-5.6-sol
+
+python3 "$HARNESS" verify \
+  --case "$PROOF_ROOT/private-case/case.json" \
+  --session "$PROOF_ROOT/private-case/agent-session.json" \
+  --receipt "$SOURCE_ROOT/docs/validation/gpu-clean-agent/m3-a5-clean-agent-independent-20260828.json"
 ```
 
-The command writes `clean-agent-journey.json`, all three complete typed probe
-JSON results, and bounded `reference/`, `seeded-failure/`, and `repaired/`
-artifacts beneath the
-scaffold. The receipt records the live catalog revision, selected recipe,
-the exact scaffold selection/README byte hashes and documented commands,
-failure mutation/pass/code, applied fix, all evidence IDs and source/signature
-digests, every artifact digest, all stable reference artifacts, changed output
-artifacts, raw-result digests, and the CLI binary digest. Unknown, ambiguous,
-conditional, unavailable, timed-out,
-untyped, unbounded, or tampered evidence fails closed. Unavailable or
-unverified evidence exits 2; a broken journey contract exits 1.
-
-CTest runs the same process-level gate as `cli-gpu-clean-agent-journey`. The
-checked-in `m3-a5-clean-agent-20260828.json` is one real M3 Ultra execution
-receipt; it is evidence for this host and binary only, not a cross-platform
-claim.
+Preserve the private case, agent transcript, and workspace alongside the
+terminal receipt until their hashes have been reviewed. CTest exercises only
+the nonterminal `prepare` process contract under
+`cli-gpu-clean-agent-preparer-contract`; it is intentionally incapable of
+claiming A5 acceptance.

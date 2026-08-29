@@ -396,15 +396,18 @@ if(PULP_BUILD_TESTS)
             RESOURCE_LOCK pulp_gpu)
 
         if(PULP_ENABLE_PROJECT_PACKAGE)
-            add_test(NAME cli-gpu-clean-agent-journey
+            add_test(NAME cli-gpu-clean-agent-preparer-contract
                 COMMAND ${CMAKE_COMMAND}
                     -DPULP_CLI=$<TARGET_FILE:pulp-cli>
+                    -DCLI_INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake
+                    -DV8_RUNTIME_LIBRARY=${V8_RUNTIME_LIBRARY}
+                    -DWEBGPU_RUNTIME_LIB=${WEBGPU_RUNTIME_LIB}
                     -DPYTHON=${Python3_EXECUTABLE}
                     -DJOURNEY_SCRIPT=${CMAKE_SOURCE_DIR}/tools/scripts/gpu_clean_agent_journey.py
-                    -DWORKSPACE=${CMAKE_CURRENT_BINARY_DIR}/gpu-clean-agent-journey-workspace
+                    -DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
                     -P ${CMAKE_SOURCE_DIR}/test/cmake/gpu_clean_agent_journey_test.cmake)
-            set_tests_properties(cli-gpu-clean-agent-journey PROPERTIES
-                LABELS "gpu;gpu-probe;cli;clean-agent"
+            set_tests_properties(cli-gpu-clean-agent-preparer-contract PROPERTIES
+                LABELS "gpu;gpu-probe;cli;clean-agent-preparer"
                 RESOURCE_LOCK pulp_gpu)
         endif()
     endif()
