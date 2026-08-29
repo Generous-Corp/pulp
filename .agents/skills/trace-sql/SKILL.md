@@ -119,18 +119,22 @@ an empty named view, a different process cohort, or hand-written SQL into a
 passing campaign analysis.
 The checked-in role producers additionally pin the external lifecycle driver
 and checked-in source-bound analyzer wrapper and retain the closed driver
-request/receipt. The wrapper runs the exact requested clean revision with a
-target directory outside the source tree. The driver supplies the trace, not a
+request/receipt. The wrapper prepares one exact analyzer in a fresh,
+config-free Cargo home/target, strips ambient Cargo/Rust runners and flags, and
+retains toolchain/source/output digests. The driver supplies the trace, not a
 trusted analysis sidecar; the producer runs the named query plus an invalid-
-trace negative and accepts only the exact health evidence ID and recorded host
-UPID/PID cohort before the shared verifier consumes the derived analysis. Its
+trace negative and accepts only the exact health evidence ID, recorded host
+UPID, and PID that answered the producer's live-host nonce challenge before the
+shared verifier consumes the derived analysis. Its
 structural `unverified` result is distinct from the campaign budget verdict.
 
 Do not let the offline A2T no-producer classification hide the real A3 product
 health-transition spans. Terminal acceptance also consumes the derived
 pre-change/compile-out/compiled-in-idle/active overhead receipt from
-`gpu_first_visible_a3_trace_producer_overhead.py`, including zero xrun and
-audio-thread trace-event controls for measured and fresh-process trials.
+`gpu_first_visible_a3_trace_producer_overhead.py`. Each active sample is replayed
+from its session metadata and real producer span with exact process-start,
+binary, session-config, xrun, and audio-thread facts. Arbitrary trace bytes are
+rejected, and the final active binary must equal one measured role product.
 
 **Closed GPU cohort boundary.** The named GPU analyses do not currently accept
 an evidence-ID selector, so the SQL must not flatten unrelated runs. Startup

@@ -546,12 +546,14 @@ Select the checked-in standalone, constrained-headless, REAPER, or Forge role
 producer rather than an undocumented producer path. The adapter pins the role
 entry point and its checked-in support from the exact Pulp source root. Each
 role entry point pins the configured product, host, lifecycle driver,
-source-bound trace analyzer, embedded-build verifier, and digest-bound build
-attestation/receipt; it rehashes those
-inputs and validates 20 role-appropriate endpoint observations plus named trace
-replay. The driver must be the exact reviewed file at the requested clean
-Pulp/Forge Git revision, and every reported process identity carries an OS PID
-that must be gone before replay and PASS. The driver remains an explicit
+source-build driver, sealed source-bound trace analyzer, embedded-build
+verifier, and supplemental build attestation/receipt. The source-build driver
+receives clean exact-revision roots and a fresh output directory, never the
+measured product path; rebuilt executable and DAW/Forge bundle digests must
+match the measurement. Every lifecycle row answers a producer nonce while the
+exact host is alive, named replay selects that challenged trace-host PID, and
+all reported processes must then be gone before replay and PASS. The lifecycle
+driver remains an explicit
 external prerequisite wherever the current Dawn/AppKit/host seam cannot expose
 native presentation without Vellum-owned work.
 

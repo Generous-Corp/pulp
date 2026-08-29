@@ -258,11 +258,16 @@ Use the checked-in `gpu_first_visible_a3_external_adapter.py` as the immutable
 envelope and select `gpu_first_visible_a3_reaper_producer.py`. Configure its
 exact source-bound smoke/Lua helpers, REAPER, plugin binary/bundle, role driver,
 checked-in source-bound trace analyzer, embedded-build verifier, and
-digest-bound product build attestation/receipt;
+digest-bound product build attestation/receipt. Also configure a reviewed
+source-build driver from the exact clean revision; it must reproduce the
+measured plugin executable and complete bundle in a fresh output without being
+given the measured path. The analyzer is a sealed prepared binary, and every
+REAPER lifecycle answers the producer's live-host nonce with exact executable
+and start identity;
 the driver must resolve to the reviewed file at the requested clean Pulp
 revision. The producer runs the qualified-format preflight and then requires
-the driver to perform all 20 editor opens and terminate every reported REAPER
-PID. It retains and rehashes those inputs with the
+the driver to perform all 20 editor opens, bind the trace to one challenged
+live REAPER PID, and terminate every reported REAPER PID. It retains and rehashes those inputs with the
 exact driver request/receipt in the host evidence tar. Missing automation,
 build provenance, analyzer replay, or native-present truth is nonterminal;
 the producer cannot promote the `editor-open` smoke or a screenshot completion

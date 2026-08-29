@@ -64,7 +64,6 @@ and role-specific executables:
 : "${PULP_PLANNING_ROOT:?clean pulp-planning checkout}"
 : "${BLANK_CONTROL_BIN:?exact final-head standalone blank-control test binary}"
 : "${AUDIO_CONTROL_BIN:?exact final-head audio-thread-control test binary}"
-: "${PULP_A3_ANALYZER_CARGO_TARGET_ROOT:?absolute Cargo target root outside the Pulp checkout}"
 PULP_REVISION=$(git rev-parse HEAD)
 PLAN_REVISION=$(git -C "$PULP_PLANNING_ROOT" rev-parse HEAD)
 A3_ADAPTER="$PWD/tools/scripts/gpu_first_visible_a3_external_adapter.py"
@@ -74,17 +73,23 @@ BUILD_VERIFIER="$PWD/tools/scripts/gpu_first_visible_a3_build_verifier.py"
 : "${STANDALONE_PRODUCT_BIN:?exact final-head Standalone executable}"
 : "${STANDALONE_DRIVER:?exact executable that automates the 20 Standalone lifecycles}"
 : "${STANDALONE_DRIVER_SOURCE_PATH:?reviewed Pulp-relative driver path}"
+: "${STANDALONE_BUILD_DRIVER:?source-bound driver that rebuilds the exact product}"
+: "${STANDALONE_BUILD_DRIVER_SOURCE_PATH:?reviewed Pulp-relative build-driver path}"
 : "${STANDALONE_BUILD_ATTESTATION:?closed Standalone build attestation JSON}"
 : "${STANDALONE_BUILD_PROVENANCE:?digest-bound Standalone build receipt}"
 : "${HEADLESS_PRODUCT_BIN:?exact final-head constrained-headless executable}"
 : "${HEADLESS_DRIVER:?exact executable that automates the 20 headless lifecycles}"
 : "${HEADLESS_DRIVER_SOURCE_PATH:?reviewed Pulp-relative driver path}"
+: "${HEADLESS_BUILD_DRIVER:?source-bound driver that rebuilds the exact product}"
+: "${HEADLESS_BUILD_DRIVER_SOURCE_PATH:?reviewed Pulp-relative build-driver path}"
 : "${HEADLESS_BUILD_ATTESTATION:?closed headless build attestation JSON}"
 : "${HEADLESS_BUILD_PROVENANCE:?digest-bound headless build receipt}"
 : "${DAW_PRODUCT_BIN:?exact final-head plugin Mach-O or DLL}"
 : "${DAW_PLUGIN_BUNDLE:?exact .vst3, .clap, or .component bundle}"
 : "${REAPER_DRIVER:?exact executable that automates the 20 REAPER lifecycles}"
 : "${REAPER_DRIVER_SOURCE_PATH:?reviewed Pulp-relative driver path}"
+: "${REAPER_BUILD_DRIVER:?source-bound driver that rebuilds the exact plugin bundle}"
+: "${REAPER_BUILD_DRIVER_SOURCE_PATH:?reviewed Pulp-relative build-driver path}"
 : "${REAPER_BUILD_ATTESTATION:?closed DAW-product build attestation JSON}"
 : "${REAPER_BUILD_PROVENANCE:?digest-bound DAW-product build receipt}"
 : "${FORGE_APP_BIN:?exact final-head Forge app executable}"
@@ -92,6 +97,9 @@ BUILD_VERIFIER="$PWD/tools/scripts/gpu_first_visible_a3_build_verifier.py"
 : "${FORGE_DRIVER:?exact executable that automates the 20 Forge lifecycles}"
 : "${FORGE_DRIVER_SOURCE_OWNER:?pulp or forge source authority for the driver}"
 : "${FORGE_DRIVER_SOURCE_PATH:?reviewed authority-relative driver path}"
+: "${FORGE_BUILD_DRIVER:?source-bound driver that rebuilds the exact Forge app}"
+: "${FORGE_BUILD_DRIVER_SOURCE_OWNER:?pulp or forge source authority for the build driver}"
+: "${FORGE_BUILD_DRIVER_SOURCE_PATH:?reviewed authority-relative build-driver path}"
 : "${FORGE_BUILD_ATTESTATION:?closed Forge build attestation JSON}"
 : "${FORGE_BUILD_PROVENANCE:?digest-bound Forge build receipt}"
 : "${FORGE_ROOT:?clean Forge source checkout at the identity revision}"
@@ -105,12 +113,14 @@ PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
 PULP_A3_PULP_ROOT="$PWD" \
 PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
 PULP_A3_BUILD_VERIFIER="$BUILD_VERIFIER" \
-PULP_A3_ANALYZER_CARGO_TARGET_ROOT="$PULP_A3_ANALYZER_CARGO_TARGET_ROOT" \
 PULP_A3_STANDALONE_PRODUCT_BIN="$STANDALONE_PRODUCT_BIN" \
 PULP_A3_STANDALONE_HOST_BIN="$STANDALONE_PRODUCT_BIN" \
 PULP_A3_STANDALONE_DRIVER="$STANDALONE_DRIVER" \
 PULP_A3_STANDALONE_DRIVER_SOURCE_OWNER=pulp \
 PULP_A3_STANDALONE_DRIVER_SOURCE_PATH="$STANDALONE_DRIVER_SOURCE_PATH" \
+PULP_A3_STANDALONE_BUILD_DRIVER="$STANDALONE_BUILD_DRIVER" \
+PULP_A3_STANDALONE_BUILD_DRIVER_SOURCE_OWNER=pulp \
+PULP_A3_STANDALONE_BUILD_DRIVER_SOURCE_PATH="$STANDALONE_BUILD_DRIVER_SOURCE_PATH" \
 PULP_A3_STANDALONE_BUILD_ATTESTATION="$STANDALONE_BUILD_ATTESTATION" \
 PULP_A3_STANDALONE_BUILD_PROVENANCE="$STANDALONE_BUILD_PROVENANCE" \
 PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_standalone_producer.py" \
@@ -128,12 +138,14 @@ PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
 PULP_A3_PULP_ROOT="$PWD" \
 PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
 PULP_A3_BUILD_VERIFIER="$BUILD_VERIFIER" \
-PULP_A3_ANALYZER_CARGO_TARGET_ROOT="$PULP_A3_ANALYZER_CARGO_TARGET_ROOT" \
 PULP_A3_HEADLESS_PRODUCT_BIN="$HEADLESS_PRODUCT_BIN" \
 PULP_A3_HEADLESS_HOST_BIN="$HEADLESS_PRODUCT_BIN" \
 PULP_A3_HEADLESS_DRIVER="$HEADLESS_DRIVER" \
 PULP_A3_HEADLESS_DRIVER_SOURCE_OWNER=pulp \
 PULP_A3_HEADLESS_DRIVER_SOURCE_PATH="$HEADLESS_DRIVER_SOURCE_PATH" \
+PULP_A3_HEADLESS_BUILD_DRIVER="$HEADLESS_BUILD_DRIVER" \
+PULP_A3_HEADLESS_BUILD_DRIVER_SOURCE_OWNER=pulp \
+PULP_A3_HEADLESS_BUILD_DRIVER_SOURCE_PATH="$HEADLESS_BUILD_DRIVER_SOURCE_PATH" \
 PULP_A3_HEADLESS_BUILD_ATTESTATION="$HEADLESS_BUILD_ATTESTATION" \
 PULP_A3_HEADLESS_BUILD_PROVENANCE="$HEADLESS_BUILD_PROVENANCE" \
 PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_headless_producer.py" \
@@ -150,12 +162,14 @@ PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
 PULP_A3_PULP_ROOT="$PWD" \
 PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
 PULP_A3_BUILD_VERIFIER="$BUILD_VERIFIER" \
-PULP_A3_ANALYZER_CARGO_TARGET_ROOT="$PULP_A3_ANALYZER_CARGO_TARGET_ROOT" \
 PULP_A3_REAPER_PRODUCT_BIN="$DAW_PRODUCT_BIN" \
 PULP_A3_REAPER_HOST_BIN=/Applications/REAPER.app/Contents/MacOS/REAPER \
 PULP_A3_REAPER_DRIVER="$REAPER_DRIVER" \
 PULP_A3_REAPER_DRIVER_SOURCE_OWNER=pulp \
 PULP_A3_REAPER_DRIVER_SOURCE_PATH="$REAPER_DRIVER_SOURCE_PATH" \
+PULP_A3_REAPER_BUILD_DRIVER="$REAPER_BUILD_DRIVER" \
+PULP_A3_REAPER_BUILD_DRIVER_SOURCE_OWNER=pulp \
+PULP_A3_REAPER_BUILD_DRIVER_SOURCE_PATH="$REAPER_BUILD_DRIVER_SOURCE_PATH" \
 PULP_A3_REAPER_PLUGIN_BUNDLE="$DAW_PLUGIN_BUNDLE" \
 PULP_A3_REAPER_SMOKE="$PWD/tools/testing/daw-smoke/reaper_smoke.py" \
 PULP_A3_REAPER_SMOKE_LUA="$PWD/tools/testing/daw-smoke/insert_and_float.lua" \
@@ -174,7 +188,6 @@ PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
 PULP_A3_PULP_ROOT="$PWD" \
 PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
 PULP_A3_BUILD_VERIFIER="$BUILD_VERIFIER" \
-PULP_A3_ANALYZER_CARGO_TARGET_ROOT="$PULP_A3_ANALYZER_CARGO_TARGET_ROOT" \
 PULP_A3_FORGE_ROOT="$FORGE_ROOT" \
 PULP_A3_FORGE_PRODUCT_BIN="$FORGE_APP_BIN" \
 PULP_A3_FORGE_HOST_BIN="$FORGE_APP_BIN" \
@@ -182,6 +195,9 @@ PULP_A3_FORGE_APP_BUNDLE="$FORGE_APP_BUNDLE" \
 PULP_A3_FORGE_DRIVER="$FORGE_DRIVER" \
 PULP_A3_FORGE_DRIVER_SOURCE_OWNER="$FORGE_DRIVER_SOURCE_OWNER" \
 PULP_A3_FORGE_DRIVER_SOURCE_PATH="$FORGE_DRIVER_SOURCE_PATH" \
+PULP_A3_FORGE_BUILD_DRIVER="$FORGE_BUILD_DRIVER" \
+PULP_A3_FORGE_BUILD_DRIVER_SOURCE_OWNER="$FORGE_BUILD_DRIVER_SOURCE_OWNER" \
+PULP_A3_FORGE_BUILD_DRIVER_SOURCE_PATH="$FORGE_BUILD_DRIVER_SOURCE_PATH" \
 PULP_A3_FORGE_BUILD_ATTESTATION="$FORGE_BUILD_ATTESTATION" \
 PULP_A3_FORGE_BUILD_PROVENANCE="$FORGE_BUILD_PROVENANCE" \
 PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_forge_producer.py" \
@@ -242,7 +258,17 @@ outcome fields but exactly these artifacts: `health_result`, `raw_cold`,
 producer configuration, timeout, schema drift, exit mismatch, or an omitted
 artifact cannot become a pass.
 
-Before invoking the role driver, the producer also requires a
+Before invoking the role driver, the producer independently runs a second,
+source-bound build driver from the exact clean Pulp or Forge revision. Its
+closed request exposes only those source roots and a fresh output directory,
+not the configured measured product path. PASS requires the rebuilt executable
+digest—and complete rebuilt bundle-tree digest for DAW/Forge—to equal the
+measured bytes. The rebuilt Forge bundle must also bind
+`CFBundleExecutable`, `CFBundleIdentifier`, and `CFBundleName` in its regular
+`Contents/Info.plist` to the requested shell. This independent reproduction is
+the product proof; caller-authored build documents remain supplemental.
+
+The producer also requires a
 `pulp.gpu-first-visible-product-build-attestation.v1` JSON document. Its exact
 fields bind the requested Pulp/Forge revisions, build ID, product ID/name and
 format to the product digest, complete bundle-tree digest when applicable,
@@ -257,9 +283,13 @@ documents, pinned driver/analyzer/verifier/support, source-bound smoke helpers, 
 driver request, and deterministic bundle snapshots are rehashed after the
 driver and again after trace replay. A claim without those external build
 inputs remains nonterminal; the producer never infers source provenance from a
-filename or the current checkout. The analyzer wrapper runs the requested
-revision's Rust analyzer with `--release --locked --offline` and a Cargo target
-directory outside the source tree. Its structural campaign replay normally
+filename or the current checkout. The analyzer wrapper runs a one-shot sealed
+prepare protocol for the requested revision's Rust analyzer with `--release
+--locked --offline`. It strips caller Cargo/Rust flags and runners, links only
+locked offline caches into a fresh config-free Cargo home, uses a fresh target,
+and retains exact Cargo/rustc paths, versions, digests, manifest/lock digests,
+and the produced analyzer digest. The producer executes only that prepared
+binary. Its structural campaign replay normally
 returns `unverified`/exit 2 because it has no A3 budget; that structural verdict
 is kept separate from the campaign health/budget verdict.
 The separately source-bound build verifier scans the final executable, retains
@@ -272,8 +302,13 @@ The role driver is the product/host automation seam. It accepts the closed
 `pulp.gpu-first-visible-role-driver-receipt.v1`. A pass requires 20 ordered
 lifecycle-provenance rows, including the observed cache boundary, unique
 lifecycle and process identities, both the lifecycle and process predecessor
-for every same-process warm reopen, the owned OS host PID, and explicit
-endpoint/native-present truth.
+for every same-process warm reopen, the owned OS host PID, producer-observed
+process-start identity and executable digest, and explicit endpoint/native-
+present truth. Every row answers a producer-issued nonce challenge while the
+exact configured host is alive; the producer resolves and hashes that live
+executable before acknowledging it. The driver names the one challenged PID
+that produced the trace, and replay must select that exact PID rather than any
+member of the campaign.
 The predecessor must be an earlier observed lifecycle in the same process. The
 producer cross-checks those rows against the raw cold/warm observations. It
 returns four measured artifacts beneath its issued directory: health, raw cold,
@@ -305,8 +340,8 @@ completion), exact product/host identity, and same-campaign GPU/trace evidence
 IDs. The campaign trace keeps the ratified startup-budget `verdict` separate
 from `trace_replay_verdict`: a complete real `gpu-startup` replay is normally
 `unverified` because that analyzer has no A3 budget. Its exact evidence ID,
-Perfetto process identity, and process PID must resolve to one of the 20
-recorded host lifecycles. For the one `--require-controls` role, the envelope
+Perfetto process identity, and process PID must resolve to the trace-producing
+live-host challenge. For the one `--require-controls` role, the envelope
 separately snapshots and runs the two focused harness binaries named above and
 rejects a passing producer when either independent control is absent.
 
@@ -319,8 +354,9 @@ capture completion cannot substitute for native compositor presentation. The
 producer binds both the exact plugin bundle executable and the smoke harness's
 checked-in `insert_and_float.lua` helper. It snapshots the complete bundle,
 retains its deterministic digest, and rejects any smoke/lifecycle mutation.
-The Forge adapter likewise drives one
-exact executable inside the configured `.app` bundle and binds both Pulp and
+The Forge adapter likewise drives the `CFBundleExecutable` named by the
+configured app's regular `Contents/Info.plist`; its bundle identifier and name
+must equal the requested product identity. It binds both Pulp and
 Forge SHAs from source checkouts with no tracked or untracked changes. It also
 snapshots and mutation-guards the complete `.app` bundle. The existing
 standalone product test is a useful wiring
@@ -362,12 +398,18 @@ workload. Terminal A3 therefore also requires a four-state product control:
 - the same candidate built with tracing compiled in but no session active; and
 - that exact compiled-in binary with an active 128 MiB Perfetto ring.
 
-All four states use one machine, product, workload, build family, and
-source-bound measurement driver. Each raw document contains 5 warmups, 30
-measured same-product trials, and 20 fresh-process trials. Every sample has a
-unique evidence ID, positive duration, zero xruns, and zero audio-thread trace
-events. The active state additionally retains a digest/size-bound trace for
-every sample; inactive states may not claim one. The compiled-in idle and active
+All four states use one machine, product, workload, build family, selected A3
+campaign identity, and source-bound measurement driver. Each raw document
+contains 5 warmups, 30 measured same-product trials, and 20 fresh-process
+trials. Every sample references immutable runtime metrics binding its host PID,
+process-start identity, executable digest, audio-thread TIDs, monotonic
+start/end timestamps, and zero xruns; duration is derived from those
+timestamps. Fresh-process `(PID,start)` pairs are globally unique. The active
+state additionally retains a digest/size-bound trace for every sample. Its
+source-bound replay must find one matching session identity, the real
+`gpu_health_transition_first_visible` span on a declared non-audio host thread,
+and zero foreign producer or xrun events. Arbitrary marker-bearing bytes are
+not traces. Inactive states may not claim one. The compiled-in idle and active
 states must identify the same executable bytes, while the compile-out build is
 distinct. The driver is a reviewed relative path in the candidate revision and
 must remain byte-identical at final verification.
@@ -382,6 +424,7 @@ python3 tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py ratify \
   --candidate-compiled-in-idle "$A3_EVIDENCE/overhead/candidate-compiled-in-idle.json" \
   --candidate-active "$A3_EVIDENCE/overhead/candidate-active.json" \
   --evidence-root "$A3_EVIDENCE" \
+  --trace-processor "$A3_EVIDENCE/tooling/trace_processor_shell" \
   --generated-utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --output "$A3_EVIDENCE/trace-producer-overhead.json"
 ```
@@ -393,7 +436,11 @@ missing final-head product variant produces `unavailable`. Neither is terminal.
 The final acceptance template must set `trace_producer_overhead.status` to
 `pass` and bind the derived receipt. The checked-in nonterminal receipt records
 this control as unavailable because those exact M5 variants and trials have not
-yet run; it does not waive them.
+yet run; it does not waive them. Final verification also requires the selected
+campaign/product/format/machine identity to match one validated A3 role and the
+active binary digest to equal that campaign's measured product. A pinned
+`--trace-processor` is required for binary Perfetto protobuf traces; strict
+Chrome trace JSON is reserved for planted fixture controls.
 
 Copy each passing `run.json` campaign fragment and the requested control refs
 into the final template, add the passing trace-producer-overhead receipt and

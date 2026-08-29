@@ -2177,7 +2177,11 @@ frame, or invents a presentation timestamp itself.
 The four checked-in role entry points turn this into an executable handoff:
 each invokes one exact external lifecycle driver, requires a predecessor for
 every warm same-process reopen, and retains the closed driver protocol in the
-host evidence tar. That driver must use the real product/host bridge; a loop of
+host evidence tar. Each row answers the producer's nonce while the exact host
+executable is alive and retains its observed start identity; the trace binds to
+one challenged PID. A separate reviewed source-build driver reproduces the
+measured product/bundle without receiving its runtime path. The lifecycle
+driver must use the real product/host bridge; a loop of
 capture calls without editor lifecycle evidence is rejected.
 
 The health-transition trace macros compile to no work when `PULP_TRACING=OFF`,

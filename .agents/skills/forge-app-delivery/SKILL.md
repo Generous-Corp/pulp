@@ -438,10 +438,15 @@ For the executable handoff, use
 and Forge roots, the exact app executable for both product and host identity,
 the product-specific lifecycle driver, checked-in source-bound trace analyzer,
 embedded-build verifier, and the digest-bound Forge build
-attestation/receipt. The producer pins and rehashes
+attestation/receipt. Configure a reviewed Pulp- or Forge-owned source-build
+driver as well; it must reproduce the executable and complete `.app` tree from
+clean exact-revision sources without receiving the measured path. Both trees
+must bind `CFBundleExecutable`, `CFBundleIdentifier`, and `CFBundleName` to the
+request. The producer pins and rehashes
 those inputs; the driver must resolve to reviewed source at the declared clean
-Pulp or Forge revision. It requires 10+10 reopen/reset rows, independent native
-presentation, terminated owned Forge PIDs, and named same-instance Perfetto replay. A missing driver,
+Pulp or Forge revision. It requires 10+10 reopen/reset rows, producer-observed
+live executable/start identities, independent native presentation, terminated
+owned Forge PIDs, and named replay on the challenged trace-host PID. A missing driver,
 provenance, dirty/wrong source head, different Forge build, or Pulp demo stays
 nonterminal or fails closed.
 

@@ -551,9 +551,10 @@ For an A3 external role, the executable selected by
 `PULP_A3_CAMPAIGN_PRODUCER` must emit the campaign trace with the exact health
 IDs. The checked-in external adapter snapshots that producer but does not run
 substitute SQL or create an evidence ID. Its role producer pins the exact
-checked-in source-bound analyzer wrapper, proves its invalid-trace negative,
+checked-in source-bound analyzer wrapper, prepares it with fresh config-free
+Cargo state and retained toolchain/source/output digests, proves its invalid-trace negative,
 and derives the typed campaign analysis only when the named replay selects the
-health result's exact evidence ID and one recorded host UPID/PID cohort. The
+health result's exact evidence ID and the producer-challenged trace-host PID. The
 structural replay is normally `unverified`/exit 2 because it has no A3 budget;
 keep it separate from the health document's budget verdict. A failing analyzer
 result is terminal, and the producer may not overwrite either verdict. Final
