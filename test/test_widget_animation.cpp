@@ -4,6 +4,7 @@
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
@@ -350,6 +351,45 @@ TEST_CASE("View simulate_hover preserves hover through the hit ancestry",
     REQUIRE_FALSE(option_ptr->is_hovered());
     REQUIRE_FALSE(label_ptr->is_hovered());
     REQUIRE(option_leaves == 1);
+}
+
+TEST_CASE("ToggleButton hover remains distinct in resting and selected states",
+          "[view][widget_animation][hover]") {
+    const auto painted_face = [](ToggleButton& button) {
+        pulp::canvas::RecordingCanvas canvas;
+        button.paint(canvas);
+        pulp::canvas::Color active{};
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_fill_color)
+                active = command.color;
+            else if (command.type
+                     == pulp::canvas::DrawCommand::Type::fill_rounded_rect)
+                return active;
+        }
+        return active;
+    };
+    const auto differs = [](const pulp::canvas::Color& a,
+                            const pulp::canvas::Color& b) {
+        return std::abs(a.r - b.r) > 0.001f
+            || std::abs(a.g - b.g) > 0.001f
+            || std::abs(a.b - b.b) > 0.001f
+            || std::abs(a.a - b.a) > 0.001f;
+    };
+
+    ToggleButton button;
+    button.set_bounds({0, 0, 100, 28});
+    const auto resting = painted_face(button);
+    button.set_hovered(true);
+    const auto resting_hover = painted_face(button);
+    REQUIRE(differs(resting, resting_hover));
+
+    button.set_on(true);
+    button.set_hovered(false);
+    const auto selected = painted_face(button);
+    button.set_hovered(true);
+    const auto selected_hover = painted_face(button);
+    REQUIRE(differs(selected, selected_hover));
+    REQUIRE(differs(resting_hover, selected_hover));
 }
 
 // ── FrameClock integration test ─────────────────────────────────────────────
