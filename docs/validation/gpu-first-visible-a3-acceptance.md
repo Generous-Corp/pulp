@@ -61,6 +61,13 @@ and role-specific executables:
 
 ```bash
 A3_EVIDENCE=/absolute/path/to/a3-evidence
+PULP_REVISION=$(git rev-parse HEAD)
+PLAN_REVISION=$(git -C /absolute/path/to/pulp-planning rev-parse HEAD)
+
+python3 tools/scripts/gpu_first_visible_a3_acceptance.py ratify-budget \
+  --cold budget-cold.json --warm budget-warm.json \
+  --plan-revision "$PLAN_REVISION" --pulp-revision "$PULP_REVISION" \
+  --evidence-root "$A3_EVIDENCE" --output "$A3_EVIDENCE/budget.json"
 
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role standalone --identity "$A3_EVIDENCE/standalone-identity.json" \
