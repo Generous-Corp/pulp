@@ -369,18 +369,6 @@ if [[ "$shipped_shape_sha" == "$EXPECTED_SHAPE_TEXT_SHA" ]]; then
 else
     say_bad "the panel shaper identity is $shipped_shape_sha, not rebuilt helper $EXPECTED_SHAPE_TEXT_SHA"
 fi
-saved_patch="$REPO/tools/rack/test_fixtures/rack-open/rack-saved-rack2-valid.vcv"
-decoded_patch="$WORK/decoded-patch.json"
-if /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        "$ROOT/Contents/Resources/build/rack_patch_decode" \
-        < "$saved_patch" > "$decoded_patch" \
-        && /usr/bin/python3 -c \
-            'import json,sys; assert len(json.load(open(sys.argv[1]))["modules"]) == 2' \
-            "$decoded_patch"; then
-    say_ok "the shipped Rack saved-patch decoder reads Rack 2 format"
-else
-    say_bad "the shipped Rack saved-patch decoder rejected Rack 2 format"
-fi
 shipped_decoder_sha="$(/usr/bin/python3 \
     "$REPO/examples/forge-modular/binary_identity.py" \
     "$ROOT/Contents/Resources/build/rack_patch_decode" 2>/dev/null || echo "")"
@@ -395,6 +383,27 @@ if [[ "$shipped_decoder_archs" == "$EXPECTED_DECODER_ARCH" ]]; then
     say_ok "the Rack saved-patch decoder targets $EXPECTED_DECODER_ARCH"
 else
     say_bad "the Rack saved-patch decoder targets $shipped_decoder_archs, not $EXPECTED_DECODER_ARCH"
+fi
+host_decoder_arch="$(uname -m)"
+case "$host_decoder_arch" in
+    aarch64) host_decoder_arch="arm64" ;;
+    amd64) host_decoder_arch="x86_64" ;;
+esac
+if [[ "$shipped_decoder_archs" == "$host_decoder_arch" ]]; then
+    saved_patch="$REPO/tools/rack/test_fixtures/rack-open/rack-saved-rack2-valid.vcv"
+    decoded_patch="$WORK/decoded-patch.json"
+    if /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            "$ROOT/Contents/Resources/build/rack_patch_decode" \
+            < "$saved_patch" > "$decoded_patch" \
+            && /usr/bin/python3 -c \
+                'import json,sys; assert len(json.load(open(sys.argv[1]))["modules"]) == 2' \
+                "$decoded_patch"; then
+        say_ok "the shipped Rack saved-patch decoder reads Rack 2 format"
+    else
+        say_bad "the shipped Rack saved-patch decoder rejected Rack 2 format"
+    fi
+else
+    say_ok "the $shipped_decoder_archs Rack saved-patch decoder is not executed on the $host_decoder_arch packaging host"
 fi
 
 # An empty vocabulary hands the model a contract with no DSP in it, and the run

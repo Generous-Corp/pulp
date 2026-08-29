@@ -168,7 +168,8 @@ ships that prebuilt binary beside `shape_text`, and `install_toolchain.sh` only
 copies and validates it; an ordinary end-user install must never require a C or
 C++ compiler. Cross-architecture packaging sets
 `PULP_RACK_PATCH_DECODE_ARCH` and verifies the helper's exact Mach-O slice;
-running a helper on the packaging host does not prove it can run on the target.
+running a helper on the packaging host does not prove it can run on the target,
+and a foreign target slice must not require Rosetta merely to verify a package.
 
 Do not load `libRack.dylib` through Python `ctypes` to decode this format.
 Rack's library expects application runtime initialization; an exploratory call

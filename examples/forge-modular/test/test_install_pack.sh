@@ -411,7 +411,8 @@ if grep -q 'FORGE_PULP_SDK_SOURCE_SHA is required' "$FM/package.sh" && \
    grep -q 'PULP_RACK_PATCH_DECODE_ARCH="\$INSTALLER_ARCH"' "$FM/package.sh" && \
    grep -q 'lipo -archs.*rack_patch_decode' "$FM/package.sh" && \
    grep -q 'rack_patch_decode_sha256' "$FM/verify_package.sh" && \
-   grep -q 'EXPECTED_DECODER_ARCH' "$FM/verify_package.sh"; then
+   grep -q 'EXPECTED_DECODER_ARCH' "$FM/verify_package.sh" && \
+   grep -q 'host_decoder_arch' "$FM/verify_package.sh"; then
     ok "package binds the exact Pulp SDK and rebuilt binary helpers"
 else
     fail "package can accept an unpinned SDK, unverified content, or stale binary helper"
