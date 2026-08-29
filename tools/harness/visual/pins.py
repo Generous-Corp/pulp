@@ -4,18 +4,18 @@ These constants mirror ``tools/deps/manifest.json`` so tests and tooling can
 fail early when the deterministic rendering stack drifts without an explicit
 manifest update.
 
-Skia is pinned at chrome/m152 via the danielraffel/skia-builder fork
+Skia is pinned at chrome/m153 via the danielraffel/skia-builder fork
 (see manifest.json determinism.skia_builder_fork). The fork tracks
 upstream olilarkin's tag pattern and adds iOS/visionOS/mac-x86_64
-slices upstream does not. ``SKIA_COMMIT`` and ``SKIA_BUILDER_REF`` are
-intentionally omitted on the m152 manifest entry — the fork tracks
-branch HEAD rather than a specific commit, and the test fixtures
-match the structured fields actually present in manifest.json.
+slices upstream does not. ``SKIA_COMMIT`` and ``SKIA_BUILDER_REF`` bind the
+published archive to the exact Skia source and skia-builder workflow revision.
 """
 
 from __future__ import annotations
 
-SKIA_BRANCH = "chrome/m152"
+SKIA_BRANCH = "chrome/m153"
+SKIA_COMMIT = "8b8c3872fbc03f025855db96ce683f34ec98a815"
+SKIA_BUILDER_REF = "1f8c8d2c343f360a653bce92d11f8ded9a515208"
 SKIA_BUILDER_FORK = "https://github.com/danielraffel/skia-builder"
 SKIA_PYTHON_SMOKE_VERSION = "144.0.post2"
 
@@ -29,22 +29,21 @@ FONT_SHA256 = {
 }
 
 RELEASE_ASSET_SHA256 = {
-    # The chrome/m152 release ships linux-arm64 alongside the other slices; must
+    # The chrome/m153 release ships linux-arm64 alongside the other slices; must
     # stay in lockstep with manifest.json (guarded by
     # test_skia_linux_arm64_asset.py).
     "linux-arm64": (
-        "12aa2ba8a43472461dd552f7ac28420137bd6a3175542563c3bbbf06124d7df6"
+        "a829984ce35141ac1e8f608e29496f69ad24bd2e5215f2899a071dc6c2e0ed0e"
     ),
     "linux-x64": (
-        "b0114b0edd1e07d274fd37b8fb3508966590b9dda1fdd1f3ab24441c12dee4ed"
+        "b132db47979f116a2b35720c6e4e8c7128505499e52b218cc64546f87b0bb363"
     ),
     # The mac-arm64 key selects the verified universal archive: its arm64 Dawn
-    # slice retains the 13.0 deployment target, while the standalone M152
-    # mac-arm64 archive leaked a 15.0 stamp.
+    # slice retains the verified 13.0 deployment target.
     "mac-arm64": (
-        "a066fd95d447fe00aa9890ae404fda1fb1db369006b1c705b401c8605f8ae244"
+        "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9"
     ),
     "mac-universal": (
-        "a066fd95d447fe00aa9890ae404fda1fb1db369006b1c705b401c8605f8ae244"
+        "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9"
     ),
 }

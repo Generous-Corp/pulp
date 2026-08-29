@@ -81,6 +81,28 @@ ghapp release list --repo danielraffel/v8-builder --limit 100 --json tagName \
 The collection is a provenance and compatibility convenience, not one combined archive:
 Skia/Dawn, V8, or both may be consumed independently.
 
+## Independent Skia/Dawn advance
+
+When the user explicitly asks to advance Skia/Dawn before the matching V8 build
+is complete, keep the lanes separate instead of blocking the render update or
+claiming a matched tuple:
+
+1. Update the active Skia entry and its built-Dawn provenance from published
+   assets. Leave the V8 version, assets, and its internal `paired_*` metadata at
+   their last verified milestone.
+2. State the mixed active-provider selection in `DEPENDENCIES.md` and the V8
+   manifest notes. Do not rewrite V8's historical `skia_release_tag`,
+   `paired_skia`, or `paired_dawn` to the newer active Skia values.
+3. Run the sealed V8 provider-identity/ODR gate against the new Skia/Dawn
+   provider. A successful Skia-only build does not prove mixed-provider safety.
+4. Record a precise follow-up trigger: adopt V8 only after the matched release
+   contains every required platform asset and its embedded pair manifest passes
+   the normal milestone checks.
+
+This is a bounded compatibility state, not a new default release policy. Return
+to a fully milestone-matched selection as soon as the verified V8 release is
+available.
+
 ## Pulp update checklist
 
 1. Work from current `origin/main` in a clean worktree. Read release notes from M+1

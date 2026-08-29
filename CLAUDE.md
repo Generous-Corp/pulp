@@ -1802,7 +1802,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `prove-before-showing` | Prove a UI or generation feature works before a human sees it: A/B against the source design, drive every control headlessly, prove the generator spawns, launch the real host, negative-control every gate |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
 | `pulp-vellum-change-routing` | Route repository-qualified design-import, visual-harness, Chromium, DesignIR, and rendering changes through Pulp's exact Vellum ownership projection |
-| `render-toolchain-update` | Update milestone-matched Skia, built-Dawn, and V8 releases together while preserving the separate weekly V8 lane |
+| `render-toolchain-update` | Update Skia/built-Dawn/V8 provenance, including an explicit temporary Skia-first lane when matched V8 assets are incomplete |
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
