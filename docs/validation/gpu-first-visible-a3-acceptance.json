@@ -115,6 +115,15 @@
       "status": "confirmed",
       "detail": "A planted old single-shot adapter behavior was caught by the focused adapter test. This control proves the adapter test can fail but does not prove a real product campaign.",
       "artifact_sha256": []
+    },
+    {
+      "id": "standalone-exact-product-health-read",
+      "status": "partial",
+      "detail": "The exact standalone product, selected through the canonical broker client by installed instance, registration, and publication, produced an authentic Metal/Dawn adapter plus completed nonblank back-buffer capture. GPU submission, startup, budget, frame lifecycle, and A2T correlation remain unverified or missing, so this is not a campaign or acceptance pass. The response and binding artifacts are gpu-first-visible-a3-standalone-product-response.json and gpu-first-visible-a3-standalone-product-binding.json.",
+      "artifact_sha256": [
+        "f6ef5145ada178fd078e4affd7e91203e5afd3f9fa8f3497958ee4815cd71192",
+        "2e94731d587e332be1b80b4f1cea2ea4e8dd984010ffe4e14560276de2f7ff3e"
+      ]
     }
   ],
   "missing_evidence": [

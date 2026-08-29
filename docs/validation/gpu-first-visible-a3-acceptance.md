@@ -62,6 +62,39 @@ Until a validated campaign actually misses the ratified budget, the B4
 disposition remains unset. Missing transferred producers do not by themselves
 justify prewarm or permit a hand-authored investigation disposition.
 
+### Exact standalone product observation
+
+`gpu-first-visible-a3-standalone-product-response.json` preserves one fresh
+`dev.pulp.gpu/health.read@1` response from the real standalone composition at
+source revision `c568198f356d4b961b4fb6bb68caa3d3ccebd3c4`. The canonical client
+selected the exact installed instance, registration, and publication recorded
+in `gpu-first-visible-a3-standalone-product-binding.json`, waited until the
+startup trial existed, and retained the response and fixture digests.
+
+This observation confirms that the shipped host can report an authentic
+Metal-backed Dawn adapter, completed back-buffer readback, and nonblank content.
+It also demonstrates the intended fail-closed boundary: `command_submitted` is
+null, the submit event and aggregate health are `unverified`, startup is
+`incomplete`, the budget is `unratified`, and frame-lifecycle and A2T
+correlation categories are missing. It therefore advances product plumbing
+without satisfying a campaign, terminal acceptance, or B4 disposition gate.
+
+After building the product test target at the source revision, regenerate the
+observation in a temporary location with:
+
+```bash
+PULP_A3_EVIDENCE_SOURCE_REVISION=c568198f356d4b961b4fb6bb68caa3d3ccebd3c4 \
+PULP_A3_EVIDENCE_RESPONSE_PATH=/private/tmp/gpu-first-visible-a3-standalone-product-response.json \
+build-a3-release/test/a3-product/pulp-test-control-gpu-health-standalone-product \
+  "exact Standalone product instance publishes capture-only GPU health"
+```
+
+The response is intentionally a single product observation. The ratified
+budget, four 10-cold/10-warm product campaigns, direct submission and native
+present proof, full stage timings and signatures, same-instance Perfetto/A2T
+correlation, real blank negative, audio-thread exclusion, and legal B4
+disposition remain required below.
+
 ## Terminal evidence
 
 A complete receipt must bind the exact planning revision and digest, Pulp and
