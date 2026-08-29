@@ -30,6 +30,10 @@ RECIPES = {
     "renderer": "renderer3d.hardcoded-cube.v1",
     "threejs": "threejs.multi-pass.v1",
 }
+MISSING_FORGE_PATH_CANARIES = {
+    "gpu_audio": "stft",
+    "threejs": "threejs",
+}
 SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 MAX_COMMAND_OUTPUT = 4 * 1024 * 1024
 
@@ -172,6 +176,40 @@ def canonical_result(value: dict[str, Any]) -> dict[str, Any]:
     copied = json.loads(json.dumps(value))
     copied.pop("gpu_evidence_id", None)
     return copied
+
+
+def bind_missing_forge_path_canaries(
+    cli_results: dict[str, dict[str, dict[str, Any]]],
+    mcp_results: dict[str, dict[str, dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    """Bind Forge's missing paths to the A2 executions that actually cover them."""
+    canaries: dict[str, dict[str, Any]] = {}
+    for canary, group in MISSING_FORGE_PATH_CANARIES.items():
+        cli = cli_results.get(group, {})
+        mcp = mcp_results.get(group, {})
+        recipe = RECIPES[group]
+        if (
+            cli.get("run1", {}).get("verdict") != "pass"
+            or cli.get("run2", {}).get("verdict") != "pass"
+            or cli.get("negative", {}).get("verdict") != "fail"
+            or mcp.get("positive", {}).get("verdict") != "pass"
+            or mcp.get("negative", {}).get("verdict") != "fail"
+            or canonical_result(cli.get("run1", {}))
+            != canonical_result(mcp.get("positive", {}))
+            or canonical_result(cli.get("negative", {}))
+            != canonical_result(mcp.get("negative", {}))
+        ):
+            raise AcceptanceError(f"{canary} missing-path canary was not actually exercised")
+        group_index = list(RECIPES).index(group)
+        canaries[canary] = {
+            "status": "pass",
+            "recipe": recipe,
+            "cli_positive_files": [f"{group}-run1.json", f"{group}-run2.json"],
+            "cli_negative_file": f"{group}-negative.json",
+            "mcp_positive_response_id": 2 + (2 * group_index),
+            "mcp_negative_response_id": 3 + (2 * group_index),
+        }
+    return canaries
 
 
 def run_cli_probe(
@@ -413,8 +451,6 @@ def prove_forge(
         "bundle_binary_sha256": sha256(binary),
         "codesign_verify": "pass",
         "screenshot_metrics": metrics,
-        "threejs_canary": "pass",
-        "gpu_audio_canary": "pass",
     }
 
 
@@ -519,6 +555,9 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 if canonical_result(cli_results[group]["run1"]) != canonical_result(cli_results[group]["run2"]):
                     raise AcceptanceError(f"{recipe} installed CLI rerun was nondeterministic")
+            mcp_results: dict[str, dict[str, dict[str, Any]]] = {
+                group: {} for group in RECIPES
+            }
             session = McpSession(mcp, execution, runtime_environment)
             try:
                 session.initialize()
@@ -528,6 +567,7 @@ def main(argv: list[str] | None = None) -> int:
                             recipe, execution / f"{group}-mcp-{suffix}-artifacts",
                             negative=negative,
                         )
+                        mcp_results[group][suffix] = evidence
                         cli_key = "negative" if negative else "run1"
                         if canonical_result(evidence) != canonical_result(cli_results[group][cli_key]):
                             raise AcceptanceError(f"{recipe} installed CLI/MCP parity failed")
@@ -536,10 +576,14 @@ def main(argv: list[str] | None = None) -> int:
             (staging / "mcp-transcript.jsonl").write_text(
                 "".join(json.dumps(row, sort_keys=True) + "\n" for row in session.transcript)
             )
+            missing_path_canaries = bind_missing_forge_path_canaries(
+                cli_results, mcp_results
+            )
             forge = prove_forge(
                 forge_repository, forge_build, prefix, revision, staging,
                 build_environment, runtime_environment,
             )
+            forge["missing_path_canaries"] = missing_path_canaries
             raw_names = {
                 *(f"{group}-{suffix}.json" for group in RECIPES
                   for suffix in ("run1", "run2", "negative")),

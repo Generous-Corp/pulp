@@ -406,8 +406,25 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
                 ):
                     if not any(value.get(field) is True for value in measurements):
                         errors.append(f"Forge-cwd GPU doctor did not prove {field}")
-    if forge.get("threejs_canary") != "pass" or forge.get("gpu_audio_canary") != "pass":
-        errors.append("Forge proof does not bind the missing-path Three.js/GPU-audio canaries")
+    expected_canaries = {
+        "gpu_audio": {
+            "status": "pass", "recipe": GROUPS["stft"],
+            "cli_positive_files": ["stft-run1.json", "stft-run2.json"],
+            "cli_negative_file": "stft-negative.json",
+            "mcp_positive_response_id": 4, "mcp_negative_response_id": 5,
+        },
+        "threejs": {
+            "status": "pass", "recipe": GROUPS["threejs"],
+            "cli_positive_files": ["threejs-run1.json", "threejs-run2.json"],
+            "cli_negative_file": "threejs-negative.json",
+            "mcp_positive_response_id": 8, "mcp_negative_response_id": 9,
+        },
+    }
+    if forge.get("missing_path_canaries") != expected_canaries:
+        errors.append(
+            "Forge proof does not bind the missing-path Three.js/GPU-audio claims "
+            "to their executed CLI/MCP evidence"
+        )
     acceptance = _mapping(receipt.get("acceptance"), "acceptance", errors)
     expected_acceptance = {
         "terminal_status": "pass", "all_four_installed_cli": "pass",

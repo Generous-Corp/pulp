@@ -164,9 +164,56 @@ def verify(
                 if label == "measured"
                 else ("cli_duration_ns", "mcp_process_initialize_request_shutdown_duration_ns")
             )
-            if any(not isinstance(row.get(field), int) or row[field] <= 0 for field in duration_fields):
+            if any(type(row.get(field)) is not int or row[field] <= 0 for field in duration_fields):
                 errors.append(f"{label} trial {index + 1} lacks positive raw durations")
                 break
+
+    measured_rows_valid = (
+        isinstance(raw, list) and len(raw) == 30
+        and all(
+            isinstance(row, dict)
+            and type(row.get("cli_duration_ns")) is int
+            and row["cli_duration_ns"] > 0
+            and type(row.get("mcp_duration_ns")) is int
+            and row["mcp_duration_ns"] > 0
+            for row in raw
+        )
+    )
+    if measured_rows_valid:
+        measured_cli = [row["cli_duration_ns"] for row in raw]
+        measured_mcp = [row["mcp_duration_ns"] for row in raw]
+        if measured.get("cli") != contract.summary(measured_cli):
+            errors.append("measured CLI summary does not match raw durations")
+        if measured.get("persistent_mcp_request") != contract.summary(measured_mcp):
+            errors.append("measured MCP summary does not match raw durations")
+        if measured.get("confidence") != contract.bootstrap_median_delta_ci(
+            measured_cli, measured_mcp
+        ):
+            errors.append("measured confidence interval does not match raw durations")
+
+    fresh_rows_valid = (
+        isinstance(fresh_raw, list) and len(fresh_raw) == 20
+        and all(
+            isinstance(row, dict)
+            and type(row.get("cli_duration_ns")) is int
+            and row["cli_duration_ns"] > 0
+            and type(row.get("mcp_process_initialize_request_shutdown_duration_ns")) is int
+            and row["mcp_process_initialize_request_shutdown_duration_ns"] > 0
+            for row in fresh_raw
+        )
+    )
+    if fresh_rows_valid:
+        fresh_cli = [row["cli_duration_ns"] for row in fresh_raw]
+        fresh_mcp = [
+            row["mcp_process_initialize_request_shutdown_duration_ns"]
+            for row in fresh_raw
+        ]
+        if fresh.get("cli") != contract.summary(fresh_cli):
+            errors.append("fresh CLI summary does not match raw durations")
+        if fresh.get("mcp_process_initialize_request_shutdown") != contract.summary(
+            fresh_mcp
+        ):
+            errors.append("fresh MCP summary does not match raw durations")
 
     replay = receipt.get("fixture_replay")
     if not isinstance(replay, list) or len(replay) != len(contract.FIXTURE_REPLAY):

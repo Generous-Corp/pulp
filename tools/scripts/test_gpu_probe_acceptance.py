@@ -152,7 +152,20 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 "bundle_build_info_sha256": "5" * 64,
                 "bundle_binary_sha256": "6" * 64,
                 "screenshot_metrics": VERIFIER._png_metrics(screenshot),
-                "threejs_canary": "pass", "gpu_audio_canary": "pass",
+                "missing_path_canaries": {
+                    "gpu_audio": {
+                        "status": "pass", "recipe": RECORDER.RECIPES["stft"],
+                        "cli_positive_files": ["stft-run1.json", "stft-run2.json"],
+                        "cli_negative_file": "stft-negative.json",
+                        "mcp_positive_response_id": 4, "mcp_negative_response_id": 5,
+                    },
+                    "threejs": {
+                        "status": "pass", "recipe": RECORDER.RECIPES["threejs"],
+                        "cli_positive_files": ["threejs-run1.json", "threejs-run2.json"],
+                        "cli_negative_file": "threejs-negative.json",
+                        "mcp_positive_response_id": 8, "mcp_negative_response_id": 9,
+                    },
+                },
             },
             "acceptance": {
                 "terminal_status": "pass", "all_four_installed_cli": "pass",
@@ -228,6 +241,17 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(RECORDER.AcceptanceError, "PULP_HAS_THREEJS=TRUE"):
                 RECORDER.require_release_pulp_build(build, ROOT)
+
+    def test_missing_path_claim_must_bind_executed_canary_rows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt = self.v2_fixture(root)
+            receipt["forge_downstream"]["missing_path_canaries"]["threejs"][
+                "mcp_positive_response_id"
+            ] = 2
+            (root / "receipt.json").write_text(json.dumps(receipt))
+            errors = VERIFIER.verify(root)
+            self.assertTrue(any("missing-path" in error for error in errors))
 
     def test_forge_source_allows_only_exact_sdk_ref_overlay(self):
         responses = {

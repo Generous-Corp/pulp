@@ -70,6 +70,10 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "semantic_result": semantic,
             })
         trace_digest = CONTRACT.sha256(trace)
+        measured_cli = [1] * 30
+        measured_mcp = [1] * 30
+        fresh_cli = [1] * 20
+        fresh_mcp = [1] * 20
         return {
             "schema": "pulp.gpu-trace-overhead-acceptance.v2",
             "source_revision": head,
@@ -115,14 +119,19 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "order": "alternating cli-first/mcp-first",
                 "environment_path": "/usr/bin:/bin:/usr/sbin:/sbin",
             },
-            "measured": {"cli": {"count": 30}, "persistent_mcp_request": {"count": 30},
+            "measured": {
+                "cli": CONTRACT.summary(measured_cli),
+                "persistent_mcp_request": CONTRACT.summary(measured_mcp),
+                "confidence": CONTRACT.bootstrap_median_delta_ci(
+                    measured_cli, measured_mcp
+                ),
                 "raw_samples": [
                 {"trial": i + 1, "order": "cli-first" if i % 2 == 0 else "mcp-first",
                  "cli_duration_ns": 1, "mcp_duration_ns": 1}
                 for i in range(30)
             ]},
-            "fresh_start": {"cli": {"count": 20},
-                "mcp_process_initialize_request_shutdown": {"count": 20},
+            "fresh_start": {"cli": CONTRACT.summary(fresh_cli),
+                "mcp_process_initialize_request_shutdown": CONTRACT.summary(fresh_mcp),
                 "raw_samples": [
                 {"trial": i + 1, "order": "cli-first" if i % 2 == 0 else "mcp-first",
                  "cli_duration_ns": 1,
@@ -192,6 +201,18 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         errors = MODULE.verify(receipt, ROOT)
         self.assertIn("measured raw sample count must be exactly 30", errors)
         self.assertTrue(any("fresh trial 2" in error for error in errors))
+
+    def test_published_statistics_must_match_raw_samples(self):
+        receipt = self.terminal_receipt()
+        receipt["measured"]["cli"]["median_ms"] = 999.0
+        receipt["measured"]["confidence"]["ci_high_ms"] = 999.0
+        receipt["fresh_start"]["mcp_process_initialize_request_shutdown"][
+            "p95_ms"
+        ] = 999.0
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertIn("measured CLI summary does not match raw durations", errors)
+        self.assertIn("measured confidence interval does not match raw durations", errors)
+        self.assertIn("fresh MCP summary does not match raw durations", errors)
 
 
 if __name__ == "__main__":
