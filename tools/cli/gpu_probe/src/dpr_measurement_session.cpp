@@ -15,6 +15,7 @@
 
 #include <choc/text/choc_JSON.h>
 #include <dawn/webgpu_cpp.h>
+#include "include/gpu/graphite/Context.h"
 
 #include <algorithm>
 #include <chrono>
@@ -338,6 +339,14 @@ struct Session {
             view::paint_plugin_scene(*canvas, root, geometry, nullptr);
         const auto outcome = surfaces.skia->end_frame();
         surfaces.gpu->end_frame();
+        if (auto* context = surfaces.skia->graphite_context()) {
+            // end_frame registers the elapsed-time callback for this exact
+            // recording. A synchronous follow-up submit plus completion pump
+            // drains that callback before we read the tracker, preventing the
+            // normal one-frame async lag from attributing the predecessor.
+            context->submit(skgpu::graphite::SyncToCpu::kYes);
+            context->checkAsyncWorkCompletion();
+        }
         cpu_ms = elapsed_ms(started);
         gpu_ms = surfaces.skia->gpu_render_time_ms();
         return render::frame_reached_output(outcome) &&
@@ -746,6 +755,12 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
             adaptive_budget = (timer_baseline_median + timer_extra_median) * 0.5;
             double scale = adaptive_initial_scale;
             for (std::uint32_t frame = 0; frame < down_frames; ++frame) {
+                if (!session.calibration_frame(
+                        request.gpu_timer_extra_work_multiplier, cpu, gpu) ||
+                    !std::isfinite(gpu) || gpu <= 0.0) {
+                    message = "adaptive over-budget frame was not measured";
+                    break;
+                }
                 const auto before = scale;
                 const bool boundary = frame + 1 == down_frames;
                 if (boundary && !session.set_scale(request, down_target,
@@ -756,11 +771,16 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
                 if (boundary) scale = session.geometry.scale;
                 adaptive_observations.push_back({
                     "over-budget", frame,
-                    calibration_extra[frame % calibration_extra.size()], before, scale,
+                    gpu, before, scale,
                     boundary ? (scale < before ? "downshift" : "floor-hold") : "",
                 });
             }
             for (std::uint32_t frame = 0; message.empty() && frame < up_frames; ++frame) {
+                if (!session.calibration_frame(1, cpu, gpu) ||
+                    !std::isfinite(gpu) || gpu <= 0.0) {
+                    message = "adaptive under-budget frame was not measured";
+                    break;
+                }
                 const auto before = scale;
                 const bool boundary = frame + 1 == up_frames;
                 if (boundary && !session.set_scale(request, up_target,
@@ -771,7 +791,7 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
                 if (boundary) scale = session.geometry.scale;
                 adaptive_observations.push_back({
                     "under-budget", down_frames + frame,
-                    calibration_baseline[frame % calibration_baseline.size()], before,
+                    gpu, before,
                     scale,
                     boundary ? (scale > before ? "upshift" : "ceiling-hold") : "",
                 });
