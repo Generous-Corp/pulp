@@ -15,8 +15,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import gpu_first_visible_a3_trace_producer_overhead_analyzer as trace_replay
+
 RAW_SCHEMA = "pulp.gpu-first-visible-trace-producer-overhead-raw.v1"
 RECEIPT_SCHEMA = "pulp.gpu-first-visible-trace-producer-overhead.v1"
+METRICS_SCHEMA = "pulp.gpu-first-visible-trace-producer-runtime-metrics.v1"
+SESSION_CONFIG_SCHEMA = "pulp.gpu-first-visible-trace-session-config.v1"
 PRODUCER_REVISION = "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0"
 BASELINE_REVISION = "5048ce72dd28d87974550a3feb526de0f44af32c"
 RING_BYTES = 128 * 1024 * 1024
@@ -26,6 +30,7 @@ STATES = (
     "candidate-compiled-in-idle",
     "candidate-active",
 )
+CAMPAIGN_ROLES = {"standalone", "headless-constrained", "daw", "forge"}
 STATE_TRACING = {
     "pre-change-baseline": (False, False, 0),
     "candidate-compile-out": (False, False, 0),
@@ -39,27 +44,38 @@ LIMITS = {
 }
 RAW_KEYS = {
     "schema", "version", "state", "producer_revision", "source_revision",
-    "baseline_revision", "candidate_revision", "build_family_id", "product_id",
-    "binary_sha256", "machine", "workload", "measurement_driver", "tracing",
-    "warmups", "measured", "fresh_process",
+    "baseline_revision", "candidate_revision", "campaign_role", "campaign_id",
+    "build_family_id", "product_id", "product_name", "plugin_format",
+    "binary_sha256", "machine", "workload", "measurement_driver",
+    "trace_session_config", "tracing", "warmups", "measured", "fresh_process",
 }
 MACHINE_KEYS = {"machine_id", "operating_system", "architecture"}
 WORKLOAD_KEYS = {"workload_id", "content_sha256", "adapter_sha256"}
 DRIVER_KEYS = {"revision", "path", "sha256"}
 TRACING_KEYS = {"compiled_in", "session_active", "ring_bytes"}
-SAMPLE_KEYS = {
-    "sequence", "evidence_id", "duration_ms", "xrun_count",
-    "audio_thread_trace_events", "trace_path", "trace_sha256", "trace_bytes",
+ARTIFACT_KEYS = {"path", "sha256"}
+TRACE_KEYS = {"path", "sha256", "bytes", "format"}
+SAMPLE_KEYS = {"sequence", "evidence_id", "duration_ms", "runtime_metrics", "trace"}
+METRICS_KEYS = {
+    "schema", "version", "state", "sequence", "evidence_id", "host_pid",
+    "process_start_identity", "executable_sha256", "audio_thread_tids",
+    "started_monotonic_ns", "finished_monotonic_ns", "xrun_count",
+}
+SESSION_CONFIG_KEYS = {
+    "schema", "version", "ring_bytes", "fill_policy", "categories",
 }
 RECEIPT_KEYS = {
     "schema", "version", "generated_utc", "producer_revision",
-    "baseline_revision", "candidate_revision", "build_family_id", "product_id",
-    "machine", "workload", "measurement_driver", "protocol", "raw_artifacts", "summaries",
-    "comparisons", "verdict",
+    "baseline_revision", "candidate_revision", "campaign_role", "campaign_id",
+    "build_family_id", "product_id", "product_name", "plugin_format", "binaries",
+    "machine", "workload", "measurement_driver", "trace_session_config",
+    "trace_processor", "protocol", "raw_artifacts", "summaries",
+    "comparisons", "replay_summary", "verdict",
 }
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
 GIT_REVISION = re.compile(r"^[0-9a-f]{40}$")
+UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+Z$")
 
 
 class OverheadError(ValueError):
@@ -131,6 +147,27 @@ def safe_artifact(root: Path, relative: Any, label: str) -> Path:
     return resolved
 
 
+def artifact_path(ref: Any, root: Path, label: str) -> Path:
+    exact_keys(ref, ARTIFACT_KEYS, label)
+    path = safe_artifact(root, ref["path"], label)
+    if not isinstance(ref["sha256"], str) or SHA256.fullmatch(ref["sha256"]) is None:
+        raise OverheadError(f"{label} digest is invalid")
+    if sha256_file(path, label) != ref["sha256"]:
+        raise OverheadError(f"{label} digest differs")
+    return path
+
+
+def artifact_ref(path: Path, evidence_root: Path) -> dict[str, str]:
+    resolved = path.resolve()
+    root = evidence_root.resolve()
+    if root not in resolved.parents:
+        raise OverheadError(f"artifact escapes the evidence root: {path}")
+    return {
+        "path": resolved.relative_to(root).as_posix(),
+        "sha256": sha256_file(resolved, "artifact"),
+    }
+
+
 def finite_positive(value: Any) -> bool:
     return (
         isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -138,13 +175,111 @@ def finite_positive(value: Any) -> bool:
     )
 
 
+def validate_session_config(ref: Any, evidence_root: Path) -> tuple[Path, str]:
+    path = artifact_path(ref, evidence_root, "trace_session_config")
+    payload = regular_json(path, "trace_session_config")
+    exact_keys(payload, SESSION_CONFIG_KEYS, "trace_session_config")
+    if payload != {
+        "schema": SESSION_CONFIG_SCHEMA,
+        "version": 1,
+        "ring_bytes": RING_BYTES,
+        "fill_policy": "ring-buffer",
+        "categories": ["dsp", "gpu", "metadata", "render"],
+    }:
+        raise OverheadError("trace_session_config is not the closed 128 MiB session")
+    return path, ref["sha256"]
+
+
+def validate_metrics(
+    ref: Any, *, state: str, sequence: int, evidence_id: str,
+    binary_sha256: str, evidence_root: Path, duration_ms: float, label: str,
+) -> dict[str, Any]:
+    path = artifact_path(ref, evidence_root, f"{label}.runtime_metrics")
+    metrics = regular_json(path, f"{label}.runtime_metrics")
+    exact_keys(metrics, METRICS_KEYS, f"{label}.runtime_metrics")
+    tids = metrics["audio_thread_tids"]
+    if (
+        metrics["schema"] != METRICS_SCHEMA
+        or metrics["version"] != 1
+        or metrics["state"] != state
+        or metrics["sequence"] != sequence
+        or metrics["evidence_id"] != evidence_id
+        or not isinstance(metrics["host_pid"], int)
+        or isinstance(metrics["host_pid"], bool)
+        or metrics["host_pid"] <= 0
+        or not isinstance(metrics["process_start_identity"], str)
+        or not metrics["process_start_identity"]
+        or metrics["executable_sha256"] != binary_sha256
+        or not isinstance(tids, list)
+        or not tids
+        or tids != sorted(set(tids))
+        or any(not isinstance(item, int) or isinstance(item, bool) or item <= 0 for item in tids)
+        or not isinstance(metrics["started_monotonic_ns"], int)
+        or isinstance(metrics["started_monotonic_ns"], bool)
+        or not isinstance(metrics["finished_monotonic_ns"], int)
+        or isinstance(metrics["finished_monotonic_ns"], bool)
+        or metrics["finished_monotonic_ns"] <= metrics["started_monotonic_ns"]
+        or metrics["xrun_count"] != 0
+    ):
+        raise OverheadError(f"{label}.runtime_metrics lacks authentic process/xrun facts")
+    derived_duration = round(
+        (metrics["finished_monotonic_ns"] - metrics["started_monotonic_ns"]) / 1_000_000,
+        6,
+    )
+    if round(float(duration_ms), 6) != derived_duration:
+        raise OverheadError(f"{label}.duration_ms is not derived from runtime metrics")
+    return metrics
+
+
+def validate_trace(
+    ref: Any, *, metrics: dict[str, Any], evidence_id: str,
+    session_config_sha256: str, evidence_root: Path,
+    trace_processor: Path | None, label: str,
+) -> dict[str, Any]:
+    exact_keys(ref, TRACE_KEYS, f"{label}.trace")
+    path = safe_artifact(evidence_root, ref["path"], f"{label}.trace")
+    data = regular_file_bytes(path, f"{label}.trace")
+    if (
+        not isinstance(ref["sha256"], str)
+        or SHA256.fullmatch(ref["sha256"]) is None
+        or sha256_bytes(data) != ref["sha256"]
+        or not isinstance(ref["bytes"], int)
+        or isinstance(ref["bytes"], bool)
+        or ref["bytes"] != len(data)
+        or not 0 < len(data) <= RING_BYTES
+        or ref["format"] not in {"chrome-json", "perfetto-proto"}
+    ):
+        raise OverheadError(f"{label}.trace lacks bounded immutable bytes")
+    request = {
+        "evidence_id": evidence_id,
+        "host_pid": metrics["host_pid"],
+        "process_start_identity": metrics["process_start_identity"],
+        "executable_sha256": metrics["executable_sha256"],
+        "audio_thread_tids": metrics["audio_thread_tids"],
+        "session_config_sha256": session_config_sha256,
+        "ring_bytes": RING_BYTES,
+    }
+    try:
+        analysis = trace_replay.analyze_trace(path, request, trace_processor)
+    except (OSError, trace_replay.TraceReplayError) as error:
+        raise OverheadError(f"{label}.trace replay failed: {error}") from error
+    if analysis["trace_format"] != ref["format"]:
+        raise OverheadError(f"{label}.trace format differs from replay")
+    return analysis
+
+
 def validate_samples(
-    rows: Any, *, count: int, state: str, evidence_root: Path, label: str,
-) -> list[dict[str, Any]]:
+    rows: Any, *, count: int, state: str, evidence_root: Path,
+    binary_sha256: str, session_config_sha256: str,
+    trace_processor: Path | None, label: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if not isinstance(rows, list) or len(rows) != count:
         raise OverheadError(f"{label} must contain exactly {count} samples")
     active = state == "candidate-active"
+    metrics_rows: list[dict[str, Any]] = []
+    analyses: list[dict[str, Any]] = []
     evidence_ids: set[str] = set()
+    metric_paths: set[str] = set()
     for index, row in enumerate(rows):
         exact_keys(row, SAMPLE_KEYS, f"{label}[{index}]")
         if (
@@ -153,37 +288,44 @@ def validate_samples(
             or EVIDENCE_ID.fullmatch(row["evidence_id"]) is None
             or row["evidence_id"] in evidence_ids
             or not finite_positive(row["duration_ms"])
-            or row["xrun_count"] != 0
-            or row["audio_thread_trace_events"] != 0
         ):
-            raise OverheadError(f"{label}[{index}] lacks bounded timing/xrun identity")
+            raise OverheadError(f"{label}[{index}] lacks bounded timing/identity")
         evidence_ids.add(row["evidence_id"])
+        metrics_ref = row["runtime_metrics"]
+        exact_keys(metrics_ref, ARTIFACT_KEYS, f"{label}[{index}].runtime_metrics")
+        if metrics_ref["path"] in metric_paths:
+            raise OverheadError(f"{label} reuses a runtime metrics artifact")
+        metric_paths.add(metrics_ref["path"])
+        metrics = validate_metrics(
+            metrics_ref, state=state, sequence=index, evidence_id=row["evidence_id"],
+            binary_sha256=binary_sha256, evidence_root=evidence_root,
+            duration_ms=float(row["duration_ms"]), label=f"{label}[{index}]",
+        )
+        metrics_rows.append(metrics)
         if active:
-            if (
-                not isinstance(row["trace_sha256"], str)
-                or SHA256.fullmatch(row["trace_sha256"]) is None
-                or not isinstance(row["trace_bytes"], int)
-                or isinstance(row["trace_bytes"], bool)
-                or not 0 < row["trace_bytes"] <= RING_BYTES
-            ):
-                raise OverheadError(f"{label}[{index}] lacks a bounded active trace")
-            trace = safe_artifact(
-                evidence_root, row["trace_path"], f"{label}[{index}].trace",
-            )
-            data = regular_file_bytes(trace, f"{label}[{index}].trace")
-            if len(data) != row["trace_bytes"] or sha256_bytes(data) != row["trace_sha256"]:
-                raise OverheadError(f"{label}[{index}] trace digest/size differs")
-        elif (
-            row["trace_path"] is not None
-            or row["trace_sha256"] is not None
-            or row["trace_bytes"] != 0
-        ):
+            if row["trace"] is None:
+                raise OverheadError(f"{label}[{index}] lacks its active trace")
+            analyses.append(validate_trace(
+                row["trace"], metrics=metrics, evidence_id=row["evidence_id"],
+                session_config_sha256=session_config_sha256,
+                evidence_root=evidence_root, trace_processor=trace_processor,
+                label=f"{label}[{index}]",
+            ))
+        elif row["trace"] is not None:
             raise OverheadError(f"{label}[{index}] inactive state claims a trace")
-    return rows
+    if label.endswith("fresh_process"):
+        processes = {
+            (item["host_pid"], item["process_start_identity"])
+            for item in metrics_rows
+        }
+        if len(processes) != count:
+            raise OverheadError(f"{label} does not contain {count} unique process starts")
+    return metrics_rows, analyses
 
 
 def validate_raw(
-    payload: dict[str, Any], *, state: str, evidence_root: Path, label: str,
+    payload: dict[str, Any], *, state: str, evidence_root: Path,
+    trace_processor: Path | None, label: str,
 ) -> dict[str, Any]:
     exact_keys(payload, RAW_KEYS, label)
     exact_keys(payload["machine"], MACHINE_KEYS, f"{label}.machine")
@@ -206,10 +348,14 @@ def validate_raw(
             payload["baseline_revision"] if state == "pre-change-baseline"
             else payload["candidate_revision"]
         )
-        or not isinstance(payload["build_family_id"], str)
-        or not payload["build_family_id"]
-        or not isinstance(payload["product_id"], str)
-        or not payload["product_id"]
+        or payload["campaign_role"] not in CAMPAIGN_ROLES
+        or any(
+            not isinstance(payload[field], str) or not payload[field]
+            for field in (
+                "campaign_id", "build_family_id", "product_id", "product_name",
+                "plugin_format",
+            )
+        )
         or not isinstance(payload["binary_sha256"], str)
         or SHA256.fullmatch(payload["binary_sha256"]) is None
         or payload["tracing"] != {
@@ -237,19 +383,17 @@ def validate_raw(
         or not isinstance(driver["sha256"], str) or SHA256.fullmatch(driver["sha256"]) is None
     ):
         raise OverheadError(f"{label}.measurement_driver is not source-bound")
-    validate_samples(
-        payload["warmups"], count=5, state=state,
-        evidence_root=evidence_root, label=f"{label}.warmups",
-    )
-    validate_samples(
-        payload["measured"], count=30, state=state,
-        evidence_root=evidence_root, label=f"{label}.measured",
-    )
-    validate_samples(
-        payload["fresh_process"], count=20, state=state,
-        evidence_root=evidence_root, label=f"{label}.fresh_process",
-    )
-    return payload
+    _, session_digest = validate_session_config(payload["trace_session_config"], evidence_root)
+    metrics: dict[str, list[dict[str, Any]]] = {}
+    analyses: dict[str, list[dict[str, Any]]] = {}
+    for section, count in (("warmups", 5), ("measured", 30), ("fresh_process", 20)):
+        metrics[section], analyses[section] = validate_samples(
+            payload[section], count=count, state=state, evidence_root=evidence_root,
+            binary_sha256=payload["binary_sha256"],
+            session_config_sha256=session_digest,
+            trace_processor=trace_processor, label=f"{label}.{section}",
+        )
+    return {"payload": payload, "metrics": metrics, "analyses": analyses}
 
 
 def percentile95(values: list[float]) -> float:
@@ -287,55 +431,72 @@ def comparison(
     }
 
 
-def artifact_ref(path: Path, evidence_root: Path) -> dict[str, str]:
-    resolved = path.resolve()
-    root = evidence_root.resolve()
-    if root not in resolved.parents:
-        raise OverheadError(f"raw artifact escapes the evidence root: {path}")
-    return {"path": resolved.relative_to(root).as_posix(), "sha256": sha256_file(resolved, "raw artifact")}
-
-
 def build_receipt(
     raw_paths: dict[str, Path], *, evidence_root: Path, generated_utc: str,
+    trace_processor_path: Path | None = None,
 ) -> dict[str, Any]:
     if set(raw_paths) != set(STATES):
         raise OverheadError("all four producer-overhead states are required")
+    if UTC_TIMESTAMP.fullmatch(generated_utc) is None:
+        raise OverheadError("generated_utc is not a UTC timestamp")
+    if trace_processor_path is not None:
+        try:
+            relative_processor = trace_processor_path.resolve().relative_to(
+                evidence_root.resolve()
+            ).as_posix()
+        except ValueError as error:
+            raise OverheadError("trace_processor escapes the evidence root") from error
+        trace_processor_path = safe_artifact(
+            evidence_root, relative_processor, "trace_processor",
+        )
+        if not os.access(trace_processor_path, os.X_OK):
+            raise OverheadError("trace_processor is not executable")
     raw = {
         state: validate_raw(
             regular_json(raw_paths[state], f"{state} raw evidence"),
-            state=state, evidence_root=evidence_root, label=state,
+            state=state, evidence_root=evidence_root,
+            trace_processor=trace_processor_path, label=state,
         )
         for state in STATES
     }
+    payloads = {state: raw[state]["payload"] for state in STATES}
     common_fields = (
         "producer_revision", "baseline_revision", "candidate_revision",
-        "build_family_id", "product_id", "machine", "workload", "measurement_driver",
+        "campaign_role", "campaign_id", "build_family_id", "product_id",
+        "product_name", "plugin_format", "machine", "workload",
+        "measurement_driver", "trace_session_config",
     )
-    baseline = raw["pre-change-baseline"]
+    baseline = payloads["pre-change-baseline"]
     for state in STATES[1:]:
-        if any(raw[state][field] != baseline[field] for field in common_fields):
-            raise OverheadError(f"{state} does not use the same source/host/workload family")
+        if any(payloads[state][field] != baseline[field] for field in common_fields):
+            raise OverheadError(f"{state} does not use the same product/host/workload family")
     if (
-        raw["candidate-compiled-in-idle"]["binary_sha256"]
-        != raw["candidate-active"]["binary_sha256"]
+        payloads["candidate-compiled-in-idle"]["binary_sha256"]
+        != payloads["candidate-active"]["binary_sha256"]
     ):
         raise OverheadError("compiled-in idle and active states must use the same product binary")
     if (
-        raw["candidate-compile-out"]["binary_sha256"]
-        == raw["candidate-compiled-in-idle"]["binary_sha256"]
+        payloads["candidate-compile-out"]["binary_sha256"]
+        == payloads["candidate-compiled-in-idle"]["binary_sha256"]
     ):
         raise OverheadError("compile-out and compiled-in states do not identify distinct builds")
     all_ids = [
         row["evidence_id"] for state in STATES for section in (
             "warmups", "measured", "fresh_process",
-        ) for row in raw[state][section]
+        ) for row in payloads[state][section]
     ]
     if len(set(all_ids)) != len(all_ids):
         raise OverheadError("producer-overhead evidence IDs are not globally unique")
+    fresh_processes = [
+        (metrics["host_pid"], metrics["process_start_identity"])
+        for state in STATES for metrics in raw[state]["metrics"]["fresh_process"]
+    ]
+    if len(set(fresh_processes)) != len(fresh_processes):
+        raise OverheadError("fresh-process identities are reused across overhead states")
     summaries = {
         state: {
-            "measured": summary(raw[state]["measured"]),
-            "fresh_process": summary(raw[state]["fresh_process"]),
+            "measured": summary(payloads[state]["measured"]),
+            "fresh_process": summary(payloads[state]["fresh_process"]),
         }
         for state in STATES
     }
@@ -355,6 +516,10 @@ def build_receipt(
         )
         comparisons[state] = state_comparison
         passed = passed and state_comparison["pass"]
+    active_analyses = [
+        analysis for section in ("warmups", "measured", "fresh_process")
+        for analysis in raw["candidate-active"]["analyses"][section]
+    ]
     return {
         "schema": RECEIPT_SCHEMA,
         "version": 1,
@@ -362,11 +527,21 @@ def build_receipt(
         "producer_revision": PRODUCER_REVISION,
         "baseline_revision": baseline["baseline_revision"],
         "candidate_revision": baseline["candidate_revision"],
+        "campaign_role": baseline["campaign_role"],
+        "campaign_id": baseline["campaign_id"],
         "build_family_id": baseline["build_family_id"],
         "product_id": baseline["product_id"],
+        "product_name": baseline["product_name"],
+        "plugin_format": baseline["plugin_format"],
+        "binaries": {state: payloads[state]["binary_sha256"] for state in STATES},
         "machine": baseline["machine"],
         "workload": baseline["workload"],
         "measurement_driver": baseline["measurement_driver"],
+        "trace_session_config": baseline["trace_session_config"],
+        "trace_processor": (
+            artifact_ref(trace_processor_path, evidence_root)
+            if trace_processor_path is not None else None
+        ),
         "protocol": {
             "warmups": 5,
             "measured_trials": 30,
@@ -381,6 +556,18 @@ def build_receipt(
         },
         "summaries": summaries,
         "comparisons": comparisons,
+        "replay_summary": {
+            "active_trace_count": len(active_analyses),
+            "trace_formats": sorted({item["trace_format"] for item in active_analyses}),
+            "producer_events": sum(item["producer_events"] for item in active_analyses),
+            "foreign_producer_events": sum(
+                item["foreign_producer_events"] for item in active_analyses
+            ),
+            "xrun_events": sum(item["xrun_events"] for item in active_analyses),
+            "audio_thread_producer_events": sum(
+                item["audio_thread_producer_events"] for item in active_analyses
+            ),
+        },
         "verdict": "pass" if passed else "fail",
     }
 
@@ -395,14 +582,19 @@ def validate_receipt(
     exact_keys(refs, set(STATES), "producer-overhead raw artifacts")
     raw_paths: dict[str, Path] = {}
     for state in STATES:
-        exact_keys(refs[state], {"path", "sha256"}, f"raw_artifacts.{state}")
-        path = safe_artifact(evidence_root, refs[state]["path"], f"raw_artifacts.{state}")
-        if sha256_file(path, f"raw_artifacts.{state}") != refs[state]["sha256"]:
-            raise OverheadError(f"raw_artifacts.{state} digest differs")
-        raw_paths[state] = path
+        raw_paths[state] = artifact_path(
+            refs[state], evidence_root, f"raw_artifacts.{state}",
+        )
+    processor_ref = receipt["trace_processor"]
+    processor = (
+        artifact_path(processor_ref, evidence_root, "trace_processor")
+        if processor_ref is not None else None
+    )
+    if processor is not None and not os.access(processor, os.X_OK):
+        raise OverheadError("trace_processor is not executable")
     expected = build_receipt(
         raw_paths, evidence_root=evidence_root,
-        generated_utc=receipt["generated_utc"],
+        generated_utc=receipt["generated_utc"], trace_processor_path=processor,
     )
     if receipt != expected:
         raise OverheadError("producer-overhead receipt is not derived from its raw evidence")
@@ -417,6 +609,7 @@ def main() -> int:
     for state in STATES:
         ratify.add_argument(f"--{state}", required=True, type=Path)
     ratify.add_argument("--evidence-root", required=True, type=Path)
+    ratify.add_argument("--trace-processor", type=Path)
     ratify.add_argument("--generated-utc", required=True)
     ratify.add_argument("--output", required=True, type=Path)
     verify = subparsers.add_parser("verify")
@@ -433,14 +626,19 @@ def main() -> int:
             receipt = build_receipt(
                 paths, evidence_root=evidence_root,
                 generated_utc=args.generated_utc,
+                trace_processor_path=(
+                    args.trace_processor.resolve() if args.trace_processor else None
+                ),
             )
             atomic_json(args.output.resolve(), receipt)
             print(f"A3 trace producer overhead: {receipt['verdict']}")
             return 0 if receipt["verdict"] == "pass" else 1
-        validate_receipt(regular_json(args.receipt, "producer-overhead receipt"), evidence_root)
+        validate_receipt(
+            regular_json(args.receipt, "producer-overhead receipt"), evidence_root,
+        )
         print("A3 trace producer overhead: pass")
         return 0
-    except OverheadError as error:
+    except (OverheadError, ValueError) as error:
         print(f"A3 trace producer overhead: FAIL: {error}", file=os.sys.stderr)
         return 1
 

@@ -108,6 +108,7 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
     "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
     "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
     "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
     "tools/testing/daw-smoke/reaper_smoke.py",
@@ -1091,7 +1092,7 @@ def git_file_sha256(repository: Path, revision: str, path: str) -> str:
 
 def validate_trace_producer_overhead(
     receipt: dict[str, Any], evidence_root: Path, repository: Path, *, require_pass: bool,
-) -> None:
+) -> dict[str, Any] | None:
     control = receipt["trace_producer_overhead"]
     status = control["status"]
     evidence_ref = control["receipt"]
@@ -1163,6 +1164,44 @@ def validate_trace_producer_overhead(
     if require_pass and status != "pass":
         raise AcceptanceError(
             "complete receipt requires passing trace-producer overhead controls"
+        )
+    return payload if status not in {"missing", "unavailable"} else None
+
+
+def validate_trace_producer_overhead_campaign(
+    payload: dict[str, Any] | None,
+    campaigns: dict[str, tuple[dict[str, Any], dict[str, Any]]],
+) -> None:
+    if payload is None:
+        return
+    role = payload["campaign_role"]
+    if role not in campaigns:
+        raise AcceptanceError(
+            "trace-producer overhead does not select a measured A3 campaign role"
+        )
+    campaign, _ = campaigns[role]
+    identity = campaign["identity"]
+    expected = {
+        "campaign_id": identity["campaign_id"],
+        "build_family_id": identity["build_id"],
+        "product_id": identity["product_id"],
+        "product_name": identity["product_name"],
+        "plugin_format": identity["plugin_format"],
+    }
+    if any(payload[field] != value for field, value in expected.items()):
+        raise AcceptanceError(
+            "trace-producer overhead product identity differs from its measured campaign"
+        )
+    if payload["machine"]["machine_id"] != identity["machine_id"]:
+        raise AcceptanceError(
+            "trace-producer overhead machine differs from its measured campaign"
+        )
+    if (
+        payload["binaries"]["candidate-active"]
+        != campaign["product_artifact"]["sha256"]
+    ):
+        raise AcceptanceError(
+            "trace-producer overhead active binary differs from its measured campaign product"
         )
 
 
@@ -1359,7 +1398,7 @@ def validate_receipt(
             raise AcceptanceError(
                 f"A3 implementation source binding failed: {binding_errors[0]}"
             )
-    validate_trace_producer_overhead(
+    overhead = validate_trace_producer_overhead(
         receipt, evidence_root, repository, require_pass=receipt["status"] == "complete",
     )
     if receipt["status"] == "incomplete":
@@ -1374,6 +1413,7 @@ def validate_receipt(
         raise AcceptanceError("complete receipt must bind the exact Forge revision")
     budget = validate_budget(receipt, evidence_root)
     campaigns = validate_campaigns(receipt, evidence_root, budget)
+    validate_trace_producer_overhead_campaign(overhead, campaigns)
     derived_analysis = validate_same_instance(receipt, evidence_root, campaigns)
     validate_controls(receipt, evidence_root)
     validate_b4(receipt, evidence_root, campaigns, derived_analysis)

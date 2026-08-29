@@ -159,6 +159,14 @@ def make_fixture(root: Path) -> dict[str, Any]:
         candidate_revision=PULP_REVISION,
         driver_path=overhead_driver_path,
         driver_sha256=a3.sha256_bytes((ROOT / overhead_driver_path).read_bytes()),
+        campaign_role="standalone",
+        campaign_id="campaign-1",
+        build_family_id="pulp-build-1",
+        product_id="dev.pulp.product-1",
+        product_name="GPU Product 1",
+        plugin_format="standalone",
+        machine_id="m5-blackbook",
+        candidate_binary_sha256=a3.sha256_bytes(b"product:standalone"),
     )
     write_json(
         root, "trace-producer-overhead.json",
