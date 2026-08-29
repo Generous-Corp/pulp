@@ -1269,6 +1269,21 @@ void View::paint_post_decorations(canvas::Canvas& canvas,
     // radius they read in the monolithic paint_all.
     const float eff_r = effective_corner_radius(bounds_.width, bounds_.height);
 
+    // Lowercase HTML buttons and other imported semantic controls retain
+    // their authored background/border painter instead of becoming a stock
+    // Pulp widget. Give that complete rendered face browser-like pointer
+    // feedback without replacing its resting or selected appearance. The
+    // importer owns the opt-in flag, so authored hover treatments can disable
+    // this overlay rather than receiving two competing effects.
+    if (default_hover_feedback_ && hovered_ && enabled_) {
+        canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, 15));
+        if (eff_r > 0.0f) {
+            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+        } else {
+            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+        }
+    }
+
     // Inset box shadows paint over the content so the inner darkening
     // shows through children (CSS spec: inset shadows are above the
     // background but below the border-image, here approximated as above

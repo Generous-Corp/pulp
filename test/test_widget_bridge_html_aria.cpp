@@ -97,8 +97,10 @@ TEST_CASE("HTML role attribute routes through ARIA->AccessRole bucket",
     // 'button' used to have no Pulp enum slot and collapsed to `group`, so a
     // screen reader announced a button as a group.
     REQUIRE(bridge.widget("bn")->access_role() == View::AccessRole::button);
+    REQUIRE(bridge.widget("bn")->default_hover_feedback());
     // Empty / unknown role clears to none.
     REQUIRE(bridge.widget("un")->access_role() == View::AccessRole::none);
+    REQUIRE_FALSE(bridge.widget("un")->default_hover_feedback());
 }
 
 TEST_CASE("HTML setAttribute(aria-label) flushes through web-compat shim",

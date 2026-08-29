@@ -50,6 +50,9 @@ void BridgeRegistrars::register_accessibility_api(WidgetBridge& self) {
         // JS bridge, the widget defaults, and the platform mappings agree.
         const View::AccessRole r = access_role_from_aria(role);
         it->second->set_access_role(r);
+        it->second->set_default_hover_feedback(
+            r == View::AccessRole::button || r == View::AccessRole::tab
+            || r == View::AccessRole::menu_item);
         return choc::value::Value();
     });
 

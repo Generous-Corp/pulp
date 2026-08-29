@@ -439,6 +439,16 @@ public:
     bool is_hovered() const { return hovered_; }
     void set_hovered(bool h);
 
+    /// Baseline pointer feedback for semantic controls that keep an authored
+    /// painter (for example imported lowercase HTML buttons). Widget
+    /// subclasses with their own hover paint leave this disabled. Importers
+    /// may disable it when the authored design supplies a complete hover
+    /// treatment.
+    void set_default_hover_feedback(bool enabled) {
+        default_hover_feedback_ = enabled;
+    }
+    bool default_hover_feedback() const { return default_hover_feedback_; }
+
     // ── Frame clock ─────────────────────────────────────────────────────
 
     /// Set the frame clock on the root view. Children access via frame_clock().
@@ -2459,6 +2469,7 @@ private:
     // keyboard sinks, and the bridge clears the capability on release/teardown.
     bool scripted_navigation_input_ = false;
     bool hovered_ = false;
+    bool default_hover_feedback_ = false;
     bool hit_testable_ = true;
     PointerEvents pointer_events_ = PointerEvents::auto_;
     bool backface_visible_ = true;
