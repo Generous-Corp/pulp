@@ -173,6 +173,30 @@ missing comparison backend, not proof that the rendered PNG was empty.
 
 ## Capture options at a glance
 
+For a bounded Renderer3D diagnostic, use the canonical
+`renderer3d.hardcoded-cube.v1` recipe rather than substituting an arbitrary
+screenshot:
+
+```bash
+mkdir -p "$PWD/artifacts/gpu/cube"
+pulp gpu probe --recipe renderer3d.hardcoded-cube.v1 \
+  --artifacts "$PWD/artifacts/gpu/cube" --json
+```
+
+The recipe drives native Dawn/WebGPU rendering and readback, then checks a
+deterministic cube fingerprint on its declared backend or a portable structural
+content oracle elsewhere. A pass proves only that bounded recipe on the
+reported adapter; it is not cross-backend pixel identity, visible-window or
+compositor evidence, screenshot fidelity, input behavior, or product-scene
+coverage. Use the capture surfaces below for those separate claims.
+
+Exit 0 is a completed pass, exit 1 is a completed content/readback failure, and
+exit 2 is unavailable or unverified evidence, never a pass. To verify the
+oracle rather than the renderer, rerun with `--negative-control`: GPU work and
+readback must still complete while the planted content mutation produces a
+typed failure. A nonblank artifact alone is insufficient; trust the recipe's
+bounded evidence/result contract and adapter disclosure.
+
 - **`render_to_png` / `render_to_file`** (`screenshot.hpp`) — headless raster of
   a `View` tree, no window. macOS/iOS have native backends; Linux/Windows use
   the built-in Skia raster path when `PULP_HAS_SKIA=1`, otherwise they need a

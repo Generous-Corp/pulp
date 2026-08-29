@@ -143,6 +143,21 @@ class CatalogContract(unittest.TestCase):
         self.assertEqual(catalog.validate_repository_references(document, catalog.ROOT), [])
         self.assertEqual(catalog.main([]), 0)
 
+    def test_a2_recipe_skill_mappings_are_semantically_discoverable(self) -> None:
+        document = catalog.load_and_validate(catalog.DEFAULT_CATALOG)
+        recipes = {recipe["id"]: recipe for recipe in document["recipes"]}
+        required_pairs = {
+            "gpu-audio.stft.v1": "audio-harness",
+            "renderer3d.hardcoded-cube.v1": "screenshot",
+        }
+        for recipe_id, skill in required_pairs.items():
+            with self.subTest(recipe_id=recipe_id, skill=skill):
+                self.assertIn(skill, recipes[recipe_id]["skills"])
+                skill_text = (
+                    catalog.ROOT / ".agents/skills" / skill / "SKILL.md"
+                ).read_text(encoding="utf-8")
+                self.assertIn(recipe_id, skill_text)
+
     def test_release_cli_embedding_reads_authoritative_bytes_without_copied_ids(self) -> None:
         cmake = (catalog.ROOT / "tools/cli/CMakeLists.txt").read_text(encoding="utf-8")
         template = (
