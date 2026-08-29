@@ -5136,7 +5136,7 @@ If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them
 
 `ci/visual-harness.Dockerfile` and `.github/workflows/visual-harness.yml`
 provide the deterministic visual-harness smoke environment. The Docker image
-downloads the pinned Skia `chrome/m151` Linux release asset (from the
+downloads the pinned Skia `chrome/m153` Linux release asset (from the
 `danielraffel/skia-builder` fork — adds iOS/visionOS/mac-x86_64 slices the
 upstream `olilarkin/skia-builder` omits), verifies its SHA-256, installs the
 bundled Pulp fonts into fontconfig, and installs `skia-python==144.0.post2`
@@ -5156,6 +5156,14 @@ hand-sync typo is a silent behavioural bug rather than a doc lag. When bumping
   `fetch_skia_for_release.py` trusts it to skip downloads) and `DEPENDENCIES.md`
   Skia/Dawn/V8 version cells ← `tools/scripts/check_manifest_mirrors.py`
 - `tools/harness/visual/pins.py` ← `test_skia_determinism.py`
+
+For m153+, the pin checks are necessary but not sufficient: run
+`tools/scripts/verify_skia_m153_capabilities.py` against a real materialized
+generation so `SkLogHandler` and Graphite's executor field are proven through
+the archive's exported symbols. After the pin lands, each active Mac build host
+must populate its own immutable SHA-addressed generation through the fetcher
+and prove the second fetch is a no-download hit; do not rsync one runner's
+checkout cache to another.
 
 The `macOS local smoke` job resolves `runs-on` from
 `macOS local smoke` job resolves `runs-on` from

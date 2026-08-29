@@ -252,13 +252,20 @@ physically cannot disagree about which binary is in use — and a pin bump
 self-invalidates the cache. When you bump either the slice or the toolchain,
 bump them in the manifest, never by editing a URL into a workflow.
 
-The Skia toolchain itself is pinned at `chrome/m151` via the
+The Skia toolchain itself is pinned at `chrome/m153` via the
 `danielraffel/skia-builder` fork (see `tools/deps/manifest.json` →
 `determinism.skia_builder_fork`). The fork tracks upstream
 `olilarkin/skia-builder`'s tag pattern and additionally publishes iOS
 device, iOS simulator, visionOS device, visionOS simulator, mac-x86_64,
 and `Skia.xcframework` slices upstream does not. While upstream stays on
 m144, this fork is the active dependency; revisit when upstream catches up.
+
+Skia/Dawn and V8 are independently consumable prebuilts. If Skia advances while
+the complete matched V8 release is unavailable, keep V8's structured
+`paired_skia` / `paired_dawn` fields describing the V8 artifact that was
+actually built; record the newer active Skia/Dawn provider and temporary mixed
+selection in the human-readable dependency notes. Never relabel old V8 bytes
+as matched to the new Skia milestone.
 
 iOS-specific layout gotcha: unlike the mac / linux / windows slices, the iOS
 zips ship libs under a per-arch subdir

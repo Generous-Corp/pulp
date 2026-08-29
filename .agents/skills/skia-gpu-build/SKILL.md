@@ -81,10 +81,24 @@ consistent. Don't mix this worktree's headers with another's libs.
 
 ## Building from source (only when no cached libs anywhere)
 
-`tools/build-skia.sh` builds the currently pinned chrome/m152 Skia+Dawn from source — slow
+`tools/build-skia.sh` builds the currently pinned chrome/m153 Skia+Dawn from source — slow
 (tens of minutes). Prefer the release zip from
-`danielraffel/skia-builder` (chrome/m152, see `external/skia-build/VERSION.md`)
+`danielraffel/skia-builder` (chrome/m153, see `external/skia-build/VERSION.md`)
 or reusing a sibling checkout's `build/`.
+
+For m153, prove the provider exposes both new integration surfaces before a
+product build:
+
+```bash
+python3 tools/scripts/verify_skia_m153_capabilities.py --skia-dir "$SKIA_DIR"
+```
+
+This compile/links/runs `SkLogHandler` and
+`skgpu::graphite::ContextOptions::fExecutor`; headers alone are not a pass.
+`SkLogHandler` is process-global and first-install-wins, while the executor must
+outlive the Graphite context. Generic installation and executor policy are
+Vellum-owned; a Pulp build should consume those contracts rather than install a
+second global handler or duplicate context policy.
 
 ## Verify it's REALLY a GPU build (necessary AND sufficient)
 
