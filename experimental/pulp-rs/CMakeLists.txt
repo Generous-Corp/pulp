@@ -161,7 +161,13 @@ add_custom_command(TARGET pulp-rust-cli POST_BUILD
     COMMENT "Staging Rust pulp at ${_pulp_rs_dest_bin}"
     VERBATIM)
 
-if(PULP_BUILD_TESTS AND BUILD_TESTING)
+# PulpDependencies deliberately forces BUILD_TESTING=OFF so dependency
+# subprojects do not register their own suites. PULP_BUILD_TESTS is Pulp's
+# authoritative switch, and the top-level project has already called
+# enable_testing() when it is true.
+if(PULP_BUILD_TESTS)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
     add_test(NAME pulp-rust-gpu-trace-analysis-unit
         COMMAND ${CMAKE_COMMAND} -E env
             "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
@@ -170,22 +176,20 @@ if(PULP_BUILD_TESTS AND BUILD_TESTING)
             trace_gpu_analysis)
     set_tests_properties(pulp-rust-gpu-trace-analysis-unit
         PROPERTIES LABELS "trace;gpu;rust")
-    if(DEFINED ENV{PULP_TRACE_PROCESSOR}
-       AND EXISTS "$ENV{PULP_TRACE_PROCESSOR}")
-        add_test(NAME pulp-rust-gpu-trace-analysis-integration
-            COMMAND ${CMAKE_COMMAND} -E env
-                "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
-                "PULP_TRACE_PROCESSOR=$ENV{PULP_TRACE_PROCESSOR}"
-                ${CARGO_EXECUTABLE} test
-                --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
-                --test trace_gpu_analysis_tool_test)
-        set_tests_properties(pulp-rust-gpu-trace-analysis-integration
-            PROPERTIES LABELS "trace;gpu;rust")
-    else()
-        message(STATUS
-            "pulp-rs: GPU trace integration CTest skipped; set "
-            "PULP_TRACE_PROCESSOR to a pinned executable before configure")
-    endif()
+    add_test(NAME pulp-rust-gpu-trace-analysis-integration
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_trace_gpu_analysis_integration.py"
+            --cargo "${CARGO_EXECUTABLE}"
+            --target-dir "${_pulp_rs_target_dir}"
+            --manifest "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml")
+    set_tests_properties(pulp-rust-gpu-trace-analysis-integration PROPERTIES
+        LABELS "trace;gpu;rust"
+        SKIP_RETURN_CODE 77)
+    add_test(NAME pulp-rust-gpu-trace-analysis-ctest-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_trace_gpu_analysis_ctest.py")
+    set_tests_properties(pulp-rust-gpu-trace-analysis-ctest-selftest
+        PROPERTIES LABELS "trace;gpu;rust")
 
     # This is the installed user-facing CLI (unlike the C++ pulp-cpp delegate).
     # Keep its bytes inside the Product B absence boundary after cargo stages it.

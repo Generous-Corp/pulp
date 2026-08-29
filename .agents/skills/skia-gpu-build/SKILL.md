@@ -342,6 +342,15 @@ use CLI `recipes scaffold` only when an explicit local evidence workspace is
 wanted. Run two baselines and the seeded negative control before treating a
 pass as useful localization evidence.
 
+The Catch2 native-recipe suite deliberately skips when no real adapter is
+available; this keeps GPU-less build lanes viable and is not terminal evidence.
+For fail-closed real-work proof, build and run the EXCLUDE_FROM_ALL
+`pulp-gpu-probe-native-acceptance` and
+`pulp-gpu-probe-stft-native-acceptance` executables on a suitable host, then
+validate the digest-bound receipt with `gpu-probe-current-acceptance`. Those
+surfaces reject unavailable evidence. There is no compile-time
+`PULP_GPU_PROBE_REQUIRE_WORK` policy branch in the portable unit suite.
+
 A GPU plugin/app links `libwgpu_native.dylib`. The upstream WebGPU FetchContent
 copies the dylib INTO the bundle's `Contents/MacOS` but rpaths the binary only at
 the **build cache** (`~/Library/Caches/Pulp/fetchcontent-src/.../lib`). On the

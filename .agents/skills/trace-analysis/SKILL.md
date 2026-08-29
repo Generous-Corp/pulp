@@ -71,6 +71,14 @@ captured trace yet. For zero-install, run
 (Perfetto v57.2), SHA-256-verified, into `$PULP_HOME`. (`pulp tool install
 trace-processor` fetches the same pinned artifact via the tool registry.)
 
+The `pulp-rust-gpu-trace-analysis-integration` CTest is always registered. At
+test time its wrapper accepts an explicit executable
+`$PULP_TRACE_PROCESSOR` or the pinned v57.2 Pulp cache. A missing processor is
+a visible CTest SKIP (exit 77); an invalid explicit override is a failure; a
+resolved processor runs the full fail-closed Cargo integration suite. Do not
+condition test registration on the configure-time environment or accept an
+arbitrary PATH version for this SDK-matched integration gate.
+
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
 # ... reproduce (open the editor, sweep the knob, run the offline render) ...
