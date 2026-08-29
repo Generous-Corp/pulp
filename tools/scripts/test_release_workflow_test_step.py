@@ -665,10 +665,16 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         dependencies = (REPO_ROOT / "tools/cmake/PulpDependencies.cmake").read_text(
             encoding="utf-8"
         )
-        self.assertIn(
-            "if((PULP_BUILD_TESTS OR (PULP_BUILD_EXAMPLES AND NOT ANDROID AND NOT IOS AND NOT PULP_IOS))",
-            dependencies,
-        )
+        self.assertIn("PULP_BUILD_EXAMPLES", dependencies)
+        for exclusion in (
+            "NOT ANDROID",
+            "NOT IOS",
+            "NOT PULP_IOS",
+            "NOT EMSCRIPTEN",
+            'NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten"',
+            'NOT CMAKE_SYSTEM_NAME STREQUAL "WASI"',
+        ):
+            self.assertIn(exclusion, dependencies)
 
 
 class ReleaseCliDualBinaryPackaging(unittest.TestCase):

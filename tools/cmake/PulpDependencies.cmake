@@ -814,7 +814,11 @@ message(STATUS "Pulp: yaml-cpp 0.8.0 available (DESIGN.md import)")
 
 # three.js (MIT license) — native WebGPU bridge demos and tests. Examples-only
 # provider gates need the dependency without enabling Pulp's full test graph.
-if((PULP_BUILD_TESTS OR (PULP_BUILD_EXAMPLES AND NOT ANDROID AND NOT IOS AND NOT PULP_IOS))
+if((PULP_BUILD_TESTS OR (PULP_BUILD_EXAMPLES
+                        AND NOT ANDROID AND NOT IOS AND NOT PULP_IOS
+                        AND NOT EMSCRIPTEN
+                        AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten"
+                        AND NOT CMAKE_SYSTEM_NAME STREQUAL "WASI"))
    AND PULP_ENABLE_GPU)
     pulp_register_fetchcontent_source(threejs REF 077dd13c0e869d9f3dbe55875686f920367de457)
     FetchContent_Declare(
