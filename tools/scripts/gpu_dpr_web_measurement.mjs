@@ -7,6 +7,36 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { basename, extname, resolve, sep } from "node:path";
 
+const sourceAssetPaths = new Map([
+  ["/pulp-ui.js", "examples/web-demos/super-convolver-ui/pulp-ui.js"],
+  ["/ir-source.js", "examples/web-demos/super-convolver-ui/ir-source.js"],
+]);
+const fixtureAsset = (urlPath, sourceRoot, buildDir) => {
+  const sourceRelative = sourceAssetPaths.get(urlPath);
+  if (sourceRelative) return resolve(sourceRoot, sourceRelative);
+  const candidate = resolve(buildDir, urlPath.replace(/^\/+/, ""));
+  return candidate.startsWith(`${resolve(buildDir)}${sep}`) ? candidate : null;
+};
+if (process.argv.includes("--self-test-assets")) {
+  const sourceRoot = resolve("/fixture/source");
+  const buildDir = resolve("/fixture/build");
+  const observed = {
+    pulpUi: fixtureAsset("/pulp-ui.js", sourceRoot, buildDir),
+    irSource: fixtureAsset("/ir-source.js", sourceRoot, buildDir),
+    build: fixtureAsset("/PulpSuperConvolverUi.js", sourceRoot, buildDir),
+    traversal: fixtureAsset("/../../private.txt", sourceRoot, buildDir),
+  };
+  const expected = {
+    pulpUi: resolve(sourceRoot, "examples/web-demos/super-convolver-ui/pulp-ui.js"),
+    irSource: resolve(sourceRoot, "examples/web-demos/super-convolver-ui/ir-source.js"),
+    build: resolve(buildDir, "PulpSuperConvolverUi.js"),
+    traversal: null,
+  };
+  if (JSON.stringify(observed) !== JSON.stringify(expected)) throw new Error("fixture asset routing self-test failed");
+  process.stdout.write("gpu_dpr_web_assets_selftest=true source_allowlist=pass build_confinement=pass traversal_rejected=pass\n");
+  process.exit(0);
+}
+
 const value = (flag) => {
   const index = process.argv.indexOf(flag);
   if (index < 0 || index + 1 >= process.argv.length) throw new Error(`missing ${flag}`);
@@ -63,13 +93,12 @@ try{const {mountPulpUi}=await import('/pulp-ui.js');window.__ui=await mountPulpU
 </script>`;
 
 const mime = { ".js":"text/javascript", ".mjs":"text/javascript", ".wasm":"application/wasm", ".data":"application/octet-stream" };
-const pulpUiPath = resolve(sourceRoot,"examples/web-demos/super-convolver-ui/pulp-ui.js");
 const fixtureServer = createServer(async (req,res) => {
   const path = new URL(req.url, "http://127.0.0.1").pathname;
   const headers = {"cross-origin-opener-policy":"same-origin","cross-origin-embedder-policy":"require-corp"};
   if (path === "/") { res.writeHead(200,{...headers,"content-type":"text/html"});res.end(PAGE);return; }
-  const file = path === "/pulp-ui.js" ? pulpUiPath : resolve(buildDir,path.slice(1));
-  if (file !== pulpUiPath && !file.startsWith(`${buildDir}${sep}`)) { res.writeHead(404);res.end();return; }
+  const file = fixtureAsset(path, sourceRoot, buildDir);
+  if (!file) { res.writeHead(404);res.end();return; }
   try { const bytes=await readFile(file);res.writeHead(200,{...headers,"content-type":mime[extname(file)]||"application/octet-stream"});res.end(bytes); }
   catch { res.writeHead(404);res.end(); }
 });

@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import stat
 import struct
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -34,6 +34,14 @@ def request(root: Path) -> dict:
 
 
 def main() -> int:
+    measurement = Path(web.__file__).with_name("gpu_dpr_web_measurement.mjs")
+    asset_test = subprocess.run(
+        [str(measurement), "--self-test-assets"], text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15,
+    )
+    assert asset_test.returncode == 0, asset_test.stderr
+    assert "source_allowlist=pass" in asset_test.stdout
+    assert "traversal_rejected=pass" in asset_test.stdout
     with tempfile.TemporaryDirectory(prefix="pulp-dpr-web-") as temporary:
         root = Path(temporary); (root / "source.mjs").write_text("export default true\n")
         req = request(root); cell = root / "cell"; cell.mkdir()
