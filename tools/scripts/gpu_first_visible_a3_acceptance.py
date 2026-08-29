@@ -23,6 +23,7 @@ ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import json_schema_lite  # noqa: E402
 import gpu_trace_overhead_acceptance as a2t_acceptance  # noqa: E402
+import gpu_first_visible_a3_trace_producer_overhead as trace_producer_overhead  # noqa: E402
 
 SCHEMA_PATH = ROOT / "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json"
 HEALTH_SCHEMA_PATH = ROOT / "docs/contracts/gpu-health-read-result-v1.schema.json"
@@ -90,6 +91,7 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "inspect/src/control_gpu_health_view_adapter.cpp",
     "inspect/src/control_standalone_host.cpp",
     "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
     "test/cmake/view_widget_bridge_tests.cmake",
     "test/test_control_gpu_health_provider.cpp",
     "test/test_control_gpu_health_standalone_product.cpp",
@@ -105,6 +107,8 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "tools/scripts/gpu_first_visible_a3_role_producer.py",
     "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
     "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
     "tools/testing/daw-smoke/insert_and_float.lua",
     "tools/testing/daw-smoke/reaper_smoke.py",
 }
@@ -1058,6 +1062,110 @@ def validate_controls(receipt: dict[str, Any], evidence_root: Path) -> None:
         raise AcceptanceError("audio-thread exclusion receipt lacks an exact non-audio positive control")
 
 
+def git_revision_is_ancestor_of(
+    repository: Path, ancestor: str, descendant: str,
+) -> bool:
+    run = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=repository, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, check=False,
+    )
+    return run.returncode == 0
+
+
+def git_file_sha256(repository: Path, revision: str, path: str) -> str:
+    relative = Path(path)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise AcceptanceError("trace-producer overhead driver path is unsafe")
+    run = subprocess.run(
+        ["git", "cat-file", "blob", f"{revision}:{path}"],
+        cwd=repository, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, check=False,
+    )
+    if run.returncode != 0:
+        raise AcceptanceError(
+            "trace-producer overhead driver is absent from the declared revision"
+        )
+    return sha256_bytes(run.stdout)
+
+
+def validate_trace_producer_overhead(
+    receipt: dict[str, Any], evidence_root: Path, repository: Path, *, require_pass: bool,
+) -> None:
+    control = receipt["trace_producer_overhead"]
+    status = control["status"]
+    evidence_ref = control["receipt"]
+    if status in {"missing", "unavailable"}:
+        if evidence_ref is not None:
+            raise AcceptanceError(
+                "missing or unavailable trace-producer overhead cannot claim a receipt"
+            )
+    else:
+        if evidence_ref is None:
+            raise AcceptanceError(
+                "pass or fail trace-producer overhead requires a derived receipt"
+            )
+        payload = artifact_json(
+            evidence_ref, evidence_root, "trace_producer_overhead.receipt",
+        )
+        try:
+            trace_producer_overhead.validate_receipt(
+                payload, evidence_root, require_pass=status == "pass",
+            )
+        except trace_producer_overhead.OverheadError as error:
+            raise AcceptanceError(
+                f"trace-producer overhead receipt is invalid: {error}"
+            ) from error
+        if payload["verdict"] != status:
+            raise AcceptanceError(
+                "trace-producer overhead status differs from its derived receipt"
+            )
+        candidate_revision = payload["candidate_revision"]
+        if (
+            candidate_revision != receipt["implementation_head"]
+            or candidate_revision != receipt["identity"]["pulp_revision"]
+        ):
+            raise AcceptanceError(
+                "trace-producer overhead candidate differs from the A3 implementation head"
+            )
+        if not git_revision_is_ancestor_of(
+            repository, trace_producer_overhead.PRODUCER_REVISION, candidate_revision,
+        ):
+            raise AcceptanceError(
+                "trace-producer overhead candidate does not contain the measured producer"
+            )
+        parent = subprocess.run(
+            ["git", "rev-parse", f"{trace_producer_overhead.PRODUCER_REVISION}^"],
+            cwd=repository, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, check=False, text=True,
+        )
+        if (
+            parent.returncode != 0
+            or parent.stdout.strip() != trace_producer_overhead.BASELINE_REVISION
+            or payload["baseline_revision"] != trace_producer_overhead.BASELINE_REVISION
+        ):
+            raise AcceptanceError(
+                "trace-producer overhead baseline is not the exact pre-producer parent"
+            )
+        driver = payload["measurement_driver"]
+        declared_digest = driver["sha256"]
+        path = driver["path"]
+        if (
+            driver["revision"] != candidate_revision
+            or git_file_sha256(repository, candidate_revision, path) != declared_digest
+            or git_file_sha256(repository, "HEAD", path) != declared_digest
+            or snapshot_relative(path, repository, "trace-producer overhead driver").sha256
+            != declared_digest
+        ):
+            raise AcceptanceError(
+                "trace-producer overhead driver is not current and source-bound"
+            )
+    if require_pass and status != "pass":
+        raise AcceptanceError(
+            "complete receipt requires passing trace-producer overhead controls"
+        )
+
+
 def derive_b4_disposition(
     startup: dict[str, Any], derived_analysis: dict[str, Any],
 ) -> tuple[str, str | None, int, int]:
@@ -1245,15 +1353,21 @@ def validate_receipt(
     if problems:
         raise AcceptanceError(f"receipt schema violation: {problems[0]}")
     validate_declared_artifacts(receipt, evidence_root)
+    if receipt["status"] == "complete":
+        binding_errors = implementation_source_binding_errors(receipt, repository)
+        if binding_errors:
+            raise AcceptanceError(
+                f"A3 implementation source binding failed: {binding_errors[0]}"
+            )
+    validate_trace_producer_overhead(
+        receipt, evidence_root, repository, require_pass=receipt["status"] == "complete",
+    )
     if receipt["status"] == "incomplete":
         if not receipt["missing_evidence"]:
             raise AcceptanceError("incomplete receipt must enumerate missing_evidence")
         if receipt["b4"]["disposition"] is not None or receipt["b4"]["status"] != "withheld":
             raise AcceptanceError("incomplete receipt must withhold B4 disposition")
         return False
-    binding_errors = implementation_source_binding_errors(receipt, repository)
-    if binding_errors:
-        raise AcceptanceError(f"A3 implementation source binding failed: {binding_errors[0]}")
     if receipt["missing_evidence"]:
         raise AcceptanceError("complete receipt cannot list missing evidence")
     if receipt["identity"]["forge_revision"] is None:

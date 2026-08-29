@@ -16,7 +16,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import gpu_first_visible_a3_acceptance as a3  # noqa: E402
+import gpu_first_visible_a3_trace_producer_overhead as trace_producer_overhead  # noqa: E402
 import gpu_trace_overhead_acceptance as a2t  # noqa: E402
+import test_gpu_first_visible_a3_trace_producer_overhead as overhead_fixture  # noqa: E402
 from test_gpu_health_read_contract import startup_document  # noqa: E402
 
 PULP_REVISION = subprocess.check_output(
@@ -151,6 +153,20 @@ def health_result(campaign_identity: dict[str, Any], budget: dict[str, Any]) -> 
 
 def make_fixture(root: Path) -> dict[str, Any]:
     implementation_binding = a3.implementation_source_binding(ROOT, PULP_REVISION)
+    overhead_driver_path = "tools/scripts/gpu_first_visible_a3_role_producer.py"
+    overhead_paths, _ = overhead_fixture.make_fixture(
+        root,
+        candidate_revision=PULP_REVISION,
+        driver_path=overhead_driver_path,
+        driver_sha256=a3.sha256_bytes((ROOT / overhead_driver_path).read_bytes()),
+    )
+    write_json(
+        root, "trace-producer-overhead.json",
+        trace_producer_overhead.build_receipt(
+            overhead_paths, evidence_root=root,
+            generated_utc="2026-08-28T12:00:00Z",
+        ),
+    )
     budget_cold = {
         "schema": "pulp.gpu-first-visible-budget-raw.v1", "version": 1,
         "reference_host": REFERENCE_HOST, "cache_state": "cold", "samples": samples("cold"),
@@ -452,6 +468,11 @@ raise SystemExit(code)
             "receipt": auto("blank.json"),
         },
         "audio_thread_exclusion": {"status": "pass", "receipt": auto("audio.json")},
+        "trace_producer_overhead": {
+            "status": "pass",
+            "reason": "The source-bound four-state product control passed.",
+            "receipt": auto("trace-producer-overhead.json"),
+        },
         "b4": {
             "disposition": "no-change", "status": "closed-no-change",
             "reason": b4_reason, "evidence": auto("b4.json"),
@@ -782,6 +803,14 @@ def main() -> int:
         assert a3.validate_receipt(incomplete, root) is False
         incomplete["status"] = "complete"
         expect_failure(incomplete, root, "cannot list missing evidence")
+
+        mutated = copy.deepcopy(receipt)
+        mutated["trace_producer_overhead"] = {
+            "status": "unavailable",
+            "reason": "The four-state product control did not run.",
+            "receipt": None,
+        }
+        expect_failure(mutated, root, "passing trace-producer overhead controls")
 
         mutated = copy.deepcopy(receipt)
         mutated["budget"]["status"] = "unratified"
@@ -1121,7 +1150,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=47 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=48 "
             "checked_in_nonterminal=verified"
         )
     return 0

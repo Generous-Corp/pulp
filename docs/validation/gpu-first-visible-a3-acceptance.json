@@ -53,10 +53,15 @@
     "status": "missing",
     "receipt": null
   },
+  "trace_producer_overhead": {
+    "status": "unavailable",
+    "reason": "Final-head pre-change baseline, candidate compile-out, compiled-in idle, and active 128 MiB product builds have not run the exact 5-warmup, 30-measured, and 20-fresh-process xrun and audio-thread protocol.",
+    "receipt": null
+  },
   "b4": {
     "disposition": null,
     "status": "withheld",
-    "reason": "A B4 disposition is not legal until the budget, product campaigns, same-instance causal trace, blank negative, and audio-thread exclusion gates pass.",
+    "reason": "A B4 disposition is not legal until the budget, product campaigns, same-instance causal trace, blank negative, audio-thread exclusion, and trace-producer overhead gates pass.",
     "evidence": null
   },
   "observations": [
@@ -136,6 +141,7 @@
     "same-instance A2T receipt digest and causal trace binding",
     "caught real blank negative receipt",
     "audio-thread exclusion receipt with positive control",
+    "passing four-state A3 trace-producer overhead and xrun receipt",
     "single legal B4 disposition evidence"
   ]
 }

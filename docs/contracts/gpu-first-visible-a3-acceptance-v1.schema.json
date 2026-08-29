@@ -3,7 +3,7 @@
   "$id": "https://pulp.dev/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
   "title": "Pulp GPU first-visible A3 acceptance receipt",
   "type": "object",
-  "required": ["$schema", "schema", "version", "status", "recorded_at", "implementation_head", "source_blobs", "plan", "identity", "budget", "campaigns", "same_instance_a2t", "blank_negative", "audio_thread_exclusion", "b4", "observations", "missing_evidence"],
+  "required": ["$schema", "schema", "version", "status", "recorded_at", "implementation_head", "source_blobs", "plan", "identity", "budget", "campaigns", "same_instance_a2t", "blank_negative", "audio_thread_exclusion", "trace_producer_overhead", "b4", "observations", "missing_evidence"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "const": "../contracts/gpu-first-visible-a3-acceptance-v1.schema.json" },
@@ -22,8 +22,8 @@
         { "type": "null" },
         {
           "type": "object",
-          "minProperties": 26,
-          "maxProperties": 26,
+          "minProperties": 29,
+          "maxProperties": 29,
           "propertyNames": { "type": "string", "minLength": 1, "maxLength": 512 },
           "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
         }
@@ -144,6 +144,16 @@
       "additionalProperties": false,
       "properties": {
         "status": { "enum": ["missing", "pass", "fail"] },
+        "receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+      }
+    },
+    "trace_producer_overhead": {
+      "type": "object",
+      "required": ["status", "reason", "receipt"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["missing", "unavailable", "pass", "fail"] },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1024 },
         "receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
       }
     },
