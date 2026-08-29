@@ -6,10 +6,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +80,11 @@ if outcome == "pass":
         if name in {"raw_cold", "raw_warm"}:
             payload = json.loads(destination.read_text())
             payload["identity"] = request["identity"]
+            if name == "raw_warm":
+                cold_path = root / artifacts["raw_cold"]["path"]
+                cold_samples = json.loads(cold_path.read_text())["samples"]
+                for index, sample in enumerate(payload["samples"]):
+                    sample["process_id"] = cold_samples[index]["process_id"]
             destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
         artifacts[name] = {
             "path": destination.relative_to(root).as_posix(),
@@ -94,13 +101,40 @@ if outcome == "pass":
     if mutation == "nine-cold":
         mutate_json("raw_cold", lambda payload: payload["samples"].pop())
     elif mutation == "visible-no-present":
-        mutate_json("health_result", lambda payload: payload["startup"]["trials"][0].__setitem__("present_ms", None))
+        mutate_json(
+            "health_result",
+            lambda payload: payload["startup"]["trials"][0].__setitem__(
+                "present_ms", None,
+            ),
+        )
     elif mutation == "headless-present":
-        mutate_json("health_result", lambda payload: payload["startup"]["trials"][0].__setitem__("present_ms", 1))
+        mutate_json(
+            "health_result",
+            lambda payload: payload["startup"]["trials"][0].__setitem__(
+                "present_ms", 1,
+            ),
+        )
     elif mutation == "trace-id":
-        mutate_json("trace_analysis", lambda payload: payload.__setitem__("gpu_evidence_id", "f" * 32))
+        mutate_json(
+            "trace_analysis",
+            lambda payload: payload.__setitem__("gpu_evidence_id", "f" * 32),
+        )
     elif mutation == "product-mutation":
         Path(request["product"]["runtime_path"]).write_bytes(b"mutated")
+    elif mutation == "bundle-mutation":
+        resource = (
+            Path(os.environ["PULP_A3_REAPER_PLUGIN_BUNDLE"])
+            / "Contents" / "Resources" / "changed.txt"
+        )
+        resource.parent.mkdir(parents=True, exist_ok=True)
+        resource.write_text("changed during lifecycle\n")
+    elif mutation == "forge-bundle-mutation":
+        resource = (
+            Path(os.environ["PULP_A3_FORGE_APP_BUNDLE"])
+            / "Contents" / "Resources" / "changed.txt"
+        )
+        resource.parent.mkdir(parents=True, exist_ok=True)
+        resource.write_text("changed during lifecycle\n")
 
 cold = json.loads((root / artifacts["raw_cold"]["path"]).read_text())["samples"] if outcome == "pass" else []
 warm = json.loads((root / artifacts["raw_warm"]["path"]).read_text())["samples"] if outcome == "pass" else []
@@ -113,12 +147,19 @@ for index, row in enumerate(cold + warm):
         "lifecycle_id": row["lifecycle_id"],
         "process_id": row["process_id"],
         "cache_boundary": row["cache_provenance"],
-        "prior_lifecycle_id": f"reopen-predecessor-{index}" if warm_row else None,
+        "prior_lifecycle_id": cold[index - 10]["lifecycle_id"] if warm_row else None,
+        "prior_process_id": row["process_id"] if warm_row else None,
         "endpoint_observed": True,
         "native_presented": request["role"] != "headless-constrained",
     })
 if mutation == "lifecycle" and lifecycle:
     lifecycle[10]["prior_lifecycle_id"] = None
+elif mutation == "unknown-predecessor" and lifecycle:
+    lifecycle[10]["prior_lifecycle_id"] = "unobserved-lifecycle"
+elif mutation == "prior-process" and lifecycle:
+    lifecycle[10]["prior_process_id"] = "unrelated-process"
+elif mutation == "lifecycle-raw-mismatch" and lifecycle:
+    lifecycle[0]["lifecycle_id"] = "unrelated-lifecycle"
 
 receipt = {
     "schema": "pulp.gpu-first-visible-role-driver-receipt.v1",
@@ -154,6 +195,7 @@ def write_smoke(path: Path) -> None:
         encoding="utf-8",
     )
     path.chmod(0o755)
+    (path.parent / "insert_and_float.lua").write_text("-- fixture\n", encoding="utf-8")
 
 
 def make_git_root(path: Path) -> str:
@@ -165,6 +207,65 @@ def make_git_root(path: Path) -> str:
     subprocess.run(["git", "add", "source.txt"], cwd=path, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "fixture"], cwd=path, check=True)
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=path, text=True).strip()
+
+
+def process_is_live(pid: int) -> bool:
+    completed = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "stat="], text=True,
+        capture_output=True, check=False,
+    )
+    state = completed.stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def assert_signal_cleanup(root: Path) -> None:
+    marker = root / "signal-child-pids.json"
+    child = root / "signal-child.py"
+    child.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, pathlib, subprocess, sys, time\n"
+        "grandchild = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "pathlib.Path(os.environ['PULP_A3_SIGNAL_MARKER']).write_text(\n"
+        "    json.dumps([os.getpid(), grandchild.pid]) + '\\n')\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    child.chmod(0o755)
+    helper = r'''
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import gpu_first_visible_a3_role_producer as producer
+producer.install_signal_handlers()
+root = pathlib.Path(sys.argv[2])
+producer.bounded_run(
+    [sys.executable, sys.argv[3]], cwd=root, environment=dict(os.environ),
+    timeout_seconds=60, stdout_path=root / "signal.stdout.log",
+    stderr_path=root / "signal.stderr.log",
+)
+'''
+    environment = dict(os.environ)
+    environment["PULP_A3_SIGNAL_MARKER"] = str(marker)
+    process = subprocess.Popen(
+        [sys.executable, "-c", helper, str(SCRIPT_DIR), str(root), str(child)],
+        env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    deadline = time.monotonic() + 5
+    while (
+        not marker.is_file()
+        and process.poll() is None
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.02)
+    assert marker.is_file(), process.communicate(timeout=2)
+    child_pids = json.loads(marker.read_text(encoding="utf-8"))
+    process.send_signal(signal.SIGTERM)
+    stdout, stderr = process.communicate(timeout=8)
+    assert process.returncode == 128 + signal.SIGTERM, (process.returncode, stdout, stderr)
+    deadline = time.monotonic() + 3
+    while any(process_is_live(pid) for pid in child_pids) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not any(process_is_live(pid) for pid in child_pids), child_pids
 
 
 def run_role(
@@ -200,12 +301,39 @@ def run_role(
     request_path = run_dir / "request.json"
     receipt_path = artifact_directory / "producer-receipt.json"
     write_json(request_path, request)
-    product = root / f"{role}-product"
-    host = root / f"{role}-host"
+    case_name = mutation or smoke
+    if role == "daw" and mutation != "daw-product-outside-bundle":
+        bundle = root / f"plugin-{case_name}.vst3"
+        (bundle / "Contents" / "MacOS").mkdir(parents=True, exist_ok=True)
+        product = bundle / "Contents" / "MacOS" / "plugin-product"
+    elif role == "daw":
+        bundle = root / f"plugin-{case_name}.vst3"
+        (bundle / "Contents" / "MacOS").mkdir(parents=True, exist_ok=True)
+        bundled_product = bundle / "Contents" / "MacOS" / "bundled-product"
+        bundled_product.write_bytes(b"actual bundled product")
+        bundled_product.chmod(0o755)
+        product = root / "plugin-product-outside-bundle"
+    elif role == "forge":
+        bundle = root / f"Forge-{case_name}.app"
+        (bundle / "Contents" / "MacOS").mkdir(parents=True, exist_ok=True)
+        product = bundle / "Contents" / "MacOS" / "Forge FX"
+    else:
+        product = root / f"{role}-product"
+    if role == "daw":
+        host = root / "daw-host"
+    elif mutation in {"forge-separate-host", "single-executable-host"}:
+        host = root / f"{role}-host-outside-bundle"
+    else:
+        host = product
     product.write_bytes(f"product:{role}".encode())
-    host.write_bytes(f"host:{role}".encode())
+    if host != product:
+        host.write_bytes(f"host:{role}".encode())
     product.chmod(0o755)
     host.chmod(0o755)
+    if role == "daw" and mutation == "daw-extra-executable":
+        extra_executable = bundle / "Contents" / "MacOS" / "other-product"
+        extra_executable.write_bytes(b"unrelated executable")
+        extra_executable.chmod(0o755)
     driver = root / "role-driver.py"
     smoke_bin = root / "reaper-smoke"
     environment = dict(os.environ)
@@ -223,19 +351,30 @@ def run_role(
     if not omit_driver:
         environment[f"{PREFIX[role]}_DRIVER"] = str(driver)
     if role == "daw":
-        bundle = root / "plugin.vst3"
-        bundle.mkdir(exist_ok=True)
+        smoke_lua = (
+            root / "unrelated.lua"
+            if mutation == "reaper-lua-mismatch"
+            else root / "insert_and_float.lua"
+        )
+        if mutation == "reaper-lua-mismatch":
+            smoke_lua.write_text("-- unrelated fixture\n", encoding="utf-8")
         environment.update({
             "PULP_A3_REAPER_PLUGIN_BUNDLE": str(bundle),
             "PULP_A3_REAPER_SMOKE": str(smoke_bin),
+            "PULP_A3_REAPER_SMOKE_LUA": str(smoke_lua),
         })
     if role == "forge":
         environment["PULP_A3_FORGE_ROOT"] = str(forge_root)
+        environment["PULP_A3_FORGE_APP_BUNDLE"] = str(bundle)
+    untracked_forge_source = forge_root / "untracked-runtime-input.txt"
+    if role == "forge" and mutation == "forge-untracked-source":
+        untracked_forge_source.write_text("must not be ignored\n", encoding="utf-8")
     completed = subprocess.run(
         [str(PRODUCERS[role]), "--request", str(request_path),
          "--receipt", str(receipt_path)],
         env=environment, text=True, capture_output=True, check=False,
     )
+    untracked_forge_source.unlink(missing_ok=True)
     receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {}
     return completed, receipt
 
@@ -250,6 +389,7 @@ def main() -> int:
         write_driver(root / "role-driver.py")
         write_smoke(root / "reaper-smoke")
         make_git_root(root / "forge-root")
+        assert_signal_cleanup(root)
 
         for role in PRODUCERS:
             completed, receipt = run_role(root, evidence, role)
@@ -265,8 +405,31 @@ def main() -> int:
             ("headless-constrained", "headless-present", "pass", "cannot claim"),
             ("standalone", "trace-id", "pass", "same product instance"),
             ("standalone", "lifecycle", "pass", "reopen predecessor"),
+            ("standalone", "unknown-predecessor", "pass", "observed lifecycle"),
+            (
+                "standalone", "prior-process", "pass",
+                "same-process reopen predecessor",
+            ),
+            ("standalone", "lifecycle-raw-mismatch", "pass", "raw observation"),
             ("standalone", "product-mutation", "pass", "changed during"),
             ("standalone", "driver-exit", "pass", "exit code disagrees"),
+            ("standalone", "single-executable-host", "pass", "same executable"),
+            ("daw", "daw-product-outside-bundle", "pass", "sole executable"),
+            ("daw", "daw-extra-executable", "pass", "sole executable"),
+            ("daw", "bundle-mutation", "pass", "changed during the campaign"),
+            (
+                "daw", "reaper-lua-mismatch", "pass",
+                "helper used by the smoke harness",
+            ),
+            ("forge", "forge-separate-host", "pass", "same executable"),
+            (
+                "forge", "forge-bundle-mutation", "pass",
+                "changed during the campaign",
+            ),
+            (
+                "forge", "forge-untracked-source", "pass",
+                "tracked or untracked changes",
+            ),
         ]
         for role, mutation, smoke, needle in negatives:
             completed, receipt = run_role(root, evidence, role, mutation=mutation, smoke=smoke)
@@ -291,7 +454,10 @@ def main() -> int:
         assert receipt["outcome"] == "skip"
         assert receipt["dependencies"] == ["reaper:editor-open-smoke"]
 
-        print("gpu-first-visible-a3-role-producers: positive=4 planted_negatives=10")
+        print(
+            "gpu-first-visible-a3-role-producers: "
+            "positive=4 planted_negatives=21 cleanup_controls=1"
+        )
     return 0
 
 

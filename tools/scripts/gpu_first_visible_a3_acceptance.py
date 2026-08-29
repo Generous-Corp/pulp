@@ -103,6 +103,7 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
     "tools/scripts/gpu_first_visible_a3_role_producer.py",
     "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
     "tools/testing/daw-smoke/reaper_smoke.py",
 }
 AUDIO_PROVIDER_ENTRY_POINTS = [

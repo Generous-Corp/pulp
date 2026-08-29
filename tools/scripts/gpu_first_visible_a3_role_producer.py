@@ -77,6 +77,7 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
 GIT_REVISION = re.compile(r"^[0-9a-f]{40}$")
 OUTPUT_CAP_BYTES = 1024 * 1024
+_active_child: subprocess.Popen[bytes] | None = None
 
 
 class ProducerError(ValueError):
@@ -268,20 +269,48 @@ def validate_source_root(root: Path, revision: str, label: str) -> dict[str, str
     head = git_output(root, "rev-parse", "HEAD")
     if head != revision:
         raise ProducerError(f"{label} HEAD {head} differs from requested {revision}")
-    status = git_output(root, "status", "--porcelain=v1", "--untracked-files=no")
+    status = git_output(root, "status", "--porcelain=v1", "--untracked-files=all")
     if status:
-        raise ProducerError(f"{label} source checkout has tracked changes")
-    return {"path": str(root), "revision": head, "tracked_status": "clean"}
+        raise ProducerError(f"{label} source checkout has tracked or untracked changes")
+    return {"path": str(root), "revision": head, "worktree_status": "clean"}
+
+
+def terminate_child(process: subprocess.Popen[bytes]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+
+def _forward_termination(signum: int, _frame: Any) -> None:
+    if _active_child is not None and _active_child.poll() is None:
+        terminate_child(_active_child)
+    raise SystemExit(128 + signum)
+
+
+def install_signal_handlers() -> None:
+    signal.signal(signal.SIGTERM, _forward_termination)
+    signal.signal(signal.SIGINT, _forward_termination)
 
 
 def bounded_run(
     command: list[str], *, cwd: Path, environment: dict[str, str],
     timeout_seconds: float, stdout_path: Path, stderr_path: Path,
 ) -> int:
+    global _active_child
     process = subprocess.Popen(
         command, cwd=cwd, env=environment, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
     )
+    _active_child = process
     buffers = [bytearray(), bytearray()]
     exceeded = threading.Event()
 
@@ -309,18 +338,11 @@ def bounded_run(
         remaining = deadline - time.monotonic()
         if remaining <= 0 or exceeded.wait(min(0.05, remaining)):
             timed_out = remaining <= 0
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=3)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait()
+            terminate_child(process)
             break
     for thread in threads:
         thread.join(timeout=2)
+    _active_child = None
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stdout_path.write_bytes(bytes(buffers[0]))
     stderr_path.write_bytes(bytes(buffers[1]))
@@ -334,6 +356,90 @@ def bounded_run(
     return process.returncode
 
 
+def directory_entries(
+    root: Path, label: str,
+) -> list[tuple[str, bytes, int]]:
+    entries: list[tuple[str, bytes, int]] = []
+    for current, directories, files in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        for directory in directories:
+            path = current_path / directory
+            if path.is_symlink() or not stat.S_ISDIR(
+                path.stat(follow_symlinks=False).st_mode
+            ):
+                raise ProducerError(f"{label} contains a non-directory or symlink: {path}")
+        for filename in files:
+            path = current_path / filename
+            if path.is_symlink():
+                raise ProducerError(f"{label} contains a symlink: {path}")
+            metadata = path.stat(follow_symlinks=False)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ProducerError(f"{label} contains a non-regular file: {path}")
+            relative = path.relative_to(root).as_posix()
+            entries.append((
+                relative, regular_file_bytes(path, f"{label} member {relative}"),
+                stat.S_IMODE(metadata.st_mode),
+            ))
+    if not entries:
+        raise ProducerError(f"{label} contains no regular files")
+    return sorted(entries, key=lambda entry: entry[0])
+
+
+def directory_tree_digest(entries: list[tuple[str, bytes, int]]) -> str:
+    hasher = hashlib.sha256(b"pulp-directory-tree-v1\0")
+    for relative, data, mode in entries:
+        encoded = relative.encode("utf-8")
+        hasher.update(len(encoded).to_bytes(8, "big"))
+        hasher.update(encoded)
+        hasher.update(mode.to_bytes(4, "big"))
+        hasher.update(len(data).to_bytes(8, "big"))
+        hasher.update(data)
+    return hasher.hexdigest()
+
+
+def directory_digest(root: Path, label: str) -> str:
+    return directory_tree_digest(directory_entries(root, label))
+
+
+def snapshot_directory(
+    source: Path, destination: Path, label: str,
+) -> tuple[Path, str]:
+    entries = directory_entries(source, label)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() or destination.is_symlink():
+        raise ProducerError(f"{label} snapshot already exists: {destination}")
+    with tarfile.open(destination, "w", format=tarfile.PAX_FORMAT) as archive:
+        for relative, data, mode in entries:
+            info = tarfile.TarInfo(name=relative)
+            info.size = len(data)
+            info.mtime = 0
+            info.mode = mode
+            info.uid = 0
+            info.gid = 0
+            info.uname = ""
+            info.gname = ""
+            with tempfile.SpooledTemporaryFile() as handle:
+                handle.write(data)
+                handle.seek(0)
+                archive.addfile(info, handle)
+    return destination, directory_tree_digest(entries)
+
+
+def require_bundle_executable(bundle: Path, product_binary: Path) -> None:
+    executable_directory = bundle / "Contents" / "MacOS"
+    if not executable_directory.is_dir() or executable_directory.is_symlink():
+        raise ProducerError("DAW plugin bundle lacks a regular Contents/MacOS directory")
+    candidates = [
+        path.resolve()
+        for path in executable_directory.iterdir()
+        if path.is_file() and not path.is_symlink() and os.access(path, os.X_OK)
+    ]
+    if candidates != [product_binary]:
+        raise ProducerError(
+            "DAW product binary is not the sole executable loaded from the exact plugin bundle"
+        )
+
+
 def run_reaper_preflight(
     *, request: dict[str, Any], product_bundle: Path, product_binary: Path,
     host_binary: Path, artifact_directory: Path,
@@ -341,9 +447,21 @@ def run_reaper_preflight(
     smoke = configured_file(
         "PULP_A3_REAPER_SMOKE", "reaper:editor-open-smoke",
     )
+    smoke_lua = configured_file(
+        "PULP_A3_REAPER_SMOKE_LUA", "reaper:editor-open-smoke-lua",
+        executable=False,
+    )
+    if smoke_lua != smoke.parent / "insert_and_float.lua":
+        raise ProducerError(
+            "configured REAPER Lua is not the helper used by the smoke harness"
+        )
     smoke_snapshot, smoke_digest = snapshot_file(
         smoke, artifact_directory / "tooling" / f"reaper-smoke{smoke.suffix}",
         "REAPER smoke harness",
+    )
+    lua_snapshot, lua_digest = snapshot_file(
+        smoke_lua, artifact_directory / "tooling" / "insert-and-float.lua",
+        "REAPER editor-open Lua",
     )
     smoke_format = "au" if request["identity"]["plugin_format"] == "auv2" else request["identity"]["plugin_format"]
     command = [
@@ -360,6 +478,8 @@ def run_reaper_preflight(
     )
     if file_sha256(smoke, "REAPER smoke harness") != smoke_digest:
         raise ProducerError("REAPER smoke harness changed while it ran")
+    if file_sha256(smoke_lua, "REAPER editor-open Lua") != lua_digest:
+        raise ProducerError("REAPER editor-open Lua changed while the smoke ran")
     if exit_code == 2:
         raise ProducerBlocked(
             "exact-format REAPER editor-open smoke skipped", "reaper:editor-open-smoke",
@@ -379,8 +499,9 @@ def run_reaper_preflight(
         "plugin_binary_sha256": file_sha256(product_binary, "DAW product binary"),
         "host_binary_sha256": file_sha256(host_binary, "REAPER host binary"),
         "smoke_sha256": smoke_digest,
+        "smoke_lua_sha256": lua_digest,
         "exit_code": exit_code,
-    }, [smoke_snapshot, stdout_path, stderr_path])
+    }, [smoke_snapshot, lua_snapshot, stdout_path, stderr_path])
 
 
 def validate_artifact_ref(
@@ -459,6 +580,7 @@ def validate_raw(
 def validate_health_and_trace(
     *, request: dict[str, Any], health_path: Path, cold_path: Path,
     warm_path: Path, trace_path: Path, analysis_path: Path,
+    lifecycle_provenance: list[dict[str, Any]],
 ) -> None:
     cold = validate_raw(regular_json(cold_path, "raw cold"), request=request, cache_state="cold")
     warm = validate_raw(regular_json(warm_path, "raw warm"), request=request, cache_state="warm")
@@ -481,6 +603,18 @@ def validate_health_and_trace(
     if not isinstance(trials, list) or len(trials) != 20:
         raise ProducerError("role health result must contain exactly 20 lifecycle trials")
     raw_rows = cold + warm
+    for index, (provenance, raw) in enumerate(
+        zip(lifecycle_provenance, raw_rows, strict=True)
+    ):
+        if (
+            provenance["sequence"] != raw["sequence"]
+            or provenance["lifecycle_id"] != raw["lifecycle_id"]
+            or provenance["process_id"] != raw["process_id"]
+            or provenance["cache_boundary"] != raw["cache_provenance"]
+        ):
+            raise ProducerError(
+                f"role-driver lifecycle {index} differs from its raw observation"
+            )
     for index, (trial, raw) in enumerate(zip(trials, raw_rows, strict=True)):
         if not isinstance(trial, dict):
             raise ProducerError(f"health trial {index} is not an object")
@@ -562,7 +696,7 @@ def deterministic_tar(path: Path, members: list[tuple[str, Path]]) -> None:
 def validate_driver_receipt(
     receipt: dict[str, Any], *, request: dict[str, Any], driver_root: Path,
     product_digest: str, host_digest: str, driver_digest: str, exit_code: int,
-) -> tuple[str, dict[str, Path]]:
+) -> tuple[str, dict[str, Path], list[dict[str, Any]]]:
     exact_keys(receipt, DRIVER_RECEIPT_KEYS, "role-driver receipt")
     if receipt["schema"] != DRIVER_RECEIPT_SCHEMA or receipt["version"] != 1:
         raise ProducerError("role-driver receipt has the wrong schema or version")
@@ -605,11 +739,12 @@ def validate_driver_receipt(
     if outcome == "pass":
         if not isinstance(lifecycle, list) or len(lifecycle) != 20:
             raise ProducerError("passing role driver lacks 20 lifecycle provenance rows")
+        observed_lifecycles: dict[str, str] = {}
         for index, row in enumerate(lifecycle):
             exact_keys(row, {
                 "sequence", "cache_state", "lifecycle_id", "process_id",
-                "cache_boundary", "prior_lifecycle_id", "endpoint_observed",
-                "native_presented",
+                "cache_boundary", "prior_lifecycle_id", "prior_process_id",
+                "endpoint_observed", "native_presented",
             }, f"role-driver lifecycle {index}")
             expected_state = "cold" if index < 10 else "warm"
             expected_boundary = (
@@ -624,14 +759,27 @@ def validate_driver_receipt(
                 or row["endpoint_observed"] is not True
             ):
                 raise ProducerError(f"role-driver lifecycle {index} lacks authentic provenance")
-            if expected_state == "cold" and row["prior_lifecycle_id"] is not None:
+            if expected_state == "cold" and (
+                row["prior_lifecycle_id"] is not None
+                or row["prior_process_id"] is not None
+            ):
                 raise ProducerError("cold lifecycle cannot claim an editor-reopen predecessor")
             if expected_state == "warm" and (
                 not isinstance(row["prior_lifecycle_id"], str)
                 or not row["prior_lifecycle_id"]
                 or row["prior_lifecycle_id"] == row["lifecycle_id"]
+                or row["prior_process_id"] != row["process_id"]
             ):
                 raise ProducerError("warm lifecycle lacks its same-process reopen predecessor")
+            if expected_state == "warm" and observed_lifecycles.get(
+                row["prior_lifecycle_id"]
+            ) != row["process_id"]:
+                raise ProducerError(
+                    "warm reopen predecessor is not an observed lifecycle in the same process"
+                )
+            if row["lifecycle_id"] in observed_lifecycles:
+                raise ProducerError("role-driver lifecycle identity is not unique")
+            observed_lifecycles[row["lifecycle_id"]] = row["process_id"]
             if request["role"] == "headless-constrained":
                 if row["native_presented"] is not False:
                     raise ProducerError("headless lifecycle cannot claim native presentation")
@@ -639,7 +787,7 @@ def validate_driver_receipt(
                 raise ProducerError("visible lifecycle lacks independent native presentation")
     elif lifecycle != []:
         raise ProducerError("non-passing role driver cannot retain unvalidated lifecycle claims")
-    return outcome, paths
+    return outcome, paths, lifecycle
 
 
 def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
@@ -660,6 +808,10 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         host_binary = configured_file(
             f"{prefix}_HOST_BIN", f"host:{role}",
         )
+        if role != "daw" and product_binary != host_binary:
+            raise ProducerError(
+                f"{role} product/host must resolve to the same executable"
+            )
         driver_source = configured_file(
             f"{prefix}_DRIVER", f"role-driver:{role}",
         )
@@ -689,16 +841,42 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             "producer_support_sha256": support_digest,
         }
         extra_members: list[Path] = []
+        directory_guards: list[tuple[Path, str, str]] = []
         role_context: dict[str, Any] = {"preflight": role}
         if role == "daw":
             product_bundle = configured_directory(
                 "PULP_A3_REAPER_PLUGIN_BUNDLE", "product:daw-bundle",
+            )
+            expected_suffix = {
+                "auv2": ".component", "vst3": ".vst3", "clap": ".clap",
+            }[request["identity"]["plugin_format"]]
+            if product_bundle.suffix != expected_suffix:
+                raise ProducerError(
+                    "DAW plugin bundle suffix differs from the requested format"
+                )
+            require_bundle_executable(product_bundle, product_binary)
+            bundle_snapshot, bundle_digest = snapshot_directory(
+                product_bundle,
+                artifact_directory / "identity" / "plugin-bundle.tar",
+                "DAW plugin bundle",
             )
             smoke, extra_members = run_reaper_preflight(
                 request=request, product_bundle=product_bundle,
                 product_binary=product_binary, host_binary=host_binary,
                 artifact_directory=artifact_directory,
             )
+            if directory_digest(product_bundle, "DAW plugin bundle") != bundle_digest:
+                raise ProducerError("DAW plugin bundle changed while the smoke ran")
+            smoke.update({
+                "plugin_bundle_tree_sha256": bundle_digest,
+                "plugin_bundle_snapshot_sha256": file_sha256(
+                    bundle_snapshot, "DAW plugin bundle snapshot",
+                ),
+            })
+            extra_members.append(bundle_snapshot)
+            directory_guards.append((
+                product_bundle, bundle_digest, "DAW plugin bundle",
+            ))
             preflight["reaper_smoke"] = smoke
             role_context.update({
                 "host_kind": "reaper",
@@ -707,14 +885,42 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             })
         elif role == "forge":
             forge_root = configured_directory("PULP_A3_FORGE_ROOT", "source:forge-root")
+            forge_bundle = configured_directory(
+                "PULP_A3_FORGE_APP_BUNDLE", "product:forge-app-bundle",
+            )
+            if forge_bundle.suffix != ".app":
+                raise ProducerError("Forge app bundle must have the .app suffix")
+            if (
+                product_binary.parent != forge_bundle / "Contents" / "MacOS"
+                or product_binary != host_binary
+            ):
+                raise ProducerError(
+                    "Forge product/host must be the same executable inside the exact app bundle"
+                )
+            forge_snapshot, forge_bundle_digest = snapshot_directory(
+                forge_bundle,
+                artifact_directory / "identity" / "forge-app-bundle.tar",
+                "Forge app bundle",
+            )
+            extra_members.append(forge_snapshot)
+            directory_guards.append((
+                forge_bundle, forge_bundle_digest, "Forge app bundle",
+            ))
             forge_source = validate_source_root(
                 forge_root, request["identity"]["forge_revision"], "Forge",
             )
-            preflight["forge_source"] = forge_source
+            preflight.update({
+                "forge_source": forge_source,
+                "forge_app_bundle_tree_sha256": forge_bundle_digest,
+                "forge_app_bundle_snapshot_sha256": file_sha256(
+                    forge_snapshot, "Forge app bundle snapshot",
+                ),
+            })
             role_context.update({
                 "host_kind": "forge-standalone",
                 "forge_revision": request["identity"]["forge_revision"],
                 "forge_root": str(forge_root),
+                "forge_app_bundle": str(forge_bundle),
             })
         elif role == "headless-constrained":
             role_context.update({
@@ -756,7 +962,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         driver_exit = bounded_run(
             [str(driver_snapshot), "--request", str(driver_request_path),
              "--receipt", str(driver_receipt_path)],
-            cwd=artifact_directory, environment=dict(os.environ), timeout_seconds=720,
+            cwd=artifact_directory, environment=dict(os.environ), timeout_seconds=480,
             stdout_path=artifact_directory / "logs" / "role-driver.stdout.log",
             stderr_path=artifact_directory / "logs" / "role-driver.stderr.log",
         )
@@ -766,10 +972,13 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             raise ProducerError("configured product binary changed during the campaign")
         if file_sha256(host_binary, "configured host binary") != host_digest:
             raise ProducerError("configured host binary changed during the campaign")
+        for directory, expected_digest, label in directory_guards:
+            if directory_digest(directory, label) != expected_digest:
+                raise ProducerError(f"{label} changed during the campaign")
         if not driver_receipt_path.is_file() or driver_receipt_path.is_symlink():
             raise ProducerError(f"role driver exited {driver_exit} without its receipt")
         driver_receipt = regular_json(driver_receipt_path, "role-driver receipt")
-        outcome, measured_paths = validate_driver_receipt(
+        outcome, measured_paths, lifecycle_provenance = validate_driver_receipt(
             driver_receipt, request=request, driver_root=driver_root,
             product_digest=product_digest, host_digest=host_digest,
             driver_digest=driver_digest, exit_code=driver_exit,
@@ -784,6 +993,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             request=request, health_path=measured_paths["health_result"],
             cold_path=measured_paths["raw_cold"], warm_path=measured_paths["raw_warm"],
             trace_path=measured_paths["trace"], analysis_path=measured_paths["trace_analysis"],
+            lifecycle_provenance=lifecycle_provenance,
         )
         preflight_path = artifact_directory / "preflight.json"
         atomic_json(preflight_path, preflight)
@@ -823,6 +1033,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
 
 
 def main_entry(role: str, argv: list[str] | None = None) -> int:
+    install_signal_handlers()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request", required=True, type=Path)
     parser.add_argument("--receipt", required=True, type=Path)

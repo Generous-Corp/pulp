@@ -76,6 +76,7 @@ A3_SUPPORT="$PWD/tools/scripts/gpu_first_visible_a3_role_producer.py"
 : "${DAW_PLUGIN_BUNDLE:?exact .vst3, .clap, or .component bundle}"
 : "${REAPER_DRIVER:?exact executable that automates the 20 REAPER lifecycles}"
 : "${FORGE_APP_BIN:?exact final-head Forge app executable}"
+: "${FORGE_APP_BUNDLE:?exact final-head Forge .app bundle}"
 : "${FORGE_DRIVER:?exact executable that automates the 20 Forge lifecycles}"
 : "${FORGE_ROOT:?clean Forge source checkout at the identity revision}"
 
@@ -122,6 +123,7 @@ PULP_A3_REAPER_HOST_BIN=/Applications/REAPER.app/Contents/MacOS/REAPER \
 PULP_A3_REAPER_DRIVER="$REAPER_DRIVER" \
 PULP_A3_REAPER_PLUGIN_BUNDLE="$DAW_PLUGIN_BUNDLE" \
 PULP_A3_REAPER_SMOKE="$PWD/tools/testing/daw-smoke/reaper_smoke.py" \
+PULP_A3_REAPER_SMOKE_LUA="$PWD/tools/testing/daw-smoke/insert_and_float.lua" \
 PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_reaper_producer.py" \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --role daw --identity "$A3_EVIDENCE/daw-identity.json" \
@@ -136,6 +138,7 @@ PULP_A3_PULP_ROOT="$PWD" \
 PULP_A3_FORGE_ROOT="$FORGE_ROOT" \
 PULP_A3_FORGE_PRODUCT_BIN="$FORGE_APP_BIN" \
 PULP_A3_FORGE_HOST_BIN="$FORGE_APP_BIN" \
+PULP_A3_FORGE_APP_BUNDLE="$FORGE_APP_BUNDLE" \
 PULP_A3_FORGE_DRIVER="$FORGE_DRIVER" \
 PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_forge_producer.py" \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
@@ -161,7 +164,11 @@ the product lifecycle. It snapshots the checked-in role entry point named by
 runtime, and preserves its exact digest in `run.json`. The four entry points
 share `gpu_first_visible_a3_role_producer.py`; the engine snapshots itself,
 the configured role driver, and exact product and host executable bytes before
-the campaign. A role producer accepts the same `--request PATH --receipt PATH`, writes
+the campaign. Standalone, constrained headless, and Forge require product and
+host to resolve to one executable. Termination is forwarded to the isolated
+driver process group so a timed-out campaign cannot leave host automation
+running. A role producer accepts the same `--request PATH --receipt PATH`,
+writes
 `pulp.gpu-first-visible-campaign-producer.v1`, and uses the supplied
 `artifact_directory`. Its receipt has the adapter receipt's identity and
 outcome fields but exactly these artifacts: `health_result`, `raw_cold`,
@@ -174,11 +181,14 @@ The role driver is the product/host automation seam. It accepts the closed
 `pulp.gpu-first-visible-role-driver-request.v1` request and writes
 `pulp.gpu-first-visible-role-driver-receipt.v1`. A pass requires 20 ordered
 lifecycle-provenance rows, including the observed cache boundary, unique
-lifecycle and process identities, a predecessor for every same-process warm
-reopen, and explicit endpoint/native-present truth. It also returns the five
-measured artifacts beneath its issued directory. The role producer rejects a
-short campaign, a relabeled cache state, a visible trial without independent
-native presentation, a headless trial claiming presentation, mutation of any
+lifecycle and process identities, both the lifecycle and process predecessor
+for every same-process warm reopen, and explicit endpoint/native-present truth.
+The predecessor must be an earlier observed lifecycle in the same process. The
+producer cross-checks those rows against the raw cold/warm observations. It
+also returns the five measured artifacts beneath its issued directory. The
+role producer rejects a short campaign, a relabeled cache state, a visible
+trial without independent native presentation, a headless trial claiming
+presentation, mutation of any
 configured binary, or a trace ID that differs from the health result. The
 digest-bound `host_artifact` tar retains the exact host, driver, producer
 support, closed driver request/receipt, and role preflight. The driver may be
@@ -199,8 +209,14 @@ vst3 --plugin-name NAME --plugin-path /absolute/product.vst3 --reaper-bin
 /Applications/REAPER.app/Contents/MacOS/REAPER`. That smoke is a
 prerequisite, not the 20-trial campaign: SKIP/INCONCLUSIVE remains pending, and
 capture completion cannot substitute for native compositor presentation. The
-Forge adapter likewise drives the exact standalone shell and binds both Pulp
-and Forge SHAs. The existing standalone product test is a useful wiring
+producer binds both the exact plugin bundle executable and the smoke harness's
+checked-in `insert_and_float.lua` helper. It snapshots the complete bundle,
+retains its deterministic digest, and rejects any smoke/lifecycle mutation.
+The Forge adapter likewise drives one
+exact executable inside the configured `.app` bundle and binds both Pulp and
+Forge SHAs from source checkouts with no tracked or untracked changes. It also
+snapshots and mutation-guards the complete `.app` bundle. The existing
+standalone product test is a useful wiring
 preflight but remains one observation; it is not a role adapter until a real
 lifecycle harness supplies all 20 trials and role-appropriate presentation
 evidence.
