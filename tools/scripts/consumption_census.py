@@ -68,6 +68,10 @@ FRAMEWORK_FEATURES = {"FRAMEWORK", "WEAK_FRAMEWORK", "NEEDED_FRAMEWORK", "REEXPO
 # live on both the examples-off required lane and the examples-on local one.
 BUILD_SCOPE_FEATURES = ("PULP_BUILD_TESTS", "PULP_BUILD_EXAMPLES")
 
+# A prebuilt library reaches the link line as an absolute path. CMake writes
+# them with forward slashes on every platform, Windows drive letters included.
+ABSOLUTE_PATH_RE = re.compile(r"^(?:/|[A-Za-z]:/|\\\\)")
+
 PULP_SOURCE_ROOTS = ("core/", "inspect/", "ship/", "tools/", "apple/", "bindings/", "experimental/")
 
 
@@ -183,7 +187,7 @@ class Graph:
                 self.node_kind[identifier] = "framework"
                 out.append(identifier)
                 continue
-            if name.startswith("/") or name.startswith("\\"):
+            if ABSOLUTE_PATH_RE.match(name):
                 # An absolute archive path is machine-specific; the census
                 # records the archive, never where this host happened to
                 # unpack it.
@@ -850,7 +854,15 @@ def run_validate_only(census_path: Path, schema_path: Path) -> int:
     return 0
 
 
-def run_check(profile: dict, census_path: Path, schema_path: Path, build_dir: Path) -> int:
+def check_profile_recorded(build_dir: Path, census_path: Path, schema_path: Path) -> int | None:
+    """Exit status to return without measuring, or None to go on and measure.
+
+    Reads only the facts dump's header — the platform and the feature switches
+    — so a host the census does not cover costs a file read rather than a full
+    graph resolution.
+    """
+    facts = load_facts(build_dir)
+    key = profile_key(facts)
     # A census that is missing or invalid is a broken artifact, not a broken
     # instrument, so it reports as drift rather than as "could not measure".
     try:
@@ -858,7 +870,6 @@ def run_check(profile: dict, census_path: Path, schema_path: Path, build_dir: Pa
     except CensusError as error:
         print(f"consumption_census: {error}", file=sys.stderr)
         return 1
-    key = profile["key"]
     recorded = document["profiles"].get(key)
     if recorded is None:
         print(
@@ -866,14 +877,25 @@ def run_check(profile: dict, census_path: Path, schema_path: Path, build_dir: Pa
             f"recorded={','.join(sorted(document['profiles']))}"
         )
         return 77
-    if recorded["features"] != profile["features"]:
+    features = {
+        name: value
+        for name, value in facts["features"].items()
+        if name not in BUILD_SCOPE_FEATURES
+    }
+    if recorded["features"] != features:
         differing = sorted(
             name
-            for name in set(recorded["features"]) | set(profile["features"])
-            if recorded["features"].get(name) != profile["features"].get(name)
+            for name in set(recorded["features"]) | set(features)
+            if recorded["features"].get(name) != features.get(name)
         )
         print(f"consumption_census_skipped reason=features differing={','.join(differing)}")
         return 77
+    return None
+
+
+def run_check(profile: dict, census_path: Path, schema_path: Path, build_dir: Path) -> int:
+    document = load_document(census_path, schema_path)
+    recorded = document["profiles"][profile["key"]]
     if diffable(recorded) != diffable(profile):
         print("consumption_census: the census no longer matches the build tree", file=sys.stderr)
         for line in describe_drift(recorded, profile):
@@ -886,7 +908,7 @@ def run_check(profile: dict, census_path: Path, schema_path: Path, build_dir: Pa
         return 1
     print(
         f"consumption_census_verified=true targets={profile['summary']['installed_target_count']} "
-        f"profile={key}"
+        f"profile={profile['key']}"
     )
     return 0
 
@@ -901,6 +923,17 @@ def main(argv: list[str]) -> int:
     try:
         if args.validate_only:
             return run_validate_only(census_path, schema_path)
+
+        if args.check:
+            # Decide whether this host has a profile to compare BEFORE
+            # measuring one. Measuring first would make every platform the
+            # census does not record run the full graph resolution only to
+            # throw it away — and turn any platform-specific surprise in that
+            # resolution into a red check on a lane that could never have
+            # compared anything anyway.
+            skip = check_profile_recorded(build_dir, census_path, schema_path)
+            if skip is not None:
+                return skip
 
         profile = build_profile(build_dir, source_root)
 

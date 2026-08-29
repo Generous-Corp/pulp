@@ -35,9 +35,11 @@ endfunction()
 # of the top-level directory so every subsystem, tool and example target the
 # build defines is already present, whichever order the subdirectories run in.
 function(_pulp_census_write_facts)
-    # Feature switches that change which targets exist or what they link, and
-    # so change every closure downstream of them. The census refuses to compare
-    # two build trees that disagree here.
+    # Switches worth recording alongside the graph. The first ten change which
+    # targets exist or what they link, so a build tree that disagrees on one of
+    # them is measuring a different SDK and the census refuses to compare it.
+    # The last two decide only which CONSUMERS the tree builds; the generator
+    # records them as provenance and deliberately does not compare them.
     set(_feature_vars
         PULP_HAS_SKIA
         PULP_ENABLE_JS
