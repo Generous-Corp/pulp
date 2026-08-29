@@ -119,10 +119,18 @@ if outcome == "pass":
             payload["samples"][0]["cache_provenance"] = "explicit-cache-reset"
             payload["samples"][1]["process_id"] = payload["samples"][0]["process_id"]
         mutate_json("raw_cold", reuse_prior_process)
+        mutate_json(
+            "raw_warm",
+            lambda payload: payload["samples"][1].__setitem__(
+                "process_id", payload["samples"][0]["process_id"],
+            ),
+        )
     elif mutation == "product-mutation":
         Path(request["product"]["runtime_path"]).write_bytes(b"mutated")
     elif mutation == "snapshot-mutation":
-        (root.parent / "identity" / "product.bin").write_bytes(b"mutated snapshot")
+        snapshot = root.parent / "identity" / "product.bin"
+        snapshot.chmod(0o755)
+        snapshot.write_bytes(b"mutated snapshot")
     elif mutation == "bundle-mutation":
         resource = (
             Path(os.environ["PULP_A3_REAPER_PLUGIN_BUNDLE"])
