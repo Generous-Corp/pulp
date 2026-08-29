@@ -394,12 +394,13 @@ def analyze_trace(
     data = trace.read_bytes()
     if not data:
         raise TraceReplayError("active trace is empty")
-    if data.lstrip().startswith(b"{"):
+    json_candidate = data[3:] if data.startswith(b"\xef\xbb\xbf") else data
+    if json_candidate.lstrip().startswith((b"{", b"[")):
         if not allow_fixture_chrome_json:
             raise TraceReplayError(
                 "Chrome trace JSON is a nonterminal planted-fixture format"
             )
-        return analyze_chrome_json(data, request)
+        return analyze_chrome_json(json_candidate, request)
     if trace_processor is None:
         raise TraceReplayError("binary Perfetto trace requires the pinned trace processor")
     return analyze_proto(trace, request, trace_processor)

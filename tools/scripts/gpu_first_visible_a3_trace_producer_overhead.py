@@ -179,6 +179,21 @@ def sha256_file(path: Path, label: str) -> str:
     return sha256_bytes(regular_file_bytes(path, label))
 
 
+def live_collection_evidence_id(
+    *, attempt_nonce: str, challenge_nonce: str, state: str, section: str,
+    sequence: int, host_pid: int, process_start_identity: str,
+    executable_sha256: str,
+) -> str:
+    fields = (
+        attempt_nonce, challenge_nonce, state, section, str(sequence), str(host_pid),
+        process_start_identity, executable_sha256,
+    )
+    return hashlib.sha256(
+        b"pulp-a3-overhead-live-evidence-v1\0"
+        + b"\0".join(field.encode("utf-8") for field in fields)
+    ).hexdigest()[:32]
+
+
 def regular_json(path: Path, label: str) -> dict[str, Any]:
     try:
         value = json.loads(regular_file_bytes(path, label))
@@ -1077,10 +1092,26 @@ class CollectionLivenessMonitor:
                     raise OverheadError(
                         f"collection challenge {section}[{sequence}] names the wrong live product"
                     )
+                process_start_identity = role_support.live_process_start_identity(pid)
+                expected_evidence_id = live_collection_evidence_id(
+                    attempt_nonce=self.attempt_nonce,
+                    challenge_nonce=self.challenge_nonce,
+                    state=self.state,
+                    section=section,
+                    sequence=sequence,
+                    host_pid=pid,
+                    process_start_identity=process_start_identity,
+                    executable_sha256=self.binary_sha256,
+                )
+                if challenge["evidence_id"] != expected_evidence_id:
+                    raise OverheadError(
+                        f"collection challenge {section}[{sequence}] evidence ID is not "
+                        "derived from the challenged process lifetime"
+                    )
                 observation = {
                     **challenge,
                     "schema": COLLECTION_ACK_SCHEMA,
-                    "process_start_identity": role_support.live_process_start_identity(pid),
+                    "process_start_identity": process_start_identity,
                     "executable_sha256": self.binary_sha256,
                 }
                 ack_path = self.root / f"ack-{index:02}.json"

@@ -53,7 +53,23 @@ for section, count in (("warmups", 5), ("measured", 30), ("fresh_process", 20)):
             stderr=subprocess.DEVNULL, start_new_session=True,
         )
         try:
-            evidence_id = f"{global_index + 1:032x}"
+            started_text = subprocess.check_output(
+                ["ps", "-p", str(host.pid), "-o", "lstart="], text=True,
+            )
+            process_start_identity = (
+                f"pid={host.pid};started={' '.join(started_text.split())}"
+            )
+            evidence_fields = (
+                request["attempt_nonce"], request["challenge_nonce"], request["state"],
+                section, str(sequence), str(host.pid), process_start_identity,
+                request["binary"]["sha256"],
+            )
+            evidence_id = hashlib.sha256(
+                b"pulp-a3-overhead-live-evidence-v1\0"
+                + b"\0".join(field.encode() for field in evidence_fields)
+            ).hexdigest()[:32]
+            if os.environ.get("PULP_A3_TEST_ARBITRARY_OVERHEAD_ID") == "1":
+                evidence_id = f"{global_index + 1:032x}"
             started = time.monotonic_ns()
             finished = started + 10_000_000
             challenge_payload = {
@@ -444,6 +460,21 @@ def main() -> int:
             "#!/bin/sh\ntouch " + str(fake_marker) + "\n", encoding="utf-8",
         )
         fake_processor.chmod(0o755)
+        for name, payload in (
+            ("chrome-array.json", b"[]\n"),
+            ("chrome-bom.json", b"\xef\xbb\xbf{\"traceEvents\":[]}\n"),
+        ):
+            json_trace = temp_root / name
+            json_trace.write_bytes(payload)
+            try:
+                overhead.trace_replay.analyze_trace(
+                    json_trace, replay_request, fake_processor,
+                )
+            except overhead.trace_replay.TraceReplayError:
+                pass
+            else:
+                raise AssertionError(f"production replay accepted {name}")
+            assert not fake_marker.exists(), f"trace processor executed for {name}"
         binary_trace = temp_root / "binary.pftrace"
         binary_trace.write_bytes(b"\x0a\x03bad")
         try:
@@ -634,6 +665,30 @@ def main() -> int:
         else:
             raise AssertionError("non-source-bound collection driver passed")
         collection_output = collection_evidence / "candidate-compiled-in-idle.json"
+        arbitrary_root = temp_root / "arbitrary-live-id"
+        arbitrary_root.mkdir()
+        arbitrary_config = arbitrary_root / "trace-session-config.json"
+        write_json(arbitrary_config, json.loads(session_config.read_text()))
+        arbitrary_request = copy.deepcopy(collection_request)
+        arbitrary_request["trace_session_config"] = overhead.artifact_ref(
+            arbitrary_config, arbitrary_root,
+        )
+        arbitrary_request_path = arbitrary_root / "request.json"
+        write_json(arbitrary_request_path, arbitrary_request)
+        os.environ["PULP_A3_TEST_ARBITRARY_OVERHEAD_ID"] = "1"
+        try:
+            overhead.collect_state(
+                request_path=arbitrary_request_path, evidence_root=arbitrary_root,
+                source_root=source_root, binary=collection_host,
+                driver=collection_driver, output=arbitrary_root / "raw.json",
+                trace_processor=None,
+            )
+        except overhead.OverheadError as error:
+            assert "challenged process lifetime" in str(error), error
+        else:
+            raise AssertionError("arbitrary live evidence ID unexpectedly passed")
+        finally:
+            os.environ.pop("PULP_A3_TEST_ARBITRARY_OVERHEAD_ID", None)
         live_raw = overhead.collect_state(
             request_path=collection_request_path, evidence_root=collection_evidence,
             source_root=source_root, binary=collection_host, driver=collection_driver,
@@ -670,7 +725,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-trace-producer-overhead: "
-            "positive=2 planted_negatives=22"
+            "positive=2 planted_negatives=25"
         )
     return 0
 
