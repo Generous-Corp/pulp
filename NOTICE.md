@@ -1391,8 +1391,10 @@ developer opts in with `PULP_ENABLE_SCALA_TUNING=ON` or
 
 Copyright (c) 2010-2026 three.js authors
 
-MIT License — used optionally for native WebGPU bridge demos and tests.
-Fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON.
+MIT License — used for the pinned native WebGPU runtime consumed by demos,
+tests, and installed SDKs. It is fetched or supplied through
+`PULP_THREEJS_RUNTIME_DIR` when `PULP_ENABLE_THREEJS_RUNTIME=ON`, which defaults
+to the GPU-support setting.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
