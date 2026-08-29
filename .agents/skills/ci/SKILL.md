@@ -4511,6 +4511,13 @@ build's canonical inventory, then run
 Otherwise the full suite can finish almost entirely green and fail only at the
 inventory self-test, forcing a needless second admission cycle.
 
+Catch2 `TEST_CASE` additions, removals, and renames are CTest topology changes
+too: discovery materializes each case as a registration even when no CMake
+manifest changed. A 2026-08-28 sequence added four cases and removed one after
+the last inventory refresh, leaving main's contract three registrations stale
+until the next unrelated full proof exposed it. Treat changes to discovered test
+sources exactly like explicit `add_test` changes for this refresh requirement.
+
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued
