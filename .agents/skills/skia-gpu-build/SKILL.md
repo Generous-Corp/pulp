@@ -90,11 +90,14 @@ For m153, prove the provider exposes both new integration surfaces before a
 product build:
 
 ```bash
-python3 tools/scripts/verify_skia_m153_capabilities.py --skia-dir "$SKIA_DIR"
+python3 tools/scripts/verify_skia_m153_capabilities.py \
+  --platform darwin-arm64 --skia-dir "$SKIA_DIR"
 ```
 
-This compile/links/runs `SkLogHandler` and
-`skgpu::graphite::ContextOptions::fExecutor`; headers alone are not a pass.
+The directory must be the fetcher's exact stamped manifest generation. This
+compile/links/runs `SkLogHandler` and
+`skgpu::graphite::ContextOptions::fExecutor`; headers or unstamped local
+libraries alone are not a pass.
 `SkLogHandler` is process-global and first-install-wins, while the executor must
 outlive the Graphite context. Generic installation and executor policy are
 Vellum-owned; a Pulp build should consume those contracts rather than install a

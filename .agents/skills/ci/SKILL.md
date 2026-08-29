@@ -5152,15 +5152,16 @@ hand-sync typo is a silent behavioural bug rather than a doc lag. When bumping
 `tools/deps/manifest.json`, keep these in lockstep — all are enforced in CI
 (`workflow-lint.yml`) and pre-push (`gates.sh`):
 - `ci/visual-harness.Dockerfile` ← `tools/harness/visual/check_skia_pin.py`
-- `external/skia-build/VERSION.md` digest table (a *fetch cache-skip oracle* —
-  `fetch_skia_for_release.py` trusts it to skip downloads) and `DEPENDENCIES.md`
+- `external/skia-build/VERSION.md` digest table (documentation only — a
+  missing fetcher-written asset stamp always forces verified re-download) and `DEPENDENCIES.md`
   Skia/Dawn/V8 version cells ← `tools/scripts/check_manifest_mirrors.py`
 - `tools/harness/visual/pins.py` ← `test_skia_determinism.py`
 
 For m153+, the pin checks are necessary but not sufficient: run
-`tools/scripts/verify_skia_m153_capabilities.py` against a real materialized
-generation so `SkLogHandler` and Graphite's executor field are proven through
-the archive's exported symbols. After the pin lands, each active Mac build host
+`tools/scripts/verify_skia_m153_capabilities.py --platform <matrix-platform>
+--skia-dir <generation>` against the exact stamped manifest generation so
+`SkLogHandler` and Graphite's executor field are proven through the archive's
+exported symbols. After the pin lands, each active Mac build host
 must populate its own immutable SHA-addressed generation through the fetcher
 and prove the second fetch is a no-download hit; do not rsync one runner's
 checkout cache to another.

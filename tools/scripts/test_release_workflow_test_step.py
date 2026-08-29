@@ -662,6 +662,13 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         )
         self.assertIn("provider_identity_test.cmake", self.text)
         self.assertIn("matrix.platform == 'darwin-arm64'", self.text)
+        dependencies = (REPO_ROOT / "tools/cmake/PulpDependencies.cmake").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "if((PULP_BUILD_TESTS OR PULP_BUILD_EXAMPLES) AND PULP_ENABLE_GPU)",
+            dependencies,
+        )
 
 
 class ReleaseCliDualBinaryPackaging(unittest.TestCase):
