@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import platform as host_platform
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -27,7 +28,7 @@ except ModuleNotFoundError:  # Direct script execution from outside the repo roo
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "tools/deps/manifest.json"
-REQUIRED_RELEASE = "chrome/m153"
+MINIMUM_MILESTONE = 153
 NATIVE_PLATFORMS = {
     "darwin-arm64",
     "darwin-x64",
@@ -125,9 +126,12 @@ def verify(skia_dir: Path, platform: str) -> None:
     _require_native_host(platform)
     dependency = _manifest_skia()
     release = str(dependency.get("version", ""))
-    if release != REQUIRED_RELEASE:
+    match = re.fullmatch(r"chrome/m([0-9]+)", release)
+    milestone = int(match.group(1)) if match else 0
+    if milestone < MINIMUM_MILESTONE:
         raise RuntimeError(
-            f"capability contract requires {REQUIRED_RELEASE}, manifest has {release or '<empty>'}"
+            f"capability contract requires chrome/m{MINIMUM_MILESTONE}+; "
+            f"manifest has {release or '<empty>'}"
         )
 
     try:
@@ -180,7 +184,7 @@ def verify(skia_dir: Path, platform: str) -> None:
             )
 
     print(
-        "verify_skia_m153_capabilities: OK — SkLogHandler exported symbols and "
+        f"verify_skia_m153_capabilities: OK — {release} SkLogHandler exported symbols and "
         "Graphite ContextOptions::fExecutor compile/link/run against "
         f"{library}"
     )

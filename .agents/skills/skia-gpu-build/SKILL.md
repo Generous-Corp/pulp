@@ -54,18 +54,22 @@ found") ⇒ `PULP_HAS_SKIA` undefined ⇒ CPU-only build.
 ls external/skia-build/build/*/lib/Release/libskia.a 2>/dev/null || echo "headers-only — no GPU"
 ```
 
-## Fastest fix: reuse another checkout's cached libs via SKIA_DIR
+## Fastest fix: materialize the pinned immutable cache generation
 
-Don't rebuild Skia (slow). Point `SKIA_DIR` at a checkout that already has the
-compiled `mac-gpu` libs — usually the **primary checkout**:
+Do not rebuild Skia and do not borrow mutable bytes from another checkout.
+Populate the manifest-selected, platform-plus-asset-SHA generation through the
+release fetcher, then point `SKIA_DIR` at that exact stamped generation:
 
 ```bash
-ls /Users/<you>/Code/pulp/external/skia-build/build/mac-gpu/lib/Release/libskia.a   # confirm it exists
+python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
+  --cache-root "$HOME/Library/Caches/Pulp/skia"
+SKIA_DIR="$(python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
+  --cache-root "$HOME/Library/Caches/Pulp/skia" --print-cache-dest)"
 
 # Configure a SEPARATE GPU build dir (keep the CPU build/ for deterministic
 # CoreGraphics goldens — see "Don't mix" below).
 cmake -S . -B build-gpu -DCMAKE_BUILD_TYPE=Release \
-  -DSKIA_DIR=/Users/<you>/Code/pulp/external/skia-build \
+  -DSKIA_DIR="$SKIA_DIR" \
   -DPULP_ENABLE_GPU=ON
 ```
 
@@ -75,16 +79,18 @@ cmake -S . -B build-gpu -DCMAKE_BUILD_TYPE=Release \
 layout); flat `mac/lib` + `include` layouts are also accepted (see
 `tools/cmake/FindSkia.cmake`).
 
-A SKIA_DIR you point cross-checkout uses that checkout's headers **and** libs
-together (`build/include` + `build/<platform>-gpu/lib/Release`) — self-
-consistent. Don't mix this worktree's headers with another's libs.
+A valid cached generation keeps headers and libraries together and carries both
+the verified archive stamp and extracted-file digest receipt. An arbitrary
+sibling checkout is not provenance: never use its mutable
+`external/skia-build` directory as `SKIA_DIR`, and never mix one generation's
+headers with another's libraries.
 
 ## Building from source (only when no cached libs anywhere)
 
 `tools/build-skia.sh` builds the currently pinned chrome/m153 Skia+Dawn from source — slow
 (tens of minutes). Prefer the release zip from
 `danielraffel/skia-builder` (chrome/m153, see `external/skia-build/VERSION.md`)
-or reusing a sibling checkout's `build/`.
+or the immutable fetcher-owned cache generation above.
 
 For m153, prove the provider exposes both new integration surfaces before a
 product build:
@@ -372,9 +378,13 @@ wrong for a cross/Intel build on Apple Silicon).
   `PulpDependencies.cmake` comment "the only published mac asset" was false).
   Each slice's `libskia.a` flattens to the SAME path
   (`build/mac-gpu/lib/Release/libskia.a`), so the autofetch uses **per-slice
-  cache dirs** `~/.cache/pulp/skia-build{,-x64,-universal}` — one shared dir
-  would silently reuse a wrong-arch archive after an arch switch. `fetch_skia_for_release.py`
-  matrix keys: `darwin-arm64` / `darwin-x64` / `darwin-universal`.
+  immutable cache generations** under the configured cache root, keyed as
+  `<matrix-platform>-<asset-sha256>-<receipt-schema>` — a mutable shared directory would
+  silently reuse a wrong-arch archive after an arch switch.
+  `fetch_skia_for_release.py` matrix keys: `darwin-arm64` / `darwin-x64` /
+  `darwin-universal`. Legacy `~/.cache/pulp/skia-build*` directories are not
+  valid inputs unless repopulated through the current fetcher into a stamped,
+  receipt-bound generation.
 - **FindSkia fails LOUD on an arch mismatch.** If `SKIA_DIR` points at the wrong
   slice, `FindSkia.cmake` FATALs at configure time (`lipo -archs` vs
   `CMAKE_OSX_ARCHITECTURES`) with "architecture mismatch … missing: <arch>" —

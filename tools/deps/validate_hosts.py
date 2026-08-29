@@ -42,12 +42,17 @@ def run(label: str, cmd: list[str]) -> bool:
     return True
 
 
-def unix_remote_command(repo_path: str, branch: str, skip_tests: bool) -> str:
+def unix_remote_command(
+    repo_path: str, branch: str, skip_tests: bool, render_toolchain: bool = False
+) -> str:
     validate = "./validate-build.sh --quiet"
     if skip_tests:
         validate += " --no-tests"
     repo = shlex.quote(repo_path)
     branch_q = shlex.quote(branch)
+    render_validate = ""
+    if render_toolchain:
+        render_validate = "\npython3 tools/deps/validate_render_update.py --cache-only"
     return f"""
 set -e
 export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
@@ -70,7 +75,7 @@ else
         echo "warning: no origin remote configured; validating current checkout" >&2
     fi
 fi
-{validate}
+{validate}{render_validate}
 """.strip()
 
 
@@ -113,6 +118,11 @@ def main() -> int:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="JSON config path")
     parser.add_argument("--branch", default=None, help="Branch to validate remotely")
     parser.add_argument("--skip-tests", action="store_true", help="Skip tests")
+    parser.add_argument(
+        "--render-toolchain",
+        action="store_true",
+        help="also prove the pinned render provider, warm-cache integrity, and mixed-provider path",
+    )
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
@@ -123,6 +133,11 @@ def main() -> int:
     if args.skip_tests:
         local_cmd.append("--no-tests")
     ok &= run("local", local_cmd)
+    if args.render_toolchain:
+        ok &= run(
+            "local render toolchain",
+            [sys.executable, "tools/deps/validate_render_update.py"],
+        )
 
     for target in config.get("unix_targets", []):
         label = f"ssh {target['host']}"
@@ -130,7 +145,9 @@ def main() -> int:
             "ssh",
             "-o", "BatchMode=yes",
             target["host"],
-            unix_remote_command(target["path"], branch, args.skip_tests),
+            unix_remote_command(
+                target["path"], branch, args.skip_tests, args.render_toolchain
+            ),
         ]
         ok &= run(label, cmd)
 

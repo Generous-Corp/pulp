@@ -107,6 +107,19 @@ available.
 
 ## Pulp update checklist
 
+For the canonical executable validation and machine-readable result, run:
+
+```bash
+python3 tools/deps/validate_hosts.py --render-toolchain
+```
+
+The local native arm64 leg performs the full mixed-provider proof. Configured
+Unix remotes populate and verify their own immutable generation, run the
+capability probe, and require the second fetch to be a no-download hit. The
+underlying `validate_render_update.py` JSON records platform, asset SHA,
+generation receipt, capability result, cache result, and mixed-provider result;
+retain those fields in the PR/landing evidence.
+
 1. Work from current `origin/main` in a clean worktree. Read release notes from M+1
    through the target and search Pulp for removed APIs.
 2. Inspect the published Skia release with `ghapp release view chrome/mNNN --repo
@@ -147,7 +160,7 @@ available.
 10. Exercise the shared-cache publication path with
     `--cache-lock-timeout`: a pin-stale or cold cache must be populated only by
     the lock owner in a private sibling staging directory, then renamed into an
-    immutable platform-plus-asset-SHA generation. A waiter must recheck the
+    immutable platform-plus-asset-SHA-plus-receipt-schema generation. A waiter must recheck the
     winner's exact stamp plus platform library before it skips downloading, and
     a pin bump must preserve the prior generation for bound consumers. Never
     seed the canonical cache by rsyncing a checkout merely because

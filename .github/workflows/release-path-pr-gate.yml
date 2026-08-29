@@ -137,6 +137,14 @@ jobs:
         run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
         shell: bash
 
+      - name: Verify m153+ provider capabilities and extracted receipt
+        if: matrix.platform == 'darwin-arm64' || matrix.platform == 'linux-x64'
+        run: |
+          python3 tools/scripts/verify_skia_m153_capabilities.py \
+            --platform "${{ matrix.platform }}" \
+            --skia-dir external/skia-build
+        shell: bash
+
       # Mirror release-cli.yml's CLI configure exactly so this gate
       # surfaces the same flag combinations that get exercised at
       # release time (PULP_REQUIRE_GPU_FOR_SDK=ON, WebView=OFF on

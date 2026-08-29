@@ -112,6 +112,13 @@ class RemoteCommandTests(unittest.TestCase):
         self.assertIn("./validate-build.sh --quiet", with_tests)
         self.assertNotIn("--no-tests", with_tests)
 
+        render = validate_hosts.unix_remote_command(
+            "/repo", "main", skip_tests=False, render_toolchain=True
+        )
+        self.assertIn(
+            "python3 tools/deps/validate_render_update.py --cache-only", render
+        )
+
     def test_windows_remote_command_escapes_quotes_and_toggles_tests(self) -> None:
         cmd = validate_hosts.windows_remote_command(
             "C:\\repo path\\agent's",
@@ -177,6 +184,29 @@ class MainTests(unittest.TestCase):
         self.assertEqual(
             run.call_args.args[1],
             ["bash", "./validate-build.sh", "--quiet", "--ref", "current"],
+        )
+
+    def test_render_toolchain_mode_runs_full_local_and_cache_only_remote(self) -> None:
+        config = {"unix_targets": [{"host": "m5", "path": "/repo"}]}
+        with mock.patch.object(sys, "argv", [
+            "validate_hosts.py", "--branch", "feature/render", "--render-toolchain"
+        ]), mock.patch.object(
+            validate_hosts, "load_config", return_value=config
+        ), mock.patch.object(
+            validate_hosts, "run", return_value=True
+        ) as run:
+            self.assertEqual(validate_hosts.main(), 0)
+
+        self.assertEqual(
+            run.call_args_list[1].args,
+            (
+                "local render toolchain",
+                [sys.executable, "tools/deps/validate_render_update.py"],
+            ),
+        )
+        self.assertIn(
+            "python3 tools/deps/validate_render_update.py --cache-only",
+            run.call_args_list[2].args[1][-1],
         )
 
     def test_script_entrypoint_exits_with_main_status(self) -> None:

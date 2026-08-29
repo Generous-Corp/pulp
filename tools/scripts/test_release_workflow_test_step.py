@@ -649,6 +649,12 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         self.assertIn("lfs: false", self.text)
         self.assertNotIn("lfs: true", self.text)
 
+    def test_native_release_path_requires_provider_capability_and_receipt_probe(self) -> None:
+        self.assertIn("Verify m153+ provider capabilities and extracted receipt", self.text)
+        self.assertIn("tools/scripts/verify_skia_m153_capabilities.py", self.text)
+        self.assertIn("--skia-dir external/skia-build", self.text)
+        self.assertIn("matrix.platform == 'darwin-arm64' || matrix.platform == 'linux-x64'", self.text)
+
     def test_darwin_leg_requires_mixed_provider_render_proof(self) -> None:
         self.assertIn(
             "python3 tools/scripts/fetch_v8_for_release.py darwin-arm64",

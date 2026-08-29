@@ -19,7 +19,7 @@ Usage:
         --cache-root ~/.cache/pulp/skia --cache-lock-timeout 300
 
 `--cache-root` is the host/worktree mode: it resolves an immutable
-`<platform>-<asset-sha256>` generation, downloads into private sibling staging,
+`<platform>-<asset-sha256>-receipt-v1` generation, downloads into private sibling staging,
 and atomically renames the validated generation into place. Release workflows
 continue to use the default or explicit `--dest` mode for isolated matrix trees.
 
@@ -193,14 +193,74 @@ def keyed_cache_dest(cache_root: str, matrix_platform: str, asset_sha: str) -> P
     """Immutable cache generation selected by platform and exact asset identity."""
     if not re.fullmatch(r"[0-9a-fA-F]{64}", asset_sha):
         raise ValueError("cache asset SHA-256 must contain exactly 64 hexadecimal characters")
-    return Path(cache_root).absolute() / f"{matrix_platform}-{asset_sha.lower()}"
+    # Receipt format is part of the immutable generation identity. Adding a
+    # stronger validator must publish beside old generations, never mutate one
+    # that an active compiler may still have open.
+    return Path(cache_root).absolute() / f"{matrix_platform}-{asset_sha.lower()}-receipt-v1"
+
+
+_ASSET_STAMP = ".skia-asset-sha256"
+GENERATION_RECEIPT = ".skia-generation-manifest.json"
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _generation_payload(dest: Path) -> list[dict[str, str | int]]:
+    """Describe every extracted provider file, rejecting symlink substitution."""
+    entries: list[dict[str, str | int]] = []
+    for path in sorted(dest.rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"Skia generation contains symlink: {path}")
+        if not path.is_file() or path.name in {_ASSET_STAMP, GENERATION_RECEIPT}:
+            continue
+        entries.append({
+            "path": path.relative_to(dest).as_posix(),
+            "sha256": _file_sha256(path),
+            "size": path.stat().st_size,
+        })
+    return entries
+
+
+def write_generation_receipt(dest: Path, matrix_platform: str, asset_sha: str) -> None:
+    """Seal the extracted provider tree before it becomes a reusable warm hit."""
+    receipt = {
+        "schema_version": 1,
+        "platform": matrix_platform,
+        "asset_sha256": asset_sha,
+        "files": _generation_payload(dest),
+    }
+    path = dest / GENERATION_RECEIPT
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def generation_receipt_valid(dest: Path, matrix_platform: str, asset_sha: str) -> bool:
+    path = dest / GENERATION_RECEIPT
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        return (
+            receipt.get("schema_version") == 1
+            and receipt.get("platform") == matrix_platform
+            and receipt.get("asset_sha256") == asset_sha
+            and receipt.get("files") == _generation_payload(dest)
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
 
 
 def cache_generation_valid(dest: Path, matrix_platform: str, expected_sha: str) -> bool:
-    stamp = dest / ".skia-asset-sha256"
+    stamp = dest / _ASSET_STAMP
     try:
         return (cache_generation_materialized(dest, matrix_platform) and stamp.is_file()
-                and stamp.read_text(encoding="utf-8").strip() == expected_sha)
+                and stamp.read_text(encoding="utf-8").strip() == expected_sha
+                and generation_receipt_valid(dest, matrix_platform, expected_sha))
     except OSError:
         return False
 
@@ -513,7 +573,7 @@ def _main(argv: list[str]) -> int:
     # actually unpacked here, so the download is skipped only when that
     # sha matches the current pin — a pin bump changes expected_sha, the
     # stamp no longer matches, and the asset is re-fetched.
-    stamp_path = Path(dest_root) / ".skia-asset-sha256"
+    stamp_path = Path(dest_root) / _ASSET_STAMP
     if expected_lib.is_file():
         if cache_generation_valid(Path(dest_root), matrix_platform, expected_sha):
             print(
@@ -662,9 +722,16 @@ def _main(argv: list[str]) -> int:
             print(f"  {p}", file=sys.stderr)
         return 1
 
-    # Record the asset identity so the next run on a `clean: false` runner
-    # can skip the download — and so a future manifest pin bump forces a
-    # re-fetch (the stamp will no longer match the new expected_sha).
+    # Seal the complete extracted tree as well as the archive identity. A
+    # matching archive stamp alone cannot detect a later library/header swap.
+    try:
+        write_generation_receipt(dest, matrix_platform, expected_sha)
+    except (OSError, ValueError) as error:
+        print(f"ERROR: could not seal extracted Skia generation: {error}", file=sys.stderr)
+        return 1
+
+    # Record the asset identity last: readers never accept a generation before
+    # both its extracted-file receipt and archive identity are durable.
     stamp_path.write_text(expected_sha + "\n", encoding="utf-8")
 
     print(f"OK: {expected_lib} present ({expected_lib.stat().st_size:,} bytes)")

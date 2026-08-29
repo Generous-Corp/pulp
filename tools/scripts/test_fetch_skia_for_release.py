@@ -206,6 +206,7 @@ class ImmutableKeyedCache(unittest.TestCase):
             source, {
                 "build/mac-gpu/lib/Release/libskia.a": payload,
                 "build/mac-gpu/lib/Release/libdawn_combined.a": b"dawn-" + payload,
+                "build/include/include/core/SkTypes.h": b"header-" + payload,
             }
         )
         _write_manifest(root, f"file://{source.as_posix()}", sha, "mac-arm64")
@@ -217,6 +218,7 @@ class ImmutableKeyedCache(unittest.TestCase):
         c = fetch_skia.keyed_cache_dest("/cache", "linux-x64", "a" * 64)
         self.assertNotEqual(a, b)
         self.assertNotEqual(a, c)
+        self.assertTrue(a.name.endswith("-receipt-v1"))
 
     def test_private_stage_is_atomically_published_and_removed(self):
         with _in_tempdir() as td:
@@ -289,6 +291,27 @@ class ImmutableKeyedCache(unittest.TestCase):
             lib.write_bytes(b"skia")
             (dest / ".skia-asset-sha256").write_text(sha)
             self.assertFalse(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+
+    def test_generation_rejects_nonempty_library_or_header_mutation(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"sealed")
+            root = td / "cache"
+            argv = ["fetch", "darwin-arm64", "--cache-root", str(root),
+                    "--cache-lock-timeout", "1"]
+            self.assertEqual(fetch_skia.main(argv), 0)
+            dest = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha)
+
+            library = fetch_skia.expected_library_path("darwin-arm64", str(dest))
+            original_library = library.read_bytes()
+            library.write_bytes(b"X" * len(original_library))
+            self.assertFalse(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+            library.write_bytes(original_library)
+
+            header = dest / "build/include/include/core/SkTypes.h"
+            original_header = header.read_bytes()
+            header.write_bytes(b"Y" * len(original_header))
+            self.assertFalse(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+            self.assertEqual(fetch_skia.main(argv), 1)
 
     def test_direct_warm_hit_rejects_missing_dawn_and_repairs(self):
         with _in_tempdir() as td:

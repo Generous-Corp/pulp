@@ -32,7 +32,21 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
         with mock.patch.object(
             probe, "_manifest_skia", return_value={"version": "chrome/m152"}
         ):
-            with self.assertRaisesRegex(RuntimeError, "requires chrome/m153"):
+            with self.assertRaisesRegex(RuntimeError, r"requires chrome/m153\+"):
+                probe.verify(Path("/does/not/matter"), "darwin-arm64")
+
+    def test_later_milestone_reaches_provider_validation(self) -> None:
+        dependency = {
+            "version": "chrome/m154",
+            "determinism": {
+                "release_assets": {"mac-arm64": {"sha256": "b" * 64}}
+            },
+        }
+        with mock.patch.object(probe, "_manifest_skia", return_value=dependency), \
+             mock.patch.object(
+                 probe.skia_fetch, "cache_generation_valid", return_value=False
+             ):
+            with self.assertRaisesRegex(RuntimeError, "verified darwin-arm64"):
                 probe.verify(Path("/does/not/matter"), "darwin-arm64")
 
     def test_source_fallback_fails_before_copy_on_commit_drift(self) -> None:
