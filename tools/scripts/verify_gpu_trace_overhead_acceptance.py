@@ -169,6 +169,9 @@ def _verify_installed_build_provenance(
             or not isinstance(row.get("bytes"), int)
             or isinstance(row.get("bytes"), bool)
             or row["bytes"] <= 0
+            or not isinstance(row.get("build_output_bytes"), int)
+            or isinstance(row.get("build_output_bytes"), bool)
+            or row["build_output_bytes"] != row["bytes"]
         ):
             errors.append(f"installed {name} is not byte-identical to its exact build output")
         if artifact_role is not None:

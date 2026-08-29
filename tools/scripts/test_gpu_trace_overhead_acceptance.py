@@ -183,6 +183,33 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 semantic_result=self.semantic_result(),
             )
 
+    def test_human_review_rejects_missing_or_untyped_contributor_fields(self):
+        for semantic_field, observed_field, invalid in (
+            ("duration_ns", "duration_ns", None),
+            ("evidence_id", "gpu_evidence_id", None),
+            ("frame_index", "frame_index", False),
+            ("sequence", "sequence", -1),
+            ("health_state", "health_state", "mystery"),
+        ):
+            with self.subTest(field=semantic_field, invalid=invalid):
+                receipt = self.human_review_receipt()
+                semantic = self.semantic_result()
+                if invalid is None:
+                    del semantic["contributors"][0][semantic_field]
+                    del receipt["human_perfetto_ui_correlation"]["observed_spans"][0][
+                        observed_field
+                    ]
+                else:
+                    semantic["contributors"][0][semantic_field] = invalid
+                    receipt["human_perfetto_ui_correlation"]["observed_spans"][0][
+                        observed_field
+                    ] = invalid
+                with self.assertRaisesRegex(ValueError, "lacks typed"):
+                    MODULE.preserve_human_perfetto_ui_correlation(
+                        receipt, question="gpu-startup", trace_sha256="1" * 64,
+                        semantic_result=semantic,
+                    )
+
     def test_human_review_rejects_prior_non_startup_receipt(self):
         receipt = self.human_review_receipt()
         receipt["protocol"]["question"] = "gpu-health"
@@ -705,6 +732,18 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");'
             ),
         )
+        self.assertEqual(
+            MODULE.product_producer_signatures(
+                'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit") /* note */;'
+            ),
+            MODULE.product_producer_signatures(
+                'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");'
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "terminating semicolon"):
+            MODULE.product_producer_signatures(
+                'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit") /* note */'
+            )
         oversized = (
             'PULP_TRACE_SCOPE_NAMED("gpu", "'
             + ("x" * MODULE.MAX_PRODUCT_TRACE_CALL_BYTES)

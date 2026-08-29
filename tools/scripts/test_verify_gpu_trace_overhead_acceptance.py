@@ -115,6 +115,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                             "sha256": "2" * 64,
                             "build_output_sha256": "2" * 64,
                             "bytes": 1,
+                            "build_output_bytes": 1,
                         },
                         "pulp-cpp": {
                             "installed_role": "installed-prefix/bin/pulp-cpp",
@@ -122,6 +123,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                             "sha256": "4" * 64,
                             "build_output_sha256": "4" * 64,
                             "bytes": 1,
+                            "build_output_bytes": 1,
                         },
                         "pulp-mcp": {
                             "installed_role": "installed-prefix/bin/pulp-mcp",
@@ -129,6 +131,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                             "sha256": "3" * 64,
                             "build_output_sha256": "3" * 64,
                             "bytes": 1,
+                            "build_output_bytes": 1,
                         },
                     },
                 },
@@ -278,6 +281,23 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         receipt["artifacts"]["cli"]["sha256"] = "7" * 64
         errors = MODULE.verify(receipt, ROOT)
         self.assertIn("measured cli artifact differs from build provenance", errors)
+
+    def test_build_output_bytes_are_required_typed_and_equal(self):
+        for value in (None, False, 2):
+            with self.subTest(value=value):
+                receipt = self.terminal_receipt()
+                row = receipt["installed_source_identity"]["build_provenance"][
+                    "binaries"
+                ]["pulp-mcp"]
+                if value is None:
+                    del row["build_output_bytes"]
+                else:
+                    row["build_output_bytes"] = value
+                errors = MODULE.verify(receipt, ROOT)
+                self.assertIn(
+                    "installed pulp-mcp is not byte-identical to its exact build output",
+                    errors,
+                )
 
     def test_no_producer_disposition_is_recomputed_from_git(self):
         receipt = self.terminal_receipt()

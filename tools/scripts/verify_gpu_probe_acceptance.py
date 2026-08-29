@@ -336,7 +336,15 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
     binaries = receipt.get("binaries")
     if isinstance(binaries, dict):
         for role, binary in binaries.items():
-            if isinstance(binary, dict) and binary.get("build_output_sha256") != binary.get("sha256"):
+            if isinstance(binary, dict) and (
+                binary.get("build_output_sha256") != binary.get("sha256")
+                or not isinstance(binary.get("bytes"), int)
+                or isinstance(binary.get("bytes"), bool)
+                or binary["bytes"] <= 0
+                or not isinstance(binary.get("build_output_bytes"), int)
+                or isinstance(binary.get("build_output_bytes"), bool)
+                or binary["build_output_bytes"] != binary["bytes"]
+            ):
                 errors.append(f"v2 binary {role} differs from its refreshed build output")
         rust = binaries.get("installed_rust_cli")
         cpp = binaries.get("installed_cpp_delegate")

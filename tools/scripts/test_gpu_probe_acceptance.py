@@ -128,7 +128,8 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             },
             "binaries": {
                 role: {"sha256": str(index) * 64, "bytes": 1,
-                       "build_output_sha256": str(index) * 64}
+                       "build_output_sha256": str(index) * 64,
+                       "build_output_bytes": 1}
                 for index, role in enumerate(
                     ("installed_rust_cli", "installed_cpp_delegate", "installed_mcp"), 1
                 )
@@ -237,6 +238,22 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             (root / "receipt.json").write_text(json.dumps(receipt))
             errors = VERIFIER.verify(root)
             self.assertTrue(any("installed CLI provenance" in error for error in errors))
+
+    def test_v2_rejects_missing_or_mismatched_build_output_bytes(self):
+        for value in (None, False, 2):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                receipt = self.v2_fixture(root)
+                binary = receipt["binaries"]["installed_mcp"]
+                if value is None:
+                    del binary["build_output_bytes"]
+                else:
+                    binary["build_output_bytes"] = value
+                (root / "receipt.json").write_text(json.dumps(receipt))
+                errors = VERIFIER.verify(root)
+                self.assertTrue(
+                    any("refreshed build output" in error for error in errors)
+                )
 
     def test_png_content_cap_rejects_blank_even_when_digest_rebound(self):
         with tempfile.TemporaryDirectory() as temporary:

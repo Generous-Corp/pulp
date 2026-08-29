@@ -1356,6 +1356,19 @@ def _bounded_product_trace_calls(text: str) -> tuple[str, ...]:
     calls: list[str] = []
     index = 0
     while index < len(text):
+        if text[index] == "#" and not text[text.rfind("\n", 0, index) + 1:index].strip():
+            while True:
+                newline = text.find("\n", index + 1)
+                if newline < 0:
+                    index = len(text)
+                    break
+                continued = text[text.rfind("\n", 0, newline) + 1:newline].rstrip(
+                    " \t\r"
+                ).endswith("\\")
+                index = newline + 1
+                if not continued:
+                    break
+            continue
         if text.startswith("//", index):
             newline = text.find("\n", index + 2)
             index = len(text) if newline < 0 else newline + 1
@@ -1409,11 +1422,33 @@ def _bounded_product_trace_calls(text: str) -> tuple[str, ...]:
                 "recognized product trace call is unterminated or exceeds the bounded scan"
             )
         cursor = call_end
-        while cursor < len(text) and text[cursor].isspace():
-            cursor += 1
-        if cursor < len(text) and text[cursor] == ";":
-            calls.append(text[token_start:cursor + 1])
-            index = cursor + 1
+        while cursor < len(text):
+            if text[cursor].isspace():
+                cursor += 1
+                continue
+            if text.startswith("//", cursor):
+                newline = text.find("\n", cursor + 2)
+                if newline < 0:
+                    raise ValueError(
+                        "recognized product trace call has no terminating semicolon"
+                    )
+                cursor = newline + 1
+                continue
+            if text.startswith("/*", cursor):
+                end = text.find("*/", cursor + 2)
+                if end < 0:
+                    raise ValueError(
+                        "recognized product trace call has an unterminated trailing comment"
+                    )
+                cursor = end + 2
+                continue
+            break
+        if cursor >= len(text) or text[cursor] != ";":
+            raise ValueError(
+                "recognized product trace call has no terminating semicolon"
+            )
+        calls.append(text[token_start:cursor + 1])
+        index = cursor + 1
     return tuple(calls)
 
 
@@ -1538,7 +1573,8 @@ def _normalize_product_trace_call(text: str) -> str:
         else:
             pieces.append(text[index])
             index += 1
-    return re.sub(r"\s+", " ", "".join(pieces)).strip()
+    normalized = re.sub(r"\s+", " ", "".join(pieces)).strip()
+    return re.sub(r"\s+;", ";", normalized)
 
 
 def product_producer_signatures(text: str) -> tuple[str, ...]:
@@ -2331,7 +2367,48 @@ def preserve_human_perfetto_ui_correlation(
             "health_state": "health_state",
         }
         for semantic_field, observed_field in compared.items():
-            if observed.get(observed_field) != contributor.get(semantic_field):
+            semantic_value = contributor.get(semantic_field)
+            observed_value = observed.get(observed_field)
+            if semantic_field in {"duration_ns", "frame_index", "sequence"}:
+                minimum = 1 if semantic_field == "duration_ns" else 0
+                if (
+                    not isinstance(semantic_value, int)
+                    or isinstance(semantic_value, bool)
+                    or semantic_value < minimum
+                    or not isinstance(observed_value, int)
+                    or isinstance(observed_value, bool)
+                    or observed_value < minimum
+                ):
+                    raise ValueError(
+                        f"prior human review lacks typed {contributor['stage']} "
+                        f"{semantic_field}"
+                    )
+            elif semantic_field == "evidence_id":
+                if (
+                    not isinstance(semantic_value, str)
+                    or re.fullmatch(r"[0-9a-f]{32}", semantic_value) is None
+                    or not isinstance(observed_value, str)
+                    or re.fullmatch(r"[0-9a-f]{32}", observed_value) is None
+                ):
+                    raise ValueError(
+                        f"prior human review lacks typed {contributor['stage']} "
+                        "evidence_id"
+                    )
+            elif (
+                not isinstance(semantic_value, str)
+                or semantic_value not in {
+                    "healthy", "failed", "unavailable", "unverified", "lost"
+                }
+                or not isinstance(observed_value, str)
+                or observed_value not in {
+                    "healthy", "failed", "unavailable", "unverified", "lost"
+                }
+            ):
+                raise ValueError(
+                    f"prior human review lacks typed {contributor['stage']} "
+                    "health_state"
+                )
+            if observed_value != semantic_value:
                 raise ValueError(
                     f"prior human review disagrees with current {contributor['stage']} "
                     f"{semantic_field}"
