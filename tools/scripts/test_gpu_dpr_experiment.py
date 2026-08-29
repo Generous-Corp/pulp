@@ -164,6 +164,25 @@ def main() -> int:
             raise AssertionError(
                 f"capture similarity manifest mutation unexpectedly passed: {label}"
             )
+    for scenario_id in ("threejs-audio-reactive", "super-convolver-web"):
+        mutated_manifest = copy.deepcopy(manifest)
+        scenario = next(
+            item for item in mutated_manifest["scenarios"]
+            if item["id"] == scenario_id
+        )
+        del scenario["logical_input_oracle"]
+        if not contract.manifest_errors(mutated_manifest, contract.DEFAULT_MANIFEST):
+            raise AssertionError(
+                f"source-less scenario oracle mutation unexpectedly passed: {scenario_id}"
+            )
+    mutated_manifest = copy.deepcopy(manifest)
+    web_scenario = next(
+        item for item in mutated_manifest["scenarios"]
+        if item["id"] == "super-convolver-web"
+    )
+    web_scenario["fidelity_oracle"]["small_text_roi"]["x"] = 1000
+    if not contract.manifest_errors(mutated_manifest, contract.DEFAULT_MANIFEST):
+        raise AssertionError("out-of-bounds web fidelity region unexpectedly passed")
 
     schema = contract.schema_for_lite(contract.load_json(contract.DEFAULT_SCHEMA))
     fixture = complete_fixture(manifest)

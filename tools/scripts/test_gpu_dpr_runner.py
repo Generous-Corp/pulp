@@ -153,6 +153,8 @@ def make_receipt(
         if cell["mode"] == "configured_max" else requested
     )
     oracle = scenario["logical_input_oracle"]
+    if "fidelity_oracle" in scenario:
+        raw["fidelity"]["oracle_regions"] = scenario["fidelity_oracle"]
     logical_trial = raw["logical_input_trials"][0]
     expected_point = oracle["point"]
     logical_trial["expected_logical"] = expected_point
@@ -588,6 +590,13 @@ def main() -> int:
             "unbound fidelity reference",
             lambda raw: raw["fidelity"]["comparison"].update(
                 reference_sha256="0" * 64
+            ),
+        )
+        planted += 1
+        reject_raw_mutation(
+            "fidelity oracle region drift",
+            lambda raw: raw["fidelity"]["oracle_regions"]["small_text_roi"].update(
+                x=25
             ),
         )
         planted += 1
@@ -1195,6 +1204,18 @@ def main() -> int:
             ingest_receipt(complete_run, receipt_path)
         completed = runner.load_state(complete_run)
         assert runner.status_document(completed)["complete_cells"] == 84
+        readiness_observations = runner.project_result(completed)["observations"]
+        assert runner.policy_readiness(
+            readiness_observations,
+            manifest["trial_contract"]["capture_similarity_minimum"],
+        )
+        readiness_observations[0]["metrics"]["gpu_frame_time"].update(
+            provenance="unavailable", median=None, p95=None, sample_count=0
+        )
+        assert not runner.policy_readiness(
+            readiness_observations,
+            manifest["trial_contract"]["capture_similarity_minimum"],
+        )
         a2t_receipt, budget_id, a3_receipt = dependency_receipts(root)
         assert "machine_id" not in runner.load_json(a2t_receipt)["machine"]
         _, _, unratified_a3 = dependency_receipts(root, ratified=False)

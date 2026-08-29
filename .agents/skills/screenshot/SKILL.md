@@ -452,7 +452,8 @@ categories cannot complete a cell.
 
 Treat the two fidelity images as independent evidence artifacts: hash both,
 bind them to the same content/state token, and compute numeric pixel similarity,
-small-text luminance variation, and thin-stroke coverage. A producer-authored
+small-text luminance variation, and thin-stroke coverage inside the frozen
+scenario-specific logical ROIs. Whole-frame variance/coverage and a producer-authored
 boolean is not an oracle. Logical input is equally independent: take the
 expected logical point/target from the frozen scenario, then compare it with the
 physical pointer event and hit target reported by the runtime. Every metric must

@@ -99,14 +99,6 @@ def manifest_errors(manifest: dict[str, Any], manifest_path: Path) -> list[str]:
         )
     corpus_dir = manifest_path.parent
     for scenario in scenarios:
-        source_hash = scenario.get("source_sha256")
-        if source_hash is None:
-            continue
-        source = corpus_dir / scenario["source"]
-        if not source.is_file():
-            errors.append(f"{scenario['id']}: missing source {source}")
-        elif sha256_file(source) != source_hash:
-            errors.append(f"{scenario['id']}: source digest drift")
         if not scenario.get("required_oracles"):
             errors.append(f"{scenario['id']}: no required oracle")
         logical_size = scenario.get("logical_size", {})
@@ -122,6 +114,38 @@ def manifest_errors(manifest: dict[str, Any], manifest_path: Path) -> list[str]:
             or not 0 <= float(point[1]) < float(logical_size.get("height", 0))
         ):
             errors.append(f"{scenario['id']}: logical-input oracle is not a frozen in-bounds point/target")
+        required_oracles = set(scenario.get("required_oracles", []))
+        if required_oracles & {"small_text", "thin_strokes"}:
+            regions = scenario.get("fidelity_oracle")
+            for oracle_name, region_name in (
+                ("small_text", "small_text_roi"),
+                ("thin_strokes", "thin_stroke_roi"),
+            ):
+                if oracle_name not in required_oracles:
+                    continue
+                region = regions.get(region_name) if isinstance(regions, dict) else None
+                if (
+                    not isinstance(region, dict)
+                    or set(region) != {"x", "y", "width", "height"}
+                    or any(isinstance(region.get(field), bool)
+                           or not isinstance(region.get(field), (int, float))
+                           for field in region)
+                    or region["x"] < 0 or region["y"] < 0
+                    or region["width"] <= 0 or region["height"] <= 0
+                    or region["x"] + region["width"] > logical_size.get("width", 0)
+                    or region["y"] + region["height"] > logical_size.get("height", 0)
+                ):
+                    errors.append(
+                        f"{scenario['id']}: {region_name} is not a frozen in-bounds region"
+                    )
+        source_hash = scenario.get("source_sha256")
+        if source_hash is None:
+            continue
+        source = corpus_dir / scenario["source"]
+        if not source.is_file():
+            errors.append(f"{scenario['id']}: missing source {source}")
+        elif sha256_file(source) != source_hash:
+            errors.append(f"{scenario['id']}: source digest drift")
 
     adaptive = manifest.get("adaptive_profile", {})
     if adaptive.get("shipping") is not False:

@@ -919,7 +919,7 @@ def receipt_observation(
     if (
         not isinstance(comparison, dict)
         or comparison.get("method") not in {
-            "pulp-png-pixel-comparison", "pulp-ui-capture-vs-browser-canvas"
+            "pulp-png-pixel-comparison", "browser-canvas-repeat"
         }
         or comparison.get("reference_sha256") != reference_digest
         or comparison.get("capture_sha256") != capture_digest
@@ -929,6 +929,11 @@ def receipt_observation(
         raise EvidenceError("fidelity comparison is not bound to same-content artifacts")
     text_contrast = fidelity_raw.get("small_text_luminance_stddev")
     stroke_coverage = fidelity_raw.get("thin_stroke_coverage")
+    required_oracles = set(scenario.get("required_oracles", []))
+    required_regions = scenario.get("fidelity_oracle")
+    if required_oracles & {"small_text", "thin_strokes"}:
+        if fidelity_raw.get("oracle_regions") != required_regions:
+            raise EvidenceError("fidelity measurements are not bound to frozen oracle regions")
     if (
         isinstance(text_contrast, bool) or not isinstance(text_contrast, (int, float))
         or not math.isfinite(float(text_contrast)) or text_contrast < 0
@@ -939,12 +944,18 @@ def receipt_observation(
     fidelity = {
         "content_floor_passed": fidelity_raw.get("content_floor_passed") is True,
         "capture_similarity": fidelity_raw.get("capture_similarity"),
-        "small_text_legible": text_contrast >= manifest["trial_contract"][
-            "small_text_luminance_stddev_minimum"
-        ],
-        "thin_strokes_preserved": stroke_coverage >= manifest["trial_contract"][
-            "thin_stroke_coverage_minimum"
-        ],
+        "small_text_legible": (
+            "small_text" not in required_oracles
+            or text_contrast >= manifest["trial_contract"][
+                "small_text_luminance_stddev_minimum"
+            ]
+        ),
+        "thin_strokes_preserved": (
+            "thin_strokes" not in required_oracles
+            or stroke_coverage >= manifest["trial_contract"][
+                "thin_stroke_coverage_minimum"
+            ]
+        ),
         "logical_input_correct": logical_input_passed,
     }
     if (

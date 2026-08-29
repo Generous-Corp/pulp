@@ -533,6 +533,27 @@ def revalidate_complete_state(
     return manifest
 
 
+def policy_readiness(observations: list[dict[str, Any]], similarity_minimum: float) -> bool:
+    fidelity_passed = all(
+        (
+            item["fidelity"][gate]
+            if gate != "capture_similarity"
+            else item["fidelity"][gate] >= similarity_minimum
+        )
+        for item in observations
+        for gate in (
+            "content_floor_passed", "capture_similarity", "small_text_legible",
+            "thin_strokes_preserved", "logical_input_correct"
+        )
+    )
+    all_metrics_available = all(
+        statistic["provenance"] != "unavailable"
+        for item in observations
+        for statistic in item["metrics"].values()
+    )
+    return fidelity_passed and all_metrics_available
+
+
 def finalize(
     run_dir: Path, disposition: str, a2t: str, a3_budget: str, a3: str
 ) -> dict[str, Any]:
@@ -544,23 +565,15 @@ def finalize(
     result = project_result(state)
     result["dependencies"] = dependencies
     similarity_minimum = manifest["trial_contract"]["capture_similarity_minimum"]
-    fidelity_passed = all(
-        (
-            item["fidelity"][gate]
-            if gate != "capture_similarity"
-            else item["fidelity"][gate] >= similarity_minimum
+    policy_ready = policy_readiness(result["observations"], similarity_minimum)
+    if disposition != "no-change" and not policy_ready:
+        raise EvidenceError(
+            "a B5 candidate cannot cross a failing fidelity/input oracle "
+            "or unavailable required metric"
         )
-        for item in result["observations"]
-        for gate in (
-            "content_floor_passed", "capture_similarity", "small_text_legible",
-            "thin_strokes_preserved", "logical_input_correct"
-        )
-    )
-    if disposition != "no-change" and not fidelity_passed:
-        raise EvidenceError("a B5 candidate cannot cross a failing fidelity/input oracle")
     result["status"] = "complete"
     result["disposition"] = disposition
-    result["eligible_for_policy"] = fidelity_passed
+    result["eligible_for_policy"] = policy_ready
     schema_problems = experiment.json_schema_lite.validate(
         result,
         experiment.schema_for_lite(experiment.load_json(experiment.DEFAULT_SCHEMA)),

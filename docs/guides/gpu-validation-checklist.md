@@ -135,7 +135,9 @@ expectation.
 
 Fidelity compares two independently hashed PNGs of the same content/state and
 reports numeric pixel similarity, small-text luminance variation, and
-thin-stroke coverage. Adaptive trials retain the measured over/under-budget
+thin-stroke coverage. Text/stroke statistics are computed only inside the
+scenario's frozen logical ROIs; whole-frame content variance cannot satisfy
+those feature oracles. Adaptive trials retain the measured over/under-budget
 samples and every scale transition; copied mode metadata is not adaptive
 evidence. The browser producer requires exactly `playwright-core@1.61.1` and
 refuses another installed version. Old receipts invalidated by these instrument
