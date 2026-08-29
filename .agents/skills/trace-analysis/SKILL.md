@@ -122,8 +122,11 @@ deliberately `unverified` until A3 defines a measured budget; `gpu-health` and
 probe evidence return `unavailable` rather than a misleading pass. Read
 `cold_start_contributors` separately from `steady_state_contributors`. Treat
 `execution_state` as CPU/wait evidence only when
-`scheduler_evidence_available:true`; `unavailable` means the wall-clock span
-does not prove blocking, so use the emitted platform-harness action.
+`scheduler_evidence_available:true`, which requires complete interval coverage
+for at least one contributor; partial/absent coverage stays `unavailable`.
+That state means the wall-clock span does not prove blocking, so use the emitted
+platform-harness action. Treat an `unknown` timing phase as neither cold nor
+steady.
 
 ```bash
 pulp trace gpu-startup --trace /tmp/pulp.pftrace --json

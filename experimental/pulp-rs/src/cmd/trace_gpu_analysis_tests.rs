@@ -271,8 +271,10 @@ fn checked_in_gpu_views_keep_the_safe_sql_contract() {
     }
     assert!(STARTUP_SQL.contains("thread_state"));
     assert!(STARTUP_SQL.contains("tt.utid"));
+    assert!(STARTUP_SQL.contains("measured_state_coverage_ns = dur"));
     assert!(STARTUP_SQL.contains("'cold'"));
     assert!(STARTUP_SQL.contains("'steady'"));
+    assert!(STARTUP_SQL.contains("'unknown'"));
 }
 
 #[cfg(unix)]

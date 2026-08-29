@@ -5,8 +5,10 @@
 -- every startup candidate has one exact, valid evidence ID.
 --
 -- `duration_ns` is wall-clock time. `cpu_running_ns` is populated only when
--- Perfetto has overlapping thread_state rows for the slice's stable utid; a
--- NULL value means the capture cannot distinguish blocking from CPU work.
+-- Perfetto thread_state intervals cover the complete slice on its stable utid;
+-- partial or absent coverage remains NULL because it cannot distinguish
+-- blocking from CPU work. Unindexed work is cold only when it begins before a
+-- correlated indexed frame-zero completes; later unindexed work is unknown.
 -- Incomplete slices are excluded here and detected across the whole trace by
 -- the CLI's capture-integrity query, so they fail closed instead of ranking as
 -- zero-duration work.
@@ -81,21 +83,32 @@ WITH candidates AS (
   JOIN all_candidates_identified
   WHERE NOT EXISTS (SELECT 1 FROM first_indexed_anchor)
 ), selected_rows AS (
-  SELECT c.*, tt.utid
+  SELECT
+    c.*,
+    tt.utid,
+    (
+      SELECT MAX(anchor.ts + anchor.dur)
+      FROM candidates AS anchor
+      WHERE anchor.evidence_id = c.evidence_id
+        AND anchor.stage = 'frame'
+        AND anchor.frame_index = 0
+    ) AS cold_frame_end_ts
   FROM candidates AS c
   JOIN selected_lifecycle USING (evidence_id)
   LEFT JOIN thread_track AS tt ON c.track_id = tt.id
 ), attributed AS (
   SELECT
     selected_rows.*,
-    EXISTS (
-      SELECT 1
+    (
+      SELECT SUM(
+        MIN(state.ts + state.dur, selected_rows.ts + selected_rows.dur)
+        - MAX(state.ts, selected_rows.ts))
       FROM thread_state AS state
       WHERE state.utid = selected_rows.utid
         AND state.dur >= 0
         AND state.ts < selected_rows.ts + selected_rows.dur
         AND state.ts + state.dur > selected_rows.ts
-    ) AS has_scheduler_evidence,
+    ) AS measured_state_coverage_ns,
     (
       SELECT SUM(
         MIN(state.ts + state.dur, selected_rows.ts + selected_rows.dur)
@@ -124,14 +137,18 @@ SELECT
     EXTRACT_ARG(arg_set_id, 'args.debug.sequence')) AS INT) AS sequence,
   frame_index,
   CASE
-    WHEN frame_index IS NULL OR frame_index = 0 THEN 'cold'
-    ELSE 'steady'
+    WHEN frame_index = 0 THEN 'cold'
+    WHEN frame_index > 0 THEN 'steady'
+    WHEN frame_index IS NULL
+      AND cold_frame_end_ts IS NOT NULL
+      AND ts < cold_frame_end_ts THEN 'cold'
+    ELSE 'unknown'
   END AS timing_phase,
   CASE
-    WHEN has_scheduler_evidence THEN COALESCE(measured_cpu_running_ns, 0)
+    WHEN measured_state_coverage_ns = dur THEN COALESCE(measured_cpu_running_ns, 0)
     ELSE NULL
   END AS cpu_running_ns,
-  has_scheduler_evidence AS has_scheduler_evidence,
+  COALESCE(measured_state_coverage_ns = dur, 0) AS has_scheduler_evidence,
   0 AS is_incomplete,
   COALESCE(
     CAST(EXTRACT_ARG(arg_set_id, 'debug.health_state') AS TEXT),

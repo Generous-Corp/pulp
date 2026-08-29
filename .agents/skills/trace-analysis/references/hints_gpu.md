@@ -14,8 +14,10 @@ For `gpu-startup`, compare `cold_start_contributors` with
 `steady_state_contributors` rather than mixing initialization into recurring
 cost. A contributor's `cpu_running_ns`, `non_running_ns`, and
 `execution_state` are authoritative only when
-`scheduler_evidence_available:true`. If it is false, the trace proves wall time
-but not blocking; follow the emitted platform-harness action.
+`scheduler_evidence_available:true`, which requires complete `thread_state`
+coverage for the contributor. Partial/absent coverage proves wall time but not
+blocking; follow the emitted platform-harness action. Do not fold `unknown`
+unindexed rows into either cold or steady conclusions.
 
 ## CPU submit time vs real GPU time — the distinction that matters
 

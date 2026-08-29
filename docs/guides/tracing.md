@@ -35,9 +35,11 @@ GPU analysis is the first shipped L0 slice. Its three names map one-to-one to
 the same `pulp.trace-gpu-analysis.v1` result and accept no raw SQL. Startup is
 `unverified` until A3 supplies a measured budget. Its cold/setup and indexed
 steady-state contributors are separate. When the capture contains scheduler
-`thread_state` evidence, each contributor reports CPU-running and non-running
+`thread_state` intervals covering the complete slice, each contributor reports CPU-running and non-running
 time plus a `cpu-dominated|wait-dominated|mixed` classification; without that
 evidence it says `unavailable` and never infers blocking from wall duration.
+Unindexed work beginning before a correlated frame-zero completes is cold;
+later unindexed work is `unknown`, never silently folded into steady or cold.
 Zero-byte/never-flushed captures, processor-reported truncation, positive Perfetto data-loss/no-flush stats,
 unfinished slices, missing categories, and invalid evidence correlation are
 typed `unavailable` outcomes with `capture_complete:false`.

@@ -1467,7 +1467,7 @@ Subcommands:
 | `start [--instance ID] [--categories LIST] [--ring-mb 1..512]` | canonical `dev.pulp.trace/session-control@1` | Begin a broker-authorized session recording selected span categories into a bounded in-process ring. The host owns the flushed trace destination. |
 | `stop [--instance ID]` | canonical `dev.pulp.trace/session-control@1` | Flush the broker-authorized session and print the `.pftrace` path. |
 | `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format table` is the only explicit format. |
-| `gpu-startup --trace FILE.pftrace` | checked-in `pulp_gpu_startup_breakdown` view | Rank cold/setup separately from steady-state contributors. Scheduler-backed captures distinguish CPU-running from non-running wall time; the verdict remains `unverified` until A3 defines a measured budget. |
+| `gpu-startup --trace FILE.pftrace` | checked-in `pulp_gpu_startup_breakdown` view | Rank proven cold/setup separately from steady-state contributors; unanchored work remains unknown. Complete scheduler coverage distinguishes CPU-running from non-running wall time; the verdict remains `unverified` until A3 defines a measured budget. |
 | `gpu-health --trace FILE.pftrace` | checked-in `pulp_gpu_health_transitions` view | Return typed pass/fail health and device-loss evidence. |
 | `gpu-probe --trace FILE.pftrace` | checked-in `pulp_gpu_probe_correlation` view | Correlate bounded probe/readback evidence and return typed pass/fail. |
 | `doctor` | client-side | Report offline `trace_processor` readiness. |
@@ -1478,8 +1478,10 @@ Named GPU analysis emits `pulp.trace-gpu-analysis.v1`: a verdict, capture
 completeness, ranked contributors, stable evidence IDs, concrete next actions,
 and a Perfetto UI open command/search terms. Startup exposes separate
 `cold_start_contributors` and `steady_state_contributors`; contributor CPU and
-non-running durations/classification appear only when the capture contains
-overlapping scheduler `thread_state` evidence. `capture_integrity` records
+non-running durations/classification appear only when scheduler `thread_state`
+intervals cover the complete contributor; partial coverage remains unavailable.
+Unindexed spans without a first-frame temporal anchor use phase `unknown`.
+`capture_integrity` records
 whole-trace slice, unfinished-slice, data-loss, and no-flush counts.
 `observed_categories` is derived
 independently from the parsed trace, never supplied by a scenario adapter, so

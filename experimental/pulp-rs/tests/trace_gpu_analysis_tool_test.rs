@@ -299,6 +299,84 @@ fn startup_uses_only_the_earliest_first_visible_lifecycle() {
 }
 
 #[test]
+fn startup_infers_only_pre_first_frame_unindexed_setup_as_cold() {
+    let evidence = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    let trace = tempfile::NamedTempFile::new().expect("phase trace");
+    let fixture = serde_json::json!({
+        "traceEvents": [
+            {"name":"gpu_pipeline_prepare","cat":"gpu","ph":"X","ts":500,
+             "dur":300,"pid":30,"tid":30,"args":{"debug.gpu_evidence_id":evidence,
+             "debug.health_state":"healthy","debug.sequence":1}},
+            {"name":"frame","cat":"render","ph":"X","ts":1000,"dur":100,
+             "pid":30,"tid":30,"args":{"debug.gpu_evidence_id":evidence,
+             "debug.health_state":"healthy","debug.sequence":2,"debug.frame_index":0}},
+            {"name":"gpu_acquire_late_unindexed","cat":"gpu","ph":"X","ts":2000,
+             "dur":900,"pid":30,"tid":30,"args":{"debug.gpu_evidence_id":evidence,
+             "debug.health_state":"healthy","debug.sequence":3}},
+            {"name":"gpu_present_steady","cat":"gpu","ph":"X","ts":3000,"dur":80,
+             "pid":30,"tid":30,"args":{"debug.gpu_evidence_id":evidence,
+             "debug.health_state":"healthy","debug.sequence":4,"debug.frame_index":1}}
+        ]
+    });
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let result = run_path("gpu-startup", trace.path(), 2);
+    assert_eq!(result["verdict"], "unverified");
+    assert_eq!(result["dominant_stage"], "pipeline-prepare");
+    let contributors = result["contributors"].as_array().unwrap();
+    let late = contributors
+        .iter()
+        .find(|row| row["stage"] == "acquire")
+        .expect("late unindexed acquire");
+    assert_eq!(late["timing_phase"], "unknown");
+    assert_eq!(
+        result["cold_start_contributors"].as_array().unwrap().len(),
+        2
+    );
+    assert_eq!(
+        result["steady_state_contributors"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn steady_only_startup_trace_fails_closed() {
+    let evidence = "ffffffffffffffffffffffffffffffff";
+    let trace = tempfile::NamedTempFile::new().expect("steady-only trace");
+    let fixture = serde_json::json!({
+        "traceEvents": [
+            {"name":"gpu_present_steady","cat":"gpu","ph":"X","ts":1000,
+             "dur":800,"pid":31,"tid":31,"args":{"debug.gpu_evidence_id":evidence,
+             "debug.health_state":"healthy","debug.sequence":1,"debug.frame_index":1}},
+            {"name":"frame_steady","cat":"render","ph":"X","ts":1900,"dur":100,
+             "pid":31,"tid":31,"args":{"debug.gpu_evidence_id":evidence,
+             "debug.health_state":"healthy","debug.sequence":2,"debug.frame_index":1}}
+        ]
+    });
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let result = run_path("gpu-startup", trace.path(), 2);
+    assert_eq!(result["verdict"], "unavailable");
+    assert_eq!(result["capture_complete"], false);
+    assert_eq!(result["unavailable_reason"], "missing-cold-start-window");
+    assert_eq!(
+        result["next_actions"][0]["code"],
+        "capture-cold-start-window"
+    );
+    assert_eq!(result["cold_start_contributors"], serde_json::json!([]));
+    assert_eq!(
+        result["steady_state_contributors"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
 fn zero_byte_never_flushed_capture_is_typed_unavailable() {
     let trace = tempfile::NamedTempFile::new().expect("empty capture");
     let result = run_path("gpu-startup", trace.path(), 2);

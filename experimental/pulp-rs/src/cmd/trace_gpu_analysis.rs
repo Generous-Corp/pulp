@@ -476,6 +476,10 @@ fn result_from_rows_and_categories(
         question == GpuQuestion::GpuProbe && rows.iter().any(|row| row.evidence_id.is_none());
     let missing_startup_gpu_stage =
         question == GpuQuestion::GpuStartup && !rows.iter().any(|row| row.stage != "frame");
+    let missing_startup_cold_stage = question == GpuQuestion::GpuStartup
+        && !rows
+            .iter()
+            .any(|row| row.stage != "frame" && row.timing_phase == "cold");
     let health_state_required = matches!(question, GpuQuestion::GpuHealth | GpuQuestion::GpuProbe);
     let invalid_health_state = health_state_required
         && rows.iter().any(|row| {
@@ -504,6 +508,8 @@ fn result_from_rows_and_categories(
         Some("missing-question-category")
     } else if missing_startup_gpu_stage {
         Some("missing-question-category")
+    } else if missing_startup_cold_stage {
+        Some("missing-cold-start-window")
     } else if evidence_malformed || missing_probe_evidence {
         Some("invalid-evidence-correlation")
     } else if invalid_health_state {
@@ -593,6 +599,10 @@ fn result_from_rows_and_categories(
             "empty-or-never-flushed-capture" => (
                 "record-and-flush-capture",
                 "The artifact contains no slices. Start tracing on the exact instance, reproduce the issue, and stop or detach cleanly so the ring is flushed.",
+            ),
+            "missing-cold-start-window" => (
+                "capture-cold-start-window",
+                "The selected lifecycle has no indexed frame-zero GPU contributor. Capture from before editor/device startup through the first visible frame, preserving frame indices.",
             ),
             _ => (
                 "capture-required-gpu-category",

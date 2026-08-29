@@ -1275,7 +1275,7 @@ commands:
             required: false
             description: Exact broker-owned live instance ID; omission preserves fail-closed unambiguous selection
       - name: gpu-startup
-        summary: Rank cold/setup separately from steady-state GPU/render contributors with checked-in PerfettoSQL, exposing scheduler-backed CPU versus non-running time when available and refusing to infer blocking otherwise. Returns unverified until A3 defines a measured budget.
+        summary: Rank proven cold/setup separately from steady-state GPU/render contributors with checked-in PerfettoSQL, leaving unanchored work unknown and exposing CPU versus non-running time only under complete scheduler coverage. Returns unverified until A3 defines a measured budget.
         args:
           - name: --trace
             kind: option

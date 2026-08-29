@@ -110,8 +110,11 @@ and returns that lifecycle's unindexed/frame-zero cold work separately from its
 later indexed steady-state rows; the single-ID fallback exists only for legacy
 traces with no indexed render frame. Startup joins `slice → thread_track` on
 the stable `utid` and intersects overlapping `thread_state` rows when scheduler
-evidence exists; absent scheduler rows remain NULL rather than becoming a
-blocking claim. Health and probe inspect their full candidate set before the CLI's
+evidence exists; CPU/non-running attribution is exposed only when those
+intervals cover the complete slice. Partial or absent coverage remains NULL
+rather than becoming a blocking claim. Unindexed work is cold only when a
+correlated frame-zero anchor proves that it began before first-frame completion;
+later unindexed work is `unknown`. Health and probe inspect their full candidate set before the CLI's
 bounded contributor query and return no rows unless every candidate carries
 the same valid 32-lowercase-hex evidence ID. The closed analyzer interprets an
 empty mixed-ID result as unavailable. A future multi-run UX should add an
