@@ -2179,3 +2179,12 @@ each invokes one exact external lifecycle driver, requires a predecessor for
 every warm same-process reopen, and retains the closed driver protocol in the
 host evidence tar. That driver must use the real product/host bridge; a loop of
 capture calls without editor lifecycle evidence is rejected.
+
+The health-transition trace macros compile to no work when `PULP_TRACING=OFF`,
+but compiled-in idle and active product cost still need evidence. Terminal A3
+requires the acceptance guide's exact pre-change, compile-out, compiled-in idle,
+and active 128 MiB control with 5 warmups, 30 measured, and 20 fresh-process
+observations per state. All must report zero xruns and audio-thread trace events.
+The active role campaigns include the spans but do not replace this differential
+control. Keep all producer work and Perfetto session management off the audio
+thread.

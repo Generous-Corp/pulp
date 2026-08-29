@@ -545,11 +545,28 @@ must not be used to relabel capture completion as native presentation.
 Select the checked-in standalone, constrained-headless, REAPER, or Forge role
 producer rather than an undocumented producer path. The adapter pins the role
 entry point and its checked-in support from the exact Pulp source root. Each
-role entry point pins the configured product, host, lifecycle driver, final-head
-trace analyzer, and digest-bound build attestation/receipt; it rehashes those
+role entry point pins the configured product, host, lifecycle driver,
+source-bound trace analyzer, embedded-build verifier, and digest-bound build
+attestation/receipt; it rehashes those
 inputs and validates 20 role-appropriate endpoint observations plus named trace
 replay. The driver must be the exact reviewed file at the requested clean
 Pulp/Forge Git revision, and every reported process identity carries an OS PID
 that must be gone before replay and PASS. The driver remains an explicit
 external prerequisite wherever the current Dawn/AppKit/host seam cannot expose
 native presentation without Vellum-owned work.
+
+Terminal A3 also requires the four-state product trace-producer overhead control
+from the acceptance guide. Compare the exact pre-producer parent with final-head
+compile-out, compiled-in idle, and active 128 MiB capture using one host,
+workload, build family, and source-bound driver. The compiled-in idle and active
+states use identical executable bytes; every state requires zero xruns and
+audio-thread trace events. A passing role campaign or offline A2T no-producer
+classification does not waive this control.
+
+If a validated B4 disposition routes follow-up to Vellum, test a bounded
+Graphite `PipelineManager` `SkExecutor` supplied through `ContextOptions` before
+designing custom prewarm. Trace pipeline queued/start/end, cache hit/miss,
+signature, and render wait over the exact 10-cold/10-warm workload; keep work
+off the audio thread and bound executor ownership, lifetime, and shutdown. Ship
+only a causal, material improvement, otherwise record `no-change`. A generic
+Vellum-installed `SkLogHandler` is a later diagnostic producer, not Horizon A.

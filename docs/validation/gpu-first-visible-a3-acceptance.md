@@ -64,11 +64,13 @@ and role-specific executables:
 : "${PULP_PLANNING_ROOT:?clean pulp-planning checkout}"
 : "${BLANK_CONTROL_BIN:?exact final-head standalone blank-control test binary}"
 : "${AUDIO_CONTROL_BIN:?exact final-head audio-thread-control test binary}"
-: "${TRACE_ANALYZER:?exact final-head installed pulp CLI with trace gpu-startup}"
+: "${PULP_A3_ANALYZER_CARGO_TARGET_ROOT:?absolute Cargo target root outside the Pulp checkout}"
 PULP_REVISION=$(git rev-parse HEAD)
 PLAN_REVISION=$(git -C "$PULP_PLANNING_ROOT" rev-parse HEAD)
 A3_ADAPTER="$PWD/tools/scripts/gpu_first_visible_a3_external_adapter.py"
 A3_SUPPORT="$PWD/tools/scripts/gpu_first_visible_a3_role_producer.py"
+TRACE_ANALYZER="$PWD/tools/scripts/gpu_first_visible_a3_trace_analyzer.py"
+BUILD_VERIFIER="$PWD/tools/scripts/gpu_first_visible_a3_build_verifier.py"
 : "${STANDALONE_PRODUCT_BIN:?exact final-head Standalone executable}"
 : "${STANDALONE_DRIVER:?exact executable that automates the 20 Standalone lifecycles}"
 : "${STANDALONE_DRIVER_SOURCE_PATH:?reviewed Pulp-relative driver path}"
@@ -102,6 +104,8 @@ python3 tools/scripts/gpu_first_visible_a3_acceptance.py ratify-budget \
 PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
 PULP_A3_PULP_ROOT="$PWD" \
 PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
+PULP_A3_BUILD_VERIFIER="$BUILD_VERIFIER" \
+PULP_A3_ANALYZER_CARGO_TARGET_ROOT="$PULP_A3_ANALYZER_CARGO_TARGET_ROOT" \
 PULP_A3_STANDALONE_PRODUCT_BIN="$STANDALONE_PRODUCT_BIN" \
 PULP_A3_STANDALONE_HOST_BIN="$STANDALONE_PRODUCT_BIN" \
 PULP_A3_STANDALONE_DRIVER="$STANDALONE_DRIVER" \
@@ -123,6 +127,8 @@ python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
 PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
 PULP_A3_PULP_ROOT="$PWD" \
 PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
+PULP_A3_BUILD_VERIFIER="$BUILD_VERIFIER" \
+PULP_A3_ANALYZER_CARGO_TARGET_ROOT="$PULP_A3_ANALYZER_CARGO_TARGET_ROOT" \
 PULP_A3_HEADLESS_PRODUCT_BIN="$HEADLESS_PRODUCT_BIN" \
 PULP_A3_HEADLESS_HOST_BIN="$HEADLESS_PRODUCT_BIN" \
 PULP_A3_HEADLESS_DRIVER="$HEADLESS_DRIVER" \
@@ -143,6 +149,8 @@ python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
 PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
 PULP_A3_PULP_ROOT="$PWD" \
 PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
+PULP_A3_BUILD_VERIFIER="$BUILD_VERIFIER" \
+PULP_A3_ANALYZER_CARGO_TARGET_ROOT="$PULP_A3_ANALYZER_CARGO_TARGET_ROOT" \
 PULP_A3_REAPER_PRODUCT_BIN="$DAW_PRODUCT_BIN" \
 PULP_A3_REAPER_HOST_BIN=/Applications/REAPER.app/Contents/MacOS/REAPER \
 PULP_A3_REAPER_DRIVER="$REAPER_DRIVER" \
@@ -165,6 +173,8 @@ python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
 PULP_A3_ROLE_PRODUCER_SUPPORT="$A3_SUPPORT" \
 PULP_A3_PULP_ROOT="$PWD" \
 PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
+PULP_A3_BUILD_VERIFIER="$BUILD_VERIFIER" \
+PULP_A3_ANALYZER_CARGO_TARGET_ROOT="$PULP_A3_ANALYZER_CARGO_TARGET_ROOT" \
 PULP_A3_FORGE_ROOT="$FORGE_ROOT" \
 PULP_A3_FORGE_PRODUCT_BIN="$FORGE_APP_BIN" \
 PULP_A3_FORGE_HOST_BIN="$FORGE_APP_BIN" \
@@ -184,13 +194,31 @@ python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
   --output-dir "$A3_EVIDENCE/forge-run"
 ```
 
-On the M5 endpoint, reserve 60–90 minutes after the exact final-head products
-and drivers exist. The ratification and four campaigns comprise at least 100
-editor/capture lifecycles (20 budget observations plus 80 role observations),
-with one additional REAPER scan/editor-open preflight, trace replay, and human
-Perfetto UI correlation. Driver timeouts keep any one role bounded; do not
-compress the run by reusing lifecycle IDs, omitting cold process boundaries, or
-relabeling capture completion as native presentation.
+Before codesigning each product, embed the canonical build identity in the
+exact executable that the campaign measures:
+
+```bash
+python3 tools/scripts/gpu_first_visible_a3_build_verifier.py emit \
+  --identity product-build-identity.json --output product-build-identity.marker
+```
+
+The identity JSON contains exactly `pulp_revision`, `forge_revision`,
+`build_id`, `product_id`, `product_name`, and `plugin_format`, matching the role
+identity. On macOS, the product build may link the marker as a data section
+(for example, `-Wl,-sectcreate,__DATA,__pulp_a3,product-build-identity.marker`)
+before signing. The checked-in verifier scans the final executable, requires
+exactly one canonical marker, and proves both a tampered-product and a
+wrong-source negative. A build attestation or filename cannot substitute for
+the embedded marker.
+
+On the M5 endpoint, reserve 90–150 minutes after the exact final-head products,
+drivers, and overhead variants exist. Budget ratification, the four campaigns,
+and the trace-producer overhead control comprise at least 320 observations (20
+budget observations, 80 role observations, and 220 four-state overhead
+observations), with one additional REAPER scan/editor-open preflight, trace
+replay, and human Perfetto UI correlation. Driver timeouts keep any one role
+bounded; do not compress the run by reusing lifecycle IDs, omitting cold
+process boundaries, or relabeling capture completion as native presentation.
 
 The checked-in external adapter is an evidence envelope, not a substitute for
 the product lifecycle. It snapshots the checked-in role entry point named by
@@ -218,18 +246,26 @@ Before invoking the role driver, the producer also requires a
 `pulp.gpu-first-visible-product-build-attestation.v1` JSON document. Its exact
 fields bind the requested Pulp/Forge revisions, build ID, product ID/name and
 format to the product digest, complete bundle-tree digest when applicable,
-the lifecycle-driver and pinned trace-analyzer digests, the local-clean
+the lifecycle-driver and source-bound trace-analyzer wrapper digests, the local-clean
 provenance kind, and the digest of the separately retained build receipt. That
 receipt must itself use `pulp.gpu-first-visible-local-build-provenance.v1` and
 repeat the exact product identity, clean Pulp/Forge source revisions, product,
 bundle, driver, and analyzer digests, bounded build command, builder identity,
 and ordered UTC build timestamps. Opaque bytes or an unverified GitHub/Shipyard
 claim are rejected. The configured binaries, build
-documents, pinned driver/analyzer/support, source-bound smoke helpers, closed
+documents, pinned driver/analyzer/verifier/support, source-bound smoke helpers, closed
 driver request, and deterministic bundle snapshots are rehashed after the
 driver and again after trace replay. A claim without those external build
 inputs remains nonterminal; the producer never infers source provenance from a
-filename or the current checkout.
+filename or the current checkout. The analyzer wrapper runs the requested
+revision's Rust analyzer with `--release --locked --offline` and a Cargo target
+directory outside the source tree. Its structural campaign replay normally
+returns `unverified`/exit 2 because it has no A3 budget; that structural verdict
+is kept separate from the campaign health/budget verdict.
+The separately source-bound build verifier scans the final executable, retains
+its own closed receipt and negative controls, and is included in the immutable
+host evidence; it is not retroactively asserted as a field in the build
+attestation.
 
 The role driver is the product/host automation seam. It accepts the closed
 `pulp.gpu-first-visible-role-driver-request.v1` request and writes
@@ -245,12 +281,13 @@ raw warm, and the same-instance Perfetto trace. The
 role producer rejects a short campaign, a relabeled cache state, a visible
 trial without independent native presentation, a headless trial claiming
 presentation, or mutation of any configured binary or snapshot. The producer,
-not the driver, runs the pinned final-head analyzer against both an invalid-
+not the driver, runs the pinned source-bound analyzer wrapper against both an invalid-
 trace negative and the role trace, then derives the digest-bound campaign trace
 analysis only when replay proves the health result's exact GPU evidence ID and
 capture scope. The
 digest-bound `host_artifact` tar retains the exact host, driver, producer
-support, analyzer, build documents, closed driver request/receipt, and role
+support, analyzer, build verifier, build documents, closed driver
+request/receipt, and role
 preflight. The driver may be
 external because native AppKit/REAPER/Forge automation is product-specific, but
 its runtime path and bytes must exactly match the declared reviewed file at the
@@ -313,8 +350,54 @@ separate wrong-thread rejection test protecting the writer guard. Its receipt in
 `external-harness-only-not-product-runtime-proof`; the role adapter must not
 upgrade that bounded claim.
 
+## Ratify trace-producer overhead
+
+The Pulp-owned `gpu_health_transition_first_visible` spans are real runtime
+producers. The active 10-cold/10-warm role campaigns include their cost, but
+that alone cannot distinguish the instrumentation's cost from the product
+workload. Terminal A3 therefore also requires a four-state product control:
+
+- exact pre-producer parent `5048ce72dd28d87974550a3feb526de0f44af32c`;
+- exact final-head candidate built with tracing compiled out;
+- the same candidate built with tracing compiled in but no session active; and
+- that exact compiled-in binary with an active 128 MiB Perfetto ring.
+
+All four states use one machine, product, workload, build family, and
+source-bound measurement driver. Each raw document contains 5 warmups, 30
+measured same-product trials, and 20 fresh-process trials. Every sample has a
+unique evidence ID, positive duration, zero xruns, and zero audio-thread trace
+events. The active state additionally retains a digest/size-bound trace for
+every sample; inactive states may not claim one. The compiled-in idle and active
+states must identify the same executable bytes, while the compile-out build is
+distinct. The driver is a reviewed relative path in the candidate revision and
+must remain byte-identical at final verification.
+
+After the source-bound product driver has written the four raw documents under
+the evidence root, derive the only accepted receipt with:
+
+```bash
+python3 tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py ratify \
+  --pre-change-baseline "$A3_EVIDENCE/overhead/pre-change-baseline.json" \
+  --candidate-compile-out "$A3_EVIDENCE/overhead/candidate-compile-out.json" \
+  --candidate-compiled-in-idle "$A3_EVIDENCE/overhead/candidate-compiled-in-idle.json" \
+  --candidate-active "$A3_EVIDENCE/overhead/candidate-active.json" \
+  --evidence-root "$A3_EVIDENCE" \
+  --generated-utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --output "$A3_EVIDENCE/trace-producer-overhead.json"
+```
+
+Against the pre-change baseline, both measured and fresh-process medians/p95s
+must remain within 1%/2% for compile-out, 2%/5% for compiled-in idle, and
+5%/10% for active capture. A failed ceiling produces a derived FAIL receipt; a
+missing final-head product variant produces `unavailable`. Neither is terminal.
+The final acceptance template must set `trace_producer_overhead.status` to
+`pass` and bind the derived receipt. The checked-in nonterminal receipt records
+this control as unavailable because those exact M5 variants and trials have not
+yet run; it does not waive them.
+
 Copy each passing `run.json` campaign fragment and the requested control refs
-into the final template, add the same-instance A2T bundle, and run the closed
+into the final template, add the passing trace-producer-overhead receipt and
+same-instance A2T bundle, and run the closed
 generator above. Each final campaign preserves and re-verifies the exact outer
 adapter and nested role-producer bytes, so an opaque or later-replaced harness
 cannot inherit the trials. The generator independently derives exactly one B4
@@ -348,6 +431,17 @@ validated, lossless, over-budget visible campaign may then derive
 receipt names every missing field, event, required argument, observed interval,
 and exact `framework-authoritative-transferred` route. That disposition requests
 post-adoption instrumentation and a causal rerun; it is not prewarm evidence.
+
+If the validated disposition is `queue-B4` or `queue-B4-investigation`, the
+first post-adoption Vellum experiment is Graphite `PipelineManager` work on a
+bounded `SkExecutor` supplied through `ContextOptions`, before any custom
+prewarm design. Instrument pipeline queued/start/end, cache hit/miss, pipeline
+signature, and render-wait intervals, then compare the exact 10-cold/10-warm
+workload. Keep executor work off the audio thread and define bounded ownership,
+lifetime, and shutdown. Adopt nothing unless the rerun proves a causal,
+material benefit; otherwise record `no-change`. A generic Vellum-installed
+`SkLogHandler` can be a later diagnostic producer. Neither item is Horizon A or
+part of the initial Pulp implementation.
 
 The gap inventory uses the existing low-cardinality Perfetto vocabulary:
 `gpu_shader_compile` for compile and source/shader signatures,
@@ -429,6 +523,12 @@ campaign. It must also contain:
   registered audio threads, and include a non-audio positive control. This is
   external harness evidence; it is deliberately not described as product-runtime
   thread proof.
+- A passing four-state trace-producer overhead receipt derived from the exact
+  pre-producer parent and final-head compile-out, compiled-in idle, and active
+  variants. It binds the same host/workload/build family and source-bound driver,
+  requires zero xruns and audio-thread trace events, enforces the 128 MiB ring,
+  and checks measured plus fresh-process median/p95 ceilings. Missing,
+  unavailable, or failed overhead evidence keeps A3 nonterminal.
 - Exactly one disposition: `queue-B4`, `queue-B4-investigation`, or
   `no-change`. The verifier derives it from the validated causal campaign and
   replayed A2T result under `pulp.b4-disposition-policy.v1`; neither the health
@@ -443,7 +543,9 @@ truncated events. It cross-checks raw
 samples against the health results, and verifies every declared artifact
 digest. The A2T no-producer disposition must also be accepted by the exact
 planning revision/digest bound by A3; a stale `requires-approval` receipt cannot
-close the causal gate. A product provider's locally complete snapshot is therefore input
+close the causal gate. That A2T disposition applies only to the offline
+CLI/MCP analyzer and does not waive the separate product trace-producer overhead
+receipt. A product provider's locally complete snapshot is therefore input
 evidence, never self-sufficient acceptance. Artifact traversal rejects symlinks
 and parses the same immutable byte snapshot it hashes. Partial observations
 belong in `observations`; every remaining gap must be named in

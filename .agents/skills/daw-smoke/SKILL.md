@@ -257,7 +257,8 @@ nonterminal `run.json`, never a passing campaign.
 Use the checked-in `gpu_first_visible_a3_external_adapter.py` as the immutable
 envelope and select `gpu_first_visible_a3_reaper_producer.py`. Configure its
 exact source-bound smoke/Lua helpers, REAPER, plugin binary/bundle, role driver,
-final-head trace analyzer, and digest-bound product build attestation/receipt;
+checked-in source-bound trace analyzer, embedded-build verifier, and
+digest-bound product build attestation/receipt;
 the driver must resolve to the reviewed file at the requested clean Pulp
 revision. The producer runs the qualified-format preflight and then requires
 the driver to perform all 20 editor opens and terminate every reported REAPER
@@ -266,3 +267,10 @@ exact driver request/receipt in the host evidence tar. Missing automation,
 build provenance, analyzer replay, or native-present truth is nonterminal;
 the producer cannot promote the `editor-open` smoke or a screenshot completion
 into campaign evidence.
+
+The measured plugin executable must carry the canonical embedded build marker,
+and the source-bound analyzer must preserve structural `unverified` separately
+from the campaign budget verdict. Before terminal A3, also run the four-state
+product trace-producer overhead protocol in the acceptance guide. Its exact
+pre-change, compile-out, compiled-in idle, and active measurements require zero
+xruns/audio-thread trace events; the DAW role campaign alone does not waive it.

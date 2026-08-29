@@ -436,10 +436,19 @@ For the executable handoff, use
 `gpu_first_visible_a3_external_adapter.py` with the checked-in
 `gpu_first_visible_a3_forge_producer.py`. Configure clean exact-revision Pulp
 and Forge roots, the exact app executable for both product and host identity,
-the product-specific lifecycle driver, final-head trace analyzer, and the
-digest-bound Forge build attestation/receipt. The producer pins and rehashes
+the product-specific lifecycle driver, checked-in source-bound trace analyzer,
+embedded-build verifier, and the digest-bound Forge build
+attestation/receipt. The producer pins and rehashes
 those inputs; the driver must resolve to reviewed source at the declared clean
 Pulp or Forge revision. It requires 10+10 reopen/reset rows, independent native
 presentation, terminated owned Forge PIDs, and named same-instance Perfetto replay. A missing driver,
 provenance, dirty/wrong source head, different Forge build, or Pulp demo stays
 nonterminal or fails closed.
+
+The exact Forge executable must carry the canonical embedded build marker. Its
+role campaign cost includes active product spans, but terminal A3 also requires
+the separate four-state pre-change/compile-out/compiled-in-idle/active product
+overhead receipt with zero xruns and audio-thread trace events. Keep the
+analyzer's structural `unverified` result distinct from the campaign budget
+verdict; neither an offline A2T classification nor a passing Forge role waives
+the overhead control.

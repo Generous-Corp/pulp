@@ -551,16 +551,26 @@ For an A3 external role, the executable selected by
 `PULP_A3_CAMPAIGN_PRODUCER` must emit the campaign trace with the exact health
 IDs. The checked-in external adapter snapshots that producer but does not run
 substitute SQL or create an evidence ID. Its role producer pins the exact
-final-head `pulp trace gpu-startup` analyzer, proves its invalid-trace negative,
+checked-in source-bound analyzer wrapper, proves its invalid-trace negative,
 and derives the typed campaign analysis only when the named replay selects the
-health result's cohort and verdict. A failing analyzer result is terminal; the
-producer may not overwrite it with the health document's verdict. Final
+health result's exact evidence ID and one recorded host UPID/PID cohort. The
+structural replay is normally `unverified`/exit 2 because it has no A3 budget;
+keep it separate from the health document's budget verdict. A failing analyzer
+result is terminal, and the producer may not overwrite either verdict. Final
 same-instance A2T replay and human Perfetto UI correlation
 are added only from the selected causal campaign after all role runs complete.
 Use one of the four checked-in role entry points, which also pins its lifecycle
 driver and rejects analyzer evidence IDs that differ from the exact health
 instance. The driver still owns capture; the entry point cannot manufacture a
 Perfetto file or native-present event.
+
+The product health-transition spans are real runtime producers even though the
+macros compile out with `PULP_TRACING=OFF`. Terminal A3 separately requires the
+four-state pre-change/compile-out/compiled-in-idle/active control documented in
+`docs/validation/gpu-first-visible-a3-acceptance.md`: 5 warmups, 30 measured,
+20 fresh-process observations per state, zero xruns/audio-thread trace events,
+and derived median/p95 ceilings. The offline A2T no-producer disposition does
+not waive this product control.
 
 ## Correlate a catalog recipe with Perfetto
 
