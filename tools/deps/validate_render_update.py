@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import platform
 from pathlib import Path
 import subprocess
@@ -17,11 +19,15 @@ if str(ROOT) not in sys.path:
 from tools.scripts import fetch_skia_for_release as skia_fetch  # noqa: E402
 
 
-DEFAULT_CACHE_ROOT = Path.home() / "Library/Caches/Pulp/skia"
 WARM_MARKERS = (
     "OK: immutable Skia cache generation ready at ",
     "OK: complete Skia/Dawn generation already unpacked from the pinned asset ",
 )
+
+
+def default_cache_root() -> Path:
+    configured = os.environ.get("PULP_SKIA_CACHE_ROOT")
+    return Path(configured).expanduser() if configured else Path.home() / ".cache/pulp/skia"
 
 
 def native_platform() -> str:
@@ -41,6 +47,39 @@ def run_checked(command: list[str]) -> str:
             + result.stdout + result.stderr
         )
     return result.stdout
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def classify_fetch(output: str) -> str:
+    if "OK: atomically published immutable Skia cache at " in output:
+        return "cold-published"
+    if "OK: concurrent publisher completed immutable cache at " in output:
+        return "concurrent-published"
+    if any(marker in output for marker in WARM_MARKERS):
+        return "warm-verified"
+    raise RuntimeError("Skia fetch returned success without a recognized publication receipt")
+
+
+def source_sha() -> str:
+    dirty = run_checked([
+        "git", "status", "--porcelain=v1", "--untracked-files=all",
+    ])
+    if dirty.strip():
+        raise RuntimeError(
+            "render-update evidence requires a clean exact source checkout; "
+            "commit or remove every tracked and untracked change first"
+        )
+    value = run_checked(["git", "rev-parse", "HEAD"]).strip()
+    if len(value) != 40 or any(character not in "0123456789abcdef" for character in value):
+        raise RuntimeError(f"could not bind validation to an exact source SHA: {value!r}")
+    return value
 
 
 def expected_v8_version() -> str:
@@ -63,7 +102,7 @@ def validate(cache_root: Path, build_dir: Path, cache_only: bool) -> dict[str, o
         "--cache-root",
         str(cache_root),
     ]
-    run_checked(fetch)
+    first_fetch = classify_fetch(run_checked(fetch))
     second_output = run_checked(fetch)
     if not any(marker in second_output for marker in WARM_MARKERS):
         raise RuntimeError("second Skia fetch did not prove a verified no-download warm hit")
@@ -76,6 +115,12 @@ def validate(cache_root: Path, build_dir: Path, cache_only: bool) -> dict[str, o
         "--skia-dir",
         str(generation),
     ])
+
+    receipt_path = generation / skia_fetch.GENERATION_RECEIPT
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt_files = receipt.get("files")
+    if not isinstance(receipt_files, list):
+        raise RuntimeError("generation receipt has no exact extracted-file list")
 
     mixed_provider: dict[str, object]
     if cache_only:
@@ -114,14 +159,21 @@ def validate(cache_root: Path, build_dir: Path, cache_only: bool) -> dict[str, o
             "status": "pass",
             "capture": str(capture.resolve()),
             "capture_bytes": capture.stat().st_size,
+            "capture_sha256": file_sha256(capture),
+            "v8_version": expected_v8_version(),
         }
 
     return {
         "schema_version": 1,
+        "source_sha": source_sha(),
         "platform": matrix_platform,
         "asset_sha256": asset_sha,
         "generation": str(generation),
-        "generation_receipt": str(generation / skia_fetch.GENERATION_RECEIPT),
+        "generation_receipt": str(receipt_path),
+        "generation_receipt_sha256": file_sha256(receipt_path),
+        "generation_file_count": len(receipt_files),
+        "generation_payload_bytes": sum(int(item["size"]) for item in receipt_files),
+        "first_fetch": first_fetch,
         "second_fetch_no_download": True,
         "capability_probe": "pass",
         "mixed_provider": mixed_provider,
@@ -130,7 +182,7 @@ def validate(cache_root: Path, build_dir: Path, cache_only: bool) -> dict[str, o
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cache-root", type=Path, default=DEFAULT_CACHE_ROOT)
+    parser.add_argument("--cache-root", type=Path, default=default_cache_root())
     parser.add_argument("--build-dir", type=Path, default=ROOT / "build-render-update-validation")
     parser.add_argument("--cache-only", action="store_true")
     parser.add_argument("--result", type=Path)

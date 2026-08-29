@@ -61,10 +61,11 @@ Populate the manifest-selected, platform-plus-asset-SHA generation through the
 release fetcher, then point `SKIA_DIR` at that exact stamped generation:
 
 ```bash
+SKIA_CACHE_ROOT="${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}"
 python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
-  --cache-root "$HOME/Library/Caches/Pulp/skia"
+  --cache-root "$SKIA_CACHE_ROOT"
 SKIA_DIR="$(python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
-  --cache-root "$HOME/Library/Caches/Pulp/skia" --print-cache-dest)"
+  --cache-root "$SKIA_CACHE_ROOT" --print-cache-dest)"
 
 # Configure a SEPARATE GPU build dir (keep the CPU build/ for deterministic
 # CoreGraphics goldens — see "Don't mix" below).
