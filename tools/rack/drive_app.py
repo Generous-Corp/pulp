@@ -468,6 +468,7 @@ GENERATOR_ENDED_BADLY = (
     "already running against this module pack",
     "generation cancelled by user",
     "the generated patch violated the exclusive",
+    "the generated patch violated maker intent",
     # The curation gates. The request is understood and declined because no
     # validated capability backs it, and nothing is sent to the model — so the
     # wording IS the verdict, and reporting INCONCLUSIVE hides the one sentence
