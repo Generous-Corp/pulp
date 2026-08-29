@@ -13,6 +13,7 @@ from pathlib import Path
 import gpu_dpr_experiment as experiment
 import gpu_dpr_evidence as evidence
 import gpu_dpr_runner as runner
+import test_gpu_first_visible_a3_acceptance as a3_fixture
 from gpu_dpr_test_support import (
     dependency_receipts, exact_binary, forged_minimal_dependencies,
     malformed_adapter_script, no_receipt_adapter_script, test_adapter_script,
@@ -21,7 +22,6 @@ from gpu_dpr_test_support import (
 )
 
 SHA_A = "3" * 40
-SHA_B = "1" * 40
 SHA_C = "2" * 40
 
 
@@ -29,7 +29,10 @@ def plan(manifest: dict) -> dict:
     class Args:
         experiment_id = "a4-runner-selftest"
         plan_revision = SHA_A
-        pulp_sha = SHA_B
+        # The A3 fixture binds its causal campaign and source blobs to the
+        # implementation under test. Keep A4's synthetic plan on that same
+        # authority instead of retaining a legacy all-ones placeholder.
+        pulp_sha = a3_fixture.PULP_REVISION
         forge_sha = SHA_C
 
     return experiment.planned_result(Args(), manifest)
