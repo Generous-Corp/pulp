@@ -399,17 +399,23 @@ else
 fi
 
 # The Forge rebuild is only reproducible when its exact released Pulp SDK and
-# locally rebuilt text shaper are bound into the package provenance.
+# locally rebuilt binary helpers are bound into the package provenance.
 ran=$((ran + 1))
 if grep -q 'FORGE_PULP_SDK_SOURCE_SHA is required' "$FM/package.sh" && \
    grep -q 'FORGE_PULP_SDK_CONTENT_SHA256 is required' "$FM/package.sh" && \
    grep -q -- '--content-sha256 "\$expected_sdk_content"' "$FM/package.sh" && \
    grep -q 'sdk_identity.py' "$FM/package.sh" && \
    grep -q 'build_shape_text.sh' "$FM/package.sh" && \
-   grep -q 'shape_text_sha256' "$FM/verify_package.sh"; then
-    ok "package binds the exact Pulp SDK and rebuilt shape_text helper"
+   grep -q 'shape_text_sha256' "$FM/verify_package.sh" && \
+   grep -q 'build_rack_patch_decode.sh' "$FM/package.sh" && \
+   grep -q 'PULP_RACK_PATCH_DECODE_ARCH="\$INSTALLER_ARCH"' "$FM/package.sh" && \
+   grep -q 'lipo -archs.*rack_patch_decode' "$FM/package.sh" && \
+   grep -q 'rack_patch_decode_sha256' "$FM/verify_package.sh" && \
+   grep -q 'EXPECTED_DECODER_ARCH' "$FM/verify_package.sh" && \
+   grep -q 'host_decoder_arch' "$FM/verify_package.sh"; then
+    ok "package binds the exact Pulp SDK and rebuilt binary helpers"
 else
-    fail "package can accept an unpinned SDK, unverified content, or stale shape_text helper"
+    fail "package can accept an unpinned SDK, unverified content, or stale binary helper"
 fi
 
 # The vocabulary extractor reads the checked capability manifest at runtime.

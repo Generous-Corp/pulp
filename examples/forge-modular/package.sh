@@ -293,7 +293,8 @@ keys = ("archive_sha256", "binary_sha256", "manifest_sha256", "module_count",
         "platform", "sdk_sha256", "source_tree_sha", "forge_source_base",
         "forge_seam_tree_sha", "app_binary_sha256", "au_binary_sha256",
         "vst3_binary_sha256", "clap_binary_sha256", "pulp_sdk_version",
-        "pulp_sdk_source_sha", "pulp_sdk_content_sha256", "shape_text_sha256")
+        "pulp_sdk_source_sha", "pulp_sdk_content_sha256", "shape_text_sha256",
+        "rack_patch_decode_sha256")
 data = dict(zip(keys, sys.argv[2:]))
 data["module_count"] = int(data["module_count"])
 with open(sys.argv[1], "w") as f:
@@ -304,7 +305,7 @@ with open(sys.argv[1], "w") as f:
   "$FORGE_SOURCE_BASE" "$FORGE_SEAM_TREE_SHA" "$FM_APP_BINARY_SHA" \
   "$FM_AU_BINARY_SHA" "$FM_VST3_BINARY_SHA" "$FM_CLAP_BINARY_SHA" \
   "$FM_PULP_SDK_VERSION" "$FM_PULP_SDK_SOURCE_SHA" "$FM_PULP_SDK_SHA" \
-  "$FM_SHAPE_TEXT_SHA"
+  "$FM_SHAPE_TEXT_SHA" "$FM_RACK_PATCH_DECODE_SHA"
 }
 
 [[ -n "$RACK_PLUGIN" ]] || {
@@ -333,6 +334,17 @@ rebuild_forge_products "$BUILD_DIR" || exit 1
 "$REPO/tools/rack/build_shape_text.sh"
 FM_SHAPE_TEXT_SHA="$(/usr/bin/python3 \
     "$REPO/examples/forge-modular/binary_identity.py" "$REPO/build/shape_text")"
+PULP_RACK_PATCH_DECODE_ARCH="$INSTALLER_ARCH" \
+    "$REPO/tools/rack/build_rack_patch_decode.sh" \
+    "$REPO/build/rack_patch_decode"
+DECODER_ARCHS="$(/usr/bin/lipo -archs "$REPO/build/rack_patch_decode")"
+if [[ "$DECODER_ARCHS" != "$INSTALLER_ARCH" ]]; then
+    echo "Rack saved-patch decoder architecture is $DECODER_ARCHS, not $INSTALLER_ARCH" >&2
+    exit 1
+fi
+FM_RACK_PATCH_DECODE_SHA="$(/usr/bin/python3 \
+    "$REPO/examples/forge-modular/binary_identity.py" \
+    "$REPO/build/rack_patch_decode")"
 
 if [[ -n "${APP_OVERRIDE:-}" ]]; then
     echo "APP_OVERRIDE cannot prove current Forge build identity" >&2
@@ -461,6 +473,8 @@ ditto "$REPO/external/fonts/Inter-Regular.ttf" \
       "$APP/Contents/Resources/external/fonts/Inter-Regular.ttf"
 mkdir -p "$APP/Contents/Resources/build"
 ditto "$REPO/build/shape_text" "$APP/Contents/Resources/build/shape_text"
+ditto "$REPO/build/rack_patch_decode" \
+      "$APP/Contents/Resources/build/rack_patch_decode"
 for mod in signal format audio state platform runtime timebase; do
     ditto "$REPO/core/$mod/include" "$APP/Contents/Resources/core/$mod/include"
 done
@@ -745,13 +759,15 @@ fi
 : "${PULP_SIGN_IDENTITY_HASH:?set PULP_SIGN_IDENTITY_HASH (see ~/.config/pulp/secrets/keychain.env)}"
 : "${PULP_SIGN_INSTALLER_HASH:?set PULP_SIGN_INSTALLER_HASH (see ~/.config/pulp/secrets/keychain.env)}"
 
-# The panel shaper is a Mach-O executable inside Resources, which codesign
-# treats as a resource and seals by hash rather than signing as code. Apple's
-# notary service scans every Mach-O in the payload regardless and rejects the
-# whole submission over an unsigned one, so it is signed here -- before the
-# bundle is sealed around it, or the seal would be invalidated by this.
-codesign --force --options runtime --timestamp \
-         -s "$PULP_SIGN_IDENTITY_HASH" "$APP/Contents/Resources/build/shape_text"
+# These helpers are Mach-O executables inside Resources, which codesign treats
+# as resources and seals by hash rather than signing as code. Apple's notary
+# service scans every Mach-O in the payload regardless and rejects the whole
+# submission over an unsigned one, so sign them before sealing the bundle.
+for helper in shape_text rack_patch_decode; do
+    codesign --force --options runtime --timestamp \
+             -s "$PULP_SIGN_IDENTITY_HASH" \
+             "$APP/Contents/Resources/build/$helper"
+done
 
 # The consent pane. Apple shows it before anything is written, which is where
 # the Rack SDK / GPLv3 note belongs -- the moment the user is deciding.
