@@ -447,7 +447,19 @@ def verify_builder_tag_ref(determinism: dict) -> None:
     expected = determinism.get("v8_builder_ref")
     if not isinstance(url, str) or not isinstance(expected, str):
         raise ValueError("matched V8 pin has no builder tag-ref URL/SHA")
-    with urllib.request.urlopen(url) as response:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.netloc != "api.github.com":
+        raise ValueError(
+            "V8 builder tag-ref URL must use https://api.github.com"
+        )
+    request = urllib.request.Request(url)
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+        request.add_header("Accept", "application/vnd.github+json")
+        request.add_header("X-GitHub-Api-Version", "2022-11-28")
+    opener = urllib.request.build_opener(_RejectRedirect())
+    with opener.open(request, timeout=30) as response:
         payload = response.read()
     try:
         ref = json.loads(payload)
@@ -461,6 +473,13 @@ def verify_builder_tag_ref(determinism: dict) -> None:
             f"V8 builder release tag mismatch: type={kind!r}, sha={actual!r}, "
             f"pinned={expected!r}"
         )
+
+
+class _RejectRedirect(urllib.request.HTTPRedirectHandler):
+    """Fail closed rather than forwarding a provenance credential."""
+
+    def redirect_request(self, request, fp, code, msg, headers, new_url):
+        return None
 
 
 def expected_library_path(manifest_key: str) -> Path | None:

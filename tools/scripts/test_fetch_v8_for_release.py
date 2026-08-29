@@ -266,20 +266,64 @@ class EmbeddedPairManifest(unittest.TestCase):
             self.assertFalse((private_root / "mac-arm64").exists())
 
     def test_builder_release_tag_must_resolve_to_pinned_source(self):
-        with tempfile.TemporaryDirectory() as td:
-            ref_path = pathlib.Path(td) / "ref.json"
-            ref_path.write_text(json.dumps({
-                "object": {"type": "commit", "sha": "a" * 40}}),
-                encoding="utf-8")
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "object": {"type": "commit", "sha": "a" * 40}
+        }).encode("utf-8")
+        opener = mock.MagicMock()
+        opener.open.return_value = response
+        with mock.patch.object(fetch_v8.urllib.request, "build_opener",
+                               return_value=opener):
             fetch_v8.verify_builder_tag_ref({
-                "v8_builder_tag_ref_url": ref_path.as_uri(),
+                "v8_builder_tag_ref_url":
+                    "https://api.github.com/repos/example/v8-builder/git/ref/tags/v8-m153",
                 "v8_builder_ref": "a" * 40,
             })
             with self.assertRaisesRegex(ValueError, "release tag mismatch"):
                 fetch_v8.verify_builder_tag_ref({
-                    "v8_builder_tag_ref_url": ref_path.as_uri(),
+                    "v8_builder_tag_ref_url":
+                        "https://api.github.com/repos/example/v8-builder/git/ref/tags/v8-m153",
                     "v8_builder_ref": "b" * 40,
                 })
+
+    def test_builder_tag_ref_uses_ci_token_only_for_github_api(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "object": {"type": "commit", "sha": "a" * 40}
+        }).encode("utf-8")
+        opener = mock.MagicMock()
+        opener.open.return_value = response
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "ci-token"}, clear=True), \
+                mock.patch.object(fetch_v8.urllib.request, "build_opener",
+                                  return_value=opener) as build_opener:
+            fetch_v8.verify_builder_tag_ref({
+                "v8_builder_tag_ref_url":
+                    "https://api.github.com/repos/example/v8-builder/git/ref/tags/v8-m153",
+                "v8_builder_ref": "a" * 40,
+            })
+        self.assertIsInstance(
+            build_opener.call_args.args[0], fetch_v8._RejectRedirect
+        )
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.get_header("Authorization"), "Bearer ci-token")
+        self.assertEqual(request.get_header("Accept"), "application/vnd.github+json")
+        self.assertEqual(opener.open.call_args.kwargs["timeout"], 30)
+
+        for unsafe_url in (
+            "http://api.github.com/repos/example/v8-builder/git/ref/tags/v8-m153",
+            "https://example.com/repos/example/v8-builder/git/ref/tags/v8-m153",
+            "file:///tmp/ref.json",
+        ):
+            with self.subTest(url=unsafe_url), self.assertRaisesRegex(
+                    ValueError, "must use https://api.github.com"):
+                fetch_v8.verify_builder_tag_ref({
+                    "v8_builder_tag_ref_url": unsafe_url,
+                    "v8_builder_ref": "a" * 40,
+                })
+
+        self.assertIsNone(fetch_v8._RejectRedirect().redirect_request(
+            request, None, 302, "Found", {}, "https://example.com/ref"
+        ))
 
 
 class MatrixMap(unittest.TestCase):

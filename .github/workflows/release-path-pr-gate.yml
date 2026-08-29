@@ -202,6 +202,8 @@ jobs:
       # render a headless Three.js frame before accepting a release-path change.
       - name: Fetch sealed V8 provider (mixed-provider gate)
         if: matrix.platform == 'darwin-arm64'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 tools/scripts/fetch_v8_for_release.py darwin-arm64
         shell: bash
 
