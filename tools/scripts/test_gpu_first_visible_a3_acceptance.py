@@ -150,6 +150,7 @@ def health_result(campaign_identity: dict[str, Any], budget: dict[str, Any]) -> 
 
 
 def make_fixture(root: Path) -> dict[str, Any]:
+    implementation_binding = a3.implementation_source_binding(ROOT, PULP_REVISION)
     budget_cold = {
         "schema": "pulp.gpu-first-visible-budget-raw.v1", "version": 1,
         "reference_host": REFERENCE_HOST, "cache_state": "cold", "samples": samples("cold"),
@@ -410,6 +411,8 @@ raise SystemExit(code)
         "version": 1,
         "status": "complete",
         "recorded_at": "2026-08-28T12:00:00Z",
+        "implementation_head": implementation_binding["implementation_head"],
+        "source_blobs": implementation_binding["source_blobs"],
         "plan": {
             "document": "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md",
             "revision": PLAN_REVISION,
@@ -615,7 +618,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="pulp-a3-acceptance-") as temporary:
         root = Path(temporary)
         template = make_fixture(root)
-        write_json(root, "template.json", template)
+        generation_template = copy.deepcopy(template)
+        generation_template["implementation_head"] = "auto"
+        generation_template["source_blobs"] = "auto"
+        write_json(root, "template.json", generation_template)
         output = root / "receipt.json"
         run = subprocess.run(
             [sys.executable, str(SCRIPT_DIR / "gpu_first_visible_a3_acceptance.py"),
@@ -625,6 +631,8 @@ def main() -> int:
         )
         assert run.returncode == 0, run.stderr
         receipt = json.loads(output.read_text(encoding="utf-8"))
+        assert receipt["implementation_head"] == PULP_REVISION
+        assert receipt["source_blobs"] == template["source_blobs"]
         assert a3.validate_receipt(receipt, root) is True
 
         ratified_output = root / "ratified-by-tool.json"
@@ -733,6 +741,22 @@ def main() -> int:
         mutated = copy.deepcopy(receipt)
         mutated["unexpected"] = True
         expect_failure(mutated, root, "schema violation")
+
+        legacy = copy.deepcopy(receipt)
+        legacy.pop("implementation_head")
+        legacy.pop("source_blobs")
+        expect_failure(legacy, root, "schema violation")
+
+        mutated = copy.deepcopy(receipt)
+        first_source = sorted(mutated["source_blobs"])[0]
+        mutated["source_blobs"][first_source] = "0" * 40
+        expect_failure(mutated, root, "source blob mismatch")
+
+        mutated = copy.deepcopy(receipt)
+        unknown_head = "f" * 40
+        mutated["implementation_head"] = unknown_head
+        mutated["identity"]["pulp_revision"] = unknown_head
+        expect_failure(mutated, root, "not an ancestor of current HEAD")
 
         incomplete = copy.deepcopy(receipt)
         incomplete["status"] = "incomplete"
@@ -1057,7 +1081,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=40 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=43 "
             "checked_in_nonterminal=verified"
         )
     return 0

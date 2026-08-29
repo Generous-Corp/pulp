@@ -80,6 +80,19 @@ ARTIFACT_KEYS = {"path", "sha256"}
 GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
 BUDGET_THRESHOLD_POLICY = "max-cache-state-p95-plus-one-refresh-interval-ceil-ms-v1"
 BUDGET_THRESHOLD_SOURCE = "derived-from-bound-reference-host-raw-v1"
+A3_IMPLEMENTATION_SOURCE_PATHS = {
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
+    "docs/contracts/gpu-health-read-result-v1.schema.json",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+}
 AUDIO_PROVIDER_ENTRY_POINTS = [
     "pulp::inspect::ControlGpuHealthProvider::begin_editor_open",
     "pulp::inspect::ControlGpuHealthProvider::record_presented_frame",
@@ -92,6 +105,85 @@ AUDIO_PROVIDER_ENTRY_POINTS = [
 
 class AcceptanceError(Exception):
     """The receipt cannot substantiate its declared state."""
+
+
+def git_revision_is_ancestor(repository: Path, ancestor: str) -> bool:
+    run = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, "HEAD"],
+        cwd=repository, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, check=False,
+    )
+    return run.returncode == 0
+
+
+def implementation_source_binding(repository: Path, revision: str) -> dict[str, Any]:
+    """Bind the exact A3 implementation without hashing the receipt itself."""
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise AcceptanceError("implementation head must be an exact Git SHA")
+    if not git_revision_is_ancestor(repository, revision):
+        raise AcceptanceError("implementation head is not an ancestor of current HEAD")
+    historical = a2t_acceptance.git_blobs(
+        repository, revision, A3_IMPLEMENTATION_SOURCE_PATHS
+    )
+    head = a2t_acceptance.git_blobs(repository, "HEAD", A3_IMPLEMENTATION_SOURCE_PATHS)
+    checkout = a2t_acceptance.checkout_blobs(repository, A3_IMPLEMENTATION_SOURCE_PATHS)
+    if set(historical) != A3_IMPLEMENTATION_SOURCE_PATHS:
+        raise AcceptanceError("cannot resolve the exact A3 implementation source set")
+    for path in sorted(A3_IMPLEMENTATION_SOURCE_PATHS):
+        if head.get(path) != historical[path]:
+            raise AcceptanceError(f"current HEAD A3 implementation source drift for {path}")
+        if checkout.get(path) != historical[path]:
+            raise AcceptanceError(f"current checkout A3 implementation source drift for {path}")
+    return {"implementation_head": revision, "source_blobs": historical}
+
+
+def implementation_source_binding_errors(
+    receipt: Any, repository: Path,
+) -> list[str]:
+    if not isinstance(receipt, dict):
+        return ["A3 receipt must be an object"]
+    errors: list[str] = []
+    implementation_head = receipt.get("implementation_head")
+    pulp_revision = ((receipt.get("identity") or {}).get("pulp_revision"))
+    if (
+        not isinstance(implementation_head, str)
+        or re.fullmatch(r"[0-9a-f]{40}", implementation_head) is None
+    ):
+        errors.append("implementation_head must be an exact Git SHA")
+    elif implementation_head != pulp_revision:
+        errors.append("implementation_head does not match identity.pulp_revision")
+    elif not git_revision_is_ancestor(repository, implementation_head):
+        errors.append("implementation_head is not an ancestor of current HEAD")
+
+    declared = receipt.get("source_blobs")
+    if not isinstance(declared, dict) or set(declared) != A3_IMPLEMENTATION_SOURCE_PATHS:
+        errors.append("source_blobs does not bind the exact A3 implementation source set")
+        return errors
+    historical = (
+        a2t_acceptance.git_blobs(
+            repository, implementation_head, A3_IMPLEMENTATION_SOURCE_PATHS
+        )
+        if isinstance(implementation_head, str)
+        and re.fullmatch(r"[0-9a-f]{40}", implementation_head)
+        else {}
+    )
+    head = a2t_acceptance.git_blobs(repository, "HEAD", A3_IMPLEMENTATION_SOURCE_PATHS)
+    checkout = a2t_acceptance.checkout_blobs(repository, A3_IMPLEMENTATION_SOURCE_PATHS)
+    for path in sorted(A3_IMPLEMENTATION_SOURCE_PATHS):
+        value = declared.get(path)
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9a-f]{40}", value) is None
+        ):
+            errors.append(f"source blob {path} must be an exact Git blob SHA")
+            continue
+        if historical.get(path) != value:
+            errors.append(f"source blob mismatch for {path}")
+        if head.get(path) != value:
+            errors.append(f"current HEAD source blob drift for {path}")
+        if checkout.get(path) != value:
+            errors.append(f"current checkout source blob drift for {path}")
+    return errors
 
 
 def load_json(path: Path) -> Any:
@@ -1094,7 +1186,9 @@ def validate_b4(
         raise AcceptanceError("B4 evidence does not bind the selected disposition")
 
 
-def validate_receipt(receipt: dict[str, Any], evidence_root: Path) -> bool:
+def validate_receipt(
+    receipt: dict[str, Any], evidence_root: Path, repository: Path = ROOT,
+) -> bool:
     schema = load_json(SCHEMA_PATH)
     problems = json_schema_lite.validate(receipt, schema)
     if problems:
@@ -1106,6 +1200,9 @@ def validate_receipt(receipt: dict[str, Any], evidence_root: Path) -> bool:
         if receipt["b4"]["disposition"] is not None or receipt["b4"]["status"] != "withheld":
             raise AcceptanceError("incomplete receipt must withhold B4 disposition")
         return False
+    binding_errors = implementation_source_binding_errors(receipt, repository)
+    if binding_errors:
+        raise AcceptanceError(f"A3 implementation source binding failed: {binding_errors[0]}")
     if receipt["missing_evidence"]:
         raise AcceptanceError("complete receipt cannot list missing evidence")
     if receipt["identity"]["forge_revision"] is None:
@@ -1131,6 +1228,26 @@ def materialize_auto_hashes(value: Any, evidence_root: Path) -> Any:
         ref["sha256"] = snapshot_relative(ref["path"], evidence_root, "auto-hashed artifact").sha256
         return ref
     return {key: materialize_auto_hashes(item, evidence_root) for key, item in value.items()}
+
+
+def materialize_implementation_source_binding(
+    receipt: dict[str, Any], repository: Path,
+) -> dict[str, Any]:
+    head = receipt.get("implementation_head")
+    blobs = receipt.get("source_blobs")
+    if head != "auto" and blobs != "auto":
+        return receipt
+    if head != "auto" or blobs != "auto":
+        raise AcceptanceError(
+            "implementation_head and source_blobs must both use auto binding"
+        )
+    identity = receipt.get("identity")
+    revision = identity.get("pulp_revision") if isinstance(identity, dict) else None
+    if not isinstance(revision, str):
+        raise AcceptanceError("auto source binding requires identity.pulp_revision")
+    result = copy.deepcopy(receipt)
+    result.update(implementation_source_binding(repository, revision))
+    return result
 
 
 def atomic_write(path: Path, payload: dict[str, Any]) -> None:
@@ -1201,10 +1318,12 @@ def main(argv: list[str] | None = None) -> int:
     verify = subparsers.add_parser("verify")
     verify.add_argument("receipt", type=Path)
     verify.add_argument("--evidence-root", type=Path)
+    verify.add_argument("--repository", type=Path, default=ROOT)
     generate = subparsers.add_parser("generate")
     generate.add_argument("template", type=Path)
     generate.add_argument("--output", required=True, type=Path)
     generate.add_argument("--evidence-root", type=Path)
+    generate.add_argument("--repository", type=Path, default=ROOT)
     ratify = subparsers.add_parser("ratify-budget")
     ratify.add_argument("--cold", required=True)
     ratify.add_argument("--warm", required=True)
@@ -1229,8 +1348,11 @@ def main(argv: list[str] | None = None) -> int:
         evidence_root = (args.evidence_root or source.parent).resolve()
         receipt = load_json(source)
         if args.command == "generate":
+            receipt = materialize_implementation_source_binding(
+                receipt, args.repository.resolve()
+            )
             receipt = materialize_auto_hashes(receipt, evidence_root)
-        terminal = validate_receipt(receipt, evidence_root)
+        terminal = validate_receipt(receipt, evidence_root, args.repository.resolve())
         if args.command == "generate":
             atomic_write(args.output, receipt)
         print("A3 acceptance: PASS" if terminal else "A3 acceptance: NONTERMINAL")

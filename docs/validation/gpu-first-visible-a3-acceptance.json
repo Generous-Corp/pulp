@@ -4,6 +4,8 @@
   "version": 1,
   "status": "incomplete",
   "recorded_at": "2026-08-28T07:46:19Z",
+  "implementation_head": null,
+  "source_blobs": null,
   "plan": {
     "document": "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md",
     "revision": "641649b7e7fece6baae34380b6e719904506af22",
