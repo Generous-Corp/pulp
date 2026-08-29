@@ -1128,9 +1128,24 @@ def check_unjudged_patch_is_kept() -> tuple:
     P.reflow = lambda pch, inv: pch
     P.configure_audio = lambda pch: None
     shortfall = None
+    def module(name, inputs, outputs, tags):
+        return {"name": name, "description": "", "tags": tags,
+                "inputs": inputs, "outputs": outputs}
+
+    inv = {
+        "Fundamental": {"name": "Fundamental", "version": "2.6.6",
+                        "modules": {
+            "VCO": module("VCO", [], ["Sine"], ["Oscillator"]),
+            "VCF": module("VCF", ["Audio"], ["Lowpass"], ["Filter"]),
+        }},
+        "Core": {"name": "Core", "version": "2.6.6", "modules": {
+            "AudioInterface2": module("Audio 2", ["L", "R"], [],
+                                      ["External"]),
+        }},
+    }
     try:
         got, _, shortfall = P.generate(
-            "a plain drone, nothing clever", {}, None)
+            "a plain drone, nothing clever", inv, None)
     except SystemExit as exc:
         got = None
         why = str(exc)
@@ -1220,6 +1235,10 @@ def check_brand_targeting() -> tuple:
              {"Bogaudio": (False, False)}),
             ("use only Bogaudio modules for the oscillator",
              {"Bogaudio": (False, False)}),
+            ("use only the module from Bogaudio",
+             {"Bogaudio": (False, False)}),
+            ("use only the oscillator from Bogaudio",
+             {"Bogaudio": (False, False)}),
             ("replace the oscillator with only Bogaudio",
              {"Bogaudio": (False, False)}),
             ("only modules from CV funk and Bogaudio",
@@ -1243,11 +1262,11 @@ def check_brand_targeting() -> tuple:
             ("use Bogaudio modules only",
              {"Bogaudio": (False, True)}),
             ("do not use Valley; use Bogaudio only.",
-             {"Valley": (False, False), "Bogaudio": (False, True)}),
+             {"Bogaudio": (False, True)}),
             ("Bogaudio; Valley only.",
              {"Bogaudio": (False, False), "Valley": (False, True)}),
             ("do not use Valley, use Bogaudio only.",
-             {"Valley": (False, False), "Bogaudio": (False, True)}),
+             {"Bogaudio": (False, True)}),
             ("use Valley for the oscillator and add only one LFO",
              {"Valley": (False, False)}),
             ("use Valley for the oscillator and only one LFO from Bogaudio",
@@ -1869,9 +1888,10 @@ def check_named_is_fetched() -> tuple:
 
     def plan(prompt, inv=None, download="entitled", owned=frozenset()):
         st = dict(P.SETTINGS_DEFAULTS, auto_download=download)
+        resolution = P.resolve_maker_intent(prompt, FETCH_CAT)
+        mentions = P.brand_mentions(prompt, FETCH_CAT, resolution)
         return P.named_fetch_plan(prompt, inv or {}, FETCH_CAT, FETCH_MIDX,
-                                  P.brand_mentions(prompt, FETCH_CAT), st,
-                                  set(owned))
+                                  mentions, st, set(owned), resolution)
 
     def slugs(p):
         return [f["plugin"] for f in p["fetch"]]
@@ -1971,6 +1991,17 @@ def check_named_is_fetched() -> tuple:
     else:
         print("  ok     a module named outright fetches the plugin that has it")
 
+    # Exact module syntax cannot override the same prompt's maker veto. This is
+    # the carrier slug because the exact-fetch lane used to bypass the denylist.
+    ran += 1
+    denied_exact = plan("avoid Zephyr; use @Zephyr/Wavelet")
+    if slugs(denied_exact):
+        bad += 1
+        print(f"  WRONG  an exact module from an excluded maker was fetched: "
+              f"{slugs(denied_exact)}")
+    else:
+        print("  ok     excluded maker vetoes an exact Plugin/Module fetch")
+
     # ── the maker's own first word is not a stranger's module ────────────────
     ran += 1
     two_words = plan("@Acme Audio, a drone")
@@ -2017,9 +2048,10 @@ def check_named_is_fetched() -> tuple:
     class Stop(Exception):
         pass
 
-    def fake_ensure(prompt, inv, cat, midx, mentions):
+    def fake_ensure(prompt, inv, cat, midx, mentions, maker_resolution=None):
         seen["prompt"] = prompt
         seen["mentions"] = dict(mentions)
+        seen["maker_resolution"] = maker_resolution
         return inv, ["AcmeOne"]
 
     def fake_generate(*a, **k):
@@ -2070,6 +2102,9 @@ def check_named_is_fetched() -> tuple:
         bad += 1
         print(f"  WRONG  the maker never reached the fetch: "
               f"{seen.get('mentions')}")
+    elif seen.get("maker_resolution") is None:
+        bad += 1
+        print("  WRONG  `build` did not thread its maker resolution into fetch")
     elif not seen.get("sdk_before_model"):
         bad += 1
         print("  WRONG  generation reached the model before the Rack DSP SDK "
@@ -3456,7 +3491,7 @@ def check_default_output_write_probe() -> tuple:
             P.catalog = lambda *args, **kwargs: {}
             P.module_index = lambda *args, **kwargs: {}
             P.ensure_named_installed = (
-                lambda prompt, inv, cat, midx, mentions: (inv, []))
+                lambda prompt, inv, cat, midx, mentions, resolution: (inv, []))
             P.preflight = lambda *args, **kwargs: {
                 "ok": True, "missing": {}, "omitted": {}}
             P.generate = fake_generate
@@ -4352,6 +4387,12 @@ def main():
     intent_bad, intent_ran = test_intent_context.check_tag_context()
     maker_bad, maker_ran = test_intent_context.check_exclusive_maker()
     intent_bad += maker_bad; intent_ran += maker_ran
+    # Standalone unittest split, registered here so the required Rack contract
+    # runs it even on machines that take the pre-Rack skip below.
+    import test_maker_intent
+    maker_intent_bad, maker_intent_ran = \
+        test_maker_intent.check_maker_intent()
+    intent_bad += maker_intent_bad; intent_ran += maker_intent_ran
     acq_bad += (lb_bad + br_bad + gc_bad + sdk_bad + set_bad + fresh_bad +
                 output_bad + ship_bad + ver_bad)
     acq_ran += (lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran +
