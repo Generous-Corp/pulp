@@ -319,7 +319,8 @@ def _whole_patch_exclusive(prefix: str, suffix: str) -> bool:
         return False
     if re.match(r"^\s+(?:only\s+)?(?:once|one\b)", suffix, re.I):
         return False
-    if re.search(r"\bonly\s+(?:once\b|one\b|an?\b|the\b)", local, re.I):
+    if re.search(r"\bonly\s+(?:once\b|one\b|an?\b|the\b(?!\s+modules\b))",
+                 local, re.I):
         return False
     if re.search(r"\bonly\s+(?:one|an?|the)\s+(?!modules?\b)\w+\s+"
                  r"(?:from|by)\s*$",

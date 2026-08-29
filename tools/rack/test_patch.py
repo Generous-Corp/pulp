@@ -1128,9 +1128,24 @@ def check_unjudged_patch_is_kept() -> tuple:
     P.reflow = lambda pch, inv: pch
     P.configure_audio = lambda pch: None
     shortfall = None
+    def module(name, inputs, outputs, tags):
+        return {"name": name, "description": "", "tags": tags,
+                "inputs": inputs, "outputs": outputs}
+
+    inv = {
+        "Fundamental": {"name": "Fundamental", "version": "2.6.6",
+                        "modules": {
+            "VCO": module("VCO", [], ["Sine"], ["Oscillator"]),
+            "VCF": module("VCF", ["Audio"], ["Lowpass"], ["Filter"]),
+        }},
+        "Core": {"name": "Core", "version": "2.6.6", "modules": {
+            "AudioInterface2": module("Audio 2", ["L", "R"], [],
+                                      ["External"]),
+        }},
+    }
     try:
         got, _, shortfall = P.generate(
-            "a plain drone, nothing clever", {}, None)
+            "a plain drone, nothing clever", inv, None)
     except SystemExit as exc:
         got = None
         why = str(exc)
@@ -1219,6 +1234,10 @@ def check_brand_targeting() -> tuple:
             ("use only Bogaudio for the oscillator",
              {"Bogaudio": (False, False)}),
             ("use only Bogaudio modules for the oscillator",
+             {"Bogaudio": (False, False)}),
+            ("use only the module from Bogaudio",
+             {"Bogaudio": (False, False)}),
+            ("use only the oscillator from Bogaudio",
              {"Bogaudio": (False, False)}),
             ("replace the oscillator with only Bogaudio",
              {"Bogaudio": (False, False)}),
@@ -3472,7 +3491,7 @@ def check_default_output_write_probe() -> tuple:
             P.catalog = lambda *args, **kwargs: {}
             P.module_index = lambda *args, **kwargs: {}
             P.ensure_named_installed = (
-                lambda prompt, inv, cat, midx, mentions: (inv, []))
+                lambda prompt, inv, cat, midx, mentions, resolution: (inv, []))
             P.preflight = lambda *args, **kwargs: {
                 "ok": True, "missing": {}, "omitted": {}}
             P.generate = fake_generate
