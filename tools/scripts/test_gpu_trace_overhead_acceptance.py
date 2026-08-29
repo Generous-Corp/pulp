@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import py_compile
 import tempfile
 import unittest
 from pathlib import Path
@@ -93,6 +94,34 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 session._request("initialize")
         session.close()
         self.assertIsNotNone(session.process.returncode)
+
+    def test_mcp_partial_line_cannot_escape_the_response_deadline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "partial-mcp"
+            executable.write_text("#!/bin/sh\nprintf '{'\nsleep 10\n")
+            executable.chmod(0o755)
+            session = MODULE.McpSession(executable, {})
+            with mock.patch.object(MODULE, "ANALYSIS_TIMEOUT_SECONDS", 0.05):
+                with self.assertRaisesRegex(RuntimeError, "response exceeded"):
+                    session._request("initialize")
+            session.close()
+            self.assertIsNotNone(session.process.returncode)
+
+    def test_local_source_loader_ignores_planted_unchecked_bytecode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "planted.py"
+            cache = root / "__pycache__" / "planted.pyc"
+            cache.parent.mkdir()
+            source.write_text('origin = "bytecode"\n')
+            py_compile.compile(
+                str(source), cfile=str(cache), doraise=True,
+                invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+            )
+            source.write_text('origin = "source"\n')
+            with mock.patch.object(MODULE, "SCRIPT_DIR", root):
+                loaded = MODULE._load_local_source("planted_local_source", source.name)
+            self.assertEqual(loaded.origin, "source")
 
     def test_terminal_status_requires_the_exact_measurement_protocol(self):
         human = {"reviewer": "independent"}
@@ -497,13 +526,54 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             )
             try:
                 self.assertEqual(
-                    evidence["forced_clean_targets"], list(MODULE.BUILD_TARGETS)
+                    evidence["build_targets"], list(MODULE.BUILD_TARGETS)
                 )
+                self.assertTrue(evidence["forced_clean_before_build"])
                 graph = build / "build.ninja"
                 graph.write_text("rule substituted\n", encoding="utf-8")
                 graph.write_text(files["build.ninja"], encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "mutation event"):
                     claim.assert_current()
+            finally:
+                claim.close()
+
+    def test_render_provider_claim_retains_actual_skia_dawn_and_v8_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build = root / "build"
+            skia = root / "skia"
+            v8 = root / "v8"
+            (build / "CMakeFiles").mkdir(parents=True)
+            (skia / "build/include/include/core").mkdir(parents=True)
+            (skia / "build/mac-gpu/lib/Release").mkdir(parents=True)
+            (v8 / "include").mkdir(parents=True)
+            (v8 / "lib").mkdir(parents=True)
+            (skia / "build/include/include/core/SkCanvas.h").write_text("skia")
+            skia_library = skia / "build/mac-gpu/lib/Release/libskia.a"
+            skia_library.write_bytes(b"skia archive")
+            (skia / "build/mac-gpu/lib/Release/libdawn_combined.a").write_bytes(
+                b"dawn archive"
+            )
+            (v8 / "include/v8.h").write_text("v8")
+            runtime = v8 / "lib/libv8.dylib"
+            runtime.write_bytes(b"v8 runtime")
+            (build / "CMakeCache.txt").write_text(
+                "PULP_HAS_SKIA:INTERNAL=TRUE\n"
+                "PULP_JS_ENGINE:STRING=v8\n"
+                f"SKIA_DIR:PATH={skia}\n"
+                f"V8_RUNTIME_LIBRARY:FILEPATH={runtime}\n"
+            )
+            (build / "build.ninja").write_text(f"build x: link {skia_library}\n")
+            (build / "CMakeFiles/rules.ninja").write_text("rule link\n")
+            claim, evidence = MODULE.retain_resolved_render_provider_inputs(
+                build, "test providers"
+            )
+            try:
+                self.assertEqual(set(evidence["providers"]), {"skia_dawn", "v8"})
+                skia_library.write_bytes(b"substituted")
+                skia_library.write_bytes(b"skia archive")
+                with self.assertRaisesRegex(ValueError, "mutation event"):
+                    claim.assert_full()
             finally:
                 claim.close()
 
@@ -771,6 +841,20 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             '"gpu_evidence_id", value);'
         )
         self.assertTrue(MODULE.is_product_producer_source(source))
+        wrapper = (
+            '#define RECORD_GPU_STAGE(name) \\\n'
+            '  PULP_TRACE_SCOPE_NAMED("gpu", name)\n'
+        )
+        with self.assertRaisesRegex(ValueError, "literal event name"):
+            MODULE.product_producer_signatures(wrapper)
+        literal_wrapper = (
+            '#define RECORD_GPU_SUBMIT() \\\n'
+            '  PULP_TRACE_SCOPE_NAMED("render", "gpu_submit")\n'
+        )
+        self.assertEqual(
+            MODULE.product_producer_signatures(literal_wrapper),
+            ('PULP_TRACE_SCOPE_NAMED("render", "gpu_submit");',),
+        )
         self.assertTrue(
             MODULE.is_product_producer_source(
                 'PULP_TRACE_SCOPE_NAMED("gpu", "pipeline_compile");'

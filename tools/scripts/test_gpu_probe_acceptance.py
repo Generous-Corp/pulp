@@ -57,6 +57,26 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
         finally:
             claim.close()
 
+    def test_mcp_partial_line_cannot_escape_the_response_deadline(self):
+        class Claim:
+            @staticmethod
+            def assert_current():
+                return None
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "partial-mcp"
+            executable.write_text("#!/bin/sh\nprintf '{'\nsleep 10\n")
+            executable.chmod(0o755)
+            session = RECORDER.McpSession(executable, root, {}, Claim())
+            with mock.patch.object(RECORDER, "MCP_RESPONSE_TIMEOUT_SECONDS", 0.05):
+                with self.assertRaisesRegex(
+                    RECORDER.AcceptanceError, "response exceeded"
+                ):
+                    session.request("initialize")
+            session.close()
+            self.assertIsNotNone(session.process.returncode)
+
     def v2_fixture(self, directory: Path) -> dict:
         for group in RECORDER.RECIPES:
             for suffix in ("run1", "run2", "negative"):
@@ -91,6 +111,39 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             *(f"{group}-{suffix}.json" for group in RECORDER.RECIPES
               for suffix in ("run1", "run2", "negative")),
             "mcp-transcript.jsonl", "forge-modular-screenshot.png", "forge-gpu-doctor.json",
+        }
+        tree_claim = {
+            "method": "retained-complete-tree-vnode-and-descriptor-v1",
+            "file_count": 3,
+            "bytes": 3,
+            "manifest_sha256": "a" * 64,
+        }
+        providers = {
+            "skia_dawn": {
+                "root_role": "resolved-skia-dawn-provider-root",
+                "resolution": "CMake SKIA_DIR or exact generated Ninja archive path",
+                "tree_claim": tree_claim,
+                "required_members": [
+                    {"path": "lib/libskia.a", "git_blob_sha1": "1" * 40, "bytes": 1},
+                    {"path": "lib/libdawn_combined.a", "git_blob_sha1": "2" * 40, "bytes": 1},
+                ],
+            },
+            "v8": {
+                "root_role": "resolved-v8-provider-root",
+                "resolution": "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root",
+                "tree_claim": tree_claim,
+                "required_members": [
+                    {"path": "include/v8.h", "git_blob_sha1": "3" * 40, "bytes": 1},
+                    {"path": "lib/libv8.dylib", "git_blob_sha1": "4" * 40, "bytes": 1},
+                ],
+            },
+        }
+        render_provider_claim = {
+            "method": "retained-resolved-render-provider-trees-v1",
+            "providers": providers,
+            "manifest_sha256": hashlib.sha256(
+                json.dumps(providers, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
         }
         receipt = {
             "schema": "pulp.gpu-probe-acceptance-receipt.v2",
@@ -135,10 +188,12 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     "method": "regenerated-cmake-ninja-input-descriptor-v1",
                     "file_count": 3,
                     "manifest_sha256": "9" * 64,
-                    "forced_clean_targets": [
+                    "build_targets": [
                         "pulp-rust-cli", "pulp-cli", "pulp-mcp"
                     ],
+                    "forced_clean_before_build": True,
                 },
+                "render_provider_input_claim": render_provider_claim,
                 "feature_contract": {
                     "PULP_ENABLE_GPU": "ON", "PULP_ENABLE_SCENE3D": "ON",
                     "PULP_ENABLE_THREEJS_RUNTIME": "ON", "PULP_ENABLE_JS": "ON",
@@ -181,6 +236,14 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     "regular_or_symlink_files": 1,
                     "retained_directories": 1,
                 },
+                "pulp_sdk_tree_claim": tree_claim,
+                "build_input_claim": {
+                    "method": "regenerated-cmake-ninja-input-descriptor-v1",
+                    "file_count": 3,
+                    "manifest_sha256": "b" * 64,
+                    "build_targets": ["ForgeModular_Standalone"],
+                    "forced_clean_before_build": False,
+                },
                 "build_directory_claim_method": (
                     "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
                 ),
@@ -197,12 +260,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 "cmake_cache_sha256": "4" * 64,
                 "bundle_build_info_sha256": "5" * 64,
                 "bundle_binary_sha256": "6" * 64,
-                "bundle_tree_claim": {
-                    "method": "retained-complete-tree-vnode-and-descriptor-v1",
-                    "file_count": 3,
-                    "bytes": 3,
-                    "manifest_sha256": "a" * 64,
-                },
+                "bundle_tree_claim": tree_claim,
                 "screenshot_metrics": VERIFIER._png_metrics(screenshot),
             },
             "additional_pulp_path_canaries": {
@@ -328,7 +386,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             (
                 lambda receipt: receipt["install_provenance"][
                     "build_input_claim"
-                ].update({"forced_clean_targets": []}),
+                ].update({"build_targets": []}),
                 "forced clean",
             ),
             (
@@ -336,6 +394,24 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     "source_tree_claim"
                 ),
                 "Forge source was not retained",
+            ),
+            (
+                lambda receipt: receipt["install_provenance"].pop(
+                    "render_provider_input_claim"
+                ),
+                "render providers",
+            ),
+            (
+                lambda receipt: receipt["forge_downstream"].pop(
+                    "pulp_sdk_tree_claim"
+                ),
+                "consumed Pulp SDK",
+            ),
+            (
+                lambda receipt: receipt["forge_downstream"].pop(
+                    "build_input_claim"
+                ),
+                "Forge build inputs",
             ),
             (
                 lambda receipt: receipt["forge_downstream"].pop(

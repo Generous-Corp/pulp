@@ -18,14 +18,36 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
-import gpu_trace_overhead_acceptance as provenance
-import verify_gpu_probe_acceptance as verifier
+
+
+def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
+    """Load a trusted sibling from source bytes without consulting ``.pyc``."""
+    path = SCRIPT_DIR / filename
+    data = path.read_bytes()
+    if len(data) > 2 * 1024 * 1024:
+        raise RuntimeError(f"local source module is unbounded: {filename}")
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    exec(compile(data, str(path), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+_load_local_source("json_schema_lite", "json_schema_lite.py")
+_load_local_source("sdk_capability_handoff", "sdk_capability_handoff.py")
+_load_local_source("sdk_provenance", "sdk_provenance.py")
+provenance = _load_local_source(
+    "gpu_trace_overhead_acceptance", "gpu_trace_overhead_acceptance.py"
+)
+verifier = _load_local_source(
+    "verify_gpu_probe_acceptance", "verify_gpu_probe_acceptance.py"
+)
 
 
 RECIPES = {
@@ -40,6 +62,7 @@ ADDITIONAL_PULP_PATH_CANARIES = {
 }
 SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 MAX_COMMAND_OUTPUT = 4 * 1024 * 1024
+MCP_RESPONSE_TIMEOUT_SECONDS = 310
 BINARY_PATHS = {
     "installed_rust_cli": (Path("pulp"), Path("bin/pulp")),
     "installed_cpp_delegate": (
@@ -570,12 +593,14 @@ def refresh_install(
 ) -> tuple[
     dict[str, Any], dict[str, dict[str, Any]], RetainedDirectoryClaim,
     provenance.RetainedTreeClaim, provenance.RetainedTreeClaim,
+    provenance.RetainedClaimSet,
 ]:
     require_release_pulp_build(build_dir, repository)
     retained_claim = claim_fresh_directory(prefix, "install-prefix")
     prefix_claim = retained_claim.identity
     source_claim: provenance.RetainedTreeClaim | None = None
     build_input_claim: provenance.RetainedTreeClaim | None = None
+    provider_input_claim: provenance.RetainedClaimSet | None = None
     try:
         revision = provenance._git_text(repository, "rev-parse", "HEAD")
         source_claim, source_tree_evidence = provenance.retain_git_source_tree(
@@ -600,8 +625,16 @@ def refresh_install(
             )
         except ValueError as error:
             raise AcceptanceError(str(error)) from error
+        try:
+            provider_input_claim, provider_input_evidence = (
+                provenance.retain_resolved_render_provider_inputs(
+                    build_dir, "Pulp resolved render providers"
+                )
+            )
+        except ValueError as error:
+            raise AcceptanceError(str(error)) from error
         compilation_claim = provenance.CombinedClaims(
-            retained_claim, source_claim, build_input_claim
+            retained_claim, source_claim, build_input_claim, provider_input_claim
         )
         clean = run_bounded(
             ["cmake", "--build", str(build_dir), "--target", "clean"],
@@ -642,6 +675,7 @@ def refresh_install(
             raise AcceptanceError(f"Pulp CLI/MCP refresh failed: {build.stderr[-2000:]}")
         source_claim.assert_full()
         build_input_claim.assert_full()
+        provider_input_claim.assert_full()
         cache_digest = retained_claim.bind_file(
             build_dir / "CMakeCache.txt", "refreshed CMake cache"
         )
@@ -679,6 +713,7 @@ def refresh_install(
             },
             "source_tree_claim": source_tree_evidence,
             "build_input_claim": build_input_evidence,
+            "render_provider_input_claim": provider_input_evidence,
             "build_info": installed_identity["build_info"],
             "build_info_sha256": build_info_digest,
             "install_prefix_initial_state": "absent-and-atomically-claimed",
@@ -687,8 +722,11 @@ def refresh_install(
             ),
             "install_prefix_claim": prefix_claim,
             "build_install_binary_identity": "pass",
-        }, binaries, retained_claim, source_claim, build_input_claim)
+        }, binaries, retained_claim, source_claim, build_input_claim,
+            provider_input_claim)
     except BaseException:
+        if provider_input_claim is not None:
+            provider_input_claim.close()
         if build_input_claim is not None:
             build_input_claim.close()
         if source_claim is not None:
@@ -785,6 +823,18 @@ class McpSession:
         self.directory_claim.assert_current()
         self.next_id = 1
         self.transcript: list[dict[str, Any]] = []
+        self._stdout_buffer = bytearray()
+        self._terminated_for_timeout = False
+
+    def _terminate_bounded(self) -> None:
+        if self.process.poll() is not None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
 
     def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         self.directory_claim.assert_current()
@@ -796,13 +846,23 @@ class McpSession:
         assert self.process.stdin is not None and self.process.stdout is not None
         self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
         self.process.stdin.flush()
-        ready, _, _ = select.select([self.process.stdout], [], [], 310)
-        if not ready:
-            raise AcceptanceError("installed MCP response exceeded five minutes")
-        line = self.process.stdout.readline()
-        if not line or len(line.encode()) > 1024 * 1024:
-            raise AcceptanceError("installed MCP returned no bounded response")
-        response = json.loads(line)
+        try:
+            line = provenance.read_bounded_process_line(
+                self.process,
+                self.process.stdout,
+                self._stdout_buffer,
+                timeout_seconds=MCP_RESPONSE_TIMEOUT_SECONDS,
+                maximum_bytes=provenance.MCP_RESPONSE_LIMIT_BYTES,
+                label="installed MCP response",
+            )
+        except (TimeoutError, ValueError) as error:
+            self._terminated_for_timeout = isinstance(error, TimeoutError)
+            self._terminate_bounded()
+            raise AcceptanceError(str(error)) from error
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise AcceptanceError("installed MCP returned malformed JSON") from error
         self.directory_claim.assert_current()
         if response.get("id") != request_id or not isinstance(response.get("result"), dict):
             raise AcceptanceError("installed MCP returned an incoherent response")
@@ -849,10 +909,16 @@ class McpSession:
         try:
             self.process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            self.process.terminate()
-            self.process.wait(timeout=5)
+            self._terminate_bounded()
         stderr = self.process.stderr.read() if self.process.stderr else ""
-        if self.process.returncode != 0 or len(stderr.encode()) > MAX_COMMAND_OUTPUT:
+        if self.process.stdout:
+            self.process.stdout.close()
+        if self.process.stderr:
+            self.process.stderr.close()
+        if (
+            (self.process.returncode != 0 and not self._terminated_for_timeout)
+            or len(stderr.encode()) > MAX_COMMAND_OUTPUT
+        ):
             raise AcceptanceError(f"installed MCP exited abnormally: {stderr[-1000:]}")
         self.directory_claim.assert_current()
 
@@ -925,6 +991,8 @@ def prove_forge(
     identity = forge_source_identity(repository, pulp_revision)
     source_claim: provenance.RetainedTreeClaim | None = None
     forge_build_claim: RetainedDirectoryClaim | None = None
+    sdk_input_claim: provenance.RetainedTreeClaim | None = None
+    forge_input_claim: provenance.RetainedTreeClaim | None = None
     bundle_claim: provenance.RetainedTreeClaim | None = None
     try:
         try:
@@ -938,11 +1006,21 @@ def prove_forge(
             raise AcceptanceError(str(error)) from error
         if source_evidence["excluded_gitlinks"]:
             raise AcceptanceError("Forge source contains unsealed Git links")
+        try:
+            provenance._raise_descriptor_limit(262144)
+            sdk_input_claim, sdk_input_evidence = provenance.retain_current_regular_tree(
+                prefix,
+                "Forge consumed installed Pulp SDK",
+                maximum_files=65536,
+                maximum_bytes=16 * 1024 * 1024 * 1024,
+            )
+        except ValueError as error:
+            raise AcceptanceError(str(error)) from error
         forge_build_claim = claim_fresh_directory(
             build_dir, "Forge build directory"
         )
         configure_claim = provenance.CombinedClaims(
-            directory_claim, source_claim, forge_build_claim
+            directory_claim, source_claim, sdk_input_claim, forge_build_claim
         )
         expected_pulp_dir = (prefix / "lib/cmake/Pulp").resolve()
         configure = run_bounded(
@@ -979,19 +1057,35 @@ def prove_forge(
             raise AcceptanceError(
                 "Forge build does not consume the accepted Pulp install"
             )
+        try:
+            forge_input_claim, forge_input_evidence = (
+                provenance.retain_generated_build_inputs(
+                    build_dir, "Forge regenerated build inputs",
+                    targets=("ForgeModular_Standalone",),
+                    forced_clean_before_build=False,
+                )
+            )
+        except ValueError as error:
+            raise AcceptanceError(str(error)) from error
+        build_claim = provenance.CombinedClaims(
+            directory_claim, source_claim, sdk_input_claim,
+            forge_build_claim, forge_input_claim,
+        )
         build = run_bounded(
             [
                 "cmake", "--build", str(build_dir), "--target",
                 "ForgeModular_Standalone", "--parallel",
             ],
             cwd=repository, environment=build_environment, timeout=3600,
-            directory_claim=configure_claim,
+            directory_claim=build_claim,
         )
         if build.returncode != 0:
             raise AcceptanceError(
                 f"Forge Modular refresh failed: {build.stderr[-2000:]}"
             )
         source_claim.assert_full()
+        sdk_input_claim.assert_full()
+        forge_input_claim.assert_full()
         forge_build_claim.assert_current()
         stamps: list[tuple[Path, dict[str, str], int]] = []
         candidates = list(build_dir.rglob("FORGE_BUILD_INFO"))
@@ -1053,7 +1147,8 @@ def prove_forge(
         ):
             raise AcceptanceError("Forge bundle stamp differs from its retained claim")
         proof_claim = provenance.CombinedClaims(
-            directory_claim, source_claim, forge_build_claim, bundle_claim
+            directory_claim, source_claim, sdk_input_claim,
+            forge_build_claim, forge_input_claim, bundle_claim
         )
         signed = run_bounded(
             ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(bundle)],
@@ -1095,6 +1190,8 @@ def prove_forge(
             json.dumps(doctor_payload, indent=2, sort_keys=True) + "\n"
         )
         source_claim.assert_full()
+        sdk_input_claim.assert_full()
+        forge_input_claim.assert_full()
         forge_build_claim.assert_current()
         bundle_claim.assert_full()
         if forge_source_identity(repository, pulp_revision) != identity:
@@ -1104,6 +1201,8 @@ def prove_forge(
         return {
             **identity,
             "source_tree_claim": source_evidence,
+            "pulp_sdk_tree_claim": sdk_input_evidence,
+            "build_input_claim": forge_input_evidence,
             "build_directory_claim_method": (
                 "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
             ),
@@ -1122,8 +1221,12 @@ def prove_forge(
     finally:
         if bundle_claim is not None:
             bundle_claim.close()
+        if forge_input_claim is not None:
+            forge_input_claim.close()
         if forge_build_claim is not None:
             forge_build_claim.close()
+        if sdk_input_claim is not None:
+            sdk_input_claim.close()
         if source_claim is not None:
             source_claim.close()
 
@@ -1511,10 +1614,11 @@ def main(argv: list[str] | None = None) -> int:
         runtime_environment["PATH"] = SYSTEM_PATH
         (
             install_provenance, binaries, install_claim,
-            source_tree_claim, build_input_claim,
+            source_tree_claim, build_input_claim, provider_input_claim,
         ) = refresh_install(repository, build_dir, prefix, build_environment)
         execution_claim = provenance.CombinedClaims(
-            install_claim, source_tree_claim, build_input_claim
+            install_claim, source_tree_claim, build_input_claim,
+            provider_input_claim,
         )
         cli = prefix / "bin/pulp"
         mcp = prefix / "bin/pulp-mcp"
@@ -1640,7 +1744,9 @@ def main(argv: list[str] | None = None) -> int:
             install_claim.assert_current()
             source_tree_claim.assert_full()
             build_input_claim.assert_full()
+            provider_input_claim.assert_full()
             install_claim.close()
+            provider_input_claim.close()
             build_input_claim.close()
             source_tree_claim.close()
             output_parent_claim.assert_current()

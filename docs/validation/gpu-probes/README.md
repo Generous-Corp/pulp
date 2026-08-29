@@ -29,7 +29,9 @@ not create or promote a receipt during an implementation turn.
   binds its no-follow created-inode identity through the final proof. Before
   reconfiguration it retains every tracked Pulp regular-file/symlink inode and
   expected Git blob. It then reconfigures the external build, retains the
-  regenerated CMake/Ninja/configure-time graph, forces a CMake clean, removes
+  regenerated CMake/Ninja/configure-time graph, resolves and retains the
+  complete selected Skia/Dawn and V8 provider trees (including both GPU
+  archives, V8 headers, and the V8 runtime), forces a CMake clean, removes
   the Rust Cargo target cache, and requires all three measured outputs absent
   before rebuilding. Those exact source and build-input descriptors remain
   live through install, all CLI/MCP recipes, Forge proof, self-verification,
@@ -49,8 +51,10 @@ not create or promote a receipt during an implementation turn.
   the plan-required `PULP_SDK_REF` overlay containing the final Pulp SHA; it
   must be unstaged, with no untracked or other modified files. The recorder
   retains the complete tracked Forge tree with that one exact overlay, rejects
-  Git links, atomically claims a fresh Forge build inode, parses the retained
-  CMake cache descriptor, and retains the build-info stamp plus every regular
+  Git links, retains every file in the installed Pulp SDK before Forge
+  configure, atomically claims a fresh Forge build inode, parses the retained
+  CMake cache descriptor, retains the regenerated Forge CMake/Ninja input graph,
+  and retains the build-info stamp plus every regular
   file/symlink in the completed app bundle through codesign, screenshot, and
   Forge-cwd doctor execution.
 - A not-yet-created Forge build path outside every checkout. The recorder

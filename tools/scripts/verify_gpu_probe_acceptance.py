@@ -11,9 +11,26 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import types
 from typing import Any
 
-import json_schema_lite
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
+    path = SCRIPT_DIR / filename
+    data = path.read_bytes()
+    if len(data) > 2 * 1024 * 1024:
+        raise RuntimeError(f"local source module is unbounded: {filename}")
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    exec(compile(data, str(path), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+json_schema_lite = _load_local_source("json_schema_lite", "json_schema_lite.py")
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,6 +96,7 @@ EXPECTED_SOURCE_BLOBS_V2 = EXPECTED_SOURCE_BLOBS | {
     "docs/contracts/gpu-health-result-v1.schema.json",
     "docs/status/gpu-recipes.schema.json",
     "docs/status/gpu-recipes.yaml",
+    "docs/validation/gpu-probes/README.md",
     "experimental/pulp-rs/CMakeLists.txt",
     "experimental/pulp-rs/src/fallthrough.rs",
     "experimental/pulp-rs/src/main.rs",
@@ -231,8 +249,11 @@ def _verify_tree_claim(
         errors.append(f"{label} source was not retained as its exact Git tree")
 
 
-def _verify_build_input_claim(value: Any, errors: list[str]) -> None:
-    claim = _mapping(value, "build_input_claim", errors)
+def _verify_build_input_claim(
+    value: Any, errors: list[str], *, targets: list[str], label: str,
+    forced_clean_before_build: bool,
+) -> None:
+    claim = _mapping(value, f"{label} build_input_claim", errors)
     if (
         claim.get("method") != "regenerated-cmake-ninja-input-descriptor-v1"
         or not isinstance(claim.get("file_count"), int)
@@ -240,10 +261,68 @@ def _verify_build_input_claim(value: Any, errors: list[str]) -> None:
         or claim["file_count"] < 3
         or not isinstance(claim.get("manifest_sha256"), str)
         or SHA256.fullmatch(claim["manifest_sha256"]) is None
-        or claim.get("forced_clean_targets")
-        != ["pulp-rust-cli", "pulp-cli", "pulp-mcp"]
+        or claim.get("build_targets") != targets
+        or claim.get("forced_clean_before_build") is not forced_clean_before_build
     ):
-        errors.append("Pulp build inputs were not regenerated, retained, and forced clean")
+        errors.append(
+            f"{label} build inputs were not regenerated, retained, and forced clean"
+        )
+
+
+def _verify_complete_tree_claim(value: Any, label: str, errors: list[str]) -> None:
+    claim = _mapping(value, f"{label} tree claim", errors)
+    if (
+        claim.get("method") != "retained-complete-tree-vnode-and-descriptor-v1"
+        or not isinstance(claim.get("file_count"), int)
+        or isinstance(claim.get("file_count"), bool)
+        or claim["file_count"] <= 0
+        or not isinstance(claim.get("bytes"), int)
+        or isinstance(claim.get("bytes"), bool)
+        or claim["bytes"] <= 0
+        or SHA256.fullmatch(str(claim.get("manifest_sha256", ""))) is None
+    ):
+        errors.append(f"{label} was not retained as one complete exact tree")
+
+
+def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
+    claim = _mapping(value, "render_provider_input_claim", errors)
+    providers = _mapping(claim.get("providers"), "render providers", errors)
+    if (
+        claim.get("method") != "retained-resolved-render-provider-trees-v1"
+        or set(providers) != {"skia_dawn", "v8"}
+        or SHA256.fullmatch(str(claim.get("manifest_sha256", ""))) is None
+        or claim.get("manifest_sha256") != hashlib.sha256(
+            json.dumps(providers, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    ):
+        errors.append("Pulp render providers lack one exact sealed provider manifest")
+        return
+    for role, row_value in providers.items():
+        row = _mapping(row_value, f"render provider {role}", errors)
+        _verify_complete_tree_claim(row.get("tree_claim"), f"render provider {role}", errors)
+        members = row.get("required_members")
+        if not isinstance(members, list) or not members or any(
+            not isinstance(member, dict)
+            or not isinstance(member.get("path"), str)
+            or GIT_SHA.fullmatch(str(member.get("git_blob_sha1", ""))) is None
+            or not isinstance(member.get("bytes"), int)
+            or isinstance(member.get("bytes"), bool)
+            or member["bytes"] <= 0
+            for member in members
+        ):
+            errors.append(f"render provider {role} lacks exact required members")
+            continue
+        names = {Path(member["path"]).name for member in members}
+        if role == "skia_dawn" and not (
+            names & {"libskia.a", "skia.lib"}
+            and names & {"libdawn_combined.a", "dawn_combined.lib"}
+        ):
+            errors.append("render provider skia_dawn lacks both consumed archives")
+        if role == "v8" and not (
+            any(member["path"] == "include/v8.h" for member in members)
+            and names & {"libv8.dylib", "libv8.so", "v8.dll"}
+        ):
+            errors.append("render provider v8 lacks its consumed headers/runtime")
 
 
 def _png_metrics(path: Path) -> dict[str, int]:
@@ -419,7 +498,12 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         != _expected_gitlinks(ROOT, revision)
     ):
         errors.append("Pulp retained source claim omits or invents Git links")
-    _verify_build_input_claim(install.get("build_input_claim"), errors)
+    _verify_build_input_claim(
+        install.get("build_input_claim"), errors,
+        targets=["pulp-rust-cli", "pulp-cli", "pulp-mcp"], label="Pulp",
+        forced_clean_before_build=True,
+    )
+    _verify_render_provider_claim(install.get("render_provider_input_claim"), errors)
     features = _mapping(install.get("feature_contract"), "install feature_contract", errors)
     expected_features = {
         "PULP_ENABLE_GPU": "ON", "PULP_ENABLE_SCENE3D": "ON",
@@ -472,6 +556,14 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         "excluded_gitlinks"
     ) != {}:
         errors.append("Forge retained source claim excludes Git links")
+    _verify_complete_tree_claim(
+        forge.get("pulp_sdk_tree_claim"), "Forge consumed Pulp SDK", errors
+    )
+    _verify_build_input_claim(
+        forge.get("build_input_claim"), errors,
+        targets=["ForgeModular_Standalone"], label="Forge",
+        forced_clean_before_build=False,
+    )
     if forge.get("build_directory_claim_method") != (
         "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
     ):
@@ -488,20 +580,9 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         )
     ):
         errors.append("Forge build directory lacks its retained inode claim")
-    bundle_tree = forge.get("bundle_tree_claim")
-    if (
-        not isinstance(bundle_tree, dict)
-        or bundle_tree.get("method")
-        != "retained-complete-tree-vnode-and-descriptor-v1"
-        or not isinstance(bundle_tree.get("file_count"), int)
-        or isinstance(bundle_tree.get("file_count"), bool)
-        or bundle_tree["file_count"] <= 0
-        or not isinstance(bundle_tree.get("bytes"), int)
-        or isinstance(bundle_tree.get("bytes"), bool)
-        or bundle_tree["bytes"] <= 0
-        or not SHA256.fullmatch(str(bundle_tree.get("manifest_sha256", "")))
-    ):
-        errors.append("Forge bundle was not retained as one complete exact tree")
+    _verify_complete_tree_claim(
+        forge.get("bundle_tree_claim"), "Forge bundle", errors
+    )
     stamp = _mapping(forge.get("bundle_build_info"), "Forge bundle build info", errors)
     if (
         stamp.get("product") != "Forge Modular"

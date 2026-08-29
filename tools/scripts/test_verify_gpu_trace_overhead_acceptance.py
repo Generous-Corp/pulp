@@ -81,8 +81,50 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             self.__class__._scope_key = head
             self.__class__._scope_inventory = CONTRACT.a2t_scope_inventory(ROOT, head)
         scope_inventory = copy.deepcopy(self.__class__._scope_inventory)
+        human, human_source = CONTRACT.bind_tracked_human_review_receipt(
+            ROOT,
+            head,
+            ROOT / "docs/validation/gpu-trace-overhead/"
+            "m3-a2t-offline-analysis-20260828.json",
+            question="gpu-startup",
+            trace_sha256=trace_digest,
+            semantic_result=startup,
+        )
+        provider_tree = {
+            "method": "retained-complete-tree-vnode-and-descriptor-v1",
+            "file_count": 3,
+            "bytes": 3,
+            "manifest_sha256": "7" * 64,
+        }
+        providers = {
+            "skia_dawn": {
+                "root_role": "resolved-skia-dawn-provider-root",
+                "resolution": "CMake SKIA_DIR or exact generated Ninja archive path",
+                "tree_claim": provider_tree,
+                "required_members": [
+                    {"path": "lib/libskia.a", "git_blob_sha1": "1" * 40, "bytes": 1},
+                    {"path": "lib/libdawn_combined.a", "git_blob_sha1": "2" * 40, "bytes": 1},
+                ],
+            },
+            "v8": {
+                "root_role": "resolved-v8-provider-root",
+                "resolution": "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root",
+                "tree_claim": provider_tree,
+                "required_members": [
+                    {"path": "include/v8.h", "git_blob_sha1": "3" * 40, "bytes": 1},
+                    {"path": "lib/libv8.dylib", "git_blob_sha1": "4" * 40, "bytes": 1},
+                ],
+            },
+        }
+        provider_claim = {
+            "method": "retained-resolved-render-provider-trees-v1",
+            "providers": providers,
+            "manifest_sha256": CONTRACT.hashlib.sha256(
+                json.dumps(providers, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+        }
         return {
-            "schema": "pulp.gpu-trace-overhead-acceptance.v2",
+            "schema": "pulp.gpu-trace-overhead-acceptance.v3",
             "source_revision": head,
             "mcp_source_revision": head,
             "integration_head": binding["integration_head"],
@@ -126,8 +168,10 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                         "method": "regenerated-cmake-ninja-input-descriptor-v1",
                         "file_count": 3,
                         "manifest_sha256": "6" * 64,
-                        "forced_clean_targets": list(CONTRACT.BUILD_TARGETS),
+                        "build_targets": list(CONTRACT.BUILD_TARGETS),
+                        "forced_clean_before_build": True,
                     },
+                    "render_provider_input_claim": provider_claim,
                     "binaries": {
                         "pulp": {
                             "installed_role": "installed-prefix/bin/pulp",
@@ -229,21 +273,8 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             ]},
             "fixture_replay": replay,
             "semantic_result": startup,
-            "human_perfetto_ui_correlation": {
-                "artifact_sha256": trace_digest,
-                "reviewer": "independent human reviewer",
-                "reviewed_utc": "2026-08-29T00:00:00Z",
-                "ui_revision": "v58.3-example",
-                "delivery": "official localhost embedding protocol; localOnly",
-                "observed_spans": [
-                    {"name": "gpu_pipeline_prepare", "duration_ns": 1_800_000,
-                     "gpu_evidence_id": evidence_id, "frame_index": 0,
-                     "sequence": 1, "health_state": "healthy"},
-                    {"name": "gpu_resource_upload", "duration_ns": 900_000,
-                     "gpu_evidence_id": evidence_id, "frame_index": 0,
-                     "sequence": 2, "health_state": "healthy"},
-                ],
-            },
+            "human_perfetto_ui_correlation": human,
+            "human_perfetto_ui_review_source": human_source,
             "acceptance": {
                 "terminal_status": "pass", "semantic_parity": "pass",
                 "same_installed_prefix": "pass",
@@ -330,9 +361,16 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         receipt = self.terminal_receipt()
         receipt["installed_source_identity"]["build_provenance"][
             "build_input_claim"
-        ]["forced_clean_targets"] = []
+        ]["build_targets"] = []
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("forced-clean build inputs" in error for error in errors))
+
+        receipt = self.terminal_receipt()
+        receipt["installed_source_identity"]["build_provenance"][
+            "render_provider_input_claim"
+        ]["providers"]["v8"]["required_members"].pop()
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("V8 provider" in error for error in errors))
 
     def test_no_producer_disposition_is_recomputed_from_git(self):
         receipt = self.terminal_receipt()
@@ -368,6 +406,17 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         receipt["human_perfetto_ui_correlation"]["observed_spans"][0]["duration_ns"] = 1
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("human Perfetto UI correlation" in error for error in errors))
+
+    def test_terminal_human_review_cannot_self_authenticate(self):
+        receipt = self.terminal_receipt()
+        del receipt["human_perfetto_ui_review_source"]
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("human Perfetto UI correlation" in error for error in errors))
+
+        receipt = self.terminal_receipt()
+        receipt["human_perfetto_ui_review_source"]["git_blob_sha1"] = "0" * 40
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("immutable Git provenance" in error for error in errors))
 
     def test_sample_count_and_order_mutations_fail_closed(self):
         receipt = self.terminal_receipt()

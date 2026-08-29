@@ -42,7 +42,10 @@ CMake cache, Ninja graph, CMake modules, and configure-time headers, runs a
 forced CMake clean, removes the Rust Cargo target cache, and requires all three
 measured outputs to be absent before rebuilding them. The source and generated
 input descriptors remain live across clean, build, install, replay, timing,
-and publication. Immediately after the build it retains all three exact
+and publication. It also resolves and retains the complete selected Skia/Dawn
+and V8 provider trees (including the exact Skia/Dawn archives, V8 headers, and
+V8 runtime) before the clean build, and keeps those provider descriptors live
+through every measured launch. Immediately after the build it retains all three exact
 build-output inodes before installation, then retains the installed build
 stamp, CLI, delegate, MCP, trace, and trace-processor inodes through final
 publication. Every claim is rehashed and sealed with macOS vnode mutation
@@ -175,9 +178,14 @@ revision, and observed span details; an executable open command is not itself
 visual inspection.
 
 Regenerating analyzer timings does not repeat or silently manufacture that
-visual acceptance. For a `gpu-startup` rerun, pass the prior accepted A2T
-receipt with `--prior-human-review-receipt`. The generator carries its
-`human_perfetto_ui_correlation` root object forward verbatim and records
+visual acceptance. For a `gpu-startup` rerun, pass a prior accepted A2T receipt
+that is already tracked below `docs/validation/gpu-trace-overhead/` with
+`--prior-human-review-receipt`. The generator requires the checkout bytes to be
+the exact Git blob at the final source revision, requires that same blob to have
+existed unchanged in a direct parent, records its path/blob/SHA-256/byte-count
+provenance, and carries its `human_perfetto_ui_correlation` root object forward
+verbatim. The terminal verifier independently re-reads that prior Git blob; it
+never treats the new receipt's own fields as review authority. It records
 `acceptance.human_perfetto_ui_correlation: pass` only when the prior receipt is
 also a `gpu-startup` receipt with passing human acceptance and its trace
 artifact SHA-256 exactly matches the trace being measured. A missing object,
@@ -196,9 +204,11 @@ python3 tools/scripts/verify_gpu_trace_overhead_acceptance.py \
 
 `--allow-nonterminal` exists only for inspecting an intentionally incomplete
 draft. It must not be used by a checked-in final acceptance gate. The existing
-`m3-a2t-offline-analysis-20260828.json` is historical: it predates v2 installed
-provenance, complete fixture replay, expanded semantic parity, and exact
-same-artifact contributor correlation, so it is not terminal evidence.
+`m3-a2t-offline-analysis-20260828.json` is historical: it predates v3 installed
+provider provenance, complete fixture replay, expanded semantic parity, and
+exact same-artifact contributor correlation, so it is not terminal evidence.
+Its independently published human-review object may still be inherited through
+the immutable tracked-blob rule above.
 
 Perfetto is a localization tool, not an oracle for every platform state
 machine. A real resize investigation demonstrated the correct evidence chain:

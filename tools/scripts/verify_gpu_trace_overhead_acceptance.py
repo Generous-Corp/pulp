@@ -9,10 +9,32 @@ import json
 import re
 import subprocess
 import sys
+import types
 from pathlib import Path
 from typing import Any
 
-import gpu_trace_overhead_acceptance as contract
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
+    path = SCRIPT_DIR / filename
+    data = path.read_bytes()
+    if len(data) > 2 * 1024 * 1024:
+        raise RuntimeError(f"local source module is unbounded: {filename}")
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    exec(compile(data, str(path), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+_load_local_source("json_schema_lite", "json_schema_lite.py")
+_load_local_source("sdk_capability_handoff", "sdk_capability_handoff.py")
+_load_local_source("sdk_provenance", "sdk_provenance.py")
+contract = _load_local_source(
+    "gpu_trace_overhead_acceptance", "gpu_trace_overhead_acceptance.py"
+)
 
 
 EXPECTED_PLAN_REVISION = "641649b7e7fece6baae34380b6e719904506af22"
@@ -198,10 +220,71 @@ def _verify_installed_build_provenance(
         or not contract.valid_lower_hex(
             str(build_input_claim.get("manifest_sha256", "")), 64
         )
-        or build_input_claim.get("forced_clean_targets")
-        != list(contract.BUILD_TARGETS)
+        or build_input_claim.get("build_targets") != list(contract.BUILD_TARGETS)
+        or build_input_claim.get("forced_clean_before_build") is not True
     ):
         errors.append("installed build provenance lacks retained forced-clean build inputs")
+    provider_claim = _object(
+        provenance.get("render_provider_input_claim"),
+        "installed render_provider_input_claim", errors,
+    )
+    providers = _object(
+        provider_claim.get("providers"), "installed render providers", errors
+    )
+    if (
+        provider_claim.get("method")
+        != "retained-resolved-render-provider-trees-v1"
+        or set(providers) != {"skia_dawn", "v8"}
+        or not contract.valid_lower_hex(
+            str(provider_claim.get("manifest_sha256", "")), 64
+        )
+        or provider_claim.get("manifest_sha256") != hashlib.sha256(
+            json.dumps(providers, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    ):
+        errors.append("installed build provenance lacks exact sealed render providers")
+    for role, row_value in providers.items():
+        row = _object(row_value, f"installed render provider {role}", errors)
+        tree = _object(
+            row.get("tree_claim"), f"installed render provider {role} tree", errors
+        )
+        if (
+            tree.get("method")
+            != "retained-complete-tree-vnode-and-descriptor-v1"
+            or not isinstance(tree.get("file_count"), int)
+            or isinstance(tree.get("file_count"), bool)
+            or tree["file_count"] <= 0
+            or not isinstance(tree.get("bytes"), int)
+            or isinstance(tree.get("bytes"), bool)
+            or tree["bytes"] <= 0
+            or not contract.valid_lower_hex(str(tree.get("manifest_sha256", "")), 64)
+        ):
+            errors.append(f"installed render provider {role} tree is not retained")
+        members = row.get("required_members")
+        if not isinstance(members, list) or not members or any(
+            not isinstance(member, dict)
+            or not isinstance(member.get("path"), str)
+            or not contract.valid_lower_hex(
+                str(member.get("git_blob_sha1", "")), 40
+            )
+            or not isinstance(member.get("bytes"), int)
+            or isinstance(member.get("bytes"), bool)
+            or member["bytes"] <= 0
+            for member in members
+        ):
+            errors.append(f"installed render provider {role} lacks exact members")
+            continue
+        names = {Path(member["path"]).name for member in members}
+        if role == "skia_dawn" and not (
+            names & {"libskia.a", "skia.lib"}
+            and names & {"libdawn_combined.a", "dawn_combined.lib"}
+        ):
+            errors.append("installed Skia/Dawn provider lacks both consumed archives")
+        if role == "v8" and not (
+            any(member["path"] == "include/v8.h" for member in members)
+            and names & {"libv8.dylib", "libv8.so", "v8.dll"}
+        ):
+            errors.append("installed V8 provider lacks its consumed headers/runtime")
     binaries = provenance.get("binaries")
     expected_roles = {
         "pulp": ("installed-prefix/bin/pulp", "external-build/pulp", "cli"),
@@ -258,8 +341,8 @@ def verify(
     if not isinstance(receipt, dict):
         return ["A2T receipt must be an object"]
     repository = repository.resolve()
-    if receipt.get("schema") != "pulp.gpu-trace-overhead-acceptance.v2":
-        errors.append("receipt schema must be pulp.gpu-trace-overhead-acceptance.v2")
+    if receipt.get("schema") != "pulp.gpu-trace-overhead-acceptance.v3":
+        errors.append("receipt schema must be pulp.gpu-trace-overhead-acceptance.v3")
     errors.extend(contract.source_binding_errors(receipt, repository))
 
     source_revision = receipt.get("source_revision")
@@ -510,31 +593,38 @@ def verify(
         if acceptance.get(field) != expected:
             errors.append(f"acceptance {field} differs from the Horizon-A contract")
     human = receipt.get("human_perfetto_ui_correlation")
+    human_source = receipt.get("human_perfetto_ui_review_source")
     if require_terminal:
         if acceptance.get("terminal_status") != "pass":
             errors.append("receipt is nonterminal")
         if acceptance.get("human_perfetto_ui_correlation") != "pass":
             errors.append("human Perfetto UI correlation did not pass")
-        if trace_path is not None and isinstance(measured_semantic, dict):
-            try:
-                contract.preserve_human_perfetto_ui_correlation(
-                    receipt,
-                    question=str(protocol.get("question")),
-                    trace_sha256=contract.sha256(trace_path),
-                    semantic_result=measured_semantic,
-                )
-            except ValueError as error:
-                errors.append(f"human Perfetto UI correlation is invalid: {error}")
+    if human is None and human_source is not None:
+        errors.append("human review source exists without a carried correlation")
     elif human is not None and isinstance(measured_semantic, dict) and trace_path is not None:
         try:
-            contract.preserve_human_perfetto_ui_correlation(
-                receipt,
+            source = _object(
+                human_source, "human_perfetto_ui_review_source", errors
+            )
+            prior_path = repository / str(source.get("repository_path", ""))
+            expected_human, expected_source = contract.bind_tracked_human_review_receipt(
+                repository,
+                str(source_revision),
+                prior_path,
                 question=str(protocol.get("question")),
                 trace_sha256=contract.sha256(trace_path),
                 semantic_result=measured_semantic,
             )
+            if expected_human != human:
+                errors.append(
+                    "human Perfetto UI correlation differs from its prior Git blob"
+                )
+            if expected_source != source:
+                errors.append(
+                    "human Perfetto UI review source differs from immutable Git provenance"
+                )
         except ValueError as error:
-            errors.append(f"optional human Perfetto UI correlation is invalid: {error}")
+            errors.append(f"human Perfetto UI correlation is invalid: {error}")
     return errors
 
 
@@ -554,7 +644,7 @@ def main(argv: list[str] | None = None) -> int:
         for error in errors:
             print(f"gpu-trace-overhead-acceptance: FAIL: {error}", file=sys.stderr)
         return 1
-    print("gpu-trace-overhead-acceptance: ok (v2 exact-head, SDK-matched, same artifact)")
+    print("gpu-trace-overhead-acceptance: ok (v3 exact-head, SDK-matched, same artifact)")
     return 0
 
 

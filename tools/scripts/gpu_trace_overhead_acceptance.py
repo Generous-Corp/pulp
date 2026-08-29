@@ -29,17 +29,35 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
-import sdk_provenance
+
+
+def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
+    """Load a trusted sibling from source bytes without consulting ``.pyc``."""
+    path = SCRIPT_DIR / filename
+    data = path.read_bytes()
+    if len(data) > 2 * 1024 * 1024:
+        raise RuntimeError(f"local source module is unbounded: {filename}")
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    exec(compile(data, str(path), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+_load_local_source("json_schema_lite", "json_schema_lite.py")
+_load_local_source("sdk_capability_handoff", "sdk_capability_handoff.py")
+sdk_provenance = _load_local_source("sdk_provenance", "sdk_provenance.py")
 
 
 EXPECTED_EXIT = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
 ANALYSIS_TIMEOUT_SECONDS = 300
+MCP_RESPONSE_LIMIT_BYTES = 1024 * 1024
 A2T_ANALYZER_SOURCE_PATHS = {
     "CMakeLists.txt",
     ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
@@ -201,6 +219,8 @@ FIXTURE_SOURCE_PATHS = {
     for _case, filename, _question, _verdict, _dominant, _action in FIXTURE_REPLAY
 }
 PLAN_PATH = "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md"
+HUMAN_REVIEW_PATH_PREFIX = "docs/validation/gpu-trace-overhead/"
+HUMAN_REVIEW_MAX_BYTES = 4 * 1024 * 1024
 
 
 def sha256(path: Path) -> str:
@@ -322,6 +342,52 @@ def normalized_semantic_projection(payload: dict[str, Any], trace_label: str) ->
     return projection
 
 
+def read_bounded_process_line(
+    process: subprocess.Popen[Any],
+    stream: Any,
+    buffered: bytearray,
+    *,
+    timeout_seconds: float,
+    maximum_bytes: int,
+    label: str,
+) -> str:
+    """Read one newline-delimited response under one wall-clock deadline.
+
+    ``TextIOWrapper.readline`` may block after ``select`` reports only a partial
+    line. Reading the descriptor incrementally keeps the deadline authoritative
+    and retains bytes after the first newline for the next JSON-RPC response.
+    """
+    if timeout_seconds <= 0 or maximum_bytes <= 0:
+        raise ValueError(f"{label} has an invalid read bound")
+    descriptor = stream.fileno()
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        newline = buffered.find(b"\n")
+        if newline >= 0:
+            if newline + 1 > maximum_bytes:
+                raise ValueError(f"{label} exceeded {maximum_bytes} bytes")
+            raw = bytes(buffered[:newline + 1])
+            del buffered[:newline + 1]
+            try:
+                return raw.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise ValueError(f"{label} is not UTF-8") from error
+        if len(buffered) >= maximum_bytes:
+            raise ValueError(f"{label} exceeded {maximum_bytes} bytes")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"{label} exceeded {timeout_seconds:g} seconds")
+        ready, _, _ = select.select([descriptor], [], [], remaining)
+        if not ready:
+            raise TimeoutError(f"{label} exceeded {timeout_seconds:g} seconds")
+        chunk = os.read(descriptor, min(64 * 1024, maximum_bytes + 1 - len(buffered)))
+        if not chunk:
+            if process.poll() is None:
+                raise ValueError(f"{label} closed before a complete line")
+            raise ValueError(f"{label} process exited before a complete line")
+        buffered.extend(chunk)
+
+
 class McpSession:
     def __init__(
         self, executable: Path, environment: dict[str, str],
@@ -345,6 +411,7 @@ class McpSession:
             raise RuntimeError("failed to open pulp-mcp pipes")
         self._next_id = 1
         self._terminated_for_timeout = False
+        self._stdout_buffer = bytearray()
 
     def _terminate_bounded(self) -> None:
         if self.process.poll() is not None:
@@ -368,20 +435,23 @@ class McpSession:
         assert self.process.stdout is not None
         self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
         self.process.stdin.flush()
-        ready, _, _ = select.select(
-            [self.process.stdout], [], [], ANALYSIS_TIMEOUT_SECONDS
-        )
-        if not ready:
-            self._terminated_for_timeout = True
-            self._terminate_bounded()
-            raise RuntimeError(
-                f"pulp-mcp response exceeded {ANALYSIS_TIMEOUT_SECONDS} seconds"
+        try:
+            line = read_bounded_process_line(
+                self.process,
+                self.process.stdout,
+                self._stdout_buffer,
+                timeout_seconds=ANALYSIS_TIMEOUT_SECONDS,
+                maximum_bytes=MCP_RESPONSE_LIMIT_BYTES,
+                label="pulp-mcp response",
             )
-        line = self.process.stdout.readline()
-        if not line:
-            stderr = self.process.stderr.read() if self.process.stderr else ""
-            raise RuntimeError(f"pulp-mcp exited before responding: {stderr}")
-        response = json.loads(line)
+        except (TimeoutError, ValueError) as error:
+            self._terminated_for_timeout = isinstance(error, TimeoutError)
+            self._terminate_bounded()
+            raise RuntimeError(str(error)) from error
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("pulp-mcp returned malformed JSON") from error
         if self.directory_claim is not None:
             self.directory_claim.assert_current()
         if response.get("id") != request_id or "result" not in response:
@@ -1285,7 +1355,8 @@ class CombinedClaims:
 
 
 def retain_generated_build_inputs(
-    build_dir: Path, label: str,
+    build_dir: Path, label: str, *, targets: tuple[str, ...] = BUILD_TARGETS,
+    forced_clean_before_build: bool = True,
 ) -> tuple[RetainedTreeClaim, dict[str, Any]]:
     """Retain regenerated CMake/Ninja/configure-time inputs through compilation."""
     expected: dict[str, tuple[str, str]] = {}
@@ -1325,7 +1396,8 @@ def retain_generated_build_inputs(
         "method": "regenerated-cmake-ninja-input-descriptor-v1",
         "file_count": len(manifest),
         "manifest_sha256": digest,
-        "forced_clean_targets": list(BUILD_TARGETS),
+        "build_targets": list(targets),
+        "forced_clean_before_build": forced_clean_before_build,
     }
 
 
@@ -1366,6 +1438,165 @@ def retain_current_regular_tree(
             json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),
     }
+
+
+class RetainedClaimSet:
+    """Own a bounded set of retained provider trees as one lifetime claim."""
+
+    def __init__(self, claims: dict[str, RetainedTreeClaim]):
+        self.claims = claims
+
+    def assert_current(self) -> None:
+        for claim in self.claims.values():
+            claim.assert_current()
+
+    def assert_full(self) -> None:
+        for claim in self.claims.values():
+            claim.assert_full()
+
+    def close(self) -> None:
+        for claim in self.claims.values():
+            claim.close()
+
+
+def _resolved_skia_root(build_dir: Path, cache: dict[str, str]) -> Path:
+    candidates: list[Path] = []
+    configured = cache.get("SKIA_DIR", "")
+    if configured and Path(configured).is_absolute():
+        candidates.append(Path(configured))
+    icu = cache.get("PULP_SKIA_ICUDTL_FILE", "")
+    if icu and Path(icu).is_absolute():
+        candidates.extend(Path(icu).parents)
+    for graph in (build_dir / "build.ninja", build_dir / "CMakeFiles/rules.ninja"):
+        try:
+            data = graph.read_bytes()
+        except OSError:
+            continue
+        if len(data) > 64 * 1024 * 1024:
+            raise ValueError("generated build graph is too large for provider discovery")
+        for raw in re.findall(
+            rb"/[A-Za-z0-9_./+@%$:-]+/(?:libskia\.a|skia\.lib)", data
+        ):
+            library = Path(os.fsdecode(raw).replace("$ ", " "))
+            candidates.extend(library.parents)
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            root = candidate.resolve()
+        except OSError:
+            continue
+        if root in seen or not root.is_dir() or root.is_symlink():
+            continue
+        seen.add(root)
+        headers = (
+            root / "build/include/include/core/SkCanvas.h",
+            root / "include/include/core/SkCanvas.h",
+            root / "include/core/SkCanvas.h",
+        )
+        skia = tuple(root.glob("build/*-gpu/lib/Release/libskia.a")) + tuple(
+            root.glob("*-gpu/lib/Release/libskia.a")
+        ) + tuple(root.glob("*/lib/libskia.a")) + (root / "lib/libskia.a",)
+        dawn = tuple(root.glob("build/*-gpu/lib/Release/libdawn_combined.a")) + tuple(
+            root.glob("*-gpu/lib/Release/libdawn_combined.a")
+        ) + tuple(root.glob("*/lib/libdawn_combined.a")) + (
+            root / "lib/libdawn_combined.a",
+        )
+        if any(path.is_file() for path in headers) and any(
+            path.is_file() for path in skia
+        ) and any(path.is_file() for path in dawn):
+            return root
+    raise ValueError(
+        "cannot resolve one self-contained Skia/Dawn provider root from CMake/Ninja"
+    )
+
+
+def _resolved_v8_root(cache: dict[str, str]) -> tuple[Path, Path]:
+    runtime_value = cache.get("V8_RUNTIME_LIBRARY", "")
+    runtime = Path(runtime_value)
+    if not runtime.is_absolute() or not runtime.is_file() or runtime.is_symlink():
+        raise ValueError("CMake cache lacks one resolved regular V8 runtime library")
+    for root in runtime.parents:
+        if (root / "include/v8.h").is_file():
+            return root.resolve(), runtime.resolve()
+    raise ValueError("resolved V8 provider is not a self-contained header/library root")
+
+
+def retain_resolved_render_provider_inputs(
+    build_dir: Path, label: str,
+) -> tuple[RetainedClaimSet, dict[str, Any]]:
+    """Retain the actual Skia/Dawn and V8 provider trees through every launch."""
+    cache = _cmake_cache(build_dir)
+    if cache.get("PULP_HAS_SKIA") != "TRUE" or cache.get("PULP_JS_ENGINE") != "v8":
+        raise ValueError("render provider sealing requires the exact GPU + V8 build")
+    skia_root = _resolved_skia_root(build_dir, cache)
+    v8_root, v8_runtime = _resolved_v8_root(cache)
+    if skia_root == v8_root or skia_root in v8_root.parents or v8_root in skia_root.parents:
+        raise ValueError("resolved Skia/Dawn and V8 provider roots must not overlap")
+    _raise_descriptor_limit(131072)
+    claims: dict[str, RetainedTreeClaim] = {}
+    rows: dict[str, Any] = {}
+    try:
+        for role, root, maximum_bytes in (
+            ("skia_dawn", skia_root, 8 * 1024 * 1024 * 1024),
+            ("v8", v8_root, 2 * 1024 * 1024 * 1024),
+        ):
+            claim, tree_evidence = retain_current_regular_tree(
+                root,
+                f"{label} {role}",
+                maximum_files=32768,
+                maximum_bytes=maximum_bytes,
+            )
+            claims[role] = claim
+            by_relative = {row["relative"]: row for row in claim.file_claims}
+            if role == "skia_dawn":
+                required_paths = sorted(
+                    relative for relative in by_relative
+                    if Path(relative).name in {
+                        "libskia.a", "skia.lib",
+                        "libdawn_combined.a", "dawn_combined.lib",
+                    }
+                )
+                if not any(Path(path).name in {"libskia.a", "skia.lib"} for path in required_paths):
+                    raise ValueError("retained Skia/Dawn provider lacks the Skia archive")
+                if not any(
+                    Path(path).name in {"libdawn_combined.a", "dawn_combined.lib"}
+                    for path in required_paths
+                ):
+                    raise ValueError("retained Skia/Dawn provider lacks the Dawn archive")
+                resolution = "CMake SKIA_DIR or exact generated Ninja archive path"
+            else:
+                runtime_relative = v8_runtime.relative_to(v8_root).as_posix()
+                required_paths = ["include/v8.h", runtime_relative]
+                if any(path not in by_relative for path in required_paths):
+                    raise ValueError("retained V8 provider lacks its resolved headers/runtime")
+                resolution = "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root"
+            rows[role] = {
+                "root_role": f"resolved-{role.replace('_', '-')}-provider-root",
+                "resolution": resolution,
+                "tree_claim": tree_evidence,
+                "required_members": [
+                    {
+                        "path": path,
+                        "git_blob_sha1": by_relative[path]["blob"],
+                        "bytes": os.fstat(by_relative[path]["descriptor"]).st_size,
+                    }
+                    for path in required_paths
+                ],
+            }
+        evidence = {
+            "method": "retained-resolved-render-provider-trees-v1",
+            "providers": rows,
+        }
+        evidence["manifest_sha256"] = hashlib.sha256(
+            json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        retained = RetainedClaimSet(claims)
+        retained.assert_full()
+        return retained, evidence
+    except BaseException:
+        for claim in claims.values():
+            claim.close()
+        raise
 
 
 def validate_output_path(output: Path, protected: tuple[Path, ...]) -> None:
@@ -1618,6 +1849,7 @@ def exact_build_install_identity(
     repository: Path, revision: str, build_dir: Path, prefix: Path,
     cli: Path, mcp: Path, binaries: dict[str, Any], cmake_cache_sha256: str,
     source_tree_evidence: dict[str, Any], build_input_evidence: dict[str, Any],
+    provider_input_evidence: dict[str, Any],
 ) -> dict[str, Any]:
     _values, settings = _release_build_contract(repository, build_dir)
     identity = installed_source_identity(repository, revision, cli, mcp)
@@ -1638,6 +1870,7 @@ def exact_build_install_identity(
         "build_settings": settings,
         "source_tree_claim": source_tree_evidence,
         "build_input_claim": build_input_evidence,
+        "render_provider_input_claim": provider_input_evidence,
         "binaries": binaries,
     }
     return identity
@@ -1648,7 +1881,7 @@ def refresh_exact_build_install(
     planning_repository: Path, environment: dict[str, str],
 ) -> tuple[
     Path, Path, dict[str, Any], RetainedDirectoryClaim,
-    RetainedTreeClaim, RetainedTreeClaim,
+    RetainedTreeClaim, RetainedTreeClaim, RetainedClaimSet,
 ]:
     _require_external_path(build_dir, (repository, planning_repository), "build-dir")
     _require_external_path(prefix, (repository, planning_repository), "install-prefix")
@@ -1662,6 +1895,7 @@ def refresh_exact_build_install(
     prefix_claim = retained_claim.identity
     source_claim: RetainedTreeClaim | None = None
     build_input_claim: RetainedTreeClaim | None = None
+    provider_input_claim: RetainedClaimSet | None = None
     try:
         source_claim, source_tree_evidence = retain_git_source_tree(
             repository, revision, "Pulp exact source"
@@ -1676,8 +1910,13 @@ def refresh_exact_build_install(
         build_input_claim, build_input_evidence = retain_generated_build_inputs(
             build_dir, "Pulp regenerated build inputs"
         )
+        provider_input_claim, provider_input_evidence = (
+            retain_resolved_render_provider_inputs(
+                build_dir, "Pulp resolved render providers"
+            )
+        )
         compilation_claim = CombinedClaims(
-            retained_claim, source_claim, build_input_claim
+            retained_claim, source_claim, build_input_claim, provider_input_claim
         )
         _run_bounded_build(
             ["cmake", "--build", str(build_dir), "--target", "clean"],
@@ -1704,6 +1943,7 @@ def refresh_exact_build_install(
         )
         source_claim.assert_full()
         build_input_claim.assert_full()
+        provider_input_claim.assert_full()
         cmake_cache_sha256 = retained_claim.bind_file(
             build_dir / "CMakeCache.txt", "refreshed CMake cache",
         )
@@ -1733,7 +1973,7 @@ def refresh_exact_build_install(
         identity = exact_build_install_identity(
             repository, revision, build_dir, prefix, cli, mcp,
             binaries, cmake_cache_sha256,
-            source_tree_evidence, build_input_evidence,
+            source_tree_evidence, build_input_evidence, provider_input_evidence,
         )
         retained_claim.assert_current()
         if identity["build_info_sha256"] != build_info_sha256:
@@ -1741,9 +1981,12 @@ def refresh_exact_build_install(
         if identity["build_provenance"]["install_prefix_claim"] != prefix_claim:
             raise ValueError("installed provenance differs from the claimed prefix identity")
         return (
-            cli, mcp, identity, retained_claim, source_claim, build_input_claim
+            cli, mcp, identity, retained_claim, source_claim, build_input_claim,
+            provider_input_claim,
         )
     except BaseException:
+        if provider_input_claim is not None:
+            provider_input_claim.close()
         if build_input_claim is not None:
             build_input_claim.close()
         if source_claim is not None:
@@ -1938,6 +2181,7 @@ def _bounded_product_trace_calls(text: str) -> tuple[str, ...]:
     index = 0
     while index < len(text):
         if text[index] == "#" and not text[text.rfind("\n", 0, index) + 1:index].strip():
+            directive_start = index
             while True:
                 newline = text.find("\n", index + 1)
                 if newline < 0:
@@ -1949,6 +2193,20 @@ def _bounded_product_trace_calls(text: str) -> tuple[str, ...]:
                 index = newline + 1
                 if not continued:
                     break
+            directive = re.sub(
+                r"\\\r?\n", " ", text[directive_start:index]
+            )
+            define = re.match(
+                r"\s*#\s*define\s+[A-Za-z_][A-Za-z0-9_]*"
+                r"(?:\s*\([^\r\n)]*\))?",
+                directive,
+            )
+            body = directive[define.end():] if define else directive.lstrip()[1:]
+            if any(macro in body for macro in PRODUCT_TRACE_MACROS):
+                # Wrapper definitions are product producer call sites too. Scan
+                # their body conservatively; the synthetic semicolon terminates
+                # the common final macro call omitted by #define syntax.
+                calls.extend(_bounded_product_trace_calls(body.rstrip() + ";"))
             continue
         if text.startswith("//", index):
             newline = text.find("\n", index + 2)
@@ -2997,6 +3255,81 @@ def preserve_human_perfetto_ui_correlation(
     return human
 
 
+def bind_tracked_human_review_receipt(
+    repository: Path,
+    source_revision: str,
+    prior_path: Path,
+    *,
+    question: str,
+    trace_sha256: str,
+    semantic_result: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Bind an independently published review receipt as an immutable Git blob."""
+    repository = repository.resolve()
+    resolved = prior_path.resolve()
+    try:
+        relative = resolved.relative_to(repository).as_posix()
+    except ValueError as error:
+        raise ValueError("prior human-review receipt must be tracked in this repository") from error
+    if (
+        prior_path.is_symlink()
+        or not relative.startswith(HUMAN_REVIEW_PATH_PREFIX)
+        or not relative.endswith(".json")
+        or ".." in Path(relative).parts
+    ):
+        raise ValueError("prior human-review receipt has an unsafe repository path")
+    try:
+        data = resolved.read_bytes()
+    except OSError as error:
+        raise ValueError(f"cannot read prior human-review receipt: {error}") from error
+    if len(data) > HUMAN_REVIEW_MAX_BYTES:
+        raise ValueError("prior human-review receipt exceeds 4 MiB")
+    historical = subprocess.run(
+        ["git", "show", f"{source_revision}:{relative}"],
+        cwd=repository, check=False, capture_output=True,
+    )
+    if historical.returncode != 0 or historical.stdout != data:
+        raise ValueError(
+            "prior human-review receipt is not the exact source-revision Git blob"
+        )
+    blob = _git_blob_digest_bytes(data)
+    if _git_text(repository, "rev-parse", f"{source_revision}:{relative}") != blob:
+        raise ValueError("prior human-review receipt Git blob identity disagrees")
+    if _git_text(repository, "rev-parse", f"HEAD:{relative}") != blob:
+        raise ValueError("prior human-review receipt differs at current HEAD")
+    parents = _git_text(repository, "rev-list", "--parents", "-n", "1", source_revision)
+    parent_revisions = parents.split()[1:]
+    if not parent_revisions or not any(
+        subprocess.run(
+            ["git", "rev-parse", f"{parent}:{relative}"],
+            cwd=repository, check=False, capture_output=True, text=True,
+        ).stdout.strip() == blob
+        for parent in parent_revisions
+    ):
+        raise ValueError(
+            "prior human-review receipt was not independently published before source revision"
+        )
+    try:
+        prior_receipt = json.loads(data)
+    except json.JSONDecodeError as error:
+        raise ValueError("prior human-review receipt is malformed JSON") from error
+    human = preserve_human_perfetto_ui_correlation(
+        prior_receipt,
+        question=question,
+        trace_sha256=trace_sha256,
+        semantic_result=semantic_result,
+    )
+    return human, {
+        "method": "preexisting-tracked-git-blob-v1",
+        "repository_path": relative,
+        "source_revision": source_revision,
+        "git_blob_sha1": blob,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
+        "existed_unchanged_in_direct_parent": True,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", type=Path, required=True)
@@ -3019,8 +3352,8 @@ def main() -> int:
     parser.add_argument(
         "--prior-human-review-receipt", type=Path,
         help=(
-            "Prior accepted gpu-startup A2T receipt whose exact root visual-review "
-            "object is carried forward only when its trace SHA-256 matches"
+            "Preexisting tracked gpu-startup A2T receipt whose immutable Git blob "
+            "and exact root visual-review object are carried forward"
         ),
     )
     parser.add_argument("--output", type=Path, required=True)
@@ -3071,13 +3404,14 @@ def main() -> int:
         )
         (
             cli, mcp, installed_identity, install_claim,
-            source_tree_claim, build_input_claim,
+            source_tree_claim, build_input_claim, provider_input_claim,
         ) = refresh_exact_build_install(
             repository, args.source_revision, build_dir, prefix,
             planning_repository, build_environment,
         )
         execution_claim = CombinedClaims(
-            install_claim, source_tree_claim, build_input_claim
+            install_claim, source_tree_claim, build_input_claim,
+            provider_input_claim,
         )
         validate_paths(cli, mcp, trace, processor)
         binding = source_binding(repository, args.source_revision, trace)
@@ -3105,15 +3439,6 @@ def main() -> int:
         parser.error(str(error))
 
     trace_sha256 = sha256(trace)
-    prior_receipt = None
-    if args.prior_human_review_receipt:
-        try:
-            prior_receipt = json.loads(
-                args.prior_human_review_receipt.read_text(encoding="utf-8")
-            )
-        except (OSError, json.JSONDecodeError) as error:
-            parser.error(f"invalid prior-human-review-receipt: {error}")
-
     environment = build_environment.copy()
     environment["PULP_TRACE_PROCESSOR"] = str(processor)
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -3224,10 +3549,16 @@ def main() -> int:
     if reference_projection is None:
         raise RuntimeError("measured trials produced no reference semantic result")
     human_perfetto_ui_correlation = None
-    if prior_receipt is not None:
+    human_perfetto_ui_review_source = None
+    if args.prior_human_review_receipt is not None:
         try:
-            human_perfetto_ui_correlation = preserve_human_perfetto_ui_correlation(
-                prior_receipt,
+            (
+                human_perfetto_ui_correlation,
+                human_perfetto_ui_review_source,
+            ) = bind_tracked_human_review_receipt(
+                repository,
+                args.source_revision,
+                args.prior_human_review_receipt,
                 question=args.question,
                 trace_sha256=trace_sha256,
                 semantic_result=reference_projection,
@@ -3239,6 +3570,7 @@ def main() -> int:
         execution_claim.assert_current()
         source_tree_claim.assert_full()
         build_input_claim.assert_full()
+        provider_input_claim.assert_full()
         if clean_source_identity(repository, args.source_revision) != source_identity:
             raise ValueError("source identity changed during A2T recording")
         if source_binding(repository, args.source_revision, trace) != binding:
@@ -3249,6 +3581,7 @@ def main() -> int:
             installed_identity["build_provenance"]["cmake_cache_sha256"],
             installed_identity["build_provenance"]["source_tree_claim"],
             installed_identity["build_provenance"]["build_input_claim"],
+            installed_identity["build_provenance"]["render_provider_input_claim"],
         ) != installed_identity:
             raise ValueError("installed CLI/MCP provenance changed during A2T recording")
         if trace_processor_identity(repository, processor) != processor_identity:
@@ -3260,7 +3593,7 @@ def main() -> int:
         parser.error(str(error))
 
     evidence = {
-        "schema": "pulp.gpu-trace-overhead-acceptance.v2",
+        "schema": "pulp.gpu-trace-overhead-acceptance.v3",
         "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_revision": args.source_revision,
         "mcp_source_revision": args.mcp_source_revision,
@@ -3312,6 +3645,7 @@ def main() -> int:
         "semantic_result": reference_projection,
         "fixture_replay": fixture_replay,
         "human_perfetto_ui_correlation": human_perfetto_ui_correlation,
+        "human_perfetto_ui_review_source": human_perfetto_ui_review_source,
         "measured": {
             "cli": cli_summary, "persistent_mcp_request": mcp_summary,
             "confidence": confidence, "raw_samples": rows,
@@ -3343,8 +3677,10 @@ def main() -> int:
     execution_claim.assert_current()
     source_tree_claim.assert_full()
     build_input_claim.assert_full()
+    provider_input_claim.assert_full()
     output_parent_claim.assert_current()
     install_claim.close()
+    provider_input_claim.close()
     build_input_claim.close()
     source_tree_claim.close()
     output_parent_claim.close()
