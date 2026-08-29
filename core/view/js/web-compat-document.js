@@ -343,12 +343,27 @@ var __documentElement__ = new Element("html", "__docRoot__");
 __documentElement__.style = new CSSStyleDeclaration(__documentElement__);
 __documentElement__._nativeCreated = true;
 
+// Native web-compat buttons should provide the same baseline pointer feedback
+// developers get from a browser even when an app has no authored hover rule.
+// Install this user-agent sheet lazily after selector parsing is available.
+// Application sheets attach later, so their `button:hover` properties win.
+var __pulpDefaultButtonHoverSheet__ = null;
+function __pulpEnsureDefaultButtonHoverSheet__() {
+    if (__pulpDefaultButtonHoverSheet__ || typeof _parseSelector !== "function")
+        return;
+    __pulpDefaultButtonHoverSheet__ = new StyleSheet({
+        "button:hover": { opacity: 0.86 }
+    });
+    __pulpDefaultButtonHoverSheet__.attach();
+}
+
 var document = {
     body: __bodyElement__,
     documentElement: __documentElement__,
     activeElement: null,
 
     createElement: function(tag) {
+        __pulpEnsureDefaultButtonHoverSheet__();
         var el = new Element(tag);
         __elements__[el._id] = el;
         return el;
