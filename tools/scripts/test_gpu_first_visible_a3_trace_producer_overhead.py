@@ -19,12 +19,82 @@ def write_collection_host(path: Path) -> None:
     source = path.with_suffix(".c")
     source.write_text(
         "#include <signal.h>\n#include <unistd.h>\n"
+        "__attribute__((used)) static const char kTracingSentinel[] = "
+        "\"PULP_TRACING_COMPILED_IN__DO_NOT_SHIP\";\n"
         "int main(void) { for (;;) pause(); }\n",
         encoding="utf-8",
     )
     compiler = shutil.which("cc")
     assert compiler is not None
     subprocess.run([compiler, str(source), "-o", str(path)], check=True)
+    path.chmod(0o755)
+
+
+def write_state_build_driver(path: Path, forbidden_root: Path) -> None:
+    source = r'''#!/usr/bin/env python3
+import argparse, hashlib, json, os, socket, sys
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--request", required=True, type=Path)
+parser.add_argument("--receipt", required=True, type=Path)
+args = parser.parse_args()
+request = json.loads(args.request.read_text())
+output = Path(request["output_directory"])
+output.mkdir()
+source = (
+    Path(request["source_directory"])
+    / "tools" / "testing" / "a3" / "collection-host-product"
+)
+product = output / "product"
+family = request["identity"]["build_family_id"]
+if "state-build-read-measured" in family:
+    product.write_bytes((Path(__FORBIDDEN_ROOT__) / "tools" / "testing" / "a3"
+                         / "collection-host-product").read_bytes())
+elif "state-build-network" in family:
+    socket.create_connection(("1.1.1.1", 80), timeout=1).close()
+else:
+    product.write_bytes(source.read_bytes())
+product.chmod(0o755)
+tool = Path(sys.executable).resolve()
+tool_digest = hashlib.sha256(tool.read_bytes()).hexdigest()
+receipt = {
+    "schema": "pulp.gpu-first-visible-trace-producer-state-build-receipt.v1",
+    "version": 1,
+    "attempt_nonce": request["attempt_nonce"],
+    "state": request["state"],
+    "outcome": "pass",
+    "reason": None,
+    "source_revision": request["source_revision"],
+    "candidate_revision": request["candidate_revision"],
+    "source_tree": request["source_tree"],
+    "source_tree_sha256": request["source_tree_sha256"],
+    "source_archive_sha256": request["source_archive_sha256"],
+    "binary_sha256": request["binary_sha256"],
+    "identity": request["identity"],
+    "tracing": request["tracing"],
+    "driver_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+    "build_command": [
+        str(tool), str(Path(__file__).resolve()), "--request", str(args.request),
+        "--receipt", str(args.receipt),
+    ],
+    "builder_id": "pulp-a3-state-build-fixture",
+    "build_started_utc": "2026-08-29T12:00:00Z",
+    "build_finished_utc": "2026-08-29T12:00:01Z",
+    "toolchain": [{
+        "path": str(tool), "sha256": tool_digest, "version": sys.version.split()[0],
+    }],
+    "product_path": product.relative_to(output).as_posix(),
+    "product_sha256": hashlib.sha256(product.read_bytes()).hexdigest(),
+}
+if "state-build-config-receipt" in family:
+    receipt["tracing"]["compiled_in"] = False
+args.receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+'''
+    path.write_text(
+        source.replace("__FORBIDDEN_ROOT__", repr(str(forbidden_root))),
+        encoding="utf-8",
+    )
     path.chmod(0o755)
 
 
@@ -152,10 +222,16 @@ args.receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     path.chmod(0o755)
 
 
-def make_collection_source(path: Path) -> tuple[Path, str]:
+def make_collection_source(path: Path) -> tuple[Path, Path, Path, str]:
     driver = path / "tools/testing/a3/trace-producer-overhead-driver.py"
     driver.parent.mkdir(parents=True)
     write_collection_driver(driver)
+    state_build_driver = (
+        path / "tools/testing/a3/trace-producer-overhead-state-build.py"
+    )
+    write_state_build_driver(state_build_driver, path)
+    product = path / "tools/testing/a3/collection-host-product"
+    write_collection_host(product)
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "a3@example.invalid"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.name", "A3 Test"], cwd=path, check=True)
@@ -164,7 +240,7 @@ def make_collection_source(path: Path) -> tuple[Path, str]:
     revision = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=path, text=True,
     ).strip()
-    return driver, revision
+    return driver, state_build_driver, product, revision
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -178,6 +254,10 @@ def make_fixture(
     root: Path, *, candidate_revision: str = "c" * 40,
     driver_path: str = "tools/testing/a3/trace-producer-overhead-driver.py",
     driver_sha256: str = "f" * 64,
+    state_build_driver_path: str = (
+        "tools/testing/a3/trace-producer-overhead-state-build.py"
+    ),
+    state_build_driver_sha256: str = "a" * 64,
     campaign_role: str = "standalone", campaign_id: str = "campaign-1",
     build_family_id: str = "pulp-build-1",
     product_id: str = "dev.pulp.product-1",
@@ -203,6 +283,11 @@ def make_fixture(
         "revision": candidate_revision,
         "path": driver_path,
         "sha256": driver_sha256,
+    }
+    state_build_driver = {
+        "revision": candidate_revision,
+        "path": state_build_driver_path,
+        "sha256": state_build_driver_sha256,
     }
     challenge_nonce = "0" * 32
     duration = {
@@ -345,6 +430,7 @@ def make_fixture(
             "machine": copy.deepcopy(machine),
             "workload": copy.deepcopy(workload),
             "measurement_driver": copy.deepcopy(driver),
+            "state_build_driver": copy.deepcopy(state_build_driver),
             "trace_session_config": copy.deepcopy(session_config_ref),
             "tracing": {
                 "compiled_in": compiled,
@@ -592,9 +678,10 @@ def main() -> int:
         collection_evidence.mkdir()
         source_root = temp_root / "collection-source"
         source_root.mkdir()
-        collection_driver, candidate_revision = make_collection_source(source_root)
-        collection_host = temp_root / "collection-host"
-        write_collection_host(collection_host)
+        (
+            collection_driver, state_build_driver, collection_host,
+            candidate_revision,
+        ) = make_collection_source(source_root)
         session_config = collection_evidence / "trace-session-config.json"
         write_json(session_config, {
             "schema": overhead.SESSION_CONFIG_SCHEMA,
@@ -639,6 +726,13 @@ def main() -> int:
                 "path": driver_relative,
                 "sha256": overhead.sha256_file(collection_driver, "collection driver"),
             },
+            "state_build_driver": {
+                "revision": candidate_revision,
+                "path": "tools/testing/a3/trace-producer-overhead-state-build.py",
+                "sha256": overhead.sha256_file(
+                    state_build_driver, "state build driver",
+                ),
+            },
             "trace_session_config": overhead.artifact_ref(
                 session_config, collection_evidence,
             ),
@@ -658,12 +752,89 @@ def main() -> int:
                 request_path=collection_request_path,
                 evidence_root=collection_evidence, source_root=source_root,
                 binary=collection_host, driver=foreign_driver,
+                build_driver=state_build_driver,
                 output=collection_evidence / "foreign.json", trace_processor=None,
             )
         except overhead.OverheadError:
             pass
         else:
             raise AssertionError("non-source-bound collection driver passed")
+        foreign_build_driver = temp_root / "foreign-state-build-driver.py"
+        foreign_build_driver.write_bytes(state_build_driver.read_bytes())
+        foreign_build_driver.chmod(0o755)
+        try:
+            overhead.collect_state(
+                request_path=collection_request_path,
+                evidence_root=collection_evidence, source_root=source_root,
+                binary=collection_host, driver=collection_driver,
+                build_driver=foreign_build_driver,
+                output=collection_evidence / "foreign-build.json",
+                trace_processor=None,
+            )
+        except overhead.OverheadError:
+            pass
+        else:
+            raise AssertionError("non-source-bound state build driver passed")
+        for mutation in ("state-build-read-measured", "state-build-network"):
+            mutation_root = temp_root / mutation
+            mutation_root.mkdir()
+            mutation_config = mutation_root / "trace-session-config.json"
+            write_json(mutation_config, json.loads(session_config.read_text()))
+            mutation_request = copy.deepcopy(collection_request)
+            mutation_request["build_family_id"] = mutation
+            mutation_request["trace_session_config"] = overhead.artifact_ref(
+                mutation_config, mutation_root,
+            )
+            mutation_request_path = mutation_root / "request.json"
+            write_json(mutation_request_path, mutation_request)
+            try:
+                overhead.collect_state(
+                    request_path=mutation_request_path, evidence_root=mutation_root,
+                    source_root=source_root, binary=collection_host,
+                    driver=collection_driver, build_driver=state_build_driver,
+                    output=mutation_root / "raw.json", trace_processor=None,
+                )
+            except overhead.OverheadError as error:
+                assert "omitted its receipt" in str(error), error
+            else:
+                raise AssertionError(f"state build sandbox accepted {mutation}")
+        mismatch_root = temp_root / "state-build-product-mismatch"
+        mismatch_root.mkdir()
+        mismatch_config = mismatch_root / "trace-session-config.json"
+        write_json(mismatch_config, json.loads(session_config.read_text()))
+        mismatch_product = temp_root / "mismatched-product"
+        mismatch_product.write_bytes(collection_host.read_bytes() + b"mismatch")
+        mismatch_product.chmod(0o755)
+        mismatch_request = copy.deepcopy(collection_request)
+        mismatch_request["binary_sha256"] = overhead.sha256_file(
+            mismatch_product, "mismatched product",
+        )
+        mismatch_request["trace_session_config"] = overhead.artifact_ref(
+            mismatch_config, mismatch_root,
+        )
+        mismatch_request_path = mismatch_root / "request.json"
+        write_json(mismatch_request_path, mismatch_request)
+        try:
+            overhead.collect_state(
+                request_path=mismatch_request_path, evidence_root=mismatch_root,
+                source_root=source_root, binary=mismatch_product,
+                driver=collection_driver, build_driver=state_build_driver,
+                output=mismatch_root / "raw.json", trace_processor=None,
+            )
+        except overhead.OverheadError as error:
+            assert "differs from the measured executable" in str(error), error
+        else:
+            raise AssertionError("non-source-built measured executable passed")
+        no_sentinel = temp_root / "no-tracing-sentinel"
+        no_sentinel.write_bytes(b"regular executable bytes")
+        try:
+            overhead.validate_binary_compile_config(
+                no_sentinel, True, "planted compiled-in product",
+            )
+        except overhead.OverheadError:
+            pass
+        else:
+            raise AssertionError("compiled-in product without its sentinel passed")
         collection_output = collection_evidence / "candidate-compiled-in-idle.json"
         arbitrary_root = temp_root / "arbitrary-live-id"
         arbitrary_root.mkdir()
@@ -680,7 +851,8 @@ def main() -> int:
             overhead.collect_state(
                 request_path=arbitrary_request_path, evidence_root=arbitrary_root,
                 source_root=source_root, binary=collection_host,
-                driver=collection_driver, output=arbitrary_root / "raw.json",
+                driver=collection_driver, build_driver=state_build_driver,
+                output=arbitrary_root / "raw.json",
                 trace_processor=None,
             )
         except overhead.OverheadError as error:
@@ -692,6 +864,7 @@ def main() -> int:
         live_raw = overhead.collect_state(
             request_path=collection_request_path, evidence_root=collection_evidence,
             source_root=source_root, binary=collection_host, driver=collection_driver,
+            build_driver=state_build_driver,
             output=collection_output, trace_processor=None,
         )
         overhead.validate_raw(
@@ -704,6 +877,75 @@ def main() -> int:
             collection_evidence / live_raw["collection"]["path"]
         )
         original_collection_receipt = collection_receipt_path.read_bytes()
+        original_collection_digest = live_raw["collection"]["sha256"]
+
+        def expect_state_build_artifact_tamper(
+            key: str, mutate: Callable[[Path], None], label: str,
+        ) -> None:
+            collection = json.loads(original_collection_receipt)
+            ref = collection["state_build"][key]
+            artifact = collection_evidence / ref["path"]
+            original_artifact = artifact.read_bytes()
+            original_mode = artifact.stat().st_mode & 0o777
+            artifact.chmod(0o700)
+            mutate(artifact)
+            ref["sha256"] = overhead.sha256_file(artifact, label)
+            write_json(collection_receipt_path, collection)
+            live_raw["collection"]["sha256"] = overhead.sha256_file(
+                collection_receipt_path, "mutated collection receipt",
+            )
+            try:
+                overhead.validate_raw(
+                    live_raw, state="candidate-compiled-in-idle",
+                    evidence_root=collection_evidence, trace_processor=None,
+                    label="live-collection", allow_fixture_collection=False,
+                    allow_fixture_chrome_json=False,
+                )
+            except overhead.OverheadError:
+                pass
+            else:
+                raise AssertionError(f"state build accepted planted {label}")
+            artifact.write_bytes(original_artifact)
+            artifact.chmod(original_mode)
+            collection_receipt_path.write_bytes(original_collection_receipt)
+            live_raw["collection"]["sha256"] = original_collection_digest
+
+        def mutate_build_receipt(path: Path) -> None:
+            payload = json.loads(path.read_text())
+            payload["tracing"]["compiled_in"] = False
+            write_json(path, payload)
+
+        expect_state_build_artifact_tamper(
+            "build_receipt", mutate_build_receipt, "state build config receipt",
+        )
+        expect_state_build_artifact_tamper(
+            "source_archive", lambda path: path.write_bytes(path.read_bytes() + b"x"),
+            "state source archive",
+        )
+        expect_state_build_artifact_tamper(
+            "rebuilt_product", lambda path: path.write_bytes(path.read_bytes() + b"x"),
+            "state rebuilt product",
+        )
+        collection_receipt = json.loads(original_collection_receipt)
+        collection_receipt["state_build"]["toolchain"].pop()
+        write_json(collection_receipt_path, collection_receipt)
+        live_raw["collection"]["sha256"] = overhead.sha256_file(
+            collection_receipt_path, "mutated collection receipt",
+        )
+        try:
+            overhead.validate_raw(
+                live_raw, state="candidate-compiled-in-idle",
+                evidence_root=collection_evidence, trace_processor=None,
+                label="live-collection", allow_fixture_collection=False,
+                allow_fixture_chrome_json=False,
+            )
+        except overhead.OverheadError:
+            pass
+        else:
+            raise AssertionError("state build accepted incomplete toolchain evidence")
+        collection_receipt_path.write_bytes(original_collection_receipt)
+        live_raw["collection"]["sha256"] = original_collection_digest
+
         collection_receipt = json.loads(original_collection_receipt)
         collection_receipt["handshake_artifacts"].pop()
         write_json(collection_receipt_path, collection_receipt)
@@ -722,10 +964,11 @@ def main() -> int:
         else:
             raise AssertionError("incomplete live handshake unexpectedly passed")
         collection_receipt_path.write_bytes(original_collection_receipt)
+        live_raw["collection"]["sha256"] = original_collection_digest
 
         print(
             "gpu-first-visible-a3-trace-producer-overhead: "
-            "positive=2 planted_negatives=25"
+            "positive=2 planted_negatives=34"
         )
     return 0
 

@@ -12,6 +12,7 @@ import re
 import stat
 import statistics
 import sys
+import tarfile
 import tempfile
 import threading
 from pathlib import Path
@@ -29,6 +30,8 @@ COLLECTION_DRIVER_REQUEST_SCHEMA = "pulp.gpu-first-visible-trace-producer-driver
 COLLECTION_DRIVER_RECEIPT_SCHEMA = "pulp.gpu-first-visible-trace-producer-driver-receipt.v1"
 COLLECTION_RECEIPT_SCHEMA = "pulp.gpu-first-visible-trace-producer-collection.v1"
 COLLECTION_TRANSCRIPT_SCHEMA = "pulp.gpu-first-visible-trace-producer-liveness.v1"
+STATE_BUILD_REQUEST_SCHEMA = "pulp.gpu-first-visible-trace-producer-state-build-request.v1"
+STATE_BUILD_RECEIPT_SCHEMA = "pulp.gpu-first-visible-trace-producer-state-build-receipt.v1"
 PRODUCER_REVISION = "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0"
 INPUT_TO_PRESENT_REVISION = "b4ba22f1d700621366afdbc72bb8615336964cd1"
 BASELINE_REVISION = "5048ce72dd28d87974550a3feb526de0f44af32c"
@@ -75,7 +78,7 @@ RAW_KEYS = {
     "build_family_id", "product_id", "product_name", "plugin_format",
     "binary_sha256", "machine", "workload", "measurement_driver",
     "trace_session_config", "tracing", "warmups", "measured", "fresh_process",
-    "collection", "producer_packages",
+    "collection", "producer_packages", "state_build_driver",
 }
 MACHINE_KEYS = {"machine_id", "operating_system", "architecture"}
 WORKLOAD_KEYS = {
@@ -112,8 +115,31 @@ COLLECTION_RECEIPT_KEYS = {
     "schema", "version", "attempt_nonce", "challenge_nonce", "state",
     "source_revision", "binary_sha256", "driver_sha256", "collector_sha256",
     "driver_artifact_directory", "driver_request", "driver_receipt",
-    "liveness_transcript", "handshake_artifacts",
+    "liveness_transcript", "handshake_artifacts", "state_build",
 }
+STATE_BUILD_IDENTITY_KEYS = {
+    "campaign_role", "build_family_id", "product_id", "product_name", "plugin_format",
+}
+STATE_BUILD_REQUEST_KEYS = {
+    "schema", "version", "attempt_nonce", "state", "source_revision",
+    "candidate_revision", "source_tree", "source_tree_sha256",
+    "source_archive_sha256",
+    "source_directory", "output_directory", "binary_sha256", "identity",
+    "tracing", "driver_sha256",
+}
+STATE_BUILD_RECEIPT_KEYS = {
+    "schema", "version", "attempt_nonce", "state", "outcome", "reason",
+    "source_revision", "candidate_revision", "source_tree", "source_tree_sha256",
+    "source_archive_sha256",
+    "binary_sha256", "identity", "tracing", "driver_sha256", "build_command",
+    "builder_id", "build_started_utc", "build_finished_utc", "toolchain",
+    "product_path", "product_sha256",
+}
+STATE_BUILD_EVIDENCE_KEYS = {
+    "source_archive", "build_driver", "build_request", "build_receipt",
+    "rebuilt_product", "stdout", "stderr", "toolchain",
+}
+TOOLCHAIN_KEYS = {"path", "sha256", "version"}
 COLLECTION_TRANSCRIPT_KEYS = {
     "schema", "version", "attempt_nonce", "challenge_nonce", "state",
     "binary_sha256", "driver_sha256", "observations",
@@ -135,12 +161,13 @@ RECEIPT_KEYS = {
     "machine", "workload", "measurement_driver", "trace_session_config",
     "trace_processor", "protocol", "raw_artifacts", "summaries",
     "comparisons", "replay_summary", "producer_packages",
-    "aggregate_disposition", "verdict",
+    "aggregate_disposition", "verdict", "state_build_driver",
 }
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
 GIT_REVISION = re.compile(r"^[0-9a-f]{40}$")
 UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+Z$")
+TRACING_SENTINEL = b"PULP_TRACING_COMPILED_IN__DO_NOT_SHIP"
 
 
 class OverheadError(ValueError):
@@ -287,6 +314,181 @@ def projected_driver_ref(
     return projected
 
 
+def state_build_identity(payload: dict[str, Any]) -> dict[str, str]:
+    return {
+        field: payload[field]
+        for field in (
+            "campaign_role", "build_family_id", "product_id", "product_name",
+            "plugin_format",
+        )
+    }
+
+
+def source_archive_tree_sha256(path: Path, label: str) -> str:
+    entries: list[tuple[str, bytes, int]] = []
+    total_bytes = 0
+    try:
+        with tarfile.open(path, "r:") as archive:
+            for member in archive.getmembers():
+                member_path = Path(member.name)
+                if (
+                    member.name.startswith("/") or ".." in member_path.parts
+                    or member.issym() or member.islnk()
+                    or not (member.isdir() or member.isfile())
+                ):
+                    raise OverheadError(f"{label} contains an unsafe member")
+                if member.isdir():
+                    continue
+                total_bytes += member.size
+                if member.size > 512 * 1024 * 1024 or total_bytes > 4 * 1024 * 1024 * 1024:
+                    raise OverheadError(f"{label} exceeds its bounded source size")
+                handle = archive.extractfile(member)
+                if handle is None:
+                    raise OverheadError(f"{label} contains an unreadable member")
+                mode = stat.S_IMODE(member.mode)
+                entries.append((
+                    member_path.as_posix(), handle.read(),
+                    0o755 if mode & 0o111 else 0o644,
+                ))
+    except (OSError, tarfile.TarError) as error:
+        raise OverheadError(f"{label} is not a readable source archive") from error
+    if not entries:
+        raise OverheadError(f"{label} is empty")
+    return role_support.directory_tree_digest(sorted(entries))
+
+
+def validate_binary_compile_config(path: Path, compiled_in: bool, label: str) -> None:
+    sentinel_count = regular_file_bytes(path, label).count(TRACING_SENTINEL)
+    if compiled_in and sentinel_count != 1:
+        raise OverheadError(f"{label} does not prove one compiled-in tracing sentinel")
+    if not compiled_in and sentinel_count != 0:
+        raise OverheadError(f"{label} contains a compiled-in tracing sentinel")
+
+
+def validate_state_build(
+    evidence: Any, *, payload: dict[str, Any], evidence_root: Path, label: str,
+) -> None:
+    exact_keys(evidence, STATE_BUILD_EVIDENCE_KEYS, f"{label}.state_build")
+    source_archive = artifact_path(
+        evidence["source_archive"], evidence_root,
+        f"{label}.state_build source archive",
+    )
+    build_driver = artifact_path(
+        evidence["build_driver"], evidence_root,
+        f"{label}.state_build driver",
+    )
+    build_request_path = artifact_path(
+        evidence["build_request"], evidence_root,
+        f"{label}.state_build request",
+    )
+    build_receipt_path = artifact_path(
+        evidence["build_receipt"], evidence_root,
+        f"{label}.state_build receipt",
+    )
+    rebuilt_product = artifact_path(
+        evidence["rebuilt_product"], evidence_root,
+        f"{label}.state_build rebuilt product",
+    )
+    artifact_path(evidence["stdout"], evidence_root, f"{label}.state_build stdout")
+    artifact_path(evidence["stderr"], evidence_root, f"{label}.state_build stderr")
+    request = regular_json(build_request_path, f"{label}.state_build request")
+    receipt = regular_json(build_receipt_path, f"{label}.state_build receipt")
+    exact_keys(request, STATE_BUILD_REQUEST_KEYS, f"{label}.state_build request")
+    exact_keys(receipt, STATE_BUILD_RECEIPT_KEYS, f"{label}.state_build receipt")
+    driver = payload["state_build_driver"]
+    identity = state_build_identity(payload)
+    common = (
+        request["attempt_nonce"] == receipt["attempt_nonce"]
+        and request["state"] == receipt["state"] == payload["state"]
+        and request["source_revision"] == receipt["source_revision"]
+        == payload["source_revision"]
+        and request["candidate_revision"] == receipt["candidate_revision"]
+        == payload["candidate_revision"]
+        and request["source_tree"] == receipt["source_tree"]
+        and request["source_tree_sha256"] == receipt["source_tree_sha256"]
+        and request["source_archive_sha256"] == receipt["source_archive_sha256"]
+        and request["binary_sha256"] == receipt["binary_sha256"]
+        == payload["binary_sha256"]
+        and request["identity"] == receipt["identity"] == identity
+        and request["tracing"] == receipt["tracing"] == payload["tracing"]
+        and request["driver_sha256"] == receipt["driver_sha256"]
+        == driver["sha256"]
+    )
+    if (
+        request["schema"] != STATE_BUILD_REQUEST_SCHEMA
+        or request["version"] != 1
+        or receipt["schema"] != STATE_BUILD_RECEIPT_SCHEMA
+        or receipt["version"] != 1
+        or not common
+        or not isinstance(request["attempt_nonce"], str)
+        or not request["attempt_nonce"]
+        or not isinstance(request["source_directory"], str)
+        or not Path(request["source_directory"]).is_absolute()
+        or not isinstance(request["output_directory"], str)
+        or not Path(request["output_directory"]).is_absolute()
+        or not isinstance(request["source_tree"], str)
+        or GIT_REVISION.fullmatch(request["source_tree"]) is None
+        or not isinstance(request["source_tree_sha256"], str)
+        or SHA256.fullmatch(request["source_tree_sha256"]) is None
+        or sha256_file(source_archive, f"{label}.state_build source archive")
+        != request["source_archive_sha256"]
+        or source_archive_tree_sha256(
+            source_archive, f"{label}.state_build source archive",
+        ) != request["source_tree_sha256"]
+        or sha256_file(build_driver, f"{label}.state_build driver") != driver["sha256"]
+        or sha256_file(rebuilt_product, f"{label}.state_build rebuilt product")
+        != payload["binary_sha256"]
+        or receipt["outcome"] != "pass"
+        or receipt["reason"] is not None
+        or receipt["product_sha256"] != payload["binary_sha256"]
+        or not isinstance(receipt["product_path"], str)
+        or not receipt["product_path"]
+        or Path(receipt["product_path"]).is_absolute()
+        or ".." in Path(receipt["product_path"]).parts
+        or not isinstance(receipt["builder_id"], str)
+        or not receipt["builder_id"]
+        or not isinstance(receipt["build_command"], list)
+        or not 1 <= len(receipt["build_command"]) <= 64
+        or any(
+            not isinstance(item, str) or not item for item in receipt["build_command"]
+        )
+        or UTC_TIMESTAMP.fullmatch(receipt["build_started_utc"]) is None
+        or UTC_TIMESTAMP.fullmatch(receipt["build_finished_utc"]) is None
+        or receipt["build_finished_utc"] < receipt["build_started_utc"]
+    ):
+        raise OverheadError(f"{label}.state_build is not source/config/product bound")
+    toolchain = receipt["toolchain"]
+    toolchain_refs = evidence["toolchain"]
+    if (
+        not isinstance(toolchain, list) or not 1 <= len(toolchain) <= 16
+        or not isinstance(toolchain_refs, list) or len(toolchain_refs) != len(toolchain)
+    ):
+        raise OverheadError(f"{label}.state_build lacks bounded toolchain provenance")
+    observed_paths: set[str] = set()
+    for index, (tool, ref) in enumerate(zip(toolchain, toolchain_refs, strict=True)):
+        exact_keys(tool, TOOLCHAIN_KEYS, f"{label}.state_build toolchain[{index}]")
+        tool_snapshot = artifact_path(
+            ref, evidence_root, f"{label}.state_build toolchain[{index}]",
+        )
+        if (
+            not isinstance(tool["path"], str) or not Path(tool["path"]).is_absolute()
+            or tool["path"] in observed_paths
+            or not isinstance(tool["sha256"], str)
+            or SHA256.fullmatch(tool["sha256"]) is None
+            or sha256_file(tool_snapshot, f"{label}.state_build toolchain[{index}]")
+            != tool["sha256"]
+            or not isinstance(tool["version"], str) or not tool["version"]
+        ):
+            raise OverheadError(f"{label}.state_build toolchain[{index}] is invalid")
+        observed_paths.add(tool["path"])
+    if receipt["build_command"][0] != toolchain[0]["path"]:
+        raise OverheadError(f"{label}.state_build command is not toolchain bound")
+    validate_binary_compile_config(
+        rebuilt_product, bool(payload["tracing"]["compiled_in"]),
+        f"{label}.state_build rebuilt product",
+    )
+
+
 def validate_collection(
     payload: dict[str, Any], *, evidence_root: Path, label: str,
     allow_fixture_collection: bool,
@@ -316,6 +518,10 @@ def validate_collection(
         or EVIDENCE_ID.fullmatch(collection["challenge_nonce"]) is None
     ):
         raise OverheadError(f"{label}.collection is not source/product bound")
+    validate_state_build(
+        collection["state_build"], payload=payload, evidence_root=evidence_root,
+        label=label,
+    )
     driver_root = safe_directory(
         evidence_root, collection["driver_artifact_directory"],
         f"{label}.collection driver artifacts",
@@ -664,6 +870,7 @@ def validate_raw(
     exact_keys(payload["machine"], MACHINE_KEYS, f"{label}.machine")
     exact_keys(payload["workload"], WORKLOAD_KEYS, f"{label}.workload")
     exact_keys(payload["measurement_driver"], DRIVER_KEYS, f"{label}.measurement_driver")
+    exact_keys(payload["state_build_driver"], DRIVER_KEYS, f"{label}.state_build_driver")
     exact_keys(payload["tracing"], TRACING_KEYS, f"{label}.tracing")
     compiled, active, ring = STATE_TRACING[state]
     if (
@@ -722,6 +929,17 @@ def validate_raw(
         or not isinstance(driver["sha256"], str) or SHA256.fullmatch(driver["sha256"]) is None
     ):
         raise OverheadError(f"{label}.measurement_driver is not source-bound")
+    state_build_driver = payload["state_build_driver"]
+    if (
+        state_build_driver["revision"] != payload["candidate_revision"]
+        or not isinstance(state_build_driver["path"], str)
+        or not state_build_driver["path"]
+        or Path(state_build_driver["path"]).is_absolute()
+        or ".." in Path(state_build_driver["path"]).parts
+        or not isinstance(state_build_driver["sha256"], str)
+        or SHA256.fullmatch(state_build_driver["sha256"]) is None
+    ):
+        raise OverheadError(f"{label}.state_build_driver is not source-bound")
     challenge_nonce, live_observations = validate_collection(
         payload, evidence_root=evidence_root, label=label,
         allow_fixture_collection=allow_fixture_collection,
@@ -834,7 +1052,7 @@ def build_receipt(
         "campaign_role", "campaign_id", "build_family_id", "product_id",
         "product_name", "plugin_format", "machine", "workload",
         "measurement_driver", "trace_session_config",
-        "producer_packages",
+        "producer_packages", "state_build_driver",
     )
     baseline = payloads["pre-change-baseline"]
     for state in STATES[1:]:
@@ -908,6 +1126,7 @@ def build_receipt(
         "machine": baseline["machine"],
         "workload": baseline["workload"],
         "measurement_driver": baseline["measurement_driver"],
+        "state_build_driver": baseline["state_build_driver"],
         "trace_session_config": baseline["trace_session_config"],
         "trace_processor": (
             artifact_ref(trace_processor_path, evidence_root)
@@ -1135,11 +1354,12 @@ class CollectionLivenessMonitor:
 
 def validate_collection_request(
     request: dict[str, Any], *, evidence_root: Path, source_root: Path,
-    binary: Path, driver: Path,
+    binary: Path, driver: Path, build_driver: Path,
 ) -> None:
     exact_keys(request, COLLECTION_REQUEST_KEYS, "collection request")
     state = request.get("state")
     driver_record = request.get("measurement_driver")
+    build_driver_record = request.get("state_build_driver")
     workload = request.get("workload")
     if (
         request.get("schema") != COLLECTION_REQUEST_SCHEMA
@@ -1170,6 +1390,15 @@ def validate_collection_request(
         or Path(driver_record["path"]).is_absolute()
         or ".." in Path(driver_record["path"]).parts
         or driver_record.get("sha256") != sha256_file(driver, "collection driver")
+        or not isinstance(build_driver_record, dict)
+        or set(build_driver_record) != DRIVER_KEYS
+        or build_driver_record.get("revision") != request.get("candidate_revision")
+        or not isinstance(build_driver_record.get("path"), str)
+        or not build_driver_record["path"]
+        or Path(build_driver_record["path"]).is_absolute()
+        or ".." in Path(build_driver_record["path"]).parts
+        or build_driver_record.get("sha256")
+        != sha256_file(build_driver, "state build driver")
         or not isinstance(workload, dict) or set(workload) != WORKLOAD_KEYS
         or workload.get("adapter_revision") != request.get("candidate_revision")
         or workload.get("adapter_path") != driver_record.get("path")
@@ -1190,6 +1419,13 @@ def validate_collection_request(
             source_root, request["candidate_revision"], driver_record["path"],
             "overhead collection driver",
         ))
+        expected_build_driver = (source_root / build_driver_record["path"]).resolve()
+        expected_build_driver_digest = role_support.sha256_bytes(
+            role_support.git_file_bytes(
+                source_root, request["candidate_revision"],
+                build_driver_record["path"], "overhead state build driver",
+            )
+        )
         adapter = workload
         expected_adapter = (source_root / adapter["adapter_path"]).resolve()
         adapter_digest = role_support.sha256_bytes(role_support.git_file_bytes(
@@ -1200,6 +1436,13 @@ def validate_collection_request(
         raise OverheadError(str(error)) from error
     if expected_digest != driver_record["sha256"]:
         raise OverheadError("collection driver differs from the exact candidate revision")
+    if (
+        expected_build_driver != build_driver.resolve()
+        or expected_build_driver_digest != build_driver_record["sha256"]
+    ):
+        raise OverheadError(
+            "state build driver differs from the exact candidate revision"
+        )
     if (
         adapter["adapter_revision"] != request["candidate_revision"]
         or expected_adapter != driver.resolve()
@@ -1212,14 +1455,271 @@ def validate_collection_request(
     validate_session_config(request["trace_session_config"], evidence_root)
 
 
+def run_state_source_build(
+    *, request: dict[str, Any], evidence_root: Path, source_root: Path,
+    binary: Path, driver: Path, build_driver: Path, collection_root: Path,
+    attempt_nonce: str,
+) -> dict[str, Any]:
+    """Independently rebuild and byte-compare the exact state product."""
+    if sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file():
+        raise OverheadError("state source proof requires the macOS sandbox")
+    evidence_resolved = evidence_root.resolve()
+    source_resolved = source_root.resolve()
+    if (
+        evidence_resolved == source_resolved
+        or evidence_resolved in source_resolved.parents
+        or source_resolved in evidence_resolved.parents
+    ):
+        raise OverheadError("state source root overlaps the evidence root")
+    build_record = request["state_build_driver"]
+    stdout_path = collection_root / "state-build.stdout.log"
+    stderr_path = collection_root / "state-build.stderr.log"
+    retained_root = collection_root / "state-build"
+    retained_root.mkdir()
+    with tempfile.TemporaryDirectory(
+        prefix="pulp-a3-trace-producer-state-build-",
+    ) as temporary:
+        workspace = Path(temporary).resolve()
+        source_archive, source_snapshot = role_support.export_exact_source_tree(
+            source_root, request["source_revision"], workspace / "source",
+            f"{request['state']} overhead source",
+        )
+        source_archive_digest = sha256_file(
+            source_archive, "state source archive",
+        )
+        source_tree_digest = role_support.directory_digest(
+            source_snapshot, "state source tree",
+        )
+        if source_archive_tree_sha256(
+            source_archive, "state source archive",
+        ) != source_tree_digest:
+            raise OverheadError("state source archive and extracted tree differ")
+        try:
+            source_tree = role_support.git_output(
+                source_root, "rev-parse", f"{request['source_revision']}^{{tree}}",
+            )
+        except role_support.ProducerError as error:
+            raise OverheadError(str(error)) from error
+        if GIT_REVISION.fullmatch(source_tree) is None:
+            raise OverheadError("state source revision has an invalid tree identity")
+        local_driver, observed_driver_digest = role_support.snapshot_file(
+            build_driver, workspace / f"state-build-driver{build_driver.suffix}",
+            "state build driver",
+        )
+        if observed_driver_digest != build_record["sha256"]:
+            raise OverheadError("state build driver changed before execution")
+        output = workspace / "output"
+        build_request_path = workspace / "request.json"
+        build_receipt_path = workspace / "receipt.json"
+        build_request = {
+            "schema": STATE_BUILD_REQUEST_SCHEMA,
+            "version": 1,
+            "attempt_nonce": attempt_nonce,
+            "state": request["state"],
+            "source_revision": request["source_revision"],
+            "candidate_revision": request["candidate_revision"],
+            "source_tree": source_tree,
+            "source_tree_sha256": source_tree_digest,
+            "source_archive_sha256": source_archive_digest,
+            "source_directory": str(source_snapshot),
+            "output_directory": str(output),
+            "binary_sha256": request["binary_sha256"],
+            "identity": state_build_identity(request),
+            "tracing": request["tracing"],
+            "driver_sha256": observed_driver_digest,
+        }
+        atomic_json(build_request_path, build_request)
+        (workspace / "home").mkdir()
+        (workspace / "tmp").mkdir()
+        environment = {
+            "HOME": str(workspace / "home"),
+            "LC_ALL": "C",
+            "PATH": ":".join((
+                str(Path(sys.executable).resolve().parent), "/opt/homebrew/bin",
+                "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+            )),
+            "PYTHONFAULTHANDLER": "1",
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": str(workspace / "tmp"),
+        }
+        for name in ("DEVELOPER_DIR", "SDKROOT"):
+            if os.environ.get(name):
+                environment[name] = os.environ[name]
+        sandbox_profile = role_support.macos_default_deny_build_profile(
+            workspace, [evidence_root, source_root, binary, driver, build_driver],
+        )
+        exit_code = role_support.bounded_run(
+            ["/usr/bin/sandbox-exec", "-p", sandbox_profile, str(local_driver),
+             "--request", str(build_request_path),
+             "--receipt", str(build_receipt_path)],
+            cwd=workspace, environment=environment, timeout_seconds=1800,
+            stdout_path=stdout_path, stderr_path=stderr_path,
+        )
+        if not build_receipt_path.is_file() or build_receipt_path.is_symlink():
+            stdout_tail = regular_file_bytes(
+                stdout_path, "state build stdout",
+            )[-2048:].decode(errors="replace").strip()
+            stderr_tail = regular_file_bytes(
+                stderr_path, "state build stderr",
+            )[-4096:].decode(errors="replace").strip()
+            detail = " | ".join(
+                item for item in (stdout_tail, stderr_tail) if item
+            )
+            raise OverheadError(
+                f"state build driver omitted its receipt (exit {exit_code})"
+                + (f": {detail}" if detail else "")
+            )
+        receipt = regular_json(build_receipt_path, "state build receipt")
+        exact_keys(receipt, STATE_BUILD_RECEIPT_KEYS, "state build receipt")
+        if (
+            exit_code != 0
+            or receipt["schema"] != STATE_BUILD_RECEIPT_SCHEMA
+            or receipt["version"] != 1
+            or receipt["attempt_nonce"] != attempt_nonce
+            or receipt["state"] != request["state"]
+            or receipt["outcome"] != "pass"
+            or receipt["reason"] is not None
+            or receipt["source_revision"] != request["source_revision"]
+            or receipt["candidate_revision"] != request["candidate_revision"]
+            or receipt["source_tree"] != source_tree
+            or receipt["source_tree_sha256"] != source_tree_digest
+            or receipt["source_archive_sha256"] != source_archive_digest
+            or receipt["binary_sha256"] != request["binary_sha256"]
+            or receipt["identity"] != state_build_identity(request)
+            or receipt["tracing"] != request["tracing"]
+            or receipt["driver_sha256"] != observed_driver_digest
+        ):
+            raise OverheadError("state build receipt differs from the closed request")
+        command = receipt["build_command"]
+        if (
+            not isinstance(command, list) or not 1 <= len(command) <= 64
+            or any(not isinstance(item, str) or not item for item in command)
+            or not isinstance(receipt["builder_id"], str)
+            or not receipt["builder_id"]
+        ):
+            raise OverheadError("state build receipt lacks a bounded builder identity")
+        try:
+            started = role_support.parse_utc(
+                receipt["build_started_utc"], "state build start",
+            )
+            finished = role_support.parse_utc(
+                receipt["build_finished_utc"], "state build finish",
+            )
+        except role_support.ProducerError as error:
+            raise OverheadError(str(error)) from error
+        if finished < started:
+            raise OverheadError("state build finishes before it starts")
+        if not output.is_dir() or output.is_symlink():
+            raise OverheadError("state build output is not a fresh regular directory")
+        try:
+            product = role_support.safe_built_path(
+                output, receipt["product_path"], "state-built product",
+            )
+        except role_support.ProducerError as error:
+            raise OverheadError(str(error)) from error
+        product_digest = sha256_file(product, "state-built product")
+        if (
+            not product.is_file() or product.is_symlink()
+            or not os.access(product, os.X_OK)
+            or receipt["product_sha256"] != product_digest
+            or product_digest != request["binary_sha256"]
+            or product_digest != sha256_file(binary, "measured state product")
+        ):
+            raise OverheadError(
+                "independent state build differs from the measured executable"
+            )
+        if [entry[0] for entry in role_support.directory_entries(
+            output, "state build output",
+        )] != [product.relative_to(output).as_posix()]:
+            raise OverheadError("state build retained unrelated output")
+        validate_binary_compile_config(
+            product, bool(request["tracing"]["compiled_in"]),
+            "state-built product",
+        )
+        toolchain = receipt["toolchain"]
+        if not isinstance(toolchain, list) or not 1 <= len(toolchain) <= 16:
+            raise OverheadError("state build lacks bounded toolchain provenance")
+        retained_toolchain: list[dict[str, str]] = []
+        observed_tool_paths: set[Path] = set()
+        allowed_tool_roots = tuple(
+            path.resolve() for path in (
+                Path(sys.executable).resolve().parent.parent,
+                Path("/System"), Path("/usr"), Path("/bin"), Path("/sbin"),
+                Path("/Library/Developer"), Path("/Applications/Xcode.app"),
+                Path("/opt/homebrew"), Path("/usr/local"),
+            ) if path.exists()
+        )
+        for index, tool in enumerate(toolchain):
+            exact_keys(tool, TOOLCHAIN_KEYS, f"state build toolchain[{index}]")
+            tool_path = Path(tool["path"])
+            resolved_tool = tool_path.resolve()
+            if (
+                not tool_path.is_absolute() or tool_path.is_symlink()
+                or not resolved_tool.is_file() or not os.access(resolved_tool, os.X_OK)
+                or resolved_tool in observed_tool_paths
+                or not any(
+                    resolved_tool == root or root in resolved_tool.parents
+                    for root in allowed_tool_roots
+                )
+                or tool["path"] != str(resolved_tool)
+                or tool["sha256"] != sha256_file(
+                    resolved_tool, f"state build toolchain[{index}]",
+                )
+                or not isinstance(tool["version"], str) or not tool["version"]
+            ):
+                raise OverheadError(f"state build toolchain[{index}] is invalid")
+            observed_tool_paths.add(resolved_tool)
+            retained_path = (
+                evidence_root / "tooling"
+                / f"state-build-tool-{tool['sha256']}"
+            )
+            if retained_path.exists():
+                if sha256_file(retained_path, "retained state build tool") != tool["sha256"]:
+                    raise OverheadError("retained state build tool digest differs")
+            else:
+                role_support.snapshot_file(
+                    resolved_tool, retained_path, f"state build toolchain[{index}]",
+                )
+            retained_toolchain.append(artifact_ref(retained_path, evidence_root))
+        if command[0] != toolchain[0]["path"]:
+            raise OverheadError("state build command is not toolchain bound")
+        retained_source, _ = role_support.snapshot_file(
+            source_archive, retained_root / "source.tar", "state source archive",
+        )
+        retained_driver, _ = role_support.snapshot_file(
+            local_driver, retained_root / "build-driver", "state build driver",
+        )
+        retained_request, _ = role_support.snapshot_file(
+            build_request_path, retained_root / "request.json", "state build request",
+        )
+        retained_receipt, _ = role_support.snapshot_file(
+            build_receipt_path, retained_root / "receipt.json", "state build receipt",
+        )
+        retained_product, _ = role_support.snapshot_file(
+            product, retained_root / "product", "state rebuilt product",
+        )
+    return {
+        "source_archive": artifact_ref(retained_source, evidence_root),
+        "build_driver": artifact_ref(retained_driver, evidence_root),
+        "build_request": artifact_ref(retained_request, evidence_root),
+        "build_receipt": artifact_ref(retained_receipt, evidence_root),
+        "rebuilt_product": artifact_ref(retained_product, evidence_root),
+        "stdout": artifact_ref(stdout_path, evidence_root),
+        "stderr": artifact_ref(stderr_path, evidence_root),
+        "toolchain": retained_toolchain,
+    }
+
+
 def collect_state(
     *, request_path: Path, evidence_root: Path, source_root: Path,
-    binary: Path, driver: Path, output: Path, trace_processor: Path | None,
+    binary: Path, driver: Path, build_driver: Path, output: Path,
+    trace_processor: Path | None,
 ) -> dict[str, Any]:
     request = regular_json(request_path, "collection request")
     validate_collection_request(
         request, evidence_root=evidence_root, source_root=source_root,
-        binary=binary, driver=driver,
+        binary=binary, driver=driver, build_driver=build_driver,
     )
     try:
         request_path.resolve().relative_to(evidence_root.resolve())
@@ -1240,6 +1740,11 @@ def collect_state(
     )
     binary_digest = sha256_file(binary, "overhead product binary")
     attempt_nonce = os.urandom(16).hex()
+    state_build = run_state_source_build(
+        request=request, evidence_root=evidence_root, source_root=source_root,
+        binary=binary, driver=driver, build_driver=build_driver,
+        collection_root=collection_root, attempt_nonce=attempt_nonce,
+    )
     monitor = CollectionLivenessMonitor(
         root=collection_root / "liveness", attempt_nonce=attempt_nonce,
         state=state, binary=binary, binary_sha256=binary_digest,
@@ -1360,6 +1865,7 @@ def collect_state(
         "handshake_artifacts": [
             artifact_ref(path, evidence_root) for path in handshake_artifacts
         ],
+        "state_build": state_build,
     }
     atomic_json(collection_receipt_path, collection_receipt)
     raw = {
@@ -1386,6 +1892,7 @@ def main() -> int:
     collect.add_argument("--source-root", required=True, type=Path)
     collect.add_argument("--binary", required=True, type=Path)
     collect.add_argument("--driver", required=True, type=Path)
+    collect.add_argument("--build-driver", required=True, type=Path)
     collect.add_argument("--trace-processor", type=Path)
     collect.add_argument("--output", required=True, type=Path)
     ratify = subparsers.add_parser("ratify")
@@ -1405,7 +1912,8 @@ def main() -> int:
             raw = collect_state(
                 request_path=args.request.resolve(), evidence_root=evidence_root,
                 source_root=args.source_root.resolve(), binary=args.binary.resolve(),
-                driver=args.driver.resolve(), output=args.output.resolve(),
+                driver=args.driver.resolve(), build_driver=args.build_driver.resolve(),
+                output=args.output.resolve(),
                 trace_processor=(
                     args.trace_processor.resolve() if args.trace_processor else None
                 ),
