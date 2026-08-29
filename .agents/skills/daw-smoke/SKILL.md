@@ -285,5 +285,13 @@ driver through `gpu_first_visible_a3_trace_producer_overhead.py collect-state`;
 do not time the smoke wrapper or relabel its editor-open result. Every one of
 the 55 samples/state must answer the collector while the challenged REAPER PID
 and exact plug-in executable are alive, then terminate cleanly. Active replay
-must find the health and `gpu_acquire`/`gpu_submit`/`gpu_present` packages with
-zero xruns and zero producer events on the audio TIDs.
+must find the health producer and bind the complete b4ba exact 20-signature
+`state`/`render`/`js` package from the A3 acceptance guide.
+`gpu_acquire`/`gpu_submit`/`gpu_present` are mandatory per sample; every other
+signature remains counted and a zero count is reported not-covered, not
+zero-cost. Require zero xruns and zero producer events on the audio TIDs.
+Pin the candidate-relative `state_build_driver` too. The collector exports and
+default-deny rebuilds the exact source row without the measured plug-in,
+ambient build tree, or network, then requires identical executable bytes and
+the requested tracing sentinel state. Keep its source/build/toolchain artifacts
+with the campaign; an already-built bundle or receipt assertion is not proof.

@@ -463,5 +463,14 @@ collect-state` with the exact Forge executable and reviewed Forge lifecycle
 driver. Each state requires 55 live challenges; the source-built `.app` and
 measured executable identities remain exact, and idle/active reuse identical
 bytes. Active binary Perfetto replay covers both the health producer and the
-`b4ba22…` acquire/submit/present package with zero xruns/audio-thread producer
-events. A direct driver result or Pulp example is nonterminal.
+complete b4ba exact 20-signature `state`/`render`/`js` inventory from the A3
+guide. Acquire/submit/present are mandatory; all other signatures are counted
+and an unobserved one stays not-covered, not zero-cost. Require zero
+xruns/audio-thread producer events. A direct driver result or Pulp example is
+nonterminal.
+Also pin the candidate-relative `state_build_driver`. The collector exports the
+exact source row and default-deny rebuilds it without the measured `.app`,
+ambient build output, or network, then byte-compares the rebuilt executable and
+checks its tracing sentinel. Retain source archive, closed build
+request/receipt, product, logs, and toolchain snapshots; a pre-existing Forge
+bundle cannot satisfy this proof.

@@ -435,7 +435,17 @@ immutable producer packages exactly:
 - `8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0` for
   `gpu_health_transition_first_visible`;
 - `b4ba22f1d700621366afdbc72bb8615336964cd1` for the five macOS
-  input-to-present paths and `gpu_acquire`, `gpu_submit`, `gpu_present`.
+  input-to-present paths and its exact 20 producer signatures. The 16 slices
+  are `native_drag_dispatch`, `pointer_coalescer_flush`, `mac_mouse_dragged`,
+  `gpu_acquire`, `skia_begin`, `gpu_submit`, `gpu_present`,
+  `editor_bridge_dispatch_json`, `editor_bridge_json_parse`,
+  `view_repaint_request`, `repaint_request`, `frame_callback_pump`,
+  `raf_flush`, `dom_event_dispatch`, `dom_event_evaluate`, and
+  `dom_event_microtask_pump`; the four counters are
+  `delivered_drag_samples`, `pointer_coalescer_flushes`,
+  `pointer_samples_merged`, and `raw_drag_samples`. The immutable contract also
+  binds every signature's slice/counter kind, `state`/`render`/`js` category,
+  and fields (`callbacks` for `raf_flush`, `value` for counters).
 
 `measurement_driver` and `workload.adapter_*` name the same reviewed,
 candidate-relative executable path, revision, and digest. The driver receives
@@ -447,9 +457,37 @@ the transcript, verifies exact executable/start identity, and refuses leftover
 processes. `evidence_id` is derived from the challenge/attempt/logical process,
 never from a reusable PID.
 
+`state_build_driver` is a second, candidate-relative `{revision,path,sha256}`
+record. Before measuring a row, the collector exports the row's exact
+`source_revision` with `git archive`, verifies both the Git tree identity and a
+normalized extracted-tree digest, and invokes that driver in a fresh macOS
+default-deny sandbox. The driver receives only a
+`pulp.gpu-first-visible-trace-producer-state-build-request.v1` naming the
+attempt, state, baseline/candidate/source revisions, tree/archive digests,
+fresh source/output directories, expected product digest, product identity,
+tracing state, and driver digest. It does **not** receive the measured product
+path. The sandbox denies the measured binary, original worktree, evidence
+tree, ambient user/workspace build outputs, and network, while allowing the
+exported source, fresh output, and declared system toolchain. A build that
+needs another immutable input must declare and snapshot that input in the
+closed contract; ambient cache or SDK discovery is not provenance.
+
+The driver must return one
+`pulp.gpu-first-visible-trace-producer-state-build-receipt.v1` with the same
+closed identity/configuration, bounded builder and command, start/finish UTC,
+relative product path and digest, and 1–16 exact toolchain
+`{path,sha256,version}` records. The collector requires the independently
+rebuilt executable bytes to equal the measured bytes, requires exactly one
+`PULP_TRACING_COMPILED_IN__DO_NOT_SHIP` sentinel for each compiled-in row and
+none for compile-out/baseline, and retains the source archive, build
+driver/request/receipt, rebuilt product, stdout/stderr, and snapshotted
+toolchain executables. Offline ratification rehashes and replays all of those
+artifacts; a driver assertion without the independent bytes cannot pass.
+
 Create a pinned session-config artifact under the evidence root with schema
 `pulp.gpu-first-visible-trace-session-config.v1`, categories
-`dsp,gpu,metadata,render`, `fill_policy=ring-buffer`, and `ring_bytes=134217728`.
+`dsp,gpu,js,metadata,render,state`, `fill_policy=ring-buffer`, and
+`ring_bytes=134217728`.
 All requests reference its digest; only the active row declares that ring
 active. Then collect the four states through the collector—never by invoking
 the measurement driver directly:
@@ -458,6 +496,7 @@ the measurement driver directly:
 : "${A3_EVIDENCE:?fresh absolute evidence root}"
 : "${A3_CANDIDATE_ROOT:?clean exact final-candidate checkout}"
 : "${A3_OVERHEAD_DRIVER:?candidate-relative reviewed measurement driver}"
+: "${A3_OVERHEAD_BUILD_DRIVER:?candidate-relative reviewed state-build driver}"
 : "${A3_PRECHANGE_BIN:?exact baseline product executable}"
 : "${A3_COMPILE_OUT_BIN:?exact final-head compile-out executable}"
 : "${A3_COMPILED_IN_BIN:?exact final-head compiled-in executable used idle and active}"
@@ -475,6 +514,7 @@ for STATE in pre-change-baseline candidate-compile-out candidate-compiled-in-idl
     --source-root "$A3_CANDIDATE_ROOT" \
     --binary "$BIN" \
     --driver "$A3_CANDIDATE_ROOT/$A3_OVERHEAD_DRIVER" \
+    --build-driver "$A3_CANDIDATE_ROOT/$A3_OVERHEAD_BUILD_DRIVER" \
     --trace-processor "$TRACE_PROCESSOR" \
     --output "$A3_EVIDENCE/overhead/$STATE.json"
 done
@@ -484,9 +524,15 @@ Production active traces must be binary Perfetto and replay only through the
 exact Pulp v57.2 platform SHA pin. Chrome trace JSON is accepted solely by
 planted fixture tests; the production CLI has no bypass. Replay requires
 finished slices, zero loss/no-flush stats, one stable UPID/session challenge,
-the challenged host PID, the expected producer spans, and zero xrun or
-audio-thread producer events. The four-state receipt reports both aggregate
-input-to-first-visible overhead and the explicit audio/xrun disposition.
+the challenged host PID, the health span, and all 20 b4ba signature counters.
+Each sample must observe `gpu_acquire`, `gpu_submit`, and `gpu_present`; the
+other 17 signatures are workload-conditional but remain counted. A zero
+workload-conditional count is emitted as `reported-not-covered-not-zero-cost`,
+never silently converted to zero overhead. All observed b4ba slices/counters
+must belong to the challenged host process and zero may occur on declared
+audio TIDs. The four-state receipt reports the full signature inventory,
+unobserved disposition, aggregate input-to-first-visible overhead, and explicit
+audio/xrun disposition.
 
 After the source-bound product driver has written the four raw documents under
 the evidence root, derive the only accepted receipt with:
@@ -563,6 +609,126 @@ lifetime, and shutdown. Adopt nothing unless the rerun proves a causal,
 material benefit; otherwise record `no-change`. A generic Vellum-installed
 `SkLogHandler` can be a later diagnostic producer. Neither item is Horizon A or
 part of the initial Pulp implementation.
+
+### Exact B4 Vellum handoff
+
+This handoff is executable only after A3 derives `queue-B4` or
+`queue-B4-investigation`; it is not authority to change the current Pulp
+renderer. The pinned Skia header makes
+`skgpu::graphite::ContextOptions::fExecutor` a non-owning `SkExecutor*`, says
+Graphite currently uses it for pipeline compilation, and requires the client
+to keep it alive for the complete `Context` lifetime. `SkExecutor`'s FIFO/LIFO
+factories provide a fixed worker count but do not themselves prove bounded
+queue capacity or backpressure. Vellum must supply those bounds or reject the
+candidate; fixed workers alone do not qualify as `background_bounded`.
+
+The present Pulp compatibility seam is
+`core/render/src/skia_surface.cpp::SkiaSurfaceImpl::init`, immediately before
+`ContextFactory::MakeDawn`. Do not install generic executor policy there.
+After adoption, the authority is Vellum's
+`graphics/include/vellum/graphics/skia_dawn_surface.hpp` and
+`graphics/src/skia_dawn_surface.mm`, with proof in
+`graphics/tests/gpu_style_test.cpp` and
+`graphics/tests/text_shaping_concurrency_test.cpp` (or their B0-verified
+successors). A Vellum `Impl` owns a `std::unique_ptr<SkExecutor>` or equivalent
+before the Graphite context member so reverse destruction drains/destroys
+recorders and context first, releases the executor next, and releases borrowed
+Dawn state last. Initialization must select either a null synchronous control
+or one bounded executor; it must define worker count, queue capacity,
+backpressure/rejection, cancellation, worker failure, partial-init rollback,
+and queued-work shutdown, and must not add a second pipeline scheduler around
+Graphite. No callback, queue operation, compilation, or teardown wait may run
+on an audio thread.
+
+The first experiment compares the null/synchronous control with that bounded
+executor on the same exact Pulp/Vellum/Skia/Dawn build, provider asset, host,
+trace session, product workload, and 10 cold plus 10 warm lifecycle rows. It
+does not add signature prewarm first. Vellum owns these minimum events on one
+documented monotonic-nanosecond clock:
+
+| Event | Required correlation/payload |
+|---|---|
+| `vellum.gpu.context.create` | runtime/context IDs, provider release/SHA, backend, adapter, policy |
+| `vellum.gpu.pipeline.request` | context/request IDs, stable pipeline-key hash, cache state |
+| `vellum.gpu.pipeline.queue` | request ID, enqueue time, bounded depth/capacity |
+| `vellum.gpu.pipeline.compile` | request ID, begin/end, outcome, worker thread |
+| `vellum.gpu.prewarm` | session ID, begin/end, requested/ready/failed counts |
+| `vellum.gpu.frame.paint` | surface/frame IDs, CPU begin/end |
+| `vellum.gpu.frame.submit` | surface/frame IDs, recording/submit begin/end |
+| `vellum.gpu.drawable.acquire` | surface/frame IDs, begin/end, status |
+| `vellum.gpu.present` | surface/frame IDs, call time, result |
+| `vellum.gpu.readback` | surface/frame IDs, begin/end, bytes, result |
+| `vellum.gpu.executor.saturation` | context ID, depth/capacity, dropped/rejected count |
+
+Every event/result binds process, runtime, context, surface, frame, trace
+session, provider asset, build, and (where applicable) pipeline-request IDs.
+Checked query output must carry the source-trace digest, provider release/SHA,
+process UPID, trace-session identity, units, event counts, p50/p95/p99,
+loss/flush disposition, and exact slice/counter evidence IDs. The saved queries
+must answer which stage delayed first-visible readiness; which pipelines were
+cold, warm, duplicated, failed, or late; how much time was queued, compiling,
+or blocking render; whether the executor reduced latency or merely moved
+contention; and whether trace drops or audio xruns occurred. Missing identity,
+events, flush, or loss truth is `unverified`, not a zero-duration conclusion.
+
+The current A3/Pulp comparison remains independently replayable. Its
+`pulp_a3_trace_session` metadata must contain
+`debug.gpu_evidence_id`, `debug.process_start_identity`,
+`debug.executable_sha256`, `debug.session_config_sha256`,
+`debug.audio_thread_tids_sha256`, `debug.collection_challenge_nonce`,
+`debug.ring_bytes`, and `debug.session_active`. The same challenged host
+UPID/session must contain `gpu_health_transition_first_visible` plus at least
+one each of `gpu_acquire`, `gpu_submit`, and `gpu_present`, all carrying the
+exact `debug.gpu_evidence_id`, with zero producer slices on declared audio TIDs,
+zero `xrun*`/`deadline_miss*`, zero loss/no-flush stats, and no incomplete
+slices. It must also report counts for the exact remaining 17 b4ba signatures
+under active `js`, `render`, and `state` categories; unobserved signatures stay
+explicitly not covered. B6 compares those saved A3 queries with the Vellum
+result contract; renamed events need an explicit compatibility mapping, never
+silent drift.
+
+The B4 test matrix includes null/synchronous, compiled-in idle, and active
+bounded-executor controls; saturation/backpressure, worker failure, partial
+initialization, wrong instance/build/provider, queued shutdown, and a planted
+executor-before-context lifetime failure; exact 10-cold/10-warm standalone,
+real-DAW, and Forge campaigns; and CPU, memory, frame-miss/hitch, trace-overhead,
+audio-thread, and xrun comparisons. `background_bounded` is accepted only when
+the exact campaign proves a causal, material first-visible improvement while
+every correctness, bounded-resource, trace-loss, and audio gate passes.
+Otherwise leave `fExecutor` null and close `no-change` or
+`cancelled-no-change`, retaining useful observability.
+
+After an m153+ provider is adopted, `SkLogHandler` is a separate future generic
+diagnostic producer in Vellum. Gate it on `GetInstance`/`SetInstance`, refuse to
+replace an unknown foreign handler, and retain an installed handler for process
+lifetime. Its callback may only copy bounded/truncated priority and message
+data into a bounded queue—no JSON, filesystem/network, unbounded lock, heavy
+formatting, or audio-thread work. A non-RT drain adds monotonic/process/thread,
+provider/build, drop-count, and optional surface/context identity.
+
+B6 deletes ownership duplication: Vellum retains the generic executor, log
+handler, runtime trace schema/state, and checked queries; Pulp retains
+product/host lifecycle selection, genuinely AppKit-specific
+acquire/submit/present spans if still required, unified control/CLI/MCP
+projection, and the standalone/REAPER/Forge campaign harnesses. Compare saved
+queries first, then remove superseded Pulp-local generic producers, state
+machines, and adapters. `core/render/src/skia_surface.cpp` becomes a thin
+compatibility/adoption adapter or disappears when the Vellum surface owns that
+seam. Deletion tests must reject duplicate global handlers, executors, runtime
+policy, and generic events. Update Doxygen, this guide, status/support surfaces,
+controls, capabilities, and mapped skills in the adoption package—not in the
+initial A3 implementation.
+
+`docs/status/gpu-vellum-handoff.yaml` is the closed v2 implementation ledger
+for that future work. It pins the plan, Pulp, Vellum, issue, and comment
+authorities; names B1 through B6 packages with exact existing/proposed path
+objects; and records APIs, ownership/lifetime/RT rules, trace fields, tests,
+performance gates, Pulp adoption, and terminal outcomes. Every current Pulp
+path is explicitly retained or listed as one exact delete candidate. Horizon A
+has no delete candidates: every `delete_paths` array is empty and every
+deletion gate is default-deny. Prose, a future phase name, or a Vellum issue is
+never deletion authority. B0 must refresh all pinned revisions and rerun the
+closed validator before an adoption tranche can propose any exact deletion.
 
 The gap inventory uses the existing low-cardinality Perfetto vocabulary:
 `gpu_shader_compile` for compile and source/shader signatures,

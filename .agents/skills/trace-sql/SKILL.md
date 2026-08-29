@@ -140,9 +140,16 @@ The four-state collector accepts production binary Perfetto only and replays it
 through Pulp's exact v57.2 platform SHA pin. Chrome JSON is planted-fixture-only.
 Reject unfinished slices, loss/no-flush stats, foreign UPIDs, reused session
 challenges, mismatched host PIDs, xruns, or producer spans on declared audio
-TIDs. Active queries must find both `gpu_health_transition_first_visible` and
-the `gpu_acquire` → `gpu_submit` → `gpu_present` package; absence is missing
-evidence, never zero.
+TIDs. Active queries must find `gpu_health_transition_first_visible`, require
+`gpu_acquire` → `gpu_submit` → `gpu_present` per sample, and count the complete
+b4ba exact 20-signature `state`/`render`/`js` inventory. A zero count for one of
+the other 17 signatures is reported not-covered, never zero-cost; absence of a
+mandatory stage is missing evidence.
+Each row also has a source-bound `state_build_driver`: the collector exports the
+exact revision, rebuilds under a default-deny/no-network sandbox, and requires
+rebuilt executable bytes plus the tracing sentinel state to match measurement.
+The retained source/build/toolchain artifacts are part of offline replay; SQL
+truth cannot compensate for missing product provenance.
 
 **Closed GPU cohort boundary.** The named GPU analyses do not currently accept
 an evidence-ID selector, so the SQL must not flatten unrelated runs. Startup

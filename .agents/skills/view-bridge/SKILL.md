@@ -2184,6 +2184,14 @@ measured product/bundle without receiving its runtime path. The lifecycle
 driver must use the real product/host bridge; a loop of
 capture calls without editor lifecycle evidence is rejected.
 
+The separate four-state overhead collector similarly requires a
+candidate-relative `state_build_driver`. It exports the exact source row and
+default-deny rebuilds it without access to the measured executable, ambient
+build output, or network, then requires matching executable bytes and tracing
+sentinel state. Preserve its source archive, closed request/receipt, rebuilt
+product, logs, and toolchain snapshots; no ViewBridge observation can replace
+that product provenance.
+
 The health-transition trace macros compile to no work when `PULP_TRACING=OFF`,
 but compiled-in idle and active product cost still need evidence. Terminal A3
 requires the acceptance guide's exact pre-change, compile-out, compiled-in idle,
@@ -2197,8 +2205,9 @@ The terminal overhead workflow enters through
 `gpu_first_visible_a3_trace_producer_overhead.py collect-state`. That collector,
 not ViewBridge or the product driver, owns the 55 per-state liveness challenges
 and binds process start plus executable identity. Active binary traces must
-contain the health-first-visible package and the `b4ba22…` macOS
-`gpu_acquire`/`gpu_submit`/`gpu_present` package on the challenged host process,
-with zero producer events on declared audio TIDs. Do not add evidence IDs,
-session control, or synthesized compositor timestamps to ViewBridge to satisfy
-the receipt.
+contain the health-first-visible package and the complete b4ba exact
+20-signature `state`/`render`/`js` package on the challenged host process.
+Acquire/submit/present are mandatory; every other signature remains counted
+and an unobserved one is not-covered, not zero-cost. Require zero producer
+events on declared audio TIDs. Do not add evidence IDs, session control, or
+synthesized compositor timestamps to ViewBridge to satisfy the receipt.

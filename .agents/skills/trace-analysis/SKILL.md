@@ -577,9 +577,17 @@ Collect every state with `gpu_first_visible_a3_trace_producer_overhead.py
 collect-state`, never by invoking the product driver directly. The collector
 owns 55 live challenge/ack handshakes per state and binds exact executable/start
 identity. Active replay must prove both immutable packages: health-first-visible
-at `8175bd…` and the `b4ba22…` input-to-present package containing
-`gpu_acquire`, `gpu_submit`, and `gpu_present`. Use the exact v57.2
-`trace_processor_shell`; production Chrome JSON is forbidden.
+at `8175bd…` and the complete b4ba exact 20-signature `state`/`render`/`js`
+inventory. Acquire/submit/present are mandatory per sample; the other 17
+signatures are counted and an unobserved signature stays explicitly
+not-covered, never zero-cost. Use the exact v57.2 `trace_processor_shell`;
+production Chrome JSON is forbidden.
+The request also pins a candidate-relative `state_build_driver`. Before timing,
+the collector exports the exact row source and default-deny rebuilds it without
+the measured binary, ambient build output, or network; rebuilt bytes and the
+compile-in sentinel must match the requested state. Preserve the source
+archive, closed build request/receipt, product, logs, and digest/version-bound
+toolchain snapshots. A direct binary or build-driver assertion cannot pass.
 
 ## Correlate a catalog recipe with Perfetto
 

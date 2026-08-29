@@ -569,9 +569,17 @@ Use the acceptance guide's `collect-state` command for every row. It wraps the
 source-bound product driver with 55 independent live-process challenges, keeps
 compiled-in idle and active executable bytes identical, and replays active
 binary Perfetto traces with the exact pinned processor. Acceptance binds both
-the health-first-visible producer and the `b4ba22…` macOS
-input/acquire/submit/present package; raw driver JSON or Chrome trace cannot
-stand in for the collector receipt.
+the health-first-visible producer and the complete b4ba exact 20-signature
+`state`/`render`/`js` package. Acquire/submit/present are mandatory per active
+sample; every other signature is counted and a zero is reported not-covered,
+not zero-cost. Raw driver JSON or Chrome trace cannot stand in for the
+collector receipt.
+The same request pins a candidate-relative `state_build_driver`. The collector
+exports the exact row revision, rebuilds it under default-deny/no-network
+confinement without the measured product or ambient build tree, byte-compares
+the rebuilt executable, and verifies the compile-in sentinel. Retain its source
+archive, closed build request/receipt, product, logs, and exact toolchain
+snapshots; an existing Skia/Dawn build directory is not source proof.
 
 If a validated B4 disposition routes follow-up to Vellum, test a bounded
 Graphite `PipelineManager` `SkExecutor` supplied through `ContextOptions` before
