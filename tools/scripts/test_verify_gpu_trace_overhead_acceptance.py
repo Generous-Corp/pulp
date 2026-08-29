@@ -594,7 +594,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "non_a2t_product_producers"
         ] = []
         errors = MODULE.verify(receipt, ROOT)
-        self.assertTrue(any("every later non-A2T product producer" in error for error in errors))
+        self.assertTrue(any("every post-base non-A2T product producer" in error for error in errors))
 
     def test_fixture_semantic_question_cannot_be_relabelled(self):
         receipt = self.structural_receipt()
