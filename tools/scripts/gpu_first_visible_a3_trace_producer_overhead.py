@@ -42,6 +42,20 @@ INPUT_TO_PRESENT_PATHS = [
     "core/view/src/widget_bridge.cpp",
     "core/view/src/widget_bridge/bridge_dispatch.cpp",
 ]
+B4BA_SIGNATURES = [
+    {
+        "kind": "slice", "category": category, "name": name,
+        "fields": ["callbacks"] if name == "raf_flush" else [],
+    }
+    for category, name in trace_replay.B4BA_SLICE_SIGNATURES
+] + [
+    {"kind": "counter", "category": category, "name": name, "fields": ["value"]}
+    for category, name in trace_replay.B4BA_COUNTER_SIGNATURES
+]
+B4BA_OPTIONAL_SIGNATURES = sorted(
+    set(trace_replay.B4BA_SIGNATURE_IDS)
+    - set(trace_replay.B4BA_REQUIRED_SIGNATURE_IDS)
+)
 PRODUCER_PACKAGES = {
     "gpu-health-first-visible": {
         "revision": PRODUCER_REVISION,
@@ -50,10 +64,20 @@ PRODUCER_PACKAGES = {
     "mac-input-to-present": {
         "revision": INPUT_TO_PRESENT_REVISION,
         "paths": INPUT_TO_PRESENT_PATHS,
-        "events": ["gpu_acquire", "gpu_submit", "gpu_present"],
+        "active_categories": list(trace_replay.B4BA_ACTIVE_CATEGORIES),
+        "signatures": B4BA_SIGNATURES,
+        "workload_scope": {
+            "name": "first-visible-frame",
+            "required_signatures": list(
+                trace_replay.B4BA_REQUIRED_SIGNATURE_IDS
+            ),
+            "optional_signatures": B4BA_OPTIONAL_SIGNATURES,
+            "unobserved_disposition": "reported-not-covered-not-zero-cost",
+        },
     },
 }
 RING_BYTES = 128 * 1024 * 1024
+ACTIVE_TRACE_CATEGORIES = ["dsp", "gpu", "js", "metadata", "render", "state"]
 STATES = (
     "pre-change-baseline",
     "candidate-compile-out",
@@ -719,7 +743,7 @@ def validate_session_config(ref: Any, evidence_root: Path) -> tuple[Path, str]:
         "version": 1,
         "ring_bytes": RING_BYTES,
         "fill_policy": "ring-buffer",
-        "categories": ["dsp", "gpu", "metadata", "render"],
+        "categories": ACTIVE_TRACE_CATEGORIES,
     }:
         raise OverheadError("trace_session_config is not the closed 128 MiB session")
     return path, ref["sha256"]
@@ -1175,9 +1199,32 @@ def build_receipt(
                 item["audio_thread_input_to_present_events"]
                 for item in active_analyses
             ),
+            "b4ba_active_categories": list(trace_replay.B4BA_ACTIVE_CATEGORIES),
+            "b4ba_signature_events": {
+                signature: sum(
+                    item["b4ba_signature_events"][signature]
+                    for item in active_analyses
+                )
+                for signature in trace_replay.B4BA_SIGNATURE_IDS
+            },
+            "b4ba_unobserved_signatures": sorted(
+                signature for signature in trace_replay.B4BA_SIGNATURE_IDS
+                if all(
+                    item["b4ba_signature_events"][signature] == 0
+                    for item in active_analyses
+                )
+            ),
+            "audio_thread_b4ba_events": sum(
+                item["audio_thread_b4ba_events"] for item in active_analyses
+            ),
         },
         "aggregate_disposition": {
             "scope": "aggregate-input-to-first-visible-producer-overhead",
+            "b4ba_signature_inventory": "exact-20-signature-package-bound",
+            "b4ba_workload_coverage": (
+                "required-first-visible-observed-optional-counted-"
+                "unobserved-not-covered"
+            ),
             "compiled_out": "measured-against-exact-pre-producer-baseline",
             "compiled_in_idle": "measured-no-session",
             "active_128_mib_ring": "measured-lossless-replayed",

@@ -310,7 +310,7 @@ def make_fixture(
         "version": 1,
         "ring_bytes": overhead.RING_BYTES,
         "fill_policy": "ring-buffer",
-        "categories": ["dsp", "gpu", "metadata", "render"],
+        "categories": overhead.ACTIVE_TRACE_CATEGORIES,
     })
     session_config_ref = overhead.artifact_ref(session_config_path, root)
     counter = 1
@@ -399,6 +399,36 @@ def make_fixture(
                             }
                             for name in ("gpu_acquire", "gpu_submit", "gpu_present")
                         ],
+                        *[
+                            {
+                                "name": name,
+                                "cat": category,
+                                "ph": "X",
+                                "pid": host_pid,
+                                "tid": host_pid,
+                                "ts": started_ns / 1000,
+                                "dur": 1,
+                                "args": {},
+                            }
+                            for category, name in (
+                                ("render", "skia_begin"),
+                                ("render", "view_repaint_request"),
+                                ("render", "repaint_request"),
+                                ("state", "editor_bridge_dispatch_json"),
+                                ("state", "editor_bridge_json_parse"),
+                                ("js", "frame_callback_pump"),
+                                ("js", "raf_flush"),
+                            )
+                        ],
+                        {
+                            "name": "pointer_coalescer_flushes",
+                            "cat": "state",
+                            "ph": "C",
+                            "pid": host_pid,
+                            "tid": host_pid,
+                            "ts": started_ns / 1000,
+                            "args": {"value": 1},
+                        },
                     ]})
                     trace_ref = {
                         **overhead.artifact_ref(trace, root),
@@ -480,6 +510,19 @@ def duplicate_process(root: Path, documents: dict[str, dict[str, Any]]) -> None:
     rewrite_artifact(root, rows[1]["runtime_metrics"], mutate)
 
 
+def omit_active_category(
+    root: Path, documents: dict[str, dict[str, Any]], category: str,
+) -> None:
+    reference = documents["candidate-active"]["trace_session_config"]
+    path = root / reference["path"]
+    payload = json.loads(path.read_text())
+    payload["categories"].remove(category)
+    write_json(path, payload)
+    digest = overhead.sha256_file(path, "mutated trace session config")
+    for document in documents.values():
+        document["trace_session_config"]["sha256"] = digest
+
+
 def expect_failure(
     root: Path, mutation: Callable[[dict[str, dict[str, Any]], dict[str, Path]], None],
     label: str,
@@ -516,6 +559,17 @@ def main() -> int:
             receipt, temp_root / "positive",
             allow_fixture_collection=True, allow_fixture_chrome_json=True,
         )
+        replay = receipt["replay_summary"]
+        assert replay["b4ba_active_categories"] == ["js", "render", "state"]
+        assert len(receipt["producer_packages"]["mac-input-to-present"]["signatures"]) == 20
+        assert all(
+            replay["b4ba_signature_events"][signature] == 55
+            for signature in overhead.trace_replay.B4BA_REQUIRED_SIGNATURE_IDS
+        )
+        assert replay["b4ba_signature_events"][
+            "counter:state:pointer_coalescer_flushes"
+        ] == 55
+        assert "counter:state:raw_drag_samples" in replay["b4ba_unobserved_signatures"]
         for kwargs, label in (
             ({}, "terminal receipt without a live collection"),
             ({"allow_fixture_collection": True}, "terminal Chrome JSON fixture"),
@@ -594,6 +648,16 @@ def main() -> int:
             "input_to_present_pids": [metrics["host_pid"]],
             "input_to_present_tids": [metrics["host_pid"]],
             "input_to_present_upids": [7],
+            "b4ba_signature_events": {
+                signature: (
+                    1 if signature in overhead.trace_replay.B4BA_REQUIRED_SIGNATURE_IDS
+                    else 0
+                )
+                for signature in overhead.trace_replay.B4BA_SIGNATURE_IDS
+            },
+            "b4ba_pids": [metrics["host_pid"]],
+            "b4ba_tids": [metrics["host_pid"]],
+            "b4ba_upids": [7],
         }
         for field, value in (("incomplete_slices", 1), ("session_upids", [8])):
             mutated = dict(valid_result)
@@ -663,9 +727,13 @@ def main() -> int:
                 lambda docs, _: docs["candidate-active"]["producer_packages"][
                     "mac-input-to-present"
                 ].__setitem__("revision", "0" * 40),
+                lambda docs, _: docs["candidate-active"]["producer_packages"][
+                    "mac-input-to-present"
+                ]["signatures"].pop(),
+                lambda docs, _: omit_active_category(case_root, docs, "state"),
             ]
 
-        for index in range(14):
+        for index in range(16):
             case_root = temp_root / f"negative-{index}"
             case_root.mkdir()
             expect_failure(case_root, mutation_table(case_root)[index], str(index))
@@ -696,7 +764,7 @@ def main() -> int:
             "version": 1,
             "ring_bytes": overhead.RING_BYTES,
             "fill_policy": "ring-buffer",
-            "categories": ["dsp", "gpu", "metadata", "render"],
+            "categories": overhead.ACTIVE_TRACE_CATEGORIES,
         })
         driver_relative = "tools/testing/a3/trace-producer-overhead-driver.py"
         collection_request = {
@@ -980,7 +1048,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-trace-producer-overhead: "
-            "positive=2 planted_negatives=35"
+            "positive=2 planted_negatives=37"
         )
     return 0
 

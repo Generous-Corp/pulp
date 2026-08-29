@@ -30,6 +30,49 @@ PINNED_PROCESSOR_SHA256 = {
     ("Linux", "aarch64"): "1dcc1d9aaff2eb92e8bc58f1957e4e445600294bd61dbc09345c1018c5ff0868",
     ("Linux", "arm64"): "1dcc1d9aaff2eb92e8bc58f1957e4e445600294bd61dbc09345c1018c5ff0868",
 }
+B4BA_SLICE_SIGNATURES = (
+    ("state", "native_drag_dispatch"),
+    ("state", "pointer_coalescer_flush"),
+    ("state", "mac_mouse_dragged"),
+    ("render", "gpu_acquire"),
+    ("render", "skia_begin"),
+    ("render", "gpu_submit"),
+    ("render", "gpu_present"),
+    ("state", "editor_bridge_dispatch_json"),
+    ("state", "editor_bridge_json_parse"),
+    ("render", "view_repaint_request"),
+    ("render", "repaint_request"),
+    ("js", "frame_callback_pump"),
+    ("js", "raf_flush"),
+    ("js", "dom_event_dispatch"),
+    ("js", "dom_event_evaluate"),
+    ("js", "dom_event_microtask_pump"),
+)
+B4BA_COUNTER_SIGNATURES = (
+    ("state", "delivered_drag_samples"),
+    ("state", "pointer_coalescer_flushes"),
+    ("state", "pointer_samples_merged"),
+    ("state", "raw_drag_samples"),
+)
+B4BA_REQUIRED_FIRST_VISIBLE = ("gpu_acquire", "gpu_submit", "gpu_present")
+B4BA_ACTIVE_CATEGORIES = ("js", "render", "state")
+
+
+def b4ba_signature_id(kind: str, category: str, name: str) -> str:
+    return f"{kind}:{category}:{name}"
+
+
+B4BA_SIGNATURE_IDS = tuple(
+    b4ba_signature_id("slice", category, name)
+    for category, name in B4BA_SLICE_SIGNATURES
+) + tuple(
+    b4ba_signature_id("counter", category, name)
+    for category, name in B4BA_COUNTER_SIGNATURES
+)
+B4BA_REQUIRED_SIGNATURE_IDS = tuple(
+    b4ba_signature_id("slice", "render", name)
+    for name in B4BA_REQUIRED_FIRST_VISIBLE
+)
 
 
 class TraceReplayError(ValueError):
@@ -95,10 +138,17 @@ def result(
     no_flush_count: int, input_to_present_events: dict[str, int],
     input_to_present_pids: list[int], input_to_present_tids: list[int],
     input_to_present_upids: list[int],
+    b4ba_signature_events: dict[str, int], b4ba_pids: list[int],
+    b4ba_tids: list[int], b4ba_upids: list[int],
 ) -> dict[str, Any]:
     audio_tids = set(request["audio_thread_tids"])
     audio_events = sum(tid in audio_tids for tid in producer_tids)
     audio_stage_events = sum(tid in audio_tids for tid in input_to_present_tids)
+    audio_b4ba_events = sum(tid in audio_tids for tid in b4ba_tids)
+    unobserved_b4ba = sorted(
+        signature for signature, count in b4ba_signature_events.items()
+        if count == 0
+    )
     payload = {
         "schema": ANALYSIS_SCHEMA,
         "version": 1,
@@ -128,7 +178,33 @@ def result(
         "input_to_present_tids": sorted(set(input_to_present_tids)),
         "input_to_present_upids": sorted(set(input_to_present_upids)),
         "audio_thread_input_to_present_events": audio_stage_events,
+        "b4ba_active_categories": list(B4BA_ACTIVE_CATEGORIES),
+        "b4ba_required_first_visible_signatures": list(
+            B4BA_REQUIRED_SIGNATURE_IDS
+        ),
+        "b4ba_signature_events": b4ba_signature_events,
+        "b4ba_unobserved_signatures": unobserved_b4ba,
+        "b4ba_pids": sorted(set(b4ba_pids)),
+        "b4ba_tids": sorted(set(b4ba_tids)),
+        "b4ba_upids": sorted(set(b4ba_upids)),
+        "audio_thread_b4ba_events": audio_b4ba_events,
     }
+    valid_signature_shape = (
+        set(b4ba_signature_events) == set(B4BA_SIGNATURE_IDS)
+        and all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in b4ba_signature_events.values()
+        )
+    )
+    expected_input_to_present = (
+        {
+            name: b4ba_signature_events[
+                b4ba_signature_id("slice", "render", name)
+            ]
+            for name in B4BA_REQUIRED_FIRST_VISIBLE
+        }
+        if valid_signature_shape else {}
+    )
     if (
         producer_events < 1
         or foreign_producer_events != 0
@@ -142,10 +218,16 @@ def result(
         or data_loss_count != 0
         or no_flush_count != 0
         or set(input_to_present_events) != {"gpu_acquire", "gpu_submit", "gpu_present"}
+        or input_to_present_events != expected_input_to_present
         or any(value < 1 for value in input_to_present_events.values())
         or payload["input_to_present_pids"] != [request["host_pid"]]
         or payload["input_to_present_upids"] != payload["producer_upids"]
         or audio_stage_events != 0
+        or not valid_signature_shape
+        or any(b4ba_signature_events[item] < 1 for item in B4BA_REQUIRED_SIGNATURE_IDS)
+        or payload["b4ba_pids"] != [request["host_pid"]]
+        or payload["b4ba_upids"] != payload["producer_upids"]
+        or audio_b4ba_events != 0
     ):
         raise TraceReplayError("trace does not prove the bounded producer session")
     return payload
@@ -175,6 +257,10 @@ def analyze_chrome_json(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
     stage_pids: list[int] = []
     stage_tids: list[int] = []
     stage_upids: list[int] = []
+    b4ba_signature_events = {signature: 0 for signature in B4BA_SIGNATURE_IDS}
+    b4ba_pids: list[int] = []
+    b4ba_tids: list[int] = []
+    b4ba_upids: list[int] = []
     expected_tids_digest = tids_digest(request["audio_thread_tids"])
     for index, event in enumerate(events):
         if not isinstance(event, dict):
@@ -215,6 +301,21 @@ def analyze_chrome_json(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
             stage_pids.append(pid)
             stage_tids.append(tid)
             stage_upids.append(pid)
+        kind = "counter" if event.get("ph") == "C" else "slice"
+        if isinstance(category, str) and isinstance(name, str):
+            signature = b4ba_signature_id(kind, category, name)
+            if signature in b4ba_signature_events:
+                pid = event.get("pid")
+                tid = event.get("tid")
+                if (
+                    not isinstance(pid, int) or isinstance(pid, bool)
+                    or not isinstance(tid, int) or isinstance(tid, bool)
+                ):
+                    raise TraceReplayError("b4ba producer event lacks numeric PID/TID")
+                b4ba_signature_events[signature] += 1
+                b4ba_pids.append(pid)
+                b4ba_tids.append(tid)
+                b4ba_upids.append(pid)
         if category == "metadata" and name == "pulp_a3_trace_session":
             session_matches = (
                 event.get("pid") == request["host_pid"]
@@ -241,6 +342,8 @@ def analyze_chrome_json(data: bytes, request: dict[str, Any]) -> dict[str, Any]:
         input_to_present_events=input_to_present_events,
         input_to_present_pids=stage_pids, input_to_present_tids=stage_tids,
         input_to_present_upids=stage_upids,
+        b4ba_signature_events=b4ba_signature_events, b4ba_pids=b4ba_pids,
+        b4ba_tids=b4ba_tids, b4ba_upids=b4ba_upids,
     )
 
 
@@ -266,6 +369,27 @@ def analyze_proto(
     executable = sql_literal(request["executable_sha256"])
     config = sql_literal(request["session_config_sha256"])
     tids = sql_literal(tids_hash)
+    b4ba_slice_filter = " OR ".join(
+        f"(slice.category = {sql_literal(category)} AND "
+        f"slice.name = {sql_literal(name)})"
+        for category, name in B4BA_SLICE_SIGNATURES
+    )
+    b4ba_counter_names = ", ".join(
+        sql_literal(name) for _, name in B4BA_COUNTER_SIGNATURES
+    )
+    b4ba_count_selects = []
+    for index, (category, name) in enumerate(B4BA_SLICE_SIGNATURES):
+        b4ba_count_selects.append(
+            f"(SELECT COUNT(*) FROM b4ba_slices WHERE category = "
+            f"{sql_literal(category)} AND name = {sql_literal(name)}) "
+            f"AS b4ba_slice_{index:02d}"
+        )
+    for index, (_, name) in enumerate(B4BA_COUNTER_SIGNATURES):
+        b4ba_count_selects.append(
+            f"(SELECT COUNT(*) FROM b4ba_counters WHERE name = "
+            f"{sql_literal(name)}) AS b4ba_counter_{index:02d}"
+        )
+    b4ba_count_sql = ",\n  ".join(b4ba_count_selects)
     query = f"""
 WITH producer AS (
   SELECT process.upid AS upid, process.pid AS pid, thread.tid AS tid,
@@ -295,15 +419,37 @@ WITH producer AS (
 ), xruns AS (
   SELECT 1 FROM slice WHERE category = 'dsp' AND dur >= 0
     AND (name GLOB 'xrun*' OR name GLOB 'deadline_miss*')
-), stages AS (
+), b4ba_slices AS (
   SELECT process.upid AS upid, process.pid AS pid, thread.tid AS tid,
-         slice.name AS name
+         slice.category AS category, slice.name AS name
   FROM slice
   JOIN thread_track ON slice.track_id = thread_track.id
   JOIN thread ON thread_track.utid = thread.utid
   JOIN process ON thread.upid = process.upid
-  WHERE slice.category = 'render' AND slice.dur >= 0
-    AND slice.name IN ('gpu_acquire', 'gpu_submit', 'gpu_present')
+  WHERE slice.dur >= 0 AND ({b4ba_slice_filter})
+), b4ba_counters AS (
+  SELECT COALESCE(process_direct.upid, process_thread.upid) AS upid,
+         COALESCE(process_direct.pid, process_thread.pid) AS pid,
+         thread.tid AS tid, counter_track.name AS name
+  FROM counter
+  JOIN counter_track ON counter.track_id = counter_track.id
+  LEFT JOIN process_counter_track
+    ON counter.track_id = process_counter_track.id
+  LEFT JOIN process AS process_direct
+    ON process_counter_track.upid = process_direct.upid
+  LEFT JOIN thread_counter_track
+    ON counter.track_id = thread_counter_track.id
+  LEFT JOIN thread ON thread_counter_track.utid = thread.utid
+  LEFT JOIN process AS process_thread ON thread.upid = process_thread.upid
+  WHERE counter_track.name IN ({b4ba_counter_names})
+), stages AS (
+  SELECT upid, pid, tid, name FROM b4ba_slices
+  WHERE category = 'render'
+    AND name IN ('gpu_acquire', 'gpu_submit', 'gpu_present')
+), b4ba_all AS (
+  SELECT upid, pid, tid FROM b4ba_slices
+  UNION ALL
+  SELECT upid, pid, tid FROM b4ba_counters
 )
 SELECT
   (SELECT COUNT(*) FROM producer WHERE evidence_id = {evidence}) AS producer_events,
@@ -330,6 +476,13 @@ SELECT
   (SELECT GROUP_CONCAT(DISTINCT pid) FROM stages) AS stage_pids,
   (SELECT GROUP_CONCAT(DISTINCT tid) FROM stages) AS stage_tids,
   (SELECT GROUP_CONCAT(DISTINCT upid) FROM stages) AS stage_upids,
+  {b4ba_count_sql},
+  (SELECT GROUP_CONCAT(DISTINCT pid) FROM b4ba_all
+    WHERE pid IS NOT NULL) AS b4ba_pids,
+  (SELECT GROUP_CONCAT(DISTINCT tid) FROM b4ba_all
+    WHERE tid IS NOT NULL) AS b4ba_tids,
+  (SELECT GROUP_CONCAT(DISTINCT upid) FROM b4ba_all
+    WHERE upid IS NOT NULL) AS b4ba_upids,
   (SELECT COUNT(*) FROM slice WHERE dur = -1) AS incomplete_slices,
   COALESCE((SELECT SUM(value) FROM stats
     WHERE severity = 'data_loss' AND value > 0), 0) AS data_loss_count,
@@ -360,6 +513,18 @@ SELECT
         raise TraceReplayError("trace processor returned the wrong result shape")
     row = rows[0]
     try:
+        b4ba_signature_events = {
+            b4ba_signature_id("slice", category, name): int(
+                row[f"b4ba_slice_{index:02d}"]
+            )
+            for index, (category, name) in enumerate(B4BA_SLICE_SIGNATURES)
+        }
+        b4ba_signature_events.update({
+            b4ba_signature_id("counter", category, name): int(
+                row[f"b4ba_counter_{index:02d}"]
+            )
+            for index, (category, name) in enumerate(B4BA_COUNTER_SIGNATURES)
+        })
         return result(
             trace_format="perfetto-proto", request=request,
             producer_events=int(row["producer_events"]),
@@ -381,7 +546,13 @@ SELECT
             input_to_present_pids=parse_integer_list(row["stage_pids"]),
             input_to_present_tids=parse_integer_list(row["stage_tids"]),
             input_to_present_upids=parse_integer_list(row["stage_upids"]),
+            b4ba_signature_events=b4ba_signature_events,
+            b4ba_pids=parse_integer_list(row["b4ba_pids"]),
+            b4ba_tids=parse_integer_list(row["b4ba_tids"]),
+            b4ba_upids=parse_integer_list(row["b4ba_upids"]),
         )
+    except TraceReplayError:
+        raise
     except (KeyError, ValueError) as error:
         raise TraceReplayError("trace processor output is not the closed replay shape") from error
 
