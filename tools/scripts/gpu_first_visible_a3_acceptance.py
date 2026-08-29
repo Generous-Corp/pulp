@@ -14,15 +14,33 @@ import stat
 import subprocess
 import sys
 import tempfile
+import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
-sys.path.insert(0, str(SCRIPT_DIR))
-import json_schema_lite  # noqa: E402
-import gpu_trace_overhead_acceptance as a2t_acceptance  # noqa: E402
+
+
+def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
+    """Load a trusted sibling from source bytes without consulting ``.pyc``."""
+    path = SCRIPT_DIR / filename
+    data = path.read_bytes()
+    if len(data) > 2 * 1024 * 1024:
+        raise RuntimeError(f"local source module is unbounded: {filename}")
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    exec(compile(data, str(path), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+json_schema_lite = _load_local_source("json_schema_lite", "json_schema_lite.py")
+a2t_acceptance = _load_local_source(
+    "gpu_trace_overhead_acceptance", "gpu_trace_overhead_acceptance.py"
+)
 import gpu_first_visible_a3_trace_producer_overhead as trace_producer_overhead  # noqa: E402
 
 SCHEMA_PATH = ROOT / "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json"

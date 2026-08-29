@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import py_compile
 import subprocess
 import sys
 import tempfile
@@ -659,6 +660,25 @@ raise SystemExit(2)
 
 
 def main() -> int:
+    with tempfile.TemporaryDirectory(prefix="pulp-a3-source-loader-") as temporary:
+        source_root = Path(temporary)
+        source = source_root / "planted.py"
+        cache = source_root / "__pycache__" / "planted.pyc"
+        cache.parent.mkdir()
+        source.write_text('origin = "bytecode"\n', encoding="utf-8")
+        py_compile.compile(
+            str(source), cfile=str(cache), doraise=True,
+            invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+        )
+        source.write_text('origin = "source"\n', encoding="utf-8")
+        module_name = "pulp_a3_planted_local_source"
+        try:
+            with mock.patch.object(a3, "SCRIPT_DIR", source_root):
+                loaded = a3._load_local_source(module_name, source.name)
+            assert loaded.origin == "source"
+        finally:
+            sys.modules.pop(module_name, None)
+
     with tempfile.TemporaryDirectory(prefix="pulp-a3-acceptance-") as temporary:
         root = Path(temporary)
         template = make_fixture(root)
@@ -1197,7 +1217,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         ) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=49 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=50 "
             "checked_in_nonterminal=verified"
         )
     return 0
