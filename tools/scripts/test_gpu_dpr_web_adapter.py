@@ -25,7 +25,8 @@ def request(root: Path) -> dict:
         "attempt_nonce": "a" * 32, "attempt_number": 1,
         "cell_key": "super-convolver-web__exact__dpr-1",
         "scenario": {"id": "super-convolver-web", "kind": "maintained_web_canary",
-                     "source": "source.mjs", "logical_size": {"width": 760, "height": 520}},
+                     "source": "source.mjs", "logical_size": {"width": 760, "height": 520},
+                     "logical_input_oracle": {"point": [139, 448], "target": "parameter:1"}},
         "mode": "exact", "requested_dpr": 1,
         "expected_content_digest": hashlib.sha256(source.read_bytes()).hexdigest(),
         "trial_contract": {"fresh_process_first_frame_trials": 20},
@@ -34,6 +35,23 @@ def request(root: Path) -> dict:
 
 
 def main() -> int:
+    package_dir = Path(__file__).resolve().parents[2] / (
+        "examples/web-demos/super-convolver-ui/browser-test"
+    )
+    package = json.loads((package_dir / "package.json").read_text())
+    lock = json.loads((package_dir / "package-lock.json").read_text())
+    assert (
+        package["devDependencies"]["playwright-core"]
+        == web.PLAYWRIGHT_CORE_VERSION
+    )
+    assert (
+        lock["packages"][""]["devDependencies"]["playwright-core"]
+        == web.PLAYWRIGHT_CORE_VERSION
+    )
+    assert (
+        lock["packages"]["node_modules/playwright-core"]["version"]
+        == web.PLAYWRIGHT_CORE_VERSION
+    )
     measurement = Path(web.__file__).with_name("gpu_dpr_web_measurement.mjs")
     asset_test = subprocess.run(
         [str(measurement), "--self-test-assets"], text=True,
@@ -64,6 +82,8 @@ def main() -> int:
 
         capture = cell / "capture.png"
         capture.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 760, 520))
+        reference = cell / "reference.png"
+        reference.write_bytes(capture.read_bytes())
         trace = cell / "trace.json"; trace.write_text('{"traceEvents":[]}')
         inputs = cell / "input.json"; write_json(inputs, {"ok": True})
         browser_digest = hashlib.sha256(browser.read_bytes()).hexdigest()
@@ -78,7 +98,9 @@ def main() -> int:
                    "first_frame_time_ms":first[i],"adapter":adapter}
                   for i in range(20)]
         raw = cell / "raw.json"
-        write_json(raw, {"metrics":{"gpu_frame_time":[0.2] * 30},
+        write_json(raw, {"metrics":{"gpu_frame_time":{
+                             "provenance":"measured","definition":"WebGL GPU timer query",
+                             "samples":[0.2] * 30}},
                          "fresh_process_trials":trials})
         artifact = lambda kind, path: {"kind":kind,"path":path.name,
             "sha256":hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -89,25 +111,27 @@ def main() -> int:
             "physical_size":{"width":760,"height":520},
             "content_digest":req["expected_content_digest"],"outcome":"pass",
             "adapter":adapter,"build_identity":{"pulp_sha":req["pulp_sha"],
+              "playwright_core_version":web.PLAYWRIGHT_CORE_VERSION,
               "web_ui_artifacts":build_artifacts,"web_ui_bundle_sha256":build_digest},
             "measurement_scope":{"schema":web.SCOPE_SCHEMA,
               "same_process":{key:True for key in web.SAME_PROCESS_FIELDS},
               "audio_device_opened":False},
-            "artifacts":[artifact("capture",capture),artifact("trace",trace),
+            "artifacts":[artifact("capture",capture),artifact("reference_capture",reference),artifact("trace",trace),
                          artifact("raw_samples",raw),artifact("input_receipt",inputs)]}
         validate = lambda: web.validate_receipt(
             req, receipt, cell, browser, browser, build_artifacts, build_digest,
         )
         assert validate()["outcome"] == "pass"
         baseline = json.loads(raw.read_text())
-        planted = json.loads(json.dumps(baseline)); planted["metrics"]["gpu_frame_time"][0] = 0
-        write_json(raw, planted); receipt["artifacts"][2] = artifact("raw_samples", raw)
+        raw_artifact = lambda: next(item for item in receipt["artifacts"] if item["kind"] == "raw_samples")
+        planted = json.loads(json.dumps(baseline)); planted["metrics"]["gpu_frame_time"]["samples"][0] = 0
+        write_json(raw, planted); raw_artifact().update(artifact("raw_samples", raw))
         try: validate()
         except ValueError: pass
         else: raise AssertionError("zero browser GPU timing passed")
         planted = json.loads(json.dumps(baseline))
         planted["fresh_process_trials"][1]["pid"] = planted["fresh_process_trials"][0]["pid"]
-        write_json(raw, planted); receipt["artifacts"][2] = artifact("raw_samples", raw)
+        write_json(raw, planted); raw_artifact().update(artifact("raw_samples", raw))
         try: validate()
         except ValueError: pass
         else: raise AssertionError("reused browser process passed")
@@ -118,10 +142,16 @@ def main() -> int:
         receipt["adapter"] = adapter
         planted = json.loads(json.dumps(baseline))
         planted["fresh_process_trials"][1]["build_sha256"] = "0" * 64
-        write_json(raw, planted); receipt["artifacts"][2] = artifact("raw_samples", raw)
+        write_json(raw, planted); raw_artifact().update(artifact("raw_samples", raw))
         try: validate()
         except ValueError: pass
         else: raise AssertionError("mixed browser build identity passed")
+        write_json(raw, baseline); raw_artifact().update(artifact("raw_samples", raw))
+        receipt["build_identity"]["playwright_core_version"] = "latest"
+        try: validate()
+        except ValueError: pass
+        else: raise AssertionError("unpinned playwright-core passed")
+        receipt["build_identity"]["playwright_core_version"] = web.PLAYWRIGHT_CORE_VERSION
 
         manifest = {"trial_contract":{"required_trace_categories":["render","gpu","text","js","layout"]}}
         trace_raw = {"trace":{"complete":True,"kind":"browser-devtools","process_pid":77}}

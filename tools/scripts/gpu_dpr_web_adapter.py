@@ -29,7 +29,9 @@ RECEIPT_SCHEMA = "pulp.gpu-dpr-cell-receipt.v1"
 SCOPE_SCHEMA = "pulp.gpu-dpr-browser-measurement-scope.v1"
 ATTESTATION_SCHEMA = "pulp.gpu-dpr-browser-measurement-attestation.v1"
 FIRST_FRAME_SCHEMA = "pulp.gpu-dpr-first-frame-trial.v1"
-ARTIFACT_KINDS = {"capture", "trace", "raw_samples", "input_receipt"}
+ARTIFACT_KINDS = {
+    "capture", "reference_capture", "trace", "raw_samples", "input_receipt"
+}
 SAME_PROCESS_FIELDS = {
     "adapter_identity", "capture", "frame_metrics", "memory_metrics",
     "logical_input", "trace_correlation",
@@ -39,6 +41,7 @@ WEB_UI_NAMES = (
     "PulpSuperConvolverUi.data", "PulpSuperConvolverUi.js",
     "PulpSuperConvolverUi.wasm",
 )
+PLAYWRIGHT_CORE_VERSION = "1.61.1"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -235,9 +238,14 @@ def validate_receipt(
         raise ValueError("browser receipt lacks a canonical artifact")
     if png_size(by_kind["capture"]) != (physical["width"], physical["height"]):
         raise ValueError("browser capture dimensions differ from logical DPR")
+    if png_size(by_kind["reference_capture"]) != (
+        physical["width"], physical["height"]
+    ):
+        raise ValueError("browser reference dimensions differ from logical DPR")
     raw = load_json(by_kind["raw_samples"])
     metrics = raw.get("metrics")
-    gpu = metrics.get("gpu_frame_time") if isinstance(metrics, dict) else None
+    gpu_metric = metrics.get("gpu_frame_time") if isinstance(metrics, dict) else None
+    gpu = gpu_metric.get("samples") if isinstance(gpu_metric, dict) else None
     if (
         not isinstance(gpu, list) or len(gpu) < 30
         or any(isinstance(v, bool) or not isinstance(v, (int, float))
@@ -267,6 +275,7 @@ def validate_receipt(
     build = receipt.get("build_identity")
     if (
         not isinstance(build, dict) or build.get("pulp_sha") != request["pulp_sha"]
+        or build.get("playwright_core_version") != PLAYWRIGHT_CORE_VERSION
         or build.get("web_ui_artifacts") != build_artifacts
         or build.get("web_ui_bundle_sha256") != build_digest
     ):
