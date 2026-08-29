@@ -22,6 +22,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-recipe-catalog-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_recipe_catalog.py")
+    add_test(NAME gpu-clean-agent-journey-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_clean_agent_journey.py")
     add_test(NAME doxygen-installed-header-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/doxygen_installed_header_check.py")

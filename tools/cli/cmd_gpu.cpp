@@ -262,7 +262,9 @@ int cmd_gpu_recipes_scaffold(const std::vector<std::string>& args) {
             "The canonical catalog is the matched SDK's `share/pulp/gpu-recipes.yaml` (or "
             "`docs/status/gpu-recipes.yaml` in a source checkout). Run the baseline twice, "
             "then run its seeded negative control. Exit 0 is verified pass, exit 1 is a completed "
-            "measured failure, and exit 2 is unavailable or unverified.\n\n"
+            "measured failure, and exit 2 is unavailable or unverified. Fix the seeded failure "
+            "by removing only `--negative-control` and rerunning the same catalog command; the "
+            "input and independent oracle must remain unchanged.\n\n"
             "```sh\n"
             "pulp gpu probe --recipe " +
             id +

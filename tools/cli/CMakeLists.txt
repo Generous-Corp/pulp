@@ -394,6 +394,19 @@ if(PULP_BUILD_TESTS)
         set_tests_properties(cli-gpu-probe-contract PROPERTIES
             LABELS "gpu;gpu-probe;cli"
             RESOURCE_LOCK pulp_gpu)
+
+        if(PULP_ENABLE_PROJECT_PACKAGE)
+            add_test(NAME cli-gpu-clean-agent-journey
+                COMMAND ${CMAKE_COMMAND}
+                    -DPULP_CLI=$<TARGET_FILE:pulp-cli>
+                    -DPYTHON=${Python3_EXECUTABLE}
+                    -DJOURNEY_SCRIPT=${CMAKE_SOURCE_DIR}/tools/scripts/gpu_clean_agent_journey.py
+                    -DWORKSPACE=${CMAKE_CURRENT_BINARY_DIR}/gpu-clean-agent-journey-workspace
+                    -P ${CMAKE_SOURCE_DIR}/test/cmake/gpu_clean_agent_journey_test.cmake)
+            set_tests_properties(cli-gpu-clean-agent-journey PROPERTIES
+                LABELS "gpu;gpu-probe;cli;clean-agent"
+                RESOURCE_LOCK pulp_gpu)
+        endif()
     endif()
 
     add_test(NAME cli-doctor-widgetbridge-generated-api
