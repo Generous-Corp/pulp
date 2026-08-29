@@ -19,6 +19,7 @@ import os
 import pathlib
 import queue
 import re
+import secrets
 import shutil
 import signal
 import stat
@@ -30,13 +31,15 @@ import time
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+import gpu_clean_agent_trust as trust
+
 
 RESULT_SCHEMA = "pulp.gpu-probe-result.v1"
 DISCOVERY_SCHEMA = "pulp.gpu-recipes-discovery.v1"
 CATALOG_SCHEMA = "pulp.gpu-recipes.v1"
-CASE_SCHEMA = "pulp.gpu-clean-agent-case.v2"
-SESSION_SCHEMA = "pulp.gpu-clean-agent-session.v2"
-VERIFICATION_SCHEMA = "pulp.gpu-clean-agent-verification.v2"
+CASE_SCHEMA = "pulp.gpu-clean-agent-case.v3"
+SESSION_SCHEMA = "pulp.gpu-clean-agent-session.v3"
+VERIFICATION_SCHEMA = "pulp.gpu-clean-agent-verification.v3"
 SUPERSEDED_SCHEMA = "pulp.gpu-clean-agent-disposition.v1"
 
 MAX_ARTIFACTS = 16
@@ -47,16 +50,19 @@ MAX_STDOUT_BYTES = 8 * 1024 * 1024
 MAX_STDERR_BYTES = 4 * 1024 * 1024
 MAX_METADATA_BYTES = 16 * 1024 * 1024
 MAX_BINARY_BYTES = 512 * 1024 * 1024
+MAX_BUNDLE_BYTES = 8 * 1024 * 1024
+MAX_BUNDLE_EVENTS = 512
+MAX_BUNDLE_STRING_BYTES = 512 * 1024
+MAX_BUNDLE_DEPTH = 32
 MONITOR_INTERVAL_SECONDS = 0.01
 PROCESS_GROUP_GRACE_SECONDS = 0.5
 ARTIFACT_KINDS = {"json", "image", "numeric-samples", "trace"}
 AGENT_INHERITED_ENV_KEYS = {
-    "OPENAI_API_KEY", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY",
-    "ALL_PROXY", "NO_PROXY", "LANG", "LC_ALL", "USER", "LOGNAME", "SHELL", "TERM",
+    "LANG", "LC_ALL", "USER", "LOGNAME", "SHELL", "TERM",
 }
 AGENT_FIXED_ENV_KEYS = {
     "HOME", "XDG_CONFIG_HOME", "CODEX_HOME", "TMPDIR", "PATH", "PWD",
-    "PULP_UPDATE_CHECK_DISABLED", "NO_COLOR",
+    "PULP_UPDATE_CHECK_DISABLED", "NO_COLOR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
 }
 RESULT_FIELDS = {
     "schema", "version", "gpu_evidence_id", "recipe_id", "source_digest",
@@ -171,11 +177,54 @@ def _write_bytes(path: pathlib.Path, payload: bytes, *, replace: bool = False) -
             except OSError as exc:
                 raise JourneyError(f"output appeared or could not be published: {path}") from exc
             temporary.unlink()
+        _fsync_directory(path.parent)
     finally:
         try:
             temporary.unlink()
         except FileNotFoundError:
             pass
+
+
+def _fsync_directory(path: pathlib.Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _publish_terminal_pair(
+    *, bundle_path: pathlib.Path, bundle_payload: bytes,
+    receipt_path: pathlib.Path, receipt_payload: bytes,
+) -> None:
+    """Publish bundle then receipt, recovering either exact staged state after a crash."""
+
+    if receipt_path.exists() or receipt_path.is_symlink():
+        raise JourneyError("terminal acceptance receipt already exists")
+    if bundle_path.exists() or bundle_path.is_symlink():
+        if bundle_path.is_symlink() or _read_regular_bytes(bundle_path) != bundle_payload:
+            raise JourneyError("pre-existing audit bundle is not this exact staged transaction")
+    else:
+        _write_bytes(bundle_path, bundle_payload)
+    try:
+        _write_bytes(receipt_path, receipt_payload)
+    except BaseException:
+        # _write_bytes can fail after atomically linking the receipt but before
+        # its parent-directory fsync returns.  Never remove the bundle while a
+        # receipt may be visible.  If the complete receipt was linked, retry
+        # the durability barrier and accept the exact pair; otherwise leave the
+        # exact bundle staged so a later invocation can safely recover it.
+        try:
+            receipt_complete = (
+                not receipt_path.is_symlink()
+                and _read_regular_bytes(receipt_path) == receipt_payload
+            )
+        except (FileNotFoundError, JourneyError, OSError):
+            receipt_complete = False
+        if receipt_complete:
+            _fsync_directory(receipt_path.parent)
+            return
+        raise
 
 
 def _write_json(path: pathlib.Path, value: dict[str, Any], *, replace: bool = False) -> None:
@@ -218,6 +267,19 @@ def _validate_isolation(
         _require_real_directory(root)
         if _is_within(workspace, root) or _is_within(case_dir, root):
             raise JourneyError("workspace and private verifier directory must be outside source trees")
+
+
+def _validate_install_isolation(
+    workspace: pathlib.Path, case_dir: pathlib.Path, installed_prefix: pathlib.Path,
+) -> None:
+    if any(
+        _is_within(first, second) or _is_within(second, first)
+        for first, second in (
+            (workspace, installed_prefix),
+            (case_dir, installed_prefix),
+        )
+    ):
+        raise JourneyError("installed prefix must be separate from public and private evidence trees")
 
 
 def _resource_usage(root: ResourceRoot) -> None:
@@ -317,7 +379,10 @@ def _run(
 ) -> CommandResult:
     """Capture a process while enforcing output, time, and filesystem caps."""
 
-    if not argv or timeout_seconds <= 0 or stdout_limit < 1 or stderr_limit < 1:
+    if (
+        not argv or not math.isfinite(timeout_seconds) or timeout_seconds <= 0
+        or stdout_limit < 1 or stderr_limit < 1
+    ):
         raise JourneyError("invalid bounded subprocess request")
     child_env = dict(os.environ if env is None else env)
     child_env["NO_COLOR"] = "1"
@@ -405,13 +470,15 @@ def _run(
                 violation = "command left a descendant process outside its bounded lifetime"
             _terminate_process_group(process)
     finally:
+        for thread in threads:
+            thread.join(timeout=1.0)
+            if thread.is_alive() and violation is None:
+                violation = "bounded output reader did not reach end-of-file"
         for stream in (process.stdout, process.stderr):
             try:
                 stream.close()
             except OSError:
                 pass
-        for thread in threads:
-            thread.join(timeout=1.0)
     if violation is None:
         try:
             violation = failures.get_nowait()
@@ -889,48 +956,88 @@ exit "$probe_rc"
 '''
 
 
-def _task_text(public_docs: list[str]) -> str:
-    bullets = "\n".join(f"- {url}" for url in public_docs)
-    return f"""# Independent GPU recipe repair
+def _task_text() -> str:
+    return """# Independent GPU recipe repair
 
 Use only the installed `pulp` on `PATH`, this workspace, the exact symptom from
-the prompt, and these public documents:
+the prompt, and the public catalog and documentation installed beside that
+binary. Derive the install prefix from `command -v pulp`; do not use a source
+checkout, a private plan, a remembered recipe ID, or network documentation.
 
-{bullets}
-
-Run `./run-probe.sh <symptom>`. The script discovers the uniquely callable
-recipe from the symptom; do not supply a remembered recipe ID. A completed
-typed failure exits 1. Read its pass-level code, mutation, expected value,
-observed value, and absolute error. Then make the documented correction in
-`run-probe.sh`: change only `{SEED_LINE}` to `{REPAIRED_LINE}`. Do not edit or
-delete any receipt or artifact. Rerun the same script with the same symptom and
-report the selected recipe, diagnosis, edit, and repaired verdict.
+Start only from the symptom. Query the installed CLI catalog, inspect the
+installed catalog file, and follow its installed public documentation for the
+unique callable recipe. Then run `./run-probe.sh <symptom>`. A completed typed
+failure exits 1. Read its pass-level code, mutation, expected value, observed
+value, and absolute error. Diagnose the single incorrect option in
+`run-probe.sh` from those public surfaces, change only that option, preserve all
+receipts and artifacts, and rerun the same script with the same symptom.
 """
 
 
-def _prompt_text(workspace: pathlib.Path, symptom: str, public_docs: list[str]) -> str:
-    docs = "\n".join(f"- {url}" for url in public_docs)
+def _prompt_text(workspace: pathlib.Path, symptom: str, run_nonce: str) -> str:
     return f"""You are the fresh independent agent for one GPU recipe usability acceptance run.
 
 You have no Pulp source checkout, no recipe ID, and no prior task context. Use
 only the installed `pulp` on PATH, the workspace below, the exact symptom token,
-and the listed public documentation.
+and the public catalog/documentation installed beside that binary. Do not use
+network documentation.
 
 Workspace: {workspace}
 Symptom token: {symptom}
-Public documentation:
-{docs}
+Fresh run nonce: {run_nonce}
 
 Work only inside the workspace. First run `pwd` and `command -v pulp`. Read
-`TASK.md`, discover the recipe from the symptom through the installed CLI, and
-run `./run-probe.sh {symptom}`. Interpret the completed typed failure, including
-its failing pass, code, mutation, expected, observed, and absolute error. Edit
-only the one documented seeded option in `run-probe.sh`; do not alter generated
-receipts or artifacts. Rerun the same script with the same symptom. In your
-final response state the selected recipe, negative exit/verdict and diagnosis,
-the exact edit, and the repaired exit/verdict. Do not search for or read any
-source checkout, private plan, private verifier case, or remembered recipe ID.
+`TASK.md`; derive the install prefix from the installed binary; query the CLI by
+symptom; inspect the installed `share/pulp/gpu-recipes.yaml`; and read at least
+one installed public document named by the selected catalog row before editing.
+Run `./run-probe.sh {symptom}`, interpret the completed typed failure, make only
+the diagnosed option correction, and rerun it. Your final response must satisfy
+the supplied JSON schema and repeat the fresh run nonce exactly. Do not search
+for or read any source checkout, private plan, private verifier case, or
+remembered recipe ID.
 """
+
+
+def _final_output_schema(run_nonce: str, symptom: str) -> dict[str, Any]:
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "run_nonce", "symptom", "selected_recipe", "negative", "edit", "repaired",
+        ],
+        "properties": {
+            "run_nonce": {"const": run_nonce},
+            "symptom": {"const": symptom},
+            "selected_recipe": {"type": "string", "minLength": 1, "maxLength": 128},
+            "negative": {
+                "type": "object", "additionalProperties": False,
+                "required": ["exit_code", "verdict", "pass", "code", "mutation",
+                             "expected", "observed", "absolute_error"],
+                "properties": {
+                    "exit_code": {"const": 1}, "verdict": {"const": "fail"},
+                    "pass": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "code": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "mutation": {"type": "string", "minLength": 1, "maxLength": 256},
+                    "expected": {}, "observed": {}, "absolute_error": {},
+                },
+            },
+            "edit": {
+                "type": "object", "additionalProperties": False,
+                "required": ["path", "removed", "added"],
+                "properties": {
+                    "path": {"const": "run-probe.sh"},
+                    "removed": {"type": "string", "minLength": 1, "maxLength": 256},
+                    "added": {"type": "string", "maxLength": 256},
+                },
+            },
+            "repaired": {
+                "type": "object", "additionalProperties": False,
+                "required": ["exit_code", "verdict"],
+                "properties": {"exit_code": {"const": 0}, "verdict": {"const": "pass"}},
+            },
+        },
+    }
 
 
 def _require_revision(value: str, label: str) -> str:
@@ -971,36 +1078,75 @@ def prepare_case(
     symptom: str,
     workspace: pathlib.Path,
     case_dir: pathlib.Path,
-    source_revision: str,
-    plan_revision: str,
+    source_root: pathlib.Path,
+    build_root: pathlib.Path,
+    cli_install_script: pathlib.Path,
+    installed_prefix: pathlib.Path,
+    plan_root: pathlib.Path,
+    plan_document: pathlib.Path,
     forbidden_roots: list[pathlib.Path],
     timeout_seconds: float,
 ) -> dict[str, Any]:
-    pulp = pulp.resolve(strict=True)
-    if not pulp.is_file() or not os.access(pulp, os.X_OK):
-        raise JourneyError("--pulp must name an executable file")
+    if not math.isfinite(timeout_seconds) or not 1.0 <= timeout_seconds <= 1800.0:
+        raise JourneyError("--timeout-seconds must be between 1 and 1800 seconds")
     if not symptom or symptom.strip() != symptom:
         raise JourneyError("--symptom must be a non-empty exact token")
-    source_revision = _require_revision(source_revision, "source revision")
-    plan_revision = _require_revision(plan_revision, "plan revision")
     default_source = pathlib.Path(__file__).resolve(strict=True).parents[2]
-    all_forbidden = [default_source, *forbidden_roots]
+    source_root = source_root.resolve(strict=True)
+    plan_root = plan_root.resolve(strict=True)
+    build_root = build_root.resolve(strict=True)
+    installed_prefix = installed_prefix.resolve(strict=True)
+    if source_root != default_source:
+        raise JourneyError("--source-root must be the exact checkout containing this harness")
+    if source_root == plan_root or _is_within(source_root, plan_root) or _is_within(plan_root, source_root):
+        raise JourneyError("source and canonical plan must be distinct repositories")
+    if plan_document.is_absolute() or any(part in {"", ".", ".."} for part in plan_document.parts):
+        raise JourneyError("--plan-document must be a normalized repository-relative path")
+    plan_document_path = plan_root / plan_document
+    if plan_document_path.resolve(strict=True) != plan_document_path:
+        raise JourneyError("--plan-document must not traverse a symlink")
+
+    source = trust.git_repository_identity(
+        source_root, expected_repository="Generous-Corp/pulp"
+    )
+    plan = trust.git_repository_identity(
+        plan_root,
+        expected_repository="danielraffel/pulp-planning",
+        required_document=plan_document_path,
+        require_origin_main=True,
+    )
+    all_forbidden = list(dict.fromkeys([
+        source_root, build_root, plan_root,
+        *(root.resolve(strict=True) for root in forbidden_roots),
+    ]))
     _validate_isolation(workspace, case_dir, all_forbidden)
-    if any(_is_within(pulp, root.resolve(strict=True)) for root in all_forbidden):
-        raise JourneyError("--pulp must be an installed binary outside source trees")
+    _validate_install_isolation(workspace, case_dir, installed_prefix)
+    if any(
+        _is_within(installed_prefix, root) or _is_within(root, installed_prefix)
+        for root in all_forbidden
+    ):
+        raise JourneyError("installed prefix must be isolated from source, build, and plan roots")
     os.mkdir(workspace, 0o755)
     os.mkdir(case_dir, 0o700)
+    build, installed_identity = trust.build_install_identity(
+        source=source,
+        build_root=build_root,
+        install_script=cli_install_script,
+        installed_prefix=installed_prefix,
+        installed_pulp=pulp,
+        timeout=timeout_seconds,
+    )
+    pulp = pathlib.Path(installed_identity["path"])
     linkage_sha256 = _installed_cli_linkage_digest(
         pulp, all_forbidden, case_dir, timeout_seconds
     )
+    public_material = trust.installed_public_material(source_root, installed_prefix)
+    record_key = trust.create_record_keypair(case_dir)
+    run_nonce = secrets.token_hex(32)
 
-    public_docs = [
-        f"https://github.com/Generous-Corp/pulp/blob/{source_revision}/docs/guides/gpu-validation-checklist.md",
-        f"https://github.com/Generous-Corp/pulp/blob/{source_revision}/docs/reference/cli.md",
-    ]
     _write_bytes(workspace / "run-probe.sh", _seed_script().encode("utf-8"))
     os.chmod(workspace / "run-probe.sh", 0o755)
-    _write_bytes(workspace / "TASK.md", _task_text(public_docs).encode("utf-8"))
+    _write_bytes(workspace / "TASK.md", _task_text().encode("utf-8"))
     initial_tree = _snapshot_tree(workspace)
 
     discovery, recipe = _select_recipe(pulp, symptom, timeout_seconds, case_dir)
@@ -1028,17 +1174,15 @@ def prepare_case(
     _write_json(reference_path, reference)
 
     version_result = _run(
-        [str(pulp), "version", "--json"], timeout_seconds,
+        [str(pulp), "version"], timeout_seconds,
         cwd=case_dir, monitor_roots=[ResourceRoot(case_dir)],
     )
     if version_result.returncode != 0:
-        version_result = _run(
-            [str(pulp), "version"], timeout_seconds,
-            cwd=case_dir, monitor_roots=[ResourceRoot(case_dir)],
-        )
-    if version_result.returncode != 0:
         raise JourneyError("installed CLI did not report its version")
-    prompt = _prompt_text(workspace, symptom, public_docs)
+    version_match = re.search(r"(?m)^Pulp SDK version: ([0-9]+\.[0-9]+\.[0-9]+)$", version_result.stdout)
+    if version_match is None or version_match.group(1) != build["build_info"]["kSdkVersion"]:
+        raise JourneyError("installed CLI version does not match generated Release build provenance")
+    prompt = _prompt_text(workspace, symptom, run_nonce)
     if recipe_id in prompt:
         raise JourneyError("independent prompt must not disclose the selected recipe ID")
     prompt_path = case_dir / "agent-prompt.txt"
@@ -1048,11 +1192,13 @@ def prepare_case(
         "symptom": symptom,
         "workspace": str(workspace),
         "forbidden_roots": sorted({str(root.resolve(strict=True)) for root in all_forbidden}),
-        "source_revision": source_revision,
-        "plan_revision": plan_revision,
+        "source_revision": source["revision"],
+        "plan_revision": plan["revision"],
         "pulp_binary_sha256": _sha256(pulp, MAX_BINARY_BYTES),
         "initial_tree_sha256": initial_tree["sha256"],
         "reference_result_sha256": _sha256(reference_path),
+        "run_nonce": run_nonce,
+        "record_public_key_sha256": record_key["public_key_sha256"],
     }
     case_id = _sha256_bytes(
         json.dumps(identity_seed, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1064,18 +1210,29 @@ def prepare_case(
         "case_id": case_id,
         "symptom": symptom,
         "workspace": str(workspace),
-        "source_revision": source_revision,
-        "plan_revision": plan_revision,
-        "public_docs": public_docs,
+        "forbidden_roots": identity_seed["forbidden_roots"],
+        "source_revision": source["revision"],
+        "plan_revision": plan["revision"],
+        "source": source,
+        "plan": plan,
+        "build": build,
+        "public_material": public_material,
+        "run_nonce": run_nonce,
+        "record_key": record_key,
         "installed_cli": {
+            **installed_identity,
             "path": str(pulp),
-            "bytes": pulp.stat().st_size,
-            "sha256": _sha256(pulp, MAX_BINARY_BYTES),
             "version_output": version_result.stdout.strip(),
             "version_output_sha256": _sha256_bytes(version_result.stdout.encode("utf-8")),
             "linkage_sha256": linkage_sha256,
         },
-        "harness_sha256": _sha256(pathlib.Path(__file__).resolve(strict=True)),
+        "harnesses": {
+            "journey_sha256": _sha256(pathlib.Path(__file__).resolve(strict=True)),
+            "trust_sha256": _sha256(pathlib.Path(trust.__file__).resolve(strict=True)),
+            "isolation_sha256": _sha256(
+                pathlib.Path(trust.isolation.__file__).resolve(strict=True)
+            ),
+        },
         "prompt": {
             "path": str(prompt_path),
             "sha256": _sha256(prompt_path),
@@ -1123,14 +1280,21 @@ def _parse_transcript(payload: bytes) -> tuple[list[dict[str, Any]], str]:
         if not isinstance(event, dict) or not isinstance(event.get("type"), str):
             raise JourneyError("every agent transcript event needs a string type")
         events.append(event)
-    if not events or events[0].get("type") != "thread.started":
-        raise JourneyError("agent transcript must start with thread.started")
+        if len(events) > MAX_BUNDLE_EVENTS:
+            raise JourneyError("agent transcript exceeds its event-count cap")
+    if (
+        len(events) < 3 or events[0].get("type") != "thread.started"
+        or events[1].get("type") != "turn.started"
+        or events[-1].get("type") != "turn.completed"
+    ):
+        raise JourneyError("agent transcript must contain one ordered started/completed turn")
     thread_id = events[0].get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
+    if not isinstance(thread_id, str) or trust.UUID_RE.fullmatch(thread_id) is None:
         raise JourneyError("thread.started has no session identity")
     types = [event["type"] for event in events]
     if (
         types.count("thread.started") != 1
+        or types.count("turn.started") != 1
         or types.count("turn.completed") != 1
         or any(item in types for item in ("turn.failed", "item.failed", "error"))
     ):
@@ -1158,7 +1322,7 @@ def _string_corpus(value: Any) -> str:
 
 def _fresh_agent_environment(
     pulp: pathlib.Path, workspace: pathlib.Path, agent_home: pathlib.Path,
-    agent_config: pathlib.Path, agent_codex_home: pathlib.Path,
+    agent_config: pathlib.Path, agent_codex_home: pathlib.Path, proxy_port: int,
 ) -> dict[str, str]:
     environment = {
         key: value for key, value in os.environ.items() if key in AGENT_INHERITED_ENV_KEYS
@@ -1172,21 +1336,129 @@ def _fresh_agent_environment(
         "PWD": str(workspace),
         "PULP_UPDATE_CHECK_DISABLED": "1",
         "NO_COLOR": "1",
+        "HTTPS_PROXY": f"http://127.0.0.1:{proxy_port}",
+        "HTTP_PROXY": f"http://127.0.0.1:{proxy_port}",
+        "NO_PROXY": "",
     })
     return environment
 
 
-def _stage_agent_auth(agent_codex_home: pathlib.Path) -> None:
-    """Copy only Codex authentication into the disposable config root."""
+def _credential_strings(value: Any) -> list[str]:
+    strings: list[str] = []
 
-    if os.environ.get("OPENAI_API_KEY"):
-        return
+    def visit(item: Any) -> None:
+        if isinstance(item, str) and len(item) >= 8:
+            strings.append(item)
+        elif isinstance(item, dict):
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return strings
+
+
+def _agent_auth_material() -> tuple[bytes, list[str], tuple[str, ...]]:
+    """Return minimal compact auth for keychain staging and its endpoint set."""
+
+    if api_key := os.environ.get("OPENAI_API_KEY"):
+        auth = {"auth_mode": "apikey", "OPENAI_API_KEY": api_key}
+        payload = json.dumps(auth, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return payload, _credential_strings(auth), ("api.openai.com",)
     host_root = pathlib.Path(
         os.environ.get("CODEX_HOME", str(pathlib.Path.home() / ".codex"))
     ).expanduser()
     source = host_root / "auth.json"
     payload = _read_regular_bytes(source, 1024 * 1024)
-    _write_bytes(agent_codex_home / "auth.json", payload)
+    try:
+        auth = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise JourneyError("Codex authentication is not bounded UTF-8 JSON") from exc
+    if not isinstance(auth, dict):
+        raise JourneyError("Codex authentication JSON root is not an object")
+    if auth.get("auth_mode") != "chatgpt" or not isinstance(auth.get("tokens"), dict):
+        raise JourneyError("A5 supports only ChatGPT-token or OPENAI_API_KEY Codex auth")
+    token_keys = {"access_token", "account_id", "id_token", "refresh_token"}
+    tokens = auth["tokens"]
+    if set(tokens) != token_keys or any(
+        not isinstance(tokens.get(key), str) or not tokens[key] for key in token_keys
+    ):
+        raise JourneyError("ChatGPT Codex authentication token set is not closed")
+    minimal = {
+        "auth_mode": "chatgpt",
+        "tokens": {key: tokens[key] for key in sorted(token_keys)},
+        "last_refresh": auth.get("last_refresh"),
+    }
+    if not isinstance(minimal["last_refresh"], str) or not minimal["last_refresh"]:
+        raise JourneyError("ChatGPT Codex authentication has no refresh identity")
+    compact = json.dumps(minimal, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    credentials = sorted(set(_credential_strings(minimal)), key=len, reverse=True)
+    return compact, credentials, ("auth.openai.com", "chatgpt.com")
+
+
+def _codex_exec_config_arguments(environment: dict[str, str]) -> list[str]:
+    shell_values = {
+        key: environment[key]
+        for key in ("HOME", "TMPDIR", "PATH", "PWD", "PULP_UPDATE_CHECK_DISABLED", "NO_COLOR")
+    }
+    inline = ", ".join(
+        f"{key} = {json.dumps(value)}" for key, value in sorted(shell_values.items())
+    )
+    return [
+        "-c", 'cli_auth_credentials_store="keyring"',
+        "-c", "features.secret_auth_storage=false",
+        "-c", 'web_search="disabled"',
+        "-c", "check_for_update_on_startup=false",
+        "-c", 'shell_environment_policy.inherit="none"',
+        "-c", f"shell_environment_policy.set={{ {inline} }}",
+    ]
+
+
+def _reject_credential_disclosure(payloads: Iterable[bytes], credentials: Iterable[str]) -> None:
+    material = tuple(payloads)
+    for credential in credentials:
+        encoded = credential.encode("utf-8")
+        if any(encoded in payload for payload in material):
+            raise JourneyError("agent outputs contain copied authentication material")
+
+
+def _parse_agent_final_output(payload: bytes, case: dict[str, Any]) -> dict[str, Any]:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise JourneyError("agent final message is not one UTF-8 JSON object") from exc
+    if not isinstance(value, dict) or set(value) != {
+        "run_nonce", "symptom", "selected_recipe", "negative", "edit", "repaired",
+    }:
+        raise JourneyError("agent final message does not have its closed result fields")
+    negative = value.get("negative")
+    edit = value.get("edit")
+    repaired = value.get("repaired")
+    if (
+        value.get("run_nonce") != case["run_nonce"]
+        or value.get("symptom") != case["symptom"]
+        or not isinstance(value.get("selected_recipe"), str)
+        or not isinstance(negative, dict)
+        or set(negative) != {
+            "exit_code", "verdict", "pass", "code", "mutation", "expected",
+            "observed", "absolute_error",
+        }
+        or negative.get("exit_code") != 1 or negative.get("verdict") != "fail"
+        or any(not isinstance(negative.get(key), str) or not negative[key]
+               for key in ("pass", "code", "mutation"))
+        or not isinstance(edit, dict) or set(edit) != {"path", "removed", "added"}
+        or edit.get("path") != "run-probe.sh"
+        or not isinstance(edit.get("removed"), str) or not edit["removed"]
+        or not isinstance(edit.get("added"), str)
+        or not isinstance(repaired, dict) or set(repaired) != {"exit_code", "verdict"}
+        or repaired != {"exit_code": 0, "verdict": "pass"}
+    ):
+        raise JourneyError("agent final message violates the closed output contract")
+    if len(payload) > MAX_BUNDLE_STRING_BYTES:
+        raise JourneyError("agent final message exceeds its byte cap")
+    return value
 
 
 def record_agent(
@@ -1195,6 +1467,8 @@ def record_agent(
     model: str,
     timeout_seconds: float,
 ) -> dict[str, Any]:
+    if not math.isfinite(timeout_seconds) or not 1.0 <= timeout_seconds <= 1800.0:
+        raise JourneyError("--timeout-seconds must be between 1 and 1800 seconds")
     _require_real_directory(case_path.parent)
     case = _load_json(case_path)
     if case.get("schema") != CASE_SCHEMA or case.get("status") != "awaiting-independent-agent":
@@ -1203,6 +1477,9 @@ def record_agent(
     _validate_case_material(case, case_path)
     workspace = pathlib.Path(case["workspace"])
     _require_real_directory(workspace)
+    installed_prefix = pathlib.Path(case["installed_cli"]["prefix"])
+    _require_real_directory(installed_prefix)
+    _validate_install_isolation(workspace, case_path.parent, installed_prefix)
     forbidden_roots = [pathlib.Path(item) for item in case.get("forbidden_roots", [])]
     if not forbidden_roots or any(
         _is_within(workspace, root) or _is_within(case_path.parent, root)
@@ -1224,22 +1501,28 @@ def record_agent(
         raise JourneyError("agent prompt discloses the selected recipe ID")
     if not model or len(model) > 128 or re.fullmatch(r"[A-Za-z0-9._:-]+", model) is None:
         raise JourneyError("model identity is missing or malformed")
-    agent_bin = agent_bin.resolve(strict=True)
-    if not agent_bin.is_file() or not os.access(agent_bin, os.X_OK):
-        raise JourneyError("--agent-bin must name an executable file")
-    agent_version = _run([str(agent_bin), "--version"], 10.0)
-    help_result = _run([str(agent_bin), "exec", "--help"], 10.0)
-    required_flags = (
-        "--json", "--ephemeral", "--ignore-user-config", "--ignore-rules",
-        "--skip-git-repo-check", "--sandbox", "--cd", "--output-last-message",
-    )
-    if agent_version.returncode != 0 or help_result.returncode != 0:
-        raise JourneyError("agent binary did not report version/help")
-    missing_flags = [flag for flag in required_flags if flag not in help_result.stdout]
-    if missing_flags:
-        raise JourneyError(f"agent binary lacks required isolation flags: {missing_flags}")
+    agent_identity = trust.official_codex_identity(agent_bin)
+    agent_bin = pathlib.Path(agent_identity["path"])
 
     case_dir = case_path.parent
+    record_key = case["record_key"]
+    private_key = pathlib.Path(record_key["private_key_path"])
+    public_key = pathlib.Path(record_key["public_key_path"])
+    if (
+        not private_key.is_file() or private_key.is_symlink()
+        or not public_key.is_file() or public_key.is_symlink()
+        or _sha256(public_key) != record_key["public_key_sha256"]
+    ):
+        raise JourneyError("record requires its unused one-use signing keypair")
+    output_paths = [
+        case_dir / name for name in (
+            "agent-session.json", "agent-transcript.jsonl", "agent-stderr.log",
+            "agent-last-message.json", "codex-session.jsonl", "agent-seatbelt.sb",
+            "agent-output-schema.json",
+        )
+    ]
+    if any(path.exists() or path.is_symlink() for path in output_paths):
+        raise JourneyError("record outputs already exist; prepare a fresh case")
     runtime_root = pathlib.Path(tempfile.mkdtemp(prefix="pulp-gpu-agent-runtime-")).resolve()
     _require_real_directory(runtime_root)
     os.chmod(runtime_root, 0o700)
@@ -1247,106 +1530,241 @@ def record_agent(
     agent_config = runtime_root / "config"
     agent_codex_home = runtime_root / "codex"
     runtime_last_message = runtime_root / "last-message.txt"
+    runtime_output_schema = runtime_root / "agent-output-schema.json"
+    runtime_profile = runtime_root / "agent-seatbelt.sb"
     last_message_payload: bytes | None = None
+    launched = False
+    keychain_record: dict[str, Any] | None = None
+    keychain_removed = False
     try:
-        if (
-            _is_within(runtime_root, workspace)
-            or _is_within(runtime_root, case_dir)
-            or any(_is_within(runtime_root, root) for root in forbidden_roots)
-        ):
-            raise JourneyError("temporary agent config root overlaps a source or evidence tree")
-        for directory in (agent_home, agent_config, agent_codex_home, agent_home / "tmp"):
-            os.mkdir(directory, 0o700)
-        _stage_agent_auth(agent_codex_home)
-        environment = _fresh_agent_environment(
-            pulp, workspace, agent_home, agent_config, agent_codex_home
-        )
-        if any(
-            root_text in value
-            for root_text in case["forbidden_roots"]
-            for value in environment.values()
-        ):
-            raise JourneyError("sanitized agent environment contains a source-checkout path")
-        command = [
-            str(agent_bin), "exec", "--json", "--ephemeral", "--ignore-user-config",
-            "--ignore-rules", "--skip-git-repo-check", "--sandbox", "workspace-write",
-            "--color", "never", "--model", model, "--cd", str(workspace),
-            "--output-last-message", str(runtime_last_message), prompt,
-        ]
-        result = _run(
-            command,
-            timeout_seconds,
-            cwd=workspace,
-            env=environment,
-            monitor_roots=[
-                ResourceRoot(workspace), ResourceRoot(case_dir), ResourceRoot(runtime_root)
+        try:
+            installed_prefix = pathlib.Path(case["installed_cli"]["prefix"])
+            if (
+                _is_within(runtime_root, workspace)
+                or _is_within(runtime_root, case_dir)
+                or _is_within(runtime_root, installed_prefix)
+                or _is_within(installed_prefix, runtime_root)
+                or any(_is_within(runtime_root, root) for root in forbidden_roots)
+            ):
+                raise JourneyError("temporary agent config root overlaps a source or evidence tree")
+            for directory in (agent_home, agent_config, agent_codex_home, agent_home / "tmp"):
+                os.mkdir(directory, 0o700)
+            auth_payload, credential_values, endpoint_hosts = _agent_auth_material()
+            keychain_record = trust.install_codex_keychain_auth(
+                codex_home=agent_codex_home, agent_bin=agent_bin, auth_payload=auth_payload,
+            )
+            try:
+                proxy = trust.ExactHostConnectProxy(endpoint_hosts)
+                with proxy:
+                    environment = _fresh_agent_environment(
+                        pulp, workspace, agent_home, agent_config, agent_codex_home,
+                        proxy.port,
+                    )
+                    if any(
+                        root_text in value
+                        for root_text in [str(case_dir), *case["forbidden_roots"]]
+                        for value in environment.values()
+                    ):
+                        raise JourneyError("sanitized agent environment contains a denied read path")
+                    profile_text = trust.seatbelt_profile(
+                        workspace=workspace,
+                        runtime_root=runtime_root,
+                        installed_prefix=pathlib.Path(case["installed_cli"]["prefix"]),
+                        agent_bin=agent_bin,
+                        denied_roots=[case_dir, *forbidden_roots],
+                        network_proxy_port=proxy.port,
+                    )
+                    _write_bytes(runtime_profile, profile_text.encode("utf-8"))
+                    _write_json(
+                        runtime_output_schema,
+                        _final_output_schema(case["run_nonce"], case["symptom"]),
+                    )
+                    denied_probes = {
+                        "private-case": case_path,
+                        "source-checkout": pathlib.Path(case["source"]["root"]) / "AGENTS.md",
+                        "canonical-plan": (
+                            pathlib.Path(case["plan"]["root"])
+                            / case["plan"]["document"]["path"]
+                        ),
+                        "build-tree": pathlib.Path(case["build"]["root"]) / "CMakeCache.txt",
+                    }
+                    preflight = trust.seatbelt_preflight(
+                        profile_path=runtime_profile,
+                        workspace=workspace,
+                        denied_probes=denied_probes,
+                        agent_bin=agent_bin,
+                        agent_version=agent_identity["version"],
+                        installed_pulp=pulp,
+                        network_proxy_port=proxy.port,
+                        codex_home=agent_codex_home,
+                        agent_environment=environment,
+                    )
+                    if _snapshot_tree(workspace) != case["initial_tree"]:
+                        raise JourneyError("Seatbelt traversal controls changed the pristine workspace")
+                    command = [
+                        "/usr/bin/sandbox-exec", "-f", str(runtime_profile),
+                        str(agent_bin), *_codex_exec_config_arguments(environment),
+                        "exec", "--json", "--ignore-user-config", "--ignore-rules",
+                        "--skip-git-repo-check", "--sandbox", "danger-full-access",
+                        "--color", "never", "--model", model, "--cd", str(workspace),
+                        "--output-schema", str(runtime_output_schema),
+                        "--output-last-message", str(runtime_last_message), prompt,
+                    ]
+                    launched = True
+                    result = _run(
+                        command,
+                        timeout_seconds,
+                        cwd=workspace,
+                        env=environment,
+                        monitor_roots=[ResourceRoot(workspace), ResourceRoot(runtime_root)],
+                        stdout_limit=MAX_STDOUT_BYTES,
+                        stderr_limit=MAX_STDERR_BYTES,
+                    )
+                proxy_audit = proxy.audit()
+                if not any(
+                    item.get("outcome") == "completed"
+                    for item in proxy_audit["connections"]
+                    if isinstance(item, dict)
+                ):
+                    raise JourneyError("Codex session did not use the allowlisted CONNECT transport")
+                proxy_audit["environment"] = {
+                    key: environment[key] for key in ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY")
+                }
+            finally:
+                trust.remove_codex_keychain_auth(keychain_record)
+                keychain_removed = True
+            last_message_payload = _read_regular_bytes(runtime_last_message)
+            transcript_payload = result.stdout.encode("utf-8")
+            events, thread_id = _parse_transcript(transcript_payload)
+            if result.returncode != 0:
+                raise JourneyError(f"fresh signed Codex exited {result.returncode}")
+            final_output = _parse_agent_final_output(last_message_payload, case)
+            rollout_paths = sorted(
+                path for path in (agent_codex_home / "sessions").rglob("rollout-*.jsonl")
+                if path.is_file() and not path.is_symlink()
+            )
+            if len(rollout_paths) != 1 or thread_id not in rollout_paths[0].name:
+                raise JourneyError("record did not produce one thread-bound Codex session JSONL")
+            rollout_payload = _read_regular_bytes(rollout_paths[0], MAX_METADATA_BYTES)
+            rollout_identity = trust.parse_codex_rollout(
+                rollout_payload,
+                thread_id=thread_id,
+                cli_version=agent_identity["cli_version"],
+                workspace=workspace,
+                model=model,
+                run_nonce=case["run_nonce"],
+            )
+            _reject_credential_disclosure(
+                (
+                    transcript_payload,
+                    result.stderr.encode("utf-8"),
+                    last_message_payload,
+                    rollout_payload,
+                ),
+                credential_values,
+            )
+            copied_profile = case_dir / "agent-seatbelt.sb"
+            copied_schema = case_dir / "agent-output-schema.json"
+            transcript_path = case_dir / "agent-transcript.jsonl"
+            stderr_path = case_dir / "agent-stderr.log"
+            last_message = case_dir / "agent-last-message.json"
+            rollout_path = case_dir / "codex-session.jsonl"
+            _write_bytes(copied_profile, _read_regular_bytes(runtime_profile))
+            _write_bytes(copied_schema, _read_regular_bytes(runtime_output_schema))
+            _write_bytes(transcript_path, transcript_payload)
+            _write_bytes(stderr_path, result.stderr.encode("utf-8"))
+            _write_bytes(last_message, last_message_payload)
+            _write_bytes(rollout_path, rollout_payload)
+        finally:
+            shutil.rmtree(runtime_root)
+        if last_message_payload is None:
+            raise JourneyError("agent did not publish its bounded final message")
+        if keychain_record is None or not keychain_removed:
+            raise JourneyError("one-use Codex keychain authentication was not removed")
+        final_tree = _snapshot_tree(workspace)
+        session_core = {
+            "schema": SESSION_SCHEMA,
+            "status": "agent-finished-awaiting-verification",
+            "acceptance_gate_satisfied": False,
+            "case_id": case["case_id"],
+            "case_sha256": _sha256(case_path),
+            "session_id": thread_id,
+            "run_nonce": case["run_nonce"],
+            "model": model,
+            "cwd": str(workspace),
+            "path": environment["PATH"],
+            "home": str(agent_home),
+            "config_home": str(agent_config),
+            "codex_home": str(agent_codex_home),
+            "runtime_removed": not runtime_root.exists() and not runtime_root.is_symlink(),
+            "environment_keys": sorted(environment),
+            "agent_binary": agent_identity,
+            "keychain_auth": {**keychain_record, "removed_after_record": keychain_removed},
+            "network_proxy": proxy_audit,
+            "installed_cli_sha256": _sha256(pulp, MAX_BINARY_BYTES),
+            "source_revision": case["source_revision"],
+            "plan_revision": case["plan_revision"],
+            "prompt_sha256": _sha256_bytes(prompt_payload),
+            "command_argv": [
+                *command[:-1], f"<prompt-sha256:{_sha256_bytes(prompt_payload)}>",
             ],
-            stdout_limit=MAX_STDOUT_BYTES,
-            stderr_limit=MAX_STDERR_BYTES,
-        )
-        last_message_payload = _read_regular_bytes(runtime_last_message)
+            "agent_exit_code": result.returncode,
+            "seatbelt": {
+                "authority": "outer-macos-seatbelt",
+                "codex_internal_sandbox": "danger-full-access",
+                "runtime_profile_path": str(runtime_profile),
+                "network_proxy_port": proxy_audit["listen_port"],
+                "denied_roots": [str(case_dir), *case["forbidden_roots"]],
+                "profile": {
+                    "path": str(copied_profile), "sha256": _sha256(copied_profile),
+                    "bytes": copied_profile.stat().st_size,
+                },
+                "preflight": preflight,
+            },
+            "output_schema": {
+                "path": str(copied_schema), "sha256": _sha256(copied_schema),
+                "bytes": copied_schema.stat().st_size,
+            },
+            "transcript": {
+                "path": str(transcript_path), "sha256": _sha256(transcript_path),
+                "bytes": transcript_path.stat().st_size, "events": len(events),
+            },
+            "codex_rollout": {
+                "path": str(rollout_path), "sha256": _sha256(rollout_path),
+                "bytes": rollout_path.stat().st_size,
+                "events": rollout_identity["event_count"],
+                "turn_id": rollout_identity["turn_id"],
+            },
+            "stderr": {
+                "path": str(stderr_path), "sha256": _sha256(stderr_path),
+                "bytes": stderr_path.stat().st_size,
+            },
+            "last_message": {
+                "path": str(last_message), "sha256": _sha256(last_message),
+                "bytes": last_message.stat().st_size, "result": final_output,
+            },
+            "record_private_key_destroyed": True,
+            "credential_disclosure_scan": "passed",
+            "final_tree": final_tree,
+        }
+        replacements = _redaction_pairs(case, case_path, session_core)
+        redacted_session_core = _redact_value(session_core, replacements)
+        attestation = trust.sign_record(session_core, private_key)
+        redacted_attestation = trust.sign_record(redacted_session_core, private_key)
+        private_key.unlink()
+        if private_key.exists() or private_key.is_symlink():
+            raise JourneyError("one-use record signing key was not destroyed")
+        session = {
+            **session_core,
+            "record_attestation": attestation,
+            "redacted_record_attestation": redacted_attestation,
+        }
+        session_path = case_dir / "agent-session.json"
+        _write_json(session_path, session)
+        return session
     finally:
-        shutil.rmtree(runtime_root)
-    if last_message_payload is None:
-        raise JourneyError("agent did not publish its bounded final message")
-    last_message = case_dir / "agent-last-message.txt"
-    _write_bytes(last_message, last_message_payload)
-    transcript_payload = result.stdout.encode("utf-8")
-    events, thread_id = _parse_transcript(transcript_payload)
-    transcript_path = case_dir / "agent-transcript.jsonl"
-    stderr_path = case_dir / "agent-stderr.log"
-    _write_bytes(transcript_path, transcript_payload)
-    _write_bytes(stderr_path, result.stderr.encode("utf-8"))
-    final_tree = _snapshot_tree(workspace)
-    session = {
-        "schema": SESSION_SCHEMA,
-        "status": "agent-finished-awaiting-verification" if result.returncode == 0 else "agent-failed",
-        "acceptance_gate_satisfied": False,
-        "case_id": case["case_id"],
-        "case_sha256": _sha256(case_path),
-        "session_id": thread_id,
-        "model": model,
-        "cwd": str(workspace),
-        "path": environment["PATH"],
-        "home": str(agent_home),
-        "config_home": str(agent_config),
-        "codex_home": str(agent_codex_home),
-        "runtime_removed": not runtime_root.exists() and not runtime_root.is_symlink(),
-        "environment_keys": sorted(environment),
-        "agent_binary": {
-            "path": str(agent_bin),
-            "sha256": _sha256(agent_bin, MAX_BINARY_BYTES),
-            "version": agent_version.stdout.strip() or agent_version.stderr.strip(),
-        },
-        "installed_cli_sha256": _sha256(pulp, MAX_BINARY_BYTES),
-        "source_revision": case["source_revision"],
-        "plan_revision": case["plan_revision"],
-        "prompt_sha256": _sha256_bytes(prompt_payload),
-        "command_argv": [*command[:-1], f"<prompt-sha256:{_sha256_bytes(prompt_payload)}>"],
-        "agent_exit_code": result.returncode,
-        "transcript": {
-            "path": str(transcript_path),
-            "sha256": _sha256(transcript_path),
-            "bytes": transcript_path.stat().st_size,
-            "events": len(events),
-        },
-        "stderr": {
-            "path": str(stderr_path),
-            "sha256": _sha256(stderr_path),
-            "bytes": stderr_path.stat().st_size,
-        },
-        "last_message": {
-            "path": str(last_message),
-            "sha256": _sha256(last_message),
-            "bytes": last_message.stat().st_size,
-        },
-        "final_tree": final_tree,
-    }
-    session_path = case_dir / "agent-session.json"
-    _write_json(session_path, session)
-    if result.returncode != 0:
-        raise JourneyError(f"fresh agent exited {result.returncode}; session record: {session_path}")
-    return session
+        if launched and (private_key.exists() or private_key.is_symlink()):
+            private_key.unlink()
 
 
 def _validate_discovery_file(
@@ -1481,8 +1899,9 @@ def _require_case_identity(case: dict[str, Any], case_path: pathlib.Path) -> Non
         {
             "schema", "status", "acceptance_gate_satisfied", "case_id", "symptom",
             "workspace", "forbidden_roots", "source_revision", "plan_revision",
-            "public_docs", "installed_cli", "harness_sha256", "prompt", "initial_tree",
-            "correction", "selection", "reference",
+            "source", "plan", "build", "public_material", "run_nonce", "record_key",
+            "installed_cli", "harnesses", "prompt", "initial_tree", "correction",
+            "selection", "reference",
         },
         "prepared case",
     )
@@ -1493,20 +1912,118 @@ def _require_case_identity(case: dict[str, Any], case_path: pathlib.Path) -> Non
         or not isinstance(case["case_id"], str)
         or re.fullmatch(r"[0-9a-f]{32}", case["case_id"]) is None
         or not isinstance(case["symptom"], str) or not case["symptom"]
+        or not isinstance(case["run_nonce"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", case["run_nonce"]) is None
     ):
-        raise JourneyError("prepared case is not a nonterminal v2 identity")
+        raise JourneyError("prepared case is not a nonterminal v3 identity")
     _require_revision(case["source_revision"], "source revision")
     _require_revision(case["plan_revision"], "plan revision")
+    source = _require_exact_fields(
+        case["source"],
+        {
+            "root", "revision", "clean", "status_sha256", "origin", "origin_main",
+            "head_ref", "commit_signature",
+        },
+        "source provenance",
+    )
+    plan = _require_exact_fields(
+        case["plan"],
+        {
+            "root", "revision", "clean", "status_sha256", "origin", "origin_main",
+            "head_ref", "commit_signature", "document",
+        },
+        "plan provenance",
+    )
+    source_origin = _require_exact_fields(
+        source["origin"], {"url", "repository"}, "source Git origin"
+    )
+    plan_origin = _require_exact_fields(
+        plan["origin"], {"url", "repository"}, "plan Git origin"
+    )
+    for label, identity in (("source", source), ("plan", plan)):
+        signature = _require_exact_fields(
+            identity["commit_signature"], {"status", "signer", "fingerprint"},
+            f"{label} commit signature",
+        )
+        if (
+            not isinstance(identity["head_ref"], str) or not identity["head_ref"]
+            or re.fullmatch(r"[0-9a-f]{40}", str(identity["origin_main"])) is None
+            or not isinstance(signature["status"], str) or len(signature["status"]) != 1
+            or not isinstance(signature["signer"], str)
+            or not isinstance(signature["fingerprint"], str)
+        ):
+            raise JourneyError(f"{label} Git authority identity is malformed")
+    if (
+        source["revision"] != case["source_revision"] or source["clean"] is not True
+        or plan["revision"] != case["plan_revision"] or plan["clean"] is not True
+        or source["status_sha256"] != _sha256_bytes(b"")
+        or plan["status_sha256"] != _sha256_bytes(b"")
+        or source_origin["repository"] != "Generous-Corp/pulp"
+        or plan_origin["repository"] != "danielraffel/pulp-planning"
+        or not isinstance(source_origin["url"], str) or not source_origin["url"]
+        or not isinstance(plan_origin["url"], str) or not plan_origin["url"]
+        or plan["revision"] != plan["origin_main"]
+    ):
+        raise JourneyError("case revisions are not derived from clean source and plan repositories")
+    document = _require_exact_fields(
+        plan["document"], {"path", "git_blob", "bytes", "sha256"},
+        "canonical plan document",
+    )
+    if (
+        not isinstance(document["path"], str) or not document["path"]
+        or re.fullmatch(r"[0-9a-f]{40}", str(document["git_blob"])) is None
+        or type(document["bytes"]) is not int or document["bytes"] < 1
+    ):
+        raise JourneyError("canonical plan document identity is malformed")
+    _require_digest(document["sha256"], "canonical plan document digest")
     if case["correction"] != {
         "path": "run-probe.sh", "before": SEED_LINE, "after": REPAIRED_LINE
     }:
-        raise JourneyError("prepared case does not require the documented correction")
-    if _sha256(pathlib.Path(__file__).resolve(strict=True)) != case["harness_sha256"]:
-        raise JourneyError("verification harness bytes changed after preparation")
+        raise JourneyError("prepared private case does not contain the single seeded correction")
+    harnesses = _require_exact_fields(
+        case["harnesses"],
+        {"journey_sha256", "trust_sha256", "isolation_sha256"},
+        "harness identities",
+    )
+    if (
+        _sha256(pathlib.Path(__file__).resolve(strict=True)) != harnesses["journey_sha256"]
+        or _sha256(pathlib.Path(trust.__file__).resolve(strict=True)) != harnesses["trust_sha256"]
+        or _sha256(pathlib.Path(trust.isolation.__file__).resolve(strict=True))
+        != harnesses["isolation_sha256"]
+    ):
+        raise JourneyError("journey or trust harness bytes changed after preparation")
+    record_key = _require_exact_fields(
+        case["record_key"],
+        {"algorithm", "private_key_path", "public_key_path", "public_key_sha256"},
+        "record signing key identity",
+    )
+    public_key = pathlib.Path(record_key["public_key_path"])
+    if (
+        record_key["algorithm"] != "rsa-3072-sha256"
+        or pathlib.Path(record_key["private_key_path"]) != case_path.parent / "record-signing-key.pem"
+        or public_key != case_path.parent / "record-signing-public.pem"
+        or not public_key.is_file() or public_key.is_symlink()
+        or _sha256(public_key, 64 * 1024)
+        != _require_digest(record_key["public_key_sha256"], "record public key digest")
+    ):
+        raise JourneyError("record signing public identity is invalid")
     if not isinstance(case["forbidden_roots"], list) or not case["forbidden_roots"]:
         raise JourneyError("prepared case has no source-tree isolation record")
+    expected_roots = {
+        source["root"], plan["root"],
+        _require_exact_fields(
+            case["build"],
+            {"root", "cmake_cache", "cmake", "install_script", "build_info", "install_replay"},
+            "build provenance",
+        )["root"],
+    }
+    if not expected_roots.issubset(set(case["forbidden_roots"])):
+        raise JourneyError("source, build, and plan are not all denied read roots")
     workspace = pathlib.Path(case["workspace"])
     _require_real_directory(workspace)
+    installed_prefix = pathlib.Path(case["installed_cli"]["prefix"])
+    _require_real_directory(installed_prefix)
+    _validate_install_isolation(workspace, case_path.parent, installed_prefix)
     for item in case["forbidden_roots"]:
         root = pathlib.Path(item)
         _require_real_directory(root)
@@ -1516,6 +2033,23 @@ def _require_case_identity(case: dict[str, Any], case_path: pathlib.Path) -> Non
             or _is_within(pathlib.Path(case["installed_cli"]["path"]), root)
         ):
             raise JourneyError("workspace, private case, or installed CLI is inside a source tree")
+    identity_seed = {
+        "symptom": case["symptom"],
+        "workspace": case["workspace"],
+        "forbidden_roots": sorted(set(case["forbidden_roots"])),
+        "source_revision": case["source_revision"],
+        "plan_revision": case["plan_revision"],
+        "pulp_binary_sha256": case["installed_cli"]["sha256"],
+        "initial_tree_sha256": case["initial_tree"]["sha256"],
+        "reference_result_sha256": case["reference"]["result_json_sha256"],
+        "run_nonce": case["run_nonce"],
+        "record_public_key_sha256": record_key["public_key_sha256"],
+    }
+    expected_case_id = _sha256_bytes(
+        json.dumps(identity_seed, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )[:32]
+    if case["case_id"] != expected_case_id:
+        raise JourneyError("case identity does not bind its provenance and private reference")
 
 
 def _validate_session_identity(
@@ -1525,10 +2059,14 @@ def _validate_session_identity(
         session,
         {
             "schema", "status", "acceptance_gate_satisfied", "case_id", "case_sha256",
-            "session_id", "model", "cwd", "path", "home", "config_home", "codex_home",
-            "runtime_removed", "environment_keys", "agent_binary", "installed_cli_sha256",
-            "source_revision", "plan_revision", "prompt_sha256", "command_argv",
-            "agent_exit_code", "transcript", "stderr", "last_message", "final_tree",
+            "session_id", "run_nonce", "model", "cwd", "path", "home", "config_home",
+            "codex_home", "runtime_removed", "environment_keys", "agent_binary",
+            "keychain_auth", "network_proxy",
+            "installed_cli_sha256", "source_revision", "plan_revision", "prompt_sha256",
+            "command_argv", "agent_exit_code", "seatbelt", "output_schema", "transcript",
+            "codex_rollout", "stderr", "last_message", "record_private_key_destroyed",
+            "credential_disclosure_scan", "final_tree", "record_attestation",
+            "redacted_record_attestation",
         },
         "agent session",
     )
@@ -1546,6 +2084,8 @@ def _validate_session_identity(
         and runtime_root.name.startswith("pulp-gpu-agent-runtime-")
         and not _is_within(runtime_root, workspace)
         and not _is_within(runtime_root, case_dir)
+        and not _is_within(runtime_root, pathlib.Path(case["installed_cli"]["prefix"]))
+        and not _is_within(pathlib.Path(case["installed_cli"]["prefix"]), runtime_root)
         and all(not _is_within(runtime_root, pathlib.Path(item)) for item in case["forbidden_roots"])
     )
     if (
@@ -1554,7 +2094,9 @@ def _validate_session_identity(
         or session["acceptance_gate_satisfied"] is not False
         or session["case_id"] != case["case_id"]
         or session["case_sha256"] != _sha256(case_path)
-        or not isinstance(session["session_id"], str) or not session["session_id"]
+        or not isinstance(session["session_id"], str)
+        or trust.UUID_RE.fullmatch(session["session_id"]) is None
+        or session["run_nonce"] != case["run_nonce"]
         or not isinstance(session["model"], str) or not session["model"]
         or session["cwd"] != str(workspace)
         or session["path"] != os.pathsep.join(
@@ -1568,28 +2110,119 @@ def _validate_session_identity(
         or session["source_revision"] != case["source_revision"]
         or session["plan_revision"] != case["plan_revision"]
         or session["prompt_sha256"] != case["prompt"]["sha256"]
+        or session["record_private_key_destroyed"] is not True
+        or session["credential_disclosure_scan"] != "passed"
     ):
         raise JourneyError("agent session identity or isolation binding is invalid")
+    private_key = pathlib.Path(case["record_key"]["private_key_path"])
+    if private_key.exists() or private_key.is_symlink():
+        raise JourneyError("one-use record signing key still exists after the agent session")
+    session_core = {
+        key: value for key, value in session.items()
+        if key not in {"record_attestation", "redacted_record_attestation"}
+    }
+    public_key_path = pathlib.Path(case["record_key"]["public_key_path"])
+    trust.verify_record_signature(
+        session_core,
+        session["record_attestation"],
+        public_key_path,
+    )
+    redacted_session_core = _redact_value(
+        session_core, _redaction_pairs(case, case_path, session)
+    )
+    trust.verify_record_signature(
+        redacted_session_core,
+        session["redacted_record_attestation"],
+        public_key_path,
+    )
     keys = session["environment_keys"]
     if (
         not isinstance(keys, list) or any(not isinstance(item, str) for item in keys)
         or not set(keys).issubset(AGENT_INHERITED_ENV_KEYS | AGENT_FIXED_ENV_KEYS)
         or any(item.startswith("GIT_") for item in keys)
         or any(item.startswith("PULP_") and item != "PULP_UPDATE_CHECK_DISABLED" for item in keys)
-        or not {"HOME", "XDG_CONFIG_HOME", "CODEX_HOME", "PATH", "PWD"}.issubset(keys)
+        or not {
+            "HOME", "XDG_CONFIG_HOME", "CODEX_HOME", "PATH", "PWD",
+            "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+        }.issubset(keys)
     ):
         raise JourneyError("agent environment contains repository metadata or misses isolation keys")
-    agent = _require_exact_fields(
-        session["agent_binary"], {"path", "sha256", "version"}, "agent binary identity"
+    agent = session["agent_binary"]
+    if agent != trust.official_codex_identity(pathlib.Path(agent["path"])):
+        raise JourneyError("agent binary no longer has its recorded official Codex identity")
+    keychain = _require_exact_fields(
+        session["keychain_auth"],
+        {
+            "backend", "service", "account", "auth_mode", "payload_bytes", "payload_sha256",
+            "trusted_application", "creator_access_removed", "fallback_auth_file_absent",
+            "removed_after_record",
+        },
+        "one-use Codex keychain authentication",
     )
-    agent_path = pathlib.Path(agent["path"])
+    expected_account = "cli|" + hashlib.sha256(
+        str(agent_codex_home).encode("utf-8")
+    ).hexdigest()[:16]
     if (
-        not agent_path.is_absolute() or not agent_path.is_file() or agent_path.is_symlink()
-        or _sha256(agent_path, MAX_BINARY_BYTES)
-        != _require_digest(agent["sha256"], "agent binary digest")
-        or not isinstance(agent["version"], str) or not agent["version"]
+        keychain["backend"] != "macos-keychain-direct"
+        or keychain["service"] != trust.CODEX_KEYCHAIN_SERVICE
+        or keychain["account"] != expected_account
+        or keychain["auth_mode"] not in {"chatgpt", "apikey"}
+        or type(keychain["payload_bytes"]) is not int
+        or not 1 <= keychain["payload_bytes"] <= 1024 * 1024
+        or _require_digest(keychain["payload_sha256"], "keychain payload")
+        != keychain["payload_sha256"]
+        or keychain["trusted_application"] != agent["path"]
+        or keychain["creator_access_removed"] is not True
+        or keychain["fallback_auth_file_absent"] is not True
+        or keychain["removed_after_record"] is not True
     ):
-        raise JourneyError("agent binary identity is no longer reproducible")
+        raise JourneyError("one-use Codex authentication is not keychain-only and removed")
+    proxy = _require_exact_fields(
+        session["network_proxy"],
+        {
+            "schema", "listen_host", "listen_port", "allowed_hosts", "max_connections",
+            "max_bytes_each_way", "connections", "environment",
+        },
+        "CONNECT proxy audit",
+    )
+    expected_hosts = (
+        ["api.openai.com"] if keychain["auth_mode"] == "apikey"
+        else ["auth.openai.com", "chatgpt.com"]
+    )
+    proxy_url = f"http://127.0.0.1:{proxy['listen_port']}"
+    connections = proxy["connections"]
+    if (
+        proxy["schema"] != "pulp.gpu-clean-agent-connect-proxy.v1"
+        or proxy["listen_host"] != "127.0.0.1"
+        or type(proxy["listen_port"]) is not int or not 1 <= proxy["listen_port"] <= 65535
+        or proxy["allowed_hosts"] != expected_hosts
+        or proxy["max_connections"] != 32
+        or proxy["max_bytes_each_way"] != 64 * 1024 * 1024
+        or proxy["environment"] != {
+            "HTTPS_PROXY": proxy_url, "HTTP_PROXY": proxy_url, "NO_PROXY": "",
+        }
+        or not isinstance(connections, list)
+        or not 1 <= len(connections) <= proxy["max_connections"]
+        or not any(
+            isinstance(item, dict) and item.get("outcome") == "completed"
+            for item in connections
+        )
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {
+                "host", "port", "outcome", "bytes_to_upstream", "bytes_to_client",
+            }
+            or item["host"] not in {*expected_hosts, "rejected"}
+            or item["port"] != 443
+            or item["outcome"] not in {"completed", "transport-preflight"}
+            or type(item["bytes_to_upstream"]) is not int
+            or type(item["bytes_to_client"]) is not int
+            or not 0 <= item["bytes_to_upstream"] <= proxy["max_bytes_each_way"]
+            or not 0 <= item["bytes_to_client"] <= proxy["max_bytes_each_way"]
+            for item in connections
+        )
+    ):
+        raise JourneyError("CONNECT proxy audit does not prove bounded exact-host egress")
     argv = session["command_argv"]
     def flag_value(flag: str) -> str | None:
         if not isinstance(argv, list):
@@ -1600,33 +2233,118 @@ def _validate_session_identity(
             return None
         return argv[index + 1] if index + 1 < len(argv) else None
 
+    expected_environment = {
+        "HOME": str(agent_home), "TMPDIR": str(agent_home / "tmp"),
+        "PATH": session["path"], "PWD": str(workspace),
+        "PULP_UPDATE_CHECK_DISABLED": "1", "NO_COLOR": "1",
+    }
     expected_argv = [
-        agent["path"], "exec", "--json", "--ephemeral", "--ignore-user-config",
-        "--ignore-rules", "--skip-git-repo-check", "--sandbox", "workspace-write",
-        "--color", "never", "--model", session["model"], "--cd", str(workspace),
-        "--output-last-message", str(runtime_root / "last-message.txt"),
+        "/usr/bin/sandbox-exec", "-f", str(runtime_root / "agent-seatbelt.sb"),
+        agent["path"], *_codex_exec_config_arguments(expected_environment),
+        "exec", "--json", "--ignore-user-config", "--ignore-rules",
+        "--skip-git-repo-check", "--sandbox", "danger-full-access", "--color", "never",
+        "--model", session["model"], "--cd", str(workspace), "--output-schema",
+        str(runtime_root / "agent-output-schema.json"), "--output-last-message",
+        str(runtime_root / "last-message.txt"),
         f"<prompt-sha256:{case['prompt']['sha256']}>",
     ]
     if (
         not isinstance(argv, list) or any(not isinstance(item, str) for item in argv)
         or argv != expected_argv
         or "--ignore-user-config" not in argv or "--ignore-rules" not in argv
-        or "--ephemeral" not in argv or "--skip-git-repo-check" not in argv
-        or flag_value("--sandbox") != "workspace-write"
+        or "--ephemeral" in argv or "--skip-git-repo-check" not in argv
+        or flag_value("--sandbox") != "danger-full-access"
         or flag_value("--model") != session["model"]
         or flag_value("--cd") != str(workspace)
+        or flag_value("--output-schema") != str(runtime_root / "agent-output-schema.json")
         or flag_value("--output-last-message") != str(runtime_root / "last-message.txt")
         or any(
             forbidden in argv
             for forbidden in (
-                "danger-full-access", "--dangerously-bypass-approvals-and-sandbox",
-                "--add-dir", "--full-auto",
+                "--dangerously-bypass-approvals-and-sandbox", "--add-dir", "--full-auto",
             )
         )
         or argv[-1] != f"<prompt-sha256:{case['prompt']['sha256']}>"
         or any(path in item for path in [str(case_dir), *case["forbidden_roots"]] for item in argv)
     ):
-        raise JourneyError("agent command does not prove the required workspace-write isolation")
+        raise JourneyError("agent command does not prove the single outer-Seatbelt launch")
+
+    seatbelt = _require_exact_fields(
+        session["seatbelt"],
+        {
+            "authority", "codex_internal_sandbox", "runtime_profile_path",
+            "network_proxy_port", "denied_roots", "profile", "preflight",
+        },
+        "Seatbelt identity",
+    )
+    expected_denied = [str(case_dir), *case["forbidden_roots"]]
+    profile_payload = _validate_bound_file(
+        seatbelt["profile"], case_dir / "agent-seatbelt.sb", "Seatbelt profile"
+    )
+    expected_profile = trust.seatbelt_profile_for_paths(
+        workspace=workspace,
+        runtime_root=runtime_root,
+        installed_prefix=pathlib.Path(case["installed_cli"]["prefix"]),
+        agent_bin=pathlib.Path(agent["path"]),
+        denied_roots=[pathlib.Path(item) for item in expected_denied],
+        network_proxy_port=proxy["listen_port"],
+    ).encode("utf-8")
+    if (
+        seatbelt["authority"] != "outer-macos-seatbelt"
+        or seatbelt["codex_internal_sandbox"] != "danger-full-access"
+        or seatbelt["runtime_profile_path"] != str(runtime_root / "agent-seatbelt.sb")
+        or seatbelt["network_proxy_port"] != proxy["listen_port"]
+        or seatbelt["denied_roots"] != expected_denied
+        or profile_payload != expected_profile
+    ):
+        raise JourneyError("Seatbelt profile does not bind the required read/write boundary")
+    preflight = _require_exact_fields(
+        seatbelt["preflight"], {"schema", "profile_sha256", "controls", "passed"},
+        "Seatbelt preflight",
+    )
+    controls = preflight["controls"]
+    expected_controls = {
+        ("workspace-read", "positive"),
+        ("workspace-write-remove", "positive"),
+        ("signed-codex-version", "positive"),
+        ("signed-codex-exec-help", "positive"),
+        ("signed-codex-keychain-auth", "positive"),
+        ("installed-pulp-version", "positive"),
+        ("connect-proxy", "positive"),
+        ("non-allowlisted-loopback", "network-denied"),
+        ("ambient-usr-local", "directory-read-denied"),
+        ("ambient-site-library", "directory-read-denied"),
+        ("non-allowlisted-read", "absolute-denied"),
+        ("non-allowlisted-read", "relative-denied"),
+        ("non-allowlisted-write", "write-denied"),
+        ("denied-symlink", "symlink-denied"),
+        *((label, kind) for label in (
+            "private-case", "source-checkout", "canonical-plan", "build-tree"
+        ) for kind in ("absolute-denied", "relative-denied")),
+    }
+    if (
+        preflight["schema"] != "pulp.gpu-clean-agent-seatbelt-preflight.v1"
+        or preflight["profile_sha256"] != seatbelt["profile"]["sha256"]
+        or preflight["passed"] is not True or not isinstance(controls, list)
+        or len(controls) != len(expected_controls)
+        or {
+            (item.get("label"), item.get("kind"))
+            for item in controls if isinstance(item, dict)
+        } != expected_controls
+        or any(
+            set(item) != {"label", "kind", "exit_code"}
+            or type(item["exit_code"]) is not int
+            or ((item["kind"] == "positive") != (item["exit_code"] == 0))
+            for item in controls if isinstance(item, dict)
+        )
+        or any(not isinstance(item, dict) for item in controls)
+    ):
+        raise JourneyError("Seatbelt planted controls do not prove direct and traversal denial")
+    output_schema = _validate_bound_file(
+        session["output_schema"], case_dir / "agent-output-schema.json", "agent output schema"
+    )
+    if output_schema != _json_bytes(_final_output_schema(case["run_nonce"], case["symptom"])):
+        raise JourneyError("agent output schema is not bound to this case nonce and symptom")
 
 
 def _validate_bound_file(
@@ -1645,8 +2363,8 @@ def _validate_bound_file(
     return payload
 
 
-def _expected_initial_tree(public_docs: list[str]) -> dict[str, Any]:
-    task = _task_text(public_docs).encode("utf-8")
+def _expected_initial_tree() -> dict[str, Any]:
+    task = _task_text().encode("utf-8")
     script = _seed_script().encode("utf-8")
     entries = [
         {
@@ -1668,24 +2386,19 @@ def _expected_initial_tree(public_docs: list[str]) -> dict[str, Any]:
 
 
 def _validate_case_material(
-    case: dict[str, Any], case_path: pathlib.Path
+    case: dict[str, Any], case_path: pathlib.Path,
+    *, allowed_source_untracked: Iterable[pathlib.Path] = (),
 ) -> tuple[dict[str, Any], dict[str, str], dict[str, Any]]:
     workspace = pathlib.Path(case["workspace"])
     case_dir = case_path.parent
-    public_docs = case["public_docs"]
-    if (
-        not isinstance(public_docs, list) or len(public_docs) < 1
-        or any(not isinstance(item, str) or not item.startswith("https://") for item in public_docs)
-    ):
-        raise JourneyError("prepared case has no bounded public documentation list")
-    if case["initial_tree"] != _expected_initial_tree(public_docs):
+    if case["initial_tree"] != _expected_initial_tree():
         raise JourneyError("prepared before-tree is not the documented seeded workspace")
     prompt_record = _require_exact_fields(
         case["prompt"], {"path", "sha256", "bytes"}, "prepared prompt"
     )
     prompt_path = case_dir / "agent-prompt.txt"
     prompt_payload = _read_regular_bytes(prompt_path)
-    expected_prompt = _prompt_text(workspace, case["symptom"], public_docs).encode("utf-8")
+    expected_prompt = _prompt_text(workspace, case["symptom"], case["run_nonce"]).encode("utf-8")
     if (
         prompt_record["path"] != str(prompt_path)
         or prompt_payload != expected_prompt
@@ -1695,16 +2408,55 @@ def _validate_case_material(
         raise JourneyError("prepared prompt is not the public no-context prompt")
     prompt_text = prompt_payload.decode("utf-8")
     forbidden_prompt_text = [
-        case["selection"]["recipe_id"], str(case_dir),
+        case["selection"]["recipe_id"], SEED_LINE, REPAIRED_LINE, str(case_dir),
         *case["forbidden_roots"],
     ]
     if any(item and item in prompt_text for item in forbidden_prompt_text):
         raise JourneyError("agent prompt leaks a recipe or private source/verifier path")
 
+    source_root = pathlib.Path(case["source"]["root"])
+    plan_root = pathlib.Path(case["plan"]["root"])
+    current_source = trust.git_repository_identity(
+        source_root, expected_repository="Generous-Corp/pulp",
+        allowed_untracked=allowed_source_untracked,
+    )
+    current_plan = trust.git_repository_identity(
+        plan_root,
+        expected_repository="danielraffel/pulp-planning",
+        required_document=plan_root / case["plan"]["document"]["path"],
+        require_origin_main=True,
+    )
+    if current_source != case["source"] or current_plan != case["plan"]:
+        raise JourneyError("source or canonical plan provenance changed after preparation")
+    for label, identity in (("source", current_source), ("plan", current_plan)):
+        signature = identity["commit_signature"]
+        if (
+            signature["status"] != "G"
+            or signature["fingerprint"] != trust.AUTHORIZED_GIT_SIGNING_FINGERPRINT
+        ):
+            raise JourneyError(
+                f"{label} HEAD lacks the authorized valid commit signature required for recording"
+            )
+    current_build, current_installed = trust.build_install_identity(
+        source=current_source,
+        build_root=pathlib.Path(case["build"]["root"]),
+        install_script=pathlib.Path(case["build"]["install_script"]["path"]),
+        installed_prefix=pathlib.Path(case["installed_cli"]["prefix"]),
+        installed_pulp=pathlib.Path(case["installed_cli"]["path"]),
+        timeout=120.0,
+    )
+    if current_build != case["build"]:
+        raise JourneyError("Release build/install provenance changed after preparation")
+    current_public = trust.installed_public_material(
+        source_root, pathlib.Path(case["installed_cli"]["prefix"])
+    )
+    if current_public != case["public_material"]:
+        raise JourneyError("installed public catalog or documentation changed after preparation")
     installed = _require_exact_fields(
         case["installed_cli"],
         {
-            "path", "bytes", "sha256", "version_output", "version_output_sha256",
+            "prefix", "path", "cpp_path", "bytes", "sha256",
+            "fresh_install_replay_sha256", "version_output", "version_output_sha256",
             "linkage_sha256",
         },
         "installed CLI identity",
@@ -1714,11 +2466,23 @@ def _validate_case_material(
         not pulp.is_absolute() or not pulp.is_file() or pulp.is_symlink()
         or installed["bytes"] != pulp.stat().st_size
         or installed["sha256"] != _sha256(pulp, MAX_BINARY_BYTES)
+        or any(installed[key] != current_installed[key] for key in current_installed)
         or not isinstance(installed["version_output"], str)
         or not installed["version_output"]
     ):
         raise JourneyError("installed CLI identity changed or is not an installed executable")
     _require_digest(installed["version_output_sha256"], "CLI version output digest")
+    version_result = _run(
+        [str(pulp), "version"], 30.0, cwd=case_dir,
+        monitor_roots=[ResourceRoot(case_dir)],
+    )
+    if (
+        version_result.returncode != 0
+        or version_result.stdout.strip() != installed["version_output"]
+        or _sha256_bytes(version_result.stdout.encode("utf-8"))
+        != installed["version_output_sha256"]
+    ):
+        raise JourneyError("installed CLI version output changed after preparation")
     linkage_sha256 = _installed_cli_linkage_digest(
         pulp,
         [pathlib.Path(item) for item in case["forbidden_roots"]],
@@ -1845,7 +2609,7 @@ def _validate_workspace_tree(
     workspace = pathlib.Path(case["workspace"])
     task_payload = _read_regular_bytes(workspace / "TASK.md")
     script_payload = _read_regular_bytes(workspace / "run-probe.sh")
-    expected_task = _task_text(case["public_docs"]).encode("utf-8")
+    expected_task = _task_text().encode("utf-8")
     seeded_script = _seed_script()
     repaired_script = seeded_script.replace(SEED_LINE, REPAIRED_LINE, 1)
     if seeded_script.count(SEED_LINE) != 1 or REPAIRED_LINE in seeded_script:
@@ -1903,6 +2667,80 @@ def _diagnostic_tokens(negative: dict[str, Any]) -> list[str]:
     return [value for value in values if isinstance(value, str) and value]
 
 
+def _transcript_uses_network_tool(value: Any) -> bool:
+    if isinstance(value, dict):
+        item_type = str(value.get("type", "")).lower().replace("-", "_")
+        tool_name = str(value.get("name", "")).lower().replace("-", "_")
+        if (
+            ("web" in item_type and "search" in item_type)
+            or item_type in {"web_search", "search_query"}
+            or ("web" in tool_name and "search" in tool_name)
+        ):
+            return True
+        return any(_transcript_uses_network_tool(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_transcript_uses_network_tool(child) for child in value)
+    return False
+
+
+def _validate_public_discovery_sequence(
+    case: dict[str, Any], events: list[dict[str, Any]],
+    records: list[tuple[str, int, str]], run_positions: list[int],
+) -> None:
+    if len(run_positions) != 2:
+        raise JourneyError("public discovery validation requires exactly two probe runs")
+    symptom = case["symptom"]
+    recipe_id = case["selection"]["recipe_id"]
+    discovery_positions = [
+        index for index, (command, exit_code, output) in enumerate(records)
+        if "gpu recipes list" in command and "--symptom" in command
+        and symptom in command and "--json" in command and exit_code == 0
+        and symptom in output and recipe_id in output
+    ]
+    catalog_positions = [
+        index for index, (command, exit_code, output) in enumerate(records)
+        if "share/pulp/gpu-recipes.yaml" in command and exit_code == 0
+        and recipe_id in output and symptom in output
+    ]
+    public_docs = {
+        item["installed_relative_path"]: item["source_path"]
+        for item in case["public_material"]
+        if item["role"] in {"guide", "reference"}
+    }
+    doc_records = [
+        (index, installed_relative, source_relative)
+        for index, (command, exit_code, output) in enumerate(records)
+        for installed_relative, source_relative in public_docs.items()
+        if installed_relative in command and exit_code == 0 and len(output.strip()) >= 32
+    ]
+    commands = "\n".join(record[0] for record in records)
+    forbidden_network = (
+        r"(?i)(?:^|[;&|()\s])(?:curl|wget|ftp|nc|netcat|telnet|ssh|scp|sftp|gh)\b",
+        r"(?i)https?://",
+        r"(?i)\bgit\s+(?:clone|fetch|pull|ls-remote)\b",
+        r"(?i)\b(?:urllib|requests|http\.client|socket)\b",
+        r"(?i)\b(?:fetch|XMLHttpRequest)\s*\(",
+    )
+    if (
+        not discovery_positions
+        or not catalog_positions
+        or not doc_records
+        or discovery_positions[0] >= catalog_positions[0]
+        or discovery_positions[0] >= run_positions[0]
+        or catalog_positions[0] >= run_positions[0]
+        or min(item[0] for item in doc_records) >= run_positions[0]
+        or not any(
+            source_relative in "\n".join(records[index][2] for index in catalog_positions)
+            for _, _, source_relative in doc_records
+        )
+        or any(re.search(pattern, commands) for pattern in forbidden_network)
+        or _transcript_uses_network_tool(events)
+    ):
+        raise JourneyError(
+            "transcript does not prove pre-edit symptom-only installed catalog/document discovery"
+        )
+
+
 def _validate_transcript(
     case: dict[str, Any], case_path: pathlib.Path, session: dict[str, Any],
     negative: dict[str, Any], repaired: dict[str, Any],
@@ -1914,14 +2752,19 @@ def _validate_transcript(
     )
     _validate_bound_file(session["stderr"], case_dir / "agent-stderr.log", "agent stderr")
     last_message_payload = _validate_bound_file(
-        session["last_message"], case_dir / "agent-last-message.txt", "agent final message"
+        session["last_message"], case_dir / "agent-last-message.json", "agent final message",
+        {"result"},
     )
     events, thread_id = _parse_transcript(transcript_payload)
     if thread_id != session["session_id"] or session["transcript"]["events"] != len(events):
         raise JourneyError("transcript event count or session identity does not match")
     records = _command_records(events)
     symptom = case["symptom"]
-    run_records = [record for record in records if "run-probe.sh" in record[0] and symptom in record[0]]
+    run_positions = [
+        index for index, record in enumerate(records)
+        if "run-probe.sh" in record[0] and symptom in record[0]
+    ]
+    run_records = [records[index] for index in run_positions]
     if len(run_records) != 2 or [item[1] for item in run_records] != [1, 0]:
         raise JourneyError("transcript must bind exactly one negative and one repaired script execution")
     if not _transcript_has_agent_edit(events, symptom):
@@ -1929,7 +2772,34 @@ def _validate_transcript(
     commands = "\n".join(record[0] for record in records)
     if "pwd" not in commands or "command -v pulp" not in commands:
         raise JourneyError("transcript does not prove the requested cwd and installed-CLI checks")
+    _validate_public_discovery_sequence(case, events, records, run_positions)
     corpus = _string_corpus(events)
+    final_result = _parse_agent_final_output(last_message_payload, case)
+    if final_result != session["last_message"]["result"]:
+        raise JourneyError("session does not bind the parsed structured final output")
+    failed = [item for item in _typed_passes(negative) if item["verdict"] == "fail"]
+    if len(failed) != 1:
+        raise JourneyError("negative evidence has no unique failed pass")
+    failed_pass = failed[0]
+    expected_final = {
+        "run_nonce": case["run_nonce"],
+        "symptom": symptom,
+        "selected_recipe": case["selection"]["recipe_id"],
+        "negative": {
+            "exit_code": 1,
+            "verdict": "fail",
+            "pass": failed_pass["name"],
+            "code": failed_pass["code"],
+            "mutation": negative["mutation"],
+            "expected": failed_pass["expected"],
+            "observed": failed_pass["observed"],
+            "absolute_error": failed_pass["absolute_error"],
+        },
+        "edit": {"path": "run-probe.sh", "removed": SEED_LINE, "added": REPAIRED_LINE},
+        "repaired": {"exit_code": 0, "verdict": "pass"},
+    }
+    if final_result != expected_final:
+        raise JourneyError("structured final output does not exactly interpret the evidence and repair")
     final_message = last_message_payload.decode("utf-8", errors="strict").strip()
     agent_messages = _agent_messages(events)
     if not final_message or final_message not in agent_messages:
@@ -1941,15 +2811,26 @@ def _validate_transcript(
     ]
     if any(token not in corpus for token in required_corpus):
         raise JourneyError("transcript omits a selected recipe, receipt, cwd, or exit binding")
-    final_required = [
-        case["selection"]["recipe_id"], SEED_LINE, REPAIRED_LINE,
-        "fail", "pass", *_diagnostic_tokens(negative),
-    ]
-    if any(token.casefold() not in final_message.casefold() for token in final_required):
-        raise JourneyError("agent final message does not interpret the typed failure and exact repair")
     private_paths = [str(case_path.parent), *case["forbidden_roots"]]
     if any(path in corpus for path in private_paths):
         raise JourneyError("agent transcript exposes a private verifier or source-checkout path")
+    rollout_payload = _validate_bound_file(
+        session["codex_rollout"], case_dir / "codex-session.jsonl", "Codex session JSONL",
+        {"events", "turn_id"},
+    )
+    rollout = trust.parse_codex_rollout(
+        rollout_payload,
+        thread_id=thread_id,
+        cli_version=session["agent_binary"]["cli_version"],
+        workspace=pathlib.Path(case["workspace"]),
+        model=session["model"],
+        run_nonce=case["run_nonce"],
+    )
+    if (
+        session["codex_rollout"]["events"] != rollout["event_count"]
+        or session["codex_rollout"]["turn_id"] != rollout["turn_id"]
+    ):
+        raise JourneyError("Codex rollout identity is not joined to the stdout transcript")
     return events, records
 
 
@@ -1986,7 +2867,7 @@ def _validate_superseded_disposition(value: Any) -> None:
         or not isinstance(prior["historical_provenance"], dict)
         or not isinstance(invalidation["reason"], str) or not invalidation["reason"]
         or invalidation["nonterminal_effect"] != "cannot satisfy Horizon-A A5"
-        or replacement["required_schema"] != VERIFICATION_SCHEMA
+        or replacement["required_schema"] != "pulp.gpu-clean-agent-verification.v2"
         or replacement["required_status"] != "independent-agent-accepted"
         or replacement["required_new_filename"] == prior["filename"]
         or not isinstance(replacement["requirements"], list) or not replacement["requirements"]
@@ -1994,8 +2875,126 @@ def _validate_superseded_disposition(value: Any) -> None:
         raise JourneyError("legacy receipt is not an explicit superseded/nonterminal disposition")
 
 
+def _bundle_bounds(value: Any, *, depth: int = 0) -> None:
+    if depth > MAX_BUNDLE_DEPTH:
+        raise JourneyError("audit bundle exceeds its nesting-depth cap")
+    if value is None or isinstance(value, (bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise JourneyError("audit bundle contains a non-finite number")
+        return
+    if isinstance(value, str):
+        if len(value.encode("utf-8")) > MAX_BUNDLE_STRING_BYTES:
+            raise JourneyError("audit bundle contains an oversized string")
+        return
+    if isinstance(value, list):
+        if len(value) > MAX_BUNDLE_EVENTS:
+            raise JourneyError("audit bundle contains an oversized list")
+        for item in value:
+            _bundle_bounds(item, depth=depth + 1)
+        return
+    if isinstance(value, dict):
+        if len(value) > MAX_WORKSPACE_ENTRIES:
+            raise JourneyError("audit bundle contains an oversized object")
+        for key, item in value.items():
+            if not isinstance(key, str) or len(key.encode("utf-8")) > 256:
+                raise JourneyError("audit bundle contains an invalid key")
+            _bundle_bounds(item, depth=depth + 1)
+        return
+    raise JourneyError("audit bundle contains an unsupported value")
+
+
+def _redaction_pairs(
+    case: dict[str, Any], case_path: pathlib.Path, session: dict[str, Any]
+) -> list[tuple[str, str]]:
+    runtime_root = str(pathlib.Path(session["home"]).parent)
+    values = {
+        str(case_path.parent): "$PRIVATE_CASE",
+        case["build"]["root"]: "$BUILD_ROOT",
+        case["source"]["root"]: "$SOURCE_ROOT",
+        case["plan"]["root"]: "$PLAN_ROOT",
+        case["workspace"]: "$WORKSPACE",
+        case["installed_cli"]["prefix"]: "$INSTALL_PREFIX",
+        session["agent_binary"]["path"]: "$CODEX_BINARY",
+        runtime_root: "$AGENT_RUNTIME",
+    }
+    return sorted(values.items(), key=lambda item: len(item[0]), reverse=True)
+
+
+def _redact_value(value: Any, replacements: list[tuple[str, str]]) -> Any:
+    if isinstance(value, str):
+        redacted = value
+        for original, placeholder in replacements:
+            redacted = redacted.replace(original, placeholder)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_value(item, replacements) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_value(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact_value(item, replacements) for key, item in value.items()}
+    return value
+
+
+def _bounded_redacted_bytes(
+    value: dict[str, Any], replacements: list[tuple[str, str]], label: str,
+) -> tuple[dict[str, Any], bytes]:
+    redacted = _redact_value(value, replacements)
+    _bundle_bounds(redacted)
+    payload = _json_bytes(redacted)
+    if len(payload) > MAX_BUNDLE_BYTES:
+        raise JourneyError(f"{label} exceeds its {MAX_BUNDLE_BYTES}-byte cap")
+    leaked = [original for original, _ in replacements if original in payload.decode("utf-8")]
+    if leaked:
+        raise JourneyError(f"{label} still contains a private absolute path")
+    return redacted, payload
+
+
+def _public_rollout_events(payload: bytes) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for line in payload.splitlines():
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        event_type = event.get("type")
+        source_payload = event.get("payload", {})
+        if event_type == "session_meta":
+            allowed = {
+                "id", "session_id", "cwd", "originator", "source", "cli_version",
+                "model_provider",
+            }
+        elif event_type == "turn_context":
+            allowed = {"turn_id", "cwd", "model", "approval_policy", "sandbox_policy"}
+        elif event_type == "event_msg" and source_payload.get("type") in {
+            "task_started", "task_complete",
+        }:
+            allowed = {"type", "turn_id", "started_at", "completed_at", "duration_ms"}
+        elif event_type == "response_item" and source_payload.get("type") in {
+            "message", "custom_tool_call", "custom_tool_call_output",
+            "function_call", "function_call_output",
+        }:
+            allowed = {
+                "type", "role", "content", "call_id", "id", "name", "namespace",
+                "input", "arguments", "output", "status",
+            }
+        else:
+            continue
+        projected = {
+            "type": event_type,
+            "payload": {key: source_payload[key] for key in sorted(allowed) if key in source_payload},
+        }
+        if "timestamp" in event:
+            projected["timestamp"] = event["timestamp"]
+        if "ordinal" in event:
+            projected["ordinal"] = event["ordinal"]
+        selected.append(projected)
+    return selected
+
+
 def verify_case(
-    case_path: pathlib.Path, session_path: pathlib.Path, receipt_path: pathlib.Path
+    case_path: pathlib.Path, session_path: pathlib.Path, receipt_path: pathlib.Path,
+    bundle_path: pathlib.Path,
 ) -> dict[str, Any]:
     _require_real_directory(case_path.parent)
     _require_real_directory(session_path.parent)
@@ -2006,12 +3005,45 @@ def verify_case(
     _validate_superseded_disposition(_load_json(legacy_path))
     case = _load_json(case_path)
     _require_case_identity(case, case_path)
+    workspace = pathlib.Path(case["workspace"])
+    source_root = pathlib.Path(case["source"]["root"])
+    durable_parent = source_root / "docs/validation/gpu-clean-agent"
+    if (
+        receipt_path.parent != durable_parent or bundle_path.parent != durable_parent
+        or receipt_path == bundle_path
+        or receipt_path.name == "m3-a5-clean-agent-20260828.json"
+        or bundle_path.name == "m3-a5-clean-agent-20260828.json"
+        or receipt_path.suffix != ".json" or bundle_path.suffix != ".json"
+        or re.fullmatch(r"[A-Za-z0-9._-]+", receipt_path.name) is None
+        or re.fullmatch(r"[A-Za-z0-9._-]+", bundle_path.name) is None
+        or _is_within(receipt_path, workspace) or _is_within(receipt_path, case_path.parent)
+        or _is_within(bundle_path, workspace) or _is_within(bundle_path, case_path.parent)
+    ):
+        raise JourneyError("terminal receipt and bundle must be new durable A5 source artifacts")
+    _require_real_directory(durable_parent)
+    for output_path in (receipt_path, bundle_path):
+        relative = output_path.relative_to(source_root).as_posix()
+        tracked = _run(
+            [
+                "/usr/bin/git", "-c", "core.fsmonitor=false", "-C", str(source_root),
+                "ls-files", "--error-unmatch", "--", relative,
+            ],
+            30.0,
+        )
+        if tracked.returncode == 0:
+            raise JourneyError("terminal receipt and bundle paths must be new untracked artifacts")
+    if receipt_path.exists() or receipt_path.is_symlink():
+        raise JourneyError("terminal acceptance receipt already exists")
     expected_session_path = case_path.parent / "agent-session.json"
     if session_path != expected_session_path:
         raise JourneyError("verifier requires the session beside its private prepared case")
     session = _load_json(session_path)
     _validate_session_identity(case, case_path, session)
-    reference, reference_hashes, adapter = _validate_case_material(case, case_path)
+    reference, reference_hashes, adapter = _validate_case_material(
+        case,
+        case_path,
+        allowed_source_untracked=(bundle_path,) if bundle_path.exists() else (),
+    )
     negative, repaired, negative_hashes, repaired_hashes, stable, changed = (
         _validate_workspace_evidence(case, reference, reference_hashes, adapter)
     )
@@ -2019,12 +3051,77 @@ def verify_case(
         case, session, negative, repaired
     )
     events, records = _validate_transcript(case, case_path, session, negative, repaired)
-    workspace = pathlib.Path(case["workspace"])
-    if _is_within(receipt_path, workspace) or _is_within(receipt_path, case_path.parent):
-        raise JourneyError("terminal acceptance receipt must be outside agent and private workspaces")
-    if receipt_path.exists() or receipt_path.is_symlink():
-        raise JourneyError("terminal acceptance receipt already exists")
-    _require_real_directory(receipt_path.parent)
+    replacements = _redaction_pairs(case, case_path, session)
+    rollout_payload = _read_regular_bytes(
+        case_path.parent / "codex-session.jsonl", MAX_METADATA_BYTES
+    )
+    public_key_payload = _read_regular_bytes(
+        pathlib.Path(case["record_key"]["public_key_path"]), 64 * 1024
+    )
+    bundle = {
+        "schema": "pulp.gpu-clean-agent-audit-bundle.v1",
+        "status": "verification-material-awaiting-bound-receipt",
+        "acceptance_gate_satisfied": False,
+        "case_id": case["case_id"],
+        "redaction": {
+            "format": "absolute-path-placeholders-v1",
+            "placeholders": sorted({placeholder for _, placeholder in replacements}),
+            "private_content_included": False,
+        },
+        "trust_boundary": {
+            "official_codex_code_signature_required": True,
+            "stdout_thread_joined_to_persisted_rollout": True,
+            "one_use_record_signature_verified": True,
+            "redacted_session_signature_verified": True,
+            "outer_macos_seatbelt_preflight_verified": True,
+            "local_record_orchestrator_is_trusted": True,
+            "remote_session_attestation_claimed": False,
+        },
+        "case": case,
+        "prompt_text": _read_regular_bytes(pathlib.Path(case["prompt"]["path"])).decode("utf-8"),
+        "record_public_key": {
+            "algorithm": "rsa-3072-sha256",
+            "bytes": len(public_key_payload),
+            "sha256": _sha256_bytes(public_key_payload),
+            "pem": public_key_payload.decode("ascii"),
+        },
+        "session": session,
+        "stdout_transcript_events": events,
+        "codex_rollout_public_events": _public_rollout_events(rollout_payload),
+        "command_records": records,
+        "workspace": {
+            "before_tree": case["initial_tree"],
+            "after_tree": final_tree,
+            "exact_tree_diff": tree_diff,
+            "exact_script_diff": script_diff,
+        },
+        "evidence": {
+            "selection": {**case["selection"], "symptom": case["symptom"]},
+            "reference": {
+                "result": reference, "artifacts_sha256": reference_hashes,
+            },
+            "negative": {
+                "exit_code": 1, "result": negative, "artifacts_sha256": negative_hashes,
+            },
+            "repaired": {
+                "exit_code": 0, "result": repaired, "artifacts_sha256": repaired_hashes,
+            },
+            "adapter": adapter,
+            "stable_negative_artifacts": stable,
+            "changed_negative_artifacts": changed,
+        },
+    }
+    redacted_bundle, bundle_payload = _bounded_redacted_bytes(
+        bundle, replacements, "durable audit bundle"
+    )
+    bundle_record = {
+        "schema": redacted_bundle["schema"],
+        "filename": bundle_path.name,
+        "bytes": len(bundle_payload),
+        "sha256": _sha256_bytes(bundle_payload),
+        "stdout_event_count": len(events),
+        "codex_rollout_public_event_count": len(redacted_bundle["codex_rollout_public_events"]),
+    }
     receipt = {
         "schema": VERIFICATION_SCHEMA,
         "status": "independent-agent-accepted",
@@ -2032,8 +3129,10 @@ def verify_case(
         "case_id": case["case_id"],
         "case_sha256": _sha256(case_path),
         "session_sha256": _sha256(session_path),
-        "source_revision": case["source_revision"],
-        "plan_revision": case["plan_revision"],
+        "provenance": {
+            "source": case["source"], "plan": case["plan"], "build": case["build"],
+            "public_material": case["public_material"],
+        },
         "installed_cli": case["installed_cli"],
         "agent": {
             **session["agent_binary"],
@@ -2047,7 +3146,9 @@ def verify_case(
             "temporary_config_home": session["config_home"],
             "temporary_codex_home": session["codex_home"],
             "temporary_runtime_removed": session["runtime_removed"],
-            "sandbox": "workspace-write",
+            "seatbelt": session["seatbelt"],
+            "codex_rollout": session["codex_rollout"],
+            "record_attestation": session["record_attestation"],
             "ignore_user_config": True,
             "ignore_rules": True,
         },
@@ -2063,6 +3164,7 @@ def verify_case(
             "command_record_count": len(records),
             "event_count": len(events),
         },
+        "durable_audit_bundle": bundle_record,
         "workspace": {
             "path": str(workspace),
             "before_tree": case["initial_tree"],
@@ -2099,15 +3201,31 @@ def verify_case(
             "schema": "pulp.gpu-clean-agent-journey.v1",
             "checked_in_receipt": "m3-a5-clean-agent-20260828.json",
         },
+        "trust_boundary": bundle["trust_boundary"],
     }
-    _write_json(receipt_path, receipt)
-    return receipt
+    redacted_receipt, receipt_payload = _bounded_redacted_bytes(
+        receipt, replacements, "terminal acceptance receipt"
+    )
+    _publish_terminal_pair(
+        bundle_path=bundle_path,
+        bundle_payload=bundle_payload,
+        receipt_path=receipt_path,
+        receipt_payload=receipt_payload,
+    )
+    return redacted_receipt
 
 
 def _absolute_path(value: str, label: str) -> pathlib.Path:
     path = pathlib.Path(value)
     if not path.is_absolute() or any(part in {".", ".."} for part in path.parts):
         raise JourneyError(f"{label} must be an absolute normalized path")
+    return path
+
+
+def _relative_path(value: str, label: str) -> pathlib.Path:
+    path = pathlib.Path(value)
+    if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts):
+        raise JourneyError(f"{label} must be a normalized repository-relative path")
     return path
 
 
@@ -2122,12 +3240,16 @@ def _build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--symptom", required=True)
     prepare.add_argument("--workspace", required=True)
     prepare.add_argument("--case-dir", required=True)
-    prepare.add_argument("--source-revision", required=True)
-    prepare.add_argument("--plan-revision", required=True)
+    prepare.add_argument("--source-root", required=True)
+    prepare.add_argument("--build-root", required=True)
+    prepare.add_argument("--cli-install-script", required=True)
+    prepare.add_argument("--installed-prefix", required=True)
+    prepare.add_argument("--plan-root", required=True)
+    prepare.add_argument("--plan-document", required=True)
     prepare.add_argument("--forbidden-root", action="append", default=[])
     prepare.add_argument("--timeout-seconds", type=float, default=120.0)
 
-    record = subparsers.add_parser("record", help="launch one fresh workspace-write Codex session")
+    record = subparsers.add_parser("record", help="launch one signed Codex inside outer Seatbelt")
     record.add_argument("--case", required=True)
     record.add_argument("--agent-bin", required=True)
     record.add_argument("--model", required=True)
@@ -2137,6 +3259,7 @@ def _build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--case", required=True)
     verify.add_argument("--session", required=True)
     verify.add_argument("--receipt", required=True)
+    verify.add_argument("--bundle", required=True)
     return parser
 
 
@@ -2149,8 +3272,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.symptom,
                 _absolute_path(args.workspace, "--workspace"),
                 _absolute_path(args.case_dir, "--case-dir"),
-                args.source_revision,
-                args.plan_revision,
+                _absolute_path(args.source_root, "--source-root"),
+                _absolute_path(args.build_root, "--build-root"),
+                _absolute_path(args.cli_install_script, "--cli-install-script"),
+                _absolute_path(args.installed_prefix, "--installed-prefix"),
+                _absolute_path(args.plan_root, "--plan-root"),
+                _relative_path(args.plan_document, "--plan-document"),
                 [_absolute_path(item, "--forbidden-root") for item in args.forbidden_root],
                 args.timeout_seconds,
             )
@@ -2166,11 +3293,12 @@ def main(argv: list[str] | None = None) -> int:
                 _absolute_path(args.case, "--case"),
                 _absolute_path(args.session, "--session"),
                 _absolute_path(args.receipt, "--receipt"),
+                _absolute_path(args.bundle, "--bundle"),
             )
     except JourneyUnavailable as exc:
         print(f"UNAVAILABLE: {exc}", file=sys.stderr)
         return 2
-    except (JourneyError, OSError, KeyError, TypeError, ValueError) as exc:
+    except (JourneyError, trust.TrustError, OSError, KeyError, TypeError, ValueError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))

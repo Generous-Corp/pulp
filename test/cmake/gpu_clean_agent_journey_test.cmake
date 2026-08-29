@@ -1,23 +1,13 @@
 if(NOT DEFINED PULP_CLI OR NOT DEFINED CLI_INSTALL_SCRIPT OR
    NOT DEFINED V8_RUNTIME_LIBRARY OR NOT DEFINED WEBGPU_RUNTIME_LIB OR
-   NOT DEFINED PYTHON OR NOT DEFINED JOURNEY_SCRIPT OR NOT DEFINED SOURCE_ROOT)
+   NOT DEFINED PYTHON OR NOT DEFINED JOURNEY_SCRIPT OR NOT DEFINED SOURCE_ROOT OR
+   NOT DEFINED BUILD_ROOT)
     message(FATAL_ERROR
-        "built CLI, install script, runtime libraries, Python, journey, and source are required")
+        "built CLI, install script, runtime libraries, Python, journey, source, and build are required")
 endif()
 if(NOT EXISTS "${PULP_CLI}" OR NOT EXISTS "${CLI_INSTALL_SCRIPT}" OR
    NOT EXISTS "${V8_RUNTIME_LIBRARY}" OR NOT EXISTS "${WEBGPU_RUNTIME_LIB}")
     message(FATAL_ERROR "built CLI installation inputs are unavailable")
-endif()
-
-execute_process(
-    COMMAND git -C "${SOURCE_ROOT}" rev-parse HEAD
-    RESULT_VARIABLE revision_rc
-    OUTPUT_VARIABLE source_revision
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-string(LENGTH "${source_revision}" source_revision_length)
-if(NOT revision_rc EQUAL 0 OR NOT source_revision_length EQUAL 40 OR
-   NOT source_revision MATCHES "^[0-9a-f]+$")
-    message(FATAL_ERROR "could not bind the preparer contract to the source revision")
 endif()
 
 get_filename_component(temp_root "$ENV{TMPDIR}" REALPATH)
@@ -53,6 +43,32 @@ file(CHMOD "${installed_cli}"
                 WORLD_READ WORLD_EXECUTE)
 set(workspace "${test_root}/workspace")
 set(private_case "${test_root}/private-case")
+set(plan_root "${test_root}/plan")
+set(plan_document "research/a5-plan.md")
+file(MAKE_DIRECTORY "${plan_root}/research")
+file(WRITE "${plan_root}/${plan_document}"
+    "# A5 independent clean-agent acceptance fixture\n")
+execute_process(COMMAND git init -q WORKING_DIRECTORY "${plan_root}"
+    RESULT_VARIABLE plan_init_rc ERROR_VARIABLE plan_init_stderr)
+execute_process(COMMAND git config user.name "A5 CTest" WORKING_DIRECTORY "${plan_root}")
+execute_process(COMMAND git config user.email "a5@example.invalid" WORKING_DIRECTORY "${plan_root}")
+execute_process(COMMAND git add "${plan_document}" WORKING_DIRECTORY "${plan_root}")
+execute_process(COMMAND git commit -qm fixture WORKING_DIRECTORY "${plan_root}"
+    RESULT_VARIABLE plan_commit_rc ERROR_VARIABLE plan_commit_stderr)
+execute_process(
+    COMMAND git remote add origin git@github.com:danielraffel/pulp-planning.git
+    WORKING_DIRECTORY "${plan_root}"
+    RESULT_VARIABLE plan_remote_rc ERROR_VARIABLE plan_remote_stderr)
+execute_process(
+    COMMAND git update-ref refs/remotes/origin/main HEAD
+    WORKING_DIRECTORY "${plan_root}"
+    RESULT_VARIABLE plan_ref_rc ERROR_VARIABLE plan_ref_stderr)
+if(NOT plan_init_rc EQUAL 0 OR NOT plan_commit_rc EQUAL 0 OR
+   NOT plan_remote_rc EQUAL 0 OR NOT plan_ref_rc EQUAL 0)
+    message(FATAL_ERROR
+        "could not create isolated plan fixture: ${plan_init_stderr}${plan_commit_stderr}"
+        "${plan_remote_stderr}${plan_ref_stderr}")
+endif()
 
 # This process contract deliberately stops at the nonterminal preparer state.
 # A CTest process is not an independent agent and cannot certify A5 acceptance.
@@ -62,9 +78,12 @@ execute_process(
         --symptom compute-readback-mismatch
         --workspace "${workspace}"
         --case-dir "${private_case}"
-        --source-revision "${source_revision}"
-        --plan-revision "${source_revision}"
-        --forbidden-root "${SOURCE_ROOT}"
+        --source-root "${SOURCE_ROOT}"
+        --build-root "${BUILD_ROOT}"
+        --cli-install-script "${CLI_INSTALL_SCRIPT}"
+        --installed-prefix "${test_root}/installed"
+        --plan-root "${plan_root}"
+        --plan-document "${plan_document}"
     RESULT_VARIABLE prepare_rc
     OUTPUT_VARIABLE prepare_json
     ERROR_VARIABLE prepare_stderr)
@@ -75,13 +94,18 @@ endif()
 string(JSON prepare_schema ERROR_VARIABLE prepare_json_error GET "${prepare_json}" schema)
 string(JSON prepare_status GET "${prepare_json}" status)
 string(JSON prepare_gate GET "${prepare_json}" acceptance_gate_satisfied)
-if(prepare_json_error OR NOT prepare_schema STREQUAL "pulp.gpu-clean-agent-case.v2" OR
+if(prepare_json_error OR NOT prepare_schema STREQUAL "pulp.gpu-clean-agent-case.v3" OR
    NOT prepare_status STREQUAL "awaiting-independent-agent" OR prepare_gate)
     message(FATAL_ERROR "preparer incorrectly emitted terminal acceptance")
 endif()
 if(NOT EXISTS "${workspace}/run-probe.sh" OR
    NOT EXISTS "${private_case}/case.json" OR
    NOT EXISTS "${private_case}/reference-result.json" OR
+   NOT EXISTS "${private_case}/record-signing-key.pem" OR
+   NOT EXISTS "${private_case}/record-signing-public.pem" OR
+   NOT EXISTS "${test_root}/installed/share/pulp/gpu-recipes.yaml" OR
+   NOT EXISTS "${test_root}/installed/share/pulp/docs/guides/gpu-validation-checklist.md" OR
+   NOT EXISTS "${test_root}/installed/share/pulp/docs/reference/cli.md" OR
    EXISTS "${private_case}/agent-session.json" OR
    EXISTS "${test_root}/terminal-receipt.json")
     message(FATAL_ERROR "preparer did not preserve the two-party state boundary")

@@ -275,6 +275,24 @@ if(NOT _pulp_cli_install_bindir)
 endif()
 install(TARGETS pulp-cli RUNTIME DESTINATION "${_pulp_cli_install_bindir}")
 
+# A standalone CLI install must carry the same public discovery material as the
+# embedded GPU catalog.  The A5 clean-agent gate derives this tree from the
+# installed binary and denies source-checkout reads, so these are product
+# inputs rather than test fixtures.  The catalog files duplicate the full SDK
+# install rule intentionally: tools/cli/cmake_install.cmake is also a supported
+# narrow staging surface for the standalone CLI.
+install(FILES
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.schema.json"
+    DESTINATION "share/pulp"
+    COMPONENT gpu-clean-agent-public)
+install(FILES "${CMAKE_SOURCE_DIR}/docs/guides/gpu-validation-checklist.md"
+    DESTINATION "share/pulp/docs/guides"
+    COMPONENT gpu-clean-agent-public)
+install(FILES "${CMAKE_SOURCE_DIR}/docs/reference/cli.md"
+    DESTINATION "share/pulp/docs/reference"
+    COMPONENT gpu-clean-agent-public)
+
 # Integration tests for CLI commands
 if(PULP_BUILD_TESTS)
     add_executable(pulp-test-cli-au-info-plist
@@ -405,6 +423,7 @@ if(PULP_BUILD_TESTS)
                     -DPYTHON=${Python3_EXECUTABLE}
                     -DJOURNEY_SCRIPT=${CMAKE_SOURCE_DIR}/tools/scripts/gpu_clean_agent_journey.py
                     -DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+                    -DBUILD_ROOT=${CMAKE_BINARY_DIR}
                     -P ${CMAKE_SOURCE_DIR}/test/cmake/gpu_clean_agent_journey_test.cmake)
             set_tests_properties(cli-gpu-clean-agent-preparer-contract PROPERTIES
                 LABELS "gpu;gpu-probe;cli;clean-agent-preparer"
