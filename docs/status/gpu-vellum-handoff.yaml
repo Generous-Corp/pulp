@@ -35,6 +35,81 @@
       "reason": "The catalog projects Pulp product workflows and remains the local discovery authority."
     },
     {
+      "id": "a2-pulp-gpu-probe-adapters",
+      "current_owner": "Generous-Corp/pulp",
+      "paths": [
+        "tools/cli/gpu_health",
+        "tools/cli/gpu_probe",
+        "tools/cli/gpu_recipe_catalog_data.h.in",
+        "tools/mcp/mcp_gpu_tools.cpp",
+        "tools/scripts/gpu_recipe_catalog.py",
+        "tools/scripts/verify_gpu_probe_acceptance.py",
+        "docs/validation/gpu-probes"
+      ],
+      "cutover_action": "retain-pulp-product-adapters",
+      "vellum_phase": "B1-B3",
+      "delete_after": null,
+      "reason": "A2 product recipes, installed CLI/MCP projection, typed receipts, and acceptance remain Pulp-owned. B1-B3 may replace only the consumed generic lifecycle or diagnostics provider after installed Vellum proves equivalent v1 evidence; these adapters are retained."
+    },
+    {
+      "id": "a2t-pulp-trace-analysis-adapters",
+      "current_owner": "Generous-Corp/pulp",
+      "paths": [
+        "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+        "tools/mcp/mcp_trace_tools.cpp",
+        "tools/scripts/gpu_trace_overhead_acceptance.py",
+        "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+        ".agents/skills/trace-analysis/references/hints_gpu.md",
+        ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+        ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+        ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+        "docs/validation/gpu-trace-overhead"
+      ],
+      "cutover_action": "retain-pulp-analysis-replace-generic-producers",
+      "vellum_phase": "B4",
+      "delete_after": "Delete only producer-specific compatibility queries named by B0 after an installed Vellum trace emits equivalent versioned categories, identities, loss accounting, and same-instance correlation and the pinned CLI/MCP/A2T rerun passes.",
+      "reason": "Pulp retains product questions, installed analyzers, MCP adaptation, SQL interpretation, and A2T receipts. Generic render-span production is the replaceable Vellum side."
+    },
+    {
+      "id": "a3-pulp-runtime-control-adapters",
+      "current_owner": "Generous-Corp/pulp",
+      "paths": [
+        "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+        "inspect/src/control_gpu_health_provider.cpp",
+        "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+        "inspect/src/control_gpu_health_view_adapter.cpp",
+        "inspect/include/pulp/inspect/control_gpu_health_read_executor.hpp",
+        "inspect/src/control_gpu_health_read_executor.cpp",
+        "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+        "tools/cli/gpu_health/src/health_read_result_json.cpp",
+        "docs/contracts/gpu-health-read-result-v1.schema.json",
+        "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
+        "tools/scripts/gpu_first_visible_a3_acceptance.py",
+        "docs/validation/gpu-first-visible-a3-acceptance.md"
+      ],
+      "cutover_action": "retain-pulp-control-replace-generic-event-sources",
+      "vellum_phase": "B4",
+      "delete_after": "Retain the provider, view adapter, exact-instance executor, typed result, and acceptance policy. Delete only a temporary event-source shim explicitly named by a terminal queue-B4-investigation receipt after installed Vellum supplies the named events/arguments and the same causal campaign rerun passes.",
+      "reason": "Runtime control operations, grants, product endpoints, budgets, receipts, and B4 disposition remain Pulp-owned and outside design-time agent capabilities; generic compile/upload/hidden/present/source/shader producers are replaceable Vellum inputs."
+    },
+    {
+      "id": "a4-pulp-dpr-experiment-adapters",
+      "current_owner": "Generous-Corp/pulp",
+      "paths": [
+        "docs/contracts/gpu-dpr-experiment-v1.schema.json",
+        "tools/scripts/gpu_dpr_experiment.py",
+        "tools/scripts/gpu_dpr_runner.py",
+        "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/gpu_dpr_evidence.py",
+        "test/fixtures/gpu-ux/dpr",
+        "docs/validation/gpu-dpr"
+      ],
+      "cutover_action": "retain-pulp-experiment-replace-policy-consumption",
+      "vellum_phase": "B5",
+      "delete_after": "Retain the corpus, runner, adapters, raw evidence, and disposition. Delete only an experiment-only policy shim named by B0 after installed Vellum preserves all DPR cells, fidelity/input gates, bounds or hysteresis, and the rerun passes.",
+      "reason": "A4 measurement and product-scenario orchestration are Pulp-owned. Generic native/web surface DPR policy remains Vellum authority and is adopted only after a terminal queue disposition."
+    },
+    {
       "id": "pulp-v8-threejs-release-followup",
       "current_owner": "Generous-Corp/pulp",
       "paths": [

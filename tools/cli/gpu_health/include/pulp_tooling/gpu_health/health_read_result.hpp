@@ -18,6 +18,7 @@ inline constexpr std::size_t kMaximumReferenceHosts = 8;
 inline constexpr std::size_t kMaximumMissingTraceCategories = 16;
 
 enum class MeasurementStatus { complete, incomplete, unavailable, unverified };
+enum class MeasurementEndpoint { native_compositor_presentation, headless_capture_complete };
 enum class BudgetStatus { ratified, unratified };
 enum class CacheState { cold, warm };
 enum class VisibleState { prepared, fallback, unknown };
@@ -60,6 +61,10 @@ struct StartupCapture {
     std::uint32_t event_count = 0;
     std::uint64_t dropped_event_count = 0;
     bool truncated = false;
+    /// Instrumentation coverage gaps in an otherwise bounded capture. These
+    /// are not dropped events: loss is represented only by dropped_event_count
+    /// or truncated. A terminal A3 verifier may accept explicit gaps only for
+    /// its plan-defined no-change or queue-B4-investigation dispositions.
     std::vector<std::string> missing_trace_categories;
 };
 
@@ -91,6 +96,10 @@ struct StartupTrial {
 struct StartupMeasurements {
     MeasurementStatus status = MeasurementStatus::unverified;
     Verdict verdict = Verdict::unverified;
+    /// Concrete end-to-end observation boundary. Visible product roles use a
+    /// native compositor presentation; the headless-constrained role uses the
+    /// completion of its lossless nonblank capture and never claims present.
+    MeasurementEndpoint measurement_endpoint = MeasurementEndpoint::native_compositor_presentation;
     StartupBudget budget;
     StartupCorrelation correlation;
     StartupCapture capture;
@@ -114,6 +123,7 @@ struct HealthReadResult {
 };
 
 std::string_view to_string(MeasurementStatus value);
+std::string_view to_string(MeasurementEndpoint value);
 std::string_view to_string(BudgetStatus value);
 std::string_view to_string(CacheState value);
 std::string_view to_string(VisibleState value);
@@ -122,8 +132,9 @@ std::string_view to_string(CausalAttribution value);
 std::string_view to_string(StartupDisposition value);
 
 /// Validates bounds and cross-field claims that JSON Schema cannot express,
-/// including percentile derivation, capture completeness, signature proof,
-/// diagnostic-code bindings, and final disposition evidence.
+/// including percentile derivation, capture integrity, instrumentation
+/// coverage, signature proof, diagnostic-code bindings, and final disposition
+/// evidence. Missing trace categories never masquerade as event loss.
 bool validate(const HealthReadResult& result, std::string* error = nullptr);
 
 std::string to_json(const HealthReadResult& result, bool pretty = false);

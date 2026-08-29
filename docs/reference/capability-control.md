@@ -183,13 +183,17 @@ trace, prewarm a cache, or run on the audio thread.
 
 The response preserves the complete `pulp.gpu-health-result.v1` device and
 render-health object under `health`. Its `startup` object binds the measurement
-clock and first-nonblank-present endpoint, cold/warm trials, content and target
+clock and explicit `native-compositor-presentation` or
+`headless-capture-complete` endpoint, cold/warm trials, content and target
 signatures, prepared/fallback state, adapter class, bounded event-loss fields,
 and nullable GPU/Perfetto evidence IDs. The budget freezes separate nonzero
 cold and warm trial counts whose sum and observed composition must match the
 total trial count. A performance verdict or final
 `queue-B4`, `queue-B4-investigation`, or `no-change` disposition is valid only
-after the budget is ratified and the required correlated capture is complete.
+after the budget is ratified and the required correlated capture is lossless.
+`dropped_event_count` and `truncated` describe capture integrity;
+`missing_trace_categories` describes instrumentation coverage and may remain
+nonempty for the plan-authorized investigation or passing no-change cases.
 An unratified budget fixes how future trials will be interpreted but cannot
 publish a performance pass or fail.
 
@@ -212,13 +216,19 @@ block, compile, trace, or touch the audio thread.
 
 The default Standalone composition is intentionally conservative: capture
 completion bounds back-buffer readiness but does not prove the native present
-boundary. Only a trusted product composition may supply independent native
+boundary. Visible Standalone, DAW, and Forge campaigns require independent
+native compositor evidence. Only a provider explicitly configured for the
+constrained headless role uses capture completion as its endpoint, and it cannot
+claim compositor present timing. A trusted visible product composition may supply independent native
 present timestamps, unique editor-lifecycle and observed cache-state identity,
 direct submission evidence, bounded compile/upload/hidden-frame/present timings,
 signatures, and the same 32-hex GPU evidence ID observed by the same-instance
 trace. Capture completion never substitutes for presentation.
-Without those inputs the versioned `pulp.editor-first-visible.v1` startup result
-remains `incomplete`/`unverified`.
+Without a ratified budget, exact lifecycle/cache identity, submission, target,
+same-instance trace identity, and the role-appropriate endpoint, the versioned
+`pulp.editor-first-visible.v1` startup result remains unverified. Missing causal
+stage timings or source/shader identity are instead recorded as instrumentation
+coverage gaps; they never become dropped-event claims.
 
 Even a locally complete live snapshot is raw campaign evidence, not the A3
 acceptance decision. The closed A3 verifier independently binds the ratified

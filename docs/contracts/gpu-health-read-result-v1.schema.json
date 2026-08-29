@@ -117,6 +117,9 @@
       "properties": {
         "status": { "enum": ["complete", "incomplete", "unavailable", "unverified"] },
         "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+        "measurement_endpoint": {
+          "enum": ["native-compositor-presentation", "headless-capture-complete"]
+        },
         "budget": {
           "type": "object",
           "required": ["budget_id", "version", "status", "clock_origin", "endpoint", "interaction_hitch_metric", "trial_count", "cold_trial_count", "warm_trial_count", "percentile", "threshold_ms", "threshold_source", "reference_hosts"],

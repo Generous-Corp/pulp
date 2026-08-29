@@ -21,6 +21,7 @@ namespace pulp::inspect {
 class ControlGpuHealthProvider final {
   public:
     enum class CacheState { cold, warm };
+    enum class MeasurementEndpoint { native_compositor_presentation, headless_capture_complete };
 
     struct ReferenceHost {
         std::string host_id;
@@ -30,6 +31,12 @@ class ControlGpuHealthProvider final {
     struct Config {
         std::string pulp_build_id;
         std::string campaign_id{"editor-open"};
+        /// Visible Standalone/DAW/Forge adapters must keep the default and
+        /// supply an independent compositor timestamp. The constrained
+        /// headless adapter selects headless_capture_complete and uses the
+        /// capture completion timestamp without claiming presentation.
+        MeasurementEndpoint measurement_endpoint =
+            MeasurementEndpoint::native_compositor_presentation;
         /// Exact 32-lowercase-hex identifier also emitted by the correlated
         /// A2T trace. Required before a startup trial can claim pass/fail.
         std::optional<std::string> gpu_evidence_id;
@@ -86,7 +93,8 @@ class ControlGpuHealthProvider final {
         std::optional<double> present_ms;
         std::optional<std::string> trace_evidence_id;
         /// Required categories that the exact same-instance trace could not
-        /// prove for this observation. Empty is meaningful only with a trace
+        /// prove for this observation. These are instrumentation coverage
+        /// gaps, not dropped events. Empty is meaningful only with a trace
         /// evidence id.
         std::vector<std::string> missing_trace_categories;
         std::uint64_t non_transparent_pixel_count = 0;

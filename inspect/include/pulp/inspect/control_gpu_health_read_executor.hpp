@@ -19,6 +19,9 @@ namespace pulp::inspect {
 /// shader, or start a trace; it returns the latest typed snapshot. The
 /// executor independently applies the native cross-field validator before it
 /// publishes the snapshot or any correlation evidence.
+/// Runtime operation metadata, grants, instances, and receipts stay outside the
+/// design-time agent-capabilities manifest even though these headers install in
+/// the same SDK.
 struct ControlGpuHealthReadSource {
     ControlRegistrationId registration_id;
     std::string instance_id;

@@ -56,6 +56,15 @@ not make them agent-capability rows: keep runtime-control operations and policy
 out of `agent-capabilities.json`, and keep the capability surface ledger focused
 on the design-time public-header contract.
 
+The A3 GPU startup-health surface is a concrete example. The installed
+`ControlGpuHealthProvider`, `ControlGpuHealthViewAdapter`,
+`ControlGpuHealthReadExecutor`, and `pulp.gpu-health-read-result.v1` types are
+runtime control plumbing. Do not add `dev.pulp.gpu/health.read@1`, its grants,
+instances, receipts, measurement campaigns, or B4 disposition to
+`agent-capabilities.json`. A public-header ledger classification, where one is
+required by the covered roots, records only that the header was reviewed; it
+must not turn this runtime operation into a generator-facing design capability.
+
 ## Classify the change
 
 For a new public header or symbol:

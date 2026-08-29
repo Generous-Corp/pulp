@@ -2143,7 +2143,15 @@ A control-enabled Standalone that declares `gpu.health.read` now requires an
 attached ViewBridge/window. Its Pulp-owned health adapter polls only on the UI
 thread, captures the existing back buffer, and publishes an immutable snapshot;
 the control worker only reads that snapshot. Do not move capture or provider
-writes to the audio thread. The current capture time is an upper bound, so keep
-startup unverified until an exact generic present producer and trace binding
-exist. Use `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` for the blank-frame negative
-control.
+writes to the audio thread.
+
+Set the endpoint honestly. Standalone, DAW, and Forge roles use
+`native-compositor-presentation` and require an independently sourced native
+presentation timestamp. Only the constrained headless role may configure
+`headless-capture-complete`; it uses capture completion and must leave compositor
+present timing null. Missing compile/upload/hidden/present/source/shader
+instrumentation is coverage, not event loss. Preserve exact nullable fields and
+named categories so the closed A3 verifier can select only a passing
+`no-change` or failing `queue-B4-investigation`; never invent Vellum events or
+identities in the ViewBridge. Use `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` for the
+blank-frame negative control.

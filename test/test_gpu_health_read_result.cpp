@@ -108,7 +108,45 @@ TEST_CASE("GPU health read v1 accepts derived correlated first-visible evidence"
     const auto json = gh::to_json(result);
     CHECK(json.find(R"("schema":"pulp.gpu-health-read-result.v1")") != std::string::npos);
     CHECK(json.find(R"("trace_evidence_id":"trace-evidence-1")") != std::string::npos);
+    CHECK(json.find(R"("measurement_endpoint":"native-compositor-presentation")") !=
+          std::string::npos);
     CHECK(json.find(R"("disposition":"no-change")") != std::string::npos);
+}
+
+TEST_CASE("GPU health read v1 separates lossless capture from partial instrumentation",
+          "[gpu][startup][contract]") {
+    std::string error;
+    auto passing = passing_read_result();
+    passing.startup.identity.source_signature_sha256.reset();
+    passing.startup.identity.shader_signature_sha256.reset();
+    passing.startup.capture.missing_trace_categories = {"pipeline_compile", "resource_upload",
+                                                        "hidden_frame", "native_present"};
+    for (auto& trial : passing.startup.trials) {
+        trial.shader_compile_ms.reset();
+        trial.upload_ms.reset();
+        trial.hidden_frame_ms.reset();
+        trial.present_ms.reset();
+    }
+    passing.startup.causal_attribution = gh::CausalAttribution::unavailable;
+    passing.startup.pipeline_contribution = gh::PipelineContribution::unverified;
+    REQUIRE(gh::validate(passing, &error));
+
+    auto investigation = passing;
+    for (auto& trial : investigation.startup.trials) {
+        trial.editor_open_to_first_nonblank_ms = 30.0;
+        trial.verdict = gh::Verdict::fail;
+        trial.diagnostic_code = "gpu.startup.budget_exceeded";
+    }
+    investigation.startup.observed_percentile_ms = 30.0;
+    investigation.startup.verdict = gh::Verdict::fail;
+    investigation.startup.pipeline_contribution = gh::PipelineContribution::unattributed;
+    investigation.startup.causal_attribution = gh::CausalAttribution::incomplete;
+    investigation.startup.disposition = gh::StartupDisposition::queue_b4_investigation;
+    REQUIRE(gh::validate(investigation, &error));
+
+    investigation.startup.capture.missing_trace_categories.clear();
+    REQUIRE_FALSE(gh::validate(investigation, &error));
+    CHECK(error.find("already attributed") != std::string::npos);
 }
 
 TEST_CASE("GPU health read v1 withholds claims before budget ratification",

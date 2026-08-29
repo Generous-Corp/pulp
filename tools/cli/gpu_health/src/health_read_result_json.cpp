@@ -27,6 +27,12 @@ constexpr std::array kMeasurementStatuses{
     std::pair{MeasurementStatus::unavailable, std::string_view{"unavailable"}},
     std::pair{MeasurementStatus::unverified, std::string_view{"unverified"}},
 };
+constexpr std::array kMeasurementEndpoints{
+    std::pair{MeasurementEndpoint::native_compositor_presentation,
+              std::string_view{"native-compositor-presentation"}},
+    std::pair{MeasurementEndpoint::headless_capture_complete,
+              std::string_view{"headless-capture-complete"}},
+};
 constexpr std::array kBudgetStatuses{
     std::pair{BudgetStatus::ratified, std::string_view{"ratified"}},
     std::pair{BudgetStatus::unratified, std::string_view{"unratified"}},
@@ -164,6 +170,10 @@ std::string_view to_string(MeasurementStatus value) {
     return enum_to_string(value, kMeasurementStatuses);
 }
 
+std::string_view to_string(MeasurementEndpoint value) {
+    return enum_to_string(value, kMeasurementEndpoints);
+}
+
 std::string_view to_string(BudgetStatus value) {
     return enum_to_string(value, kBudgetStatuses);
 }
@@ -289,8 +299,8 @@ bool validate(const HealthReadResult& result, std::string* error) {
         if (trial.verdict == Verdict::pass) {
             if (!trial.editor_open_to_first_nonblank_ms || !trial.interaction_hitch_ms ||
                 trial.content_floor_passed != std::optional<bool>{true} ||
-                trial.visible_state == VisibleState::unknown || !identity.source_signature_sha256 ||
-                !identity.shader_signature_sha256 || !identity.expected_target_signature_sha256 ||
+                trial.visible_state == VisibleState::unknown ||
+                !identity.expected_target_signature_sha256 ||
                 !trial.observed_target_signature_sha256 ||
                 *trial.observed_target_signature_sha256 !=
                     *identity.expected_target_signature_sha256 ||
@@ -323,23 +333,22 @@ bool validate(const HealthReadResult& result, std::string* error) {
             hitches.push_back(*trial.interaction_hitch_ms);
     }
 
-    const bool complete_capture = !capture.truncated && capture.dropped_event_count == 0 &&
-                                  capture.missing_trace_categories.empty() &&
-                                  startup.trials.size() == budget.trial_count &&
-                                  cold_trials == budget.cold_trial_count &&
-                                  warm_trials == budget.warm_trial_count;
+    const bool capture_integrity = !capture.truncated && capture.dropped_event_count == 0;
+    const bool complete_measurement =
+        capture_integrity && startup.trials.size() == budget.trial_count &&
+        cold_trials == budget.cold_trial_count && warm_trials == budget.warm_trial_count;
     if (startup.status == MeasurementStatus::complete) {
         if (cold_trials != budget.cold_trial_count || warm_trials != budget.warm_trial_count)
             return fail("complete startup measurement violates its cold/warm trial composition");
-        if (!complete_capture)
-            return fail("complete startup measurement has missing or dropped evidence");
+        if (!complete_measurement)
+            return fail("complete startup measurement has dropped or missing trial evidence");
         if (std::ranges::any_of(startup.trials, [](const StartupTrial& trial) {
                 return trial.verdict == Verdict::unavailable ||
                        trial.verdict == Verdict::unverified;
             }))
             return fail("complete startup measurement contains an unresolved trial");
     }
-    if (startup.status == MeasurementStatus::incomplete && complete_capture)
+    if (startup.status == MeasurementStatus::incomplete && complete_measurement)
         return fail("incomplete startup measurement lacks an incompleteness signal");
     if (startup.status == MeasurementStatus::unavailable && !startup.trials.empty())
         return fail("unavailable startup measurement must not contain trials");
@@ -358,7 +367,7 @@ bool validate(const HealthReadResult& result, std::string* error) {
         expected = Verdict::unavailable;
     } else if (budget.status == BudgetStatus::ratified) {
         if (blank_failure && startup.status == MeasurementStatus::complete &&
-            complete_capture) {
+            complete_measurement) {
             expected = Verdict::fail;
         } else if (startup.status == MeasurementStatus::complete && observed &&
                    durations.size() == startup.trials.size() &&
@@ -372,8 +381,9 @@ bool validate(const HealthReadResult& result, std::string* error) {
         return fail("startup cannot pass while the nested GPU health check did not pass");
 
     if (startup.causal_attribution == CausalAttribution::complete &&
-        (startup.status != MeasurementStatus::complete || !complete_capture ||
-         !startup.correlation.gpu_evidence_id || !startup.correlation.trace_evidence_id))
+        (startup.status != MeasurementStatus::complete || !complete_measurement ||
+         !capture.missing_trace_categories.empty() || !startup.correlation.gpu_evidence_id ||
+         !startup.correlation.trace_evidence_id))
         return fail("complete causal attribution lacks complete trace evidence");
     if ((startup.pipeline_contribution == PipelineContribution::material ||
          startup.pipeline_contribution == PipelineContribution::not_material) &&
@@ -395,7 +405,8 @@ bool validate(const HealthReadResult& result, std::string* error) {
         case StartupDisposition::queue_b4_investigation:
             if (startup.verdict != Verdict::fail ||
                 startup.pipeline_contribution != PipelineContribution::unattributed ||
-                startup.causal_attribution == CausalAttribution::complete)
+                startup.causal_attribution == CausalAttribution::complete ||
+                startup.capture.missing_trace_categories.empty())
                 return fail("queue-B4-investigation disposition is already attributed");
             break;
         case StartupDisposition::no_change:
@@ -485,6 +496,8 @@ std::string to_json(const HealthReadResult& result, bool pretty) {
     auto startup = choc::value::createObject("startup");
     startup.setMember("status", std::string(to_string(result.startup.status)));
     startup.setMember("verdict", std::string(to_string(result.startup.verdict)));
+    startup.setMember("measurement_endpoint",
+                      std::string(to_string(result.startup.measurement_endpoint)));
     startup.setMember("budget", std::move(budget));
     startup.setMember("correlation", std::move(correlation));
     startup.setMember("capture", std::move(capture));

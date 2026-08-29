@@ -489,3 +489,14 @@ to CoreGraphics, you need a live GPU window of native UI (e.g. the
 `ink-signal-showcase` / `gpu-demo` examples), or a GPU plugin/app loads on the
 build machine but crashes / shows no UI on another Mac (the dylib rpath footgun
 above).
+
+## A3 first-visible evidence
+
+GPU startup health has two independent axes. `dropped_event_count` and
+`truncated` describe capture integrity; `missing_trace_categories` describes
+instrumentation coverage. Never turn a missing Vellum event into loss or a
+zero-valued duration. Visible Standalone/DAW/Forge campaigns bind
+`native-compositor-presentation`; only the constrained headless campaign binds
+`headless-capture-complete`. The closed A3 verifier permits nullable causal
+fields only for passing no-change or a budget-miss investigation with every
+missing event, argument, interval, and transferred route named.

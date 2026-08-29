@@ -405,7 +405,10 @@ dependencies and must not be replaced with a Pulp example.
 Forge shells may reuse `ControlGpuHealthViewAdapter` by supplying their real
 back-buffer capture and `GpuSurface` callbacks. The provider is Pulp-owned and
 bounded, but a Forge canary still needs exact Forge/Pulp binary identity and a
-correlated trace. Treat its capture-confirmed first frame as an upper bound and
-leave the unratified startup budget unverified; never substitute a Pulp example
+correlated trace. Forge is a visible role: declare
+`native-compositor-presentation` and supply an independent compositor timestamp;
+capture completion is only an upper bound. Missing causal instrumentation stays
+nullable and named rather than becoming fabricated Vellum evidence. Leave an
+unratified startup budget unverified; never substitute a Pulp example
 for the requested Forge product. Exercise the seeded blank control before
 accepting a real-machine result.

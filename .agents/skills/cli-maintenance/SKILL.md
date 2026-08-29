@@ -248,7 +248,7 @@ sync with `tools/scripts/cli_sync_check.py` and
 `tools/scripts/cli_mcp_parity_baseline.json`.
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
-build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, seq, audio-harness, audio-inspect, audio-compare
+build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, control, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, seq, audio-harness, audio-inspect, audio-compare
 
 `/seq` is the agent workflow for the top-level `pulp seq` timeline command. It
 wraps schema discovery, validate, explain, typed-command apply, import, and
@@ -651,6 +651,10 @@ remain connection-bound through `ControlClient`. The installed broker may
 rebind its client ID and bounded grants across separate CLI processes only after
 every new connection independently passes kernel and static-code authentication;
 never persist a bearer token or accept a client-supplied durable principal.
+The `/control` slash command is its discovery and safe-operation workflow. Keep
+it exact-instance and typed: it may guide profiles, instances, status, grants,
+call/watch, revoke, trace, and audit, but must not add a generic raw method,
+host/port selector, newest-instance heuristic, or design-time capability claim.
 `cmd_control.cpp` must also remain compilable when `PULP_ENABLE_INSPECTOR=OFF`,
 where the `pulp::inspect-client` target is intentionally absent. Guard broker /
 client headers, helpers, and live execution with the target-derived availability

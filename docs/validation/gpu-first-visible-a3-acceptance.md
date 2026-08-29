@@ -46,17 +46,26 @@ that window returns the pending snapshot and is not campaign evidence; an
 acceptance harness must wait for the post-capture snapshot before preserving
 the response artifact.
 
-The host does not claim an observed cold/warm cache boundary, GPU submission,
+The checked-in host observation does not claim an observed cold/warm cache boundary, GPU submission,
 native presentation timestamp, compile/prepare/upload/hidden/present stage
 timings, source or shader identity, or same-instance trace correlation. The
 generic render lifecycle producers for those facts route to Vellum after
 framework adoption. If a ratified campaign misses its budget and the existing
 trace cannot separate compile or prepare, upload, hidden-frame, and native
-present work from the unattributed interval, those fields remain
-`missing_evidence`. After those product-evidence gaps are closed, only a
-validated over-budget campaign whose permitted same-instance A2T analysis
-remains causally incomplete can cause the verifier to derive
-`queue-B4-investigation`.
+present work from the unattributed interval, those causal fields remain null. A
+validated, lossless, over-budget visible campaign may then derive
+`queue-B4-investigation` before those producers exist, but only when its B4
+receipt names every missing field, event, required argument, observed interval,
+and exact `framework-authoritative-transferred` route. That disposition requests
+post-adoption instrumentation and a causal rerun; it is not prewarm evidence.
+
+The gap inventory uses the existing low-cardinality Perfetto vocabulary:
+`gpu_shader_compile` for compile and source/shader signatures,
+`gpu_resource_upload` for upload, `gpu_pipeline_prepare` for hidden-frame work,
+and `gpu_present` for presentation. Required arguments are exact bounded
+`debug.*` keys (including the GPU evidence ID and the field-specific signature,
+resource, frame, visible-state, or presentation timestamp key). A syntactically
+plausible substitute event or an abbreviated argument list is rejected.
 
 Until a validated campaign actually misses the ratified budget, the B4
 disposition remains unset. Missing transferred producers do not by themselves
@@ -90,8 +99,8 @@ build-a3-release/test/a3-product/pulp-test-control-gpu-health-standalone-product
 ```
 
 The response is intentionally a single product observation. The ratified
-budget, four 10-cold/10-warm product campaigns, direct submission and native
-present proof, full stage timings and signatures, same-instance Perfetto/A2T
+budget, four 10-cold/10-warm product campaigns, direct submission and the
+role-appropriate endpoint, same-instance Perfetto/A2T
 correlation, real blank negative, audio-thread exclusion, and legal B4
 disposition remain required below.
 
@@ -109,9 +118,13 @@ campaign. It must also contain:
 - Exactly one passing `pulp.gpu-health-read-result.v1` campaign for standalone,
   headless-constrained, a real DAW/plugin format, and the exact Forge shell.
   Each campaign carries its own raw 10-cold and 10-warm artifacts plus the
-  measured product and host artifacts. Every trial must include bounded
-  compile, upload, hidden-frame, and native-present timing; a
-  `gpu.startup.pass` code cannot substitute for present corroboration. Every
+  measured product and host artifacts. Standalone, DAW, and Forge bind
+  `native-compositor-presentation`; headless-constrained binds
+  `headless-capture-complete` and must not claim compositor timing. Every trial
+  has a measured end-to-end endpoint, nonblank target proof, and bounded hitch.
+  Compile, upload, hidden-frame, present, source, and shader causal fields may
+  be consistently null only for passing `no-change` or failing
+  `queue-B4-investigation`, with exact coverage gaps named and routed. Every
   campaign also carries a nonempty trace and typed digest-bound campaign trace
   analysis. The selected causal campaign additionally receives the full pinned
   analyzer replay described below.
@@ -133,8 +146,10 @@ campaign. It must also contain:
   the result. The disposition receipt binds the derived inputs and artifact
   digests.
 
-The verifier recomputes nearest-rank p95 values, requires a complete lossless
-capture, rejects unavailable or unverified health campaigns, cross-checks raw
+The verifier recomputes nearest-rank p95 values, requires lossless capture for
+every available category, rejects unavailable or unverified health campaigns,
+and treats missing instrumentation categories separately from dropped or
+truncated events. It cross-checks raw
 samples against the health results, and verifies every declared artifact
 digest. The A2T no-producer disposition must also be accepted by the exact
 planning revision/digest bound by A3; a stale `requires-approval` receipt cannot

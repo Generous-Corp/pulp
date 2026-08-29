@@ -13,9 +13,10 @@ namespace pulp::inspect {
 /// Pulp-owned UI-thread bridge from a concrete Standalone/plugin/constrained
 /// host to ControlGpuHealthProvider. The callbacks also make the same adapter
 /// usable by headless and Forge canaries without depending on a native window
-/// implementation. Capture completion bounds back-buffer readiness but is not
-/// a first-visible/present endpoint; exact present and trace identities remain
-/// unverified until supplied by the native render lifecycle.
+/// implementation. Capture completion is the explicit endpoint only for a
+/// provider configured as headless_capture_complete. Visible Standalone, DAW,
+/// and Forge roles require an independent native compositor timestamp; capture
+/// completion never substitutes for their presentation endpoint.
 class ControlGpuHealthViewAdapter final {
   public:
     struct Config {

@@ -99,6 +99,13 @@ def health_result(campaign_identity: dict[str, Any], budget: dict[str, Any]) -> 
     document["startup"]["causal_attribution"] = "unverified"
     document["startup"]["disposition"] = None
     combined = samples("cold") + samples("warm")
+    headless = campaign_identity["plugin_format"] == "headless"
+    document["startup"]["measurement_endpoint"] = (
+        "headless-capture-complete" if headless else "native-compositor-presentation"
+    )
+    document["startup"]["capture"]["missing_trace_categories"] = (
+        ["native_present"] if headless else []
+    )
     document["startup"]["trials"] = [
         {
             "sequence": sample["sequence"],
@@ -108,7 +115,7 @@ def health_result(campaign_identity: dict[str, Any], budget: dict[str, Any]) -> 
             "shader_compile_ms": 2 if sample["sequence"] < 10 else 0,
             "upload_ms": 1,
             "hidden_frame_ms": 1,
-            "present_ms": 2,
+            "present_ms": None if headless else 2,
             "observed_target_signature_sha256": target,
             "content_floor_passed": True,
             "visible_state": "prepared",
@@ -185,7 +192,14 @@ def make_fixture(root: Path) -> dict[str, Any]:
             "version": 1,
             "question": "gpu-startup",
             "verdict": result["startup"]["verdict"],
-            "capture_complete": True,
+            "capture_complete": role != "headless-constrained",
+            "measurement_endpoint": result["startup"]["measurement_endpoint"],
+            "capture_integrity": "lossless",
+            "instrumentation_coverage": (
+                "partial" if result["startup"]["capture"]["missing_trace_categories"]
+                else "complete"
+            ),
+            "missing_trace_categories": result["startup"]["capture"]["missing_trace_categories"],
             "campaign_id": campaign_identity["campaign_id"],
             "instance_id": campaign_identity["instance_id"],
             "build_id": campaign_identity["build_id"],
@@ -197,6 +211,7 @@ def make_fixture(root: Path) -> dict[str, Any]:
         })
         campaigns.append({
             "role": role,
+            "measurement_endpoint": result["startup"]["measurement_endpoint"],
             "status": "pass",
             "identity": campaign_identity,
             "health_result": auto(f"{role}-health.json"),
@@ -349,6 +364,18 @@ raise SystemExit(code)
         "a2t_binding_sha256": a3.sha256_bytes((root / "binding.json").read_bytes()),
         "trace_analysis_sha256": a3.sha256_bytes((root / "trace-analysis.json").read_bytes()),
         "reason": b4_reason,
+        "capture_integrity": "lossless",
+        "instrumentation_coverage": "complete",
+        "missing_causal_fields": [],
+        "instrumentation_gaps": [],
+        "observed_interval": {
+            "clock_origin": "editor_open_requested",
+            "endpoint": "native-compositor-presentation",
+            "p95_ms": causal_health["startup"]["observed_percentile_ms"],
+        },
+        "ownership_projection_sha256": a3.sha256_bytes(
+            (ROOT / ".github/vellum-ownership.json").read_bytes()
+        ),
     })
     return {
         "$schema": "../contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
@@ -409,6 +436,153 @@ def rehash(receipt: dict[str, Any], root: Path, ref: dict[str, str]) -> None:
     ref["sha256"] = a3.sha256_bytes((root / ref["path"]).read_bytes())
 
 
+def instrumentation_gaps() -> list[dict[str, Any]]:
+    route_by_field = {
+        "hidden_frame_ms": "core/render/src/render_loop.cpp",
+        "present_ms": "core/render/src/render_loop_apple.mm",
+        "shader_compile_ms": "core/render/src/gpu_surface_dawn.cpp",
+        "shader_signature_sha256": "core/render/src/gpu_surface_dawn.cpp",
+        "source_signature_sha256": "core/render/src/gpu_surface_dawn.cpp",
+        "upload_ms": "core/render/src/gpu_surface_dawn.cpp",
+    }
+    return [{
+        "field": field,
+        "missing_event": a3.CAUSAL_GAP_EVENTS[field],
+        "required_arguments": sorted(a3.CAUSAL_GAP_ARGUMENTS[field]),
+        "route_slice": "render-skia-dawn",
+        "route_path": route_by_field[field],
+        "route_repository": "Generous-Corp/vellum",
+    } for field in sorted(route_by_field)]
+
+
+def make_partial_causal_fixture(root: Path, *, budget_fail: bool) -> dict[str, Any]:
+    receipt = make_fixture(root)
+    forge = next(campaign for campaign in receipt["campaigns"] if campaign["role"] == "forge")
+    health_path = root / forge["health_result"]["path"]
+    health = json.loads(health_path.read_text(encoding="utf-8"))
+    startup = health["startup"]
+    startup["identity"]["source_signature_sha256"] = None
+    startup["identity"]["shader_signature_sha256"] = None
+    startup["capture"]["missing_trace_categories"] = [
+        "hidden_frame", "native_present_timing", "pipeline_compile",
+        "resource_upload", "shader_identity", "source_identity",
+    ]
+    startup["pipeline_contribution"] = "unattributed" if budget_fail else "unverified"
+    startup["causal_attribution"] = "incomplete" if budget_fail else "unavailable"
+    startup["disposition"] = "queue-B4-investigation" if budget_fail else "no-change"
+    duration = 60 if budget_fail else None
+    for trial in startup["trials"]:
+        for field in a3.CAUSAL_TRIAL_FIELDS:
+            trial[field] = None
+        if duration is not None:
+            trial["editor_open_to_first_nonblank_ms"] = duration
+            trial["verdict"] = "fail"
+            trial["diagnostic_code"] = "gpu.startup.budget_exceeded"
+    if duration is not None:
+        startup["observed_percentile_ms"] = duration
+        startup["verdict"] = "fail"
+        for cache_state in ("cold", "warm"):
+            raw_ref = forge[f"raw_{cache_state}"]
+            raw = json.loads((root / raw_ref["path"]).read_text(encoding="utf-8"))
+            for sample in raw["samples"]:
+                sample["duration_ms"] = duration
+            write_json(root, raw_ref["path"], raw)
+    write_json(root, forge["health_result"]["path"], health)
+
+    campaign_analysis_ref = forge["trace_analysis"]
+    campaign_analysis = json.loads(
+        (root / campaign_analysis_ref["path"]).read_text(encoding="utf-8")
+    )
+    campaign_analysis["verdict"] = startup["verdict"]
+    campaign_analysis["capture_complete"] = False
+    campaign_analysis["instrumentation_coverage"] = "partial"
+    campaign_analysis["missing_trace_categories"] = startup["capture"]["missing_trace_categories"]
+    write_json(root, campaign_analysis_ref["path"], campaign_analysis)
+
+    gpu_id = startup["correlation"]["gpu_evidence_id"]
+    analysis = {
+        "schema": "pulp.trace-gpu-analysis.v1",
+        "question": "gpu-startup",
+        "verdict": "unverified",
+        "capture_complete": False,
+        "dominant_stage": None,
+        "contributors": [],
+        "evidence_ids": [gpu_id],
+    }
+    write_json(root, "trace-analysis.json", analysis)
+    analyzer_source = f'''#!/usr/bin/python3
+import json, pathlib, sys
+trace = pathlib.Path(sys.argv[sys.argv.index("--trace") + 1]).read_bytes()
+if trace == b"PERFETTO-SAME-INSTANCE":
+    payload = {analysis!r}
+else:
+    payload = {{"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup","verdict":"unavailable","capture_complete":False,"evidence_ids":[]}}
+print(json.dumps(payload, sort_keys=True))
+raise SystemExit(2)
+'''
+    (root / "pulp-analyzer").write_text(analyzer_source, encoding="utf-8")
+    (root / "pulp-analyzer").chmod(0o700)
+
+    a2t = json.loads((root / "a2t.json").read_text(encoding="utf-8"))
+    a2t["semantic_result"] = analysis
+    a2t["artifacts"]["cli"]["sha256"] = a3.sha256_bytes((root / "pulp-analyzer").read_bytes())
+    a2t["artifacts"]["cli"]["bytes"] = len((root / "pulp-analyzer").read_bytes())
+    write_json(root, "a2t.json", a2t)
+
+    receipt = a3.materialize_auto_hashes(receipt, root)
+    forge = next(campaign for campaign in receipt["campaigns"] if campaign["role"] == "forge")
+    campaign_analysis = json.loads((root / campaign_analysis_ref["path"]).read_text(encoding="utf-8"))
+    campaign_analysis["health_result_sha256"] = forge["health_result"]["sha256"]
+    write_json(root, campaign_analysis_ref["path"], campaign_analysis)
+    rehash(receipt, root, forge["trace_analysis"])
+
+    same = receipt["same_instance_a2t"]
+    rehash(receipt, root, same["analyzer"])
+    rehash(receipt, root, same["trace_analysis"])
+    rehash(receipt, root, same["a2t_receipt"])
+    binding = json.loads((root / same["binding_receipt"]["path"]).read_text(encoding="utf-8"))
+    binding["health_result_sha256"] = forge["health_result"]["sha256"]
+    binding["trace_analysis_sha256"] = same["trace_analysis"]["sha256"]
+    binding["analyzer_sha256"] = same["analyzer"]["sha256"]
+    binding["a2t_receipt_sha256"] = same["a2t_receipt"]["sha256"]
+    write_json(root, same["binding_receipt"]["path"], binding)
+    rehash(receipt, root, same["binding_receipt"])
+
+    disposition = "queue-B4-investigation" if budget_fail else "no-change"
+    receipt["b4"] = {
+        "disposition": disposition,
+        "status": "queued-investigation" if budget_fail else "closed-no-change",
+        "reason": "Exact transferred instrumentation gaps are named for the causal rerun."
+                  if budget_fail else "The ratified end-to-end budget passes despite causal gaps.",
+        "evidence": receipt["b4"]["evidence"],
+    }
+    b4 = json.loads((root / receipt["b4"]["evidence"]["path"]).read_text(encoding="utf-8"))
+    b4.update({
+        "disposition": disposition,
+        "startup_verdict": startup["verdict"],
+        "observed_percentile_ms": startup["observed_percentile_ms"],
+        "analyzer_verdict": "unverified",
+        "capture_complete": False,
+        "dominant_stage": None,
+        "dominant_duration_ns": 0,
+        "campaign_health_sha256": forge["health_result"]["sha256"],
+        "a2t_binding_sha256": same["binding_receipt"]["sha256"],
+        "trace_analysis_sha256": same["trace_analysis"]["sha256"],
+        "reason": receipt["b4"]["reason"],
+        "instrumentation_coverage": "partial",
+        "missing_causal_fields": sorted(a3.CAUSAL_GAP_ARGUMENTS),
+        "instrumentation_gaps": instrumentation_gaps(),
+        "observed_interval": {
+            "clock_origin": "editor_open_requested",
+            "endpoint": "native-compositor-presentation",
+            "p95_ms": startup["observed_percentile_ms"],
+        },
+    })
+    write_json(root, receipt["b4"]["evidence"]["path"], b4)
+    rehash(receipt, root, receipt["b4"]["evidence"])
+    return receipt
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="pulp-a3-acceptance-") as temporary:
         root = Path(temporary)
@@ -439,6 +613,78 @@ def main() -> int:
         other["dominant_stage"] = "resource-upload"
         other["contributors"][0]["stage"] = "resource-upload"
         assert a3.derive_b4_disposition(missed, other)[0] == "no-change"
+
+        with tempfile.TemporaryDirectory(prefix="pulp-a3-partial-pass-") as partial:
+            partial_root = Path(partial)
+            partial_pass = make_partial_causal_fixture(partial_root, budget_fail=False)
+            assert a3.validate_receipt(partial_pass, partial_root) is True
+
+        with tempfile.TemporaryDirectory(prefix="pulp-a3-investigation-") as partial:
+            partial_root = Path(partial)
+            investigation = make_partial_causal_fixture(partial_root, budget_fail=True)
+            assert a3.validate_receipt(investigation, partial_root) is True
+
+            wrong_endpoint = copy.deepcopy(investigation)
+            headless = next(
+                campaign for campaign in wrong_endpoint["campaigns"]
+                if campaign["role"] == "headless-constrained"
+            )
+            headless["measurement_endpoint"] = "native-compositor-presentation"
+            expect_failure(wrong_endpoint, partial_root, "required role endpoint")
+
+            missing_argument = copy.deepcopy(investigation)
+            evidence_ref = missing_argument["b4"]["evidence"]
+            evidence_path = partial_root / evidence_ref["path"]
+            original_evidence = evidence_path.read_text(encoding="utf-8")
+            evidence = json.loads(original_evidence)
+            evidence["instrumentation_gaps"][0]["required_arguments"] = [
+                "debug.gpu_evidence_id"
+            ]
+            write_json(partial_root, evidence_ref["path"], evidence)
+            rehash(missing_argument, partial_root, evidence_ref)
+            expect_failure(missing_argument, partial_root, "exact missing event or arguments")
+            evidence_path.write_text(original_evidence, encoding="utf-8")
+
+            wrong_event = copy.deepcopy(investigation)
+            evidence_ref = wrong_event["b4"]["evidence"]
+            evidence = json.loads(original_evidence)
+            evidence["instrumentation_gaps"][0]["missing_event"] = "gpu_a3_missing"
+            write_json(partial_root, evidence_ref["path"], evidence)
+            rehash(wrong_event, partial_root, evidence_ref)
+            expect_failure(wrong_event, partial_root, "exact missing event or arguments")
+            evidence_path.write_text(original_evidence, encoding="utf-8")
+
+            wrong_route = copy.deepcopy(investigation)
+            evidence_ref = wrong_route["b4"]["evidence"]
+            evidence = json.loads(original_evidence)
+            evidence["instrumentation_gaps"][0]["route_path"] = "inspect/src/control_gpu_health_provider.cpp"
+            write_json(partial_root, evidence_ref["path"], evidence)
+            rehash(wrong_route, partial_root, evidence_ref)
+            expect_failure(wrong_route, partial_root, "transferred Vellum path")
+            evidence_path.write_text(original_evidence, encoding="utf-8")
+
+            lossy = copy.deepcopy(investigation)
+            forge = next(campaign for campaign in lossy["campaigns"] if campaign["role"] == "forge")
+            health_ref = forge["health_result"]
+            health_path = partial_root / health_ref["path"]
+            original_health = health_path.read_text(encoding="utf-8")
+            health = json.loads(original_health)
+            health["startup"]["capture"]["dropped_event_count"] = 1
+            health["startup"]["capture"]["truncated"] = True
+            write_json(partial_root, health_ref["path"], health)
+            rehash(lossy, partial_root, health_ref)
+            expect_failure(lossy, partial_root, "capture integrity is lossy")
+            health_path.write_text(original_health, encoding="utf-8")
+
+            unnamed = copy.deepcopy(investigation)
+            forge = next(campaign for campaign in unnamed["campaigns"] if campaign["role"] == "forge")
+            health_ref = forge["health_result"]
+            health = json.loads(original_health)
+            health["startup"]["capture"]["missing_trace_categories"] = []
+            write_json(partial_root, health_ref["path"], health)
+            rehash(unnamed, partial_root, health_ref)
+            expect_failure(unnamed, partial_root, "nullable causal fields without named")
+            health_path.write_text(original_health, encoding="utf-8")
 
         mutated = copy.deepcopy(receipt)
         mutated["unexpected"] = True
@@ -508,7 +754,7 @@ def main() -> int:
         health["startup"]["trials"][0]["present_ms"] = None
         write_json(root, standalone["health_result"]["path"], health)
         rehash(mutated, root, standalone["health_result"])
-        expect_failure(mutated, root, "native-present-uncorroborated")
+        expect_failure(mutated, root, "causal field present_ms")
         health_path.write_text(original_health, encoding="utf-8")
 
         mutated = copy.deepcopy(receipt)
@@ -712,7 +958,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=6 planted_negatives=29 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=35 "
             "checked_in_nonterminal=verified"
         )
     return 0

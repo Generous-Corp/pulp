@@ -73,6 +73,15 @@ those producers exist; do not manufacture identities, promote incomplete event
 captures, or advertise a live host capability before the exact product adapter
 can return a validated snapshot.
 
+For A3 receipts, distinguish capture integrity from instrumentation coverage.
+Dropped or truncated available events invalidate every terminal disposition.
+Named missing compile/upload/hidden/present/source/shader events may remain only
+for a passing `no-change` or an over-budget `queue-B4-investigation`; the latter
+must bind each missing event and argument to an exact path in the active
+`framework-authoritative-transferred` `render-skia-dawn` slice. That route is a
+request for post-adoption instrumentation and rerun, not authority to implement
+the event or prewarm policy in Pulp.
+
 The Pulp-owned live seam is `ControlGpuHealthProvider` plus
 `ControlGpuHealthViewAdapter`: product hosts supply existing back-buffer and
 `GpuSurface` callbacks, while exact generic present/source/shader/cache events

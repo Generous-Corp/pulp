@@ -229,8 +229,11 @@ way and say plainly that this rung is unproven.
 
 For a product declaring `gpu.health.read`, bind the response to the exact DAW
 instance/publication and preserve the returned snapshot. A valid response is
-not automatically a passing startup trial: the current host-capture endpoint
-is an upper bound and remains unverified without exact present/source/shader
-and correlated A2T trace evidence. Run the seeded blank control separately with
+not automatically a passing startup trial. A visible DAW campaign must declare
+`native-compositor-presentation` and bind an independent compositor timestamp;
+capture completion cannot substitute. Missing source/shader or stage timings
+are instrumentation coverage rather than event loss and remain nullable only
+under the closed A3 verifier's passing no-change or failing investigation rules.
+Preserve the correlated A2T trace and run the seeded blank control separately with
 `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1`; a pass there is a harness failure. Keep
 SKIP/INCONCLUSIVE and absent format scans as pending, never PASS.

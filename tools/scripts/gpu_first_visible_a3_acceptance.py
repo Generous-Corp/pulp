@@ -26,6 +26,51 @@ import json_schema_lite  # noqa: E402
 SCHEMA_PATH = ROOT / "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json"
 HEALTH_SCHEMA_PATH = ROOT / "docs/contracts/gpu-health-read-result-v1.schema.json"
 CAMPAIGN_ROLES = {"standalone", "headless-constrained", "daw", "forge"}
+VISIBLE_CAMPAIGN_ROLES = {"standalone", "daw", "forge"}
+MEASUREMENT_ENDPOINT_BY_ROLE = {
+    "standalone": "native-compositor-presentation",
+    "headless-constrained": "headless-capture-complete",
+    "daw": "native-compositor-presentation",
+    "forge": "native-compositor-presentation",
+}
+CAUSAL_TRIAL_FIELDS = ("shader_compile_ms", "upload_ms", "hidden_frame_ms", "present_ms")
+CAUSAL_IDENTITY_FIELDS = ("source_signature_sha256", "shader_signature_sha256")
+CAUSAL_GAP_EVENTS = {
+    "shader_compile_ms": "gpu_shader_compile",
+    "upload_ms": "gpu_resource_upload",
+    "hidden_frame_ms": "gpu_pipeline_prepare",
+    "present_ms": "gpu_present",
+    "source_signature_sha256": "gpu_shader_compile",
+    "shader_signature_sha256": "gpu_shader_compile",
+}
+CAUSAL_GAP_ARGUMENTS = {
+    "shader_compile_ms": {
+        "debug.gpu_evidence_id", "debug.source_signature_sha256",
+        "debug.shader_signature_sha256",
+    },
+    "upload_ms": {"debug.gpu_evidence_id", "debug.resource_signature_sha256"},
+    "hidden_frame_ms": {
+        "debug.frame_index", "debug.gpu_evidence_id", "debug.visible_state",
+    },
+    "present_ms": {
+        "debug.frame_index", "debug.gpu_evidence_id", "debug.presentation_timestamp_ns",
+    },
+    "source_signature_sha256": {
+        "debug.gpu_evidence_id", "debug.source_signature_sha256",
+    },
+    "shader_signature_sha256": {
+        "debug.gpu_evidence_id", "debug.shader_signature_sha256",
+    },
+}
+CAUSAL_ROUTE_PATHS = {
+    "shader_compile_ms": {"core/render/src/gpu_surface_dawn.cpp", "core/render/src/skia_surface.cpp"},
+    "upload_ms": {"core/render/src/gpu_surface_dawn.cpp", "core/render/src/skia_surface.cpp"},
+    "hidden_frame_ms": {"core/render/src/render_loop.cpp", "core/render/src/render_loop_state.hpp"},
+    "present_ms": {"core/render/src/render_loop_apple.mm", "core/render/src/metal_surface_mac.mm"},
+    "source_signature_sha256": {"core/render/src/gpu_surface_dawn.cpp", "core/render/src/skia_surface.cpp"},
+    "shader_signature_sha256": {"core/render/src/gpu_surface_dawn.cpp", "core/render/src/skia_surface.cpp"},
+}
+OWNERSHIP_PROJECTION_PATH = ROOT / ".github/vellum-ownership.json"
 IDENTITY_KEYS = {
     "pulp_revision", "forge_revision", "build_id", "product_id", "product_name",
     "plugin_format", "machine_id", "instance_id", "campaign_id",
@@ -155,6 +200,51 @@ def nearest_rank(values: list[float], percentile: float) -> float:
         raise AcceptanceError("cannot derive percentile from no trials")
     rank = max(1, math.ceil(percentile * len(values) / 100.0))
     return sorted(values)[rank - 1]
+
+
+def finite_non_negative(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        and math.isfinite(value) and value >= 0
+    )
+
+
+def causal_gaps(startup: dict[str, Any], label: str) -> list[str]:
+    """Return exact consistently-null causal fields; reject partial laundering."""
+    gaps: list[str] = []
+    for field in CAUSAL_TRIAL_FIELDS:
+        values = [trial[field] for trial in startup["trials"]]
+        if all(value is None for value in values):
+            gaps.append(field)
+        elif any(value is None for value in values) or any(
+            not finite_non_negative(value) for value in values
+        ):
+            raise AcceptanceError(
+                f"{label} causal field {field} must be finite for every trial or null for every trial"
+            )
+    for field in CAUSAL_IDENTITY_FIELDS:
+        if startup["identity"][field] is None:
+            gaps.append(field)
+    return sorted(gaps)
+
+
+def transferred_routes() -> tuple[str, dict[str, set[str]]]:
+    try:
+        data = OWNERSHIP_PROJECTION_PATH.read_bytes()
+        projection = json.loads(data)
+    except (OSError, json.JSONDecodeError) as error:
+        raise AcceptanceError(f"cannot verify Vellum ownership projection: {error}") from error
+    if projection.get("activation", {}).get("state") != "active":
+        raise AcceptanceError("Vellum ownership projection is not active")
+    routes: dict[str, set[str]] = {}
+    for item in projection.get("slices", []):
+        if item.get("state") != "framework-authoritative-transferred":
+            continue
+        slice_id = item.get("id")
+        paths = item.get("paths")
+        if isinstance(slice_id, str) and isinstance(paths, list):
+            routes[slice_id] = {path for path in paths if isinstance(path, str)}
+    return sha256_bytes(data), routes
 
 
 def validate_raw_samples(
@@ -288,8 +378,9 @@ def validate_budget(receipt: dict[str, Any], evidence_root: Path) -> dict[str, A
 
 def validate_health(
     payload: dict[str, Any], *, identity: dict[str, Any], budget_receipt: dict[str, Any],
-    cold_samples: list[dict[str, Any]], warm_samples: list[dict[str, Any]], label: str,
-) -> None:
+    cold_samples: list[dict[str, Any]], warm_samples: list[dict[str, Any]], role: str,
+    measurement_endpoint: str, label: str,
+) -> list[str]:
     health_schema = load_json(HEALTH_SCHEMA_PATH)
     problems = json_schema_lite.validate(payload, health_schema)
     if problems:
@@ -318,6 +409,8 @@ def validate_health(
             stages.add(event["stage"])
     if startup["status"] != "complete" or startup["verdict"] not in {"pass", "fail"}:
         raise AcceptanceError(f"{label} startup result is not a complete measured verdict")
+    if startup.get("measurement_endpoint") != measurement_endpoint:
+        raise AcceptanceError(f"{label} does not bind its exact role measurement endpoint")
     expected_budget = {
         "budget_id": budget_receipt["budget_id"],
         "version": budget_receipt["budget_version"],
@@ -343,8 +436,12 @@ def validate_health(
     if startup["identity"]["adapter_class"] != "hardware":
         raise AcceptanceError(f"{label} must use an authentic hardware adapter")
     capture = startup["capture"]
-    if capture["event_count"] > capture["event_capacity"] or capture["dropped_event_count"] != 0 or capture["truncated"] or capture["missing_trace_categories"]:
-        raise AcceptanceError(f"{label} capture is lossy or incomplete")
+    if (
+        capture["event_count"] > capture["event_capacity"]
+        or capture["dropped_event_count"] != 0
+        or capture["truncated"]
+    ):
+        raise AcceptanceError(f"{label} capture integrity is lossy")
     correlation = startup["correlation"]
     if (
         not isinstance(correlation["gpu_evidence_id"], str)
@@ -363,22 +460,22 @@ def validate_health(
         or (trial["diagnostic_code"] == "gpu.startup.pass" and trial["verdict"] != "pass")
         or (trial["diagnostic_code"] == "gpu.startup.budget_exceeded" and trial["verdict"] != "fail")
         or trial["content_floor_passed"] is not True or trial["visible_state"] == "unknown"
-        or any(
-            not isinstance(trial[field], (int, float)) or isinstance(trial[field], bool)
-            or not math.isfinite(trial[field]) or trial[field] < 0
-            for field in ("shader_compile_ms", "upload_ms", "hidden_frame_ms", "present_ms")
-        )
+        or not finite_non_negative(trial["editor_open_to_first_nonblank_ms"])
+        or not finite_non_negative(trial["interaction_hitch_ms"])
         or trial["observed_target_signature_sha256"] != startup["identity"]["expected_target_signature_sha256"]
         or trial["sequence"] != index
         for index, trial in enumerate(trials)
     ):
         raise AcceptanceError(
-            f"{label} contains a non-passing, unbound, or native-present-uncorroborated trial"
+            f"{label} contains a non-passing, unbound, or endpoint-uncorroborated trial"
         )
-    if any(startup["identity"][key] is None for key in (
-        "source_signature_sha256", "shader_signature_sha256", "expected_target_signature_sha256"
-    )):
-        raise AcceptanceError(f"{label} lacks source, shader, or target identity")
+    if startup["identity"]["expected_target_signature_sha256"] is None:
+        raise AcceptanceError(f"{label} lacks target identity")
+    gaps = causal_gaps(startup, label)
+    if role == "headless-constrained" and "present_ms" not in gaps:
+        raise AcceptanceError(f"{label} headless capture must not claim compositor present timing")
+    if gaps and not capture["missing_trace_categories"]:
+        raise AcceptanceError(f"{label} has nullable causal fields without named instrumentation gaps")
     cold = [trial for trial in trials if trial["cache_state"] == "cold"]
     warm = [trial for trial in trials if trial["cache_state"] == "warm"]
     if len(cold) != 10 or len(warm) != 10:
@@ -398,6 +495,7 @@ def validate_health(
     expected_verdict = "pass" if startup["observed_percentile_ms"] <= budget_receipt["threshold_ms"] else "fail"
     if startup["verdict"] != expected_verdict:
         raise AcceptanceError(f"{label} verdict is not derived from the ratified budget")
+    return gaps
 
 
 def validate_campaign_trace(
@@ -410,17 +508,23 @@ def validate_campaign_trace(
     keys = {
         "schema", "version", "question", "verdict", "capture_complete", "campaign_id",
         "instance_id", "build_id", "gpu_evidence_id", "trace_evidence_id", "trace_sha256",
-        "health_result_sha256", "evidence_ids",
+        "health_result_sha256", "evidence_ids", "measurement_endpoint",
+        "capture_integrity", "instrumentation_coverage", "missing_trace_categories",
     }
     exact_keys(analysis, keys, f"{label}.trace_analysis")
     identity = campaign["identity"]
     correlation = health["startup"]["correlation"]
+    missing_categories = health["startup"]["capture"]["missing_trace_categories"]
     expected = {
         "schema": "pulp.gpu-first-visible-campaign-trace.v1",
         "version": 1,
         "question": "gpu-startup",
         "verdict": health["startup"]["verdict"],
-        "capture_complete": True,
+        "capture_complete": not missing_categories,
+        "measurement_endpoint": campaign["measurement_endpoint"],
+        "capture_integrity": "lossless",
+        "instrumentation_coverage": "partial" if missing_categories else "complete",
+        "missing_trace_categories": missing_categories,
         "campaign_id": identity["campaign_id"],
         "instance_id": identity["instance_id"],
         "build_id": identity["build_id"],
@@ -452,6 +556,9 @@ def validate_campaigns(
             "trace", "trace_analysis",
         )):
             raise AcceptanceError(f"{label} is missing a required artifact")
+        expected_endpoint = MEASUREMENT_ENDPOINT_BY_ROLE[role]
+        if campaign.get("measurement_endpoint") != expected_endpoint:
+            raise AcceptanceError(f"{label} does not declare the required role endpoint")
         identity = campaign["identity"]
         if identity["pulp_revision"] != receipt["identity"]["pulp_revision"]:
             raise AcceptanceError(f"{label} Pulp revision differs from the receipt")
@@ -479,7 +586,8 @@ def validate_campaigns(
         health = artifact_json(campaign["health_result"], evidence_root, f"{label}.health_result")
         validate_health(
             health, identity=identity, budget_receipt=budget_receipt,
-            cold_samples=cold, warm_samples=warm, label=f"{label}.health_result",
+            cold_samples=cold, warm_samples=warm, role=role,
+            measurement_endpoint=expected_endpoint, label=f"{label}.health_result",
         )
         resolve_artifact(campaign["product_artifact"], evidence_root, f"{label}.product_artifact")
         resolve_artifact(campaign["host_artifact"], evidence_root, f"{label}.host_artifact")
@@ -652,10 +760,10 @@ def validate_same_instance(
     if (
         analysis.get("schema") != "pulp.trace-gpu-analysis.v1"
         or analysis.get("question") != "gpu-startup"
-        or analysis.get("capture_complete") is not True
+        or not isinstance(analysis.get("capture_complete"), bool)
         or same["gpu_evidence_id"] not in analysis.get("evidence_ids", [])
     ):
-        raise AcceptanceError("same-instance trace analysis is incomplete or lacks the GPU evidence id")
+        raise AcceptanceError("same-instance trace analysis is invalid or lacks the GPU evidence id")
     trace_snapshot = resolve_artifact(same["trace"], evidence_root, "same_instance_a2t.trace")
     if not trace_snapshot.data:
         raise AcceptanceError("same-instance trace artifact is empty")
@@ -796,7 +904,28 @@ def validate_b4(
     if len(causal) != 1:
         raise AcceptanceError("B4 cannot identify one causal campaign")
     causal_campaign, causal_health = causal[0]
+    for campaign, health in campaigns.values():
+        if (
+            health["startup"]["verdict"] == "fail"
+            and causal_gaps(health["startup"], "A3 campaign")
+            and campaign["identity"]["campaign_id"] != causal_campaign["identity"]["campaign_id"]
+        ):
+            raise AcceptanceError(
+                "a failing campaign with causal gaps must be the selected investigation campaign"
+            )
     startup = causal_health["startup"]
+    causal_role = causal_campaign["role"]
+    missing_fields = causal_gaps(startup, "b4 causal campaign")
+    missing_categories = startup["capture"]["missing_trace_categories"]
+    capture_integrity = (
+        startup["capture"]["dropped_event_count"] == 0
+        and startup["capture"]["truncated"] is False
+        and startup["capture"]["event_count"] <= startup["capture"]["event_capacity"]
+    )
+    analysis_complete = derived_analysis.get("capture_complete") is True
+    instrumentation_coverage = (
+        "complete" if analysis_complete and not missing_categories else "partial"
+    )
     threshold_ms = causal_health["startup"]["budget"]["threshold_ms"]
     (derived_disposition, dominant_stage, dominant_duration_ns,
      materiality_floor_ns) = derive_b4_disposition(startup, derived_analysis)
@@ -815,6 +944,8 @@ def validate_b4(
         "observed_percentile_ms", "threshold_ms", "analyzer_verdict", "capture_complete",
         "dominant_stage", "dominant_duration_ns", "materiality_floor_ns",
         "campaign_health_sha256", "a2t_binding_sha256", "trace_analysis_sha256", "reason",
+        "capture_integrity", "instrumentation_coverage", "missing_causal_fields",
+        "instrumentation_gaps", "observed_interval", "ownership_projection_sha256",
     }
     exact_keys(payload, evidence_keys, "b4.evidence")
     expected = {
@@ -835,7 +966,71 @@ def validate_b4(
         "a2t_binding_sha256": receipt["same_instance_a2t"]["binding_receipt"]["sha256"],
         "trace_analysis_sha256": receipt["same_instance_a2t"]["trace_analysis"]["sha256"],
         "reason": b4["reason"],
+        "capture_integrity": "lossless",
+        "instrumentation_coverage": instrumentation_coverage,
+        "missing_causal_fields": missing_fields,
+        "observed_interval": {
+            "clock_origin": startup["budget"]["clock_origin"],
+            "endpoint": startup["measurement_endpoint"],
+            "p95_ms": startup["observed_percentile_ms"],
+        },
     }
+    projection_sha256, routes = transferred_routes()
+    expected["ownership_projection_sha256"] = projection_sha256
+    gaps = payload.get("instrumentation_gaps")
+    if not isinstance(gaps, list):
+        raise AcceptanceError("B4 evidence instrumentation_gaps must be an array")
+    if len(gaps) != len(missing_fields):
+        raise AcceptanceError("B4 evidence must name every and only nullable causal field")
+    seen_fields: set[str] = set()
+    for index, gap in enumerate(gaps):
+        label = f"b4.evidence.instrumentation_gaps[{index}]"
+        exact_keys(gap, {
+            "field", "missing_event", "required_arguments", "route_slice",
+            "route_path", "route_repository",
+        }, label)
+        field = gap["field"]
+        if field not in missing_fields or field in seen_fields:
+            raise AcceptanceError("B4 evidence has an unexpected or duplicate causal gap")
+        seen_fields.add(field)
+        event = gap["missing_event"]
+        arguments = gap["required_arguments"]
+        if (
+            event != CAUSAL_GAP_EVENTS[field]
+            or not isinstance(arguments, list) or not arguments
+            or len(set(arguments)) != len(arguments)
+            or not all(isinstance(argument, str) and argument for argument in arguments)
+            or set(arguments) != CAUSAL_GAP_ARGUMENTS[field]
+        ):
+            raise AcceptanceError("B4 evidence lacks the exact missing event or arguments")
+        slice_id = gap["route_slice"]
+        route_path = gap["route_path"]
+        if (
+            gap["route_repository"] != "Generous-Corp/vellum"
+            or slice_id != "render-skia-dawn"
+            or route_path not in CAUSAL_ROUTE_PATHS[field]
+            or route_path not in routes.get(slice_id, set())
+        ):
+            raise AcceptanceError("B4 evidence gap does not route to a transferred Vellum path")
+    if set(missing_fields) != seen_fields:
+        raise AcceptanceError("B4 evidence causal gap inventory is incomplete")
+    expected["instrumentation_gaps"] = gaps
+    if not capture_integrity:
+        raise AcceptanceError("B4 disposition requires lossless available-category capture")
+    if derived_disposition == "queue-B4":
+        if missing_fields or instrumentation_coverage != "complete":
+            raise AcceptanceError("queue-B4 requires complete causal instrumentation")
+    elif derived_disposition == "queue-B4-investigation":
+        if (
+            startup["verdict"] != "fail" or causal_role not in VISIBLE_CAMPAIGN_ROLES
+            or startup["measurement_endpoint"] != "native-compositor-presentation"
+            or not missing_fields or instrumentation_coverage != "partial"
+        ):
+            raise AcceptanceError(
+                "queue-B4-investigation requires a visible budget miss and exact causal gaps"
+            )
+    elif missing_fields and startup["verdict"] != "pass":
+        raise AcceptanceError("nullable causal fields are legal only for passing no-change or investigation")
     if payload != expected:
         raise AcceptanceError("B4 evidence does not bind the selected disposition")
 

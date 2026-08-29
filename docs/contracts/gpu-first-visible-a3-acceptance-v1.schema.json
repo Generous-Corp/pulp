@@ -60,6 +60,9 @@
         "additionalProperties": false,
         "properties": {
           "role": { "enum": ["standalone", "headless-constrained", "daw", "forge"] },
+          "measurement_endpoint": {
+            "enum": ["native-compositor-presentation", "headless-capture-complete"]
+          },
           "status": { "enum": ["incomplete", "pass", "fail"] },
           "identity": {
             "type": "object",
