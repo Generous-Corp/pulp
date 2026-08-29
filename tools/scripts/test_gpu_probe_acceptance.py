@@ -485,6 +485,28 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             errors = VERIFIER.verify(root)
             self.assertTrue(any("sealed provider" in error for error in errors), errors)
 
+    def test_v2_rejects_forged_render_provider_root_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt = self.v2_fixture(root)
+            claim = receipt["install_provenance"]["render_provider_input_claim"]
+            claim["providers"]["skia_dawn"]["root_role"] = "caller-selected-root"
+            claim["manifest_sha256"] = hashlib.sha256(
+                json.dumps(
+                    {
+                        "providers": claim["providers"],
+                        "skia_source_disposition": claim[
+                            "skia_source_disposition"
+                        ],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            (root / "receipt.json").write_text(json.dumps(receipt))
+            errors = VERIFIER.verify(root)
+            self.assertTrue(any("exact root provenance" in error for error in errors))
+
     def test_png_content_cap_rejects_blank_even_when_digest_rebound(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

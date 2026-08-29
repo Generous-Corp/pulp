@@ -404,6 +404,27 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("sealed render providers" in error for error in errors))
 
+    def test_render_provider_root_provenance_cannot_be_forged(self):
+        receipt = self.terminal_receipt()
+        claim = receipt["installed_source_identity"]["build_provenance"][
+            "render_provider_input_claim"
+        ]
+        claim["providers"]["skia_dawn"]["root_role"] = "caller-selected-root"
+        claim["manifest_sha256"] = CONTRACT.hashlib.sha256(
+            json.dumps(
+                {
+                    "providers": claim["providers"],
+                    "skia_source_disposition": claim[
+                        "skia_source_disposition"
+                    ],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("exact root provenance" in error for error in errors))
+
     def test_no_producer_disposition_is_recomputed_from_git(self):
         receipt = self.terminal_receipt()
         inventory = receipt["producer_overhead_disposition"]["evidence"]
