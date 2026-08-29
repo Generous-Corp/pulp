@@ -71,7 +71,7 @@ STATE_BUILD_REQUEST_SCHEMA = "pulp.gpu-first-visible-trace-producer-state-build-
 STATE_BUILD_RECEIPT_SCHEMA = "pulp.gpu-first-visible-trace-producer-state-build-receipt.v1"
 PRODUCER_REVISION = "fefbfecd9fc014df54fc55d6f3259524f1179a49"
 INPUT_TO_PRESENT_REVISION = "b4ba22f1d700621366afdbc72bb8615336964cd1"
-BASELINE_REVISION = "5048ce72dd28d87974550a3feb526de0f44af32c"
+BASELINE_REVISION = "e3b4ee453b955262a243bb1a5c54c6909553551f"
 INPUT_TO_PRESENT_PATHS = [
     "core/view/platform/mac/window_host_mac.mm",
     "core/view/src/editor_bridge.cpp",

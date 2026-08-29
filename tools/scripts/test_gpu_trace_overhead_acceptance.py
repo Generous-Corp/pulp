@@ -1019,39 +1019,19 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(
             [row["path"] for row in external],
-            [
-                "core/view/platform/mac/window_host_mac.mm",
-                "inspect/src/control_gpu_health_provider.cpp",
-            ],
+            ["inspect/src/control_gpu_health_provider.cpp"],
         )
         self.assertEqual(
             external[0]["introducing_revision"],
-            "b4ba22f1d700621366afdbc72bb8615336964cd1",
+            "fefbfecd9fc014df54fc55d6f3259524f1179a49",
         )
-        self.assertEqual(
-            external[0]["owner_package"],
-            "input-to-present-latency-tracing",
-        )
-        self.assertEqual(
-            external[0]["scope_authority"]["kind"],
-            "immutable-git-commit-boundary",
-        )
-        self.assertFalse(
+        self.assertTrue(
             external[0]["scope_authority"][
                 "producer_introduction_touched_authority_path"
             ]
         )
         self.assertEqual(
-            external[1]["introducing_revision"],
-            "fefbfecd9fc014df54fc55d6f3259524f1179a49",
-        )
-        self.assertTrue(
-            external[1]["scope_authority"][
-                "producer_introduction_touched_authority_path"
-            ]
-        )
-        self.assertEqual(
-            external[1]["owner_evidence_status"],
+            external[0]["owner_evidence_status"],
             "external-not-evaluated-by-a2t",
         )
 
@@ -1066,18 +1046,32 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
 
     def test_scope_manifest_cannot_omit_external_product_producer_authority(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
-        with mock.patch.object(
-            MODULE, "_non_a2t_producer_authorities", return_value={}
-        ):
+        with mock.patch.object(MODULE, "_a3_authority_paths", return_value=(set(), "")):
             with self.assertRaisesRegex(ValueError, "unclassified product producer"):
                 MODULE.authoritative_a2t_scope_paths(ROOT, head)
 
     def test_external_product_producer_authority_rejects_signature_tamper(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
         manifest = json.loads((ROOT / MODULE.A2T_SCOPE_MANIFEST_PATH).read_text())
-        manifest["non_a2t_product_producer_authorities"][0][
-            "added_producer_signatures"
-        ]["core/view/platform/mac/window_host_mac.mm"].pop()
+        manifest["non_a2t_product_producer_authorities"] = [{
+            "owner_package": "input-to-present-latency-tracing",
+            "introducing_revision": "b4ba22f1d700621366afdbc72bb8615336964cd1",
+            "introducing_parent": "0c043eb4ce4b417ec6b995572bb9051ebe9eb14d",
+            "introducing_subject": "chore(trace): expose input-to-present latency chain",
+            "changed_paths": [
+                "core/view/platform/mac/window_host_mac.mm",
+                "core/view/src/editor_bridge.cpp",
+                "core/view/src/view.cpp",
+                "core/view/src/widget_bridge.cpp",
+                "core/view/src/widget_bridge/bridge_dispatch.cpp",
+            ],
+            "added_producer_signatures": {
+                "core/view/platform/mac/window_host_mac.mm": [
+                    'PULP_TRACE_SCOPE_NAMED("render", "gpu_acquire");',
+                    'PULP_TRACE_SCOPE_NAMED("render", "gpu_submit");',
+                ]
+            },
+        }]
         with mock.patch.object(MODULE.json, "loads", return_value=manifest):
             with self.assertRaisesRegex(ValueError, "signature delta does not match"):
                 MODULE._non_a2t_producer_authorities(ROOT, head)

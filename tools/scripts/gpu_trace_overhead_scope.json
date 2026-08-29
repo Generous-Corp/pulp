@@ -16,28 +16,7 @@
     "core/format/",
     "inspect/"
   ],
-  "non_a2t_product_producer_authorities": [
-    {
-      "owner_package": "input-to-present-latency-tracing",
-      "introducing_revision": "b4ba22f1d700621366afdbc72bb8615336964cd1",
-      "introducing_parent": "0c043eb4ce4b417ec6b995572bb9051ebe9eb14d",
-      "introducing_subject": "chore(trace): expose input-to-present latency chain",
-      "changed_paths": [
-        "core/view/platform/mac/window_host_mac.mm",
-        "core/view/src/editor_bridge.cpp",
-        "core/view/src/view.cpp",
-        "core/view/src/widget_bridge.cpp",
-        "core/view/src/widget_bridge/bridge_dispatch.cpp"
-      ],
-      "added_producer_signatures": {
-        "core/view/platform/mac/window_host_mac.mm": [
-          "PULP_TRACE_SCOPE_NAMED(\"render\", \"gpu_acquire\");",
-          "PULP_TRACE_SCOPE_NAMED(\"render\", \"gpu_submit\");",
-          "PULP_TRACE_SCOPE_NAMED(\"render\", \"gpu_present\");"
-        ]
-      }
-    }
-  ],
+  "non_a2t_product_producer_authorities": [],
   "scope_paths": [
     ".agents/skills/trace-analysis/SKILL.md",
     ".agents/skills/trace-analysis/references/hints_gpu.md",

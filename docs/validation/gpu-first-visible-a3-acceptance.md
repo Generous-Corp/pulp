@@ -399,7 +399,7 @@ producers. The active 10-cold/10-warm role campaigns include their cost, but
 that alone cannot distinguish the instrumentation's cost from the product
 workload. Terminal A3 therefore also requires a four-state product control:
 
-- exact pre-producer parent `5048ce72dd28d87974550a3feb526de0f44af32c`;
+- exact pre-producer parent `e3b4ee453b955262a243bb1a5c54c6909553551f`;
 - exact final-head candidate built with tracing compiled out;
 - the same candidate built with tracing compiled in but no session active; and
 - that exact compiled-in binary with an active 128 MiB Perfetto ring.
@@ -426,7 +426,7 @@ trace:
 
 | State | Source/build | Runtime session | Required trace evidence |
 |---|---|---|---|
-| `pre-change-baseline` | exact `5048ce72dd28d87974550a3feb526de0f44af32c` product | tracing absent | none |
+| `pre-change-baseline` | exact `e3b4ee453b955262a243bb1a5c54c6909553551f` product | tracing absent | none |
 | `candidate-compile-out` | final candidate, `PULP_TRACING=OFF` | tracing absent | none |
 | `candidate-compiled-in-idle` | final candidate, `PULP_TRACING=ON` | no session | none; binary digest must equal active |
 | `candidate-active` | same compiled-in binary bytes | active 128 MiB ring | one lossless binary Perfetto trace per sample |
