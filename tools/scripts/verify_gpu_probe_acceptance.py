@@ -7,7 +7,7 @@ import argparse
 import copy
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -44,6 +44,47 @@ V8_PROVIDER_TOP_LEVEL = frozenset({
     "VERSION", "VERSION.md", "bin", "data", "icudtl.dat", "include",
     "jniLibs", "lib", "share", "snapshot_blob.bin",
 })
+
+
+def _skia_consumed_top_level_entries(authority: dict[str, Any]) -> frozenset[str]:
+    """Derive exact provider-root additions from consumed Skia archive paths."""
+    patterns = {
+        "build/<platform>-gpu/lib/Release": re.compile(
+            r"build/(?:mac|win|linux|android(?:-x86_64)?|ios|wasm)-gpu/"
+            r"lib/Release/(?:libskia\.a|skia\.lib)"
+        ),
+        "<platform>-gpu/lib/Release": re.compile(
+            r"(?:mac|win|linux|android(?:-x86_64)?|ios|wasm)-gpu/"
+            r"lib/Release/(?:libskia\.a|skia\.lib)"
+        ),
+        "<platform>/lib": re.compile(
+            r"(?:mac|win|linux|android|ios|wasm)(?:[-_][A-Za-z0-9_+-]+)?/"
+            r"lib/(?:libskia\.a|skia\.lib)"
+        ),
+        "lib": re.compile(r"lib/(?:libskia\.a|skia\.lib)"),
+    }
+    pattern = patterns.get(authority.get("provider_layout"))
+    archives = authority.get("consumed_skia_archives")
+    if pattern is None or not isinstance(archives, list) or not archives:
+        raise ValueError("Skia provider lacks an exact consumed archive layout")
+    if any(not isinstance(value, str) for value in archives):
+        raise ValueError("Skia provider has an invalid consumed archive path")
+    if len(archives) != len(set(archives)):
+        raise ValueError("Skia provider repeats a consumed archive path")
+    top_level: set[str] = set()
+    for value in archives:
+        if len(value) > 512:
+            raise ValueError("Skia provider has an invalid consumed archive path")
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or not path.parts
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or pattern.fullmatch(value) is None
+        ):
+            raise ValueError("Skia provider consumed archive disagrees with its layout")
+        top_level.add(path.parts[0])
+    return frozenset(top_level)
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -390,6 +431,14 @@ def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
                 SKIA_PROVIDER_TOP_LEVEL
                 if role == "skia_dawn" else V8_PROVIDER_TOP_LEVEL
             )
+            skia_layout_valid = True
+            consumed_top_level: frozenset[str] = frozenset()
+            if role == "skia_dawn":
+                try:
+                    consumed_top_level = _skia_consumed_top_level_entries(authority)
+                except ValueError:
+                    skia_layout_valid = False
+                allowed = allowed | consumed_top_level
             manifest_sha256, asset_digests = _pinned_provider_asset_digests(
                 dependency
             )
@@ -409,23 +458,29 @@ def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
                 or not isinstance(entries, list)
                 or any(
                     not isinstance(entry, str)
-                    or (
-                        entry not in allowed
-                        and not (
-                            role == "skia_dawn"
-                            and re.fullmatch(r"[A-Za-z0-9_+-]+-gpu", entry)
-                        )
-                    )
+                    or entry not in allowed
                     for entry in entries
                 )
                 or len(entries) != len(set(entries))
                 or stamp not in entries
+                or (
+                    role == "skia_dawn"
+                    and (
+                        not skia_layout_valid
+                        or authority.get("consumed_top_level_entries")
+                        != sorted(consumed_top_level)
+                    )
+                )
             ):
                 errors.append(
                     f"render provider {role} lacks pinned generation authority"
                 )
             if role == "skia_dawn" and (
-                authority.get("cache_authority") not in {"SKIA_DIR", "generated-ninja"}
+                not skia_layout_valid
+                or authority.get("consumed_top_level_entries")
+                != sorted(consumed_top_level)
+                or authority.get("cache_authority")
+                not in {"SKIA_DIR", "generated-ninja"}
                 or authority.get("provider_layout") not in {
                     "build/<platform>-gpu/lib/Release",
                     "<platform>-gpu/lib/Release", "<platform>/lib", "lib",

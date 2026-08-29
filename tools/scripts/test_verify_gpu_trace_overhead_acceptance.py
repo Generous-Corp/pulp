@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -121,6 +122,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     "consumed_skia_archives": [
                         "build/mac-gpu/lib/Release/libskia.a"
                     ],
+                    "consumed_top_level_entries": ["build"],
                 },
                 "tree_claim": provider_tree,
                 "required_members": [
@@ -181,6 +183,9 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "mcp_source_revision": head,
             "integration_head": binding["integration_head"],
             "source_blobs": binding["source_blobs"],
+            "executing_source_identity": CONTRACT.executing_checkout_source_identity(
+                ROOT, head
+            ),
             "source_identity": {
                 "repository": "Generous-Corp/pulp", "revision": head,
                 "clean": True,
@@ -398,6 +403,34 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "to equal live checkout HEAD" in error for error in errors
         ))
 
+    def test_verifier_rejects_separate_clean_clone_at_older_sha(self):
+        receipt = self.structural_receipt()
+        with tempfile.TemporaryDirectory() as temporary:
+            clone = Path(temporary) / "older-clean-clone"
+            CONTRACT.subprocess.run(
+                ["git", "clone", "--quiet", "--no-hardlinks", str(ROOT), str(clone)],
+                check=True,
+            )
+            CONTRACT.subprocess.run(
+                ["git", "checkout", "--quiet", "HEAD^"], cwd=clone, check=True
+            )
+            errors = MODULE.verify(receipt, clone)
+        self.assertTrue(any(
+            "executing A2T source checkout is invalid" in error
+            and "exact checkout containing the executing recorder" in error
+            for error in errors
+        ), errors)
+
+    def test_verifier_rejects_forged_executing_source_identity(self):
+        receipt = self.structural_receipt()
+        receipt["executing_source_identity"]["source_blobs"][
+            "tools/scripts/sdk_provenance.py"
+        ] = "0" * 40
+        self.assertIn(
+            "executing_source_identity does not bind this exact recorder/verifier checkout",
+            MODULE.verify(receipt, ROOT),
+        )
+
     def test_processor_plan_and_fixture_mutations_fail_closed(self):
         mutations = [
             (lambda r: r["artifacts"]["trace_processor"].update(sha256="0" * 64),
@@ -524,7 +557,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         ]
         claim["providers"]["skia_dawn"]["root_authority"][
             "top_level_entries"
-        ].append("unrelated-product")
+        ].append("unrelated-product-gpu")
         claim["manifest_sha256"] = CONTRACT.hashlib.sha256(
             json.dumps(
                 {

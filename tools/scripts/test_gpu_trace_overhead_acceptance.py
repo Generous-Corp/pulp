@@ -30,6 +30,9 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "source_revision": head,
             "integration_head": binding["integration_head"],
             "source_blobs": binding["source_blobs"],
+            "executing_source_identity": MODULE.executing_checkout_source_identity(
+                ROOT, head
+            ),
             "artifacts": {"trace": {
                 "role": "repository/test/fixtures/perfetto-gpu/"
                         "first-frame-pipeline-upload-stall.pftrace"
@@ -211,6 +214,11 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             ("human", "Codex visual acceptance agent"),
             ("human", "automated review bot"),
             ("human", "GPT-5 visual reviewer"),
+            ("human", "GPT5 visual reviewer"),
+            ("human", "ChatGPT5 visual reviewer"),
+            ("human", "Claude3 visual reviewer"),
+            ("human", "Codex5 visual reviewer"),
+            ("human", "Gemini2 visual reviewer"),
             ("human", "OpenAI reasoning assistant"),
         ):
             with self.subTest(
@@ -233,6 +241,26 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                         trace_sha256="1" * 64,
                         semantic_result=self.semantic_result(),
                     )
+
+        document = self.human_review_document()
+        document["review_authority"]["reviewer"] = "Augustine Sargent"
+        MODULE.validate_independent_human_review_document(
+            document,
+            question="gpu-startup",
+            trace_sha256="1" * 64,
+            semantic_result=self.semantic_result(),
+        )
+        document = self.human_review_document()
+        document["review_authority"]["git_commit_author"] = (
+            "GPT5 visual reviewer <review@example.com>"
+        )
+        with self.assertRaisesRegex(ValueError, "automated agent or model"):
+            MODULE.validate_independent_human_review_document(
+                document,
+                question="gpu-startup",
+                trace_sha256="1" * 64,
+                semantic_result=self.semantic_result(),
+            )
 
     def test_human_review_rejects_missing_or_untyped_contributor_fields(self):
         for semantic_field, observed_field, invalid in (
@@ -733,12 +761,21 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     ],
                     "build/<platform>-gpu/lib/Release",
                 )
+                self.assertEqual(
+                    evidence["providers"]["skia_dawn"]["root_authority"][
+                        "consumed_top_level_entries"
+                    ],
+                    ["build"],
+                )
                 skia_library.write_bytes(b"substituted")
                 skia_library.write_bytes(b"skia archive")
                 with self.assertRaisesRegex(ValueError, "mutation event"):
                     claim.assert_full()
             finally:
                 claim.close()
+            (skia / "unrelated-product-gpu").mkdir()
+            with self.assertRaisesRegex(ValueError, "unrelated top-level data"):
+                MODULE._resolved_skia_root(build, MODULE._cmake_cache(build))
 
     def test_complete_tree_rejects_provider_symlink_escape(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -864,6 +901,25 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
 
     def test_exact_current_source_binding_passes(self):
         self.assertEqual(MODULE.source_binding_errors(self.bound_receipt(), ROOT), [])
+
+    def test_executing_sources_reject_separate_clean_clone_at_older_sha(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            clone = Path(temporary) / "older-clean-clone"
+            MODULE.subprocess.run(
+                ["git", "clone", "--quiet", "--no-hardlinks", str(ROOT), str(clone)],
+                check=True,
+            )
+            MODULE.subprocess.run(
+                ["git", "checkout", "--quiet", "HEAD^"], cwd=clone, check=True
+            )
+            older = MODULE._git_text(clone, "rev-parse", "HEAD")
+            self.assertEqual(
+                MODULE._git_text(clone, "status", "--porcelain=v1"), ""
+            )
+            with self.assertRaisesRegex(
+                ValueError, "exact checkout containing the executing recorder"
+            ):
+                MODULE.executing_checkout_source_identity(clone, older)
 
     def test_planted_stale_head_and_declared_blob_fail_closed(self):
         stale_head = self.bound_receipt()

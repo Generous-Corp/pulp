@@ -296,6 +296,16 @@ def _verify_installed_build_provenance(
                 contract.SKIA_PROVIDER_TOP_LEVEL
                 if role == "skia_dawn" else contract.V8_PROVIDER_TOP_LEVEL
             )
+            skia_layout_valid = True
+            consumed_top_level: frozenset[str] = frozenset()
+            if role == "skia_dawn":
+                try:
+                    consumed_top_level = contract.skia_consumed_top_level_entries(
+                        authority
+                    )
+                except ValueError:
+                    skia_layout_valid = False
+                allowed = allowed | consumed_top_level
             entries = authority.get("top_level_entries")
             manifest_sha256, asset_digests = contract._pinned_provider_asset_digests(
                 dependency
@@ -315,23 +325,29 @@ def _verify_installed_build_provenance(
                 or not isinstance(entries, list)
                 or any(
                     not isinstance(entry, str)
-                    or (
-                        entry not in allowed
-                        and not (
-                            role == "skia_dawn"
-                            and re.fullmatch(r"[A-Za-z0-9_+-]+-gpu", entry)
-                        )
-                    )
+                    or entry not in allowed
                     for entry in entries
                 )
                 or len(entries) != len(set(entries))
                 or stamp not in entries
+                or (
+                    role == "skia_dawn"
+                    and (
+                        not skia_layout_valid
+                        or authority.get("consumed_top_level_entries")
+                        != sorted(consumed_top_level)
+                    )
+                )
             ):
                 errors.append(
                     f"installed render provider {role} lacks pinned generation authority"
                 )
             if role == "skia_dawn" and (
-                authority.get("cache_authority") not in {"SKIA_DIR", "generated-ninja"}
+                not skia_layout_valid
+                or authority.get("consumed_top_level_entries")
+                != sorted(consumed_top_level)
+                or authority.get("cache_authority")
+                not in {"SKIA_DIR", "generated-ninja"}
                 or authority.get("provider_layout") not in {
                     "build/<platform>-gpu/lib/Release",
                     "<platform>-gpu/lib/Release", "<platform>/lib", "lib",
@@ -471,11 +487,25 @@ def verify(
     if not isinstance(receipt, dict):
         return ["A2T receipt must be an object"]
     repository = repository.resolve()
+    source_revision = receipt.get("source_revision")
+    expected_executing_source: dict[str, Any] | None = None
+    try:
+        expected_executing_source = contract.executing_checkout_source_identity(
+            repository, str(source_revision)
+        )
+    except ValueError as error:
+        errors.append(f"executing A2T source checkout is invalid: {error}")
+    if (
+        expected_executing_source is not None
+        and receipt.get("executing_source_identity") != expected_executing_source
+    ):
+        errors.append(
+            "executing_source_identity does not bind this exact recorder/verifier checkout"
+        )
     if receipt.get("schema") != "pulp.gpu-trace-overhead-acceptance.v3":
         errors.append("receipt schema must be pulp.gpu-trace-overhead-acceptance.v3")
     errors.extend(contract.source_binding_errors(receipt, repository))
 
-    source_revision = receipt.get("source_revision")
     if receipt.get("mcp_source_revision") != source_revision:
         errors.append("CLI and MCP source revisions differ")
     source_identity = _object(receipt.get("source_identity"), "source_identity", errors)

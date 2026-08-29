@@ -21,6 +21,7 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --question gpu-startup \
   --source-revision "$(git rev-parse HEAD)" \
   --mcp-source-revision "$(git rev-parse HEAD)" \
+  --repository "$PWD" \
   --plan-revision "$PLAN_REVISION" \
   --plan-sha256 "$PLAN_SHA256" \
   --planning-repository "$PWD/planning" \
@@ -33,8 +34,11 @@ same-artifact review document satisfying the contract below. The historical M3
 agent receipt is not a valid value. Binding such a document remains structural;
 it is not local terminal authority.
 
-The recorder requires an exact clean canonical Pulp worktree at
-`--source-revision` and an external single-config Release build configured from
+The recorder requires `--repository` to be the exact clean canonical Pulp
+worktree containing the executing recorder, verifier, and source-loaded support
+modules at `--source-revision`; an adjacent or older checkout is rejected even
+when it is clean. The receipt binds those executing files as exact Git blobs.
+It also requires an external single-config Release build configured from
 that exact checkout with the same GPU/Scene3D/Three.js/V8/Rust feature contract
 as A2. `--install-prefix` must not exist. The recorder refreshes the Rust CLI,
 C++ delegate, and MCP targets after publishing an unpredictable staging
@@ -49,9 +53,12 @@ input descriptors remain live across clean, build, install, replay, timing,
 and publication. It also resolves and retains the complete selected Skia/Dawn
 and V8 provider trees (including the exact Skia/Dawn archives, V8 headers, and
 V8 runtime) before the clean build. Each binary provider must resolve from the
-exact CMake/Ninja-consumed package root, match a fixed supported layout, carry
+exact CMake/Ninja-consumed package root, match a fixed supported platform
+layout, carry
 the release-asset generation stamp pinned by `tools/deps/manifest.json`, and
-contain no unrelated top-level organization/monorepo data. If FindSkia consumes the adjacent
+contain no top-level directory beyond the fixed package entries and the exact
+directory derived from the consumed archive paths; an arbitrary `*-gpu` name
+is not an allowlist. If FindSkia consumes the adjacent
 `SKIA_DIR/../skia-src` layout, the recorder retains that complete source tree as
 a third provider; broad provider roots and escaping symlinks fail closed. Those
 provider descriptors stay live through every measured launch. Immediately
@@ -198,8 +205,11 @@ review authority object naming the person and Git author. The document's
 last-touch commit must be a prior single-parent commit that changes exactly that
 one review file, and the blob must remain identical at the measured source
 revision, one of its direct parents, current `HEAD`, and the checkout. The
-filename must equal the trace digest. Reviewer identities naming Codex, GPT,
-OpenAI, another model, an assistant, an agent, automation, or a bot fail closed,
+filename must equal the trace digest. Reviewer identities are Unicode-
+normalized, split into alphanumeric tokens, and stripped of numeric model
+suffixes before checking; names such as `GPT5`, `ChatGPT5`, `Claude3`,
+`Codex5`, and `Gemini2`, as well as other model, assistant, agent, automation,
+or bot identities, fail closed,
 but the name filter is only defense in depth: the dedicated path, immutable
 single-file publication commit, exact blob, and same-artifact observations are
 the actual local evidence boundary. The structural verifier re-reads that Git

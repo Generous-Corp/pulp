@@ -30,7 +30,8 @@ import sys
 import tempfile
 import time
 import types
-from pathlib import Path
+import unicodedata
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -59,12 +60,21 @@ EXPECTED_EXIT = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
 ANALYSIS_TIMEOUT_SECONDS = 300
 MCP_RESPONSE_LIMIT_BYTES = 1024 * 1024
 OFFLINE_STRUCTURAL_STATUS = "nonterminal-offline-structural-evidence"
-NON_HUMAN_REVIEWER = re.compile(
-    r"\b(?:agent|assistant|bot|codex|claude|chatgpt|gpt(?:-[0-9.]+)?|"
-    r"gemini|copilot|llm|model|openai|reasoning[ -]system|"
-    r"automation|automated|artificial[ -]intelligence)\b",
-    re.IGNORECASE,
-)
+NON_HUMAN_IDENTITY_TOKENS = frozenset({
+    "agent", "assistant", "automated", "automation", "bot", "chatgpt",
+    "claude", "codex", "copilot", "gemini", "gpt", "llm", "model",
+    "openai",
+})
+NON_HUMAN_IDENTITY_PHRASES = frozenset({
+    "artificialintelligence", "reasoningsystem",
+})
+A2T_EXECUTING_SOURCE_PATHS = frozenset({
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+})
 A2T_ANALYZER_SOURCE_PATHS = {
     "CMakeLists.txt",
     ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
@@ -243,6 +253,9 @@ V8_PROVIDER_TOP_LEVEL = frozenset({
     "VERSION", "VERSION.md", "bin", "data", "icudtl.dat", "include",
     "jniLibs", "lib", "share", "snapshot_blob.bin",
 })
+SKIA_GPU_PLATFORM_DIRECTORY = re.compile(
+    r"^(?:mac|win|linux|android(?:-x86_64)?|ios|wasm)-gpu$"
+)
 
 
 def sha256(path: Path) -> str:
@@ -1570,21 +1583,15 @@ def _provider_generation_authority(
     dependency_name: str,
     stamp_name: str,
     allowed_top_level: frozenset[str],
-    allow_platform_gpu_directories: bool = False,
+    additional_allowed_top_level: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Bind a provider to one pinned release generation and package layout."""
     try:
         entries = sorted(root.iterdir(), key=lambda path: path.name)
     except OSError as error:
         raise ValueError(f"cannot inventory {dependency_name} provider root") from error
-    unexpected = [
-        entry.name for entry in entries
-        if entry.name not in allowed_top_level
-        and not (
-            allow_platform_gpu_directories
-            and re.fullmatch(r"[A-Za-z0-9_+-]+-gpu", entry.name)
-        )
-    ]
+    exact_allowed = allowed_top_level | additional_allowed_top_level
+    unexpected = [entry.name for entry in entries if entry.name not in exact_allowed]
     if unexpected:
         raise ValueError(
             f"{dependency_name} provider root contains unrelated top-level data: "
@@ -1629,7 +1636,7 @@ def _skia_archive_layout(library: Path) -> tuple[Path, str] | None:
         len(parents) >= 5
         and parents[0].name == "Release"
         and parents[1].name == "lib"
-        and parents[2].name.endswith("-gpu")
+        and SKIA_GPU_PLATFORM_DIRECTORY.fullmatch(parents[2].name)
         and parents[3].name == "build"
     ):
         return parents[4], "build/<platform>-gpu/lib/Release"
@@ -1637,7 +1644,7 @@ def _skia_archive_layout(library: Path) -> tuple[Path, str] | None:
         len(parents) >= 4
         and parents[0].name == "Release"
         and parents[1].name == "lib"
-        and parents[2].name.endswith("-gpu")
+        and SKIA_GPU_PLATFORM_DIRECTORY.fullmatch(parents[2].name)
     ):
         return parents[3], "<platform>-gpu/lib/Release"
     if (
@@ -1652,6 +1659,48 @@ def _skia_archive_layout(library: Path) -> tuple[Path, str] | None:
     if len(parents) >= 2 and parents[0].name == "lib":
         return parents[1], "lib"
     return None
+
+
+def skia_consumed_top_level_entries(authority: dict[str, Any]) -> frozenset[str]:
+    """Derive the only provider-root additions authorized by consumed archives."""
+    layout = authority.get("provider_layout")
+    patterns = {
+        "build/<platform>-gpu/lib/Release": re.compile(
+            r"build/(?:mac|win|linux|android(?:-x86_64)?|ios|wasm)-gpu/"
+            r"lib/Release/(?:libskia\.a|skia\.lib)"
+        ),
+        "<platform>-gpu/lib/Release": re.compile(
+            r"(?:mac|win|linux|android(?:-x86_64)?|ios|wasm)-gpu/"
+            r"lib/Release/(?:libskia\.a|skia\.lib)"
+        ),
+        "<platform>/lib": re.compile(
+            r"(?:mac|win|linux|android|ios|wasm)(?:[-_][A-Za-z0-9_+-]+)?/"
+            r"lib/(?:libskia\.a|skia\.lib)"
+        ),
+        "lib": re.compile(r"lib/(?:libskia\.a|skia\.lib)"),
+    }
+    pattern = patterns.get(layout)
+    archives = authority.get("consumed_skia_archives")
+    if pattern is None or not isinstance(archives, list) or not archives:
+        raise ValueError("Skia provider lacks an exact consumed archive layout")
+    if any(not isinstance(value, str) for value in archives):
+        raise ValueError("Skia provider has an invalid consumed archive path")
+    if len(archives) != len(set(archives)):
+        raise ValueError("Skia provider repeats a consumed archive path")
+    top_level: set[str] = set()
+    for value in archives:
+        if len(value) > 512:
+            raise ValueError("Skia provider has an invalid consumed archive path")
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or not path.parts
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or pattern.fullmatch(value) is None
+        ):
+            raise ValueError("Skia provider consumed archive disagrees with its layout")
+        top_level.add(path.parts[0])
+    return frozenset(top_level)
 
 
 def _resolved_skia_root(
@@ -1739,19 +1788,26 @@ def _resolved_skia_root(
     )
     if not any(path.is_file() and not path.is_symlink() for path in header_roots):
         raise ValueError("Skia provider layout lacks its exact include root")
+    consumed_relative = [
+        library.relative_to(lexical_root).as_posix() for library in consumed
+    ]
+    layout_authority = {
+        "provider_layout": layout_name,
+        "consumed_skia_archives": consumed_relative,
+    }
+    consumed_top_level = skia_consumed_top_level_entries(layout_authority)
     authority = _provider_generation_authority(
         lexical_root,
         dependency_name="Skia",
         stamp_name=".skia-asset-sha256",
         allowed_top_level=SKIA_PROVIDER_TOP_LEVEL,
-        allow_platform_gpu_directories=True,
+        additional_allowed_top_level=consumed_top_level,
     )
     authority.update({
         "cache_authority": "SKIA_DIR" if configured_root is not None else "generated-ninja",
         "provider_layout": layout_name,
-        "consumed_skia_archives": [
-            library.relative_to(lexical_root).as_posix() for library in consumed
-        ],
+        "consumed_skia_archives": consumed_relative,
+        "consumed_top_level_entries": sorted(consumed_top_level),
     })
     return lexical_root, authority
 
@@ -3396,6 +3452,40 @@ def checkout_blobs(repository: Path, paths: set[str]) -> dict[str, str]:
     }
 
 
+def executing_checkout_source_identity(
+    repository: Path, revision: str
+) -> dict[str, Any]:
+    """Bind executed A2T Python sources to their one exact live checkout."""
+    repository = repository.resolve()
+    script_repository = SCRIPT_DIR.parents[1].resolve()
+    if repository != script_repository:
+        raise ValueError(
+            "A2T repository must be the exact checkout containing the executing "
+            "recorder, verifier, and support modules"
+        )
+    assert_exact_live_head(repository, revision)
+    for relative in A2T_EXECUTING_SOURCE_PATHS:
+        path = repository / relative
+        if path.is_symlink() or not path.is_file() or path.parent != SCRIPT_DIR:
+            raise ValueError(
+                f"executing A2T source is not an exact sibling regular file: {relative}"
+            )
+    paths = set(A2T_EXECUTING_SOURCE_PATHS)
+    historical = git_blobs(repository, revision, paths)
+    head = git_blobs(repository, "HEAD", paths)
+    checkout = checkout_blobs(repository, paths)
+    if set(historical) != paths or historical != head or historical != checkout:
+        raise ValueError(
+            "executing A2T recorder/verifier/support sources are not exact-head Git blobs"
+        )
+    return {
+        "method": "same-executing-checkout-exact-git-blobs-v1",
+        "repository": "Generous-Corp/pulp",
+        "revision": revision,
+        "source_blobs": historical,
+    }
+
+
 def measured_source_paths(repository: Path, trace: Path) -> set[str]:
     try:
         relative_trace = trace.resolve().relative_to(repository.resolve()).as_posix()
@@ -3482,6 +3572,18 @@ def source_revisions_match(source_revision: str, mcp_source_revision: str) -> bo
     return bool(mcp_source_revision) and mcp_source_revision == source_revision
 
 
+def _identity_names_automated_system(value: str) -> bool:
+    """Reject normalized agent/model identities, including numeric versions."""
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    tokens = re.findall(r"[a-z0-9]+", normalized)
+    for token in tokens:
+        base = re.sub(r"[0-9]+$", "", token)
+        if base in NON_HUMAN_IDENTITY_TOKENS:
+            return True
+    compact = "".join(tokens)
+    return any(phrase in compact for phrase in NON_HUMAN_IDENTITY_PHRASES)
+
+
 def validate_independent_human_review_document(
     review_document: Any,
     *,
@@ -3556,8 +3658,8 @@ def validate_independent_human_review_document(
     git_author = authority["git_commit_author"].strip()
     if (
         len(reviewer) > 200
-        or NON_HUMAN_REVIEWER.search(reviewer)
-        or NON_HUMAN_REVIEWER.search(git_author)
+        or _identity_names_automated_system(reviewer)
+        or _identity_names_automated_system(git_author)
     ):
         raise ValueError(
             "independent human-review identity names an automated agent or model"
@@ -3856,6 +3958,9 @@ def main() -> int:
     ):
         build_environment.pop(inherited_override, None)
     try:
+        executing_source_identity = executing_checkout_source_identity(
+            repository, args.source_revision
+        )
         validate_output_path(
             output, (repository, planning_repository, build_dir, prefix)
         )
@@ -4037,6 +4142,10 @@ def main() -> int:
         provider_input_claim.assert_full()
         if clean_source_identity(repository, args.source_revision) != source_identity:
             raise ValueError("source identity changed during A2T recording")
+        if executing_checkout_source_identity(
+            repository, args.source_revision
+        ) != executing_source_identity:
+            raise ValueError("executing A2T source identity changed during recording")
         if source_binding(repository, args.source_revision, trace) != binding:
             raise ValueError("source binding changed during A2T recording")
         if exact_build_install_identity(
@@ -4064,6 +4173,7 @@ def main() -> int:
         "integration_head": binding["integration_head"],
         "source_blobs": binding["source_blobs"],
         "source_identity": source_identity,
+        "executing_source_identity": executing_source_identity,
         "installed_source_identity": installed_identity,
         "accepted_plan": accepted_plan,
         "scope": "offline-installed-cli-mcp-analysis",
@@ -4156,6 +4266,10 @@ def main() -> int:
     if problems:
         parser.error("A2T structural self-verification failed: " + "; ".join(problems))
     assert_exact_live_head(repository, args.source_revision)
+    if executing_checkout_source_identity(
+        repository, args.source_revision
+    ) != executing_source_identity:
+        parser.error("executing A2T source identity changed after publication")
     execution_claim.assert_current()
     source_tree_claim.assert_full()
     build_input_claim.assert_full()

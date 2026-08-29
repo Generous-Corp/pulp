@@ -41,9 +41,12 @@ not create or promote a receipt during an implementation turn.
   archives, V8 headers, and the V8 runtime). When FindSkia activates the
   adjacent `SKIA_DIR/../skia-src` include layout, that complete source-provider
   tree is retained too. Each binary provider must be the exact CMake/Ninja
-  consumed package root, match a fixed supported directory layout, carry a
+  consumed package root, match a fixed supported platform directory layout,
+  carry a
   release-asset generation stamp pinned by `tools/deps/manifest.json`, and
-  contain no unrelated top-level organization/monorepo data. Escaping provider
+  contain no top-level entry beyond fixed package entries and the exact
+  directory derived from the consumed archive paths. Arbitrary `*-gpu`
+  directory names are not accepted. Escaping provider
   symlinks fail closed.
   The recorder then forces a CMake clean, removes
   the Rust Cargo target cache, and requires all three measured outputs absent

@@ -171,6 +171,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     "consumed_skia_archives": [
                         "build/mac-gpu/lib/Release/libskia.a"
                     ],
+                    "consumed_top_level_entries": ["build"],
                 },
                 "tree_claim": tree_claim,
                 "required_members": [
@@ -608,7 +609,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             claim = receipt["install_provenance"]["render_provider_input_claim"]
             claim["providers"]["skia_dawn"]["root_authority"][
                 "top_level_entries"
-            ].append("unrelated-product")
+            ].append("unrelated-product-gpu")
             claim["manifest_sha256"] = hashlib.sha256(
                 json.dumps(
                     {
