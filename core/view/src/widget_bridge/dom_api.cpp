@@ -155,10 +155,10 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         // role: the React-DOM commit fast path appends the lowercase tag
         // directly through __domAppend. Give that semantic element the same
         // built-in role and hover feedback as an explicitly-role'd button.
-        // A later setAccessibilityRole call remains authoritative and can
-        // replace or clear both defaults.
+        // A later explicit role remains authoritative; removing it restores
+        // this implicit HTML role and its default hover feedback.
         if (tag == "button") {
-            child->set_access_role(View::AccessRole::button);
+            child->set_implicit_access_role(View::AccessRole::button);
             child->set_default_hover_feedback(true);
         }
         self.widgets_[childId] = child.get();

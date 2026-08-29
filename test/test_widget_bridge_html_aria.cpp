@@ -247,6 +247,16 @@ TEST_CASE("HTML aria-pressed / -checked / -disabled / -hidden route to View slot
     REQUIRE(btn->access_role() == View::AccessRole::button);
     REQUIRE(btn->default_hover_feedback());
 
+    // Removing an explicit role restores the HTML element's implicit button
+    // semantics instead of erasing both accessibility and hover feedback.
+    bridge.load_script(R"(
+        var semanticButton = document.getElementById('mute-btn');
+        semanticButton.setAttribute('role', 'switch');
+        semanticButton.removeAttribute('role');
+    )");
+    REQUIRE(btn->access_role() == View::AccessRole::button);
+    REQUIRE(btn->default_hover_feedback());
+
     // Fast-path values.
     REQUIRE(btn->access_pressed()  == "true");
     REQUIRE(btn->access_disabled() == "false");
