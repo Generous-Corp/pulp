@@ -55,4 +55,3 @@ The complete local run, including immutable producer copies, remains at
 The final 84-cell A4 disposition is still dependency-gated until the 24 Forge
 and 12 web cells are ingested into the same authority tuple and the required
 A2T/A3 dependency receipts are attached.
-
