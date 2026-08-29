@@ -58,6 +58,13 @@ Not supported by this skill:
 
 3. **Three.js fetched via FetchContent** — `PULP_HAS_THREEJS` is set automatically when GPU + tests are enabled.
 
+4. **Bind runtime demo fixtures at configure time** — ccache may prefix-map
+   `__FILE__` to a cache-owned diagnostic path. Files such as
+   `demo.js.template` must use a CMake-provided source-directory definition;
+   never derive runtime asset paths from `__FILE__` or from the fetched
+   Three.js directory. The strict provider-identity cube gate must work from a
+   warm shared cache and an arbitrary build directory.
+
 ## Failure Modes To Recognize
 
 These three failures all present as "demo says `status: 'ready'` but the canvas is solid black/blank" — Three.js's `renderer.init()` uses `new Promise(async (resolve, reject) => {…})` which silently swallows any throw inside the executor, so errors do NOT propagate as rejections. Whenever you see a black canvas, suspect one of these:

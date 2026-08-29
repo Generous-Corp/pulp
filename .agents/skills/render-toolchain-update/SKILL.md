@@ -94,7 +94,9 @@ claiming a matched tuple:
    manifest notes. Do not rewrite V8's historical `skia_release_tag`,
    `paired_skia`, or `paired_dawn` to the newer active Skia values.
 3. Run the sealed V8 provider-identity/ODR gate against the new Skia/Dawn
-   provider. A successful Skia-only build does not prove mixed-provider safety.
+   provider. Keep this in the required release-path CI surface while the mixed
+   selection is active; a successful one-off local or Skia-only build does not
+   prove mixed-provider safety.
 4. Record a precise follow-up trigger: adopt V8 only after the matched release
    contains every required platform asset and its embedded pair manifest passes
    the normal milestone checks.
@@ -126,11 +128,17 @@ available.
    Skia asset and matched V8 asset, configure with GPU + Lottie + V8, and run the
    provider-identity/ODR validation. A pixel-only test is insufficient.
    For m153+, run `python3 tools/scripts/verify_skia_m153_capabilities.py
-   --skia-dir <materialized-generation>` to prove `SkLogHandler` and Graphite's
-   executor field are backed by linkable provider symbols, not headers alone.
+   --platform <matrix-platform> --skia-dir <materialized-generation>`. The
+   probe must reject a directory unless its verified asset stamp matches that
+   platform's manifest digest and both Skia and Dawn archives are materialized.
+   It proves the new API and exported-symbol surface against the exact provider;
+   actual Graphite executor dispatch belongs to the integration's measured
+   behavior gate, not this toolchain probe.
 8. Measure every Apple slice actually selected by the manifest. A same-tag asset can
-   leak a higher deployment target than its universal sibling; use the verified
-   universal slice or rebuild rather than publishing a false minimum-OS claim.
+   leak a higher deployment target than its universal sibling. Measure the exact
+   thin archive when the manifest selects a thin archive; evidence from a
+   universal sibling is not interchangeable. Use the verified selected asset or
+   rebuild rather than publishing a false minimum-OS claim.
 9. Re-bake CI goldens when either prebuilt pin changes, then ship only after required CI
    and cross-platform asset coverage are green.
 10. Exercise the shared-cache publication path with
@@ -149,6 +157,13 @@ available.
     generation and performs no download. Skip or defer a host only with an
     explicit offline/retired disposition; never copy a checkout cache between
     machines.
+12. Treat missing provenance as a cold cache. A materialized library plus a
+    tracked `VERSION.md` digest is not proof that those bytes came from that
+    archive: without the exact fetcher-written asset stamp, re-download and
+    verify before publication. Source fallbacks must likewise pin the builder
+    revision and fail before copying output unless the built Skia checkout HEAD
+    equals the manifest's immutable `skia_commit`; a milestone branch name alone
+    is never sufficient provenance.
 
 ## Common traps
 
