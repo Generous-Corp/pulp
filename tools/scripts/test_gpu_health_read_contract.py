@@ -72,6 +72,11 @@ def startup_document(health: dict[str, Any]) -> dict[str, Any]:
                 {
                     "sequence": sequence,
                     "cache_state": cache,
+                    "lifecycle_id": f"lifecycle-{sequence}",
+                    "cache_provenance": (
+                        "fresh-process" if cache == "cold"
+                        else "same-process-editor-reopen"
+                    ),
                     "editor_open_to_first_nonblank_ms": duration,
                     "interaction_hitch_ms": hitch,
                     "shader_compile_ms": compile_ms,

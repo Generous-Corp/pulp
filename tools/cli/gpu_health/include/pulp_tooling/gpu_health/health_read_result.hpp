@@ -21,6 +21,12 @@ enum class MeasurementStatus { complete, incomplete, unavailable, unverified };
 enum class MeasurementEndpoint { native_compositor_presentation, headless_capture_complete };
 enum class BudgetStatus { ratified, unratified };
 enum class CacheState { cold, warm };
+enum class CacheProvenance {
+    unknown,
+    fresh_process,
+    explicit_cache_reset,
+    same_process_editor_reopen,
+};
 enum class VisibleState { prepared, fallback, unknown };
 enum class PipelineContribution { material, not_material, unattributed, unverified };
 enum class CausalAttribution { complete, incomplete, unavailable, unverified };
@@ -80,6 +86,10 @@ struct StartupIdentity {
 struct StartupTrial {
     std::uint32_t sequence = 0;
     CacheState cache_state = CacheState::cold;
+    /// Unique editor lifecycle identity retained in the durable response.
+    std::optional<std::string> lifecycle_id;
+    /// Explicit cache boundary; never inferred from cold/warm labels or timing.
+    CacheProvenance cache_provenance = CacheProvenance::unknown;
     std::optional<double> editor_open_to_first_nonblank_ms;
     std::optional<double> interaction_hitch_ms;
     std::optional<double> shader_compile_ms;
@@ -126,6 +136,7 @@ std::string_view to_string(MeasurementStatus value);
 std::string_view to_string(MeasurementEndpoint value);
 std::string_view to_string(BudgetStatus value);
 std::string_view to_string(CacheState value);
+std::string_view to_string(CacheProvenance value);
 std::string_view to_string(VisibleState value);
 std::string_view to_string(PipelineContribution value);
 std::string_view to_string(CausalAttribution value);

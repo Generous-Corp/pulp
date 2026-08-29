@@ -144,6 +144,12 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 #define PULP_TRACE_BEGIN(category, name) \
     TRACE_EVENT_BEGIN(category, ::perfetto::StaticString(name))
 
+// Begin a cross-call named span with the same typed annotation contract as
+// PULP_TRACE_SCOPE_NAMED_ARGS. The matching PULP_TRACE_END must run on the
+// same non-audio thread.
+#define PULP_TRACE_BEGIN_ARGS(category, name, ...) \
+    TRACE_EVENT_BEGIN(category, ::perfetto::StaticString(name), __VA_ARGS__)
+
 #define PULP_TRACE_END(category) TRACE_EVENT_END(category)
 
 #define PULP_TRACE_COUNTER(category, name, value) \
@@ -158,6 +164,7 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 #define PULP_TRACE_SCOPE_DYNAMIC(category, name_expr) ((void)0)
 #define PULP_TRACE_SCOPE_NAMED_ARGS(category, name, ...) ((void)0)
 #define PULP_TRACE_BEGIN(category, name) ((void)0)
+#define PULP_TRACE_BEGIN_ARGS(category, name, ...) ((void)0)
 #define PULP_TRACE_END(category) ((void)0)
 #define PULP_TRACE_COUNTER(category, name, value) ((void)0)
 

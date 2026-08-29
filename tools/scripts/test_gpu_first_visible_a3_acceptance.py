@@ -63,7 +63,17 @@ def identity(role: str, index: int) -> dict[str, Any]:
 def samples(cache_state: str) -> list[dict[str, Any]]:
     start = 0 if cache_state == "cold" else 10
     return [
-        {"sequence": sequence, "duration_ms": 10 + sequence, "hitch_ms": 1 + sequence / 10}
+        {
+            "sequence": sequence,
+            "duration_ms": 10 + sequence,
+            "hitch_ms": 1 + sequence / 10,
+            "lifecycle_id": f"lifecycle-{sequence}",
+            "process_id": f"process-{sequence}",
+            "cache_provenance": (
+                "fresh-process" if cache_state == "cold"
+                else "same-process-editor-reopen"
+            ),
+        }
         for sequence in range(start, start + 10)
     ]
 
@@ -114,6 +124,8 @@ def health_result(campaign_identity: dict[str, Any], budget: dict[str, Any]) -> 
         {
             "sequence": sample["sequence"],
             "cache_state": "cold" if sample["sequence"] < 10 else "warm",
+            "lifecycle_id": sample["lifecycle_id"],
+            "cache_provenance": sample["cache_provenance"],
             "editor_open_to_first_nonblank_ms": sample["duration_ms"],
             "interaction_hitch_ms": sample["hitch_ms"],
             "shader_compile_ms": 2 if sample["sequence"] < 10 else 0,
@@ -615,6 +627,22 @@ def main() -> int:
         receipt = json.loads(output.read_text(encoding="utf-8"))
         assert a3.validate_receipt(receipt, root) is True
 
+        ratified_output = root / "ratified-by-tool.json"
+        ratified = subprocess.run(
+            [
+                sys.executable, str(SCRIPT_DIR / "gpu_first_visible_a3_acceptance.py"),
+                "ratify-budget", "--cold", "budget-cold.json", "--warm",
+                "budget-warm.json", "--plan-revision", PLAN_REVISION,
+                "--pulp-revision", PULP_REVISION, "--output", str(ratified_output),
+                "--evidence-root", str(root),
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+        )
+        assert ratified.returncode == 0, ratified.stderr
+        assert json.loads(ratified_output.read_text(encoding="utf-8")) == json.loads(
+            (root / "budget.json").read_text(encoding="utf-8")
+        )
+
         causal_startup = json.loads((root / "forge-health.json").read_text(encoding="utf-8"))["startup"]
         causal_analysis = json.loads((root / "trace-analysis.json").read_text(encoding="utf-8"))
         assert a3.derive_b4_disposition(causal_startup, causal_analysis)[0] == "no-change"
@@ -793,6 +821,28 @@ def main() -> int:
         write_json(root, raw_ref["path"], raw)
         rehash(mutated, root, raw_ref)
         expect_failure(mutated, root, "keys differ")
+        raw_path.write_text(original_raw, encoding="utf-8")
+
+        mutated = copy.deepcopy(receipt)
+        raw_ref = mutated["campaigns"][0]["raw_warm"]
+        raw_path = root / raw_ref["path"]
+        original_raw = raw_path.read_text(encoding="utf-8")
+        raw = json.loads(original_raw)
+        raw["samples"][0]["cache_provenance"] = "fresh-process"
+        write_json(root, raw_ref["path"], raw)
+        rehash(mutated, root, raw_ref)
+        expect_failure(mutated, root, "cache provenance does not prove warm")
+        raw_path.write_text(original_raw, encoding="utf-8")
+
+        mutated = copy.deepcopy(receipt)
+        raw_ref = mutated["campaigns"][0]["raw_cold"]
+        raw_path = root / raw_ref["path"]
+        original_raw = raw_path.read_text(encoding="utf-8")
+        raw = json.loads(original_raw)
+        raw["samples"][1]["lifecycle_id"] = raw["samples"][0]["lifecycle_id"]
+        write_json(root, raw_ref["path"], raw)
+        rehash(mutated, root, raw_ref)
+        expect_failure(mutated, root, "lifecycle identities must be unique")
         raw_path.write_text(original_raw, encoding="utf-8")
 
         mutated = copy.deepcopy(receipt)
@@ -1007,7 +1057,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=38 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=40 "
             "checked_in_nonterminal=verified"
         )
     return 0

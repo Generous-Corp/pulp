@@ -275,8 +275,17 @@ def validate_raw_samples(
     if not isinstance(samples, list) or len(samples) != 10:
         raise AcceptanceError(f"{label} must contain exactly 10 samples")
     sequences: set[int] = set()
+    lifecycle_ids: set[str] = set()
+    fresh_process_ids: set[str] = set()
     for index, sample in enumerate(samples):
-        exact_keys(sample, {"sequence", "duration_ms", "hitch_ms"}, f"{label}.samples[{index}]")
+        exact_keys(
+            sample,
+            {
+                "sequence", "duration_ms", "hitch_ms", "lifecycle_id", "process_id",
+                "cache_provenance",
+            },
+            f"{label}.samples[{index}]",
+        )
         if not isinstance(sample["sequence"], int) or isinstance(sample["sequence"], bool):
             raise AcceptanceError(f"{label}.samples[{index}].sequence must be an integer")
         for metric in ("duration_ms", "hitch_ms"):
@@ -286,6 +295,27 @@ def validate_raw_samples(
                 or not math.isfinite(value) or value < 0
             ):
                 raise AcceptanceError(f"{label}.samples[{index}].{metric} must be finite and non-negative")
+        for field in ("lifecycle_id", "process_id"):
+            value = sample[field]
+            if not isinstance(value, str) or not value or len(value) > 128:
+                raise AcceptanceError(
+                    f"{label}.samples[{index}].{field} must be a bounded identity"
+                )
+        expected_provenance = (
+            {"fresh-process", "explicit-cache-reset"}
+            if cache_state == "cold" else {"same-process-editor-reopen"}
+        )
+        if sample["cache_provenance"] not in expected_provenance:
+            raise AcceptanceError(
+                f"{label}.samples[{index}] cache provenance does not prove {cache_state}"
+            )
+        if sample["lifecycle_id"] in lifecycle_ids:
+            raise AcceptanceError(f"{label} lifecycle identities must be unique")
+        lifecycle_ids.add(sample["lifecycle_id"])
+        if sample["cache_provenance"] == "fresh-process":
+            if sample["process_id"] in fresh_process_ids:
+                raise AcceptanceError(f"{label} fresh-process trials must use unique processes")
+            fresh_process_ids.add(sample["process_id"])
         sequences.add(sample["sequence"])
     if len(sequences) != len(samples):
         raise AcceptanceError(f"{label} sample sequences must be unique")
@@ -463,6 +493,15 @@ def validate_health(
         or trial["content_floor_passed"] is not True or trial["visible_state"] == "unknown"
         or not finite_non_negative(trial["editor_open_to_first_nonblank_ms"])
         or not finite_non_negative(trial["interaction_hitch_ms"])
+        or not isinstance(trial["lifecycle_id"], str) or not trial["lifecycle_id"]
+        or (
+            trial["cache_state"] == "cold"
+            and trial["cache_provenance"] not in {"fresh-process", "explicit-cache-reset"}
+        )
+        or (
+            trial["cache_state"] == "warm"
+            and trial["cache_provenance"] != "same-process-editor-reopen"
+        )
         or trial["observed_target_signature_sha256"] != startup["identity"]["expected_target_signature_sha256"]
         or trial["sequence"] != index
         for index, trial in enumerate(trials)
@@ -481,11 +520,25 @@ def validate_health(
     warm = [trial for trial in trials if trial["cache_state"] == "warm"]
     if len(cold) != 10 or len(warm) != 10:
         raise AcceptanceError(f"{label} must contain 10 cold and 10 warm trials")
+    if len({trial["lifecycle_id"] for trial in trials}) != len(trials):
+        raise AcceptanceError(f"{label} lifecycle identities must be unique across the campaign")
     projected = lambda rows: [
-        {"sequence": row["sequence"], "duration_ms": row["editor_open_to_first_nonblank_ms"], "hitch_ms": row["interaction_hitch_ms"]}
+        {
+            "sequence": row["sequence"],
+            "duration_ms": row["editor_open_to_first_nonblank_ms"],
+            "hitch_ms": row["interaction_hitch_ms"],
+            "lifecycle_id": row["lifecycle_id"],
+            "cache_provenance": row["cache_provenance"],
+        }
         for row in rows
     ]
-    if projected(cold) != cold_samples or projected(warm) != warm_samples:
+    raw_projected = lambda rows: [
+        {key: row[key] for key in (
+            "sequence", "duration_ms", "hitch_ms", "lifecycle_id", "cache_provenance",
+        )}
+        for row in rows
+    ]
+    if projected(cold) != raw_projected(cold_samples) or projected(warm) != raw_projected(warm_samples):
         raise AcceptanceError(f"{label} raw cold/warm samples differ from its health result")
     durations = [float(trial["editor_open_to_first_nonblank_ms"]) for trial in trials]
     hitches = [float(trial["interaction_hitch_ms"]) for trial in trials]
@@ -1087,6 +1140,61 @@ def atomic_write(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def ratify_budget(
+    *, cold_path: str, warm_path: str, evidence_root: Path,
+    plan_revision: str, pulp_revision: str,
+) -> dict[str, Any]:
+    """Derive a budget only from exact, provenance-bearing 10/10 raw trials."""
+    for label, revision in (("plan", plan_revision), ("Pulp", pulp_revision)):
+        if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+            raise AcceptanceError(f"{label} revision must be an exact Git SHA")
+    cold_snapshot = snapshot_relative(cold_path, evidence_root, "budget.raw_cold")
+    warm_snapshot = snapshot_relative(warm_path, evidence_root, "budget.raw_warm")
+    try:
+        cold = json.loads(cold_snapshot.data)
+        warm = json.loads(warm_snapshot.data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AcceptanceError(f"cannot parse budget raw evidence: {error}") from error
+    if not isinstance(cold, dict) or not isinstance(warm, dict):
+        raise AcceptanceError("budget raw evidence must contain JSON objects")
+    cold_host = cold.get("reference_host")
+    warm_host = warm.get("reference_host")
+    validate_reference_host(cold_host, "budget.raw_cold.reference_host")
+    validate_reference_host(warm_host, "budget.raw_warm.reference_host")
+    if cold_host != warm_host:
+        raise AcceptanceError("cold and warm budget evidence must bind the same reference host")
+    cold_samples = validate_raw_samples(
+        cold, schema="pulp.gpu-first-visible-budget-raw.v1", cache_state="cold",
+        label="budget.raw_cold", reference_host=cold_host,
+    )
+    warm_samples = validate_raw_samples(
+        warm, schema="pulp.gpu-first-visible-budget-raw.v1", cache_state="warm",
+        label="budget.raw_warm", reference_host=cold_host,
+    )
+    return {
+        "schema": "pulp.gpu-first-visible-budget.v1",
+        "version": 1,
+        "budget_id": "pulp.editor-first-visible.v1",
+        "budget_version": 1,
+        "status": "ratified",
+        "plan_revision": plan_revision,
+        "pulp_revision": pulp_revision,
+        "clock_origin": "editor_open_requested",
+        "endpoint": "first_nonblank_presented_frame",
+        "interaction_hitch_metric": "max_present_interval_before_first_nonblank_ms",
+        "trial_count": 20,
+        "cold_trial_count": 10,
+        "warm_trial_count": 10,
+        "percentile": 95,
+        "threshold_ms": derive_budget_threshold_ms(cold_samples, warm_samples, cold_host),
+        "threshold_policy": BUDGET_THRESHOLD_POLICY,
+        "threshold_source": BUDGET_THRESHOLD_SOURCE,
+        "reference_hosts": [cold_host],
+        "cold_raw_sha256": cold_snapshot.sha256,
+        "warm_raw_sha256": warm_snapshot.sha256,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1097,8 +1205,26 @@ def main(argv: list[str] | None = None) -> int:
     generate.add_argument("template", type=Path)
     generate.add_argument("--output", required=True, type=Path)
     generate.add_argument("--evidence-root", type=Path)
+    ratify = subparsers.add_parser("ratify-budget")
+    ratify.add_argument("--cold", required=True)
+    ratify.add_argument("--warm", required=True)
+    ratify.add_argument("--plan-revision", required=True)
+    ratify.add_argument("--pulp-revision", required=True)
+    ratify.add_argument("--output", required=True, type=Path)
+    ratify.add_argument("--evidence-root", type=Path, default=Path.cwd())
     args = parser.parse_args(argv)
     try:
+        if args.command == "ratify-budget":
+            receipt = ratify_budget(
+                cold_path=args.cold,
+                warm_path=args.warm,
+                evidence_root=args.evidence_root.resolve(),
+                plan_revision=args.plan_revision,
+                pulp_revision=args.pulp_revision,
+            )
+            atomic_write(args.output, receipt)
+            print("A3 budget ratification: PASS")
+            return 0
         source = args.receipt if args.command == "verify" else args.template
         evidence_root = (args.evidence_root or source.parent).resolve()
         receipt = load_json(source)

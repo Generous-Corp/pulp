@@ -18,6 +18,7 @@
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/render/gpu_surface.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/motion.hpp>
@@ -83,6 +84,15 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
 
 bool has_capability(const ControlManifest& manifest, InspectorCapability capability) {
     return std::ranges::find(manifest.capabilities, capability) != manifest.capabilities.end();
+}
+
+std::optional<std::string> random_evidence_id() noexcept {
+    try {
+        const auto bytes = runtime::secure_random_bytes(16);
+        return bytes ? std::optional<std::string>{runtime::hex_encode(*bytes)} : std::nullopt;
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 std::atomic<detail::StandaloneRuntimeEvaluatorFactory>& evaluator_factory() {
@@ -339,9 +349,14 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         ControlMainThreadExecutor main_state_write(rpc_, std::move(state_write));
         auto fenced_state_write = main_state_write.executor();
         if (has_capability(*manifest, InspectorCapability::GpuHealthRead)) {
+            gpu_health_evidence_id_ = random_evidence_id();
+            if (const auto trace_id = random_evidence_id())
+                gpu_health_trace_id_ = "trace-" + *trace_id;
             gpu_health_provider_ = std::make_shared<ControlGpuHealthProvider>(
                 ControlGpuHealthProvider::Config{
                     .pulp_build_id = manifest->build_id,
+                    .gpu_evidence_id = gpu_health_evidence_id_,
+                    .trace_evidence_id = gpu_health_trace_id_,
                     .seed_blank_first_frame =
                         std::getenv("PULP_GPU_HEALTH_SEED_BLANK_FRAME") != nullptr});
             if (!gpu_health_provider_->begin_editor_open(
@@ -429,6 +444,14 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     .frame_evidence = [this] {
                         ControlGpuHealthProvider::FrameObservation frame;
                         frame.lifecycle_id = gpu_health_lifecycle_id_;
+                        frame.observed_cache_state =
+                            ControlGpuHealthProvider::CacheState::cold;
+                        frame.cache_provenance =
+                            ControlGpuHealthProvider::CacheProvenance::fresh_process;
+                        frame.trace_evidence_id = gpu_health_trace_id_;
+                        frame.missing_trace_categories = {
+                            "gpu_submission", "native_present_timing", "pipeline_compile",
+                            "resource_upload", "shader_identity", "source_identity"};
                         const auto* surface = window_ ? window_->gpu_surface() : nullptr;
                         if (!surface)
                             return frame;
@@ -678,6 +701,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         gpu_health_view_adapter_.reset();
         gpu_health_provider_.reset();
         gpu_health_lifecycle_id_.clear();
+        gpu_health_evidence_id_.reset();
+        gpu_health_trace_id_.reset();
         evaluator_.reset();
         motion_.reset();
         if (owned_root_ && root_)
@@ -743,6 +768,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     std::shared_ptr<ControlGpuHealthProvider> gpu_health_provider_;
     std::unique_ptr<ControlGpuHealthViewAdapter> gpu_health_view_adapter_;
     std::string gpu_health_lifecycle_id_;
+    std::optional<std::string> gpu_health_evidence_id_;
+    std::optional<std::string> gpu_health_trace_id_;
     std::shared_ptr<RuntimeEvaluator> evaluator_;
     std::shared_ptr<ConsoleCapture> console_;
     view::ScriptedUiSession* log_session_ = nullptr;

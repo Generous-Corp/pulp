@@ -21,6 +21,12 @@ namespace pulp::inspect {
 class ControlGpuHealthProvider final {
   public:
     enum class CacheState { cold, warm };
+    enum class CacheProvenance {
+        unknown,
+        fresh_process,
+        explicit_cache_reset,
+        same_process_editor_reopen,
+    };
     enum class MeasurementEndpoint { native_compositor_presentation, headless_capture_complete };
 
     struct ReferenceHost {
@@ -40,6 +46,9 @@ class ControlGpuHealthProvider final {
         /// Exact 32-lowercase-hex identifier also emitted by the correlated
         /// A2T trace. Required before a startup trial can claim pass/fail.
         std::optional<std::string> gpu_evidence_id;
+        /// Bounded same-instance trace identity emitted beside gpu_evidence_id.
+        /// It is deliberately distinct from the GPU evidence identifier.
+        std::optional<std::string> trace_evidence_id;
         std::string budget_id{"pulp.editor-first-visible.v1"};
         std::uint32_t budget_version = 1;
         /// Ratification is accepted only with a positive threshold, source,
@@ -73,6 +82,9 @@ class ControlGpuHealthProvider final {
         /// independent cold/warm editor opens.
         std::string lifecycle_id;
         std::optional<CacheState> observed_cache_state;
+        /// Producer-observed cache boundary. The provider never derives this
+        /// from elapsed time or the requested cold/warm label.
+        CacheProvenance cache_provenance = CacheProvenance::unknown;
         AdapterIdentity adapter;
         bool capture_valid = false;
         bool content_floor_passed = false;

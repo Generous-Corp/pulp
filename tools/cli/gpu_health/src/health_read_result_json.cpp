@@ -41,6 +41,14 @@ constexpr std::array kCacheStates{
     std::pair{CacheState::cold, std::string_view{"cold"}},
     std::pair{CacheState::warm, std::string_view{"warm"}},
 };
+constexpr std::array kCacheProvenance{
+    std::pair{CacheProvenance::unknown, std::string_view{"unknown"}},
+    std::pair{CacheProvenance::fresh_process, std::string_view{"fresh-process"}},
+    std::pair{CacheProvenance::explicit_cache_reset,
+              std::string_view{"explicit-cache-reset"}},
+    std::pair{CacheProvenance::same_process_editor_reopen,
+              std::string_view{"same-process-editor-reopen"}},
+};
 constexpr std::array kVisibleStates{
     std::pair{VisibleState::prepared, std::string_view{"prepared"}},
     std::pair{VisibleState::fallback, std::string_view{"fallback"}},
@@ -182,6 +190,10 @@ std::string_view to_string(CacheState value) {
     return enum_to_string(value, kCacheStates);
 }
 
+std::string_view to_string(CacheProvenance value) {
+    return enum_to_string(value, kCacheProvenance);
+}
+
 std::string_view to_string(VisibleState value) {
     return enum_to_string(value, kVisibleStates);
 }
@@ -277,10 +289,14 @@ bool validate(const HealthReadResult& result, std::string* error) {
     std::size_t cold_trials = 0;
     std::size_t warm_trials = 0;
     bool blank_failure = false;
+    std::set<std::string> lifecycle_ids;
     for (std::size_t index = 0; index < startup.trials.size(); ++index) {
         const auto& trial = startup.trials[index];
         if (trial.sequence != index)
             return fail("startup trial sequence must be contiguous from zero");
+        if (!optional_bounded_string(trial.lifecycle_id, 128) ||
+            (trial.lifecycle_id && !lifecycle_ids.insert(*trial.lifecycle_id).second))
+            return fail("startup trial lifecycle identity is invalid or duplicated");
         if (!bounded_duration(trial.editor_open_to_first_nonblank_ms) ||
             !bounded_duration(trial.interaction_hitch_ms) ||
             !bounded_duration(trial.shader_compile_ms) || !bounded_duration(trial.upload_ms) ||
@@ -297,6 +313,14 @@ bool validate(const HealthReadResult& result, std::string* error) {
             ++warm_trials;
 
         if (trial.verdict == Verdict::pass) {
+            const bool cache_boundary_matches =
+                trial.cache_state == CacheState::cold
+                    ? trial.cache_provenance == CacheProvenance::fresh_process ||
+                          trial.cache_provenance == CacheProvenance::explicit_cache_reset
+                    : trial.cache_provenance ==
+                          CacheProvenance::same_process_editor_reopen;
+            if (!trial.lifecycle_id || !cache_boundary_matches)
+                return fail("passing startup trial lacks lifecycle/cache provenance");
             if (!trial.editor_open_to_first_nonblank_ms || !trial.interaction_hitch_ms ||
                 trial.content_floor_passed != std::optional<bool>{true} ||
                 trial.visible_state == VisibleState::unknown ||
@@ -477,6 +501,8 @@ std::string to_json(const HealthReadResult& result, bool pretty) {
         auto value = choc::value::createObject("trial");
         value.setMember("sequence", static_cast<std::int64_t>(trial.sequence));
         value.setMember("cache_state", std::string(to_string(trial.cache_state)));
+        set_optional(value, "lifecycle_id", trial.lifecycle_id);
+        value.setMember("cache_provenance", std::string(to_string(trial.cache_provenance)));
         set_optional(value, "editor_open_to_first_nonblank_ms",
                      trial.editor_open_to_first_nonblank_ms);
         set_optional(value, "interaction_hitch_ms", trial.interaction_hitch_ms);

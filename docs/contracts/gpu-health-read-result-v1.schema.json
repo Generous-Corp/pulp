@@ -197,11 +197,13 @@
           "maxItems": 64,
           "items": {
             "type": "object",
-            "required": ["sequence", "cache_state", "editor_open_to_first_nonblank_ms", "interaction_hitch_ms", "shader_compile_ms", "upload_ms", "hidden_frame_ms", "present_ms", "observed_target_signature_sha256", "content_floor_passed", "visible_state", "verdict", "diagnostic_code"],
+            "required": ["sequence", "cache_state", "lifecycle_id", "cache_provenance", "editor_open_to_first_nonblank_ms", "interaction_hitch_ms", "shader_compile_ms", "upload_ms", "hidden_frame_ms", "present_ms", "observed_target_signature_sha256", "content_floor_passed", "visible_state", "verdict", "diagnostic_code"],
             "additionalProperties": false,
             "properties": {
               "sequence": { "type": "integer", "minimum": 0, "maximum": 63 },
               "cache_state": { "enum": ["cold", "warm"] },
+              "lifecycle_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+              "cache_provenance": { "enum": ["unknown", "fresh-process", "explicit-cache-reset", "same-process-editor-reopen"] },
               "editor_open_to_first_nonblank_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
               "interaction_hitch_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
               "shader_compile_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },

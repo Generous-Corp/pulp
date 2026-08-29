@@ -65,6 +65,8 @@ gh::HealthReadResult passing_read_result() {
     startup.trials = {
         {.sequence = 0,
          .cache_state = gh::CacheState::cold,
+         .lifecycle_id = "lifecycle-cold-0",
+         .cache_provenance = gh::CacheProvenance::fresh_process,
          .editor_open_to_first_nonblank_ms = 10.0,
          .interaction_hitch_ms = 4.0,
          .shader_compile_ms = 2.0,
@@ -78,6 +80,8 @@ gh::HealthReadResult passing_read_result() {
          .diagnostic_code = "gpu.startup.pass"},
         {.sequence = 1,
          .cache_state = gh::CacheState::warm,
+         .lifecycle_id = "lifecycle-warm-0",
+         .cache_provenance = gh::CacheProvenance::same_process_editor_reopen,
          .editor_open_to_first_nonblank_ms = 12.0,
          .interaction_hitch_ms = 5.0,
          .shader_compile_ms = 0.0,
@@ -257,6 +261,8 @@ TEST_CASE("GPU health read v1 enforces its frozen cold and warm trial compositio
     std::string error;
     auto warm_only = passing_read_result();
     warm_only.startup.trials[0].cache_state = gh::CacheState::warm;
+    warm_only.startup.trials[0].cache_provenance =
+        gh::CacheProvenance::same_process_editor_reopen;
     REQUIRE_FALSE(gh::validate(warm_only, &error));
     CHECK(error.find("cold/warm") != std::string::npos);
 
@@ -264,4 +270,16 @@ TEST_CASE("GPU health read v1 enforces its frozen cold and warm trial compositio
     budget_drift.startup.budget.cold_trial_count = 2;
     REQUIRE_FALSE(gh::validate(budget_drift, &error));
     CHECK(error.find("composition") != std::string::npos);
+
+    auto reused_lifecycle = passing_read_result();
+    reused_lifecycle.startup.trials[1].lifecycle_id =
+        reused_lifecycle.startup.trials[0].lifecycle_id;
+    REQUIRE_FALSE(gh::validate(reused_lifecycle, &error));
+    CHECK(error.find("lifecycle identity") != std::string::npos);
+
+    auto fabricated_warm_boundary = passing_read_result();
+    fabricated_warm_boundary.startup.trials[1].cache_provenance =
+        gh::CacheProvenance::fresh_process;
+    REQUIRE_FALSE(gh::validate(fabricated_warm_boundary, &error));
+    CHECK(error.find("lifecycle/cache provenance") != std::string::npos);
 }

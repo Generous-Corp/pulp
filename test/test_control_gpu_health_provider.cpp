@@ -71,6 +71,10 @@ void record_complete_campaign_trial(pulp::inspect::ControlGpuHealthProvider& pro
     auto observed = frame(true);
     observed.lifecycle_id = "lifecycle-" + std::to_string(index);
     observed.observed_cache_state = cache_state;
+    observed.cache_provenance =
+        index < 10
+            ? pulp::inspect::ControlGpuHealthProvider::CacheProvenance::fresh_process
+            : pulp::inspect::ControlGpuHealthProvider::CacheProvenance::same_process_editor_reopen;
     observed.native_present_observed = true;
     observed.interaction_hitch_ms = 1.0;
     observed.shader_compile_ms = index < 10 ? 2.0 : 0.0;
@@ -188,6 +192,10 @@ TEST_CASE("GPU health provider completes explicit headless capture with causal g
         auto observed = frame(true);
         observed.lifecycle_id = "headless-lifecycle-" + std::to_string(index);
         observed.observed_cache_state = cache_state;
+        observed.cache_provenance =
+            index < 10
+                ? pulp::inspect::ControlGpuHealthProvider::CacheProvenance::fresh_process
+                : pulp::inspect::ControlGpuHealthProvider::CacheProvenance::same_process_editor_reopen;
         observed.interaction_hitch_ms = 1.0;
         observed.trace_evidence_id = "trace-headless-capture";
         observed.missing_trace_categories = {"pipeline_compile", "resource_upload", "hidden_frame",

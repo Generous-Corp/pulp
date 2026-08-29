@@ -264,8 +264,17 @@ TEST_CASE("exact Standalone product instance publishes capture-only GPU health")
     REQUIRE(startup["trials"][0]["editor_open_to_first_nonblank_ms"].isFloat());
     REQUIRE(startup["trials"][0]["content_floor_passed"].getBool());
     REQUIRE(startup["trials"][0]["verdict"].getString() == "unverified");
-    REQUIRE(startup["correlation"]["gpu_evidence_id"].isVoid());
-    REQUIRE(startup["correlation"]["trace_evidence_id"].isVoid());
+    const auto gpu_evidence_id =
+        std::string(startup["correlation"]["gpu_evidence_id"].getString());
+    const auto trace_evidence_id =
+        std::string(startup["correlation"]["trace_evidence_id"].getString());
+    REQUIRE(gpu_evidence_id.size() == 32);
+    REQUIRE(std::ranges::all_of(gpu_evidence_id, [](unsigned char character) {
+        return (character >= '0' && character <= '9') ||
+               (character >= 'a' && character <= 'f');
+    }));
+    REQUIRE(trace_evidence_id.starts_with("trace-"));
+    REQUIRE(trace_evidence_id != gpu_evidence_id);
 
     REQUIRE_FALSE(product.instance_id.empty());
     REQUIRE_FALSE(product.registration_id.empty());

@@ -1,5 +1,6 @@
 #include <pulp/inspect/control_gpu_health_provider.hpp>
 
+#include <pulp/runtime/trace.hpp>
 #include <pulp_tooling/gpu_health/health_read_result.hpp>
 
 #include <algorithm>
@@ -57,6 +58,18 @@ gh::AdapterIdentity identity(const ControlGpuHealthProvider::AdapterIdentity& va
     if (bounded_string(value.architecture, 256))
         result.architecture = value.architecture;
     return result;
+}
+
+gh::CacheProvenance provenance(ControlGpuHealthProvider::CacheProvenance value) {
+    using Source = ControlGpuHealthProvider::CacheProvenance;
+    switch (value) {
+        case Source::fresh_process: return gh::CacheProvenance::fresh_process;
+        case Source::explicit_cache_reset: return gh::CacheProvenance::explicit_cache_reset;
+        case Source::same_process_editor_reopen:
+            return gh::CacheProvenance::same_process_editor_reopen;
+        case Source::unknown: return gh::CacheProvenance::unknown;
+    }
+    return gh::CacheProvenance::unknown;
 }
 
 bool sha256(std::string_view value) {
@@ -232,6 +245,41 @@ struct ControlGpuHealthProvider::Impl {
         return std::make_shared<gh::HealthReadResult>(
             *std::atomic_load_explicit(&current, std::memory_order_acquire));
     }
+    bool has_trace_identity() const noexcept {
+        return config.gpu_evidence_id && evidence_id(*config.gpu_evidence_id) &&
+               config.trace_evidence_id && bounded_string(*config.trace_evidence_id, 128) &&
+               *config.gpu_evidence_id != *config.trace_evidence_id;
+    }
+    void begin_trace(std::uint32_t frame_index, CacheState observed_cache_state) noexcept {
+        if (!has_trace_identity())
+            return;
+        PULP_TRACE_BEGIN_ARGS(
+            "render", "frame_first_visible_health",
+            "gpu_evidence_id", config.gpu_evidence_id->c_str(),
+            "trace_evidence_id", config.trace_evidence_id->c_str(),
+            "frame_index", frame_index,
+            "cache_state", observed_cache_state == CacheState::cold ? "cold" : "warm");
+        trace_span_open = true;
+    }
+    void trace_transition(std::uint32_t sequence, std::string_view diagnostic_code,
+                          gh::HealthState health_state) noexcept {
+        if (!has_trace_identity())
+            return;
+        PULP_TRACE_SCOPE_NAMED_ARGS(
+            "gpu", "gpu_health_transition_first_visible",
+            "gpu_evidence_id", config.gpu_evidence_id->c_str(),
+            "trace_evidence_id", config.trace_evidence_id->c_str(),
+            "sequence", sequence,
+            "frame_index", sequence,
+            "diagnostic_code", diagnostic_code.data(),
+            "health_state", gh::to_string(health_state).data());
+    }
+    void end_trace() noexcept {
+        if (!trace_span_open)
+            return;
+        PULP_TRACE_END("render");
+        trace_span_open = false;
+    }
 
     Config config;
     std::thread::id writer;
@@ -240,11 +288,15 @@ struct ControlGpuHealthProvider::Impl {
     CacheState cache_state = CacheState::cold;
     bool all_trace_observations_complete = true;
     std::set<std::string> lifecycle_ids;
+    bool trace_span_open = false;
 };
 
 ControlGpuHealthProvider::ControlGpuHealthProvider(Config config)
     : impl_(std::make_unique<Impl>(std::move(config))) {}
-ControlGpuHealthProvider::~ControlGpuHealthProvider() = default;
+ControlGpuHealthProvider::~ControlGpuHealthProvider() {
+    if (impl_->on_writer())
+        impl_->end_trace();
+}
 
 bool ControlGpuHealthProvider::begin_editor_open(
     CacheState cache_state, std::chrono::steady_clock::time_point requested_at) noexcept {
@@ -254,6 +306,7 @@ bool ControlGpuHealthProvider::begin_editor_open(
         return false;
     impl_->cache_state = cache_state;
     impl_->requested_at = requested_at;
+    impl_->begin_trace(static_cast<std::uint32_t>(snapshot->startup.trials.size()), cache_state);
     return true;
 }
 
@@ -356,6 +409,9 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
     trial.sequence = static_cast<std::uint32_t>(result->startup.trials.size());
     trial.cache_state =
         impl_->cache_state == CacheState::cold ? gh::CacheState::cold : gh::CacheState::warm;
+    if (bounded_string(frame.lifecycle_id, 128))
+        trial.lifecycle_id = frame.lifecycle_id;
+    trial.cache_provenance = provenance(frame.cache_provenance);
     if (!capture_unavailable && !blank && std::isfinite(elapsed_wide) && elapsed_wide >= 0.0L &&
         elapsed_wide <= 300'000.0L)
         trial.editor_open_to_first_nonblank_ms = elapsed;
@@ -435,6 +491,10 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
     if (impl_->config.gpu_evidence_id && evidence_id(*impl_->config.gpu_evidence_id))
         result->startup.correlation.gpu_evidence_id = impl_->config.gpu_evidence_id;
     derive_startup_state(result->startup);
+    const auto& recorded = result->startup.trials.back();
+    impl_->trace_transition(recorded.sequence, recorded.diagnostic_code,
+                            result->health.health_state);
+    impl_->end_trace();
     impl_->requested_at.reset();
     impl_->publish(std::move(result));
     return true;
@@ -464,6 +524,10 @@ bool ControlGpuHealthProvider::record_timeout(
     result->startup.trials.push_back(std::move(trial));
     record_capture_event(result->startup.capture);
     derive_startup_state(result->startup);
+    impl_->trace_transition(result->startup.trials.back().sequence,
+                            result->startup.trials.back().diagnostic_code,
+                            result->health.health_state);
+    impl_->end_trace();
     impl_->requested_at.reset();
     impl_->publish(std::move(result));
     return true;
@@ -492,6 +556,10 @@ bool ControlGpuHealthProvider::record_instance_lost() noexcept {
     result->startup.trials.push_back(std::move(trial));
     record_capture_event(result->startup.capture);
     derive_startup_state(result->startup);
+    impl_->trace_transition(result->startup.trials.back().sequence,
+                            result->startup.trials.back().diagnostic_code,
+                            result->health.health_state);
+    impl_->end_trace();
     impl_->requested_at.reset();
     impl_->publish(std::move(result));
     return true;
