@@ -218,6 +218,105 @@ raise SystemExit({"pass": 0, "inconclusive": 2}[outcome])
     path.chmod(0o755)
 
 
+def write_build_driver(path: Path) -> None:
+    path.write_text(
+        r'''#!/usr/bin/env python3
+import argparse, hashlib, json, os, plistlib
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--request", required=True, type=Path)
+parser.add_argument("--receipt", required=True, type=Path)
+args = parser.parse_args()
+request = json.loads(args.request.read_text())
+output = Path(request["output_directory"])
+output.mkdir(parents=True)
+identity = request["identity"]
+product_identity = {
+    key: identity[key] for key in (
+        "pulp_revision", "forge_revision", "build_id", "product_id",
+        "product_name", "plugin_format",
+    )
+}
+marker_payload = json.dumps({
+    "schema": "pulp.gpu-first-visible-embedded-build.v1",
+    "version": 1,
+    "product_identity": product_identity,
+}, sort_keys=True, separators=(",", ":")).encode()
+marker = (
+    b"\0PULP_A3_BUILD_IDENTITY_V1:"
+    + f"{len(marker_payload):08x}".encode() + b":" + marker_payload
+    + b":END_PULP_A3_BUILD_IDENTITY\0"
+)
+role = request["role"]
+if role == "daw":
+    bundle = output / "plugin.vst3"
+    product = bundle / "Contents" / "MacOS" / "plugin-product"
+elif role == "forge":
+    bundle = output / "Forge.app"
+    product = bundle / "Contents" / "MacOS" / "Forge FX"
+else:
+    bundle = None
+    product = output / f"{role}-product"
+product.parent.mkdir(parents=True, exist_ok=True)
+product.write_bytes(f"product:{role}".encode() + marker)
+if "source-build-mismatch" in str(args.request):
+    product.write_bytes(b"source-built bytes differ")
+product.chmod(0o755)
+if role == "forge":
+    (bundle / "Contents" / "Info.plist").write_bytes(plistlib.dumps({
+        "CFBundleExecutable": product.name,
+        "CFBundleIdentifier": identity["product_id"],
+        "CFBundleName": identity["product_name"],
+    }, fmt=plistlib.FMT_BINARY, sort_keys=True))
+
+def tree_digest(root):
+    entries = []
+    for current, _, files in os.walk(root):
+        for filename in files:
+            member = Path(current) / filename
+            entries.append((
+                member.relative_to(root).as_posix(), member.read_bytes(),
+                member.stat().st_mode & 0o777,
+            ))
+    digest = hashlib.sha256(b"pulp-directory-tree-v1\0")
+    for relative, data, mode in sorted(entries):
+        encoded = relative.encode()
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+        digest.update(mode.to_bytes(4, "big"))
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return digest.hexdigest()
+
+receipt = {
+    "schema": "pulp.gpu-first-visible-source-build-receipt.v1",
+    "version": 1,
+    "attempt_nonce": request["attempt_nonce"],
+    "role": role,
+    "outcome": "pass",
+    "reason": None,
+    "identity": identity,
+    "source_revisions": {
+        owner: value["revision"] for owner, value in request["source_roots"].items()
+    },
+    "build_command": ["fixture-source-build", role],
+    "builder_id": "pulp-a3-source-build-fixture",
+    "build_started_utc": "2026-08-29T06:00:00Z",
+    "build_finished_utc": "2026-08-29T06:01:00Z",
+    "driver_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+    "product_path": product.relative_to(output).as_posix(),
+    "product_sha256": hashlib.sha256(product.read_bytes()).hexdigest(),
+    "bundle_path": bundle.relative_to(output).as_posix() if bundle else None,
+    "bundle_tree_sha256": tree_digest(bundle) if bundle else None,
+}
+args.receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+''',
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
 def write_smoke(path: Path) -> None:
     path.write_text(
         "#!/bin/sh\n"
@@ -332,7 +431,9 @@ raise SystemExit(exit_code)
     path.chmod(0o755)
 
 
-def make_pulp_root(path: Path, smoke: Path, driver: Path, analyzer: Path) -> str:
+def make_pulp_root(
+    path: Path, smoke: Path, driver: Path, build_driver: Path, analyzer: Path,
+) -> str:
     path.mkdir()
     sources = {
         "tools/scripts/gpu_first_visible_a3_role_producer.py": (
@@ -343,6 +444,7 @@ def make_pulp_root(path: Path, smoke: Path, driver: Path, analyzer: Path) -> str
             smoke.parent / "insert_and_float.lua"
         ),
         "tools/testing/a3/role-driver.py": driver,
+        "tools/testing/a3/source-build-driver.py": build_driver,
         "tools/scripts/gpu_first_visible_a3_trace_analyzer.py": analyzer,
         "tools/scripts/gpu_first_visible_a3_build_verifier.py": (
             SCRIPT_DIR / "gpu_first_visible_a3_build_verifier.py"
@@ -640,6 +742,13 @@ def run_role(
         f"{PREFIX[role]}_HOST_BIN": str(host),
         f"{PREFIX[role]}_BUILD_ATTESTATION": str(attestation_path),
         f"{PREFIX[role]}_BUILD_PROVENANCE": str(provenance),
+        f"{PREFIX[role]}_BUILD_DRIVER": str(
+            pulp_root / "tools/testing/a3/source-build-driver.py"
+        ),
+        f"{PREFIX[role]}_BUILD_DRIVER_SOURCE_OWNER": "pulp",
+        f"{PREFIX[role]}_BUILD_DRIVER_SOURCE_PATH": (
+            "tools/testing/a3/source-build-driver.py"
+        ),
         f"{PREFIX[role]}_DRIVER_SOURCE_OWNER": "pulp",
         f"{PREFIX[role]}_DRIVER_SOURCE_PATH": "tools/testing/a3/role-driver.py",
     })
@@ -692,11 +801,12 @@ def main() -> int:
         source_receipt = fixture.make_fixture(evidence)
         write_json(evidence / "fixture-receipt.json", source_receipt)
         write_driver(root / "role-driver.py")
+        write_build_driver(root / "source-build-driver.py")
         write_smoke(root / "reaper-smoke")
         write_analyzer(root / "trace-analyzer")
         make_pulp_root(
             root / "pulp-root", root / "reaper-smoke", root / "role-driver.py",
-            root / "trace-analyzer",
+            root / "source-build-driver.py", root / "trace-analyzer",
         )
         make_git_root(root / "forge-root")
         assert_signal_cleanup(root)
@@ -760,6 +870,10 @@ def main() -> int:
                 "build-verifier result does not bind the closed control",
             ),
             (
+                "standalone", "source-build-mismatch", "pass",
+                "independent source build differs",
+            ),
+            (
                 "standalone", "detached-host", "pass",
                 "owned host process IDs remain live",
             ),
@@ -815,7 +929,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=4 planted_negatives=36 cleanup_controls=2"
+            "positive=4 planted_negatives=37 cleanup_controls=2"
         )
     return 0
 

@@ -37,6 +37,8 @@ BUILD_ATTESTATION_SCHEMA = "pulp.gpu-first-visible-product-build-attestation.v1"
 BUILD_PROVENANCE_SCHEMA = "pulp.gpu-first-visible-local-build-provenance.v1"
 BUILD_VERIFIER_REQUEST_SCHEMA = "pulp.gpu-first-visible-build-verification-request.v1"
 BUILD_VERIFIER_RECEIPT_SCHEMA = "pulp.gpu-first-visible-build-verification-receipt.v1"
+SOURCE_BUILD_REQUEST_SCHEMA = "pulp.gpu-first-visible-source-build-request.v1"
+SOURCE_BUILD_RECEIPT_SCHEMA = "pulp.gpu-first-visible-source-build-receipt.v1"
 BUILD_VERIFIER_SOURCE_PATH = "tools/scripts/gpu_first_visible_a3_build_verifier.py"
 TRACE_ANALYZER_SOURCE_PATH = "tools/scripts/gpu_first_visible_a3_trace_analyzer.py"
 TRACE_ANALYZER_RECEIPT_SCHEMA = "pulp.gpu-first-visible-prepared-trace-analyzer.v1"
@@ -119,6 +121,12 @@ TRACE_ANALYZER_RECEIPT_KEYS = {
 }
 TRACE_ANALYZER_TOOL_KEYS = {
     "command_path", "resolved_path", "sha256", "version",
+}
+SOURCE_BUILD_RECEIPT_KEYS = {
+    "schema", "version", "attempt_nonce", "role", "outcome", "reason",
+    "identity", "source_revisions", "build_command", "builder_id",
+    "build_started_utc", "build_finished_utc", "driver_sha256",
+    "product_path", "product_sha256", "bundle_path", "bundle_tree_sha256",
 }
 
 
@@ -812,6 +820,137 @@ def prepare_trace_analyzer(
     ):
         raise ProducerError("prepared trace analyzer is not sealed to the requested source/toolchain")
     return analyzer, analyzer_digest, [receipt_path, stdout_path, stderr_path]
+
+
+def safe_built_path(root: Path, value: Any, label: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise ProducerError(f"{label} is missing")
+    relative = Path(value)
+    lexical = root / relative
+    if relative.is_absolute() or ".." in relative.parts or lexical.is_symlink():
+        raise ProducerError(f"{label} is unsafe")
+    resolved = lexical.resolve()
+    if root.resolve() not in resolved.parents:
+        raise ProducerError(f"{label} escapes the independent build output")
+    return resolved
+
+
+def run_independent_source_build(
+    *, build_driver: Path, build_driver_digest: str, request: dict[str, Any],
+    source_authorities: dict[str, tuple[Path, str]], product_digest: str,
+    bundle_digest: str | None, artifact_directory: Path,
+) -> tuple[str, list[Path], list[tuple[Path, str, str]]]:
+    output = (artifact_directory / "independent-build-output").resolve()
+    if output.exists() or output.is_symlink():
+        raise ProducerError("independent source-build output is not fresh")
+    source_roots = {
+        owner: {"path": str(root), "revision": revision}
+        for owner, (root, revision) in sorted(source_authorities.items())
+    }
+    build_request = {
+        "schema": SOURCE_BUILD_REQUEST_SCHEMA,
+        "version": 1,
+        "attempt_nonce": request["attempt_nonce"],
+        "role": request["role"],
+        "identity": request["identity"],
+        "source_roots": source_roots,
+        "output_directory": str(output),
+        "bundle_required": request["role"] in {"daw", "forge"},
+    }
+    request_path = artifact_directory / "tooling" / "source-build-request.json"
+    receipt_path = artifact_directory / "tooling" / "source-build-receipt.json"
+    stdout_path = artifact_directory / "logs" / "source-build.stdout.log"
+    stderr_path = artifact_directory / "logs" / "source-build.stderr.log"
+    atomic_json(request_path, build_request)
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith("PULP_A3_")
+    }
+    exit_code = bounded_run(
+        [str(build_driver), "--request", str(request_path),
+         "--receipt", str(receipt_path)],
+        cwd=artifact_directory, environment=environment, timeout_seconds=900,
+        stdout_path=stdout_path, stderr_path=stderr_path,
+    )
+    if not receipt_path.is_file() or receipt_path.is_symlink():
+        raise ProducerError("source-bound build driver omitted its receipt")
+    receipt = regular_json(receipt_path, "source-build receipt")
+    exact_keys(receipt, SOURCE_BUILD_RECEIPT_KEYS, "source-build receipt")
+    outcome = receipt["outcome"]
+    if (
+        receipt["schema"] != SOURCE_BUILD_RECEIPT_SCHEMA
+        or receipt["version"] != 1
+        or receipt["attempt_nonce"] != request["attempt_nonce"]
+        or receipt["role"] != request["role"]
+        or receipt["identity"] != request["identity"]
+        or receipt["source_revisions"] != {
+            owner: value["revision"] for owner, value in source_roots.items()
+        }
+        or receipt["driver_sha256"] != build_driver_digest
+        or outcome not in OUTCOME_EXIT
+        or exit_code != OUTCOME_EXIT[outcome]
+    ):
+        raise ProducerError("source-build receipt differs from the closed request")
+    if outcome != "pass":
+        if not isinstance(receipt["reason"], str) or not receipt["reason"]:
+            raise ProducerError("non-passing source build lacks a reason")
+        raise ProducerBlocked(
+            receipt["reason"], f"source-build-driver:{request['role']}", outcome,
+        )
+    if receipt["reason"] is not None:
+        raise ProducerError("passing source build cannot carry a reason")
+    command = receipt["build_command"]
+    if (
+        not isinstance(command, list) or not 1 <= len(command) <= 64
+        or any(not isinstance(item, str) or not item for item in command)
+        or not isinstance(receipt["builder_id"], str) or not receipt["builder_id"]
+    ):
+        raise ProducerError("source-build receipt lacks a bounded builder identity")
+    started = parse_utc(receipt["build_started_utc"], "source build start")
+    finished = parse_utc(receipt["build_finished_utc"], "source build finish")
+    if finished < started:
+        raise ProducerError("source build finishes before it starts")
+    product = safe_built_path(output, receipt["product_path"], "source-built product")
+    observed_product = file_sha256(product, "source-built product")
+    if (
+        receipt["product_sha256"] != observed_product
+        or observed_product != product_digest
+        or not os.access(product, os.X_OK)
+    ):
+        raise ProducerError("independent source build differs from the measured product")
+    evidence = [request_path, receipt_path, stdout_path, stderr_path, product]
+    guards = [(product, observed_product, "independent source-built product")]
+    if bundle_digest is None:
+        if receipt["bundle_path"] is not None or receipt["bundle_tree_sha256"] is not None:
+            raise ProducerError("non-bundle source build claims a bundle")
+        if [entry[0] for entry in directory_entries(output, "source-build output")] != [
+            product.relative_to(output).as_posix()
+        ]:
+            raise ProducerError("non-bundle source build retained unrelated output")
+    else:
+        bundle = safe_built_path(output, receipt["bundle_path"], "source-built bundle")
+        if not bundle.is_dir() or bundle.is_symlink():
+            raise ProducerError("source-built bundle is not a regular directory")
+        observed_bundle = directory_digest(bundle, "source-built bundle")
+        if (
+            receipt["bundle_tree_sha256"] != observed_bundle
+            or observed_bundle != bundle_digest
+            or bundle.resolve() not in product.parents
+        ):
+            raise ProducerError("independent source-built bundle differs from the measured bundle")
+        bundle_snapshot, _ = snapshot_directory(
+            bundle, artifact_directory / "identity" / "independent-source-bundle.tar",
+            "independent source-built bundle",
+        )
+        evidence.append(bundle_snapshot)
+        guards.append((
+            bundle_snapshot,
+            file_sha256(bundle_snapshot, "independent source bundle snapshot"),
+            "independent source bundle snapshot",
+        ))
+        if request["role"] == "forge":
+            require_forge_bundle_identity(bundle, product, request["identity"])
+    return file_sha256(receipt_path, "source-build receipt"), evidence, guards
 
 
 def analyzer_payload(path: Path, exit_code: int, label: str) -> dict[str, Any]:
@@ -1581,6 +1720,63 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             "sha256": driver_source_digest,
         }
 
+        build_driver_source = configured_file(
+            f"{prefix}_BUILD_DRIVER", f"source-build-driver:{role}",
+        )
+        build_driver_snapshot, build_driver_digest = snapshot_file(
+            build_driver_source,
+            artifact_directory / "tooling" / f"source-build-driver{build_driver_source.suffix}",
+            f"{role} source-build driver",
+        )
+        build_driver_owner = os.environ.get(
+            f"{prefix}_BUILD_DRIVER_SOURCE_OWNER", "pulp",
+        )
+        if build_driver_owner not in source_authorities:
+            raise ProducerError(
+                f"{prefix}_BUILD_DRIVER_SOURCE_OWNER does not name an available source authority"
+            )
+        build_driver_relative = configured_source_path(
+            f"{prefix}_BUILD_DRIVER_SOURCE_PATH", f"source-build-driver:{role}",
+        )
+        build_driver_root, build_driver_revision = source_authorities[build_driver_owner]
+        build_driver_source_digest = require_source_file(
+            build_driver_source, root=build_driver_root,
+            revision=build_driver_revision, relative=build_driver_relative,
+            label=f"{role} source-build driver",
+        )
+        if build_driver_source_digest != build_driver_digest:
+            raise ProducerError("source-build driver snapshot differs from reviewed source")
+        immutable_files.extend([
+            (
+                build_driver_source, build_driver_digest,
+                "configured source-build driver",
+            ),
+            (
+                build_driver_snapshot, build_driver_digest,
+                "source-build driver snapshot",
+            ),
+        ])
+        source_build_digest, source_build_evidence, source_build_guards = (
+            run_independent_source_build(
+                build_driver=build_driver_snapshot,
+                build_driver_digest=build_driver_digest,
+                request=request, source_authorities=source_authorities,
+                product_digest=product_digest, bundle_digest=bundle_tree_digest,
+                artifact_directory=artifact_directory,
+            )
+        )
+        extra_members.extend(source_build_evidence)
+        immutable_files.extend(source_build_guards)
+        preflight.update({
+            "source_build_receipt_sha256": source_build_digest,
+            "source_build_driver_source": {
+                "authority": build_driver_owner,
+                "revision": build_driver_revision,
+                "path": build_driver_relative,
+                "sha256": build_driver_source_digest,
+            },
+        })
+
         build_verification_digest, build_verification_artifacts = run_build_verifier(
             verifier=build_verifier_snapshot, request=request,
             product_snapshot=product_snapshot, product_digest=product_digest,
@@ -1763,6 +1959,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         members = [
             ("host-executable", host_snapshot),
             ("lifecycle-driver", driver_snapshot),
+            ("source-build-driver", build_driver_snapshot),
             ("trace-analyzer", prepared_analyzer),
             ("trace-analyzer-wrapper", analyzer_snapshot),
             ("build-verifier", build_verifier_snapshot),
