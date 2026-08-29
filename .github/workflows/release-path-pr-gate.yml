@@ -29,6 +29,10 @@ on:
     paths:
       - 'tools/scripts/fetch_skia_for_release.py'
       - 'tools/scripts/fetch_v8_for_release.py'
+      - 'tools/scripts/verify_skia_m153_capabilities.py'
+      - 'tools/scripts/test_verify_skia_m153_capabilities.py'
+      - 'tools/deps/validate_render_update.py'
+      - 'tools/deps/test_validate_render_update.py'
       - 'tools/deps/manifest.json'
       - 'tools/cmake/Find*.cmake'
       - 'tools/cmake/Pulp*.cmake'

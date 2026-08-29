@@ -71,6 +71,23 @@ class SubprocessWrapperTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["cwd"], validate_hosts.ROOT)
         self.assertTrue(run.call_args.kwargs["check"])
 
+    def test_current_sha_requires_exact_lowercase_commit(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["git"], returncode=0, stdout="a" * 40 + "\n", stderr=""
+        )
+        with mock.patch.object(
+            validate_hosts.subprocess, "run", return_value=completed
+        ):
+            self.assertEqual(validate_hosts.current_sha(), "a" * 40)
+
+        invalid = subprocess.CompletedProcess(
+            args=["git"], returncode=0, stdout="not-a-sha\n", stderr=""
+        )
+        with mock.patch.object(
+            validate_hosts.subprocess, "run", return_value=invalid
+        ), self.assertRaisesRegex(RuntimeError, "exact source SHA"):
+            validate_hosts.current_sha()
+
     def test_run_reports_success_and_failure(self) -> None:
         stdout = io.StringIO()
         with mock.patch.object(
@@ -113,11 +130,18 @@ class RemoteCommandTests(unittest.TestCase):
         self.assertNotIn("--no-tests", with_tests)
 
         render = validate_hosts.unix_remote_command(
-            "/repo", "main", skip_tests=False, render_toolchain=True
+            "/repo", "main", skip_tests=False, render_toolchain=True,
+            expected_sha="a" * 40,
         )
+        self.assertIn('actual_sha="$(git rev-parse HEAD)"', render)
+        self.assertIn('if [ "$actual_sha" != ' + "a" * 40 + " ]; then", render)
         self.assertIn(
             "python3 tools/deps/validate_render_update.py --cache-only", render
         )
+        with self.assertRaisesRegex(ValueError, "exact source SHA"):
+            validate_hosts.unix_remote_command(
+                "/repo", "main", skip_tests=False, render_toolchain=True
+            )
 
     def test_windows_remote_command_escapes_quotes_and_toggles_tests(self) -> None:
         cmd = validate_hosts.windows_remote_command(
@@ -193,6 +217,8 @@ class MainTests(unittest.TestCase):
         ]), mock.patch.object(
             validate_hosts, "load_config", return_value=config
         ), mock.patch.object(
+            validate_hosts, "current_sha", return_value="b" * 40
+        ), mock.patch.object(
             validate_hosts, "run", return_value=True
         ) as run:
             self.assertEqual(validate_hosts.main(), 0)
@@ -208,6 +234,7 @@ class MainTests(unittest.TestCase):
             "python3 tools/deps/validate_render_update.py --cache-only",
             run.call_args_list[2].args[1][-1],
         )
+        self.assertIn("b" * 40, run.call_args_list[2].args[1][-1])
 
     def test_script_entrypoint_exits_with_main_status(self) -> None:
         script = ROOT / "tools" / "deps" / "validate_hosts.py"

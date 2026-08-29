@@ -32,6 +32,20 @@ def current_branch() -> str:
     return result.stdout.strip()
 
 
+def current_sha() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    value = result.stdout.strip()
+    if len(value) != 40 or any(character not in "0123456789abcdef" for character in value):
+        raise RuntimeError(f"could not bind remote validation to exact source SHA: {value!r}")
+    return value
+
+
 def run(label: str, cmd: list[str]) -> bool:
     print(f"== {label} ==")
     proc = subprocess.run(cmd, cwd=ROOT)
@@ -43,7 +57,11 @@ def run(label: str, cmd: list[str]) -> bool:
 
 
 def unix_remote_command(
-    repo_path: str, branch: str, skip_tests: bool, render_toolchain: bool = False
+    repo_path: str,
+    branch: str,
+    skip_tests: bool,
+    render_toolchain: bool = False,
+    expected_sha: str | None = None,
 ) -> str:
     validate = "./validate-build.sh --quiet"
     if skip_tests:
@@ -52,7 +70,17 @@ def unix_remote_command(
     branch_q = shlex.quote(branch)
     render_validate = ""
     if render_toolchain:
-        render_validate = "\npython3 tools/deps/validate_render_update.py --cache-only"
+        if expected_sha is None:
+            raise ValueError("render-toolchain remote validation requires an exact source SHA")
+        expected_sha_q = shlex.quote(expected_sha)
+        render_validate = f"""
+actual_sha="$(git rev-parse HEAD)"
+if [ "$actual_sha" != {expected_sha_q} ]; then
+    echo "ERROR: render-toolchain remote source $actual_sha does not match expected {expected_sha}" >&2
+    exit 1
+fi
+python3 tools/deps/validate_render_update.py --cache-only
+"""
     return f"""
 set -e
 export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
@@ -127,6 +155,7 @@ def main() -> int:
 
     config = load_config(Path(args.config))
     branch = args.branch or current_branch()
+    expected_sha = current_sha() if args.render_toolchain else None
 
     ok = True
     local_cmd = ["bash", "./validate-build.sh", "--quiet", "--ref", branch]
@@ -146,7 +175,8 @@ def main() -> int:
             "-o", "BatchMode=yes",
             target["host"],
             unix_remote_command(
-                target["path"], branch, args.skip_tests, args.render_toolchain
+                target["path"], branch, args.skip_tests, args.render_toolchain,
+                expected_sha,
             ),
         ]
         ok &= run(label, cmd)
