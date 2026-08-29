@@ -395,6 +395,15 @@ def validate_state_build(
     receipt = regular_json(build_receipt_path, f"{label}.state_build receipt")
     exact_keys(request, STATE_BUILD_REQUEST_KEYS, f"{label}.state_build request")
     exact_keys(receipt, STATE_BUILD_RECEIPT_KEYS, f"{label}.state_build receipt")
+    try:
+        build_started = role_support.parse_utc(
+            receipt["build_started_utc"], f"{label}.state_build start",
+        )
+        build_finished = role_support.parse_utc(
+            receipt["build_finished_utc"], f"{label}.state_build finish",
+        )
+    except role_support.ProducerError as error:
+        raise OverheadError(str(error)) from error
     driver = payload["state_build_driver"]
     identity = state_build_identity(payload)
     common = (
@@ -452,9 +461,7 @@ def validate_state_build(
         or any(
             not isinstance(item, str) or not item for item in receipt["build_command"]
         )
-        or UTC_TIMESTAMP.fullmatch(receipt["build_started_utc"]) is None
-        or UTC_TIMESTAMP.fullmatch(receipt["build_finished_utc"]) is None
-        or receipt["build_finished_utc"] < receipt["build_started_utc"]
+        or build_finished < build_started
     ):
         raise OverheadError(f"{label}.state_build is not source/config/product bound")
     toolchain = receipt["toolchain"]

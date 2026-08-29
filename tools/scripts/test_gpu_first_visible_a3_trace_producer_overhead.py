@@ -53,6 +53,8 @@ if "state-build-read-measured" in family:
                          / "collection-host-product").read_bytes())
 elif "state-build-network" in family:
     socket.create_connection(("1.1.1.1", 80), timeout=1).close()
+elif "state-build-read-ambient" in family:
+    product.write_bytes(Path(__AMBIENT_BUILD_OUTPUT__).read_bytes())
 else:
     product.write_bytes(source.read_bytes())
 product.chmod(0o755)
@@ -92,7 +94,10 @@ if "state-build-config-receipt" in family:
 args.receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
 '''
     path.write_text(
-        source.replace("__FORBIDDEN_ROOT__", repr(str(forbidden_root))),
+        source.replace("__FORBIDDEN_ROOT__", repr(str(forbidden_root))).replace(
+            "__AMBIENT_BUILD_OUTPUT__",
+            repr(str(forbidden_root.parent / "ambient-build-output.bin")),
+        ),
         encoding="utf-8",
     )
     path.chmod(0o755)
@@ -223,6 +228,9 @@ args.receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
 
 
 def make_collection_source(path: Path) -> tuple[Path, Path, Path, str]:
+    (path.parent / "ambient-build-output.bin").write_bytes(
+        b"ambient build output must not be a state-build input"
+    )
     driver = path / "tools/testing/a3/trace-producer-overhead-driver.py"
     driver.parent.mkdir(parents=True)
     write_collection_driver(driver)
@@ -775,7 +783,11 @@ def main() -> int:
             pass
         else:
             raise AssertionError("non-source-bound state build driver passed")
-        for mutation in ("state-build-read-measured", "state-build-network"):
+        for mutation in (
+            "state-build-read-measured",
+            "state-build-read-ambient",
+            "state-build-network",
+        ):
             mutation_root = temp_root / mutation
             mutation_root.mkdir()
             mutation_config = mutation_root / "trace-session-config.json"
@@ -968,7 +980,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-trace-producer-overhead: "
-            "positive=2 planted_negatives=34"
+            "positive=2 planted_negatives=35"
         )
     return 0
 
