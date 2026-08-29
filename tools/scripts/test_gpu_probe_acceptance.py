@@ -241,6 +241,27 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             self.v2_fixture(root)
             self.assertEqual(VERIFIER.verify(root), [])
 
+    def test_v2_source_binding_includes_retained_tree_helper(self):
+        helper = "tools/scripts/gpu_trace_overhead_acceptance.py"
+        self.assertIn(helper, VERIFIER.EXPECTED_SOURCE_BLOBS_V2)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.v2_fixture(root)
+            original = VERIFIER._checkout_blobs
+
+            def drifted_checkout(paths):
+                blobs = original(paths)
+                blobs[helper] = "f" * 40
+                return blobs
+
+            with mock.patch.object(
+                VERIFIER, "_checkout_blobs", side_effect=drifted_checkout
+            ):
+                errors = VERIFIER.verify(root)
+            self.assertIn(
+                f"current checkout source blob drift for {helper}", errors
+            )
+
     def test_v2_rejects_missing_mcp_recipe_and_direct_binary_role(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

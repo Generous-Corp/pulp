@@ -93,6 +93,7 @@ EXPECTED_SOURCE_BLOBS_V2 = EXPECTED_SOURCE_BLOBS | {
     "tools/mcp/mcp_gpu_tools.cpp",
     "tools/mcp/pulp_mcp.cpp",
     "tools/scripts/gpu_probe_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/sdk_capability_handoff.py",
     "tools/scripts/sdk_provenance.py",

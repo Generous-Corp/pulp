@@ -478,6 +478,35 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             finally:
                 claim.close()
 
+    def test_retained_generated_build_inputs_reject_write_and_restore(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            build = Path(temporary) / "build"
+            (build / "CMakeFiles").mkdir(parents=True)
+            files = {
+                "CMakeCache.txt": "CMAKE_BUILD_TYPE:STRING=Release\n",
+                "build.ninja": "rule exact\n",
+                "CMakeFiles/rules.ninja": "rule exact\n",
+                "generated.hpp": "#define EXACT 1\n",
+            }
+            for relative, contents in files.items():
+                path = build / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(contents, encoding="utf-8")
+            claim, evidence = MODULE.retain_generated_build_inputs(
+                build, "test build inputs"
+            )
+            try:
+                self.assertEqual(
+                    evidence["forced_clean_targets"], list(MODULE.BUILD_TARGETS)
+                )
+                graph = build / "build.ninja"
+                graph.write_text("rule substituted\n", encoding="utf-8")
+                graph.write_text(files["build.ninja"], encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "mutation event"):
+                    claim.assert_current()
+            finally:
+                claim.close()
+
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

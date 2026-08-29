@@ -33,8 +33,16 @@ The recorder requires an exact clean canonical Pulp worktree at
 `--source-revision` and an external single-config Release build configured from
 that exact checkout with the same GPU/Scene3D/Three.js/V8/Rust feature contract
 as A2. `--install-prefix` must not exist. The recorder refreshes the Rust CLI,
-C++ delegate, and MCP targets after atomically claiming that new directory.
-Immediately after the build it retains the CMake cache and all three exact
+C++ delegate, and MCP targets after publishing an unpredictable staging
+directory to that final path with macOS no-replace rename semantics and
+retaining the exact created inode. Before reconfiguration it retains every
+tracked regular-file/symlink inode and Git blob in the exact Pulp source tree.
+It then reconfigures the external build directory, retains the regenerated
+CMake cache, Ninja graph, CMake modules, and configure-time headers, runs a
+forced CMake clean, removes the Rust Cargo target cache, and requires all three
+measured outputs to be absent before rebuilding them. The source and generated
+input descriptors remain live across clean, build, install, replay, timing,
+and publication. Immediately after the build it retains all three exact
 build-output inodes before installation, then retains the installed build
 stamp, CLI, delegate, MCP, trace, and trace-processor inodes through final
 publication. Every claim is rehashed and sealed with macOS vnode mutation
@@ -46,9 +54,10 @@ digests, and positive byte counts in addition to the installed
 `build_info.hpp` source stamp; a current header beside stale or mixed binaries
 therefore fails closed. `--output` must likewise be a new nonsymlink path under
 an existing directory outside the Pulp, planning, build, and install trees; the
-recorder retains a no-follow parent descriptor and publishes a fsynced staged
-inode by a relative no-replace link, then rehashes the published bytes against
-the generated payload, rejecting parent, staged-file, or in-place content swaps
+recorder retains that no-follow parent descriptor before any build or replay,
+keeps it live for the complete campaign, and publishes a fsynced staged inode
+by a relative no-replace link. It then rehashes the published bytes against the
+generated payload, rejecting parent, staged-file, or in-place content swaps
 without dirtying or overwriting measured source. During
 measurement `PATH` excludes their prefix and all checkout build directories;
 MCP therefore succeeds only through its installed absolute-sibling binding.

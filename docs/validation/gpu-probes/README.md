@@ -25,9 +25,16 @@ not create or promote a receipt during an implementation turn.
   mix headers and libraries from different Skia builds.
 - A dedicated Pulp build directory and a not-yet-created install-prefix path
   outside the worktree. The recorder atomically claims the empty prefix before
-  installing and binds its no-follow device/inode identity through the final
-  proof. Immediately after the exact-head build it retains the CMake cache and
-  all three build-output inodes before installation, then retains the installed
+  installing by no-replace renaming an unpredictable staging directory and
+  binds its no-follow created-inode identity through the final proof. Before
+  reconfiguration it retains every tracked Pulp regular-file/symlink inode and
+  expected Git blob. It then reconfigures the external build, retains the
+  regenerated CMake/Ninja/configure-time graph, forces a CMake clean, removes
+  the Rust Cargo target cache, and requires all three measured outputs absent
+  before rebuilding. Those exact source and build-input descriptors remain
+  live through install, all CLI/MCP recipes, Forge proof, self-verification,
+  and publication. Immediately after the exact-head build it retains the CMake
+  cache and all three build-output inodes before installation, then retains the installed
   build stamp, CLI, delegate, MCP, and Forge executable inodes through final
   publication. Every claim is rehashed and sealed with macOS vnode mutation
   monitoring across its complete path-ancestor chain, so a replace-and-restore
@@ -40,7 +47,12 @@ not create or promote a receipt during an implementation turn.
 - A fresh Forge worktree detached at
   `0750a88dea3af7fca927a8c02887e071109407ae`. The only allowed difference is
   the plan-required `PULP_SDK_REF` overlay containing the final Pulp SHA; it
-  must be unstaged, with no untracked or other modified files.
+  must be unstaged, with no untracked or other modified files. The recorder
+  retains the complete tracked Forge tree with that one exact overlay, rejects
+  Git links, atomically claims a fresh Forge build inode, parses the retained
+  CMake cache descriptor, and retains the build-info stamp plus every regular
+  file/symlink in the completed app bundle through codesign, screenshot, and
+  Forge-cwd doctor execution.
 - A not-yet-created Forge build path outside every checkout. The recorder
   configures its single-config Release build only after the fresh Pulp install
   exists. Pulp build, install, Forge build, and output paths must be mutually
@@ -116,10 +128,13 @@ blank screenshots, missing negative controls, Forge drift, and non-passing
 terminal fields.
 
 Publication never replaces an output directory that appears during the run.
-The recorder claims the directory with a no-replace `mkdir`, publishes regular
-files by no-replace hard links, fsyncs them, and links `receipt.json` only after
-the other evidence is durable. A raced destination or partial interrupted
-directory is nonterminal and must not be promoted.
+Before any build or recipe execution the recorder retains the exact existing
+output-parent inode; it keeps that descriptor and its vnode mutation monitor
+live through self-verification and publication. The recorder claims the final
+directory with a no-replace `mkdir`, publishes regular files by no-replace hard
+links, fsyncs them, and links `receipt.json` only after the other evidence is
+durable. A raced parent/destination or partial interrupted directory is
+nonterminal and must not be promoted.
 
 Expected recorder runtime is roughly 10–30 minutes with warm build caches and
 45–90 minutes from cold dependencies. The bounded subprocess timeouts are one
