@@ -1,43 +1,170 @@
 {
-  "schema": "pulp.gpu-vellum-handoff.v1",
+  "schema": "pulp.gpu-vellum-handoff.v2",
   "catalog": "docs/status/gpu-recipes.yaml",
   "ownership_projection": ".github/vellum-ownership.json",
   "expansion_id": "full-design-import-render-v1",
   "route_set_sha256": "5bb857c44cdba4cf4e2d584b49ea197960e9b1b490703ce3500c649dc9995028",
   "boundary_change_authorized": false,
-  "cutover_trigger": "The separately reviewed Vellum adoption owner records an adopted Vellum revision and begins B0 refresh-and-route.",
+  "authorities": {
+    "plan": {
+      "repo": "danielraffel/pulp-planning",
+      "revision": "dfa347d59f6ec7ededc01de5c2aba36b52cfcd42",
+      "path": "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md"
+    },
+    "pulp": {
+      "repo": "Generous-Corp/pulp",
+      "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62",
+      "path": ".github/vellum-ownership.json"
+    },
+    "vellum": {
+      "repo": "Generous-Corp/vellum",
+      "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403",
+      "path": "graphics/src/skia_dawn_surface.mm"
+    }
+  },
+  "upstream": {
+    "issue": {
+      "repo": "Generous-Corp/vellum",
+      "number": 26,
+      "node_id": "I_kwDOTgkcHM8AAAABOw9JNg",
+      "url": "https://github.com/Generous-Corp/vellum/issues/26"
+    },
+    "comments": [
+      {
+        "id": 5461645539,
+        "node_id": "IC_kwDOTgkcHM8AAAABRYoY4w",
+        "url": "https://github.com/Generous-Corp/vellum/issues/26#issuecomment-5461645539"
+      },
+      {
+        "id": 5462069172,
+        "node_id": "IC_kwDOTgkcHM8AAAABRZCPtA",
+        "url": "https://github.com/Generous-Corp/vellum/issues/26#issuecomment-5462069172"
+      }
+    ]
+  },
+  "cutover_trigger": "The reviewed adoption owner records an adopted Vellum revision, refreshes every v2 path object in B0, and receives explicit authority to continue at the Vellum horizon.",
+  "required_package_ids": [
+    "a2-pulp-product-probes",
+    "a2t-pulp-trace-analysis",
+    "a3-pulp-input-to-present-host",
+    "a3-pulp-runtime-control",
+    "a4-pulp-dpr-experiment",
+    "b1-vellum-gpu-runtime",
+    "b2-vellum-gpu-diagnostics",
+    "b3-vellum-gpu-capture",
+    "b4-vellum-observability-executor",
+    "b4-vellum-signature-prewarm",
+    "b5-vellum-dpr-policy",
+    "b6-pulp-vellum-adoption-skills",
+    "pulp-v8-threejs-release-followup"
+  ],
   "entries": [
     {
-      "id": "gpu-diagnostic-contracts",
-      "current_owner": "Generous-Corp/pulp",
-      "paths": [
-        "docs/contracts/gpu-health-result-v1.schema.json",
-        "docs/contracts/gpu-probe-result-v1.schema.json",
-        "tools/cli/gpu_health",
-        "tools/cli/gpu_probe"
+      "id": "a2-pulp-product-probes",
+      "phase": "A2 retained Pulp product tooling",
+      "trigger": "Always retained; Vellum B2/B3 may replace only generic consumed providers after parity.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/validation/gpu-probes",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/cli/gpu_health",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/cli/gpu_probe",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/cli/gpu_recipe_catalog_data.h.in",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/mcp/mcp_gpu_tools.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_recipe_catalog.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/verify_gpu_probe_acceptance.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
       ],
-      "cutover_action": "retain-pulp",
-      "vellum_phase": null,
-      "delete_after": null,
-      "reason": "Pulp owns product diagnosis schemas, recipe execution, and installed CLI adaptation."
-    },
-    {
-      "id": "gpu-recipe-projection",
-      "current_owner": "Generous-Corp/pulp",
-      "paths": [
-        "docs/status/gpu-recipes.schema.json",
-        "docs/status/gpu-recipes.yaml",
-        "tools/scripts/gpu_recipe_catalog.py"
-      ],
-      "cutover_action": "retain-pulp",
-      "vellum_phase": null,
-      "delete_after": null,
-      "reason": "The catalog projects Pulp product workflows and remains the local discovery authority."
-    },
-    {
-      "id": "a2-pulp-gpu-probe-adapters",
-      "current_owner": "Generous-Corp/pulp",
-      "paths": [
+      "vellum_paths": [],
+      "api_contract": {
+        "surfaces": [
+          "pulp gpu health/probe JSON, MCP, and recipe discovery"
+        ],
+        "request": "Exact recipe, product, provider, limits, and optional CPU-oracle identity.",
+        "result": "Versioned bounded Pulp evidence with pass/fail/unavailable/unverified truth.",
+        "errors": "Unsupported, unavailable, timeout, mismatch, and limit failures remain typed.",
+        "availability": "Missing authentic GPU work returns unavailable or unverified, never synthetic pass."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/pulp product tooling",
+        "ownership": "Pulp owns recipes, CPU oracles, receipts, permissions, CLI, MCP, and catalog projection.",
+        "lifetime": "Every artifact is bounded to one request and exact product/provider identity.",
+        "threads": "Readback and formatting complete on documented non-audio threads.",
+        "rt": "No allocation, mapping, encoding, filesystem, or control work runs on the audio thread."
+      },
+      "trace_contract": {
+        "producer": "none",
+        "events": [],
+        "required_fields": [],
+        "query_outputs": [],
+        "loss": "Trace evidence is supplied by the separate A2T package."
+      },
+      "tests": {
+        "unit": [
+          "Schema, bounds, oracle, and CLI/MCP parity tests."
+        ],
+        "planted": [
+          "Wrong pass/resource/provider and unavailable-work controls must fail."
+        ],
+        "real_host": [
+          "Real Dawn/Skia, Three.js, and GPU-audio recipes where supported."
+        ],
+        "installed_prefix": [
+          "Clean installed CLI and MCP consume authoritative catalog bytes."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "artifact bytes, readback duration, timeout, and CPU-oracle error"
+        ],
+        "threshold": "Every recipe enforces its checked byte/time/tolerance limits.",
+        "audio": "GPU-audio recipes preserve audio-harness xrun and RT gates.",
+        "failure": "A limit breach or missing authentic work is nonterminal or fail-closed."
+      },
+      "pulp_adoption": {
+        "adapter": "Retain Pulp product adapters and replace only a proven generic provider behind them.",
+        "surfaces": [
+          "CLI",
+          "MCP",
+          "product permissions",
+          "recipe catalog"
+        ],
+        "proof": "Run the same A2 corpus before and after any provider migration.",
+        "duplicate_rejection": "One request has one generic provider and one Pulp result projection."
+      },
+      "retained_paths": [
         "docs/validation/gpu-probes",
         "tools/cli/gpu_health",
         "tools/cli/gpu_probe",
@@ -46,15 +173,151 @@
         "tools/scripts/gpu_recipe_catalog.py",
         "tools/scripts/verify_gpu_probe_acceptance.py"
       ],
-      "cutover_action": "retain-pulp-product-adapters",
-      "vellum_phase": "B1-B3",
-      "delete_after": null,
-      "reason": "A2 product recipes, installed CLI/MCP projection, typed receipts, and acceptance remain Pulp-owned. B1-B3 may replace only the consumed generic lifecycle or diagnostics provider after installed Vellum proves equivalent v1 evidence; these adapters are retained."
+      "terminal_result": {
+        "pass": "Pulp product evidence remains callable and equivalent or stronger.",
+        "no_change": "Retain the current provider and all Pulp surfaces.",
+        "nonterminal": "Unavailable, unverified, or corpus drift remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
     },
     {
-      "id": "a2t-pulp-trace-analysis-adapters",
-      "current_owner": "Generous-Corp/pulp",
-      "paths": [
+      "id": "a2t-pulp-trace-analysis",
+      "phase": "A2T retained Pulp Perfetto analysis",
+      "trigger": "Always retained as the product question and checked-query projection.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-analysis/references/hints_gpu.md",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/validation/gpu-trace-overhead",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/mcp/mcp_trace_tools.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_trace_overhead_acceptance.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [],
+      "api_contract": {
+        "surfaces": [
+          "pulp trace gpu-health/gpu-probe/gpu-startup JSON and MCP"
+        ],
+        "request": "One named question, immutable trace, pinned analyzer, and exact evidence selector.",
+        "result": "Ranked cause/evidence/next-action with exact slice/counter identities.",
+        "errors": "Invalid, lossy, unflushed, wrong-process, or stale-analyzer input is rejected.",
+        "availability": "Missing producer coverage is named unverified rather than inferred."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/pulp analysis tooling",
+        "ownership": "Pulp owns product questions, SQL interpretation, CLI/MCP adaptation, and A2T receipts.",
+        "lifetime": "Analyzer and trace snapshots are immutable for one receipt replay.",
+        "threads": "Offline analysis runs outside product and audio threads.",
+        "rt": "A2T introduces no runtime producer or audio-thread work."
+      },
+      "trace_contract": {
+        "producer": "Pulp or later Vellum typed runtime producer consumed by Pulp SQL",
+        "events": [
+          "gpu_health_transition",
+          "gpu_probe_correlation",
+          "gpu_startup_breakdown"
+        ],
+        "required_fields": [
+          "build/provider identity",
+          "evidence ID",
+          "loss/flush disposition",
+          "process UPID",
+          "trace session"
+        ],
+        "query_outputs": [
+          "cause/evidence/next action",
+          "counts and units",
+          "exact slice/counter IDs",
+          "p50/p95/p99 where applicable"
+        ],
+        "loss": "Loss, missing flush, incomplete slices, or wrong cohort rejects a terminal claim."
+      },
+      "tests": {
+        "unit": [
+          "Named-query fixtures and pinned trace-processor replay."
+        ],
+        "planted": [
+          "Wrong process/build/session, lossy trace, invalid trace, and stale analyzer fail."
+        ],
+        "real_host": [
+          "Human Perfetto UI and agent replay inspect the same saved trace."
+        ],
+        "installed_prefix": [
+          "Installed CLI and MCP produce byte-equivalent typed answers."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "capture overhead, data loss, ring size, and xrun count"
+        ],
+        "threshold": "The ratified A2T tracing-off/idle/active ceiling must pass.",
+        "audio": "Zero producer work on declared audio TIDs and zero xrun regression.",
+        "failure": "A2T remains nonterminal when overhead or provenance is missing."
+      },
+      "pulp_adoption": {
+        "adapter": "Keep Pulp questions and map compatible Vellum events only after saved-query parity.",
+        "surfaces": [
+          "CLI",
+          "MCP",
+          "Perfetto UI guidance",
+          "slash trace questions"
+        ],
+        "proof": "Replay pinned fixtures and one real trace before and after adoption.",
+        "duplicate_rejection": "Generic events may have one owner; compatibility mappings cannot double count."
+      },
+      "retained_paths": [
         ".agents/skills/trace-analysis/references/hints_gpu.md",
         ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
         ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
@@ -65,15 +328,314 @@
         "tools/scripts/gpu_trace_overhead_acceptance.py",
         "tools/scripts/test_gpu_trace_overhead_acceptance.py"
       ],
-      "cutover_action": "retain-pulp-analysis-migrate-generic-producers",
-      "vellum_phase": "B6",
-      "delete_after": "Delete only producer-specific compatibility queries named by B0 after B6 proves an installed Vellum trace emits equivalent versioned categories, identities, loss accounting, and same-instance correlation and the pinned CLI/MCP/A2T rerun passes.",
-      "reason": "Pulp retains product questions, installed analyzers, MCP adaptation, SQL interpretation, and A2T receipts. B6 migrates generic render-span production; only exact causal gaps selected by A3 route through B4 investigation."
+      "terminal_result": {
+        "pass": "Pulp questions replay equivalent typed evidence from the adopted producer.",
+        "no_change": "Retain current producer mappings and Pulp analysis.",
+        "nonterminal": "Any provenance, loss, overhead, or query-parity gap remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
     },
     {
-      "id": "a3-pulp-runtime-control-adapters",
-      "current_owner": "Generous-Corp/pulp",
-      "paths": [
+      "id": "a3-pulp-input-to-present-host",
+      "phase": "A3 retained AppKit and product-host tracing",
+      "trigger": "Always retained unless B6 proves an individual event is generic and equivalent without losing host truth.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "core/view/platform/mac/window_host_mac.mm",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "core/view/src/editor_bridge.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "core/view/src/view.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "core/view/src/widget_bridge.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "core/view/src/widget_bridge/bridge_dispatch.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [],
+      "api_contract": {
+        "surfaces": [
+          "Exact b4ba22f1d700621366afdbc72bb8615336964cd1 host trace package"
+        ],
+        "request": "One challenged live host process, product workload, six-category session, and exact evidence ID.",
+        "result": "Per-signature counts plus first-visible acquire/submit/present and audio/xrun dispositions.",
+        "errors": "Missing required stages, foreign process, loss, xrun, or audio-thread event rejects proof.",
+        "availability": "Unobserved input-only signatures are reported not-covered, never zero-cost."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/pulp AppKit and product-host integration",
+        "ownership": "Pulp retains native input, editor, bridge, repaint, acquire, submit, present, and compositor correlation.",
+        "lifetime": "Events are scoped to one challenged product process and session.",
+        "threads": "UI/render/JS/state events retain authentic threads and process UPID.",
+        "rt": "Every producer is excluded from declared audio TIDs and the campaign requires zero xruns."
+      },
+      "trace_contract": {
+        "producer": "Pulp b4ba input-to-present package",
+        "events": [
+          "delivered_drag_samples",
+          "dom_event_dispatch",
+          "dom_event_evaluate",
+          "dom_event_microtask_pump",
+          "editor_bridge_dispatch_json",
+          "editor_bridge_json_parse",
+          "frame_callback_pump",
+          "gpu_acquire",
+          "gpu_present",
+          "gpu_submit",
+          "mac_mouse_dragged",
+          "native_drag_dispatch",
+          "pointer_coalescer_flush",
+          "pointer_coalescer_flushes",
+          "pointer_samples_merged",
+          "raf_flush",
+          "raw_drag_samples",
+          "repaint_request",
+          "skia_begin",
+          "view_repaint_request"
+        ],
+        "required_fields": [
+          "active categories js/render/state",
+          "exact five source paths",
+          "exact package revision",
+          "per-signature kind/category/name/fields",
+          "process/session/evidence identity"
+        ],
+        "query_outputs": [
+          "all 20 signature counts",
+          "audio-thread event count",
+          "required first-visible stage counts",
+          "unobserved signature disposition"
+        ],
+        "loss": "Six-category capture must be lossless and flushed; optional zero counts remain explicitly not-covered."
+      },
+      "tests": {
+        "unit": [
+          "Full signature inventory, category, replay, and receipt derivation tests."
+        ],
+        "planted": [
+          "Signature/category omission, missing gpu_present, foreign process, audio TID, loss, and xrun fail."
+        ],
+        "real_host": [
+          "Standalone, REAPER, Forge, resize/compositor, and input interaction harnesses."
+        ],
+        "installed_prefix": [
+          "Exact source-built product bytes and pinned analyzer replay."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "compile-out, compiled-idle, active duration, per-signature counts, and xruns"
+        ],
+        "threshold": "Four-state 5-warmup/30-measured/20-fresh ceilings pass on one exact workload.",
+        "audio": "Zero runtime xruns and zero b4ba events on declared audio TIDs.",
+        "failure": "Optional unobserved producers stay not-covered and cannot close unrelated input overhead."
+      },
+      "pulp_adoption": {
+        "adapter": "Retain AppKit/product-host producers and map only proven generic Vellum equivalents.",
+        "surfaces": [
+          "Perfetto",
+          "REAPER and Forge harnesses",
+          "resize/compositor harness",
+          "standalone"
+        ],
+        "proof": "Compare saved queries and real-host behavior before classifying any individual event redundant.",
+        "duplicate_rejection": "Reject double emission from both Pulp and Vellum for one semantic event."
+      },
+      "retained_paths": [
+        "core/view/platform/mac/window_host_mac.mm",
+        "core/view/src/editor_bridge.cpp",
+        "core/view/src/view.cpp",
+        "core/view/src/widget_bridge.cpp",
+        "core/view/src/widget_bridge/bridge_dispatch.cpp"
+      ],
+      "terminal_result": {
+        "pass": "Host/product events and harnesses remain, with any generic mapping proven individually.",
+        "no_change": "Retain the complete b4ba package.",
+        "nonterminal": "Incomplete signature, overhead, or host-equivalence evidence remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
+    },
+    {
+      "id": "a3-pulp-runtime-control",
+      "phase": "A3 retained product health and campaign control",
+      "trigger": "Always retained as Pulp product policy and exact-instance read-only control.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/contracts/gpu-health-read-result-v1.schema.json",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/validation/gpu-first-visible-a3-acceptance.md",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "inspect/include/pulp/inspect/control_gpu_health_read_executor.hpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "inspect/src/control_gpu_health_provider.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "inspect/src/control_gpu_health_read_executor.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "inspect/src/control_gpu_health_view_adapter.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/cli/gpu_health/src/health_read_result_json.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_acceptance.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [],
+      "api_contract": {
+        "surfaces": [
+          "dev.pulp.gpu/health.read@1 and closed A3 campaign receipts"
+        ],
+        "request": "Exact instance, build, product, role, 10 cold/10 warm lifecycle, and evidence IDs.",
+        "result": "Bounded immutable health, campaign, overhead, A2T, control, and B4 disposition.",
+        "errors": "Pending, unavailable, unverified, wrong instance, missing lifecycle, and stale receipt stay fail-closed.",
+        "availability": "Only exact standalone, constrained-headless, real DAW, and Forge roles can close A3."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/pulp product control and acceptance",
+        "ownership": "Pulp owns host lifecycle selection, permissions, typed results, budget, campaigns, and disposition.",
+        "lifetime": "Snapshots are immutable and each trial has an authentic product lifecycle boundary.",
+        "threads": "Provider mutation and capture occur on UI threads; control readers consume snapshots.",
+        "rt": "Provider entry points and trace producers are excluded from audio threads and require zero xruns."
+      },
+      "trace_contract": {
+        "producer": "Pulp gpu_health_transition_first_visible plus selected host trace",
+        "events": [
+          "gpu_health_transition_first_visible",
+          "pulp_a3_trace_session"
+        ],
+        "required_fields": [
+          "audio TID digest",
+          "challenge nonce",
+          "evidence ID",
+          "executable digest",
+          "process start",
+          "session config digest"
+        ],
+        "query_outputs": [
+          "same-instance A2T binding",
+          "startup stage evidence",
+          "trace overhead disposition"
+        ],
+        "loss": "Loss, missing flush, foreign process, xrun, or audio-thread event rejects A3."
+      },
+      "tests": {
+        "unit": [
+          "Closed schemas, lifecycle, cache, budget, control, and role producers."
+        ],
+        "planted": [
+          "Blank frame, wrong instance, stale head, fake lifecycle, trace tamper, and audio-thread entry fail."
+        ],
+        "real_host": [
+          "10 cold and 10 warm standalone, constrained-headless, REAPER, and Forge runs."
+        ],
+        "installed_prefix": [
+          "Independent source-built product and exact Forge shell identities."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "first-visible p50/p95/p99, hitch, four-state producer overhead, and xruns"
+        ],
+        "threshold": "Ratified budget and all four role campaigns plus producer-overhead receipt pass.",
+        "audio": "Zero xruns and zero provider/producer events on declared audio TIDs.",
+        "failure": "Missing terminal M5 evidence or failed overhead leaves A3 nonterminal."
+      },
+      "pulp_adoption": {
+        "adapter": "Consume bounded Vellum runtime facts behind the unchanged Pulp control/result contract.",
+        "surfaces": [
+          "CLI",
+          "Forge",
+          "MCP",
+          "REAPER",
+          "standalone",
+          "unified control"
+        ],
+        "proof": "Repeat exact role campaigns and source/trace replay after adoption.",
+        "duplicate_rejection": "Pulp owns product policy while Vellum owns at most one generic runtime fact source."
+      },
+      "retained_paths": [
         "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
         "docs/contracts/gpu-health-read-result-v1.schema.json",
         "docs/validation/gpu-first-visible-a3-acceptance.md",
@@ -87,15 +649,136 @@
         "tools/cli/gpu_health/src/health_read_result_json.cpp",
         "tools/scripts/gpu_first_visible_a3_acceptance.py"
       ],
-      "cutover_action": "retain-pulp-control-replace-generic-event-sources",
-      "vellum_phase": "B4",
-      "delete_after": "Retain the provider, view adapter, exact-instance executor, typed result, and acceptance policy. Delete only a temporary event-source shim explicitly named by a terminal queue-B4-investigation receipt after installed Vellum supplies the named events/arguments and the same causal campaign rerun passes.",
-      "reason": "Runtime control operations, grants, product endpoints, budgets, receipts, and B4 disposition remain Pulp-owned and outside design-time agent capabilities; generic compile/upload/hidden/present/source/shader producers are replaceable Vellum inputs."
+      "terminal_result": {
+        "pass": "All four roles, controls, trace replay, overhead, and one derived disposition pass.",
+        "no_change": "Keep product policy and record no generic optimization.",
+        "nonterminal": "Any unavailable, unverified, stale, or missing M5 leg remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
     },
     {
-      "id": "a4-pulp-dpr-experiment-adapters",
-      "current_owner": "Generous-Corp/pulp",
-      "paths": [
+      "id": "a4-pulp-dpr-experiment",
+      "phase": "A4 retained Pulp DPR experiment",
+      "trigger": "Always retain the corpus and runner; only a terminal queue result can start B5.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/contracts/gpu-dpr-experiment-v1.schema.json",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/validation/gpu-dpr",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "test/fixtures/gpu-ux/dpr",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_dpr_evidence.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_dpr_experiment.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_dpr_runner.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [],
+      "api_contract": {
+        "surfaces": [
+          "Closed DPR experiment plan, cells, raw evidence, and disposition"
+        ],
+        "request": "Exact build/provider/scenario/DPR/policy cell and immutable corpus.",
+        "result": "Pixels, input coordinates, latency, memory, fidelity, and one derived disposition.",
+        "errors": "Missing cell, stale scale, fake trace, wrong build, or fidelity regression rejects the matrix.",
+        "availability": "A4 may close no-change; incomplete matrices never select a policy."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/pulp experiment orchestration",
+        "ownership": "Pulp owns scenarios, evidence, corpus, runner, and disposition, not generic scale policy.",
+        "lifetime": "Every cell binds one exact product process and immutable artifacts.",
+        "threads": "Measurement and capture use documented render/UI paths.",
+        "rt": "GPU-audio canaries retain zero-xrun and no-audio-thread-control requirements."
+      },
+      "trace_contract": {
+        "producer": "Pulp DPR experiment trace adapter",
+        "events": [
+          "frame lifecycle",
+          "presentation or headless completion"
+        ],
+        "required_fields": [
+          "DPR policy",
+          "build/provider",
+          "process/session",
+          "scenario/cell"
+        ],
+        "query_outputs": [
+          "latency distribution",
+          "loss/flush",
+          "memory and frame cadence"
+        ],
+        "loss": "Missing or lossy trace cannot support a latency policy decision."
+      },
+      "tests": {
+        "unit": [
+          "Runner, evidence, matrix, policy, and digest validation."
+        ],
+        "planted": [
+          "Stale scale, wrong input coordinates, blurred corpus, fake trace, and missing cell fail."
+        ],
+        "real_host": [
+          "Exact DPR matrix on native and Three.js scenarios."
+        ],
+        "installed_prefix": [
+          "Source-built product and installed runtime use the same policy identity."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "fidelity, frame latency, input mapping, memory, and p50/p95/p99"
+        ],
+        "threshold": "A candidate must meet every fidelity/input gate and ratified latency/memory bound.",
+        "audio": "GPU-audio canary may not regress xruns.",
+        "failure": "Inconclusive or regressing evidence derives no-change."
+      },
+      "pulp_adoption": {
+        "adapter": "Keep experiment orchestration and consume a Vellum scale policy only after B5 passes.",
+        "surfaces": [
+          "DPR corpus",
+          "experiment CLI",
+          "native adapter",
+          "runner"
+        ],
+        "proof": "Rerun every frozen cell before and after Vellum adoption.",
+        "duplicate_rejection": "One generic policy owns logical-to-physical scaling."
+      },
+      "retained_paths": [
         "docs/contracts/gpu-dpr-experiment-v1.schema.json",
         "docs/validation/gpu-dpr",
         "test/fixtures/gpu-ux/dpr",
@@ -104,15 +787,1132 @@
         "tools/scripts/gpu_dpr_pulp_native_adapter.py",
         "tools/scripts/gpu_dpr_runner.py"
       ],
-      "cutover_action": "retain-pulp-experiment-replace-policy-consumption",
-      "vellum_phase": "B5",
-      "delete_after": "Retain the corpus, runner, adapters, raw evidence, and disposition. Delete only an experiment-only policy shim named by B0 after installed Vellum preserves all DPR cells, fidelity/input gates, bounds or hysteresis, and the rerun passes.",
-      "reason": "A4 measurement and product-scenario orchestration are Pulp-owned. Generic native/web surface DPR policy remains Vellum authority and is adopted only after a terminal queue disposition."
+      "terminal_result": {
+        "pass": "One measured DPR candidate queues B5 with the complete corpus.",
+        "no_change": "Retain current DPR behavior and the experiment corpus.",
+        "nonterminal": "Any missing cell, fidelity gate, or provenance remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
+    },
+    {
+      "id": "b1-vellum-gpu-runtime",
+      "phase": "B1 Vellum runtime status and Skia diagnostics lifecycle",
+      "trigger": "Begin only after B0 verifies m153+, exact paths, and Vellum-horizon authority.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "core/render/include/pulp/render/headless_surface.hpp",
+          "state": "framework-authoritative-transferred-compatibility",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "cmake/VellumSkiaDawn.cmake",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/gpu_runtime.hpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/skia_dawn_surface.hpp",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/gpu_runtime.mm",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/skia_dawn_surface.mm",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_runtime_process_harness.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_runtime_test.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "provenance/third-party-lock.json",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        }
+      ],
+      "api_contract": {
+        "surfaces": [
+          "GpuRuntimeConfig, GpuRuntimeStatus, explicit initialize, and bounded diagnostic snapshot"
+        ],
+        "request": "Skia-free policy, fixed workers/capacity, non-owning diagnostic/trace sinks, and exact provider identity.",
+        "result": "First success, idempotent reuse, foreign-handler refusal, conflict, unsupported, or partial failure.",
+        "errors": "Conflicting initialization and foreign global handler are deterministic typed failures.",
+        "availability": "Unsupported provider and partial initialization remain unavailable or unverified."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/vellum generic GPU runtime",
+        "ownership": "Vellum owns one process-global SkLogHandler coordinator and bounded runtime state.",
+        "lifetime": "Installed handler is process-lifetime; borrowed sinks outlive initialized runtime use.",
+        "threads": "Callback only enqueues bounded data; non-RT drain formats and projects diagnostics.",
+        "rt": "No JSON, filesystem, network, unbounded lock, heavy formatting, or audio-thread drain."
+      },
+      "trace_contract": {
+        "producer": "Vellum bounded runtime diagnostics and optional trace sink",
+        "events": [
+          "vellum.gpu.context.create"
+        ],
+        "required_fields": [
+          "adapter",
+          "backend",
+          "build",
+          "context",
+          "policy",
+          "provider release/SHA",
+          "runtime"
+        ],
+        "query_outputs": [
+          "initialization status",
+          "provider/build identity",
+          "runtime/context correlation"
+        ],
+        "loss": "Dropped diagnostics are counted; missing trace provenance stays unverified."
+      },
+      "tests": {
+        "unit": [
+          "Same/conflicting initialization, status bounds, severity, truncation, and teardown."
+        ],
+        "planted": [
+          "Foreign handler replacement, duplicate coordinator, oversized callback, and callback-after-teardown fail."
+        ],
+        "real_host": [
+          "Real Metal/Graphite log delivery and runtime status."
+        ],
+        "installed_prefix": [
+          "Public headers and libraries initialize from a clean consumer."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "callback cost, dropped entries, idle cost, and memory bound"
+        ],
+        "threshold": "Disabled/idle runtime and callback cost meet documented constant bounds.",
+        "audio": "Audio-like callback performs no blocking/heavy drain and real host has zero xrun regression.",
+        "failure": "Expose unavailable status and install no global handler when bounds fail."
+      },
+      "pulp_adoption": {
+        "adapter": "Pulp selects runtime config and projects read-only status without copying the state machine.",
+        "surfaces": [
+          "CLI",
+          "MCP",
+          "product host",
+          "unified control"
+        ],
+        "proof": "Installed-prefix plus exact-instance Pulp control parity and real-host proof.",
+        "duplicate_rejection": "Pulp must not install another SkLogHandler or generic runtime coordinator."
+      },
+      "retained_paths": [
+        "core/render/include/pulp/render/headless_surface.hpp"
+      ],
+      "terminal_result": {
+        "pass": "One installed Vellum runtime owns bounded diagnostics and Pulp consumes it thinly.",
+        "no_change": "Provider unsupported or handler foreign; expose status without replacement.",
+        "nonterminal": "Missing m153 integrity, lifetime, RT, or installed-prefix proof remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
+    },
+    {
+      "id": "b2-vellum-gpu-diagnostics",
+      "phase": "B2 structured shader diagnostics",
+      "trigger": "Begin after B0 routes the proposed package and B1 supplies exact provider/runtime identity.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/cli/gpu_probe",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/mcp/mcp_gpu_tools.cpp",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/gpu_diagnostics.hpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/gpu_diagnostics.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_diagnostics_test.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        }
+      ],
+      "api_contract": {
+        "surfaces": [
+          "Skia/Dawn-free owned shader diagnostic request and bounded result"
+        ],
+        "request": "Language, stage, auto/require, source identity/body, reflection request, byte/count limits, and deadline.",
+        "result": "pass/fail/unavailable/unverified/cancelled, actual validator, provider/build, diagnostics, and reflection truth.",
+        "errors": "Unsupported stage, unavailable device validator, timeout, truncation, and authentic-location absence remain typed.",
+        "availability": "WGSL require fails without device-backed validation; auto reports skipped-unavailable."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/vellum shader diagnostics",
+        "ownership": "Vellum owns SkSL normalization and supported device-backed WGSL validation; Pulp owns product policy.",
+        "lifetime": "Owned request/callback state survives one completion, cancellation, deadline, or runtime teardown.",
+        "threads": "Async completion runs on a documented non-audio thread and teardown drains callbacks.",
+        "rt": "Compilation, validation, reflection, and formatting are forbidden on the audio thread."
+      },
+      "trace_contract": {
+        "producer": "none",
+        "events": [],
+        "required_fields": [],
+        "query_outputs": [],
+        "loss": "Shader source is not copied to logs or traces by default."
+      },
+      "tests": {
+        "unit": [
+          "Real positive/negative SkSL and supported WGSL, normalization, reflection, bounds, and cancellation."
+        ],
+        "planted": [
+          "Malformed source, wrong stage/provider, missing location, source leak, oversize, timeout, and callback-after-teardown fail."
+        ],
+        "real_host": [
+          "Device-backed WGSL validation on a real supported Dawn adapter."
+        ],
+        "installed_prefix": [
+          "Clean consumer plus human/JSON/CLI/MCP field parity."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "deadline, diagnostic bytes/count, source bytes, and callback completion"
+        ],
+        "threshold": "Every request stays within declared bytes/count/deadline and teardown bounds.",
+        "audio": "No diagnostic work on audio threads and no host xrun regression.",
+        "failure": "Unsupported or unavailable validation remains typed and cannot pass require."
+      },
+      "pulp_adoption": {
+        "adapter": "Pulp keeps gpu check schema, CLI/MCP, authorization, recipes, and CI policy around one Vellum result.",
+        "surfaces": [
+          "CI require mode",
+          "CLI",
+          "MCP",
+          "product recipe selection"
+        ],
+        "proof": "Installed-prefix positive/negative parity and planted old-parser controls.",
+        "duplicate_rejection": "Pulp must not retain a second generic shader diagnostic parser."
+      },
+      "retained_paths": [
+        "tools/cli/gpu_probe",
+        "tools/mcp/mcp_gpu_tools.cpp"
+      ],
+      "terminal_result": {
+        "pass": "Installed Vellum diagnostics preserve authentic bounded fields through Pulp.",
+        "no_change": "Unsupported WGSL lanes stay unsupported without broadening authoring claims.",
+        "nonterminal": "Missing installed-prefix, async lifetime, RT, or field parity remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
+    },
+    {
+      "id": "b3-vellum-gpu-capture",
+      "phase": "B3 bounded value and intermediate capture",
+      "trigger": "Begin after B0 routes stable semantic capture points and A2 names a needed generic primitive.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/validation/gpu-probes",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/verify_gpu_probe_acceptance.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/gpu_capture.hpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/gpu_capture.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_capture_test.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        }
+      ],
+      "api_contract": {
+        "surfaces": [
+          "Bounded asynchronous semantic capture request/result without public raw GPU handles"
+        ],
+        "request": "Build/provider/runtime/context/surface/frame/pass/resource/capture-point/region/format/max-bytes/deadline.",
+        "result": "Repeated provenance, dimensions, row bytes, format, byte count/digest, and one terminal status.",
+        "errors": "unsupported/unavailable/timeout/cancelled/dropped/provenance-mismatch remain distinct.",
+        "availability": "Only renderer-registered semantic capture points are callable."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/vellum generic GPU capture",
+        "ownership": "Vellum owns staging/readback and stable capture points; Pulp owns recipes, oracles, receipts, and permissions.",
+        "lifetime": "Owned staging/callback state survives completion/cancellation and drains before surface/context/device teardown.",
+        "threads": "Completion and mapping occur on non-audio threads with bounded in-flight backpressure.",
+        "rt": "No blocking wait, mapping, encoding, allocation, or capture orchestration on the audio thread."
+      },
+      "trace_contract": {
+        "producer": "Vellum capture lifecycle",
+        "events": [
+          "vellum.gpu.readback"
+        ],
+        "required_fields": [
+          "build/provider",
+          "bytes",
+          "context/surface/frame/pass/resource",
+          "result",
+          "runtime",
+          "time bounds"
+        ],
+        "query_outputs": [
+          "capture duration",
+          "provenance disposition",
+          "readback bytes/result"
+        ],
+        "loss": "Missing lifecycle or provenance is unverified and captured bytes cannot be reused."
+      },
+      "tests": {
+        "unit": [
+          "Bounds, in-flight backpressure, cancellation, row stride, and provenance."
+        ],
+        "planted": [
+          "Wrong IDs, unknown point, oversize, saturation, timeout, stale prior-frame bytes, and callback-after-teardown fail."
+        ],
+        "real_host": [
+          "Real Metal known target matches a CPU oracle and wrong pass/resource fails."
+        ],
+        "installed_prefix": [
+          "Clean consumer captures through public headers and libraries."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "bytes, deadline, in-flight count, mapping/readback duration, and CPU-oracle error"
+        ],
+        "threshold": "All declared byte/time/in-flight/tolerance bounds pass.",
+        "audio": "No capture work on audio threads and no GPU-audio xrun regression.",
+        "failure": "Out-of-bound or provenance-mismatched capture is fail-closed."
+      },
+      "pulp_adoption": {
+        "adapter": "Pulp keeps A2 recipe orchestration, CPU oracles, receipts, CLI/MCP, and permissions.",
+        "surfaces": [
+          "A2 corpus",
+          "CLI",
+          "MCP",
+          "product permissions"
+        ],
+        "proof": "Run the exact A2 corpus before and after installed Vellum capture.",
+        "duplicate_rejection": "Pulp must not keep generic staging/readback ownership beside Vellum."
+      },
+      "retained_paths": [
+        "docs/validation/gpu-probes",
+        "tools/scripts/verify_gpu_probe_acceptance.py"
+      ],
+      "terminal_result": {
+        "pass": "Installed Vellum capture gives equivalent or stronger A2 provenance.",
+        "no_change": "No stable generic capture point is justified; retain existing bounded product paths.",
+        "nonterminal": "Missing oracle, bounds, RT, teardown, or installed-prefix proof remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
+    },
+    {
+      "id": "b4-vellum-observability-executor",
+      "phase": "B4 typed pipeline observability and bounded Graphite executor experiment",
+      "trigger": "Start only from terminal A3 queue-B4 or queue-B4-investigation after B0 refresh.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "core/render/src/skia_surface.cpp",
+          "state": "framework-authoritative-transferred-compatibility",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "inspect/src/control_gpu_health_provider.cpp",
+          "state": "pulp-owned-adoption",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/gpu_runtime.hpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/gpu_trace.hpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/skia_dawn_surface.hpp",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/gpu_runtime.mm",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/gpu_trace.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/skia_dawn_surface.mm",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_pipeline_harness.mm",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_runtime_test.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_style_test.cpp",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_trace_test.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/text_shaping_concurrency_test.cpp",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        }
+      ],
+      "api_contract": {
+        "surfaces": [
+          "GpuRuntimeConfig synchronous/background_bounded, GpuTraceSink, and SkiaDawnSurface consumption"
+        ],
+        "request": "Exact runtime/provider/build plus null or fixed-worker/capacity/backpressure executor policy.",
+        "result": "Bounded runtime status and typed pipeline/frame lifecycle events.",
+        "errors": "Conflict, saturation, rejection, worker failure, partial init, cancellation, and shutdown are typed.",
+        "availability": "Synchronous remains default until the exact measured gate passes."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/vellum Graphite context and trace runtime",
+        "ownership": "Vellum owns one executor owner and typed generic events; Pulp selects product policy only.",
+        "lifetime": "Executor member precedes context; recorders/context drain and die before executor, then Dawn releases.",
+        "threads": "Fixed workers, bounded queue/backpressure, cancellation, failure, and queued shutdown are explicit.",
+        "rt": "No executor queue/compile/shutdown wait, trace sink work, or diagnostic drain on audio threads."
+      },
+      "trace_contract": {
+        "producer": "Vellum backend-neutral monotonic-nanosecond GPU trace",
+        "events": [
+          "vellum.gpu.context.create",
+          "vellum.gpu.drawable.acquire",
+          "vellum.gpu.executor.saturation",
+          "vellum.gpu.frame.paint",
+          "vellum.gpu.frame.submit",
+          "vellum.gpu.pipeline.compile",
+          "vellum.gpu.pipeline.queue",
+          "vellum.gpu.pipeline.request",
+          "vellum.gpu.present",
+          "vellum.gpu.readback"
+        ],
+        "required_fields": [
+          "build/provider",
+          "context/surface/frame/request",
+          "depth/capacity",
+          "outcome/cache state",
+          "process/runtime/session",
+          "timestamps and units"
+        ],
+        "query_outputs": [
+          "cold/warm/duplicate/failed/late pipelines",
+          "loss/flush and xrun disposition",
+          "p50/p95/p99",
+          "queue/compile/render-wait",
+          "source trace digest and exact slice/counter IDs"
+        ],
+        "loss": "Wrong process/build/session/provider, loss, missing flush, or incomplete span is unverified."
+      },
+      "tests": {
+        "unit": [
+          "Null/exact executor, queue/backpressure, failure, partial init, trace schema, and disabled bound."
+        ],
+        "planted": [
+          "Executor-before-context destruction, wrong instance, saturation, lost trace, and old policy controls fail distinctly."
+        ],
+        "real_host": [
+          "Exact 10-cold/10-warm standalone, REAPER, Forge, and resize/presentation campaigns."
+        ],
+        "installed_prefix": [
+          "Clean Vellum consumer plus thin Pulp adoption uses one runtime."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "CPU, first-visible p50/p95/p99, frame misses, memory, queue/compile wait, saturation, trace overhead, and xruns"
+        ],
+        "threshold": "background_bounded requires causal material improvement on the same build/provider/session with every bound passing.",
+        "audio": "Zero audio-thread work and no xrun regression in real hosts.",
+        "failure": "Retain null synchronous executor and close no-change when benefit is absent or inconclusive."
+      },
+      "pulp_adoption": {
+        "adapter": "Pulp selects runtime policy and supplies a thin Perfetto sink only if dependency containment requires it.",
+        "surfaces": [
+          "A3 campaign",
+          "CLI",
+          "Forge",
+          "MCP",
+          "REAPER",
+          "unified control"
+        ],
+        "proof": "Compare saved A3 queries, four-state overhead, pixels/input, and real-host campaigns.",
+        "duplicate_rejection": "No second pipeline scheduler, executor owner, trace schema, or generic producer in Pulp."
+      },
+      "retained_paths": [
+        "core/render/src/skia_surface.cpp",
+        "inspect/src/control_gpu_health_provider.cpp"
+      ],
+      "terminal_result": {
+        "pass": "background_bounded only after causal material benefit and every correctness/RT/performance gate.",
+        "no_change": "Keep synchronous and retain useful observability.",
+        "nonterminal": "Missing A3 queue trigger, m153 proof, bounds, trace, or host campaign remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
+    },
+    {
+      "id": "b4-vellum-signature-prewarm",
+      "phase": "B4 conditional signature-aware prewarm",
+      "trigger": "Start only after observability proves pipeline preparation is the causal material A3 contributor.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "inspect/src/control_gpu_health_provider.cpp",
+          "state": "pulp-owned-adoption",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/gpu_runtime.hpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/gpu_trace.hpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/gpu_runtime.mm",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/gpu_trace.cpp",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/skia_dawn_surface.mm",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_pipeline_harness.mm",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        }
+      ],
+      "api_contract": {
+        "surfaces": [
+          "Bounded exact-signature prewarm request/status layered on proven pipeline observability"
+        ],
+        "request": "Provider/build/context, stable signature set, requested/ready/failed limits, deadline, and cancellation.",
+        "result": "Requested/ready/failed counts, exact signatures, timings, and typed unavailable/cancelled/failure.",
+        "errors": "Stale signature, wrong build/context, saturation, timeout, cancellation, and compile failure remain typed.",
+        "availability": "No generic prewarm surface ships when a safe exact-signature seam or causal benefit is absent."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/vellum generic prewarm; Pulp product lifecycle selection",
+        "ownership": "Vellum owns signature preparation; Pulp chooses when a product/host lifecycle requests it.",
+        "lifetime": "Requests/jobs remain owned through completion/cancellation and drain before context/executor teardown.",
+        "threads": "Bounded executor policy owns compilation and backpressure on documented workers.",
+        "rt": "No signature generation, queueing, compilation, wait, or callback runs on audio threads."
+      },
+      "trace_contract": {
+        "producer": "Vellum prewarm and pipeline trace",
+        "events": [
+          "vellum.gpu.pipeline.compile",
+          "vellum.gpu.pipeline.queue",
+          "vellum.gpu.pipeline.request",
+          "vellum.gpu.prewarm"
+        ],
+        "required_fields": [
+          "build/provider/context/session",
+          "counts and outcome",
+          "pipeline signature",
+          "queue depth/capacity",
+          "timestamps"
+        ],
+        "query_outputs": [
+          "cold/warm readiness",
+          "failed/late/duplicate signatures",
+          "prewarm-to-first-visible causality"
+        ],
+        "loss": "Missing signature/provenance or trace loss rejects a benefit claim."
+      },
+      "tests": {
+        "unit": [
+          "Signature stability, deduplication, bounds, cancellation, failure, and teardown."
+        ],
+        "planted": [
+          "Wrong/stale signature, wrong context/build, unbounded queue, timeout, and old no-op prewarm fail."
+        ],
+        "real_host": [
+          "Same exact 10-cold/10-warm standalone, REAPER, and Forge workload as causal A3."
+        ],
+        "installed_prefix": [
+          "Clean Vellum API plus thin Pulp lifecycle adapter."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "CPU, first-visible p50/p95/p99, frame misses, memory, ready/failed count, saturation, and xruns"
+        ],
+        "threshold": "Adopt only a causal material improvement beyond observability/executor control with no warm/fidelity regression.",
+        "audio": "Zero audio-thread work and no real-host xrun regression.",
+        "failure": "Close cancelled-no-change or no-change and ship no prewarm policy."
+      },
+      "pulp_adoption": {
+        "adapter": "Pulp supplies only product/DAW lifecycle selection for the accepted Vellum primitive.",
+        "surfaces": [
+          "A3 disposition",
+          "Forge lifecycle",
+          "REAPER lifecycle",
+          "standalone lifecycle"
+        ],
+        "proof": "Repeat exact causal workload and old/no-op control with saved queries.",
+        "duplicate_rejection": "No Pulp custom prewarm cache or second signature scheduler."
+      },
+      "retained_paths": [
+        "inspect/src/control_gpu_health_provider.cpp"
+      ],
+      "terminal_result": {
+        "pass": "One bounded signature-aware policy proves causal material benefit.",
+        "no_change": "No prewarm code ships; keep observability and synchronous or accepted executor policy.",
+        "nonterminal": "Missing causal pipeline attribution or safe signature seam remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
+    },
+    {
+      "id": "b5-vellum-dpr-policy",
+      "phase": "B5 conditional Vellum surface-scale policy",
+      "trigger": "Start only from a terminal A4 queue result after B0 path refresh.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "core/render/include/pulp/render/skia_surface.hpp",
+          "state": "framework-authoritative-transferred-compatibility",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_dpr_runner.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/include/vellum/graphics/skia_dawn_surface.hpp",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/src/skia_dawn_surface.mm",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/gpu_style_test.cpp",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "graphics/tests/text_shaping_concurrency_test.cpp",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        }
+      ],
+      "api_contract": {
+        "surfaces": [
+          "SkiaDawnSurface logical/physical scale configuration and bounded status"
+        ],
+        "request": "Logical size, physical scale, accessibility/zoom precedence, policy, bounds, and hysteresis.",
+        "result": "Exact applied scale, reason, transition state, and input-coordinate mapping.",
+        "errors": "Invalid/stale scale, conflicting precedence, unsupported policy, and bound failure are typed.",
+        "availability": "No policy change exists unless A4 selected a candidate."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/vellum generic surface scale",
+        "ownership": "Vellum owns logical/physical scale; Pulp owns experiment scenarios and product selection.",
+        "lifetime": "Scale state follows surface lifetime and resets deterministically on recreation.",
+        "threads": "Scale application and input mapping use documented UI/render ownership.",
+        "rt": "No scale policy work or evidence projection runs on audio threads."
+      },
+      "trace_contract": {
+        "producer": "Vellum surface/frame trace",
+        "events": [
+          "vellum.gpu.frame.paint",
+          "vellum.gpu.frame.submit",
+          "vellum.gpu.present"
+        ],
+        "required_fields": [
+          "applied DPR/policy",
+          "build/provider",
+          "frame/surface",
+          "logical/physical size",
+          "process/session"
+        ],
+        "query_outputs": [
+          "frame latency and cadence",
+          "p50/p95/p99",
+          "policy transitions"
+        ],
+        "loss": "Missing scale identity or trace loss rejects a policy comparison."
+      },
+      "tests": {
+        "unit": [
+          "Precedence, bounds, hysteresis, coordinates, lifecycle, and scale status."
+        ],
+        "planted": [
+          "Stale scale, blurred text, wrong coordinates, oscillation, and missing provenance fail."
+        ],
+        "real_host": [
+          "Full A4 native/Three.js/text/input/resize/accessibility matrix."
+        ],
+        "installed_prefix": [
+          "Thin Pulp adapter consumes one Vellum policy from a clean prefix."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "fidelity, frame latency, input error, memory, policy churn, and p50/p95/p99"
+        ],
+        "threshold": "Every A4 fidelity/input gate and ratified latency/memory bound passes.",
+        "audio": "GPU-audio canary has no xrun regression.",
+        "failure": "Close no-change and preserve exact/default scale."
+      },
+      "pulp_adoption": {
+        "adapter": "Pulp selects the accepted Vellum policy and retains the A4 corpus/runner.",
+        "surfaces": [
+          "A4 runner",
+          "Forge",
+          "Three.js",
+          "native host"
+        ],
+        "proof": "Rerun all frozen cells and real input/fidelity checks.",
+        "duplicate_rejection": "No second Pulp logical/physical scale policy."
+      },
+      "retained_paths": [
+        "core/render/include/pulp/render/skia_surface.hpp",
+        "tools/scripts/gpu_dpr_runner.py"
+      ],
+      "terminal_result": {
+        "pass": "One Vellum scale policy passes the complete A4 matrix.",
+        "no_change": "Retain exact/default scale and the corpus.",
+        "nonterminal": "Missing queue trigger, fidelity/input, or installed-prefix proof remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
+    },
+    {
+      "id": "b6-pulp-vellum-adoption-skills",
+      "phase": "B6 thin adoption, duplicate rejection, docs, and skills",
+      "trigger": "Begin after each adopted B1-B5 package has an installed Vellum revision and terminal evidence.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/daw-smoke/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/forge-app-delivery/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/skia-gpu-build/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-analysis/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-sql/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/view-bridge/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/status/gpu-vellum-handoff.yaml",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/validation/gpu-first-visible-a3-acceptance.md",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": ".agents/skills/vellum-app-authoring/SKILL.md",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "docs/architecture/gpu-boundary.md",
+          "state": "existing",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        },
+        {
+          "repo": "Generous-Corp/vellum",
+          "path": "docs/gpu-debugging.md",
+          "state": "proposed",
+          "revision": "f0bcb52ae8c2575886c1e59ba5fc22241e28b403"
+        }
+      ],
+      "api_contract": {
+        "surfaces": [
+          "Installed Vellum runtime APIs plus thin Pulp adapters, controls, CLI/MCP, docs, and skills"
+        ],
+        "request": "Exact adopted Pulp/Vellum/provider revisions and per-package terminal receipts.",
+        "result": "One owner per generic behavior, compatible product evidence, and explicit retained/deletion inventory.",
+        "errors": "Version drift, duplicate owner, query mismatch, missing installed prefix, or broad removal blocks adoption.",
+        "availability": "A package remains on its prior implementation until its replacement is installed and proven."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Vellum generic runtime plus Pulp product/host adapters",
+        "ownership": "Each API, global handler, executor, trace event, policy, and adapter has one recorded owner.",
+        "lifetime": "Installed runtime and Pulp adapters preserve adopted package lifetime contracts.",
+        "threads": "Thread and teardown behavior remains identical or stronger across adoption.",
+        "rt": "Saved audio-thread exclusions, producer overhead, and xrun gates all rerun."
+      },
+      "trace_contract": {
+        "producer": "Adopted Vellum generic events plus retained Pulp host/product events",
+        "events": [
+          "versioned Pulp host vocabulary",
+          "versioned Vellum generic vocabulary"
+        ],
+        "required_fields": [
+          "build/provider",
+          "event owner",
+          "process/runtime/session",
+          "trace digest",
+          "units/loss/flush"
+        ],
+        "query_outputs": [
+          "before/after semantic parity",
+          "duplicate-event rejection",
+          "exact retained event inventory"
+        ],
+        "loss": "No adoption claim passes with missing/lost events or ambiguous ownership."
+      },
+      "tests": {
+        "unit": [
+          "Path ledger, installed API, Doxygen, docs, control, CLI/MCP, capabilities, and skill checks."
+        ],
+        "planted": [
+          "Duplicate handler/executor/policy/event, stale provider, broad removal, and old adapter controls fail."
+        ],
+        "real_host": [
+          "Standalone, real DAW, Forge Modular, Three.js, GPU-audio, resize/presentation, and Perfetto replay."
+        ],
+        "installed_prefix": [
+          "Clean consumers use only installed Vellum and Pulp SDK surfaces."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "A3/A4 outcomes, producer overhead, query parity, frame/pixel/input fidelity, and xruns"
+        ],
+        "threshold": "Every adopted package preserves or improves its ratified terminal gate.",
+        "audio": "Zero forbidden audio-thread work and no xrun regression across real hosts.",
+        "failure": "Keep the prior adapter and mark adoption nonterminal; no partial cutover."
+      },
+      "pulp_adoption": {
+        "adapter": "Use thin adapters and retain Pulp product questions, policy, and host harnesses.",
+        "surfaces": [
+          "CLI/MCP/control",
+          "Forge/DAW",
+          "capability ledgers",
+          "docs/Doxygen",
+          "installed SDK",
+          "skills"
+        ],
+        "proof": "Run saved queries and the complete installed real-host ladder before path disposition.",
+        "duplicate_rejection": "Tests reject duplicate generic handler, executor, policy, event, capture, diagnostics, or scale owner."
+      },
+      "retained_paths": [
+        ".agents/skills/daw-smoke/SKILL.md",
+        ".agents/skills/forge-app-delivery/SKILL.md",
+        ".agents/skills/skia-gpu-build/SKILL.md",
+        ".agents/skills/trace-analysis/SKILL.md",
+        ".agents/skills/trace-sql/SKILL.md",
+        ".agents/skills/view-bridge/SKILL.md",
+        "docs/status/gpu-vellum-handoff.yaml",
+        "docs/validation/gpu-first-visible-a3-acceptance.md"
+      ],
+      "terminal_result": {
+        "pass": "Installed Vellum owns generic behavior and Pulp retains thin product/host workflows with no duplicates.",
+        "no_change": "Keep the prior proven adapter for any package whose replacement is not equivalent.",
+        "nonterminal": "Any package, path, query, installed-prefix, RT, or real-host gap remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
     },
     {
       "id": "pulp-v8-threejs-release-followup",
-      "current_owner": "Generous-Corp/pulp",
-      "paths": [
+      "phase": "Pulp-owned release follow-up",
+      "trigger": "Run independently when a V8-bearing CLI archive is ready; it does not gate Vellum runtime work.",
+      "pulp_paths": [
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".github/workflows/release-cli.yml",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/cmd/upgrade.rs",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/install.rs",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/install/tests.rs",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/package_cli.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/release_artifact_contents.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/release_product_matrix.json",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/test_package_cli.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/test_release_artifact_contents.py",
+          "state": "pulp-owned-retained",
+          "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62"
+        }
+      ],
+      "vellum_paths": [],
+      "api_contract": {
+        "surfaces": [
+          "Signed release archive and Rust self-upgrade preservation of share/pulp/threejs"
+        ],
+        "request": "Exact release, platform, archive, nested runtime, checksum, and upgrade source.",
+        "result": "Verified callable Three.js runtime before and after self-upgrade.",
+        "errors": "Missing V8, nested runtime, checksum, signature, or upgrade preservation fails release proof.",
+        "availability": "Three.js remains conditionally unavailable until the complete artifact exists."
+      },
+      "ownership_lifetime_rt": {
+        "owner": "Generous-Corp/pulp release tooling",
+        "ownership": "Pulp owns CLI packaging, release artifacts, upgrade, and runtime discovery.",
+        "lifetime": "Nested runtime bytes remain immutable for the installed CLI version.",
+        "threads": "Packaging and upgrade are offline/non-audio workflows.",
+        "rt": "No release or discovery work runs in an audio callback."
+      },
+      "trace_contract": {
+        "producer": "none",
+        "events": [],
+        "required_fields": [],
+        "query_outputs": [],
+        "loss": "No trace contract is required for artifact packaging."
+      },
+      "tests": {
+        "unit": [
+          "Archive contents, checksums, product matrix, install, and upgrade tests."
+        ],
+        "planted": [
+          "Missing/corrupt nested runtime and upgrade-dropping-runtime controls fail."
+        ],
+        "real_host": [
+          "Installed archive invokes the conditional Three.js recipe."
+        ],
+        "installed_prefix": [
+          "Fresh install and self-upgrade preserve share/pulp/threejs."
+        ]
+      },
+      "performance_gate": {
+        "metrics": [
+          "archive size, install/upgrade completion, and runtime callable status"
+        ],
+        "threshold": "Artifact stays within release bounds and callable proof passes.",
+        "audio": "Not applicable; release workflow remains outside product audio.",
+        "failure": "Keep Three.js discovery unavailable."
+      },
+      "pulp_adoption": {
+        "adapter": "No Vellum adapter; retain Pulp release ownership.",
+        "surfaces": [
+          "CLI release",
+          "runtime discovery",
+          "self-upgrade"
+        ],
+        "proof": "Fresh install and self-upgrade invoke the exact nested runtime.",
+        "duplicate_rejection": "One packaged runtime identity per CLI release."
+      },
+      "retained_paths": [
         ".github/workflows/release-cli.yml",
         "experimental/pulp-rs/src/cmd/upgrade.rs",
         "experimental/pulp-rs/src/install.rs",
@@ -123,74 +1923,32 @@
         "tools/scripts/test_package_cli.py",
         "tools/scripts/test_release_artifact_contents.py"
       ],
-      "cutover_action": "retain-pulp-followup",
-      "vellum_phase": null,
-      "delete_after": null,
-      "reason": "Queue Pulp-owned delivery proof for a standalone V8-bearing archive and prove Rust self-upgrade preserves its nested share/pulp/threejs runtime before installed discovery may claim the conditional Three.js recipe. This packaging work does not move generic rendering authority."
-    },
-    {
-      "id": "generic-gpu-health-lifecycle",
-      "current_owner": "Generous-Corp/vellum",
-      "paths": [
-        "core/render/include/pulp/render/headless_surface.hpp"
-      ],
-      "cutover_action": "replace-pulp-adapter-consumption",
-      "vellum_phase": "B1",
-      "delete_after": "Delete only compatibility glue named by B0 after an installed Vellum prefix proves authentic identity, ordered health/error/loss events, bounded drops, teardown, and real work through Pulp's unchanged v1 result.",
-      "reason": "The generic lifecycle is transferred Vellum authority; horizon A consumes existing interfaces without moving ownership."
-    },
-    {
-      "id": "generic-shader-diagnostics",
-      "current_owner": "Generous-Corp/vellum",
-      "paths": [],
-      "cutover_action": "adopt-when-proven",
-      "vellum_phase": "B2",
-      "delete_after": "Delete only Pulp compatibility parsing explicitly inventoried by B0 after installed Vellum structured diagnostics preserve language, stage, source location, fix, and validation truth.",
-      "reason": "No horizon-A generic shader API is introduced in Pulp."
-    },
-    {
-      "id": "generic-render-tracing-and-prewarm",
-      "current_owner": "Generous-Corp/vellum",
-      "paths": [],
-      "cutover_action": "adopt-only-if-a3-evidence-queues",
-      "vellum_phase": "B4",
-      "delete_after": "Delete only temporary Pulp instrumentation named by the A3 receipt after equivalent installed Vellum spans preserve trace correlation and the same causal rerun passes.",
-      "reason": "A3 measurement, not vGPU analogy, decides whether a generic Vellum seam is needed."
-    },
-    {
-      "id": "generic-dpr-policy",
-      "current_owner": "Generous-Corp/vellum",
-      "paths": [
-        "core/render/include/pulp/render/skia_surface.hpp"
-      ],
-      "cutover_action": "adopt-only-if-a4-evidence-queues",
-      "vellum_phase": "B5",
-      "delete_after": "Delete only temporary experiment adapters named by the A4 disposition after installed Vellum preserves logical input, fidelity gates, and the ratified bound or hysteresis.",
-      "reason": "Horizon A measures DPR without changing transferred surface policy."
-    },
-    {
-      "id": "generic-vellum-agent-guidance",
-      "current_owner": "Generous-Corp/vellum",
-      "paths": [],
-      "cutover_action": "move-generic-guidance",
-      "vellum_phase": "B6",
-      "delete_after": "Delete obsolete Pulp-only generic instructions only after the adopted Vellum revision has an owning render or tracing skill and clean-agent parity passes; retain Pulp CLI, MCP, Forge, DAW, and product-adapter guidance.",
-      "reason": "A new Vellum skill is conditional; do not create a catch-all or duplicate Pulp product instructions."
+      "terminal_result": {
+        "pass": "Signed installed archive and self-upgrade preserve callable Three.js.",
+        "no_change": "Keep conditional discovery unavailable.",
+        "nonterminal": "Missing release, signature, checksum, install, or upgrade proof remains open."
+      },
+      "delete_paths": [],
+      "deletion_gate": {
+        "authorized": false,
+        "authority": "none",
+        "required_evidence": []
+      }
     }
   ],
   "b0_required_inputs": [
     "adopted Vellum protected-tip SHA and installed-prefix identity",
-    "current Pulp protected-tip SHA and gpu-recipes catalog digest",
-    "fresh exact-route results for every candidate path",
-    "A3 budget receipt and queue/no-change disposition",
-    "A4 corpus digest and DPR disposition",
-    "inventory of every temporary adapter with replacement and deletion proof",
-    "clean-agent CLI, MCP, Perfetto, Forge, and DAW workflow evidence"
+    "clean-agent CLI, MCP, Perfetto, Forge, and DAW workflow evidence",
+    "current Pulp protected-tip SHA and GPU catalog digest",
+    "exact route results for every proposed and adoption path",
+    "inventory of every retained path and exact deletion candidate",
+    "terminal A3 budget, campaign, overhead, A2T, and B4 disposition",
+    "terminal A4 corpus digest and DPR disposition"
   ],
   "stop_rules": [
-    "Do not move, widen, narrow, or reverse authority during horizon A.",
-    "Do not delete compatibility code before the replacement is installed and equivalent proof passes.",
-    "Do not infer Vellum APIs or skills before B0 inspects the adopted revision.",
-    "Do not close unavailable or unverified evidence as pass."
+    "do not close unavailable or unverified evidence as pass",
+    "do not delete any path while delete_paths is empty or deletion_gate is unauthorized",
+    "do not infer Vellum APIs or path existence beyond pinned existing/proposed states",
+    "do not move, widen, narrow, or reverse authority during horizon A"
   ]
 }

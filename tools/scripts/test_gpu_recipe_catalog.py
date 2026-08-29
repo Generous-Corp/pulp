@@ -254,29 +254,142 @@ class CatalogContract(unittest.TestCase):
             2,
         )
 
-    def test_vellum_handoff_is_closed_and_cannot_authorize_cutover(self) -> None:
+    def test_vellum_handoff_v2_is_closed_and_default_denies_deletion(self) -> None:
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
         self.assertEqual(catalog.validate_handoff(handoff), [])
         self.assertEqual(catalog.validate_handoff_routing(handoff, catalog.ROOT), [])
+        self.assertEqual(handoff["schema"], "pulp.gpu-vellum-handoff.v2")
+        self.assertEqual(
+            [entry["id"] for entry in handoff["entries"]],
+            list(catalog.HANDOFF_PACKAGE_IDS),
+        )
+        self.assertIn("b3-vellum-gpu-capture", handoff["required_package_ids"])
+        self.assertIn("b4-vellum-observability-executor", handoff["required_package_ids"])
+        self.assertIn("b4-vellum-signature-prewarm", handoff["required_package_ids"])
+        host = next(
+            entry
+            for entry in handoff["entries"]
+            if entry["id"] == "a3-pulp-input-to-present-host"
+        )
+        self.assertEqual(len(host["trace_contract"]["events"]), 20)
+        self.assertIn("core/view/platform/mac/window_host_mac.mm", host["retained_paths"])
         followup = next(
             entry
             for entry in handoff["entries"]
             if entry["id"] == "pulp-v8-threejs-release-followup"
         )
-        self.assertEqual(followup["cutover_action"], "retain-pulp-followup")
-        self.assertIn("experimental/pulp-rs/src/install.rs", followup["paths"])
-        self.assertIn("tools/scripts/release_artifact_contents.py", followup["paths"])
-        self.assertIn("share/pulp/threejs", followup["reason"])
+        self.assertIn("experimental/pulp-rs/src/install.rs", followup["retained_paths"])
+        self.assertIn("tools/scripts/release_artifact_contents.py", followup["retained_paths"])
+        for entry in handoff["entries"]:
+            with self.subTest(package=entry["id"]):
+                inventory = {row["path"] for row in entry["pulp_paths"]}
+                disposition = set(entry["retained_paths"]) | set(entry["delete_paths"])
+                self.assertEqual(inventory, disposition)
+                self.assertEqual(entry["delete_paths"], [])
+                self.assertEqual(
+                    entry["deletion_gate"],
+                    {"authorized": False, "authority": "none", "required_evidence": []},
+                )
         handoff["boundary_change_authorized"] = True
         self.assertIn(
             "must not authorize",
             "\n".join(catalog.validate_handoff(handoff)),
         )
 
-    def test_vellum_handoff_rejects_action_and_authority_drift(self) -> None:
+    def test_vellum_handoff_rejects_missing_packages_targets_and_contracts(self) -> None:
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
-        handoff["entries"][2]["cutover_action"] = "delete-now"
-        self.assertIn("unknown cutover action", "\n".join(catalog.validate_handoff(handoff)))
+        handoff["entries"] = [
+            entry for entry in handoff["entries"] if entry["id"] != "b3-vellum-gpu-capture"
+        ]
+        self.assertIn(
+            "closed A2-B6 package set",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        b3 = next(entry for entry in handoff["entries"] if entry["id"] == "b3-vellum-gpu-capture")
+        b3["vellum_paths"] = []
+        self.assertIn("empty applicable Vellum target", "\n".join(catalog.validate_handoff(handoff)))
+
+        for field, expected in (
+            ("api_contract", "api_contract is incomplete"),
+            ("ownership_lifetime_rt", "ownership_lifetime_rt is incomplete"),
+            ("tests", "tests has the wrong closed shape"),
+        ):
+            with self.subTest(missing_contract=field):
+                handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+                b3 = next(
+                    entry for entry in handoff["entries"] if entry["id"] == "b3-vellum-gpu-capture"
+                )
+                b3[field] = {}
+                self.assertIn(expected, "\n".join(catalog.validate_handoff(handoff)))
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        b6 = next(
+            entry for entry in handoff["entries"] if entry["id"] == "b6-pulp-vellum-adoption-skills"
+        )
+        b6["vellum_paths"][0]["path"] = ".agents/skills/unknown/SKILL.md"
+        self.assertIn(
+            "claims an unknown existing Vellum path",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
+
+    def test_vellum_handoff_rejects_unsafe_deletion_dispositions(self) -> None:
+        def deletion_gate() -> dict:
+            return {
+                "authorized": False,
+                "authority": "future B6 exact-path review",
+                "required_evidence": ["installed replacement proof"],
+            }
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        a2 = next(entry for entry in handoff["entries"] if entry["id"] == "a2-pulp-product-probes")
+        broad = "tools/cli/gpu_probe"
+        next(row for row in a2["pulp_paths"] if row["path"] == broad)["state"] = (
+            "pulp-owned-delete-candidate"
+        )
+        a2["retained_paths"].remove(broad)
+        a2["delete_paths"] = [broad]
+        a2["deletion_gate"] = deletion_gate()
+        self.assertIn(
+            "contains broad directory",
+            "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        a2 = next(entry for entry in handoff["entries"] if entry["id"] == "a2-pulp-product-probes")
+        a2["delete_paths"] = ["tools/scripts/not-in-pulp-inventory.py"]
+        a2["deletion_gate"] = deletion_gate()
+        self.assertIn(
+            "delete candidate is absent from the Pulp inventory",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        a2 = next(entry for entry in handoff["entries"] if entry["id"] == "a2-pulp-product-probes")
+        overlap = "tools/mcp/mcp_gpu_tools.cpp"
+        next(row for row in a2["pulp_paths"] if row["path"] == overlap)["state"] = (
+            "pulp-owned-delete-candidate"
+        )
+        a2["delete_paths"] = [overlap]
+        a2["deletion_gate"] = deletion_gate()
+        self.assertIn("retained/deleted paths overlap", "\n".join(catalog.validate_handoff(handoff)))
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        a2 = next(entry for entry in handoff["entries"] if entry["id"] == "a2-pulp-product-probes")
+        a2["deletion_gate"] = deletion_gate()
+        self.assertIn(
+            "grants prose-only deletion without delete_paths",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
+
+    def test_vellum_handoff_rejects_authority_and_routing_drift(self) -> None:
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["authorities"]["plan"]["revision"] = "0" * 40
+        self.assertIn(
+            "must pin the reviewed plan/Pulp/Vellum revisions",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
 
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
         handoff["route_set_sha256"] = "0" * 64
@@ -286,15 +399,21 @@ class CatalogContract(unittest.TestCase):
         )
 
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
-        handoff["entries"][0]["current_owner"] = "Generous-Corp/vellum"
-        problems = [
-            *catalog.validate_handoff(handoff),
-            *catalog.validate_handoff_routing(handoff, catalog.ROOT),
-        ]
-        self.assertIn("differs from routed owner", "\n".join(problems))
+        b4 = next(
+            entry
+            for entry in handoff["entries"]
+            if entry["id"] == "b4-vellum-observability-executor"
+        )
+        next(
+            row for row in b4["pulp_paths"] if row["path"] == "core/render/src/skia_surface.cpp"
+        )["state"] = "pulp-owned-retained"
+        self.assertIn(
+            "expects 'Generous-Corp/pulp' but routing returned 'Generous-Corp/vellum'",
+            "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+        )
 
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
-        handoff["entries"][0]["paths"][0] = "tools/cli/gpu_prove"
+        handoff["entries"][0]["pulp_paths"][0]["path"] = "tools/cli/gpu_prove"
         self.assertIn(
             "path does not exist inside the repository",
             "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
@@ -306,15 +425,6 @@ class CatalogContract(unittest.TestCase):
             "must be the authoritative",
             "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
         )
-
-        for invalid in (False, 0, [], {}):
-            with self.subTest(retain_delete_after=invalid):
-                handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
-                handoff["entries"][0]["delete_after"] = invalid
-                self.assertIn(
-                    "must be null for retained Pulp work",
-                    "\n".join(catalog.validate_handoff(handoff)),
-                )
 
 
 if __name__ == "__main__":
