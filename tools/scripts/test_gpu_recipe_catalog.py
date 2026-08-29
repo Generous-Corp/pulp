@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
@@ -264,6 +265,7 @@ class CatalogContract(unittest.TestCase):
             list(catalog.HANDOFF_PACKAGE_IDS),
         )
         self.assertIn("b3-vellum-gpu-capture", handoff["required_package_ids"])
+        self.assertIn("b0-adoption-authority-freeze", handoff["required_package_ids"])
         self.assertIn("b4-vellum-observability-executor", handoff["required_package_ids"])
         self.assertIn("b4-vellum-signature-prewarm", handoff["required_package_ids"])
         host = next(
@@ -273,6 +275,12 @@ class CatalogContract(unittest.TestCase):
         )
         self.assertEqual(len(host["trace_contract"]["events"]), 20)
         self.assertIn("core/view/platform/mac/window_host_mac.mm", host["retained_paths"])
+        b0 = next(
+            entry for entry in handoff["entries"]
+            if entry["id"] == "b0-adoption-authority-freeze"
+        )
+        self.assertEqual(tuple(b0["depends_on"]), catalog.HANDOFF_B0_DEPENDENCIES)
+        self.assertEqual(b0["delete_paths"], [])
         followup = next(
             entry
             for entry in handoff["entries"]
@@ -286,6 +294,17 @@ class CatalogContract(unittest.TestCase):
                 disposition = set(entry["retained_paths"]) | set(entry["delete_paths"])
                 self.assertEqual(inventory, disposition)
                 self.assertEqual(entry["delete_paths"], [])
+                self.assertTrue(entry["accepted_dispositions"])
+                self.assertTrue(entry["terminal_evidence"]["required"])
+                self.assertTrue(entry["terminal_evidence"]["planted"])
+                self.assertEqual(
+                    entry["input_receipts"],
+                    sorted(f"{dependency}.terminal.v1" for dependency in entry["depends_on"]),
+                )
+                for row in entry["pulp_paths"]:
+                    self.assertRegex(row["revision"], r"^[0-9a-f]{40}$")
+                    self.assertRegex(row["object_id"], r"^[0-9a-f]{40}$")
+                    self.assertIn(row["object_type"], {"blob", "tree"})
                 self.assertEqual(
                     entry["deletion_gate"],
                     {"authorized": False, "authority": "none", "required_evidence": []},
@@ -331,6 +350,35 @@ class CatalogContract(unittest.TestCase):
         b6["vellum_paths"][0]["path"] = ".agents/skills/unknown/SKILL.md"
         self.assertIn(
             "claims an unknown existing Vellum path",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        b1 = next(entry for entry in handoff["entries"] if entry["id"] == "b1-vellum-gpu-runtime")
+        b1["vellum_paths"] = [
+            row for row in b1["vellum_paths"] if row["path"] != "graphics/CMakeLists.txt"
+        ]
+        self.assertIn(
+            "omits Vellum source/test/install/export wiring",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        b6 = next(
+            entry for entry in handoff["entries"] if entry["id"] == "b6-pulp-vellum-adoption-skills"
+        )
+        b6["terminal_evidence"]["required"].remove(
+            "old generic Pulp symbols and targets are absent for every separately authorized delete path"
+        )
+        self.assertIn(
+            "omits B6 absence/corpus/overhead terminal proof",
+            "\n".join(catalog.validate_handoff(handoff)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["entries"][1]["input_receipts"] = []
+        self.assertIn(
+            "input_receipts must exactly bind dependency outputs",
             "\n".join(catalog.validate_handoff(handoff)),
         )
 
@@ -416,6 +464,30 @@ class CatalogContract(unittest.TestCase):
         handoff["entries"][0]["pulp_paths"][0]["path"] = "tools/cli/gpu_prove"
         self.assertIn(
             "path does not exist inside the repository",
+            "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        row = next(
+            row
+            for entry in handoff["entries"]
+            for row in entry["pulp_paths"]
+            if row["path"] == "tools/scripts/gpu_recipe_catalog.py"
+        )
+        row["revision"] = catalog.HANDOFF_AUTHORITIES["pulp"]["revision"]
+        row["object_id"] = subprocess.check_output(
+            ["git", "rev-parse", f"{row['revision']}:{row['path']}"],
+            cwd=catalog.ROOT, text=True,
+        ).strip()
+        self.assertIn(
+            "stale revision/blob/tree identity",
+            "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+        )
+
+        handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
+        handoff["entries"][0]["pulp_paths"][0]["object_id"] = "0" * 40
+        self.assertIn(
+            "stale revision/blob/tree identity",
             "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
         )
 

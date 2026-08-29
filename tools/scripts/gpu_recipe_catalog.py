@@ -36,6 +36,7 @@ HANDOFF_PACKAGE_IDS = (
     "a3-pulp-input-to-present-host",
     "a3-pulp-runtime-control",
     "a4-pulp-dpr-experiment",
+    "b0-adoption-authority-freeze",
     "b1-vellum-gpu-runtime",
     "b2-vellum-gpu-diagnostics",
     "b3-vellum-gpu-capture",
@@ -53,7 +54,7 @@ HANDOFF_AUTHORITIES = {
     },
     "pulp": {
         "repo": "Generous-Corp/pulp",
-        "revision": "fd9cb94343a380efe74ddc6f4223c2b90ea93b62",
+        "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
         "path": ".github/vellum-ownership.json",
     },
     "vellum": {
@@ -89,17 +90,51 @@ HANDOFF_UPSTREAM = {
     ],
 }
 HANDOFF_VELLUM_TARGET_PACKAGES = frozenset(
-    package for package in HANDOFF_PACKAGE_IDS if package.startswith("b")
+    package for package in HANDOFF_PACKAGE_IDS
+    if package.startswith("b") and package != "b0-adoption-authority-freeze"
 )
-HANDOFF_EXISTING_VELLUM_PATHS = frozenset({
-    ".agents/skills/vellum-app-authoring/SKILL.md",
-    "cmake/VellumSkiaDawn.cmake",
-    "docs/architecture/gpu-boundary.md",
-    "graphics/include/vellum/graphics/skia_dawn_surface.hpp",
-    "graphics/src/skia_dawn_surface.mm",
-    "graphics/tests/gpu_style_test.cpp",
-    "graphics/tests/text_shaping_concurrency_test.cpp",
-    "provenance/third-party-lock.json",
+HANDOFF_EXISTING_VELLUM_OBJECTS = {
+    ".agents/skills/vellum-app-authoring/SKILL.md": "798393e5d7e45ddd0b53db5e0f65fcee28e78a10",
+    "CMakeLists.txt": "82ece751dc36a9dd39baa2f2fed41c0739e42215",
+    "cmake/RunInstallConsumer.cmake": "4167da313b93aa1c74dc5a810b645cfdc4b454e0",
+    "cmake/VellumConfig.cmake.in": "7d67184812f84b37ce0ea6acbf7493a70dfdad8a",
+    "cmake/VellumSkiaDawn.cmake": "b797025ce86b0bf72e6b36a507986d869198ee66",
+    "docs/architecture/gpu-boundary.md": "6e71e3a0daeb7e02b254174a6ecca61b6388b873",
+    "graphics/CMakeLists.txt": "95b84573e77f85b44e5d459a76590b3a9a15f9e7",
+    "graphics/include/vellum/graphics/skia_dawn_surface.hpp": "67b176224228b0257a77416384bb8d75d97e1e95",
+    "graphics/src/skia_dawn_surface.mm": "b6f1bfeb00661eaee935256a008810036d01deb2",
+    "graphics/tests/gpu_style_test.cpp": "dc471225469f9e5fc67dc60e3939d0aa7e73511a",
+    "graphics/tests/text_shaping_concurrency_test.cpp": "1c278964f55b23e6cec6cb344749bfb5e8cf8880",
+    "provenance/third-party-lock.json": "6fa97a114ff40c2dc4781fa46759f294430d064b",
+}
+HANDOFF_EXISTING_VELLUM_PATHS = frozenset(HANDOFF_EXISTING_VELLUM_OBJECTS)
+HANDOFF_VELLUM_WIRING_PATHS = frozenset({
+    "CMakeLists.txt",
+    "cmake/RunInstallConsumer.cmake",
+    "cmake/VellumConfig.cmake.in",
+    "graphics/CMakeLists.txt",
+})
+HANDOFF_B0_DEPENDENCIES = (
+    "a2-pulp-product-probes",
+    "a2t-pulp-trace-analysis",
+    "a3-pulp-input-to-present-host",
+    "a3-pulp-runtime-control",
+    "a4-pulp-dpr-experiment",
+)
+HANDOFF_TRACE_MIGRATIONS = frozenset({
+    "gpu_acquire -> vellum.gpu.drawable.acquire",
+    "gpu_device_loss -> vellum.gpu.device.loss",
+    "gpu_health_transition -> vellum.gpu.health.transition",
+    "gpu_pipeline_prepare -> vellum.gpu.pipeline.compile",
+    "gpu_present -> vellum.gpu.present",
+    "gpu_probe/gpu_readback -> vellum.gpu.readback",
+    "gpu_resource_upload -> vellum.gpu.resource.upload",
+    "gpu_submit -> vellum.gpu.frame.submit",
+})
+HANDOFF_B6_TERMINAL_EVIDENCE = frozenset({
+    "compile-out, compiled-idle, and active trace overhead plus xrun receipt passes",
+    "migrated A2T/A3/real-host corpus is green against installed Vellum",
+    "old generic Pulp symbols and targets are absent for every separately authorized delete path",
 })
 
 
@@ -357,7 +392,7 @@ def validate_handoff(document: Any) -> list[str]:
         "schema", "catalog", "ownership_projection", "expansion_id",
         "route_set_sha256", "boundary_change_authorized", "authorities",
         "upstream", "cutover_trigger", "required_package_ids", "entries",
-        "b0_required_inputs", "stop_rules",
+        "b0_required_inputs", "stop_rules", "self_binding",
     }
     problems: list[str] = []
     if set(document) != required:
@@ -375,6 +410,12 @@ def validate_handoff(document: Any) -> list[str]:
         problems.append("handoff route_set_sha256 must be lowercase SHA-256")
     if document.get("required_package_ids") != list(HANDOFF_PACKAGE_IDS):
         problems.append("handoff required_package_ids must include the closed A2-B6 package set")
+    if document.get("self_binding") != {
+        "path": "docs/status/gpu-vellum-handoff.yaml",
+        "policy": "excluded-from-path-inventory-to-avoid-circular-git-self-reference",
+        "validator": "tools/scripts/gpu_recipe_catalog.py",
+    }:
+        problems.append("handoff self_binding must prohibit circular Git self-reference")
     for field in ("b0_required_inputs", "stop_rules"):
         if not _closed_text_list(document.get(field)):
             problems.append(f"handoff {field} must be nonempty, sorted, and unique")
@@ -390,9 +431,10 @@ def validate_handoff(document: Any) -> list[str]:
         "id", "phase", "trigger", "pulp_paths", "vellum_paths",
         "api_contract", "ownership_lifetime_rt", "trace_contract", "tests",
         "performance_gate", "pulp_adoption", "retained_paths", "delete_paths",
-        "deletion_gate", "terminal_result",
+        "deletion_gate", "terminal_result", "depends_on", "accepted_dispositions",
+        "input_receipts", "output_receipt", "terminal_evidence",
     }
-    path_fields = {"repo", "path", "state", "revision"}
+    path_fields = {"repo", "path", "state", "revision", "object_id", "object_type"}
     api_keys = {"surfaces", "request", "result", "errors", "availability"}
     ownership_keys = {"owner", "ownership", "lifetime", "threads", "rt"}
     trace_keys = {"producer", "events", "required_fields", "query_outputs", "loss"}
@@ -406,6 +448,8 @@ def validate_handoff(document: Any) -> list[str]:
         "framework-authoritative-transferred-compatibility",
     }
     ids: list[str] = []
+    prior_ids: set[str] = set()
+    prior_output_ids: dict[str, str] = {}
     for index, entry in enumerate(entries):
         prefix = f"handoff entries[{index}]"
         if not isinstance(entry, dict) or set(entry) != entry_fields:
@@ -419,6 +463,40 @@ def validate_handoff(document: Any) -> list[str]:
             value = entry[field]
             if not isinstance(value, str) or not value.strip():
                 problems.append(f"{prefix}.{field} must be explicit")
+
+        depends_on = entry["depends_on"]
+        if not _closed_text_list(depends_on, allow_empty=True):
+            problems.append(f"{prefix}.depends_on must be exact, sorted, and unique")
+            depends_on = []
+        elif not set(depends_on).issubset(prior_ids):
+            problems.append(f"{prefix}.depends_on must reference only earlier packages")
+        dispositions = entry["accepted_dispositions"]
+        if (
+            not _closed_text_list(dispositions)
+            or not set(dispositions).issubset({"no-change", "pass"})
+        ):
+            problems.append(f"{prefix}.accepted_dispositions is invalid")
+        expected_inputs = sorted(
+            prior_output_ids[dependency]
+            for dependency in depends_on
+            if dependency in prior_output_ids
+        )
+        if entry["input_receipts"] != expected_inputs:
+            problems.append(f"{prefix}.input_receipts must exactly bind dependency outputs")
+        output_receipt = entry["output_receipt"]
+        if not _closed_contract(output_receipt, {"id", "schema", "path"}, set()):
+            problems.append(f"{prefix}.output_receipt is incomplete")
+        elif (
+            output_receipt["id"] != f"{package_id}.terminal.v1"
+            or output_receipt["schema"] != "pulp.gpu-vellum-package-terminal.v1"
+            or not _safe_relative(output_receipt["path"])
+        ):
+            problems.append(f"{prefix}.output_receipt is not exact")
+        terminal_evidence = entry["terminal_evidence"]
+        if not _closed_contract(
+            terminal_evidence, {"required", "planted"}, {"required", "planted"},
+        ):
+            problems.append(f"{prefix}.terminal_evidence is incomplete")
 
         path_sets: dict[str, set[str]] = {}
         for field, repo, states in (
@@ -435,19 +513,43 @@ def validate_handoff(document: Any) -> list[str]:
             for row_index, row in enumerate(rows):
                 row_prefix = f"{prefix}.{field}[{row_index}]"
                 if not isinstance(row, dict) or set(row) != path_fields:
-                    problems.append(f"{row_prefix} fields must be repo/path/state/revision")
+                    problems.append(
+                        f"{row_prefix} fields must bind repo/path/state/revision/object identity"
+                    )
                     continue
                 path = row["path"]
                 ordering.append((row["path"], row["state"], row["revision"], row["repo"]))
+                revision = row["revision"]
+                object_id = row["object_id"]
+                object_type = row["object_type"]
                 if (
                     row["repo"] != repo or row["state"] not in states
-                    or row["revision"] != HANDOFF_AUTHORITIES[
-                        "pulp" if field == "pulp_paths" else "vellum"
-                    ]["revision"]
+                    or not isinstance(revision, str)
+                    or re.fullmatch(r"[0-9a-f]{40}", revision) is None
                     or not isinstance(path, str) or not _safe_relative(path)
                     or any(token in path for token in ("*", "?", "[", "]"))
                 ):
                     problems.append(f"{row_prefix} is not an exact pinned path object")
+                if field == "pulp_paths" and (
+                    not isinstance(object_id, str)
+                    or re.fullmatch(r"[0-9a-f]{40}", object_id) is None
+                    or object_type not in {"blob", "tree"}
+                ):
+                    problems.append(f"{row_prefix} lacks exact Pulp object identity")
+                if field == "vellum_paths":
+                    expected_object = HANDOFF_EXISTING_VELLUM_OBJECTS.get(path)
+                    if row["state"] == "existing" and (
+                        revision != HANDOFF_AUTHORITIES["vellum"]["revision"]
+                        or object_id != expected_object
+                        or object_type != "blob"
+                    ):
+                        problems.append(f"{row_prefix} differs from the pinned Vellum object")
+                    if row["state"] == "proposed" and (
+                        revision != HANDOFF_AUTHORITIES["vellum"]["revision"]
+                        or object_id is not None
+                        or object_type != "absent"
+                    ):
+                        problems.append(f"{row_prefix} proposed path must bind exact absence")
                 if path in observed:
                     problems.append(f"{prefix}.{field} contains duplicate paths")
                 observed.add(path)
@@ -461,6 +563,10 @@ def validate_handoff(document: Any) -> list[str]:
             path_sets[field] = observed
         if package_id in HANDOFF_VELLUM_TARGET_PACKAGES and not entry["vellum_paths"]:
             problems.append(f"{prefix} has an empty applicable Vellum target")
+        if package_id in HANDOFF_VELLUM_TARGET_PACKAGES and not HANDOFF_VELLUM_WIRING_PATHS.issubset(
+            path_sets["vellum_paths"]
+        ):
+            problems.append(f"{prefix} omits Vellum source/test/install/export wiring")
 
         if not _closed_contract(entry["api_contract"], api_keys, {"surfaces"}):
             problems.append(f"{prefix}.api_contract is incomplete")
@@ -531,6 +637,25 @@ def validate_handoff(document: Any) -> list[str]:
         ):
             problems.append(f"{prefix}.deletion_gate cannot authorize deletion in horizon A")
 
+        if package_id == "b0-adoption-authority-freeze" and (
+            tuple(depends_on) != HANDOFF_B0_DEPENDENCIES
+            or deleted
+            or gate != {"authorized": False, "authority": "none", "required_evidence": []}
+        ):
+            problems.append(f"{prefix} does not freeze exact authority and deletion state")
+        if package_id == "b6-pulp-vellum-adoption-skills":
+            if not HANDOFF_TRACE_MIGRATIONS.issubset(set(trace["events"])):
+                problems.append(f"{prefix} omits the old-to-Vellum trace event migration")
+            if not HANDOFF_B6_TERMINAL_EVIDENCE.issubset(
+                set(terminal_evidence.get("required", []))
+                if isinstance(terminal_evidence, dict) else set()
+            ):
+                problems.append(f"{prefix} omits B6 absence/corpus/overhead terminal proof")
+
+        prior_ids.add(package_id)
+        if isinstance(output_receipt, dict) and isinstance(output_receipt.get("id"), str):
+            prior_output_ids[package_id] = output_receipt["id"]
+
     if ids != list(HANDOFF_PACKAGE_IDS):
         problems.append("handoff entries must equal the ordered closed A2-B6 package set")
     return problems
@@ -577,7 +702,8 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
         "pulp-owned-delete-candidate": "Generous-Corp/pulp",
         "framework-authoritative-transferred-compatibility": "Generous-Corp/vellum",
     }
-    pulp_revision = HANDOFF_AUTHORITIES["pulp"]["revision"]
+    git_facts: dict[tuple[str, str], tuple[str | None, str | None, str | None, str | None, int, str | None]] = {}
+    route_owners: dict[str, str] = {}
     for index, entry in enumerate(document.get("entries", [])):
         if not isinstance(entry, dict) or not isinstance(entry.get("pulp_paths"), list):
             continue
@@ -587,6 +713,12 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
             path = row.get("path")
             if not isinstance(path, str):
                 continue
+            if path == "docs/status/gpu-vellum-handoff.yaml":
+                problems.append(
+                    f"handoff entries[{index}].pulp_paths[{row_index}] creates a circular "
+                    "self-reference"
+                )
+                continue
             candidate = root / path
             if not candidate.exists() or not candidate.resolve().is_relative_to(root.resolve()):
                 problems.append(
@@ -594,24 +726,69 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
                     f"inside the repository: {path!r}"
                 )
                 continue
-            pinned = subprocess.run(
-                ["git", "cat-file", "-e", f"{pulp_revision}:{path}"], cwd=root,
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, timeout=10, check=False,
-            )
-            if pinned.returncode != 0:
+            revision = row.get("revision")
+            object_id = row.get("object_id")
+            object_type = row.get("object_type")
+
+            def git_text(arguments: list[str]) -> str | None:
+                completed = subprocess.run(
+                    ["git", *arguments], cwd=root, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    text=True, timeout=10, check=False,
+                )
+                return completed.stdout.strip() if completed.returncode == 0 else None
+
+            fact_key = (str(revision), path)
+            if fact_key not in git_facts:
+                pinned_object = git_text(["rev-parse", f"{revision}:{path}"])
+                pinned_type = (
+                    git_text(["cat-file", "-t", pinned_object]) if pinned_object else None
+                )
+                head_object = git_text(["rev-parse", f"HEAD:{path}"])
+                latest_owner = git_text(["log", "-1", "--format=%H", "HEAD", "--", path])
+                ancestor_code = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", str(revision), "HEAD"], cwd=root,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, timeout=10, check=False,
+                ).returncode
+                checkout_status = git_text(
+                    ["status", "--porcelain=v1", "--untracked-files=all", "--", path]
+                )
+                git_facts[fact_key] = (
+                    pinned_object, pinned_type, head_object, latest_owner,
+                    ancestor_code, checkout_status,
+                )
+            (
+                pinned_object, pinned_type, head_object, latest_owner,
+                ancestor_code, checkout_status,
+            ) = git_facts[fact_key]
+            if pinned_object is None:
                 problems.append(
                     f"handoff entries[{index}].pulp_paths[{row_index}] is absent "
-                    "from the pinned Pulp revision"
+                    "from its pinned Pulp revision"
+                )
+            elif (
+                ancestor_code != 0
+                or pinned_object != object_id
+                or pinned_type != object_type
+                or head_object != object_id
+                or latest_owner != revision
+                or checkout_status != ""
+            ):
+                problems.append(
+                    f"handoff entries[{index}].pulp_paths[{row_index}] has stale "
+                    "revision/blob/tree identity"
                 )
             try:
-                result = routing.route_changes(
-                    projection, expansion, [("Generous-Corp/pulp", path)]
-                )
+                if path not in route_owners:
+                    result = routing.route_changes(
+                        projection, expansion, [("Generous-Corp/pulp", path)]
+                    )
+                    route_owners[path] = result["changes"][0]["owner"]
             except Exception as exc:
                 problems.append(f"handoff entries[{index}] path cannot be routed: {exc}")
                 continue
-            routed_owner = result["changes"][0]["owner"]
+            routed_owner = route_owners[path]
             expected_owner = expected_owners.get(row.get("state"))
             if expected_owner is not None and routed_owner != expected_owner:
                 problems.append(
