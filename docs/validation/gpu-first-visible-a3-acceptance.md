@@ -438,7 +438,7 @@ machine and plugin format, exact product binary SHA, and one identical
 workload/build-family identity across all four files. It must also bind both
 immutable producer packages exactly:
 
-- `8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0` for
+- `fefbfecd9fc014df54fc55d6f3259524f1179a49` for
   `gpu_health_transition_first_visible`;
 - `b4ba22f1d700621366afdbc72bb8615336964cd1` for the five macOS
   input-to-present paths and its exact 20 producer signatures. The 16 slices

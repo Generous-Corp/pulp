@@ -1,11 +1,11 @@
 {
   "schema": "pulp.gpu-trace-overhead-scope.v1",
-  "base_revision": "add4c8779e54113cc8cb4aa486b839788759e891",
+  "base_revision": "d694994433aec73396caffd8bb10bdc77e15379f",
   "accepted_plan_implementation": {
     "plan_revision": "641649b7e7fece6baae34380b6e719904506af22",
     "original_revision": "69059fa0bf8f8878a735909115bb2dc2831c2907",
     "replay_revision": "b7c118d0c98aa4e3d1c7b874ee704c8053a01bf5",
-    "integrated_patch_equivalent": "d7ca8da0dbe0e7007691790ef31e33a33efc318c",
+    "integrated_patch_equivalent": "bc1cfaa0aacc881da4c3753ca9d3862f55b571c9",
     "stable_patch_id": "a5d5850162385c1cbcb2cf34344fea2511636353",
     "path_count": 29
   },

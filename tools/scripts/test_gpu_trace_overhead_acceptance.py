@@ -1043,7 +1043,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(
             external[1]["introducing_revision"],
-            "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+            "fefbfecd9fc014df54fc55d6f3259524f1179a49",
         )
         self.assertTrue(
             external[1]["scope_authority"][

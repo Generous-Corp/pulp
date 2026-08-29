@@ -113,8 +113,8 @@ A2T_ANALYZER_SOURCE_PATHS = {
     "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
 }
 A2T_SCOPE_MANIFEST_PATH = "tools/scripts/gpu_trace_overhead_scope.json"
-A2T_SCOPE_BASE = "add4c8779e54113cc8cb4aa486b839788759e891"
-A2T_INTEGRATED_PATCH_EQUIVALENT = "d7ca8da0dbe0e7007691790ef31e33a33efc318c"
+A2T_SCOPE_BASE = "d694994433aec73396caffd8bb10bdc77e15379f"
+A2T_INTEGRATED_PATCH_EQUIVALENT = "bc1cfaa0aacc881da4c3753ca9d3862f55b571c9"
 A2T_SEMANTIC_IDENTIFIERS = (
     "pulp.trace-gpu-analysis.v1",
     "pulp_gpu_startup_breakdown",
