@@ -43,7 +43,7 @@ and checked rather than trusting those declarations alone. The accepted plan
 is likewise read from its immutable Git object and checked against its Git blob
 and SHA-256 identities.
 
-The no-added-producer disposition is not caller-selected and does not label
+The A2T-scoped no-added-producer disposition is not caller-selected and does not label
 whole mixed-purpose commits as A2T work. The recorder loads the checked-in
 `gpu_trace_overhead_scope.json` contract, verifies its canonical-plan 29-path
 implementation identity, and recomputes an immutable-pre-A2T-base to exact
@@ -59,14 +59,25 @@ the accepted patch's exact 29 paths, every tracked Perfetto-GPU fixture, the
 bounded Rust trace-command and A2T acceptance-script families, and exact stable
 A2T schema/view/tool identifiers within fixed behavior roots. The discovery
 roots include the plan's product-producer prefixes, where the required
-`debug.gpu_evidence_id` key would make a new producer path fail the no-producer
-contract. Generic symptom prose such as “slow GPU startup” is not an identifier
-and cannot expand the scope by substring accident.
+source annotation `"gpu_evidence_id"` (serialized by Perfetto as
+`debug.gpu_evidence_id`) plus a `PULP_TRACE_*` macro identifies a real producer.
+Generic symptom prose such as “slow GPU startup” is not an identifier and
+cannot expand the scope by substring accident.
+
+The final Horizon-A tree does contain a later A3-owned product producer in
+`inspect/src/control_gpu_health_provider.cpp`. The recorder exposes its exact
+blob, introducing A3 revision, and immutable-source A3 path authority under
+`non_a2t_product_producers`; it does not hide that path or use it to justify
+A2T's disposition. Any product producer without that independently checked
+package authority fails closed. The owner package must provide its own
+tracing-off, tracing-on/idle, and active-capture overhead/control evidence;
+A2T records that obligation as external rather than pretending to evaluate it.
 
 New v2 receipts also bind `integration_head` plus the exact Git blobs for the
 Rust analyzer, all three closed PerfettoSQL views, CLI/MCP dispatch surfaces,
-processor pin sources, recorder/verifier, and every checked-in trace in the
-required replay matrix. Validation resolves those blobs at
+processor pin sources, recorder/verifier, the A3 package-scope authority used
+only to classify the later producer, and every checked-in trace in the required
+replay matrix. Validation resolves those blobs at
 the historical integration head, current `HEAD`, and the current checkout, so
 an analyzer, SQL, MCP projection, or fixture edit makes the receipt stale even
 when its saved timing JSON is unchanged. The committed
@@ -96,9 +107,12 @@ pre-A2T boundary to the exact measured source head. A caller cannot shorten or
 select its history. The manifest's stable patch ID binds the canonical plan's
 original/replayed implementation to its integrated equivalent; later changes
 are bound by their exact final blobs and path-limited touching history. This
-scope contains offline CLI/MCP/SQL/docs/tests and no runtime/render/view/format
-or Inspector producer path. Therefore new-producer runtime overhead is
-`not-applicable-no-added-producer-cost`, not a timing pass. The receipt binds
+scope contains offline CLI/MCP/SQL/docs/tests and no A2T-scoped
+runtime/render/view/format or Inspector producer delta. Therefore A2T-scoped
+new-producer runtime overhead is
+`not-applicable-no-a2t-scoped-producer-cost`, not a
+timing pass and not a statement that the final tree contains no producers. The
+receipt binds
 the exact canonical plan revision and digest that accepts this Horizon-A
 disposition while preserving the full producer/xrun protocol for B6.
 

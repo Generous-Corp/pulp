@@ -226,7 +226,10 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         errors = MODULE.source_binding_errors(receipt, ROOT)
         self.assertIn("integration_head must be an exact Git SHA", errors)
         self.assertIn(
-            "source_blobs does not bind the exact A2T analyzer/SQL/fixture set",
+            (
+                "source_blobs does not bind the exact A2T "
+                "analyzer/SQL/fixture/producer-authority set"
+            ),
             errors,
         )
 
@@ -326,11 +329,28 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
     def test_scope_manifest_matches_authoritative_current_path_contract(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
         manifest = MODULE._load_a2t_scope_manifest(ROOT, head)
-        paths, accepted = MODULE.authoritative_a2t_scope_paths(ROOT, head)
+        paths, accepted, external = MODULE.authoritative_a2t_scope_paths(ROOT, head)
         self.assertEqual(set(manifest["scope_paths"]), paths)
         self.assertEqual(
             len(accepted),
             manifest["accepted_plan_implementation"]["path_count"],
+        )
+        self.assertEqual(
+            [row["path"] for row in external],
+            ["inspect/src/control_gpu_health_provider.cpp"],
+        )
+        self.assertEqual(
+            external[0]["introducing_revision"],
+            "8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0",
+        )
+        self.assertTrue(
+            external[0]["scope_authority"][
+                "producer_introduction_touched_authority_path"
+            ]
+        )
+        self.assertEqual(
+            external[0]["owner_evidence_status"],
+            "external-not-evaluated-by-a2t",
         )
 
     def test_scope_manifest_cannot_omit_independently_discovered_semantic_path(self):
@@ -359,6 +379,41 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "GPU startup tracing can help explain a slow first frame."
             )
         )
+
+    def test_product_producer_discovery_uses_actual_source_macro_form(self):
+        source = (
+            'PULP_TRACE_SCOPE_NAMED_ARGS("gpu", "gpu_health_transition", '
+            '"gpu_evidence_id", value);'
+        )
+        self.assertTrue(MODULE.is_product_producer_source(source))
+        self.assertFalse(
+            MODULE.is_product_producer_source(
+                'config.gpu_evidence_id = "gpu_evidence_id";'
+            )
+        )
+
+    def test_product_producer_must_have_independent_package_authority(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        path = "inspect/src/control_gpu_health_provider.cpp"
+        with mock.patch.object(MODULE, "_a3_authority_paths", return_value=(set(), "a" * 40)):
+            with self.assertRaisesRegex(ValueError, "unclassified product producer"):
+                MODULE.classify_non_a2t_product_producers(ROOT, head, {path})
+
+    def test_product_producer_introduction_must_touch_package_authority(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        path = "inspect/src/control_gpu_health_provider.cpp"
+        with (
+            mock.patch.object(
+                MODULE, "_a3_authority_paths", return_value=({path}, "a" * 40)
+            ),
+            mock.patch.object(
+                MODULE, "_producer_introduction",
+                return_value=("b" * 40, "feat(gpu): unrelated producer"),
+            ),
+            mock.patch.object(MODULE, "_revision_changed_paths", return_value={path}),
+        ):
+            with self.assertRaisesRegex(ValueError, "unclassified product producer"):
+                MODULE.classify_non_a2t_product_producers(ROOT, head, {path})
 
 
 if __name__ == "__main__":

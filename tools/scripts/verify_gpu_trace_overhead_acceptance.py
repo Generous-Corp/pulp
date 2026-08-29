@@ -52,10 +52,15 @@ def _verify_producer_disposition(
         "producer_overhead_disposition", errors,
     )
     expected_fields = {
-        "status": "not-applicable-no-added-producer-cost",
+        "status": "not-applicable-no-a2t-scoped-producer-cost",
         "formal_plan_status": "accepted-canonical-plan",
         "formal_plan_revision": EXPECTED_PLAN_REVISION,
         "formal_plan_sha256": EXPECTED_PLAN_SHA256,
+        "non_a2t_owner_followup": (
+            "A3 must provide or bind tracing-off, tracing-on/idle, and active-capture "
+            "overhead/control evidence for its later product producer; A2T does not "
+            "evaluate that owner evidence."
+        ),
         "required_followup": (
             "B6 must run the three-state 5-warmup/30-trial and 20 fresh-process "
             "protocol when Vellum producer instrumentation is added."
@@ -78,10 +83,19 @@ def _verify_producer_disposition(
         )
     if (
         evidence.get("method") != "immutable-base-to-source path-scoped tree delta"
-        or evidence.get("no_added_producer_call_sites") is not True
-        or evidence.get("added_or_changed_producer_paths") != []
+        or evidence.get("no_a2t_scoped_producer_delta") is not True
+        or evidence.get("a2t_scoped_producer_paths") != []
     ):
         errors.append("producer overhead disposition lacks a passing path-scoped tree delta")
+    external = evidence.get("non_a2t_product_producers")
+    if not isinstance(external, list) or not external or any(
+        not isinstance(row, dict)
+        or row.get("owner_package") != "A3-first-visible-product-evidence"
+        or row.get("overhead_evidence_required_from_owner") is not True
+        or row.get("owner_evidence_status") != "external-not-evaluated-by-a2t"
+        for row in external
+    ):
+        errors.append("producer evidence does not expose the later A3 product producer")
 
 
 def verify(

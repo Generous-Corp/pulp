@@ -9,6 +9,7 @@ need a real traced product workload and remain a separate acceptance surface.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import math
@@ -95,6 +96,12 @@ A2T_FIXED_SCOPE_PATHS = {
     "tools/deps/manifest.json",
     "tools/mcp/mcp_gpu_tools.cpp",
 }
+A3_SCOPE_AUTHORITY_PATH = "tools/scripts/gpu_first_visible_a3_acceptance.py"
+A2T_PRODUCER_AUTHORITY_SOURCE_PATHS = {A3_SCOPE_AUTHORITY_PATH}
+PRODUCT_PRODUCER_ROOTS = (
+    "core/runtime", "core/render", "core/view", "core/format", "inspect",
+)
+PRODUCER_SOURCE_ANNOTATION = '"gpu_evidence_id"'
 
 PINNED_PROCESSOR_VERSION = "v57.2"
 PROCESSOR_PLATFORM = {
@@ -693,6 +700,182 @@ def _semantic_discovery_paths(
     return paths
 
 
+def is_product_producer_source(text: str) -> bool:
+    """Recognize the source spelling of a bounded Perfetto GPU producer."""
+    return PRODUCER_SOURCE_ANNOTATION in text and "PULP_TRACE_" in text
+
+
+def _product_producer_paths(
+    repository: Path, revision: str, tracked: set[str]
+) -> set[str]:
+    completed = subprocess.run(
+        [
+            "git", "grep", "-l", "-I", "-F", "-e", PRODUCER_SOURCE_ANNOTATION,
+            revision, "--", *PRODUCT_PRODUCER_ROOTS,
+        ],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if completed.returncode not in (0, 1) or len(completed.stdout.encode()) > 1024 * 1024:
+        raise ValueError(f"cannot discover product GPU producers at {revision}")
+    prefix = f"{revision}:"
+    candidates = {
+        line.removeprefix(prefix) for line in completed.stdout.splitlines()
+        if line.startswith(prefix)
+    }
+    if len(candidates) > 64 or any(path not in tracked for path in candidates):
+        raise ValueError(f"product GPU producer discovery at {revision} is unsafe or unbounded")
+    producers: set[str] = set()
+    for path in candidates:
+        blob = subprocess.run(
+            ["git", "show", f"{revision}:{path}"],
+            cwd=repository, check=False, capture_output=True,
+        )
+        if blob.returncode != 0 or len(blob.stdout) > 2 * 1024 * 1024:
+            raise ValueError(f"cannot inspect bounded product producer blob {path}")
+        if is_product_producer_source(blob.stdout.decode(errors="replace")):
+            producers.add(path)
+    return producers
+
+
+def _a3_authority_paths(repository: Path, source_revision: str) -> tuple[set[str], str]:
+    blob = subprocess.run(
+        ["git", "show", f"{source_revision}:{A3_SCOPE_AUTHORITY_PATH}"],
+        cwd=repository, check=False, capture_output=True,
+    )
+    if blob.returncode != 0 or len(blob.stdout) > 2 * 1024 * 1024:
+        raise ValueError("cannot read bounded A3 scope authority from source revision")
+    try:
+        tree = ast.parse(blob.stdout.decode("utf-8"), filename=A3_SCOPE_AUTHORITY_PATH)
+    except (UnicodeDecodeError, SyntaxError) as error:
+        raise ValueError(f"cannot parse A3 scope authority: {error}") from error
+    values: list[Any] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "A3_IMPLEMENTATION_SOURCE_PATHS"
+            for target in node.targets
+        ):
+            try:
+                values.append(ast.literal_eval(node.value))
+            except (ValueError, TypeError, SyntaxError) as error:
+                raise ValueError("A3 scope authority is not a literal path set") from error
+    if len(values) != 1 or not isinstance(values[0], set):
+        raise ValueError("A3 scope authority lacks one literal implementation path set")
+    paths = values[0]
+    if len(paths) > 64 or any(
+        not isinstance(path, str)
+        or not path
+        or path.startswith("/")
+        or ".." in Path(path).parts
+        for path in paths
+    ):
+        raise ValueError("A3 scope authority has an unsafe or unbounded path set")
+    authority_blob = git_blobs(
+        repository, source_revision, {A3_SCOPE_AUTHORITY_PATH}
+    ).get(A3_SCOPE_AUTHORITY_PATH)
+    if authority_blob is None:
+        raise ValueError("A3 scope authority has no exact source blob")
+    return paths, authority_blob
+
+
+def _producer_introduction(
+    repository: Path, source_revision: str, path: str
+) -> tuple[str, str]:
+    completed = subprocess.run(
+        [
+            "git", "log", "--reverse", "--format=%H%x00%s",
+            "-S", PRODUCER_SOURCE_ANNOTATION,
+            f"{A2T_SCOPE_BASE}..{source_revision}", "--", path,
+        ],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if completed.returncode != 0 or len(completed.stdout.encode()) > 1024 * 1024:
+        raise ValueError(f"cannot derive bounded product producer introduction for {path}")
+    for line in completed.stdout.splitlines():
+        try:
+            revision, subject = line.split("\x00", 1)
+        except ValueError:
+            continue
+        parent = subprocess.run(
+            ["git", "rev-parse", f"{revision}^"],
+            cwd=repository, check=False, capture_output=True, text=True,
+        )
+        if parent.returncode != 0 or not valid_lower_hex(parent.stdout.strip(), 40):
+            continue
+        before = subprocess.run(
+            ["git", "show", f"{parent.stdout.strip()}:{path}"],
+            cwd=repository, check=False, capture_output=True,
+        )
+        after = subprocess.run(
+            ["git", "show", f"{revision}:{path}"],
+            cwd=repository, check=False, capture_output=True,
+        )
+        if len(before.stdout) > 2 * 1024 * 1024 or len(after.stdout) > 2 * 1024 * 1024:
+            raise ValueError(f"product producer source is unbounded for {path}")
+        before_is_producer = before.returncode == 0 and is_product_producer_source(
+            before.stdout.decode(errors="replace")
+        )
+        after_is_producer = after.returncode == 0 and is_product_producer_source(
+            after.stdout.decode(errors="replace")
+        )
+        if not before_is_producer and after_is_producer:
+            if not valid_lower_hex(revision, 40):
+                break
+            return revision, subject
+    raise ValueError(f"cannot identify product producer introduction for {path}")
+
+
+def _revision_changed_paths(repository: Path, revision: str) -> set[str]:
+    completed = subprocess.run(
+        [
+            "git", "diff-tree", "--no-commit-id", "--name-only", "-r",
+            revision,
+        ],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    paths = set(completed.stdout.splitlines()) if completed.returncode == 0 else set()
+    if len(paths) > 256 or any(
+        not path or path.startswith("/") or ".." in Path(path).parts for path in paths
+    ):
+        raise ValueError(f"cannot derive bounded producer-introduction paths for {revision}")
+    return paths
+
+
+def classify_non_a2t_product_producers(
+    repository: Path, source_revision: str, producer_paths: set[str]
+) -> list[dict[str, Any]]:
+    """Expose later package-owned producers without attributing them to A2T."""
+    a3_paths, authority_blob = _a3_authority_paths(repository, source_revision)
+    source_blobs = git_blobs(repository, source_revision, producer_paths)
+    base_blobs = git_blobs(repository, A2T_SCOPE_BASE, producer_paths)
+    rows: list[dict[str, Any]] = []
+    for path in sorted(producer_paths):
+        revision, subject = _producer_introduction(repository, source_revision, path)
+        introduction_paths = _revision_changed_paths(repository, revision)
+        if (
+            path not in a3_paths
+            or path not in introduction_paths
+            or A3_SCOPE_AUTHORITY_PATH not in introduction_paths
+        ):
+            raise ValueError(f"unclassified product producer path cannot use A2T disposition: {path}")
+        rows.append({
+            "path": path,
+            "base_blob": base_blobs.get(path),
+            "source_blob": source_blobs.get(path),
+            "owner_package": "A3-first-visible-product-evidence",
+            "scope_authority": {
+                "path": A3_SCOPE_AUTHORITY_PATH,
+                "source_blob": authority_blob,
+                "symbol": "A3_IMPLEMENTATION_SOURCE_PATHS",
+                "producer_introduction_touched_authority_path": True,
+            },
+            "introducing_revision": revision,
+            "introducing_subject": subject,
+            "overhead_evidence_required_from_owner": True,
+            "owner_evidence_status": "external-not-evaluated-by-a2t",
+        })
+    return rows
+
+
 def _rule_discovery_paths(tracked: set[str]) -> set[str]:
     """Discover exact bounded behavior families that may be binary or identifier-free."""
     return {
@@ -717,7 +900,7 @@ def _rule_discovery_paths(tracked: set[str]) -> set[str]:
 
 def authoritative_a2t_scope_paths(
     repository: Path, source_revision: str
-) -> tuple[set[str], set[str]]:
+) -> tuple[set[str], set[str], list[dict[str, Any]]]:
     """Derive current scope from immutable Git objects and bounded contract rules."""
     accepted_run = subprocess.run(
         [
@@ -737,12 +920,19 @@ def authoritative_a2t_scope_paths(
         | _semantic_discovery_paths(repository, A2T_SCOPE_BASE, base_tracked)
         | _semantic_discovery_paths(repository, source_revision, source_tracked)
     )
-    paths = accepted_paths | A2T_FIXED_SCOPE_PATHS | discovered
+    producer_paths = (
+        _product_producer_paths(repository, A2T_SCOPE_BASE, base_tracked)
+        | _product_producer_paths(repository, source_revision, source_tracked)
+    )
+    external_producers = classify_non_a2t_product_producers(
+        repository, source_revision, producer_paths
+    )
+    paths = (accepted_paths | A2T_FIXED_SCOPE_PATHS | discovered) - producer_paths
     if len(paths) > 128 or any(
         path not in base_tracked and path not in source_tracked for path in paths
     ):
         raise ValueError("derived A2T scope is missing, unsafe, or unbounded")
-    return paths, accepted_paths
+    return paths, accepted_paths, external_producers
 
 
 def _load_a2t_scope_manifest(
@@ -791,7 +981,7 @@ def _load_a2t_scope_manifest(
         raise ValueError("A2T scope manifest contains an unsafe path")
     if any(path_value.startswith(tuple(producer_prefixes)) for path_value in paths):
         raise ValueError("A2T path-scoped contract includes a product producer path")
-    authoritative_paths, accepted_paths = authoritative_a2t_scope_paths(
+    authoritative_paths, accepted_paths, _external_producers = authoritative_a2t_scope_paths(
         repository, source_revision
     )
     if set(paths) != authoritative_paths or len(accepted_paths) != expected_accepted["path_count"]:
@@ -834,6 +1024,11 @@ def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any
     if not valid_lower_hex(source_revision, 40):
         raise ValueError("A2T scope source revision must be exact lowercase 40-hex")
     manifest = _load_a2t_scope_manifest(repository, source_revision)
+    authoritative_paths, _accepted_paths, external_producers = (
+        authoritative_a2t_scope_paths(repository, source_revision)
+    )
+    if set(manifest["scope_paths"]) != authoritative_paths:
+        raise ValueError("A2T manifest changed after independent scope discovery")
     base_revision = manifest["base_revision"]
     paths = manifest["scope_paths"]
     ancestor = subprocess.run(
@@ -922,8 +1117,9 @@ def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any
         "path_deltas": deltas,
         "scope_touching_revisions": touching,
         "producer_prefixes_checked": producer_prefixes,
-        "added_or_changed_producer_paths": producer_paths,
-        "no_added_producer_call_sites": not producer_paths,
+        "a2t_scoped_producer_paths": producer_paths,
+        "no_a2t_scoped_producer_delta": not producer_paths,
+        "non_a2t_product_producers": external_producers,
     }
 
 
@@ -988,7 +1184,11 @@ def measured_source_paths(repository: Path, trace: Path) -> set[str]:
         raise ValueError("A2T trace must be a checked-in Perfetto GPU fixture")
     if relative_trace not in FIXTURE_SOURCE_PATHS:
         raise ValueError("A2T trace must be one of the required checked-in replay fixtures")
-    return A2T_ANALYZER_SOURCE_PATHS | FIXTURE_SOURCE_PATHS
+    return (
+        A2T_ANALYZER_SOURCE_PATHS
+        | FIXTURE_SOURCE_PATHS
+        | A2T_PRODUCER_AUTHORITY_SOURCE_PATHS
+    )
 
 
 def source_binding(repository: Path, revision: str, trace: Path) -> dict[str, Any]:
@@ -1025,10 +1225,16 @@ def source_binding_errors(receipt: Any, repository: Path) -> list[str]:
     trace_path = role.removeprefix("repository/")
     if trace_path not in FIXTURE_SOURCE_PATHS:
         errors.append("trace role does not identify a required replay fixture")
-    expected = A2T_ANALYZER_SOURCE_PATHS | FIXTURE_SOURCE_PATHS
+    expected = (
+        A2T_ANALYZER_SOURCE_PATHS
+        | FIXTURE_SOURCE_PATHS
+        | A2T_PRODUCER_AUTHORITY_SOURCE_PATHS
+    )
     declared = receipt.get("source_blobs")
     if not isinstance(declared, dict) or set(declared) != expected:
-        errors.append("source_blobs does not bind the exact A2T analyzer/SQL/fixture set")
+        errors.append(
+            "source_blobs does not bind the exact A2T analyzer/SQL/fixture/producer-authority set"
+        )
         return errors
     historical = (
         git_blobs(repository, integration_head, expected)
@@ -1191,7 +1397,7 @@ def main() -> int:
             args.planning_repository, args.plan_revision, args.plan_sha256
         )
         producer_inventory = a2t_scope_inventory(repository, args.source_revision)
-        if producer_inventory["no_added_producer_call_sites"] is not True:
+        if producer_inventory["no_a2t_scoped_producer_delta"] is not True:
             raise ValueError(
                 "the A2T path-scoped tree delta contains product producer paths; "
                 "run the product overhead gate"
@@ -1344,15 +1550,16 @@ def main() -> int:
         "accepted_plan": accepted_plan,
         "scope": "offline-installed-cli-mcp-analysis",
         "producer_overhead_disposition": {
-            "status": "not-applicable-no-added-producer-cost",
-            "reason": "The exact path-scoped A2T delta adds offline analysis and no generic render producer call sites, so Horizon A adds no producer runtime work to grade.",
+            "status": "not-applicable-no-a2t-scoped-producer-cost",
+            "reason": "The exact A2T-scoped delta adds offline analysis and no product producer call site; the later A3-owned producer is disclosed separately and is not graded here.",
             "evidence": producer_inventory,
             "routing_inventory": routing_inventory,
+            "non_a2t_owner_followup": "A3 must provide or bind tracing-off, tracing-on/idle, and active-capture overhead/control evidence for its later product producer; A2T does not evaluate that owner evidence.",
             "required_followup": "B6 must run the three-state 5-warmup/30-trial and 20 fresh-process protocol when Vellum producer instrumentation is added.",
             "formal_plan_status": "accepted-canonical-plan",
             "formal_plan_revision": args.plan_revision,
             "formal_plan_sha256": args.plan_sha256,
-            "formal_plan_note": "The canonical plan accepts the no-added-producer disposition for Horizon A and preserves the full product producer/xrun protocol for B6; offline timing remains analyzer evidence, not product-capture evidence.",
+            "formal_plan_note": "The canonical plan accepts the no-added-producer disposition for the original A2T implementation and preserves the full product producer/xrun protocol for B6; the later A3-owned producer remains separately accountable, and offline timing is analyzer evidence rather than product-capture evidence.",
         },
         "machine": system_profiler_identity(),
         "adapter_relevance": "recorded for host provenance only; saved-trace analysis performs no GPU work",

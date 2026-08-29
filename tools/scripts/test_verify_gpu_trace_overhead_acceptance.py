@@ -107,7 +107,12 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "sha256": MODULE.EXPECTED_PLAN_SHA256,
             },
             "producer_overhead_disposition": {
-                "status": "not-applicable-no-added-producer-cost",
+                "status": "not-applicable-no-a2t-scoped-producer-cost",
+                "non_a2t_owner_followup": (
+                    "A3 must provide or bind tracing-off, tracing-on/idle, and active-capture "
+                    "overhead/control evidence for its later product producer; A2T does not "
+                    "evaluate that owner evidence."
+                ),
                 "required_followup": (
                     "B6 must run the three-state 5-warmup/30-trial and 20 "
                     "fresh-process protocol when Vellum producer instrumentation is added."
@@ -229,6 +234,14 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         deltas[:] = [row for row in deltas if row["path"] != target]
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("complete path-scoped tree delta" in error for error in errors))
+
+    def test_later_a3_product_producer_cannot_be_hidden(self):
+        receipt = self.terminal_receipt()
+        receipt["producer_overhead_disposition"]["evidence"][
+            "non_a2t_product_producers"
+        ] = []
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("later A3 product producer" in error for error in errors))
 
     def test_fixture_semantic_question_cannot_be_relabelled(self):
         receipt = self.terminal_receipt()
