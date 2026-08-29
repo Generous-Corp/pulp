@@ -179,14 +179,20 @@ retain those fields in the PR/landing evidence.
     seed the canonical cache by rsyncing a checkout merely because
     `external/skia-build/build` exists. Keep release x64/universal destinations
     isolated from the host arm64 cache.
-11. After merge, prewarm every active build host through the fetcher's normal
+11. Revalidate the independently pinned three.js runtime used by native WebGPU
+    consumers. When `PULP_ENABLE_THREEJS_RUNTIME=ON`, Pulp fetches or accepts
+    `PULP_THREEJS_RUNTIME_DIR` and stages the verified payload under
+    `share/pulp/threejs`; it is not test-only. A render-toolchain change that
+    alters this compatibility or install boundary must update the dependency
+    manifest, attribution surfaces, runtime manifest, and installed-SDK proof.
+12. After merge, prewarm every active build host through the fetcher's normal
     immutable cache-owner path. For each M3, M5, M1, Mac mini, and Mac Pro host,
     record the exact asset SHA, materialized `libskia.a` plus
     `libdawn_combined.a`, and a second invocation that reports the complete
     generation and performs no download. Skip or defer a host only with an
     explicit offline/retired disposition; never copy a checkout cache between
     machines.
-12. Treat missing provenance as a cold cache. A materialized library plus a
+13. Treat missing provenance as a cold cache. A materialized library plus a
     tracked `VERSION.md` digest is not proof that those bytes came from that
     archive: without the exact fetcher-written asset stamp, re-download and
     verify before publication. Source fallbacks must likewise pin the builder
