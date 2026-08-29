@@ -24,6 +24,16 @@ from typing import Any
 
 
 EXPECTED_EXIT = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
+A2T_ANALYZER_SOURCE_PATHS = {
+    ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+    ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+    ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "tools/mcp/mcp_trace_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+}
 
 
 def sha256(path: Path) -> str:
@@ -307,6 +317,106 @@ def valid_lower_hex(value: str, length: int) -> bool:
     return len(value) == length and all(c in "0123456789abcdef" for c in value)
 
 
+def git_blobs(repository: Path, revision: str, paths: set[str]) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "ls-tree", revision, "--", *sorted(paths)],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if completed.returncode != 0:
+        return {}
+    blobs: dict[str, str] = {}
+    for line in completed.stdout.splitlines():
+        try:
+            metadata, path = line.split("\t", 1)
+            _mode, kind, value = metadata.split()
+        except ValueError:
+            continue
+        if kind == "blob" and valid_lower_hex(value, 40):
+            blobs[path] = value
+    return blobs
+
+
+def checkout_blobs(repository: Path, paths: set[str]) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "hash-object", "--stdin-paths"], cwd=repository,
+        input="".join(f"{path}\n" for path in sorted(paths)),
+        check=False, capture_output=True, text=True,
+    )
+    values = completed.stdout.splitlines() if completed.returncode == 0 else []
+    if len(values) != len(paths):
+        return {}
+    return {
+        path: value for path, value in zip(sorted(paths), values)
+        if valid_lower_hex(value, 40)
+    }
+
+
+def measured_source_paths(repository: Path, trace: Path) -> set[str]:
+    try:
+        relative_trace = trace.resolve().relative_to(repository.resolve()).as_posix()
+    except ValueError as error:
+        raise ValueError("A2T trace must live in the measured source repository") from error
+    if not relative_trace.startswith("test/fixtures/perfetto-gpu/"):
+        raise ValueError("A2T trace must be a checked-in Perfetto GPU fixture")
+    return A2T_ANALYZER_SOURCE_PATHS | {relative_trace}
+
+
+def source_binding(repository: Path, revision: str, trace: Path) -> dict[str, Any]:
+    paths = measured_source_paths(repository, trace)
+    historical = git_blobs(repository, revision, paths)
+    head = git_blobs(repository, "HEAD", paths)
+    checkout = checkout_blobs(repository, paths)
+    if set(historical) != paths:
+        raise ValueError("cannot resolve the exact A2T source set at source-revision")
+    for path in sorted(paths):
+        if head.get(path) != historical[path]:
+            raise ValueError(f"current HEAD A2T source blob drift for {path}")
+        if checkout.get(path) != historical[path]:
+            raise ValueError(f"current checkout A2T source blob drift for {path}")
+    return {"integration_head": revision, "source_blobs": historical}
+
+
+def source_binding_errors(receipt: Any, repository: Path) -> list[str]:
+    if not isinstance(receipt, dict):
+        return ["A2T receipt must be an object"]
+    errors: list[str] = []
+    revision = receipt.get("source_revision")
+    integration_head = receipt.get("integration_head")
+    if not isinstance(integration_head, str) or not valid_lower_hex(integration_head, 40):
+        errors.append("integration_head must be an exact Git SHA")
+    elif integration_head != revision:
+        errors.append("integration_head does not match source_revision")
+    role = ((receipt.get("artifacts") or {}).get("trace") or {}).get("role")
+    if not isinstance(role, str) or not role.startswith("repository/"):
+        errors.append("trace role does not identify a repository fixture")
+        return errors
+    trace_path = role.removeprefix("repository/")
+    expected = A2T_ANALYZER_SOURCE_PATHS | {trace_path}
+    declared = receipt.get("source_blobs")
+    if not isinstance(declared, dict) or set(declared) != expected:
+        errors.append("source_blobs does not bind the exact A2T analyzer/SQL/fixture set")
+        return errors
+    historical = (
+        git_blobs(repository, integration_head, expected)
+        if isinstance(integration_head, str) and valid_lower_hex(integration_head, 40)
+        else {}
+    )
+    head = git_blobs(repository, "HEAD", expected)
+    checkout = checkout_blobs(repository, expected)
+    for path in sorted(expected):
+        value = declared.get(path)
+        if not isinstance(value, str) or not valid_lower_hex(value, 40):
+            errors.append(f"source blob {path} must be an exact Git blob SHA")
+            continue
+        if historical.get(path) != value:
+            errors.append(f"source blob mismatch for {path}")
+        if head.get(path) != value:
+            errors.append(f"current HEAD source blob drift for {path}")
+        if checkout.get(path) != value:
+            errors.append(f"current checkout source blob drift for {path}")
+    return errors
+
+
 def source_revisions_match(source_revision: str, mcp_source_revision: str) -> bool:
     return bool(mcp_source_revision) and mcp_source_revision == source_revision
 
@@ -402,6 +512,13 @@ def main() -> int:
             "mcp-source-revision must equal source-revision; the measured CLI and "
             "MCP must come from one source checkout"
         )
+
+    try:
+        binding = source_binding(
+            args.repository.resolve(), args.source_revision, trace
+        )
+    except ValueError as error:
+        parser.error(str(error))
 
     trace_sha256 = sha256(trace)
     human_perfetto_ui_correlation = None
@@ -545,6 +662,8 @@ def main() -> int:
         "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_revision": args.source_revision,
         "mcp_source_revision": args.mcp_source_revision,
+        "integration_head": binding["integration_head"],
+        "source_blobs": binding["source_blobs"],
         "scope": "offline-installed-cli-mcp-analysis",
         "producer_overhead_disposition": {
             "status": "not-applicable-no-added-producer-cost",

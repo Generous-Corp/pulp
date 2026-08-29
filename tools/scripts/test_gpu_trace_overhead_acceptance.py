@@ -17,6 +17,23 @@ SPEC.loader.exec_module(MODULE)
 
 
 class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
+    def bound_receipt(self):
+        head = MODULE.subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        trace = ROOT / "test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace"
+        binding = MODULE.source_binding(ROOT, head, trace)
+        return {
+            "source_revision": head,
+            "integration_head": binding["integration_head"],
+            "source_blobs": binding["source_blobs"],
+            "artifacts": {"trace": {
+                "role": "repository/test/fixtures/perfetto-gpu/"
+                        "first-frame-pipeline-upload-stall.pftrace"
+            }},
+        }
+
     def human_review_receipt(self, trace_digest="1" * 64):
         return {
             "protocol": {"question": "gpu-startup"},
@@ -134,6 +151,55 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertEqual(disposition["formal_plan_status"], "accepted-canonical-plan")
         self.assertTrue(MODULE.valid_lower_hex(disposition["formal_plan_revision"], 40))
         self.assertTrue(MODULE.valid_lower_hex(disposition["formal_plan_sha256"], 64))
+
+    def test_checked_in_receipt_is_stale_until_exact_source_binding_is_regenerated(self):
+        receipt = json.loads(
+            (ROOT / "docs" / "validation" / "gpu-trace-overhead" /
+             "m3-a2t-offline-analysis-20260828.json").read_text(encoding="utf-8")
+        )
+        errors = MODULE.source_binding_errors(receipt, ROOT)
+        self.assertIn("integration_head must be an exact Git SHA", errors)
+        self.assertIn(
+            "source_blobs does not bind the exact A2T analyzer/SQL/fixture set",
+            errors,
+        )
+
+    def test_exact_current_source_binding_passes(self):
+        self.assertEqual(MODULE.source_binding_errors(self.bound_receipt(), ROOT), [])
+
+    def test_planted_stale_head_and_declared_blob_fail_closed(self):
+        stale_head = self.bound_receipt()
+        stale_head["integration_head"] = "0" * 40
+        errors = MODULE.source_binding_errors(stale_head, ROOT)
+        self.assertTrue(any("source blob mismatch" in error for error in errors))
+
+        stale_blob = self.bound_receipt()
+        target = "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs"
+        stale_blob["source_blobs"][target] = "0" * 40
+        errors = MODULE.source_binding_errors(stale_blob, ROOT)
+        self.assertIn(f"source blob mismatch for {target}", errors)
+        self.assertIn(f"current HEAD source blob drift for {target}", errors)
+
+    def test_planted_current_head_and_checkout_drift_fail_closed(self):
+        receipt = self.bound_receipt()
+        target = ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql"
+        original_git_blobs = MODULE.git_blobs
+
+        def drifted_head(repository, revision, paths):
+            blobs = original_git_blobs(repository, revision, paths)
+            if revision == "HEAD":
+                blobs[target] = "f" * 40
+            return blobs
+
+        with mock.patch.object(MODULE, "git_blobs", side_effect=drifted_head):
+            errors = MODULE.source_binding_errors(receipt, ROOT)
+        self.assertIn(f"current HEAD source blob drift for {target}", errors)
+
+        checkout = MODULE.checkout_blobs(ROOT, set(receipt["source_blobs"]))
+        checkout[target] = "e" * 40
+        with mock.patch.object(MODULE, "checkout_blobs", return_value=checkout):
+            errors = MODULE.source_binding_errors(receipt, ROOT)
+        self.assertIn(f"current checkout source blob drift for {target}", errors)
 
     def test_checked_in_receipt_preserves_a3_human_review_binding(self):
         receipt = json.loads(

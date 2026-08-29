@@ -43,6 +43,16 @@ clean checkout at that revision. The receipt's independent binary digests and
 same-prefix proof make that rerun auditable, while A3 rejects unequal declared
 revisions.
 
+New receipts also bind `integration_head` plus the exact Git blobs for the Rust
+analyzer, all three closed PerfettoSQL views, the CLI/MCP dispatch surfaces,
+and the measured checked-in trace fixture. Validation resolves those blobs at
+the historical integration head, current `HEAD`, and the current checkout, so
+an analyzer, SQL, MCP projection, or fixture edit makes the receipt stale even
+when its saved timing JSON is unchanged. The committed
+`m3-a2t-offline-analysis-20260828.json` predates this field and is intentionally
+stale after the current analyzer hardening; regenerate it only with the final
+installed CLI/MCP and pinned trace-processor replay.
+
 The Rust unit contract is always registered when the experimental Rust CLI is
 enabled. The real fixture integration CTest is registered only when
 `PULP_TRACE_PROCESSOR` names an existing pinned executable at configure time;
