@@ -162,6 +162,12 @@ links, nested directories, duplicates, bad checksums and trailing ambiguity.
 It never extracts a member and never depends at runtime on Homebrew, `tar`,
 `zstd`, Python extensions, or Rack itself.
 
+Build the helper on the maintainer/package path with
+`tools/rack/build_rack_patch_decode.sh build/rack_patch_decode`. The signed app
+ships that prebuilt binary beside `shape_text`, and `install_toolchain.sh` only
+copies and validates it; an ordinary end-user install must never require a C or
+C++ compiler.
+
 Do not load `libRack.dylib` through Python `ctypes` to decode this format.
 Rack's library expects application runtime initialization; an exploratory call
 reached OpenSSL `BIO_new_ex` with invalid state and crashed Python with

@@ -20,11 +20,12 @@ zero-byte `./` directory marker followed by regular `./patch.json`. The simpler
 root-member fixture remains as compatibility coverage.
 
 The `traversal`, `absolute`, `symlink`, `hardlink`, `nonregular`, `oversized`,
-`duplicate`, `checksum`, `trailing`, `root-directory-payload`, and
-`nested-directory` variants are adversarial tar archives.
+`duplicate`, `checksum`, `trailing`, `root-directory-payload`,
+`nested-directory`, `extra-root-regular`, and `extra-nested-regular` variants
+are adversarial tar archives.
 They prove the decoder rejects unsafe paths, non-regular members, expansion
 beyond the declared limit, duplicate root `patch.json` members, invalid header
-checksums, and trailing ambiguity without extracting anything. They were
-assembled with Python's `tarfile` writer and compressed with zstd v1.5.7; their
-committed SHA-256 values are asserted by source review and their exact rejection
-reasons are asserted by `test_generate_safety.py`.
+checksums, extra regular payloads, and trailing ambiguity without extracting
+anything. They were assembled as exact tar fixtures with Python's `tarfile`
+writer or macOS `/usr/bin/tar`, then compressed with zstd v1.5.7; their exact
+rejection reasons are asserted by `test_generate_safety.py`.

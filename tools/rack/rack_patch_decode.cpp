@@ -233,11 +233,14 @@ std::vector<std::uint8_t> read_patch_json(
             throw std::runtime_error(
                 "tar contains a non-regular member: " + path);
         }
+        if ((type == 0 || type == '0') && path != "patch.json")
+            throw std::runtime_error(
+                "tar contains an unsupported regular member: " + path);
         const auto data_offset = offset + kBlockBytes;
         const auto padded = ((size + kBlockBytes - 1) / kBlockBytes) * kBlockBytes;
         if (padded > tar.size() - data_offset || size > tar.size() - data_offset)
             throw std::runtime_error("tar member extends beyond the archive");
-        if ((type == 0 || type == '0') && path == "patch.json") {
+        if (type == 0 || type == '0') {
             if (found) throw std::runtime_error("tar contains duplicate patch.json");
             found = true;
             patch.assign(tar.begin() + data_offset,

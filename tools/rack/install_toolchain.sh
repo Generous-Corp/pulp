@@ -120,8 +120,8 @@ for part in "${PARTS[@]}"; do
     # alone when it does not.
     source_has_stamp=0
     if [ "$part" = "tools/rack" ]; then
-      # The saved-patch decoder is rebuilt and atomically replaced below. Keep
-      # the last verified executable alive if compilation of its successor
+      # The saved-patch decoder is copied and atomically replaced below. Keep
+      # the last verified executable alive if validation of its successor
       # fails; source, license, provenance and fixtures still refresh normally.
       printf '%s\n' rack_patch_decode >> "$exclude_file"
       if [ -f "$SRC/$part/FORGE_TOOLCHAIN_STAMP" ]; then
@@ -216,11 +216,11 @@ done
 chmod -R u+rwX "$DEST"
 
 # Rack 2 saves patches as zstd-compressed tar, while Forge's fresh patches are
-# plain JSON. Build the tiny self-contained reader into the exact directory
-# rack_open.py resolves, then prove the installed executable against Rack's
-# real directory-plus-patch member layout without giving it Homebrew, tar, or
-# zstd on PATH. build_rack_patch_decode.sh stages beside the destination and
-# atomically replaces the previous verified executable only after compilation.
+# plain JSON. The package build produces the self-contained reader, just as it
+# produces shape_text below. Copy that prebuilt helper into the exact directory
+# rack_open.py resolves, then prove it against Rack's real directory-plus-patch
+# member layout without giving it a compiler, Homebrew, tar, or zstd on PATH.
+# The previous verified executable remains live until its successor passes.
 DECODER="$DEST/tools/rack/rack_patch_decode"
 DECODER_STAGED="$(mktemp "$DEST/tools/rack/.rack_patch_decode.install.XXXXXX")"
 DECODER_PROBE="$(mktemp)"
@@ -228,10 +228,13 @@ cleanup_decoder_stage() {
   rm -f "$DECODER_STAGED" "$DECODER_PROBE"
 }
 trap cleanup_decoder_stage EXIT
-if ! "$DEST/tools/rack/build_rack_patch_decode.sh" "$DECODER_STAGED"; then
-  echo "  FAILED to build the installed Rack saved-patch decoder" >&2
+if [ ! -x "$SRC/build/rack_patch_decode" ]; then
+  echo "  FAILED: no prebuilt Rack saved-patch decoder at $SRC/build/rack_patch_decode" >&2
+  echo "         Package builds must run: tools/rack/build_rack_patch_decode.sh build/rack_patch_decode" >&2
   exit 1
 fi
+cp "$SRC/build/rack_patch_decode" "$DECODER_STAGED"
+chmod 0755 "$DECODER_STAGED"
 if [ ! -x "$DECODER_STAGED" ]; then
   echo "  FAILED: installed Rack saved-patch decoder is not executable" >&2
   exit 1

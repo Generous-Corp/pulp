@@ -376,7 +376,8 @@ class RackLaunchSafety(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             decoder = self._archive_runtime(pathlib.Path(tmp) / "build")
             cases = [
-                ("rack-saved-missing.vcv", "no regular root patch.json"),
+                ("rack-saved-missing.vcv",
+                 "unsupported regular member: readme.txt"),
                 ("rack-saved-malformed.vcv", "patch.json is not valid JSON"),
             ]
             for name, message in cases:
@@ -409,6 +410,10 @@ class RackLaunchSafety(unittest.TestCase):
             "rack-saved-nonregular.vcv": "unsupported directory",
             "rack-saved-root-directory-payload.vcv": "unsupported directory",
             "rack-saved-nested-directory.vcv": "unsupported directory",
+            "rack-saved-extra-root-regular.vcv":
+                "unsupported regular member: readme.txt",
+            "rack-saved-extra-nested-regular.vcv":
+                "unsupported regular member: metadata/readme.txt",
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -1364,7 +1369,7 @@ class PromptBudgetSafety(unittest.TestCase):
 
 
 class BundledToolchainSafety(unittest.TestCase):
-    def test_installer_atomically_builds_and_preserves_saved_patch_decoder(
+    def test_installer_copies_prebuilt_decoder_without_compiler_and_preserves_it(
             self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
@@ -1407,12 +1412,19 @@ class BundledToolchainSafety(unittest.TestCase):
             shaper.parent.mkdir()
             shaper.write_text("#!/bin/sh\nexit 0\n")
             shaper.chmod(0o755)
+            decoder = source / "build/rack_patch_decode"
+            built = subprocess.run(
+                [str(here / "build_rack_patch_decode.sh"), str(decoder)],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(0, built.returncode, built.stderr)
 
             destination = root / "Application Support/Forge Modular"
             environment = os.environ.copy()
             environment.update({
                 "HOME": str(root / "home"),
                 "FORGE_MODULAR_HOME": str(destination),
+                "CC": "/compiler/must/not/be-used",
+                "CXX": "/compiler/must/not/be-used",
             })
             command = ["/bin/bash", str(here / "install_toolchain.sh")]
             first = subprocess.run(
@@ -1422,43 +1434,33 @@ class BundledToolchainSafety(unittest.TestCase):
             self.assertIn(
                 "verified the self-contained Rack saved-patch decoder",
                 first.stdout)
-            decoder = destination / "tools/rack/rack_patch_decode"
-            self.assertEqual(0o755, decoder.stat().st_mode & 0o777)
-            installed_hash = hashlib.sha256(decoder.read_bytes()).hexdigest()
+            installed_decoder = destination / "tools/rack/rack_patch_decode"
+            self.assertEqual(0o755, installed_decoder.stat().st_mode & 0o777)
+            installed_hash = hashlib.sha256(
+                installed_decoder.read_bytes()).hexdigest()
 
             preserved_patch = destination / "examples/forge-modular/patches/user.vcv"
             preserved_patch.parent.mkdir(parents=True, exist_ok=True)
             preserved_patch.write_bytes(b"user patch")
-            source_fixture = fixture_dir / "rack-saved-rack2-valid.vcv"
-            valid_fixture = source_fixture.read_bytes()
-            source_fixture.write_bytes(valid_fixture[:32])
+            valid_decoder = decoder.read_bytes()
+            decoder.write_bytes(b"not an executable")
+            decoder.chmod(0o755)
             rejected = subprocess.run(
                 command, env=environment, capture_output=True,
                 text=True, timeout=120)
             self.assertNotEqual(0, rejected.returncode)
-            self.assertEqual(installed_hash,
-                             hashlib.sha256(decoder.read_bytes()).hexdigest())
+            self.assertEqual(
+                installed_hash,
+                hashlib.sha256(installed_decoder.read_bytes()).hexdigest())
             self.assertEqual(b"user patch", preserved_patch.read_bytes())
-            source_fixture.write_bytes(valid_fixture)
-
-            vendored = here / "vendor/zstd-1.5.7/zstddeclib.c"
-            unavailable = vendored.with_suffix(".unavailable")
-            vendored.rename(unavailable)
-            failed = subprocess.run(
-                command, env=environment, capture_output=True,
-                text=True, timeout=120)
-            self.assertNotEqual(0, failed.returncode)
-            self.assertEqual(installed_hash,
-                             hashlib.sha256(decoder.read_bytes()).hexdigest())
-            self.assertEqual(b"user patch", preserved_patch.read_bytes())
-
-            unavailable.rename(vendored)
+            decoder.write_bytes(valid_decoder)
+            decoder.chmod(0o755)
             repeated = subprocess.run(
                 command, env=environment, capture_output=True,
                 text=True, timeout=120)
             self.assertEqual(0, repeated.returncode, repeated.stderr)
             decoded = subprocess.run(
-                [str(decoder)], input=(
+                [str(installed_decoder)], input=(
                     fixture_dir / "rack-saved-rack2-valid.vcv").read_bytes(),
                 env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
                 capture_output=True, timeout=10)

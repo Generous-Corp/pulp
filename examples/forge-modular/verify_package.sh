@@ -184,6 +184,9 @@ EXPECTED_PULP_SDK_SHA="$(/usr/bin/python3 -c \
     <<< "$EXPECTED_PULP_SDK_JSON")"
 EXPECTED_SHAPE_TEXT_SHA="$(/usr/bin/python3 \
     "$REPO/examples/forge-modular/binary_identity.py" "$REPO/build/shape_text")"
+EXPECTED_RACK_PATCH_DECODE_SHA="$(/usr/bin/python3 \
+    "$REPO/examples/forge-modular/binary_identity.py" \
+    "$REPO/build/rack_patch_decode")"
 EXPECTED_PROVENANCE="$WORK/expected-provenance.json"
 /usr/bin/python3 -c '
 import json, sys
@@ -191,7 +194,8 @@ keys = ("archive_sha256", "binary_sha256", "manifest_sha256", "module_count",
         "platform", "sdk_sha256", "source_tree_sha", "forge_source_base",
         "forge_seam_tree_sha", "app_binary_sha256", "au_binary_sha256",
         "vst3_binary_sha256", "clap_binary_sha256", "pulp_sdk_version",
-        "pulp_sdk_source_sha", "pulp_sdk_content_sha256", "shape_text_sha256")
+        "pulp_sdk_source_sha", "pulp_sdk_content_sha256", "shape_text_sha256",
+        "rack_patch_decode_sha256")
 data = dict(zip(keys, sys.argv[2:]))
 data["module_count"] = int(data["module_count"])
 with open(sys.argv[1], "w") as f:
@@ -202,7 +206,8 @@ with open(sys.argv[1], "w") as f:
   "$EXPECTED_SDK_SHA" "$EXPECTED_SOURCE_TREE_SHA" "$EXPECTED_FORGE_BASE" \
   "$EXPECTED_FORGE_SEAM_TREE" "$EXPECTED_APP_SHA" "$EXPECTED_AU_SHA" \
   "$EXPECTED_VST3_SHA" "$EXPECTED_CLAP_SHA" "$EXPECTED_PULP_SDK_VERSION" \
-  "$EXPECTED_PULP_SDK_SOURCE" "$EXPECTED_PULP_SDK_SHA" "$EXPECTED_SHAPE_TEXT_SHA"
+  "$EXPECTED_PULP_SDK_SOURCE" "$EXPECTED_PULP_SDK_SHA" "$EXPECTED_SHAPE_TEXT_SHA" \
+  "$EXPECTED_RACK_PATCH_DECODE_SHA"
 
 # The one string that exists in the current shell and cannot exist in the older
 # examples/ one. Keep in step with package.sh's SHELL_MARKER.
@@ -326,6 +331,7 @@ need_file "Contents/Resources/tools/dsp_vocabulary.py"        "the DSP vocabular
 need_file "Contents/Resources/docs/status/agent-capabilities.json" "the DSP capability manifest ships"
 need_file "Contents/Resources/external/fonts/Inter-Regular.ttf" "the panel font ships"
 need_file "Contents/Resources/build/shape_text"               "the panel shaper ships"
+need_file "Contents/Resources/build/rack_patch_decode"        "the Rack saved-patch decoder ships"
 need_file "Contents/Resources/examples/forge-modular/plugin.json" "the module pack manifest ships"
 for mod in signal format audio state platform runtime timebase; do
     if [[ -d "$ROOT/Contents/Resources/core/$mod/include" ]]; then
@@ -356,6 +362,26 @@ if [[ "$shipped_shape_sha" == "$EXPECTED_SHAPE_TEXT_SHA" ]]; then
     say_ok "the panel shaper is content-identical to the rebuilt Pulp helper"
 else
     say_bad "the panel shaper identity is $shipped_shape_sha, not rebuilt helper $EXPECTED_SHAPE_TEXT_SHA"
+fi
+saved_patch="$REPO/tools/rack/test_fixtures/rack-open/rack-saved-rack2-valid.vcv"
+decoded_patch="$WORK/decoded-patch.json"
+if /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        "$ROOT/Contents/Resources/build/rack_patch_decode" \
+        < "$saved_patch" > "$decoded_patch" \
+        && /usr/bin/python3 -c \
+            'import json,sys; assert len(json.load(open(sys.argv[1]))["modules"]) == 2' \
+            "$decoded_patch"; then
+    say_ok "the shipped Rack saved-patch decoder reads Rack 2 format"
+else
+    say_bad "the shipped Rack saved-patch decoder rejected Rack 2 format"
+fi
+shipped_decoder_sha="$(/usr/bin/python3 \
+    "$REPO/examples/forge-modular/binary_identity.py" \
+    "$ROOT/Contents/Resources/build/rack_patch_decode" 2>/dev/null || echo "")"
+if [[ "$shipped_decoder_sha" == "$EXPECTED_RACK_PATCH_DECODE_SHA" ]]; then
+    say_ok "the Rack saved-patch decoder is content-identical to the rebuilt Pulp helper"
+else
+    say_bad "the Rack saved-patch decoder identity is $shipped_decoder_sha, not rebuilt helper $EXPECTED_RACK_PATCH_DECODE_SHA"
 fi
 
 # An empty vocabulary hands the model a contract with no DSP in it, and the run
@@ -534,6 +560,7 @@ for kind in au vst3 clap; do
         Contents/Resources/docs/status/agent-capabilities.json \
         Contents/Resources/external/fonts/Inter-Regular.ttf \
         Contents/Resources/build/shape_text \
+        Contents/Resources/build/rack_patch_decode \
         Contents/Resources/examples/forge-modular/plugin.json; do
         if [[ -f "$proot/$required" ]]; then
             say_ok "$kind carries $required"
