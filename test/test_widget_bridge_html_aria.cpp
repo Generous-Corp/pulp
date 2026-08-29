@@ -242,6 +242,11 @@ TEST_CASE("HTML aria-pressed / -checked / -disabled / -hidden route to View slot
     REQUIRE(btn != nullptr);
     REQUIRE(chk != nullptr);
 
+    // Lowercase HTML buttons get usable semantics even when an importer or
+    // materialized React tree does not emit an explicit role attribute.
+    REQUIRE(btn->access_role() == View::AccessRole::button);
+    REQUIRE(btn->default_hover_feedback());
+
     // Fast-path values.
     REQUIRE(btn->access_pressed()  == "true");
     REQUIRE(btn->access_disabled() == "false");
