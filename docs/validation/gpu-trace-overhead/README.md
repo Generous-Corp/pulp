@@ -34,15 +34,17 @@ The recorder requires an exact clean canonical Pulp worktree at
 that exact checkout with the same GPU/Scene3D/Three.js/V8/Rust feature contract
 as A2. `--install-prefix` must not exist. The recorder refreshes the Rust CLI,
 C++ delegate, and MCP targets after atomically claiming that new directory,
-binds its no-follow device/inode identity through build and install, and requires
-each installed executable to be byte-identical to its exact build-tree output. Its
+retains and checks its no-follow device/inode identity around every installed
+CLI/MCP execution through final publication, and requires each installed
+executable to be byte-identical to its exact build-tree output. Its
 receipt binds the CMake cache digest, build settings, targets, installed/build
 digests, and positive byte counts in addition to the installed
 `build_info.hpp` source stamp; a current header beside stale or mixed binaries
 therefore fails closed. `--output` must likewise be a new nonsymlink path under
 an existing directory outside the Pulp, planning, build, and install trees; the
-recorder publishes it atomically without dirtying or overwriting measured
-source. During
+recorder retains a no-follow parent descriptor and publishes a fsynced staged
+inode by a relative no-replace link, rejecting parent or staged-file swaps
+without dirtying or overwriting measured source. During
 measurement `PATH` excludes their prefix and all checkout build directories;
 MCP therefore succeeds only through its installed absolute-sibling binding.
 Semantic parity is checked on every warm-up and measured trial. Both binaries

@@ -52,12 +52,19 @@ def sha256(path: Path) -> str:
 
 
 def run_bounded(
-    command: list[str], *, cwd: Path, environment: dict[str, str], timeout: int
+    command: list[str], *, cwd: Path, environment: dict[str, str], timeout: int,
+    directory_claim: Any | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
-        command, cwd=cwd, env=environment, check=False,
-        capture_output=True, text=True, timeout=timeout,
-    )
+    if directory_claim is not None:
+        directory_claim.assert_current()
+    try:
+        completed = subprocess.run(
+            command, cwd=cwd, env=environment, check=False,
+            capture_output=True, text=True, timeout=timeout,
+        )
+    finally:
+        if directory_claim is not None:
+            directory_claim.assert_current()
     if len(completed.stdout.encode()) + len(completed.stderr.encode()) > MAX_COMMAND_OUTPUT:
         raise AcceptanceError(f"command exceeded bounded output: {command[0]}")
     return completed
@@ -134,9 +141,31 @@ def assert_directory_claim(
         raise AcceptanceError(f"{label} path no longer names its claimed directory")
 
 
+class RetainedDirectoryClaim:
+    def __init__(self, path: Path, descriptor: int, identity: dict[str, int], label: str):
+        self.path = path
+        self.descriptor = descriptor
+        self.identity = identity
+        self.label = label
+        self.closed = False
+
+    def assert_current(self) -> None:
+        if self.closed:
+            raise AcceptanceError(f"{self.label} claim closed before proof completion")
+        assert_directory_claim(self.path, self.identity, self.label, self.descriptor)
+
+    def close(self) -> None:
+        if not self.closed:
+            os.close(self.descriptor)
+            self.closed = True
+
+    def __del__(self) -> None:
+        self.close()
+
+
 def refresh_install(
     repository: Path, build_dir: Path, prefix: Path, build_environment: dict[str, str]
-) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]], RetainedDirectoryClaim]:
     cache = require_release_pulp_build(build_dir, repository)
     build = run_bounded(
         ["cmake", "--build", str(build_dir), "--target",
@@ -153,16 +182,14 @@ def refresh_install(
             "install-prefix was not fresh when the recorder atomically claimed it"
         ) from error
     prefix_claim = directory_identity(os.fstat(prefix_descriptor), "install-prefix")
-    try:
-        install = run_bounded(
-            ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
-            cwd=repository, environment=build_environment, timeout=1800,
-        )
-        assert_directory_claim(
-            prefix, prefix_claim, "install-prefix", prefix_descriptor
-        )
-    finally:
-        os.close(prefix_descriptor)
+    retained_claim = RetainedDirectoryClaim(
+        prefix, prefix_descriptor, prefix_claim, "install-prefix"
+    )
+    install = run_bounded(
+        ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
+        cwd=repository, environment=build_environment, timeout=1800,
+        directory_claim=retained_claim,
+    )
     if install.returncode != 0:
         raise AcceptanceError(f"Pulp install refresh failed: {install.stderr[-2000:]}")
     installed_paths = {
@@ -217,7 +244,7 @@ def refresh_install(
         "install_prefix_initial_state": "absent-and-atomically-claimed",
         "install_prefix_claim": prefix_claim,
         "build_install_binary_identity": "pass",
-    }, binaries)
+    }, binaries, retained_claim)
 
 
 def canonical_result(value: dict[str, Any]) -> dict[str, Any]:
@@ -268,12 +295,16 @@ def run_cli_probe(
     negative: bool,
     cwd: Path,
     environment: dict[str, str],
+    directory_claim: RetainedDirectoryClaim,
 ) -> dict[str, Any]:
     command = [str(cli), "gpu", "probe", "--recipe", recipe,
                "--artifacts", str(artifacts), "--json"]
     if negative:
         command.append("--negative-control")
-    completed = run_bounded(command, cwd=cwd, environment=environment, timeout=300)
+    completed = run_bounded(
+        command, cwd=cwd, environment=environment, timeout=300,
+        directory_claim=directory_claim,
+    )
     try:
         result = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
@@ -290,16 +321,23 @@ def run_cli_probe(
 
 
 class McpSession:
-    def __init__(self, executable: Path, cwd: Path, environment: dict[str, str]):
+    def __init__(
+        self, executable: Path, cwd: Path, environment: dict[str, str],
+        directory_claim: RetainedDirectoryClaim,
+    ):
+        self.directory_claim = directory_claim
+        self.directory_claim.assert_current()
         self.process = subprocess.Popen(
             [str(executable)], cwd=cwd, env=environment,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, bufsize=1,
         )
+        self.directory_claim.assert_current()
         self.next_id = 1
         self.transcript: list[dict[str, Any]] = []
 
     def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.directory_claim.assert_current()
         request_id = self.next_id
         self.next_id += 1
         request: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
@@ -315,6 +353,7 @@ class McpSession:
         if not line or len(line.encode()) > 1024 * 1024:
             raise AcceptanceError("installed MCP returned no bounded response")
         response = json.loads(line)
+        self.directory_claim.assert_current()
         if response.get("id") != request_id or not isinstance(response.get("result"), dict):
             raise AcceptanceError("installed MCP returned an incoherent response")
         self.transcript.append(response)
@@ -365,6 +404,7 @@ class McpSession:
         stderr = self.process.stderr.read() if self.process.stderr else ""
         if self.process.returncode != 0 or len(stderr.encode()) > MAX_COMMAND_OUTPUT:
             raise AcceptanceError(f"installed MCP exited abnormally: {stderr[-1000:]}")
+        self.directory_claim.assert_current()
 
 
 def forge_source_identity(repository: Path, pulp_revision: str) -> dict[str, Any]:
@@ -427,6 +467,7 @@ def prove_forge(
     staging: Path,
     build_environment: dict[str, str],
     runtime_environment: dict[str, str],
+    directory_claim: RetainedDirectoryClaim,
 ) -> dict[str, Any]:
     identity = forge_source_identity(repository, pulp_revision)
     try:
@@ -444,6 +485,7 @@ def prove_forge(
             f"-DPulp_DIR={expected_pulp_dir}",
         ],
         cwd=repository, environment=build_environment, timeout=1800,
+        directory_claim=directory_claim,
     )
     if configure.returncode != 0:
         raise AcceptanceError(f"Forge Modular configure failed: {configure.stderr[-2000:]}")
@@ -457,6 +499,7 @@ def prove_forge(
     build = run_bounded(
         ["cmake", "--build", str(build_dir), "--target", "ForgeModular_Standalone", "--parallel"],
         cwd=repository, environment=build_environment, timeout=3600,
+        directory_claim=directory_claim,
     )
     if build.returncode != 0:
         raise AcceptanceError(f"Forge Modular refresh failed: {build.stderr[-2000:]}")
@@ -489,6 +532,7 @@ def prove_forge(
     capture = run_bounded(
         [str(binary), "--screenshot", str(screenshot)],
         cwd=repository, environment=runtime_environment, timeout=300,
+        directory_claim=directory_claim,
     )
     if capture.returncode != 0:
         raise AcceptanceError(f"Forge Modular screenshot smoke failed: {capture.stderr[-2000:]}")
@@ -497,6 +541,7 @@ def prove_forge(
     doctor = run_bounded(
         [str(prefix / "bin/pulp"), "doctor", "gpu", "--json"],
         cwd=repository, environment=runtime_environment, timeout=300,
+        directory_claim=directory_claim,
     )
     if doctor.returncode != 0:
         raise AcceptanceError(f"Forge-cwd GPU doctor failed: {doctor.stderr[-2000:]}")
@@ -656,59 +701,79 @@ def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
                     "output-dir path no longer names its claimed directory"
                 )
 
-        for name in (candidate for candidate in names if candidate != "receipt.json"):
+        def link_verified_staged_file(name: str) -> None:
             source_descriptor = os.open(
                 name,
                 os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
                 dir_fd=staging_descriptor,
             )
+            linked = False
             try:
-                if not stat_module.S_ISREG(os.fstat(source_descriptor).st_mode):
+                source_metadata = os.fstat(source_descriptor)
+                if not stat_module.S_ISREG(source_metadata.st_mode):
                     raise AcceptanceError(
                         "staging must contain only regular evidence files"
                     )
+                source_identity = {
+                    "device": source_metadata.st_dev,
+                    "inode": source_metadata.st_ino,
+                }
+                named_source = os.stat(
+                    name, dir_fd=staging_descriptor, follow_symlinks=False
+                )
+                if {
+                    "device": named_source.st_dev,
+                    "inode": named_source.st_ino,
+                } != source_identity:
+                    raise AcceptanceError(
+                        f"staged evidence identity changed before publication: {name}"
+                    )
                 os.fsync(source_descriptor)
+                try:
+                    os.link(
+                        name,
+                        name,
+                        src_dir_fd=staging_descriptor,
+                        dst_dir_fd=output_descriptor,
+                        follow_symlinks=False,
+                    )
+                    linked = True
+                except OSError as error:
+                    raise AcceptanceError(
+                        f"no-replace publication failed for {name}"
+                    ) from error
+                published = os.stat(
+                    name, dir_fd=output_descriptor, follow_symlinks=False
+                )
+                named_source = os.stat(
+                    name, dir_fd=staging_descriptor, follow_symlinks=False
+                )
+                identities = (
+                    {"device": published.st_dev, "inode": published.st_ino},
+                    {"device": named_source.st_dev, "inode": named_source.st_ino},
+                )
+                if any(identity != source_identity for identity in identities):
+                    raise AcceptanceError(
+                        f"staged evidence identity changed during publication: {name}"
+                    )
+            except BaseException:
+                if linked:
+                    try:
+                        os.unlink(name, dir_fd=output_descriptor)
+                        os.fsync(output_descriptor)
+                    except OSError:
+                        pass
+                raise
             finally:
                 os.close(source_descriptor)
-            try:
-                os.link(
-                    name,
-                    name,
-                    src_dir_fd=staging_descriptor,
-                    dst_dir_fd=output_descriptor,
-                    follow_symlinks=False,
-                )
-            except OSError as error:
-                raise AcceptanceError(
-                    f"no-replace publication failed for {name}"
-                ) from error
+
+        for name in (candidate for candidate in names if candidate != "receipt.json"):
+            link_verified_staged_file(name)
 
         os.fsync(output_descriptor)
         assert_named_output_claim()
 
-        receipt_descriptor = os.open(
-            "receipt.json",
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-            dir_fd=staging_descriptor,
-        )
-        try:
-            if not stat_module.S_ISREG(os.fstat(receipt_descriptor).st_mode):
-                raise AcceptanceError("receipt.json is not a regular evidence file")
-            os.fsync(receipt_descriptor)
-        finally:
-            os.close(receipt_descriptor)
-        try:
-            os.link(
-                "receipt.json",
-                "receipt.json",
-                src_dir_fd=staging_descriptor,
-                dst_dir_fd=output_descriptor,
-                follow_symlinks=False,
-            )
-        except OSError as error:
-            raise AcceptanceError(
-                "no-replace publication failed for receipt.json"
-            ) from error
+        link_verified_staged_file("receipt.json")
         os.fsync(output_descriptor)
         os.fsync(parent_descriptor)
         assert_named_output_claim()
@@ -768,7 +833,7 @@ def main(argv: list[str] | None = None) -> int:
             build_environment.pop(inherited_override, None)
         runtime_environment = build_environment.copy()
         runtime_environment["PATH"] = SYSTEM_PATH
-        install_provenance, binaries = refresh_install(
+        install_provenance, binaries, install_claim = refresh_install(
             repository, build_dir, prefix, build_environment
         )
         cli = prefix / "bin/pulp"
@@ -792,6 +857,7 @@ def main(argv: list[str] | None = None) -> int:
                         cli, recipe, execution / f"{group}-cli-{suffix}-artifacts",
                         negative=negative, cwd=execution,
                         environment=runtime_environment,
+                        directory_claim=install_claim,
                     )
                     cli_results[group][suffix] = result
                     (staging / f"{group}-{suffix}.json").write_text(
@@ -802,7 +868,9 @@ def main(argv: list[str] | None = None) -> int:
             mcp_results: dict[str, dict[str, dict[str, Any]]] = {
                 group: {} for group in RECIPES
             }
-            session = McpSession(mcp, execution, runtime_environment)
+            session = McpSession(
+                mcp, execution, runtime_environment, install_claim
+            )
             try:
                 session.initialize()
                 for group, recipe in RECIPES.items():
@@ -825,7 +893,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             forge = prove_forge(
                 forge_repository, forge_build, prefix, revision, staging,
-                build_environment, runtime_environment,
+                build_environment, runtime_environment, install_claim,
             )
             raw_names = {
                 *(f"{group}-{suffix}.json" for group in RECIPES
@@ -870,6 +938,7 @@ def main(argv: list[str] | None = None) -> int:
                 prefix,
                 install_provenance["install_prefix_claim"],
                 "install-prefix",
+                install_claim.descriptor,
             )
             (staging / "receipt.json").write_text(
                 json.dumps(receipt, indent=2, sort_keys=True) + "\n"
@@ -878,6 +947,8 @@ def main(argv: list[str] | None = None) -> int:
             if problems:
                 raise AcceptanceError("self-verification failed: " + "; ".join(problems))
             publish_receipt_directory_no_replace(staging, output)
+            install_claim.assert_current()
+            install_claim.close()
         print(json.dumps({"output": str(output), "integration_head": revision,
                           "terminal_status": "pass"}, sort_keys=True))
         return 0

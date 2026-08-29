@@ -27,8 +27,9 @@ not create or promote a receipt during an implementation turn.
   outside the worktree. The recorder atomically claims the empty prefix before
   installing and binds its no-follow device/inode identity through the final
   proof. Receipt publication likewise uses retained directory descriptors,
-  relative no-replace links, and a receipt-last identity check, so neither
-  path substitution nor stale SDK files can be accepted.
+  source/destination inode comparisons, relative no-replace links, and a
+  receipt-last identity check, so neither path or staged-file substitution nor
+  stale SDK files can be accepted.
 - A fresh Forge worktree detached at
   `0750a88dea3af7fca927a8c02887e071109407ae`. The only allowed difference is
   the plan-required `PULP_SDK_REF` overlay containing the final Pulp SHA; it

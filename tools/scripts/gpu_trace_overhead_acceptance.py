@@ -17,6 +17,7 @@ import os
 import platform
 import random
 import re
+import secrets
 import select
 import stat as stat_module
 import statistics
@@ -120,6 +121,11 @@ PRODUCT_PRODUCER_ROOTS = (
     "core/runtime", "core/render", "core/view", "core/format", "inspect",
 )
 PRODUCER_SOURCE_ANNOTATION = '"gpu_evidence_id"'
+PRODUCT_TRACE_CALL = re.compile(
+    r"(?ms)^[ \t]*(?!#)(PULP_TRACE_"
+    r"(?:SCOPE(?:_NAMED(?:_ARGS)?|_DYNAMIC)?|BEGIN(?:_ARGS)?|END|COUNTER)"
+    r"\s*\((?:(?!^[ \t]*PULP_TRACE_).){0,2048}?\)\s*;)"
+)
 BUILD_TARGETS = ("pulp-rust-cli", "pulp-cli", "pulp-mcp")
 REQUIRED_BUILD_SETTINGS = {
     "CMAKE_BUILD_TYPE": "Release",
@@ -293,7 +299,13 @@ def normalized_semantic_projection(payload: dict[str, Any], trace_label: str) ->
 
 
 class McpSession:
-    def __init__(self, executable: Path, environment: dict[str, str]):
+    def __init__(
+        self, executable: Path, environment: dict[str, str],
+        directory_claim: Any | None = None,
+    ):
+        self.directory_claim = directory_claim
+        if self.directory_claim is not None:
+            self.directory_claim.assert_current()
         self.process = subprocess.Popen(
             [str(executable)],
             stdin=subprocess.PIPE,
@@ -303,6 +315,8 @@ class McpSession:
             bufsize=1,
             env=environment,
         )
+        if self.directory_claim is not None:
+            self.directory_claim.assert_current()
         if self.process.stdin is None or self.process.stdout is None:
             raise RuntimeError("failed to open pulp-mcp pipes")
         self._next_id = 1
@@ -319,6 +333,8 @@ class McpSession:
             self.process.wait(timeout=5)
 
     def _request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if self.directory_claim is not None:
+            self.directory_claim.assert_current()
         request_id = self._next_id
         self._next_id += 1
         request: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
@@ -342,6 +358,8 @@ class McpSession:
             stderr = self.process.stderr.read() if self.process.stderr else ""
             raise RuntimeError(f"pulp-mcp exited before responding: {stderr}")
         response = json.loads(line)
+        if self.directory_claim is not None:
+            self.directory_claim.assert_current()
         if response.get("id") != request_id or "result" not in response:
             raise RuntimeError(f"invalid pulp-mcp response: {response}")
         return response
@@ -390,21 +408,30 @@ class McpSession:
             self.process.stderr.close()
         if self.process.returncode != 0 and not self._terminated_for_timeout:
             raise RuntimeError(f"pulp-mcp exited {self.process.returncode}: {stderr}")
+        if self.directory_claim is not None:
+            self.directory_claim.assert_current()
 
 
 def run_cli(
-    executable: Path, question: str, trace: Path, environment: dict[str, str]
+    executable: Path, question: str, trace: Path, environment: dict[str, str],
+    directory_claim: Any | None = None,
 ) -> tuple[int, dict[str, Any]]:
+    if directory_claim is not None:
+        directory_claim.assert_current()
     start = time.perf_counter_ns()
-    run = subprocess.run(
-        [str(executable), "trace", question, "--trace", str(trace), "--json"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=environment,
-        check=False,
-        timeout=ANALYSIS_TIMEOUT_SECONDS,
-    )
+    try:
+        run = subprocess.run(
+            [str(executable), "trace", question, "--trace", str(trace), "--json"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=environment,
+            check=False,
+            timeout=ANALYSIS_TIMEOUT_SECONDS,
+        )
+    finally:
+        if directory_claim is not None:
+            directory_claim.assert_current()
     elapsed = time.perf_counter_ns() - start
     try:
         payload = parse_analysis(json.loads(run.stdout), surface="CLI")
@@ -626,6 +653,30 @@ def _assert_directory_path_identity(
         raise ValueError(f"{label} path no longer names the atomically claimed directory")
 
 
+class RetainedDirectoryClaim:
+    def __init__(self, path: Path, descriptor: int, identity: dict[str, int], label: str):
+        self.path = path
+        self.descriptor = descriptor
+        self.identity = identity
+        self.label = label
+        self.closed = False
+
+    def assert_current(self) -> None:
+        if self.closed:
+            raise ValueError(f"{self.label} claim closed before proof completion")
+        _assert_directory_path_identity(
+            self.path, self.descriptor, self.identity, self.label
+        )
+
+    def close(self) -> None:
+        if not self.closed:
+            os.close(self.descriptor)
+            self.closed = True
+
+    def __del__(self) -> None:
+        self.close()
+
+
 def validate_output_path(output: Path, protected: tuple[Path, ...]) -> None:
     _require_external_path(output, protected, "output")
     if output.exists() or output.is_symlink() or not output.parent.is_dir():
@@ -634,23 +685,98 @@ def validate_output_path(output: Path, protected: tuple[Path, ...]) -> None:
 
 def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
     data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{output.name}.", suffix=".tmp", dir=output.parent
-    )
-    temporary = Path(temporary_name)
+    if output.name in {"", ".", ".."}:
+        raise ValueError("output must have a safe final path component")
+    parent_descriptor = os.open(output.parent, _directory_open_flags())
+    parent_claim = _directory_identity(os.fstat(parent_descriptor))
+    temporary_name = f".{output.name}.{secrets.token_hex(16)}.tmp"
+    temporary_descriptor: int | None = None
+    output_linked = False
     try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.link(temporary, output)
-        directory = os.open(output.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        _assert_directory_path_identity(
+            output.parent, parent_descriptor, parent_claim, "output-parent"
+        )
+        temporary_descriptor = os.open(
+            temporary_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=parent_descriptor,
+        )
+        remaining = memoryview(data)
+        while remaining:
+            written = os.write(temporary_descriptor, remaining)
+            if written <= 0:
+                raise OSError("short write while staging A2T receipt")
+            remaining = remaining[written:]
+        os.fsync(temporary_descriptor)
+        staged = os.fstat(temporary_descriptor)
+        staged_identity = {"device": staged.st_dev, "inode": staged.st_ino}
+        named_staged = os.stat(
+            temporary_name, dir_fd=parent_descriptor, follow_symlinks=False
+        )
+        if {
+            "device": named_staged.st_dev,
+            "inode": named_staged.st_ino,
+        } != staged_identity:
+            raise ValueError("A2T staged receipt identity changed before publication")
+        _assert_directory_path_identity(
+            output.parent, parent_descriptor, parent_claim, "output-parent"
+        )
+        os.link(
+            temporary_name,
+            output.name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+        output_linked = True
+        named_staged = os.stat(
+            temporary_name, dir_fd=parent_descriptor, follow_symlinks=False
+        )
+        published = os.stat(
+            output.name, dir_fd=parent_descriptor, follow_symlinks=False
+        )
+        identities = (
+            {"device": named_staged.st_dev, "inode": named_staged.st_ino},
+            {"device": published.st_dev, "inode": published.st_ino},
+        )
+        if any(identity != staged_identity for identity in identities):
+            os.unlink(output.name, dir_fd=parent_descriptor)
+            output_linked = False
+            os.fsync(parent_descriptor)
+            raise ValueError("A2T staged receipt identity changed during publication")
+        os.fsync(parent_descriptor)
+        _assert_directory_path_identity(
+            output.parent, parent_descriptor, parent_claim, "output-parent"
+        )
+        published = os.stat(
+            output.name, dir_fd=parent_descriptor, follow_symlinks=False
+        )
+        if {"device": published.st_dev, "inode": published.st_ino} != staged_identity:
+            os.unlink(output.name, dir_fd=parent_descriptor)
+            output_linked = False
+            os.fsync(parent_descriptor)
+            raise ValueError("A2T output no longer names the published receipt")
+    except BaseException:
+        if output_linked:
+            try:
+                os.unlink(output.name, dir_fd=parent_descriptor)
+                os.fsync(parent_descriptor)
+            except OSError:
+                pass
+        raise
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary_descriptor is not None:
+            os.close(temporary_descriptor)
+        try:
+            os.unlink(temporary_name, dir_fd=parent_descriptor)
+        except FileNotFoundError:
+            pass
+        finally:
+            try:
+                os.fsync(parent_descriptor)
+            finally:
+                os.close(parent_descriptor)
 
 
 def _release_build_contract(
@@ -747,7 +873,7 @@ def exact_build_install_identity(
 def refresh_exact_build_install(
     repository: Path, revision: str, build_dir: Path, prefix: Path,
     planning_repository: Path, environment: dict[str, str],
-) -> tuple[Path, Path, dict[str, Any]]:
+) -> tuple[Path, Path, dict[str, Any], RetainedDirectoryClaim]:
     _require_external_path(build_dir, (repository, planning_repository), "build-dir")
     _require_external_path(prefix, (repository, planning_repository), "install-prefix")
     if not build_dir.is_dir() or build_dir.is_symlink():
@@ -761,6 +887,9 @@ def refresh_exact_build_install(
     except OSError as error:
         raise ValueError("install-prefix could not be atomically claimed") from error
     prefix_claim = _directory_identity(os.fstat(prefix_descriptor))
+    retained_claim = RetainedDirectoryClaim(
+        prefix, prefix_descriptor, prefix_claim, "install-prefix"
+    )
     try:
         _run_bounded_build(
             ["cmake", "--build", str(build_dir), "--target", *BUILD_TARGETS, "--parallel"],
@@ -783,9 +912,10 @@ def refresh_exact_build_install(
         )
         if identity["build_provenance"]["install_prefix_claim"] != prefix_claim:
             raise ValueError("installed provenance differs from the claimed prefix identity")
-        return cli, mcp, identity
-    finally:
-        os.close(prefix_descriptor)
+        return cli, mcp, identity, retained_claim
+    except BaseException:
+        retained_claim.close()
+        raise
 
 
 def _processor_source_contract(repository: Path) -> tuple[str, dict[str, str]]:
@@ -849,18 +979,19 @@ def trace_processor_identity(
 
 
 def run_fixture_replay(
-    cli: Path, mcp: Path, repository: Path, environment: dict[str, str]
+    cli: Path, mcp: Path, repository: Path, environment: dict[str, str],
+    directory_claim: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Replay the required A2T fixture matrix through both installed fronts."""
     fixture_root = repository / "test/fixtures/perfetto-gpu"
-    session = McpSession(mcp, environment)
+    session = McpSession(mcp, environment, directory_claim)
     session.initialize()
     rows: list[dict[str, Any]] = []
     try:
         for case, filename, question, verdict, dominant, action in FIXTURE_REPLAY:
             trace = fixture_root / filename
-            _, cli_first = run_cli(cli, question, trace, environment)
-            _, cli_second = run_cli(cli, question, trace, environment)
+            _, cli_first = run_cli(cli, question, trace, environment, directory_claim)
+            _, cli_second = run_cli(cli, question, trace, environment, directory_claim)
             _, mcp_result = session.call(question, trace)
             label = f"test/fixtures/perfetto-gpu/{filename}"
             projections = [
@@ -944,17 +1075,33 @@ def _semantic_discovery_paths(
     return paths
 
 
+def product_producer_signatures(text: str) -> tuple[str, ...]:
+    """Extract bounded GPU-relevant trace call sites independently of evidence keys."""
+    signatures = []
+    for match in PRODUCT_TRACE_CALL.finditer(text):
+        call = match.group(1)
+        string_literals = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', call)
+        gpu_relevant = (
+            PRODUCER_SOURCE_ANNOTATION in call
+            or (bool(string_literals) and string_literals[0] == "gpu")
+            or re.search(r"\bgpu_evidence(?:_id)?\b", call, re.IGNORECASE) is not None
+        )
+        if gpu_relevant:
+            signatures.append(re.sub(r"\s+", " ", call).strip())
+    return tuple(signatures)
+
+
 def is_product_producer_source(text: str) -> bool:
-    """Recognize the source spelling of a bounded Perfetto GPU producer."""
-    return PRODUCER_SOURCE_ANNOTATION in text and "PULP_TRACE_" in text
+    """Recognize bounded runtime GPU trace call sites, not prose or key references."""
+    return bool(product_producer_signatures(text))
 
 
 def _product_producer_paths(
     repository: Path, revision: str, tracked: set[str]
-) -> set[str]:
+) -> dict[str, int]:
     completed = subprocess.run(
         [
-            "git", "grep", "-l", "-I", "-F", "-e", PRODUCER_SOURCE_ANNOTATION,
+            "git", "grep", "-l", "-I", "-F", "-e", "PULP_TRACE_",
             revision, "--", *PRODUCT_PRODUCER_ROOTS,
         ],
         cwd=repository, check=False, capture_output=True, text=True,
@@ -966,9 +1113,9 @@ def _product_producer_paths(
         line.removeprefix(prefix) for line in completed.stdout.splitlines()
         if line.startswith(prefix)
     }
-    if len(candidates) > 64 or any(path not in tracked for path in candidates):
+    if len(candidates) > 128 or any(path not in tracked for path in candidates):
         raise ValueError(f"product GPU producer discovery at {revision} is unsafe or unbounded")
-    producers: set[str] = set()
+    producers: dict[str, int] = {}
     for path in candidates:
         blob = subprocess.run(
             ["git", "show", f"{revision}:{path}"],
@@ -976,8 +1123,9 @@ def _product_producer_paths(
         )
         if blob.returncode != 0 or len(blob.stdout) > 2 * 1024 * 1024:
             raise ValueError(f"cannot inspect bounded product producer blob {path}")
-        if is_product_producer_source(blob.stdout.decode(errors="replace")):
-            producers.add(path)
+        signatures = product_producer_signatures(blob.stdout.decode(errors="replace"))
+        if signatures:
+            producers[path] = len(signatures)
     return producers
 
 
@@ -1027,7 +1175,6 @@ def _producer_introduction(
     completed = subprocess.run(
         [
             "git", "log", "--reverse", "--format=%H%x00%s",
-            "-S", PRODUCER_SOURCE_ANNOTATION,
             f"{A2T_SCOPE_BASE}..{source_revision}", "--", path,
         ],
         cwd=repository, check=False, capture_output=True, text=True,
@@ -1055,13 +1202,13 @@ def _producer_introduction(
         )
         if len(before.stdout) > 2 * 1024 * 1024 or len(after.stdout) > 2 * 1024 * 1024:
             raise ValueError(f"product producer source is unbounded for {path}")
-        before_is_producer = before.returncode == 0 and is_product_producer_source(
+        before_count = len(product_producer_signatures(
             before.stdout.decode(errors="replace")
-        )
-        after_is_producer = after.returncode == 0 and is_product_producer_source(
+        )) if before.returncode == 0 else 0
+        after_count = len(product_producer_signatures(
             after.stdout.decode(errors="replace")
-        )
-        if not before_is_producer and after_is_producer:
+        )) if after.returncode == 0 else 0
+        if after_count > before_count:
             if not valid_lower_hex(revision, 40):
                 break
             return revision, subject
@@ -1164,10 +1311,14 @@ def authoritative_a2t_scope_paths(
         | _semantic_discovery_paths(repository, A2T_SCOPE_BASE, base_tracked)
         | _semantic_discovery_paths(repository, source_revision, source_tracked)
     )
-    producer_paths = (
-        _product_producer_paths(repository, A2T_SCOPE_BASE, base_tracked)
-        | _product_producer_paths(repository, source_revision, source_tracked)
+    base_producers = _product_producer_paths(repository, A2T_SCOPE_BASE, base_tracked)
+    source_producers = _product_producer_paths(
+        repository, source_revision, source_tracked
     )
+    producer_paths = {
+        path for path, count in source_producers.items()
+        if count > base_producers.get(path, 0)
+    }
     external_producers = classify_non_a2t_product_producers(
         repository, source_revision, producer_paths
     )
@@ -1648,7 +1799,7 @@ def main() -> int:
         accepted_plan = plan_identity(
             planning_repository, args.plan_revision, args.plan_sha256
         )
-        cli, mcp, installed_identity = refresh_exact_build_install(
+        cli, mcp, installed_identity, install_claim = refresh_exact_build_install(
             repository, args.source_revision, build_dir, prefix,
             planning_repository, build_environment,
         )
@@ -1679,14 +1830,18 @@ def main() -> int:
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     load_average_start = list(os.getloadavg()) if hasattr(os, "getloadavg") else None
 
-    fixture_replay = run_fixture_replay(cli, mcp, repository, environment)
+    fixture_replay = run_fixture_replay(
+        cli, mcp, repository, environment, install_claim
+    )
 
-    persistent = McpSession(mcp, environment)
+    persistent = McpSession(mcp, environment, install_claim)
     persistent.initialize()
     reference_projection: dict[str, Any] | None = None
     try:
         for _ in range(args.warmups):
-            _, cli_payload = run_cli(cli, args.question, trace, environment)
+            _, cli_payload = run_cli(
+                cli, args.question, trace, environment, install_claim
+            )
             _, mcp_payload = persistent.call(args.question, trace)
             if semantic_projection(cli_payload) != semantic_projection(mcp_payload):
                 raise RuntimeError("CLI/MCP warm-up semantic parity failed")
@@ -1699,12 +1854,16 @@ def main() -> int:
         mcp_samples: list[int] = []
         for trial in range(args.trials):
             if trial % 2 == 0:
-                cli_ns, cli_payload = run_cli(cli, args.question, trace, environment)
+                cli_ns, cli_payload = run_cli(
+                    cli, args.question, trace, environment, install_claim
+                )
                 mcp_ns, mcp_payload = persistent.call(args.question, trace)
                 order = "cli-first"
             else:
                 mcp_ns, mcp_payload = persistent.call(args.question, trace)
-                cli_ns, cli_payload = run_cli(cli, args.question, trace, environment)
+                cli_ns, cli_payload = run_cli(
+                    cli, args.question, trace, environment, install_claim
+                )
                 order = "mcp-first"
             if semantic_projection(cli_payload) != semantic_projection(mcp_payload):
                 raise RuntimeError(f"CLI/MCP semantic parity failed at trial {trial + 1}")
@@ -1725,9 +1884,11 @@ def main() -> int:
     fresh_mcp: list[int] = []
     for trial in range(args.fresh_start_trials):
         if trial % 2 == 0:
-            cli_ns, cli_payload = run_cli(cli, args.question, trace, environment)
+            cli_ns, cli_payload = run_cli(
+                cli, args.question, trace, environment, install_claim
+            )
             start = time.perf_counter_ns()
-            session = McpSession(mcp, environment)
+            session = McpSession(mcp, environment, install_claim)
             try:
                 session.initialize()
                 _, mcp_payload = session.call(args.question, trace)
@@ -1737,14 +1898,16 @@ def main() -> int:
             order = "cli-first"
         else:
             start = time.perf_counter_ns()
-            session = McpSession(mcp, environment)
+            session = McpSession(mcp, environment, install_claim)
             try:
                 session.initialize()
                 _, mcp_payload = session.call(args.question, trace)
             finally:
                 session.close()
             mcp_ns = time.perf_counter_ns() - start
-            cli_ns, cli_payload = run_cli(cli, args.question, trace, environment)
+            cli_ns, cli_payload = run_cli(
+                cli, args.question, trace, environment, install_claim
+            )
             order = "mcp-first"
         if semantic_projection(cli_payload) != semantic_projection(mcp_payload):
             raise RuntimeError(f"fresh CLI/MCP semantic parity failed at trial {trial + 1}")
@@ -1784,6 +1947,7 @@ def main() -> int:
             parser.error(f"invalid prior-human-review-receipt: {error}")
 
     try:
+        install_claim.assert_current()
         if clean_source_identity(repository, args.source_revision) != source_identity:
             raise ValueError("source identity changed during A2T recording")
         if source_binding(repository, args.source_revision, trace) != binding:
@@ -1796,6 +1960,7 @@ def main() -> int:
             raise ValueError("trace processor identity changed during A2T recording")
         if a2t_scope_inventory(repository, args.source_revision) != producer_inventory:
             raise ValueError("A2T path-scoped tree delta changed during recording")
+        install_claim.assert_current()
     except ValueError as error:
         parser.error(str(error))
 
@@ -1878,7 +2043,10 @@ def main() -> int:
             "xrun_check": "not-applicable-offline-no-audio-thread",
         },
     }
+    install_claim.assert_current()
     atomic_write_json(output, evidence)
+    install_claim.assert_current()
+    install_claim.close()
     print(json.dumps({"output": str(output), "acceptance": evidence["acceptance"]}))
     return 0
 

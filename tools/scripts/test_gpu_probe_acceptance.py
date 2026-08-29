@@ -403,6 +403,34 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             self.assertFalse((moved_parent / "published" / "receipt.json").exists())
             self.assertEqual(list(parent.iterdir()), [])
 
+    def test_receipt_publication_rejects_staged_inode_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / "staging"
+            staging.mkdir()
+            evidence = staging / "evidence.json"
+            evidence.write_text('{"verified":true}\n', encoding="utf-8")
+            (staging / "receipt.json").write_text("{}\n", encoding="utf-8")
+            output = root / "published"
+            real_link = RECORDER.os.link
+            swapped = False
+
+            def swap_source_before_first_link(*args, **kwargs):
+                nonlocal swapped
+                if not swapped:
+                    evidence.rename(staging / "original-evidence.json")
+                    evidence.write_text('{"verified":false}\n', encoding="utf-8")
+                    swapped = True
+                return real_link(*args, **kwargs)
+
+            with mock.patch.object(
+                RECORDER.os, "link", side_effect=swap_source_before_first_link
+            ):
+                with self.assertRaisesRegex(RECORDER.AcceptanceError, "identity changed"):
+                    RECORDER.publish_receipt_directory_no_replace(staging, output)
+            self.assertFalse((output / "receipt.json").exists())
+            self.assertFalse((output / "evidence.json").exists())
+
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

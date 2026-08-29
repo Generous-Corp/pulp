@@ -264,6 +264,49 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 MODULE.atomic_write_json(existing, {"must_not": "replace"})
             self.assertEqual(existing.read_text(encoding="utf-8"), "do not overwrite")
 
+            published = external / "published.json"
+            MODULE.atomic_write_json(published, {"status": "pass"})
+            self.assertEqual(json.loads(published.read_text()), {"status": "pass"})
+
+    def test_output_publication_rejects_parent_directory_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "parent"
+            parent.mkdir()
+            moved = root / "moved-parent"
+            output = parent / "receipt.json"
+            real_link = MODULE.os.link
+
+            def swap_parent_before_link(*args, **kwargs):
+                parent.rename(moved)
+                parent.mkdir()
+                return real_link(*args, **kwargs)
+
+            with mock.patch.object(MODULE.os, "link", side_effect=swap_parent_before_link):
+                with self.assertRaisesRegex(ValueError, "output-parent"):
+                    MODULE.atomic_write_json(output, {"status": "pass"})
+            self.assertFalse(output.exists())
+            self.assertFalse((moved / "receipt.json").exists())
+
+    def test_output_publication_rejects_staged_inode_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "receipt.json"
+            real_link = MODULE.os.link
+
+            def swap_staged_file_before_link(source, destination, **kwargs):
+                staged = root / source
+                staged.rename(root / "original.tmp")
+                staged.write_text('{"forged":true}\n', encoding="utf-8")
+                return real_link(source, destination, **kwargs)
+
+            with mock.patch.object(
+                MODULE.os, "link", side_effect=swap_staged_file_before_link
+            ):
+                with self.assertRaisesRegex(ValueError, "identity changed"):
+                    MODULE.atomic_write_json(output, {"status": "pass"})
+            self.assertFalse(output.exists())
+
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -463,11 +506,27 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             '"gpu_evidence_id", value);'
         )
         self.assertTrue(MODULE.is_product_producer_source(source))
+        self.assertTrue(
+            MODULE.is_product_producer_source(
+                'PULP_TRACE_SCOPE_NAMED("gpu", "pipeline_compile");'
+            )
+        )
         self.assertFalse(
             MODULE.is_product_producer_source(
                 'config.gpu_evidence_id = "gpu_evidence_id";'
             )
         )
+        self.assertFalse(
+            MODULE.is_product_producer_source(
+                'PULP_TRACE_SCOPE_NAMED("state", "pointer_dispatch");'
+            )
+        )
+
+    def test_product_producer_delta_catches_gpu_call_without_evidence_literal(self):
+        before = 'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");'
+        after = before + '\nPULP_TRACE_SCOPE_NAMED("gpu", "pipeline_compile");'
+        self.assertEqual(len(MODULE.product_producer_signatures(before)), 1)
+        self.assertEqual(len(MODULE.product_producer_signatures(after)), 2)
 
     def test_product_producer_must_have_independent_package_authority(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
