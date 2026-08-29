@@ -1182,3 +1182,21 @@ that discovery to CI.
 Before assuming a new kind needs reverse-index work, check for an exhaustive
 `switch` over `CompileContextKind` — at time of writing there is none, and the
 count-parameterised arrays are why.
+
+## A floor row admits a module for includes AND links; `FORBIDDEN_LINKS` withdraws the link half
+
+`MODULE_FLOORS` in `tools/scripts/timeline_engine_dependency_floor_check.py`
+governs both what a module's sources may `#include` and what its build file may
+link, from one set. That conflation is fine until a module legitimately needs a
+header from a module it must not link.
+
+`FORBIDDEN_LINKS` in the same file is the escape hatch: it names, per module, a
+dependency the floor admits as an include and rejects as a link. `timebase`
+keeps `runtime` in its floor so `pulp/runtime/result.hpp` stays reachable, while
+the link is withdrawn so `libpulp-runtime.a` (and the mbedTLS archives its
+PRIVATE link items drag along) stay off a consumer's link line.
+
+Two consequences when editing that script. The selftest's fixture generator has
+to agree with `verify()` about which half each name carries, which is what
+`linkable_floor_names()` is for. And an entry reports a missing build file
+rather than passing quietly, so it cannot outlive its subject.
