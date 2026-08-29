@@ -219,6 +219,22 @@ class ImmutableKeyedCache(unittest.TestCase):
         self.assertNotEqual(a, b)
         self.assertNotEqual(a, c)
         self.assertTrue(a.name.endswith("-receipt-v3"))
+        self.assertTrue(
+            a.name.endswith(f"-receipt-v{fetch_skia.RECEIPT_SCHEMA_VERSION}")
+        )
+
+    def test_valid_warm_generation_does_not_take_publication_lock(self):
+        with mock.patch.object(
+            fetch_skia, "cache_generation_valid", return_value=True
+        ), mock.patch.object(
+            fetch_skia, "cache_lock", side_effect=AssertionError("lock acquired")
+        ):
+            self.assertEqual(
+                fetch_skia.publish_keyed_cache(
+                    "darwin-arm64", "/cache", 1.0, "a" * 64
+                ),
+                0,
+            )
 
     def test_private_stage_is_atomically_published_and_removed(self):
         with _in_tempdir() as td:
@@ -759,6 +775,26 @@ class ArchSubdirLayoutFlattens(unittest.TestCase):
                 (release_dir / "libdawn_combined.a").read_bytes(), b"already-flat"
             )
             self.assertTrue((release_dir / "arm64" / "libdawn_combined.a").is_file())
+
+    def test_flat_expected_library_disables_all_arch_flattening(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-mac.zip"
+            payload = {
+                "build/mac-gpu/lib/Release/libskia.a": b"flat-skia",
+                "build/mac-gpu/lib/Release/libdawn_combined.a": b"flat-dawn",
+                "build/mac-gpu/lib/Release/arm64/libskparagraph.a": b"arch-paragraph",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+
+            self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+            dest = td / "external/skia-build"
+            release_dir = dest / "build/mac-gpu/lib/Release"
+            self.assertEqual((release_dir / "libskia.a").read_bytes(), b"flat-skia")
+            self.assertEqual(
+                (release_dir / "arm64/libskparagraph.a").read_bytes(), b"arch-paragraph"
+            )
+            self.assertTrue(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
 
     def test_arch_subdir_with_only_duplicate_flat_file_leaves_subdir(self):
         with _in_tempdir() as td:

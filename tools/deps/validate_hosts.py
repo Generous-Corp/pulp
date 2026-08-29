@@ -67,7 +67,7 @@ def unix_remote_command(
     render_toolchain: bool = False,
     expected_sha: str | None = None,
 ) -> str:
-    validate_ref = expected_sha if render_toolchain else branch
+    validate_ref = expected_sha if render_toolchain else "HEAD"
     validate = f"./validate-build.sh --quiet --ref {shlex.quote(validate_ref)}"
     if skip_tests:
         validate += " --no-tests"

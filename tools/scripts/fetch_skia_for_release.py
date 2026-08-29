@@ -189,6 +189,9 @@ def manifest_asset(matrix_platform: str) -> tuple[str, dict[str, str] | None]:
     return manifest_key, skia_entry.get("determinism", {}).get("release_assets", {}).get(manifest_key)
 
 
+RECEIPT_SCHEMA_VERSION = 3
+
+
 def keyed_cache_dest(cache_root: str, matrix_platform: str, asset_sha: str) -> Path:
     """Immutable cache generation selected by platform and exact asset identity."""
     if not re.fullmatch(r"[0-9a-fA-F]{64}", asset_sha):
@@ -196,7 +199,9 @@ def keyed_cache_dest(cache_root: str, matrix_platform: str, asset_sha: str) -> P
     # Receipt format is part of the immutable generation identity. Adding a
     # stronger validator must publish beside old generations, never mutate one
     # that an active compiler may still have open.
-    return Path(cache_root).absolute() / f"{matrix_platform}-{asset_sha.lower()}-receipt-v3"
+    return Path(cache_root).absolute() / (
+        f"{matrix_platform}-{asset_sha.lower()}-receipt-v{RECEIPT_SCHEMA_VERSION}"
+    )
 
 
 _ASSET_STAMP = ".skia-asset-sha256"
@@ -280,7 +285,7 @@ def write_generation_receipt(dest: Path, matrix_platform: str, asset_sha: str) -
     if disk_payload != archive_payload:
         raise ValueError("extracted Skia payload differs from authenticated source archive")
     receipt = {
-        "schema_version": 2,
+        "schema_version": RECEIPT_SCHEMA_VERSION,
         "platform": matrix_platform,
         "asset_sha256": asset_sha,
         "archive_roots": archive_roots,
@@ -305,6 +310,10 @@ def _archive_generation_payload(
             for info in archive.infolist()
             if not info.is_dir()
         }
+        expected_library = expected_library_path(
+            matrix_platform, "."
+        ).as_posix().removeprefix("./")
+        flatten_arch_subdirs = expected_library not in file_names
         for info in archive.infolist():
             if info.is_dir():
                 continue
@@ -312,7 +321,8 @@ def _archive_generation_payload(
             parts = raw_path.parts
             release_parts = PurePosixPath(release_dir).parts
             logical = raw_path
-            if matrix_platform not in _IOS_PRESERVE_ARCH_SUBDIR:
+            if (matrix_platform not in _IOS_PRESERVE_ARCH_SUBDIR
+                    and flatten_arch_subdirs):
                 tail = parts[len(release_parts):] if parts[:len(release_parts)] == release_parts else ()
                 if len(tail) == 2:
                     flat = PurePosixPath(*release_parts, tail[1])
@@ -343,7 +353,7 @@ def generation_receipt_valid(dest: Path, matrix_platform: str, asset_sha: str) -
         disk_payload = _generation_payload(dest, set(archive_roots))
         receipt = json.loads(path.read_text(encoding="utf-8"))
         return (
-            receipt.get("schema_version") == 2
+            receipt.get("schema_version") == RECEIPT_SCHEMA_VERSION
             and receipt.get("platform") == matrix_platform
             and receipt.get("asset_sha256") == asset_sha
             and receipt.get("archive_roots") == archive_roots
@@ -391,13 +401,6 @@ def _archive_member_target(dest: Path, member_name: str) -> Path:
     target = dest.joinpath(*relative.parts)
     target_resolved = target.resolve(strict=False)
     allowed_root = dest.resolve()
-    # Legacy checkout materializations may route exactly the top-level build/
-    # directory into a machine-local shared provider cache. Keep lexical path
-    # traversal forbidden, then constrain resolved archive members to that
-    # build target. Nested symlinks that escape it still fail closed.
-    build_entry = dest / "build"
-    if relative.parts[0] == "build" and build_entry.is_symlink():
-        allowed_root = build_entry.resolve(strict=False)
     try:
         target_resolved.relative_to(allowed_root)
     except ValueError as error:
@@ -409,6 +412,12 @@ def publish_keyed_cache(matrix_platform: str, cache_root: str,
                         timeout_secs: float, expected_sha: str) -> int:
     """Build privately, validate, then atomically publish one immutable generation."""
     dest = keyed_cache_dest(cache_root, matrix_platform, expected_sha)
+    # Immutable warm generations can be deep-verified concurrently. Only a
+    # missing/invalid generation needs the publication lock; the lock owner
+    # rechecks before creating anything.
+    if cache_generation_valid(dest, matrix_platform, expected_sha):
+        print(f"OK: immutable Skia cache generation ready at {dest}")
+        return 0
     try:
         with cache_lock(str(dest), timeout_secs):
             if cache_generation_valid(dest, matrix_platform, expected_sha):
@@ -762,6 +771,9 @@ def _main(argv: list[str]) -> int:
         }
     for name in sorted(archive_roots):
         child = dest / name
+        # A verified symlink-backed generation returned above. A refetch must
+        # never unpack through an unverified/stale symlink and mutate a shared
+        # cache in place; detach the checkout entry and materialize privately.
         if child.is_symlink() or child.is_file():
             child.unlink()
         elif child.exists():
@@ -862,9 +874,11 @@ def _main(argv: list[str]) -> int:
             print(f"  {p}", file=sys.stderr)
         return 1
 
-    # Retain the exact SHA-verified archive. Warm validation derives the
-    # expected file map from these independently authenticated source bytes,
-    # so rewriting the adjacent receipt cannot bless a poisoned shared cache.
+    # Retain the exact SHA-verified archive as the independent trust anchor.
+    # Warm validation intentionally pays one bounded deep verification so
+    # rewriting the adjacent receipt cannot bless a same-size poisoned shared
+    # cache. The archive is excluded from installed SDKs but retained in host
+    # and Tart cache generations where that integrity property is required.
     shutil.copyfile(zip_path, dest / SOURCE_ARCHIVE)
 
     # Seal the complete extracted tree as well as the archive identity. A

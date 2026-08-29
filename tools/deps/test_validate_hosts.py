@@ -135,12 +135,12 @@ class RemoteCommandTests(unittest.TestCase):
 
         self.assertIn("cd '/tmp/repo path'", cmd)
         self.assertIn("'feature/quote'\"'\"'test'", cmd)
-        self.assertIn("./validate-build.sh --quiet --ref", cmd)
+        self.assertIn("./validate-build.sh --quiet --ref HEAD", cmd)
         self.assertIn("--no-tests", cmd)
         self.assertIn("git fetch origin", cmd)
 
         with_tests = validate_hosts.unix_remote_command("/repo", "main", skip_tests=False)
-        self.assertIn("./validate-build.sh --quiet", with_tests)
+        self.assertIn("./validate-build.sh --quiet --ref HEAD", with_tests)
         self.assertNotIn("--no-tests", with_tests)
 
         render = validate_hosts.unix_remote_command(
