@@ -50,6 +50,51 @@ A2T_ANALYZER_SOURCE_PATHS = {
     "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
 }
 A2T_SCOPE_MANIFEST_PATH = "tools/scripts/gpu_trace_overhead_scope.json"
+A2T_SCOPE_BASE = "add4c8779e54113cc8cb4aa486b839788759e891"
+A2T_INTEGRATED_PATCH_EQUIVALENT = "d7ca8da0dbe0e7007691790ef31e33a33efc318c"
+A2T_SEMANTIC_IDENTIFIERS = (
+    "pulp.trace-gpu-analysis.v1",
+    "pulp_gpu_startup_breakdown",
+    "pulp_gpu_health_transitions",
+    "pulp_gpu_probe_correlation",
+    "pulp_trace_analyze",
+    "gpu_trace_overhead_acceptance.py",
+    "debug.gpu_evidence_id",
+)
+A2T_SEMANTIC_DISCOVERY_PATHS = (
+    ".agents/skills/trace-analysis",
+    ".agents/skills/trace-sql",
+    ".claude/commands/trace.md",
+    "core/format",
+    "core/render",
+    "core/runtime",
+    "core/view",
+    "docs/guides/tracing.md",
+    "docs/guides/troubleshooting.md",
+    "docs/reference/cli.md",
+    "docs/status",
+    "docs/validation/gpu-trace-overhead/README.md",
+    "experimental/pulp-rs",
+    "inspect",
+    "test/cmake/quality_tests.cmake",
+    "test/test_mcp_server.cpp",
+    "tools/deps/manifest.json",
+    "tools/mcp",
+    "tools/scripts/cli_mcp_parity_baseline.json",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_scope.json",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+)
+A2T_FIXED_SCOPE_PATHS = {
+    "docs/status/tools.yaml",
+    "docs/validation/gpu-trace-overhead/README.md",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "test/cmake/quality_tests.cmake",
+    "tools/deps/manifest.json",
+    "tools/mcp/mcp_gpu_tools.cpp",
+}
 
 PINNED_PROCESSOR_VERSION = "v57.2"
 PROCESSOR_PLATFORM = {
@@ -102,72 +147,6 @@ FIXTURE_SOURCE_PATHS = {
     f"test/fixtures/perfetto-gpu/{filename}"
     for _case, filename, _question, _verdict, _dominant, _action in FIXTURE_REPLAY
 }
-A2T_TEST_FIXTURE_PATHS = {
-    f"test/fixtures/perfetto-gpu/{filename}"
-    for filename in (
-        "acquire-present-wall-time-only.pftrace",
-        "blank-readback-failure.pftrace",
-        "compile-failure.pftrace",
-        "device-loss.pftrace",
-        "first-frame-pipeline-upload-stall.pftrace",
-        "healthy-diagnostic.pftrace",
-        "healthy.pftrace",
-        "incomplete.pftrace",
-        "render-only.pftrace",
-        "truncated-json.pftrace",
-        "unavailable-state.pftrace",
-        "unverified-state.pftrace",
-        "wrong-category.pftrace",
-    )
-}
-A2T_ACCEPTED_IMPLEMENTATION_PATHS = {
-    ".agents/skills/trace-analysis/SKILL.md",
-    ".agents/skills/trace-analysis/references/hints_gpu.md",
-    ".agents/skills/trace-sql/SKILL.md",
-    ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
-    ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
-    ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
-    "docs/guides/tracing.md",
-    "docs/guides/troubleshooting.md",
-    "docs/reference/cli.md",
-    "docs/status/cli-commands.yaml",
-    "experimental/pulp-rs/src/cmd/mod.rs",
-    "experimental/pulp-rs/src/cmd/trace.rs",
-    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
-    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
-    "experimental/pulp-rs/src/cmd/trace_parse_tests.rs",
-    "experimental/pulp-rs/src/main.rs",
-    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
-    "test/fixtures/perfetto-gpu/compile-failure.pftrace",
-    "test/fixtures/perfetto-gpu/healthy.pftrace",
-    "test/fixtures/perfetto-gpu/incomplete.pftrace",
-    "test/fixtures/perfetto-gpu/wrong-category.pftrace",
-    "test/test_mcp_server.cpp",
-    "tools/mcp/CMakeLists.txt",
-    "tools/mcp/mcp_tools.hpp",
-    "tools/mcp/mcp_tools_internal.cpp",
-    "tools/mcp/mcp_tools_internal.hpp",
-    "tools/mcp/mcp_trace_tools.cpp",
-    "tools/mcp/pulp_mcp.cpp",
-    "tools/scripts/cli_mcp_parity_baseline.json",
-}
-A2T_CURRENT_CONTRACT_PATHS = (
-    A2T_ACCEPTED_IMPLEMENTATION_PATHS
-    | A2T_ANALYZER_SOURCE_PATHS
-    | A2T_TEST_FIXTURE_PATHS
-    | {
-        "docs/status/tools.yaml",
-        "docs/validation/gpu-trace-overhead/README.md",
-        "experimental/pulp-rs/CMakeLists.txt",
-        "experimental/pulp-rs/src/cmd/trace_dispatch_tests.rs",
-        "experimental/pulp-rs/src/cmd/trace_gpu_analysis_tests.rs",
-        "experimental/pulp-rs/tests/test_trace_gpu_analysis_ctest.py",
-        "test/cmake/quality_tests.cmake",
-        "tools/mcp/mcp_gpu_tools.cpp",
-        "tools/scripts/test_gpu_trace_overhead_acceptance.py",
-        "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
-    }
-)
 PLAN_PATH = "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md"
 
 
@@ -661,7 +640,114 @@ def run_fixture_replay(
     return rows
 
 
-def _load_a2t_scope_manifest(repository: Path) -> dict[str, Any]:
+def has_a2t_semantic_identifier(text: str) -> bool:
+    """Recognize only stable exact A2T contract identifiers, not symptom prose."""
+    return any(identifier in text for identifier in A2T_SEMANTIC_IDENTIFIERS)
+
+
+def _tracked_paths(repository: Path, revision: str) -> set[str]:
+    completed = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", revision],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if completed.returncode != 0 or len(completed.stdout.encode()) > 4 * 1024 * 1024:
+        raise ValueError(f"cannot enumerate bounded Git tree at {revision}")
+    paths = completed.stdout.splitlines()
+    if len(paths) > 20_000 or any(
+        not path or path.startswith("/") or ".." in Path(path).parts for path in paths
+    ):
+        raise ValueError(f"Git tree at {revision} has an unsafe or unbounded path inventory")
+    return set(paths)
+
+
+def _semantic_discovery_paths(
+    repository: Path, revision: str, tracked: set[str]
+) -> set[str]:
+    command = ["git", "grep", "-l", "-I", "-F"]
+    for identifier in A2T_SEMANTIC_IDENTIFIERS:
+        command.extend(("-e", identifier))
+    command.extend((revision, "--", *A2T_SEMANTIC_DISCOVERY_PATHS))
+    completed = subprocess.run(
+        command, cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if completed.returncode not in (0, 1) or len(completed.stdout.encode()) > 1024 * 1024:
+        raise ValueError(f"cannot discover bounded A2T identifiers at {revision}")
+    prefix = f"{revision}:"
+    paths = {
+        line.removeprefix(prefix) for line in completed.stdout.splitlines()
+        if line.startswith(prefix)
+    }
+    if len(paths) > 256 or any(path not in tracked for path in paths):
+        raise ValueError(f"A2T semantic discovery at {revision} is unsafe or unbounded")
+    for path in paths:
+        blob = subprocess.run(
+            ["git", "show", f"{revision}:{path}"],
+            cwd=repository, check=False, capture_output=True,
+        )
+        if (
+            blob.returncode != 0
+            or len(blob.stdout) > 2 * 1024 * 1024
+            or not has_a2t_semantic_identifier(blob.stdout.decode(errors="replace"))
+        ):
+            raise ValueError(f"A2T semantic discovery returned an invalid blob at {revision}")
+    return paths
+
+
+def _rule_discovery_paths(tracked: set[str]) -> set[str]:
+    """Discover exact bounded behavior families that may be binary or identifier-free."""
+    return {
+        path for path in tracked
+        if (
+            path.startswith("test/fixtures/perfetto-gpu/")
+            or (
+                path.startswith("experimental/pulp-rs/src/cmd/trace")
+                and path.endswith(".rs")
+            )
+            or (
+                path.startswith("experimental/pulp-rs/tests/")
+                and "trace_gpu_analysis" in Path(path).name
+            )
+            or (
+                path.startswith("tools/scripts/")
+                and "gpu_trace_overhead" in Path(path).name
+            )
+        )
+    }
+
+
+def authoritative_a2t_scope_paths(
+    repository: Path, source_revision: str
+) -> tuple[set[str], set[str]]:
+    """Derive current scope from immutable Git objects and bounded contract rules."""
+    accepted_run = subprocess.run(
+        [
+            "git", "diff-tree", "--no-commit-id", "--name-only", "-r",
+            A2T_INTEGRATED_PATCH_EQUIVALENT,
+        ],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    accepted_paths = set(accepted_run.stdout.splitlines())
+    if accepted_run.returncode != 0 or len(accepted_paths) != 29:
+        raise ValueError("cannot derive the canonical-plan 29-path A2T implementation")
+    base_tracked = _tracked_paths(repository, A2T_SCOPE_BASE)
+    source_tracked = _tracked_paths(repository, source_revision)
+    discovered = (
+        _rule_discovery_paths(base_tracked)
+        | _rule_discovery_paths(source_tracked)
+        | _semantic_discovery_paths(repository, A2T_SCOPE_BASE, base_tracked)
+        | _semantic_discovery_paths(repository, source_revision, source_tracked)
+    )
+    paths = accepted_paths | A2T_FIXED_SCOPE_PATHS | discovered
+    if len(paths) > 128 or any(
+        path not in base_tracked and path not in source_tracked for path in paths
+    ):
+        raise ValueError("derived A2T scope is missing, unsafe, or unbounded")
+    return paths, accepted_paths
+
+
+def _load_a2t_scope_manifest(
+    repository: Path, source_revision: str
+) -> dict[str, Any]:
     """Load and cross-check the independent exact-path A2T scope contract."""
     path = repository / A2T_SCOPE_MANIFEST_PATH
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 64 * 1024:
@@ -677,7 +763,7 @@ def _load_a2t_scope_manifest(repository: Path) -> dict[str, Any]:
         "plan_revision": "641649b7e7fece6baae34380b6e719904506af22",
         "original_revision": "69059fa0bf8f8878a735909115bb2dc2831c2907",
         "replay_revision": "b7c118d0c98aa4e3d1c7b874ee704c8053a01bf5",
-        "integrated_patch_equivalent": "d7ca8da0dbe0e7007691790ef31e33a33efc318c",
+        "integrated_patch_equivalent": A2T_INTEGRATED_PATCH_EQUIVALENT,
         "stable_patch_id": "a5d5850162385c1cbcb2cf34344fea2511636353",
         "path_count": 29,
     }
@@ -687,14 +773,12 @@ def _load_a2t_scope_manifest(repository: Path) -> dict[str, Any]:
     paths = manifest.get("scope_paths")
     if (
         manifest.get("schema") != "pulp.gpu-trace-overhead-scope.v1"
-        or manifest.get("base_revision") != "add4c8779e54113cc8cb4aa486b839788759e891"
+        or manifest.get("base_revision") != A2T_SCOPE_BASE
         or accepted != expected_accepted
         or manifest.get("producer_prefixes") != producer_prefixes
         or not isinstance(paths, list)
         or paths != sorted(paths)
         or len(paths) != len(set(paths))
-        or set(paths) != A2T_CURRENT_CONTRACT_PATHS
-        or len(A2T_ACCEPTED_IMPLEMENTATION_PATHS) != expected_accepted["path_count"]
     ):
         raise ValueError("A2T scope manifest differs from the authoritative current path contract")
     if any(
@@ -707,6 +791,13 @@ def _load_a2t_scope_manifest(repository: Path) -> dict[str, Any]:
         raise ValueError("A2T scope manifest contains an unsafe path")
     if any(path_value.startswith(tuple(producer_prefixes)) for path_value in paths):
         raise ValueError("A2T path-scoped contract includes a product producer path")
+    authoritative_paths, accepted_paths = authoritative_a2t_scope_paths(
+        repository, source_revision
+    )
+    if set(paths) != authoritative_paths or len(accepted_paths) != expected_accepted["path_count"]:
+        raise ValueError(
+            "A2T scope manifest differs from independently discovered Git-object paths"
+        )
     return manifest
 
 
@@ -742,7 +833,7 @@ def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any
     """Recompute the immutable-base-to-source, path-scoped A2T tree delta."""
     if not valid_lower_hex(source_revision, 40):
         raise ValueError("A2T scope source revision must be exact lowercase 40-hex")
-    manifest = _load_a2t_scope_manifest(repository)
+    manifest = _load_a2t_scope_manifest(repository, source_revision)
     base_revision = manifest["base_revision"]
     paths = manifest["scope_paths"]
     ancestor = subprocess.run(
@@ -767,7 +858,7 @@ def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any
     )
     if (
         accepted_paths_run.returncode != 0
-        or set(accepted_paths_run.stdout.splitlines()) != A2T_ACCEPTED_IMPLEMENTATION_PATHS
+        or len(set(accepted_paths_run.stdout.splitlines())) != accepted["path_count"]
     ):
         raise ValueError("integrated A2T implementation differs from the accepted 29-path scope")
 

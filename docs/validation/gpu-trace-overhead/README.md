@@ -54,6 +54,15 @@ other paths neither contaminate nor justify this disposition. Recorder and
 verifier changes at the final source head are included through their exact
 source blobs without requiring a self-referential commit list.
 
+Manifest completeness is independently derived from immutable Git objects:
+the accepted patch's exact 29 paths, every tracked Perfetto-GPU fixture, the
+bounded Rust trace-command and A2T acceptance-script families, and exact stable
+A2T schema/view/tool identifiers within fixed behavior roots. The discovery
+roots include the plan's product-producer prefixes, where the required
+`debug.gpu_evidence_id` key would make a new producer path fail the no-producer
+contract. Generic symptom prose such as “slow GPU startup” is not an identifier
+and cannot expand the scope by substring accident.
+
 New v2 receipts also bind `integration_head` plus the exact Git blobs for the
 Rust analyzer, all three closed PerfettoSQL views, CLI/MCP dispatch surfaces,
 processor pin sources, recorder/verifier, and every checked-in trace in the

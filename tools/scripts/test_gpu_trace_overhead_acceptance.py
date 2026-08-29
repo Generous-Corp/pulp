@@ -324,22 +324,41 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             MODULE.a2t_scope_inventory(Path("/repo"), "HEAD")
 
     def test_scope_manifest_matches_authoritative_current_path_contract(self):
-        manifest = MODULE._load_a2t_scope_manifest(ROOT)
-        self.assertEqual(set(manifest["scope_paths"]), MODULE.A2T_CURRENT_CONTRACT_PATHS)
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        manifest = MODULE._load_a2t_scope_manifest(ROOT, head)
+        paths, accepted = MODULE.authoritative_a2t_scope_paths(ROOT, head)
+        self.assertEqual(set(manifest["scope_paths"]), paths)
         self.assertEqual(
-            len(MODULE.A2T_ACCEPTED_IMPLEMENTATION_PATHS),
+            len(accepted),
             manifest["accepted_plan_implementation"]["path_count"],
         )
 
-    def test_scope_manifest_cannot_omit_real_a2t_behavior_path(self):
+    def test_scope_manifest_cannot_omit_independently_discovered_semantic_path(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
         path = ROOT / MODULE.A2T_SCOPE_MANIFEST_PATH
         manifest = json.loads(path.read_text())
-        manifest["scope_paths"].remove(
-            "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs"
-        )
+        manifest["scope_paths"].remove(".claude/commands/trace.md")
         with mock.patch.object(MODULE.json, "loads", return_value=manifest):
-            with self.assertRaisesRegex(ValueError, "authoritative current path contract"):
-                MODULE._load_a2t_scope_manifest(ROOT)
+            with self.assertRaisesRegex(ValueError, "independently discovered"):
+                MODULE._load_a2t_scope_manifest(ROOT, head)
+
+    def test_semantic_discovery_uses_exact_identifiers_not_incidental_symptoms(self):
+        self.assertTrue(
+            MODULE.has_a2t_semantic_identifier(
+                'schema = "pulp.trace-gpu-analysis.v1"'
+            )
+        )
+        self.assertTrue(
+            MODULE.has_a2t_semantic_identifier(
+                'TRACE_EVENT("gpu", "gpu_submit", "debug.gpu_evidence_id", id)'
+            )
+        )
+        self.assertIn("core/render", MODULE.A2T_SEMANTIC_DISCOVERY_PATHS)
+        self.assertFalse(
+            MODULE.has_a2t_semantic_identifier(
+                "GPU startup tracing can help explain a slow first frame."
+            )
+        )
 
 
 if __name__ == "__main__":
