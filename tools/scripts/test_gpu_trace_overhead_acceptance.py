@@ -4,7 +4,6 @@ import importlib.util
 import json
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 
@@ -315,21 +314,32 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 {"schema": "pulp.trace-gpu-analysis.v1", "verdict": "ok"}, surface="test"
             )
 
-    def test_commit_inventory_detects_a_producer_path(self):
-        completed = SimpleNamespace(
-            returncode=0,
-            stdout="tools/mcp/mcp_trace_tools.cpp\ncore/render/src/new_trace.cpp\n",
-            stderr="",
-        )
-        with mock.patch.object(MODULE.subprocess, "run", return_value=completed):
-            result = MODULE.commit_inventory(Path("/repo"), "a" * 40)
-        self.assertFalse(result["no_added_producer_call_sites"])
-        self.assertEqual(result["added_or_changed_producer_paths"],
-                         ["core/render/src/new_trace.cpp"])
+    def test_mixed_commit_inventory_is_limited_to_a2t_manifest_paths(self):
+        sql = ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql"
+        changed = [sql, "tools/cli/gpu_probe/src/dpr_measurement_session.cpp"]
+        self.assertEqual(MODULE.path_limited_changed_paths(changed, {sql}), [sql])
 
-    def test_commit_inventory_rejects_moving_ref(self):
+    def test_scope_inventory_rejects_moving_ref(self):
         with self.assertRaises(ValueError):
-            MODULE.commit_inventory(Path("/repo"), "HEAD")
+            MODULE.a2t_scope_inventory(Path("/repo"), "HEAD")
+
+    def test_scope_manifest_matches_authoritative_current_path_contract(self):
+        manifest = MODULE._load_a2t_scope_manifest(ROOT)
+        self.assertEqual(set(manifest["scope_paths"]), MODULE.A2T_CURRENT_CONTRACT_PATHS)
+        self.assertEqual(
+            len(MODULE.A2T_ACCEPTED_IMPLEMENTATION_PATHS),
+            manifest["accepted_plan_implementation"]["path_count"],
+        )
+
+    def test_scope_manifest_cannot_omit_real_a2t_behavior_path(self):
+        path = ROOT / MODULE.A2T_SCOPE_MANIFEST_PATH
+        manifest = json.loads(path.read_text())
+        manifest["scope_paths"].remove(
+            "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs"
+        )
+        with mock.patch.object(MODULE.json, "loads", return_value=manifest):
+            with self.assertRaisesRegex(ValueError, "authoritative current path contract"):
+                MODULE._load_a2t_scope_manifest(ROOT)
 
 
 if __name__ == "__main__":

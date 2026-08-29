@@ -46,23 +46,10 @@ A2T_ANALYZER_SOURCE_PATHS = {
     "tools/mcp/mcp_trace_tools.cpp",
     "tools/mcp/pulp_mcp.cpp",
     "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_scope.json",
     "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
 }
-A2T_HISTORY_BASE = "add4c8779e54113cc8cb4aa486b839788759e891"
-A2T_HISTORY_PATHS = {
-    ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
-    ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
-    ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
-    "docs/validation/gpu-trace-overhead/README.md",
-    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
-    "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
-    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
-    "tools/mcp/mcp_trace_tools.cpp",
-    "tools/scripts/gpu_trace_overhead_acceptance.py",
-    "tools/scripts/test_gpu_trace_overhead_acceptance.py",
-    "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
-    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
-}
+A2T_SCOPE_MANIFEST_PATH = "tools/scripts/gpu_trace_overhead_scope.json"
 
 PINNED_PROCESSOR_VERSION = "v57.2"
 PROCESSOR_PLATFORM = {
@@ -115,6 +102,72 @@ FIXTURE_SOURCE_PATHS = {
     f"test/fixtures/perfetto-gpu/{filename}"
     for _case, filename, _question, _verdict, _dominant, _action in FIXTURE_REPLAY
 }
+A2T_TEST_FIXTURE_PATHS = {
+    f"test/fixtures/perfetto-gpu/{filename}"
+    for filename in (
+        "acquire-present-wall-time-only.pftrace",
+        "blank-readback-failure.pftrace",
+        "compile-failure.pftrace",
+        "device-loss.pftrace",
+        "first-frame-pipeline-upload-stall.pftrace",
+        "healthy-diagnostic.pftrace",
+        "healthy.pftrace",
+        "incomplete.pftrace",
+        "render-only.pftrace",
+        "truncated-json.pftrace",
+        "unavailable-state.pftrace",
+        "unverified-state.pftrace",
+        "wrong-category.pftrace",
+    )
+}
+A2T_ACCEPTED_IMPLEMENTATION_PATHS = {
+    ".agents/skills/trace-analysis/SKILL.md",
+    ".agents/skills/trace-analysis/references/hints_gpu.md",
+    ".agents/skills/trace-sql/SKILL.md",
+    ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+    ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+    ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+    "docs/guides/tracing.md",
+    "docs/guides/troubleshooting.md",
+    "docs/reference/cli.md",
+    "docs/status/cli-commands.yaml",
+    "experimental/pulp-rs/src/cmd/mod.rs",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/src/cmd/trace_parse_tests.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+    "test/fixtures/perfetto-gpu/compile-failure.pftrace",
+    "test/fixtures/perfetto-gpu/healthy.pftrace",
+    "test/fixtures/perfetto-gpu/incomplete.pftrace",
+    "test/fixtures/perfetto-gpu/wrong-category.pftrace",
+    "test/test_mcp_server.cpp",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_tools.hpp",
+    "tools/mcp/mcp_tools_internal.cpp",
+    "tools/mcp/mcp_tools_internal.hpp",
+    "tools/mcp/mcp_trace_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/cli_mcp_parity_baseline.json",
+}
+A2T_CURRENT_CONTRACT_PATHS = (
+    A2T_ACCEPTED_IMPLEMENTATION_PATHS
+    | A2T_ANALYZER_SOURCE_PATHS
+    | A2T_TEST_FIXTURE_PATHS
+    | {
+        "docs/status/tools.yaml",
+        "docs/validation/gpu-trace-overhead/README.md",
+        "experimental/pulp-rs/CMakeLists.txt",
+        "experimental/pulp-rs/src/cmd/trace_dispatch_tests.rs",
+        "experimental/pulp-rs/src/cmd/trace_gpu_analysis_tests.rs",
+        "experimental/pulp-rs/tests/test_trace_gpu_analysis_ctest.py",
+        "test/cmake/quality_tests.cmake",
+        "tools/mcp/mcp_gpu_tools.cpp",
+        "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+        "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+    }
+)
 PLAN_PATH = "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md"
 
 
@@ -608,71 +661,179 @@ def run_fixture_replay(
     return rows
 
 
-def commit_inventory(repository: Path, revision: str) -> dict[str, Any]:
-    if not valid_lower_hex(revision, 40):
-        raise ValueError("A2T implementation revision must be an exact lowercase 40-hex commit")
-    run = subprocess.run(
-        ["git", "-C", str(repository), "diff-tree", "--no-commit-id", "--name-only", "-r", revision],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-    if run.returncode != 0:
-        raise ValueError(f"cannot inventory A2T implementation revision: {run.stderr.strip()}")
-    paths = [line for line in run.stdout.splitlines() if line]
-    producer_prefixes = ("core/runtime/", "core/render/", "core/view/", "core/format/", "inspect/")
-    producer_paths = [path for path in paths if path.startswith(producer_prefixes)]
+def _load_a2t_scope_manifest(repository: Path) -> dict[str, Any]:
+    """Load and cross-check the independent exact-path A2T scope contract."""
+    path = repository / A2T_SCOPE_MANIFEST_PATH
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 64 * 1024:
+        raise ValueError("A2T scope manifest must be a bounded regular file")
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read A2T scope manifest: {error}") from error
+    if not isinstance(manifest, dict):
+        raise ValueError("A2T scope manifest must be an object")
+    accepted = manifest.get("accepted_plan_implementation")
+    expected_accepted = {
+        "plan_revision": "641649b7e7fece6baae34380b6e719904506af22",
+        "original_revision": "69059fa0bf8f8878a735909115bb2dc2831c2907",
+        "replay_revision": "b7c118d0c98aa4e3d1c7b874ee704c8053a01bf5",
+        "integrated_patch_equivalent": "d7ca8da0dbe0e7007691790ef31e33a33efc318c",
+        "stable_patch_id": "a5d5850162385c1cbcb2cf34344fea2511636353",
+        "path_count": 29,
+    }
+    producer_prefixes = [
+        "core/runtime/", "core/render/", "core/view/", "core/format/", "inspect/",
+    ]
+    paths = manifest.get("scope_paths")
+    if (
+        manifest.get("schema") != "pulp.gpu-trace-overhead-scope.v1"
+        or manifest.get("base_revision") != "add4c8779e54113cc8cb4aa486b839788759e891"
+        or accepted != expected_accepted
+        or manifest.get("producer_prefixes") != producer_prefixes
+        or not isinstance(paths, list)
+        or paths != sorted(paths)
+        or len(paths) != len(set(paths))
+        or set(paths) != A2T_CURRENT_CONTRACT_PATHS
+        or len(A2T_ACCEPTED_IMPLEMENTATION_PATHS) != expected_accepted["path_count"]
+    ):
+        raise ValueError("A2T scope manifest differs from the authoritative current path contract")
+    if any(
+        not isinstance(path_value, str)
+        or not path_value
+        or path_value.startswith("/")
+        or ".." in Path(path_value).parts
+        for path_value in paths
+    ):
+        raise ValueError("A2T scope manifest contains an unsafe path")
+    if any(path_value.startswith(tuple(producer_prefixes)) for path_value in paths):
+        raise ValueError("A2T path-scoped contract includes a product producer path")
+    return manifest
+
+
+def _stable_patch_id(repository: Path, revision: str) -> str:
     patch = subprocess.run(
         ["git", "-C", str(repository), "show", revision],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     patch_id_run = subprocess.run(
         ["git", "patch-id", "--stable"], input=patch.stdout,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     if patch.returncode != 0 or patch_id_run.returncode != 0 or not patch_id_run.stdout:
-        raise ValueError("cannot calculate stable patch id for A2T implementation revision")
-    patch_id_output = (
+        raise ValueError("cannot calculate stable patch id for accepted A2T implementation")
+    output = (
         patch_id_run.stdout.decode() if isinstance(patch_id_run.stdout, bytes)
         else patch_id_run.stdout
     )
-    patch_id = patch_id_output.split()[0]
-    return {
-        "method": "git diff-tree --no-commit-id --name-only -r",
-        "implementation_revision": revision,
-        "stable_patch_id": patch_id,
-        "changed_path_count": len(paths),
-        "changed_paths": paths,
-        "producer_prefixes_checked": list(producer_prefixes),
-        "added_or_changed_producer_paths": producer_paths,
-        "no_added_producer_call_sites": not producer_paths,
-    }
+    patch_id = output.split()[0]
+    if not valid_lower_hex(patch_id, 40):
+        raise ValueError("accepted A2T implementation has an invalid stable patch id")
+    return patch_id
 
 
-def a2t_history_revisions(repository: Path, source_revision: str) -> list[str]:
-    """Derive the complete integrated A2T change set from immutable history."""
+def path_limited_changed_paths(
+    changed_paths: list[str], scope_paths: set[str]
+) -> list[str]:
+    """Keep only exact manifest paths from a possibly mixed commit inventory."""
+    return sorted({path for path in changed_paths if path in scope_paths})
+
+
+def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any]:
+    """Recompute the immutable-base-to-source, path-scoped A2T tree delta."""
     if not valid_lower_hex(source_revision, 40):
-        raise ValueError("A2T history source revision must be exact lowercase 40-hex")
+        raise ValueError("A2T scope source revision must be exact lowercase 40-hex")
+    manifest = _load_a2t_scope_manifest(repository)
+    base_revision = manifest["base_revision"]
+    paths = manifest["scope_paths"]
     ancestor = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", A2T_HISTORY_BASE, source_revision],
+        ["git", "merge-base", "--is-ancestor", base_revision, source_revision],
         cwd=repository, check=False, capture_output=True, text=True,
     )
     if ancestor.returncode != 0:
-        raise ValueError("immutable pre-A2T history base is not in source history")
-    completed = subprocess.run(
+        raise ValueError("immutable pre-A2T scope base is not in source history")
+    accepted = manifest["accepted_plan_implementation"]
+    equivalent = accepted["integrated_patch_equivalent"]
+    equivalent_ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", equivalent, source_revision],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if equivalent_ancestor.returncode != 0:
+        raise ValueError("accepted A2T patch-equivalent revision is not in source history")
+    if _stable_patch_id(repository, equivalent) != accepted["stable_patch_id"]:
+        raise ValueError("integrated A2T implementation does not match the accepted stable patch")
+    accepted_paths_run = subprocess.run(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", equivalent],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if (
+        accepted_paths_run.returncode != 0
+        or set(accepted_paths_run.stdout.splitlines()) != A2T_ACCEPTED_IMPLEMENTATION_PATHS
+    ):
+        raise ValueError("integrated A2T implementation differs from the accepted 29-path scope")
+
+    base_blobs = git_blobs(repository, base_revision, set(paths))
+    source_blobs = git_blobs(repository, source_revision, set(paths))
+    deltas = [
+        {"path": path, "base_blob": base_blobs.get(path), "source_blob": source_blobs.get(path)}
+        for path in paths
+        if base_blobs.get(path) != source_blobs.get(path)
+    ]
+    if not deltas:
+        raise ValueError("A2T path-scoped tree delta is empty")
+
+    history = subprocess.run(
         [
             "git", "rev-list", "--first-parent", "--reverse",
-            f"{A2T_HISTORY_BASE}..{source_revision}", "--", *sorted(A2T_HISTORY_PATHS),
+            f"{base_revision}..{source_revision}", "--", *paths,
         ],
         cwd=repository, check=False, capture_output=True, text=True,
     )
-    revisions = completed.stdout.splitlines() if completed.returncode == 0 else []
-    if not revisions or any(not valid_lower_hex(revision, 40) for revision in revisions):
-        raise ValueError("cannot derive the complete A2T implementation history")
-    return revisions
+    revisions = history.stdout.splitlines() if history.returncode == 0 else []
+    if not revisions or len(revisions) > 128 or any(
+        not valid_lower_hex(revision, 40) for revision in revisions
+    ):
+        raise ValueError("cannot derive bounded A2T scope-touching history")
+    touching: list[dict[str, Any]] = []
+    scope_set = set(paths)
+    for revision in revisions:
+        changed = subprocess.run(
+            [
+                "git", "diff-tree", "-m", "--first-parent", "--no-commit-id",
+                "--name-only", "-r", revision, "--", *paths,
+            ],
+            cwd=repository, check=False, capture_output=True, text=True,
+        )
+        changed_paths = path_limited_changed_paths(
+            changed.stdout.splitlines(), scope_set
+        ) if changed.returncode == 0 else []
+        if not changed_paths:
+            raise ValueError(f"cannot derive path-limited A2T contribution for {revision}")
+        touching.append({
+            "revision": revision,
+            "path_limited_changed_paths": changed_paths,
+        })
+    producer_prefixes = manifest["producer_prefixes"]
+    producer_paths = sorted({
+        row["path"] for row in deltas
+        if row["path"].startswith(tuple(producer_prefixes))
+    })
+    return {
+        "method": "immutable-base-to-source path-scoped tree delta",
+        "manifest": {
+            "path": A2T_SCOPE_MANIFEST_PATH,
+            "sha256": sha256(repository / A2T_SCOPE_MANIFEST_PATH),
+            "schema": manifest["schema"],
+            "scope_path_count": len(paths),
+        },
+        "accepted_plan_implementation": accepted,
+        "base_revision": base_revision,
+        "source_revision": source_revision,
+        "path_deltas": deltas,
+        "scope_touching_revisions": touching,
+        "producer_prefixes_checked": producer_prefixes,
+        "added_or_changed_producer_paths": producer_paths,
+        "no_added_producer_call_sites": not producer_paths,
+    }
 
 
 def terminal_acceptance_status(
@@ -892,14 +1053,6 @@ def main() -> int:
     parser.add_argument("--source-revision", required=True)
     parser.add_argument("--mcp-source-revision", required=True)
     parser.add_argument("--repository", type=Path, default=Path.cwd())
-    parser.add_argument(
-        "--a2t-implementation-revision", action="append", default=[],
-        help=(
-            "Optional assertion of the complete derived A2T revision sequence; "
-            "normally omit because the recorder derives it from immutable history"
-        ),
-    )
-    parser.add_argument("--equivalent-a2t-revision", action="append", default=[])
     parser.add_argument("--plan-revision", required=True)
     parser.add_argument("--plan-sha256", required=True)
     parser.add_argument("--planning-repository", type=Path, required=True)
@@ -946,40 +1099,12 @@ def main() -> int:
         accepted_plan = plan_identity(
             args.planning_repository, args.plan_revision, args.plan_sha256
         )
-        derived_implementation_revisions = a2t_history_revisions(
-            repository, args.source_revision
-        )
-        if (
-            args.a2t_implementation_revision
-            and args.a2t_implementation_revision != derived_implementation_revisions
-        ):
+        producer_inventory = a2t_scope_inventory(repository, args.source_revision)
+        if producer_inventory["no_added_producer_call_sites"] is not True:
             raise ValueError(
-                "a2t-implementation-revision assertions differ from derived A2T history"
+                "the A2T path-scoped tree delta contains product producer paths; "
+                "run the product overhead gate"
             )
-        implementation_inventories = [
-            commit_inventory(repository, revision)
-            for revision in derived_implementation_revisions
-        ]
-        if not all(
-            item["no_added_producer_call_sites"] for item in implementation_inventories
-        ):
-            raise ValueError(
-                "an A2T history revision contains producer paths; run the product overhead gate"
-            )
-        equivalent_revisions = []
-        for revision in args.equivalent_a2t_revision:
-            equivalent = commit_inventory(repository, revision)
-            if (
-                equivalent["stable_patch_id"]
-                != implementation_inventories[0]["stable_patch_id"]
-            ):
-                raise ValueError(f"A2T revision {revision} is not patch-equivalent")
-            equivalent_revisions.append(
-                {"revision": revision, "stable_patch_id": equivalent["stable_patch_id"]}
-            )
-        implementation_inventories[0][
-            "patch_equivalent_revisions"
-        ] = equivalent_revisions
     except ValueError as error:
         parser.error(str(error))
 
@@ -1078,12 +1203,6 @@ def main() -> int:
     mcp_summary = summary(mcp_samples)
     confidence = paired_delta_confidence(cli_samples, mcp_samples)
 
-    producer_inventory = {
-        "method": "per-commit git diff-tree inventory",
-        "implementation_revisions": implementation_inventories,
-        "no_added_producer_call_sites": True,
-        "added_or_changed_producer_paths": [],
-    }
     routing_inventory = None
     if args.routing_inventory:
         routing_document = json.loads(args.routing_inventory.read_text())
@@ -1117,6 +1236,8 @@ def main() -> int:
             raise ValueError("installed CLI/MCP provenance changed during A2T recording")
         if trace_processor_identity(repository, processor) != processor_identity:
             raise ValueError("trace processor identity changed during A2T recording")
+        if a2t_scope_inventory(repository, args.source_revision) != producer_inventory:
+            raise ValueError("A2T path-scoped tree delta changed during recording")
     except ValueError as error:
         parser.error(str(error))
 
@@ -1133,7 +1254,7 @@ def main() -> int:
         "scope": "offline-installed-cli-mcp-analysis",
         "producer_overhead_disposition": {
             "status": "not-applicable-no-added-producer-cost",
-            "reason": "A2T adds offline analysis and no generic render producer call sites, so Horizon A adds no producer runtime work to grade.",
+            "reason": "The exact path-scoped A2T delta adds offline analysis and no generic render producer call sites, so Horizon A adds no producer runtime work to grade.",
             "evidence": producer_inventory,
             "routing_inventory": routing_inventory,
             "required_followup": "B6 must run the three-state 5-warmup/30-trial and 20 fresh-process protocol when Vellum producer instrumentation is added.",

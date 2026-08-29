@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,7 +18,7 @@ EXPECTED_PLAN_REVISION = "641649b7e7fece6baae34380b6e719904506af22"
 EXPECTED_PLAN_SHA256 = "00bdb8bd55fb90fb42d98a09442d2b168505a23a4208cb5b9edb67b01de69f07"
 EXPECTED_PLAN_BLOB = "2d1c461d3ea640f75786a72c312d074f68f59028"
 SOURCE_STAMP = re.compile(r"^[0-9a-f]{7,40}$")
-_INVENTORY_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+_SCOPE_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
 
 
 def _object(value: Any, label: str, errors: list[str]) -> dict[str, Any]:
@@ -39,11 +37,11 @@ def _artifact_trace_path(receipt: dict[str, Any], repository: Path) -> Path | No
     return repository / role.removeprefix("repository/")
 
 
-def _commit_inventory(repository: Path, revision: str) -> dict[str, Any]:
+def _scope_inventory(repository: Path, revision: str) -> dict[str, Any]:
     key = (str(repository.resolve()), revision)
-    if key not in _INVENTORY_CACHE:
-        _INVENTORY_CACHE[key] = contract.commit_inventory(repository, revision)
-    return copy.deepcopy(_INVENTORY_CACHE[key])
+    if key not in _SCOPE_CACHE:
+        _SCOPE_CACHE[key] = contract.a2t_scope_inventory(repository, revision)
+    return json.loads(json.dumps(_SCOPE_CACHE[key]))
 
 
 def _verify_producer_disposition(
@@ -69,87 +67,21 @@ def _verify_producer_disposition(
     evidence = _object(
         disposition.get("evidence"), "producer overhead disposition evidence", errors
     )
+    try:
+        expected = _scope_inventory(repository, str(source_revision))
+    except ValueError as error:
+        errors.append(f"cannot recompute A2T path-scoped tree delta: {error}")
+        return
+    if evidence != expected:
+        errors.append(
+            "producer overhead evidence differs from the complete path-scoped tree delta"
+        )
     if (
-        evidence.get("method") != "per-commit git diff-tree inventory"
+        evidence.get("method") != "immutable-base-to-source path-scoped tree delta"
         or evidence.get("no_added_producer_call_sites") is not True
         or evidence.get("added_or_changed_producer_paths") != []
     ):
-        errors.append("producer overhead disposition lacks a passing per-commit inventory")
-    inventories = evidence.get("implementation_revisions")
-    if not isinstance(inventories, list) or not inventories:
-        errors.append("producer overhead disposition has no implementation revisions")
-        return
-    try:
-        expected_revisions = contract.a2t_history_revisions(
-            repository, str(source_revision)
-        )
-    except ValueError as error:
-        errors.append(f"cannot derive complete A2T implementation history: {error}")
-        expected_revisions = []
-    declared_revisions = [
-        row.get("implementation_revision") if isinstance(row, dict) else None
-        for row in inventories
-    ]
-    if declared_revisions != expected_revisions:
-        errors.append(
-            "A2T implementation inventories do not equal the complete derived history"
-        )
-    if len(inventories) > 64:
-        errors.append("A2T implementation inventory exceeds the 64-commit cap")
-        inventories = inventories[:64]
-    for index, declared in enumerate(inventories):
-        if not isinstance(declared, dict):
-            errors.append(f"A2T implementation inventory {index} must be an object")
-            continue
-        revision = declared.get("implementation_revision")
-        if not isinstance(revision, str) or not contract.valid_lower_hex(revision, 40):
-            errors.append(f"A2T implementation inventory {index} lacks an exact revision")
-            continue
-        try:
-            expected = _commit_inventory(repository, revision)
-        except ValueError as error:
-            errors.append(f"cannot recompute A2T implementation inventory {revision}: {error}")
-            continue
-        equivalents = declared.get("patch_equivalent_revisions")
-        declared_base = dict(declared)
-        declared_base.pop("patch_equivalent_revisions", None)
-        if declared_base != expected:
-            errors.append(f"A2T implementation inventory {revision} differs from Git")
-        if expected.get("no_added_producer_call_sites") is not True:
-            errors.append(f"A2T implementation revision {revision} touches producer paths")
-        if isinstance(source_revision, str):
-            ancestor = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", revision, source_revision],
-                cwd=repository, check=False, capture_output=True, text=True,
-            )
-            if ancestor.returncode != 0:
-                errors.append(f"A2T implementation revision {revision} is not in source history")
-        if index == 0:
-            if not isinstance(equivalents, list):
-                errors.append("primary A2T inventory lacks its patch-equivalent revision list")
-                equivalents = []
-            for equivalent in equivalents:
-                if not isinstance(equivalent, dict):
-                    errors.append("A2T patch-equivalent revision entry must be an object")
-                    continue
-                equivalent_revision = equivalent.get("revision")
-                try:
-                    equivalent_inventory = _commit_inventory(
-                        repository, str(equivalent_revision)
-                    )
-                except ValueError as error:
-                    errors.append(f"cannot recompute patch-equivalent A2T revision: {error}")
-                    continue
-                expected_equivalent = {
-                    "revision": equivalent_revision,
-                    "stable_patch_id": equivalent_inventory["stable_patch_id"],
-                }
-                if equivalent != expected_equivalent or (
-                    equivalent_inventory["stable_patch_id"] != expected["stable_patch_id"]
-                ):
-                    errors.append("A2T patch-equivalent revision does not match the primary patch")
-        elif equivalents is not None:
-            errors.append("only the primary A2T inventory may name patch-equivalent revisions")
+        errors.append("producer overhead disposition lacks a passing path-scoped tree delta")
 
 
 def verify(

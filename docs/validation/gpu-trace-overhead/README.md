@@ -21,7 +21,6 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --question gpu-startup \
   --source-revision "$(git rev-parse HEAD)" \
   --mcp-source-revision "$(git rev-parse HEAD)" \
-  --equivalent-a2t-revision "$A2T_ORIGINAL_REVISION" \
   --plan-revision "$PLAN_REVISION" \
   --plan-sha256 "$PLAN_SHA256" \
   --planning-repository "$PWD/planning" \
@@ -43,6 +42,17 @@ the lowercase 40-hex `--source-revision`. The installed build stamp is parsed
 and checked rather than trusting those declarations alone. The accepted plan
 is likewise read from its immutable Git object and checked against its Git blob
 and SHA-256 identities.
+
+The no-added-producer disposition is not caller-selected and does not label
+whole mixed-purpose commits as A2T work. The recorder loads the checked-in
+`gpu_trace_overhead_scope.json` contract, verifies its canonical-plan 29-path
+implementation identity, and recomputes an immutable-pre-A2T-base to exact
+source-head tree delta over the complete current A2T path contract. It records
+exact base/source blobs plus path-limited touching history. A commit that also
+changes unrelated A3/A4/tooling code contributes only its A2T path delta; its
+other paths neither contaminate nor justify this disposition. Recorder and
+verifier changes at the final source head are included through their exact
+source blobs without requiring a self-referential commit list.
 
 New v2 receipts also bind `integration_head` plus the exact Git blobs for the
 Rust analyzer, all three closed PerfettoSQL views, CLI/MCP dispatch surfaces,
@@ -72,13 +82,13 @@ text/structured MCP identity, all semantic fields, and the intended
 verdict/stage/action. The terminal verifier correlates the timed result to that
 same replay row and checked-in artifact digest.
 
-Every Horizon-A A2T implementation/hardening revision is derived from the
-immutable pre-A2T history boundary and the bound analyzer/SQL/acceptance paths,
-then inventoried before measurement. A caller cannot omit a revision by
-selecting a shorter list. A stable patch ID binds the original pre-rebase and
-replayed commit identities.
-It added offline CLI/MCP/SQL/docs/tests and no runtime/render/view/format or
-Inspector producer path. Therefore new-producer runtime overhead is
+The recorder derives the complete path-scoped A2T tree delta from the immutable
+pre-A2T boundary to the exact measured source head. A caller cannot shorten or
+select its history. The manifest's stable patch ID binds the canonical plan's
+original/replayed implementation to its integrated equivalent; later changes
+are bound by their exact final blobs and path-limited touching history. This
+scope contains offline CLI/MCP/SQL/docs/tests and no runtime/render/view/format
+or Inspector producer path. Therefore new-producer runtime overhead is
 `not-applicable-no-added-producer-cost`, not a timing pass. The receipt binds
 the exact canonical plan revision and digest that accepts this Horizon-A
 disposition while preserving the full producer/xrun protocol for B6.
