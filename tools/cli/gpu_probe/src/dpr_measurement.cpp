@@ -31,7 +31,8 @@ bool read_string(const choc::value::ValueView& object, const char* field,
 bool supported_scenario(std::string_view id, std::string_view kind) {
     return (id == "dense-text-thin-strokes" && kind == "pulp_screenshot") ||
         ((id == "shader-heavy-controls" || id == "meters-waveforms") &&
-         kind == "pulp_screenshot_gpu");
+         kind == "pulp_screenshot_gpu") ||
+        (id == "threejs-audio-reactive" && kind == "maintained_native_canary");
 }
 
 bool supported_mode(std::string_view mode) {
@@ -109,7 +110,7 @@ parse_dpr_measurement_request(std::string_view json, std::string* error) {
         !read_string(scenario, "kind", request.scenario_kind, message))
         return fail("scenario." + message);
     if (!supported_scenario(request.scenario_id, request.scenario_kind))
-        return fail("scenario is not one of the three Pulp-native DPR fixtures");
+        return fail("scenario is not a Pulp-owned native DPR workload");
 
     if (!read_string(scenario, "source", request.source, message))
         return fail("scenario." + message);
@@ -120,8 +121,11 @@ parse_dpr_measurement_request(std::string_view json, std::string* error) {
     if (!read_positive_u32(logical, "width", request.logical_width, message) ||
         !read_positive_u32(logical, "height", request.logical_height, message))
         return fail("scenario.logical_size." + message);
-    if (request.logical_width != 640 || request.logical_height != 360)
-        return fail("Pulp-native DPR logical size must remain 640x360");
+    const bool expected_size = request.scenario_id == "threejs-audio-reactive"
+        ? request.logical_width == 900 && request.logical_height == 600
+        : request.logical_width == 640 && request.logical_height == 360;
+    if (!expected_size)
+        return fail("Pulp-native DPR logical size differs from its frozen scenario");
 
     std::string source_root, cell_directory;
     if (!read_string(root, "pulp_source_root", source_root, message) ||
@@ -135,8 +139,12 @@ parse_dpr_measurement_request(std::string_view json, std::string* error) {
     if (!request.pulp_source_root.is_absolute() ||
         !request.cell_directory.is_absolute())
         return fail("pulp_source_root and cell_directory must be absolute");
-    if (std::filesystem::path(request.source).filename() != request.source)
+    if (request.scenario_id == "threejs-audio-reactive") {
+        if (request.source != "examples/threejs-native-demo/main.cpp")
+            return fail("Three.js scenario source must remain the maintained native demo");
+    } else if (std::filesystem::path(request.source).filename() != request.source) {
         return fail("scenario.source must be one fixture filename");
+    }
     if (!valid_hex(request.expected_content_digest, 64) ||
         !valid_hex(request.pulp_sha, 40))
         return fail("content digest or Pulp SHA is malformed");

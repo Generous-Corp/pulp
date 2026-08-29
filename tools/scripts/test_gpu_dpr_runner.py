@@ -387,6 +387,21 @@ def main() -> int:
         assert key == dense and observation is not None and not dependencies
         assert observation["metrics"]["first_frame_time"]["sample_count"] == 20
 
+        zero_gpu = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+        )
+        zero_gpu_raw_path = runner.cell_directory(run_dir, dense) / "raw-samples.json"
+        zero_gpu_raw = runner.load_json(zero_gpu_raw_path)
+        zero_gpu_raw["metrics"]["gpu_frame_time"][7] = 0.0
+        write_json(zero_gpu_raw_path, zero_gpu_raw)
+        zero_gpu_document = runner.load_json(zero_gpu)
+        next(
+            item for item in zero_gpu_document["artifacts"]
+            if item["kind"] == "raw_samples"
+        )["sha256"] = runner.sha256_file(zero_gpu_raw_path)
+        write_json(zero_gpu, zero_gpu_document)
+        expect_rejected(zero_gpu, state, manifest, run_dir, "missing GPU sample")
+
         planted = 0
         bad_digest = runner.load_json(good)
         bad_digest["artifacts"][0]["sha256"] = "0" * 64

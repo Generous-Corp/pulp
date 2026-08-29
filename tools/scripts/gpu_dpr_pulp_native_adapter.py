@@ -43,6 +43,7 @@ SUPPORTED = {
     "dense-text-thin-strokes": "skia",
     "shader-heavy-controls": "gpu",
     "meters-waveforms": "gpu",
+    "threejs-audio-reactive": "threejs",
 }
 
 
@@ -467,7 +468,7 @@ def run(request_path: Path, receipt_path: Path) -> int:
         f"logical-input-oracle:{scenario_id}",
         f"reference-fidelity-oracle:{scenario_id}",
     ]
-    if SUPPORTED[scenario_id] == "gpu":
+    if SUPPORTED[scenario_id] in {"gpu", "threejs"}:
         dependencies.append(f"same-process-adapter-identity:{scenario_id}")
     if "small_text" in scenario.get("required_oracles", []):
         dependencies.append(f"small-text-legibility-oracle:{scenario_id}")
@@ -482,7 +483,11 @@ def run(request_path: Path, receipt_path: Path) -> int:
             raise ValueError(
                 f"source HEAD {head} differs from requested Pulp SHA {request['pulp_sha']}"
             )
-        source = root / "test" / "fixtures" / "gpu-ux" / "dpr" / scenario["source"]
+        source = (
+            root / scenario["source"]
+            if scenario_id == "threejs-audio-reactive"
+            else root / "test" / "fixtures" / "gpu-ux" / "dpr" / scenario["source"]
+        )
         if not source.is_file():
             raise FileNotFoundError(f"frozen scenario source missing: {source}")
         actual_source_digest = sha256(source)
@@ -492,6 +497,10 @@ def run(request_path: Path, receipt_path: Path) -> int:
         if producer is not None:
             return run_measurement_producer(
                 request, request_path, receipt_path, producer, root, source
+            )
+        if scenario_id == "threejs-audio-reactive":
+            raise FileNotFoundError(
+                "Three.js DPR capture requires PULP_DPR_NATIVE_MEASUREMENT_BIN"
             )
         executable = screenshot_binary(root)
         observed_dpr = effective_dpr(request)

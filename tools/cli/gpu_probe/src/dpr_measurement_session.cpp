@@ -67,6 +67,49 @@ double effective_dpr(const DprMeasurementRequest& request) {
         ? std::min(request.requested_dpr, 2.0) : request.requested_dpr;
 }
 
+constexpr std::string_view kThreeJsDprModule = R"JS(
+import * as THREE from 'three/webgpu';
+const canvas = document.createElement('canvas');
+canvas.id = 'pulp-dpr-threejs-canvas';
+canvas.width = 900; canvas.height = 600;
+canvas.style.width = '900px'; canvas.style.height = '600px';
+document.body.appendChild(canvas);
+const label = document.createElement('div');
+label.textContent = 'Pulp deterministic audio-reactive spectrum';
+document.body.appendChild(label);
+const context = canvas.getContext('webgpu');
+const renderer = new THREE.WebGPURenderer({ canvas, context, antialias: false });
+await renderer.init();
+renderer.setSize(900, 600, false);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101624);
+const camera = new THREE.OrthographicCamera(-8, 8, 5, -5, 0.1, 20);
+camera.position.z = 5;
+const bars = [];
+for (let i = 0; i < 16; ++i) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.7, 1, 0.4),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(i / 20, 0.8, 0.55) })
+  );
+  mesh.position.x = -7.5 + i;
+  scene.add(mesh); bars.push(mesh);
+}
+globalThis.__pulpDprThreeFrame = (frame) => {
+  for (let i = 0; i < bars.length; ++i) {
+    const magnitude = 0.35 + 2.8 * Math.abs(Math.sin(frame * 0.11 + i * 0.37));
+    bars[i].scale.y = magnitude;
+    bars[i].position.y = -4.5 + magnitude * 0.5;
+  }
+  renderer.render(scene, camera);
+  if (typeof context.present === 'function') context.present();
+  renderer.render(scene, camera);
+  if (typeof context.present === 'function') context.present();
+  return true;
+};
+globalThis.__pulpDprThreeReady = true;
+export default true;
+)JS";
+
 struct Session {
     state::StateStore store;
     view::View root;
@@ -84,6 +127,7 @@ struct Session {
     std::vector<std::uint8_t> latest_rgba;
     std::uint32_t capture_width = 0;
     std::uint32_t capture_height = 0;
+    bool threejs = false;
 
     bool initialize(const DprMeasurementRequest& request,
                     const std::filesystem::path& source, std::string& error) {
@@ -133,13 +177,59 @@ struct Session {
             error = "frozen fixture source could not be read";
             return false;
         }
+        threejs = request.scenario_id == "threejs-audio-reactive";
         {
             PULP_TRACE_SCOPE_NAMED_ARGS("js", "dpr_fixture_script_load",
                                         "gpu_evidence_id", request.attempt_nonce);
             PULP_TRACE_SCOPE_NAMED_ARGS("text", "dpr_fixture_text_construction",
                                         "gpu_evidence_id", request.attempt_nonce);
             bridge.set_script_base_dir(source.parent_path());
-            bridge.load_script(*script);
+            if (!threejs) {
+                bridge.load_script(*script);
+            } else {
+#if PULP_DPR_HAS_THREEJS
+                if (engine.engine_type() != view::JsEngineType::v8) {
+                    error = "Three.js DPR measurement requires the V8 engine";
+                    return false;
+                }
+                const auto runtime_root = std::filesystem::path(PULP_DPR_THREEJS_SOURCE_DIR);
+                const auto webgpu = read_text(runtime_root / "build/three.webgpu.js");
+                const auto core = read_text(runtime_root / "build/three.core.js");
+                if (!webgpu || !core ||
+                    runtime::sha256_hex(*webgpu) != PULP_DPR_THREEJS_WEBGPU_SHA256 ||
+                    runtime::sha256_hex(*core) != PULP_DPR_THREEJS_CORE_SHA256) {
+                    error = "pinned Three.js runtime identity is unavailable";
+                    return false;
+                }
+                bridge.load_script("");
+                bool completed = false;
+                std::string module_error;
+                engine.run_module(std::string(kThreeJsDprModule),
+                    [webgpu, core](std::string_view path) -> std::optional<std::string> {
+                        if (path == "three/webgpu") return *webgpu;
+                        if (path == "./three.core.js" || path == "three.core.js") return *core;
+                        return std::nullopt;
+                    },
+                    [&](const std::string& message, const choc::value::Value&) {
+                        completed = true;
+                        module_error = message;
+                    });
+                for (int i = 0; i < 1024 && !completed; ++i) {
+                    bridge.service_frame_callbacks();
+                    engine.pump_message_loop();
+                }
+                if (!completed || !module_error.empty() ||
+                    !engine.evaluate("globalThis.__pulpDprThreeReady === true")
+                         .getWithDefault<bool>(false)) {
+                    error = module_error.empty()
+                        ? "Three.js DPR module did not become ready" : module_error;
+                    return false;
+                }
+#else
+                error = "measurement build lacks the pinned Three.js runtime";
+                return false;
+#endif
+            }
         }
         {
             PULP_TRACE_SCOPE_NAMED_ARGS("layout", "dpr_fixture_layout",
@@ -160,6 +250,13 @@ struct Session {
                                         "gpu_evidence_id", request.attempt_nonce,
                                         "frame_index", index);
         }
+        if (threejs) {
+            if (!engine.evaluate("globalThis.__pulpDprThreeFrame(" +
+                                 std::to_string(index) + ")")
+                     .getWithDefault<bool>(false))
+                return false;
+            for (int i = 0; i < 8; ++i) engine.pump_message_loop();
+        }
         view::PluginFrameRenderer::Request frame;
         frame.root = &root;
         frame.geometry = geometry;
@@ -176,7 +273,7 @@ struct Session {
         cpu_ms = elapsed_ms(started);
         gpu_ms = surfaces.skia->gpu_render_time_ms();
         return result.reached_output() && (!capture || result.readback_ok) &&
-            surfaces.skia->gpu_render_timing_available() && gpu_ms >= 0.0;
+            surfaces.skia->gpu_render_timing_available();
     }
 };
 
@@ -212,7 +309,9 @@ struct Session {
         error = "Pulp source root is not its canonical directory";
         return false;
     }
-    source = root / "test/fixtures/gpu-ux/dpr" / request.source;
+    source = request.scenario_id == "threejs-audio-reactive"
+        ? root / request.source
+        : root / "test/fixtures/gpu-ux/dpr" / request.source;
     const auto digest = runtime::sha256_file_hex(source, 1024 * 1024);
     if (!digest || *digest != request.expected_content_digest) {
         error = "frozen fixture digest differs from the request";
@@ -439,15 +538,44 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
 
     double cpu = 0.0, gpu = 0.0;
     for (std::uint32_t i = 0; i < request.warmups; ++i) {
-        if (!session.frame(request, i, true, cpu, gpu)) {
-            message = "warmup frame did not reach the GPU/readback/timestamp path";
+        if (!session.frame(request, i, false, cpu, gpu)) {
+            message = "warmup frame did not reach the GPU timestamp path";
             (void)runtime::Tracing::stop_owned(*tracing.ownership);
             write_text(receipt_path, incomplete_json(request, message, "gpu:warmup"));
             if (error) *error = message;
             return 3;
         }
     }
+    // Readback finalizes the current recording before SkiaSurface::end_frame()
+    // can attach its elapsed-time callback. Keep captures outside the timed
+    // sequence so a zero sentinel can never be promoted into a GPU sample.
+    if (!session.frame(request, request.warmups, true, cpu, gpu)) {
+        message = "reference frame did not reach the GPU readback path";
+        (void)runtime::Tracing::stop_owned(*tracing.ownership);
+        write_text(receipt_path, incomplete_json(request, message, "capture:reference"));
+        if (error) *error = message;
+        return 3;
+    }
     const auto reference = session.latest_rgba;
+
+    bool gpu_sample_ready = false;
+    for (std::uint32_t i = 0; i < 16; ++i) {
+        if (!session.frame(request, request.warmups + 1 + i, false, cpu, gpu)) {
+            message = "GPU timing prime frame did not complete";
+            break;
+        }
+        if (std::isfinite(gpu) && gpu > 0.0) {
+            gpu_sample_ready = true;
+            break;
+        }
+    }
+    if (!message.empty() || !gpu_sample_ready) {
+        if (message.empty()) message = "GPU elapsed-time callback produced no usable sample";
+        (void)runtime::Tracing::stop_owned(*tracing.ownership);
+        write_text(receipt_path, incomplete_json(request, message, "gpu:timestamp-sample"));
+        if (error) *error = message;
+        return 3;
+    }
     std::vector<double> cpu_samples, gpu_samples, interaction_samples;
     std::vector<double> render_target_samples, resident_samples, upload_samples;
     cpu_samples.reserve(request.measured_trials);
@@ -468,7 +596,8 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
             break;
         }
         view::deliver_mouse_up(session.root, observed_target, observed, 0, 1, {});
-        if (!session.frame(request, i + request.warmups, true, cpu, gpu)) {
+        if (!session.frame(request, i + request.warmups + 17, false, cpu, gpu) ||
+            !std::isfinite(gpu) || gpu <= 0.0) {
             message = "measured GPU frame did not complete";
             break;
         }
@@ -488,6 +617,14 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
     if (!message.empty()) {
         (void)runtime::Tracing::stop_owned(*tracing.ownership);
         write_text(receipt_path, incomplete_json(request, message, "gpu:steady-trials"));
+        if (error) *error = message;
+        return 3;
+    }
+    if (!session.frame(request, request.warmups + request.measured_trials + 17,
+                       true, cpu, gpu)) {
+        message = "final frame did not reach the GPU readback path";
+        (void)runtime::Tracing::stop_owned(*tracing.ownership);
+        write_text(receipt_path, incomplete_json(request, message, "capture:final"));
         if (error) *error = message;
         return 3;
     }
@@ -646,6 +783,8 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
     receipt.setMember("adapter", adapter_json(session.adapter));
     receipt.setMember("build_identity", std::move(build));
     receipt.setMember("measurement_scope", std::move(scope));
+    if (request.scenario_id == "threejs-audio-reactive")
+        receipt.setMember("audio_thread_excluded", true);
     receipt.setMember("artifacts", std::move(artifacts));
     if (!write_text(receipt_path, choc::json::toString(receipt, true) + "\n")) {
         if (error) *error = "terminal DPR receipt could not be written";

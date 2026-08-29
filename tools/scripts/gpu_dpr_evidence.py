@@ -229,6 +229,8 @@ def metric_statistic(name: str, samples: Any, manifest: dict[str, Any]) -> dict[
     values = [float(value) for value in samples]
     if any(not math.isfinite(value) or value < 0 for value in values):
         raise EvidenceError(f"raw metric {name} contains an invalid value")
+    if name == "gpu_frame_time" and any(value <= 0 for value in values):
+        raise EvidenceError("raw metric gpu_frame_time contains a missing zero sample")
     trial = manifest["trial_contract"]
     minimum = (
         trial["fresh_process_first_frame_trials"]

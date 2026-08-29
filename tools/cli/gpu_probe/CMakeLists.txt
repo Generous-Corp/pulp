@@ -25,6 +25,20 @@ if(PULP_ENABLE_GPU)
         PRIVATE $<BUILD_INTERFACE:${choc_SOURCE_DIR}>)
     target_link_libraries(pulp-tool-gpu-dpr-measurement
         PUBLIC pulp::render pulp::runtime pulp::state pulp::view)
+    if(PULP_HAS_THREEJS)
+        file(SHA256 "${threejs_SOURCE_DIR}/build/three.webgpu.js"
+            PULP_DPR_THREEJS_WEBGPU_SHA256)
+        file(SHA256 "${threejs_SOURCE_DIR}/build/three.core.js"
+            PULP_DPR_THREEJS_CORE_SHA256)
+        target_compile_definitions(pulp-tool-gpu-dpr-measurement PRIVATE
+            PULP_DPR_HAS_THREEJS=1
+            PULP_DPR_THREEJS_SOURCE_DIR="${threejs_SOURCE_DIR}"
+            PULP_DPR_THREEJS_WEBGPU_SHA256="${PULP_DPR_THREEJS_WEBGPU_SHA256}"
+            PULP_DPR_THREEJS_CORE_SHA256="${PULP_DPR_THREEJS_CORE_SHA256}")
+    else()
+        target_compile_definitions(pulp-tool-gpu-dpr-measurement PRIVATE
+            PULP_DPR_HAS_THREEJS=0)
+    endif()
 
     add_executable(pulp-gpu-dpr-native-measurement EXCLUDE_FROM_ALL
         src/dpr_measurement_main.cpp)

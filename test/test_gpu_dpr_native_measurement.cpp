@@ -21,8 +21,9 @@ std::string request(std::string_view scenario = "dense-text-thin-strokes",
         + R"(","trial_contract":{"warmups":5,"measured_trials":30,)"
         + R"("fresh_process_first_frame_trials":20},"scenario":{"id":")"
         + std::string{scenario} + R"(","kind":")" + std::string{kind}
-        + R"(","source":"dense-text-thin-strokes.ui.js",)"
-        + R"("logical_size":{"width":640,"height":360}}})";
+        + (scenario == "threejs-audio-reactive"
+            ? R"(","source":"examples/threejs-native-demo/main.cpp","logical_size":{"width":900,"height":600}}})"
+            : R"(","source":"dense-text-thin-strokes.ui.js","logical_size":{"width":640,"height":360}}})");
 }
 
 } // namespace
@@ -33,6 +34,7 @@ TEST_CASE("native DPR measurement recognizes the three Pulp-owned fixtures",
              std::pair{"dense-text-thin-strokes", "pulp_screenshot"},
              std::pair{"shader-heavy-controls", "pulp_screenshot_gpu"},
              std::pair{"meters-waveforms", "pulp_screenshot_gpu"},
+             std::pair{"threejs-audio-reactive", "maintained_native_canary"},
          }) {
         std::string error;
         const auto parsed = probe::parse_dpr_measurement_request(
@@ -66,7 +68,7 @@ TEST_CASE("native DPR measurement rejects forged requests",
     std::string error;
     CHECK_FALSE(probe::parse_dpr_measurement_request(
         request("forge-modular-native", "external_forge_canary"), &error));
-    CHECK(error.find("three Pulp-native") != std::string::npos);
+    CHECK(error.find("Pulp-owned native") != std::string::npos);
     CHECK_FALSE(probe::parse_dpr_measurement_request(
         request("dense-text-thin-strokes", "pulp_screenshot", "ABC"), &error));
     CHECK(error.find("32 lowercase") != std::string::npos);

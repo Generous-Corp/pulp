@@ -284,6 +284,25 @@ with the actual shipped demo modes and focused validation commands.
 
 ## Benchmark Mode
 
+### A4 DPR campaign producer
+
+The A4 DPR matrix uses the dedicated, non-default
+`pulp-gpu-dpr-native-measurement` target for the maintained
+`threejs-audio-reactive` canary. Configure it with `PULP_BENCHMARK=ON`,
+`PULP_TRACING=ON`, and V8, then pass the exact binary through
+`PULP_DPR_NATIVE_MEASUREMENT_BIN` to
+`tools/scripts/gpu_dpr_pulp_native_adapter.py`. The producer loads the pinned
+`three.webgpu.js` and `three.core.js` bytes, verifies both digests, and renders
+through the real native WebGPU canvas on the same `WidgetBridge` tree used for
+the Pulp capture and input oracle.
+
+Keep screenshot readbacks outside the steady timing loop. A readback can
+finalize the Skia recording before `SkiaSurface::end_frame()` attaches its GPU
+elapsed-time callback. `gpu_render_time_ms() == 0` is the documented
+no-sample sentinel, not a fast frame; the producer and evidence verifier must
+both reject it. Only strictly positive, same-process GPU samples can make a
+cell terminal.
+
 When `PULP_BENCHMARK=ON`, `pulp-threejs-native-demo` exposes a
 headless benchmark that drives the JS→GPU upload path without a
 visible window:
