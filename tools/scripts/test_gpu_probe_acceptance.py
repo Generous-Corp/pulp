@@ -451,6 +451,71 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             finally:
                 RECORDER.os.close(descriptor)
 
+    def test_retained_executable_claim_rejects_child_inode_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prefix = root / "prefix"
+            binary = prefix / "bin/pulp"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"claimed executable")
+            descriptor = RECORDER.os.open(prefix, RECORDER.directory_open_flags())
+            claim = RECORDER.RetainedDirectoryClaim(
+                prefix,
+                descriptor,
+                RECORDER.directory_identity(
+                    RECORDER.os.fstat(descriptor), "install-prefix"
+                ),
+                "install-prefix",
+            )
+            claim.bind_file(binary, "installed Rust CLI", RECORDER.sha256(binary))
+            moved = binary.with_name("pulp-original")
+            binary.rename(moved)
+            binary.write_bytes(b"substituted executable")
+            try:
+                with self.assertRaisesRegex(
+                    RECORDER.AcceptanceError, "retained executable claim"
+                ):
+                    claim.assert_current()
+            finally:
+                claim.close()
+
+    def test_bounded_launch_rechecks_child_inode_after_execution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prefix = root / "prefix"
+            binary = prefix / "bin/pulp"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"claimed executable")
+            descriptor = RECORDER.os.open(prefix, RECORDER.directory_open_flags())
+            claim = RECORDER.RetainedDirectoryClaim(
+                prefix,
+                descriptor,
+                RECORDER.directory_identity(
+                    RECORDER.os.fstat(descriptor), "install-prefix"
+                ),
+                "install-prefix",
+            )
+            claim.bind_file(binary, "installed Rust CLI", RECORDER.sha256(binary))
+
+            def swap_during_launch(*_args, **_kwargs):
+                binary.rename(binary.with_name("pulp-original"))
+                binary.write_bytes(b"substituted executable")
+                return RECORDER.subprocess.CompletedProcess([str(binary)], 0, "", "")
+
+            try:
+                with mock.patch.object(
+                    RECORDER.subprocess, "run", side_effect=swap_during_launch
+                ):
+                    with self.assertRaisesRegex(
+                        RECORDER.AcceptanceError, "retained executable claim"
+                    ):
+                        RECORDER.run_bounded(
+                            [str(binary)], cwd=root, environment={}, timeout=1,
+                            directory_claim=claim,
+                        )
+            finally:
+                claim.close()
+
     def test_additional_pulp_path_claim_must_bind_executed_canary_rows(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -325,6 +325,30 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             finally:
                 os.close(descriptor)
 
+    def test_retained_executable_claim_rejects_child_inode_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prefix = root / "prefix"
+            binary = prefix / "bin/pulp"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"claimed executable")
+            descriptor = os.open(prefix, MODULE._directory_open_flags())
+            claim = MODULE.RetainedDirectoryClaim(
+                prefix,
+                descriptor,
+                MODULE._directory_identity(os.fstat(descriptor)),
+                "install-prefix",
+            )
+            claim.bind_file(binary, "installed Rust CLI", MODULE.sha256(binary))
+            moved = binary.with_name("pulp-original")
+            binary.rename(moved)
+            binary.write_bytes(b"substituted executable")
+            try:
+                with self.assertRaisesRegex(ValueError, "retained executable claim"):
+                    claim.assert_current()
+            finally:
+                claim.close()
+
     def test_checked_in_receipt_uses_one_source_checkout(self):
         receipt = json.loads(
             (ROOT / "docs" / "validation" / "gpu-trace-overhead" /
@@ -525,8 +549,18 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
     def test_product_producer_delta_catches_gpu_call_without_evidence_literal(self):
         before = 'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");'
         after = before + '\nPULP_TRACE_SCOPE_NAMED("gpu", "pipeline_compile");'
-        self.assertEqual(len(MODULE.product_producer_signatures(before)), 1)
-        self.assertEqual(len(MODULE.product_producer_signatures(after)), 2)
+        before_signatures = MODULE.product_producer_signatures(before)
+        after_signatures = MODULE.product_producer_signatures(after)
+        self.assertTrue(
+            MODULE.has_added_product_producer(before_signatures, after_signatures)
+        )
+        replacement = MODULE.product_producer_signatures(
+            'PULP_TRACE_SCOPE_NAMED("gpu", "pipeline_compile");'
+        )
+        self.assertEqual(len(before_signatures), len(replacement))
+        self.assertTrue(
+            MODULE.has_added_product_producer(before_signatures, replacement)
+        )
 
     def test_product_producer_must_have_independent_package_authority(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")

@@ -51,6 +51,21 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_descriptor(descriptor: int) -> str:
+    digest = hashlib.sha256()
+    metadata = os.fstat(descriptor)
+    offset = 0
+    while offset < metadata.st_size:
+        chunk = os.pread(descriptor, min(1024 * 1024, metadata.st_size - offset), offset)
+        if not chunk:
+            raise AcceptanceError("executable descriptor ended before its claimed size")
+        digest.update(chunk)
+        offset += len(chunk)
+    if os.fstat(descriptor).st_size != metadata.st_size:
+        raise AcceptanceError("executable size changed while hashing its descriptor")
+    return digest.hexdigest()
+
+
 def run_bounded(
     command: list[str], *, cwd: Path, environment: dict[str, str], timeout: int,
     directory_claim: Any | None = None,
@@ -148,14 +163,55 @@ class RetainedDirectoryClaim:
         self.identity = identity
         self.label = label
         self.closed = False
+        self.file_claims: list[dict[str, Any]] = []
+
+    def bind_file(self, path: Path, label: str, expected_sha256: str) -> None:
+        descriptor = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            named = os.stat(path, follow_symlinks=False)
+            identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+            if (
+                not stat_module.S_ISREG(metadata.st_mode)
+                or {"device": named.st_dev, "inode": named.st_ino} != identity
+                or sha256_descriptor(descriptor) != expected_sha256
+            ):
+                raise AcceptanceError(f"{label} does not match its exact executable claim")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        self.file_claims.append({
+            "path": path,
+            "descriptor": descriptor,
+            "identity": identity,
+            "sha256": expected_sha256,
+            "label": label,
+        })
 
     def assert_current(self) -> None:
         if self.closed:
             raise AcceptanceError(f"{self.label} claim closed before proof completion")
         assert_directory_claim(self.path, self.identity, self.label, self.descriptor)
+        for claim in self.file_claims:
+            metadata = os.fstat(claim["descriptor"])
+            named = os.stat(claim["path"], follow_symlinks=False)
+            identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+            if (
+                not stat_module.S_ISREG(metadata.st_mode)
+                or identity != claim["identity"]
+                or {"device": named.st_dev, "inode": named.st_ino} != identity
+                or sha256_descriptor(claim["descriptor"]) != claim["sha256"]
+            ):
+                raise AcceptanceError(
+                    f"{claim['label']} no longer matches its retained executable claim"
+                )
 
     def close(self) -> None:
         if not self.closed:
+            for claim in self.file_claims:
+                os.close(claim["descriptor"])
             os.close(self.descriptor)
             self.closed = True
 
@@ -223,10 +279,14 @@ def refresh_install(
         }
     if binaries["installed_rust_cli"]["sha256"] == binaries["installed_cpp_delegate"]["sha256"]:
         raise AcceptanceError("installed pulp is a C++ copy, not the required Rust front")
+    for role, path in installed_paths.items():
+        retained_claim.bind_file(path, role, binaries[role]["sha256"])
+    retained_claim.assert_current()
     revision = provenance._git_text(repository, "rev-parse", "HEAD")
     installed_identity = provenance.installed_source_identity(
         repository, revision, installed_paths["installed_rust_cli"], installed_paths["installed_mcp"]
     )
+    retained_claim.assert_current()
     return ({
         "cmake_cache_sha256": sha256(build_dir / "CMakeCache.txt"),
         "cmake_home_revision": revision,
@@ -522,9 +582,12 @@ def prove_forge(
     if len(executables) != 1:
         raise AcceptanceError("Forge Modular bundle lacks one exact executable")
     binary = executables[0]
+    binary_sha256 = sha256(binary)
+    directory_claim.bind_file(binary, "Forge Modular executable", binary_sha256)
     signed = run_bounded(
         ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(bundle)],
         cwd=repository, environment=runtime_environment, timeout=60,
+        directory_claim=directory_claim,
     )
     if signed.returncode != 0:
         raise AcceptanceError(f"Forge Modular signature verification failed: {signed.stderr}")
@@ -558,7 +621,7 @@ def prove_forge(
         "build_target": "ForgeModular_Standalone",
         "bundle_build_info": stamp,
         "bundle_build_info_sha256": sha256(stamp_path),
-        "bundle_binary_sha256": sha256(binary),
+        "bundle_binary_sha256": binary_sha256,
         "codesign_verify": "pass",
         "screenshot_metrics": metrics,
     }

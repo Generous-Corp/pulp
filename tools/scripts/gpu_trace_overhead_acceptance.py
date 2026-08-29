@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from collections import Counter
 import hashlib
 import json
 import math
@@ -199,6 +200,21 @@ def sha256(path: Path) -> str:
     with path.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha256_descriptor(descriptor: int) -> str:
+    digest = hashlib.sha256()
+    metadata = os.fstat(descriptor)
+    offset = 0
+    while offset < metadata.st_size:
+        chunk = os.pread(descriptor, min(1024 * 1024, metadata.st_size - offset), offset)
+        if not chunk:
+            raise ValueError("executable descriptor ended before its claimed size")
+        digest.update(chunk)
+        offset += len(chunk)
+    if os.fstat(descriptor).st_size != metadata.st_size:
+        raise ValueError("executable size changed while hashing its descriptor")
     return digest.hexdigest()
 
 
@@ -660,6 +676,32 @@ class RetainedDirectoryClaim:
         self.identity = identity
         self.label = label
         self.closed = False
+        self.file_claims: list[dict[str, Any]] = []
+
+    def bind_file(self, path: Path, label: str, expected_sha256: str) -> None:
+        descriptor = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            named = os.stat(path, follow_symlinks=False)
+            identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+            if (
+                not stat_module.S_ISREG(metadata.st_mode)
+                or {"device": named.st_dev, "inode": named.st_ino} != identity
+                or sha256_descriptor(descriptor) != expected_sha256
+            ):
+                raise ValueError(f"{label} does not match its exact executable claim")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        self.file_claims.append({
+            "path": path,
+            "descriptor": descriptor,
+            "identity": identity,
+            "sha256": expected_sha256,
+            "label": label,
+        })
 
     def assert_current(self) -> None:
         if self.closed:
@@ -667,9 +709,24 @@ class RetainedDirectoryClaim:
         _assert_directory_path_identity(
             self.path, self.descriptor, self.identity, self.label
         )
+        for claim in self.file_claims:
+            metadata = os.fstat(claim["descriptor"])
+            named = os.stat(claim["path"], follow_symlinks=False)
+            identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+            if (
+                not stat_module.S_ISREG(metadata.st_mode)
+                or identity != claim["identity"]
+                or {"device": named.st_dev, "inode": named.st_ino} != identity
+                or sha256_descriptor(claim["descriptor"]) != claim["sha256"]
+            ):
+                raise ValueError(
+                    f"{claim['label']} no longer matches its retained executable claim"
+                )
 
     def close(self) -> None:
         if not self.closed:
+            for claim in self.file_claims:
+                os.close(claim["descriptor"])
             os.close(self.descriptor)
             self.closed = True
 
@@ -907,9 +964,21 @@ def refresh_exact_build_install(
         )
         cli = prefix / "bin/pulp"
         mcp = prefix / "bin/pulp-mcp"
+        binaries = _build_install_binary_identity(build_dir, prefix)
+        installed_paths = {
+            "pulp": cli,
+            "pulp-cpp": prefix / "bin/pulp-cpp",
+            "pulp-mcp": mcp,
+        }
+        for role, path in installed_paths.items():
+            retained_claim.bind_file(
+                path, f"installed {role}", binaries[role]["sha256"]
+            )
+        retained_claim.assert_current()
         identity = exact_build_install_identity(
             repository, revision, build_dir, prefix, cli, mcp
         )
+        retained_claim.assert_current()
         if identity["build_provenance"]["install_prefix_claim"] != prefix_claim:
             raise ValueError("installed provenance differs from the claimed prefix identity")
         return cli, mcp, identity, retained_claim
@@ -1096,9 +1165,15 @@ def is_product_producer_source(text: str) -> bool:
     return bool(product_producer_signatures(text))
 
 
+def has_added_product_producer(
+    base_signatures: tuple[str, ...], source_signatures: tuple[str, ...]
+) -> bool:
+    return bool(Counter(source_signatures) - Counter(base_signatures))
+
+
 def _product_producer_paths(
     repository: Path, revision: str, tracked: set[str]
-) -> dict[str, int]:
+) -> dict[str, tuple[str, ...]]:
     completed = subprocess.run(
         [
             "git", "grep", "-l", "-I", "-F", "-e", "PULP_TRACE_",
@@ -1115,7 +1190,7 @@ def _product_producer_paths(
     }
     if len(candidates) > 128 or any(path not in tracked for path in candidates):
         raise ValueError(f"product GPU producer discovery at {revision} is unsafe or unbounded")
-    producers: dict[str, int] = {}
+    producers: dict[str, tuple[str, ...]] = {}
     for path in candidates:
         blob = subprocess.run(
             ["git", "show", f"{revision}:{path}"],
@@ -1125,7 +1200,7 @@ def _product_producer_paths(
             raise ValueError(f"cannot inspect bounded product producer blob {path}")
         signatures = product_producer_signatures(blob.stdout.decode(errors="replace"))
         if signatures:
-            producers[path] = len(signatures)
+            producers[path] = signatures
     return producers
 
 
@@ -1202,13 +1277,13 @@ def _producer_introduction(
         )
         if len(before.stdout) > 2 * 1024 * 1024 or len(after.stdout) > 2 * 1024 * 1024:
             raise ValueError(f"product producer source is unbounded for {path}")
-        before_count = len(product_producer_signatures(
+        before_signatures = product_producer_signatures(
             before.stdout.decode(errors="replace")
-        )) if before.returncode == 0 else 0
-        after_count = len(product_producer_signatures(
+        ) if before.returncode == 0 else ()
+        after_signatures = product_producer_signatures(
             after.stdout.decode(errors="replace")
-        )) if after.returncode == 0 else 0
-        if after_count > before_count:
+        ) if after.returncode == 0 else ()
+        if has_added_product_producer(before_signatures, after_signatures):
             if not valid_lower_hex(revision, 40):
                 break
             return revision, subject
@@ -1316,8 +1391,8 @@ def authoritative_a2t_scope_paths(
         repository, source_revision, source_tracked
     )
     producer_paths = {
-        path for path, count in source_producers.items()
-        if count > base_producers.get(path, 0)
+        path for path, signatures in source_producers.items()
+        if has_added_product_producer(base_producers.get(path, ()), signatures)
     }
     external_producers = classify_non_a2t_product_producers(
         repository, source_revision, producer_paths
@@ -1806,6 +1881,19 @@ def main() -> int:
         validate_paths(cli, mcp, trace, processor)
         binding = source_binding(repository, args.source_revision, trace)
         processor_identity = trace_processor_identity(repository, processor)
+        install_claim.bind_file(trace, "measured Perfetto trace", sha256(trace))
+        for fixture_path in sorted(FIXTURE_SOURCE_PATHS):
+            fixture = repository / fixture_path
+            if fixture != trace:
+                install_claim.bind_file(
+                    fixture, f"replayed fixture {fixture_path}", sha256(fixture)
+                )
+        install_claim.bind_file(
+            processor,
+            "SDK-matched trace processor",
+            processor_identity["sha256"],
+        )
+        install_claim.assert_current()
         producer_inventory = a2t_scope_inventory(repository, args.source_revision)
         if producer_inventory["no_a2t_scoped_producer_delta"] is not True:
             raise ValueError(
