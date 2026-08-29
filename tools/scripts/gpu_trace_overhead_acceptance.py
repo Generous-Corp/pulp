@@ -160,6 +160,22 @@ def bootstrap_median_delta_ci(
     }
 
 
+def paired_delta_confidence(cli_ns: list[int], mcp_ns: list[int]) -> dict[str, Any]:
+    """Return the complete recorder confidence object from paired raw durations."""
+    cli_summary = summary(cli_ns)
+    mcp_summary = summary(mcp_ns)
+    noise_floor_ms = max(float(cli_summary["mad_ms"]), float(mcp_summary["mad_ms"]))
+    confidence = bootstrap_median_delta_ci(cli_ns, mcp_ns)
+    confidence["noise_floor_method"] = "maximum within-surface median absolute deviation"
+    confidence["noise_floor_ms"] = round(noise_floor_ms, 6)
+    confidence["delta_interpretation"] = (
+        "unchanged-within-noise"
+        if abs(float(confidence["mcp_minus_cli_median_ms"])) <= noise_floor_ms
+        else "measurable"
+    )
+    return confidence
+
+
 def parse_analysis(payload: Any, *, surface: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError(f"{surface} returned a non-object")
@@ -943,15 +959,7 @@ def main() -> int:
 
     cli_summary = summary(cli_samples)
     mcp_summary = summary(mcp_samples)
-    noise_floor_ms = max(float(cli_summary["mad_ms"]), float(mcp_summary["mad_ms"]))
-    confidence = bootstrap_median_delta_ci(cli_samples, mcp_samples)
-    confidence["noise_floor_method"] = "maximum within-surface median absolute deviation"
-    confidence["noise_floor_ms"] = round(noise_floor_ms, 6)
-    confidence["delta_interpretation"] = (
-        "unchanged-within-noise"
-        if abs(float(confidence["mcp_minus_cli_median_ms"])) <= noise_floor_ms
-        else "measurable"
-    )
+    confidence = paired_delta_confidence(cli_samples, mcp_samples)
 
     implementation_inventories = [
         commit_inventory(args.repository.resolve(), revision)

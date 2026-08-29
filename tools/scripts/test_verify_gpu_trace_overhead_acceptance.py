@@ -122,7 +122,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "measured": {
                 "cli": CONTRACT.summary(measured_cli),
                 "persistent_mcp_request": CONTRACT.summary(measured_mcp),
-                "confidence": CONTRACT.bootstrap_median_delta_ci(
+                "confidence": CONTRACT.paired_delta_confidence(
                     measured_cli, measured_mcp
                 ),
                 "raw_samples": [

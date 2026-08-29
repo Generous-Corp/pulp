@@ -186,7 +186,7 @@ def verify(
             errors.append("measured CLI summary does not match raw durations")
         if measured.get("persistent_mcp_request") != contract.summary(measured_mcp):
             errors.append("measured MCP summary does not match raw durations")
-        if measured.get("confidence") != contract.bootstrap_median_delta_ci(
+        if measured.get("confidence") != contract.paired_delta_confidence(
             measured_cli, measured_mcp
         ):
             errors.append("measured confidence interval does not match raw durations")
