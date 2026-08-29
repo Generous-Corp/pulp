@@ -392,6 +392,44 @@ TEST_CASE("ToggleButton hover remains distinct in resting and selected states",
     REQUIRE(differs(resting_hover, selected_hover));
 }
 
+TEST_CASE("View default semantic hover feedback paints the tokenized control face",
+          "[view][widget_animation][hover]") {
+    const auto paints_hover_face = [](float radius, bool enabled,
+                                      pulp::canvas::DrawCommand::Type shape) {
+        Theme theme = Theme::dark();
+        theme.colors["text.primary"] = pulp::canvas::Color::rgba8(40, 80, 120);
+
+        View control;
+        control.set_bounds({0, 0, 100, 28});
+        control.set_theme(theme);
+        control.set_border_radius(radius);
+        control.set_default_hover_feedback(true);
+        control.set_hovered(true);
+        control.set_enabled(enabled);
+
+        pulp::canvas::RecordingCanvas canvas;
+        control.paint_all(canvas);
+        pulp::canvas::Color active{};
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_fill_color) {
+                active = command.color;
+            } else if (command.type == shape
+                       && active.r8() == 40 && active.g8() == 80
+                       && active.b8() == 120 && active.a8() == 15) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    REQUIRE(paints_hover_face(
+        4.0f, true, pulp::canvas::DrawCommand::Type::fill_rounded_rect));
+    REQUIRE(paints_hover_face(
+        0.0f, true, pulp::canvas::DrawCommand::Type::fill_rect));
+    REQUIRE_FALSE(paints_hover_face(
+        4.0f, false, pulp::canvas::DrawCommand::Type::fill_rounded_rect));
+}
+
 // ── FrameClock integration test ─────────────────────────────────────────────
 
 TEST_CASE("View frame_clock walks parent chain", "[view][frame_clock]") {
