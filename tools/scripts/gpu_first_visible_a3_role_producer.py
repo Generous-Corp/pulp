@@ -569,6 +569,95 @@ def snapshot_directory(
     return destination, directory_tree_digest(entries)
 
 
+def export_exact_source_tree(
+    root: Path, revision: str, destination: Path, label: str,
+) -> tuple[Path, Path]:
+    """Export one immutable Git tree without ambient worktree/build output."""
+    archive = destination.with_suffix(".tar")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        ["/usr/bin/git", "archive", "--format=tar", "--output", str(archive), revision],
+        cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, timeout=180, check=False,
+    )
+    if completed.returncode != 0 or not archive.is_file() or archive.is_symlink():
+        raise ProducerError(f"cannot export exact {label} source tree")
+    destination.mkdir(mode=0o700)
+    try:
+        with tarfile.open(archive, "r:") as handle:
+            members = handle.getmembers()
+            if any(
+                member.name.startswith("/") or ".." in Path(member.name).parts
+                or member.islnk()
+                for member in members
+            ):
+                raise ProducerError(f"exact {label} source tree contains an unsafe member")
+            handle.extractall(destination, filter="data")
+    except (OSError, tarfile.TarError) as error:
+        raise ProducerError(f"cannot extract exact {label} source tree") from error
+    if not any(destination.iterdir()):
+        raise ProducerError(f"exact {label} source tree is empty")
+    return archive, destination
+
+
+def macos_default_deny_build_profile(
+    workspace: Path, protected_paths: list[Path],
+) -> str:
+    """Confine a source build to exported inputs, system tools, and fresh output."""
+    readable_roots = (
+        workspace,
+        Path(sys.executable).resolve().parent.parent,
+        Path("/System"),
+        Path("/System/Volumes/Preboot"),
+        Path("/private/preboot"),
+        Path("/usr"),
+        Path("/bin"),
+        Path("/sbin"),
+        Path("/Library/Developer"),
+        Path("/Applications/Xcode.app"),
+        Path("/opt/homebrew"),
+        Path("/usr/local"),
+        Path("/private/etc"),
+        Path("/private/var/db/timezone"),
+        Path("/dev"),
+    )
+    read_rules = "\n".join(
+        f"(allow file-read* (subpath {json.dumps(str(path.resolve()))}))"
+        for path in readable_roots if path.exists()
+    )
+    ambient_roots = (
+        Path("/Users"), Path("/Volumes"), Path("/private/tmp"),
+        Path("/private/var/folders"), Path("/private/var/tmp"),
+    )
+    ambient_filters = " ".join(
+        f"(require-not (subpath {json.dumps(str(path))}))"
+        for path in ambient_roots
+    )
+    protected_rules = []
+    for path in protected_paths:
+        resolved = path.resolve()
+        selector = "subpath" if resolved.is_dir() else "literal"
+        protected_rules.append(
+            f"(deny file-read* ({selector} {json.dumps(str(resolved))}))"
+        )
+    return (
+        "(version 1)\n"
+        "(deny default)\n"
+        "(allow process*)\n"
+        "(allow signal)\n"
+        "(allow sysctl-read)\n"
+        "(allow mach-lookup)\n"
+        "(allow ipc-posix-shm)\n"
+        "(allow file-read-metadata)\n"
+        f"(allow file-read-data (require-all {ambient_filters}))\n"
+        f"{read_rules}\n"
+        + "\n".join(protected_rules)
+        + "\n"
+        f"(allow file-write* (subpath {json.dumps(str(workspace.resolve()))}))\n"
+        "(deny network*)\n"
+    )
+
+
 def require_bundle_executable(bundle: Path, product_binary: Path) -> None:
     executable_directory = bundle / "Contents" / "MacOS"
     if not executable_directory.is_dir() or executable_directory.is_symlink():
@@ -904,8 +993,9 @@ def run_independent_source_build(
     *, build_driver: Path, build_driver_digest: str, request: dict[str, Any],
     source_authorities: dict[str, tuple[Path, str]], product_digest: str,
     bundle_digest: str | None, artifact_directory: Path,
+    measured_paths: list[Path],
 ) -> tuple[str, list[Path], list[tuple[Path, str, str]]]:
-    source_roots = {
+    declared_source_roots = {
         owner: {"path": str(root), "revision": revision}
         for owner, (root, revision) in sorted(source_authorities.items())
     }
@@ -923,12 +1013,21 @@ def run_independent_source_build(
         artifact_root == Path(value["path"]).resolve()
         or artifact_root in Path(value["path"]).resolve().parents
         or Path(value["path"]).resolve() in artifact_root.parents
-        for value in source_roots.values()
+        for value in declared_source_roots.values()
     ):
         raise ProducerError("independent source roots overlap the measured artifact directory")
     with tempfile.TemporaryDirectory(prefix="pulp-a3-independent-build-") as temporary:
         workspace = Path(temporary).resolve()
         output = workspace / "output"
+        source_roots: dict[str, dict[str, str]] = {}
+        source_archives: dict[str, Path] = {}
+        for owner, (root, revision) in sorted(source_authorities.items()):
+            archive, snapshot = export_exact_source_tree(
+                root, revision, workspace / "sources" / owner,
+                f"{owner} source-build",
+            )
+            source_archives[owner] = archive
+            source_roots[owner] = {"path": str(snapshot), "revision": revision}
         local_driver, observed_driver_digest = snapshot_file(
             build_driver, workspace / f"source-build-driver{build_driver.suffix}",
             "isolated source-build driver",
@@ -963,11 +1062,10 @@ def run_independent_source_build(
         for name in ("DEVELOPER_DIR", "SDKROOT"):
             if os.environ.get(name):
                 environment[name] = os.environ[name]
-        quoted_artifacts = json.dumps(str(artifact_root))
-        sandbox_profile = (
-            "(version 1)\n(allow default)\n"
-            f"(deny file-read* (subpath {quoted_artifacts}))\n"
-            f"(deny file-write* (subpath {quoted_artifacts}))\n"
+        sandbox_profile = macos_default_deny_build_profile(
+            workspace,
+            [artifact_root, *[root for root, _ in source_authorities.values()],
+             *measured_paths],
         )
         exit_code = bounded_run(
             ["/usr/bin/sandbox-exec", "-p", sandbox_profile, str(local_driver),
@@ -976,7 +1074,17 @@ def run_independent_source_build(
             stdout_path=stdout_path, stderr_path=stderr_path,
         )
         if not local_receipt.is_file() or local_receipt.is_symlink():
-            raise ProducerError("source-bound build driver omitted its receipt")
+            stdout_tail = regular_file_bytes(
+                stdout_path, "source-build driver stdout",
+            )[-2048:].decode(errors="replace").strip()
+            stderr_tail = regular_file_bytes(
+                stderr_path, "source-build driver stderr",
+            )[-4096:].decode(errors="replace").strip()
+            detail = " | ".join(item for item in (stdout_tail, stderr_tail) if item)
+            raise ProducerError(
+                f"source-bound build driver omitted its receipt (exit {exit_code})"
+                + (f": {detail}" if detail else "")
+            )
         receipt = regular_json(local_receipt, "source-build receipt")
         exact_keys(receipt, SOURCE_BUILD_RECEIPT_KEYS, "source-build receipt")
         outcome = receipt["outcome"]
@@ -1068,6 +1176,17 @@ def run_independent_source_build(
                 bundle_snapshot,
                 file_sha256(bundle_snapshot, "independent source bundle snapshot"),
                 "independent source bundle snapshot",
+            ))
+        for owner, archive in sorted(source_archives.items()):
+            retained_archive, retained_digest = snapshot_file(
+                archive,
+                artifact_directory / "tooling" / f"source-build-{owner}-source.tar",
+                f"independent {owner} source archive",
+            )
+            evidence.append(retained_archive)
+            guards.append((
+                retained_archive, retained_digest,
+                f"independent {owner} source archive",
             ))
         snapshot_file(local_request, request_path, "source-build request")
         snapshot_file(local_receipt, receipt_path, "source-build receipt")
@@ -2048,6 +2167,12 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 request=request, source_authorities=source_authorities,
                 product_digest=product_digest, bundle_digest=bundle_tree_digest,
                 artifact_directory=artifact_directory,
+                measured_paths=[
+                    product_binary,
+                    host_binary,
+                    *([product_bundle] if role == "daw" else []),
+                    *([forge_bundle] if role == "forge" else []),
+                ],
             )
         )
         extra_members.extend(source_build_evidence)

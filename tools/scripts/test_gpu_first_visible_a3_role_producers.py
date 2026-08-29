@@ -280,9 +280,9 @@ raise SystemExit({"pass": 0, "inconclusive": 2}[outcome])
 
 
 def write_build_driver(path: Path) -> None:
-    path.write_text(
+    source = (
         r'''#!/usr/bin/env python3
-import argparse, hashlib, json, os, plistlib
+import argparse, hashlib, json, os, plistlib, socket
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
@@ -325,14 +325,12 @@ template = (
     / "tools" / "testing" / "a3" / "host-template"
 )
 if "source-build-read-measured" in request["attempt_nonce"]:
-    measured = (
-        Path(request["source_roots"]["pulp"]["path"]).parent
-        / f"run-{role}-source-build-read-measured"
-        / "adapter-output" / "artifacts" / "identity" / "product.bin"
-    )
+    measured = Path(__PULP_A3_FORBIDDEN_ROOT__) / f"{role}-product"
     product.write_bytes(measured.read_bytes())
 else:
     product.write_bytes(template.read_bytes() + marker)
+if "source-build-network" in request["attempt_nonce"]:
+    socket.create_connection(("1.1.1.1", 80), timeout=1).close()
 if "source-build-mismatch" in request["attempt_nonce"]:
     product.write_bytes(b"source-built bytes differ")
 product.chmod(0o755)
@@ -390,7 +388,10 @@ if "source-build-output-symlink" in request["attempt_nonce"]:
     output.rename(real_output)
     output.symlink_to(real_output, target_is_directory=True)
 args.receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
-''',
+'''
+    )
+    path.write_text(
+        source.replace("__PULP_A3_FORBIDDEN_ROOT__", repr(str(path.parent))),
         encoding="utf-8",
     )
     path.chmod(0o755)
@@ -956,6 +957,11 @@ def main() -> int:
                     names = set(archive.getnames())
                 assert "preflight/receipt.json" in names
                 assert "preflight/source-snapshot.tar" in names
+            with tarfile.open(host_archive, "r:") as archive:
+                names = set(archive.getnames())
+            assert "preflight/source-build-pulp-source.tar" in names
+            if role == "forge":
+                assert "preflight/source-build-forge-source.tar" in names
 
         negatives = [
             ("standalone", "nine-cold", "pass", "20 lifecycle"),
@@ -1016,6 +1022,10 @@ def main() -> int:
             ),
             (
                 "standalone", "source-build-read-measured", "pass",
+                "omitted its receipt",
+            ),
+            (
+                "standalone", "source-build-network", "pass",
                 "omitted its receipt",
             ),
             (
