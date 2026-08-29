@@ -90,6 +90,14 @@ snapshot but must keep the unratified startup verdict unverified. Route any
 request for a true present hook or generic pipeline instrumentation to Vellum
 instead of modifying generic window or render-lifecycle paths in Pulp.
 
+The Pulp-owned A3 campaign runner may snapshot product-specific adapters,
+validate 10+10 lifecycle/cache provenance, and name transferred instrumentation
+gaps. That runner is not authority to add a missing generic producer in Pulp.
+If the real adapter cannot source present, pipeline, upload, shader, or source
+identity through an existing seam, leave the fields null, record the exact
+`render-skia-dawn` gap, and route the post-adoption producer to Vellum. Never
+make a warm label or a zero duration stand in for the missing boundary.
+
 Pulp also owns the A4 DPR runner, product-scenario adapters, evidence ingestion,
 and the B5 dependency receipt. The runner may classify a measured candidate,
 but B5 remains `waiting-trigger` until the adopted Vellum API refresh. Any

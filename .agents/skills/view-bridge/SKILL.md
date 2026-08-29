@@ -2155,3 +2155,13 @@ named categories so the closed A3 verifier can select only a passing
 `no-change` or failing `queue-B4-investigation`; never invent Vellum events or
 identities in the ViewBridge. Use `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` for the
 blank-frame negative control.
+
+The provider now keeps a distinct GPU evidence ID and trace evidence ID and can
+retain multiple lifecycle trials, but a product adapter must call
+`begin_editor_open` only for an editor lifecycle it actually observed. Do not
+rearm it on an arbitrary frame or label repeated captures as same-process
+editor reopens. `gpu_first_visible_a3_campaign.py` validates the external
+10-cold/10-warm ledger; it does not create those lifecycle boundaries. The
+standalone host's ordinary first observation is therefore a truthful preflight
+and remains nonterminal until a real role adapter supplies all opens and the
+role-appropriate endpoint.

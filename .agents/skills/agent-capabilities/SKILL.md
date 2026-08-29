@@ -64,6 +64,10 @@ instances, receipts, measurement campaigns, or B4 disposition to
 `agent-capabilities.json`. A public-header ledger classification, where one is
 required by the covered roots, records only that the header was reviewed; it
 must not turn this runtime operation into a generator-facing design capability.
+The checkout-only `gpu_first_visible_a3_campaign.py` runner is also runtime
+acceptance tooling, not an installed SDK capability: do not add its adapter
+request/receipt schemas, 10+10 lifecycle ledger, or source-binding receipt to
+the design-time capability catalog.
 
 ## Classify the change
 

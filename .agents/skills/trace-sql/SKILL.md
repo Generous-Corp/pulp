@@ -103,6 +103,14 @@ hand each time. Each `.sql` file carries a header comment explaining its shape.
 | `pulp_gpu_health_transitions` | health/device-loss evidence | `pulp trace gpu-health` |
 | `pulp_gpu_probe_correlation` | probe/readback evidence correlation | `pulp trace gpu-probe` |
 
+A3 product spans supply low-cardinality debug annotations such as
+`debug.gpu_evidence_id` and `debug.trace_evidence_id`; the C++ trace macro call
+uses the unprefixed annotation name and Perfetto exposes it under `debug.*`.
+Keep SQL joins on the exact GPU ID and stable process instance. The named
+`/trace gpu-startup|gpu-health|gpu-probe --trace FILE` surface must resolve to
+these checked-in views through the same installed analyzer used by A2T. Do not
+replace a missing named result with one-off SQL in a terminal receipt.
+
 **Closed GPU cohort boundary.** The named GPU analyses do not currently accept
 an evidence-ID selector, so the SQL must not flatten unrelated runs. Startup
 selects the earliest valid render-frame lifecycle carrying `frame_index = 0`

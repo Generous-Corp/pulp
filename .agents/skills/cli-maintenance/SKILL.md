@@ -83,6 +83,17 @@ stack into `pulp-mcp` or parse human output. Keep these surfaces synchronized:
 This subcommand fits the existing CLI-maintenance, Skia GPU build, and routing
 skills; adding a separate GPU-doctor skill would duplicate their ownership.
 
+### A3 campaign scripts are acceptance tooling, not shipped CLI verbs
+
+`tools/scripts/gpu_first_visible_a3_campaign.py` and
+`gpu_first_visible_a3_acceptance.py` are checkout-only evidence tools. Do not
+register them in the Rust/C++ command tables, CLI manifest, MCP tool list, or
+slash-command inventory. Their stable automation surface is the exact Python
+argv and closed JSON adapter/receipt contracts documented in
+`docs/validation/gpu-first-visible-a3-acceptance.md`. A future installed verb
+requires the full checklist below; a convenient script invocation is not that
+authorization.
+
 ### `pulp gpu probe` is a closed callable evidence catalog
 
 `pulp gpu probe --recipe <id> --artifacts <absolute-dir> [--negative-control]

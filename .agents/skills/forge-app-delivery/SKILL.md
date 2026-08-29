@@ -412,3 +412,13 @@ nullable and named rather than becoming fabricated Vellum evidence. Leave an
 unratified startup budget unverified; never substitute a Pulp example
 for the requested Forge product. Exercise the seeded blank control before
 accepting a real-machine result.
+
+For the A3 terminal campaign, invoke the exact Forge-shell adapter through
+`gpu_first_visible_a3_campaign.py run-role --role forge`. Its identity JSON must
+use `plugin_format: standalone` and bind exact Pulp and Forge revisions; a DAW
+plugin format or Pulp example is rejected even if its pixels match. The adapter
+owns the real 10-cold/10-warm shell lifecycle and native presentation source.
+The runner owns the immutable adapter/budget snapshot and closed artifact
+validation. Preserve timeout, unavailable shell delivery, and missing
+post-Vellum instrumentation as explicit dependencies rather than substituting
+another executable.

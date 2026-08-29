@@ -20,7 +20,8 @@ evidence. A nonterminal result is never an acceptance pass.
 
 Author a template matching
 `docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json`, using
-`"sha256": "auto"` for artifact references. Then run:
+`"sha256": "auto"` for artifact references and the paired
+`"implementation_head": "auto"` / `"source_blobs": "auto"` markers. Then run:
 
 ```bash
 python3 tools/scripts/gpu_first_visible_a3_acceptance.py generate template.json \
@@ -29,7 +30,88 @@ python3 tools/scripts/gpu_first_visible_a3_acceptance.py generate template.json 
 
 Artifact paths are relative to the evidence root and may not contain `..`.
 Generation hashes the referenced files, applies the full schema and semantic
-checks, and writes atomically only after validation.
+checks, binds the exact A3 implementation head plus its non-receipt source
+blobs, and writes atomically only after validation. The implementation head
+must equal `identity.pulp_revision`, remain an ancestor of the current checkout,
+and have the same relevant blobs at historical HEAD, current HEAD, and the
+working tree. The receipt is deliberately outside that set, avoiding a circular
+self-hash.
+
+## Run real product campaign roles
+
+`gpu_first_visible_a3_campaign.py` is the executable boundary between the
+closed verifier and product-specific lifecycle automation. It snapshots the
+exact adapter and ratified budget before launch, caps runtime and output, and
+preserves timeout, SKIP, and INCONCLUSIVE as a durable nonterminal `run.json`.
+It never infers cache state from timing. A passing role adapter must supply its
+real product and host binaries, 10 cold plus 10 warm trials with lifecycle,
+process, and cache-boundary provenance, a full health response, and a nonempty
+same-campaign trace plus typed analysis. Add `--require-controls` to exactly one
+real role run to require the caught blank negative and external audio-thread
+exclusion proof as part of the same runner-owned evidence directory.
+
+Each adapter is an absolute executable that accepts `--request PATH --receipt
+PATH`. The request is `pulp.gpu-first-visible-campaign-request.v1`; the adapter
+must write `pulp.gpu-first-visible-campaign-adapter.v1` and keep every declared
+artifact under the supplied `artifact_directory`. Adapter outcomes map exactly
+to exit codes `pass=0`, `fail=1`, `inconclusive=2`, and `skip=3`.
+
+After ratifying the budget, run all four roles with their exact identity files
+and role-specific executables:
+
+```bash
+A3_EVIDENCE=/absolute/path/to/a3-evidence
+
+python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
+  --role standalone --identity "$A3_EVIDENCE/standalone-identity.json" \
+  --budget-receipt "$A3_EVIDENCE/budget.json" \
+  --budget-cold "$A3_EVIDENCE/budget-cold.json" \
+  --budget-warm "$A3_EVIDENCE/budget-warm.json" \
+  --adapter /absolute/path/to/standalone-a3-adapter \
+  --output-dir "$A3_EVIDENCE/standalone-run" --require-controls
+
+python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
+  --role headless-constrained \
+  --identity "$A3_EVIDENCE/headless-identity.json" \
+  --budget-receipt "$A3_EVIDENCE/budget.json" \
+  --budget-cold "$A3_EVIDENCE/budget-cold.json" \
+  --budget-warm "$A3_EVIDENCE/budget-warm.json" \
+  --adapter /absolute/path/to/headless-a3-adapter \
+  --output-dir "$A3_EVIDENCE/headless-run"
+
+python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
+  --role daw --identity "$A3_EVIDENCE/daw-identity.json" \
+  --budget-receipt "$A3_EVIDENCE/budget.json" \
+  --budget-cold "$A3_EVIDENCE/budget-cold.json" \
+  --budget-warm "$A3_EVIDENCE/budget-warm.json" \
+  --adapter /absolute/path/to/reaper-a3-adapter \
+  --output-dir "$A3_EVIDENCE/daw-run"
+
+python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
+  --role forge --identity "$A3_EVIDENCE/forge-identity.json" \
+  --budget-receipt "$A3_EVIDENCE/budget.json" \
+  --budget-cold "$A3_EVIDENCE/budget-cold.json" \
+  --budget-warm "$A3_EVIDENCE/budget-warm.json" \
+  --adapter /absolute/path/to/exact-forge-shell-a3-adapter \
+  --output-dir "$A3_EVIDENCE/forge-run"
+```
+
+The DAW adapter must first prove the exact format scans and opens in REAPER;
+for example, a VST3 preflight uses `reaper_smoke.py --mode editor-open --format
+vst3 --plugin-name NAME --plugin-path /absolute/product.vst3`. That smoke is a
+prerequisite, not the 20-trial campaign: SKIP/INCONCLUSIVE remains pending, and
+capture completion cannot substitute for native compositor presentation. The
+Forge adapter likewise drives the exact standalone shell and binds both Pulp
+and Forge SHAs. The existing standalone product test is a useful wiring
+preflight but remains one observation; it is not a role adapter until a real
+lifecycle harness supplies all 20 trials and role-appropriate presentation
+evidence.
+
+Copy each passing `run.json` campaign fragment and the requested control refs
+into the final template, add the same-instance A2T bundle, and run the closed
+generator above. It independently derives exactly one B4 disposition from the
+validated causal campaign and replayed pinned analyzer; any submitted
+disposition or evidence that disagrees is rejected.
 
 ## Current standalone production boundary
 

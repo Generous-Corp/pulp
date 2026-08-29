@@ -237,3 +237,13 @@ under the closed A3 verifier's passing no-change or failing investigation rules.
 Preserve the correlated A2T trace and run the seeded blank control separately with
 `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1`; a pass there is a harness failure. Keep
 SKIP/INCONCLUSIVE and absent format scans as pending, never PASS.
+
+Use `reaper_smoke.py --mode editor-open` as the exact-format prerequisite for a
+DAW A3 adapter, then execute that adapter through
+`gpu_first_visible_a3_campaign.py run-role --role daw`. The smoke result cannot
+be copied into the campaign: the adapter still owes 10 real cold and 10 real
+warm editor lifecycles, independent native presentation timing, exact product
+and host artifacts, the same-instance trace, and durable cache provenance.
+Translate REAPER's `--format au` identity to the receipt's `auv2`; VST3 and CLAP
+retain their names. An adapter timeout, SKIP, or INCONCLUSIVE produces a
+nonterminal `run.json`, never a passing campaign.

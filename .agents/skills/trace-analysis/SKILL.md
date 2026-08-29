@@ -515,13 +515,22 @@ identity is incomplete evidence, even when the aggregate sample count is 20.
 
 ## Correlating GPU-health startup snapshots
 
-`ControlGpuHealthProvider` may emit a GPU evidence ID from the observed frame,
-but it must not invent a trace ID. Keep `causal_attribution=unverified` and the
-startup verdict unverified until an A2T artifact supplies the required
-categories and is bound to the same product instance, build, frame identity,
-and trial. Dropped events, truncation, missing categories, timeout, or instance
-loss are fail-closed evidence, not zero-cost measurements. Perfetto production
-and provider mutation remain off the audio thread.
+The Pulp-owned product host creates distinct bounded GPU and trace evidence IDs
+and emits both on its first-visible lifecycle and health-transition spans. A
+role adapter must preserve those exact values in the health response and trace;
+it must not synthesize a replacement when either is absent. Keep
+`causal_attribution=unverified` and the startup verdict unverified until an A2T
+artifact supplies the required categories and is bound to the same product
+instance, build, frame identity, and trial. Dropped events, truncation, missing
+categories, timeout, or instance loss are fail-closed evidence, not zero-cost
+measurements. Perfetto production and provider mutation remain off the audio
+thread.
+
+For the agent slash surface, use one named question: `/trace gpu-startup
+--trace FILE`, `/trace gpu-health --trace FILE`, or `/trace gpu-probe --trace
+FILE`. Preserve the corresponding `pulp trace ... --json` output for the A2T
+receipt. A human Perfetto UI inspection is useful additional evidence but does
+not replace the digest-bound machine result or its invalid-trace negative.
 
 ## Correlate a catalog recipe with Perfetto
 

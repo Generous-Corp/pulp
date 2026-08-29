@@ -509,3 +509,13 @@ zero-valued duration. Visible Standalone/DAW/Forge campaigns bind
 `headless-capture-complete`. The closed A3 verifier permits nullable causal
 fields only for passing no-change or a budget-miss investigation with every
 missing event, argument, interval, and transferred route named.
+
+Run real roles through `tools/scripts/gpu_first_visible_a3_campaign.py
+run-role`. Its adapter request fixes the role endpoint and requires 10 cold plus
+10 warm trials with explicit lifecycle, process, and cache provenance; it never
+derives cold/warm from elapsed time. The runner snapshots the adapter and
+ratified budget, validates product/host/health/trace artifacts, and preserves
+timeout, SKIP, or INCONCLUSIVE as nonterminal. Use `--require-controls` on one
+real role to bind the blank negative and external audio-thread exclusion. The
+existing Standalone product test remains a one-observation wiring preflight,
+not a 20-trial campaign.
