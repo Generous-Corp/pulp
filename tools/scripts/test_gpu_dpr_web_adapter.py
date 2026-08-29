@@ -150,6 +150,45 @@ def main() -> int:
         try: evidence.validate_identity(unattested, scenario, plan)
         except evidence.EvidenceError: pass
         else: raise AssertionError("unattested browser evidence passed")
+        different_product = root / "different-browser"
+        different_product.write_text("#!/bin/sh\necho Google Chrome mismatch\n")
+        different_product.chmod(0o755)
+        same_process = {key: True for key in web.SAME_PROCESS_FIELDS}
+        mismatched_product = {
+            "machine": {"id":"test","os":"test","architecture":"test"},
+            "adapter": adapter,
+            "build_identity": {
+                "pulp_sha": req["pulp_sha"],
+                "measurement_producer": {
+                    "path": str(browser), "sha256": web.sha256(browser),
+                },
+                "browser_product_executable": {
+                    "path": str(different_product),
+                    "sha256": web.sha256(different_product),
+                },
+                "measurement_script": {
+                    "path": str(browser), "sha256": web.sha256(browser),
+                },
+                "browser_product": {
+                    "version":"Google Chrome mismatch",
+                    "codesign_identifier":"com.google.Chrome",
+                    "team_identifier":"EQHXZ8M8AV",
+                },
+                "web_ui_artifacts": build_artifacts,
+                "web_ui_bundle_sha256": build_digest,
+            },
+            "measurement_attestation": {
+                "schema": web.ATTESTATION_SCHEMA,
+                "producer_sha256": web.sha256(browser),
+                "script_sha256": web.sha256(browser),
+                "build_sha256": build_digest,
+                "same_process": same_process,
+                "audio_device_opened": False,
+            },
+        }
+        try: evidence.validate_identity(mismatched_product, scenario, plan)
+        except evidence.EvidenceError: pass
+        else: raise AssertionError("mismatched browser product bytes passed")
     print("gpu_dpr_web_adapter_selftest=true planted_fake_browser=pass planted_native=pass planted_zero_gpu=pass planted_reused_process=pass planted_mixed_build=pass planted_trace_scope=pass")
     return 0
 

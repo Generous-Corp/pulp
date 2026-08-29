@@ -273,6 +273,9 @@ def validate_receipt(
         raise ValueError("browser receipt lacks exact Pulp identity")
     script_digest = sha256(script)
     build["measurement_producer"] = {"path": str(browser), "sha256": browser_digest}
+    build["browser_product_executable"] = {
+        "path": str(browser), "sha256": browser_digest,
+    }
     build["measurement_script"] = {"path": str(script), "sha256": script_digest}
     receipt["measurement_attestation"] = {
         "schema": ATTESTATION_SCHEMA,

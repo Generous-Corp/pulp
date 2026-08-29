@@ -234,6 +234,9 @@ def make_receipt(
     elif is_web:
         browser_digest = runner.sha256_file(binary)
         script_digest = runner.sha256_file(analyzer)
+        browser_product = cell_dir / "browser-product"
+        shutil.copy2(binary, browser_product)
+        browser_product.chmod(0o555)
         web_names = (
             "PulpSuperConvolverUi.data", "PulpSuperConvolverUi.js",
             "PulpSuperConvolverUi.wasm",
@@ -249,6 +252,9 @@ def make_receipt(
         receipt["build_identity"].update({
             "measurement_producer": {
                 "path": str(binary.resolve()), "sha256": browser_digest,
+            },
+            "browser_product_executable": {
+                "path": str(browser_product.resolve()), "sha256": browser_digest,
             },
             "measurement_script": {
                 "path": str(analyzer.resolve()), "sha256": script_digest,

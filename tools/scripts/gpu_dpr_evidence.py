@@ -629,7 +629,15 @@ def validate_identity(
         if attestation.get("producer_sha256") != producer_digest:
             raise EvidenceError("measurement attestation names different producer bytes")
         if browser:
-            validate_browser_product(producer, build.get("browser_product"))
+            product_executable, product_digest = exact_executable(
+                build.get("browser_product_executable"),
+                "browser product executable",
+            )
+            if product_digest != producer_digest:
+                raise EvidenceError("browser product and frozen producer bytes differ")
+            validate_browser_product(
+                product_executable, build.get("browser_product")
+            )
             script, script_digest = exact_executable(
                 build.get("measurement_script"), "browser measurement script"
             )
