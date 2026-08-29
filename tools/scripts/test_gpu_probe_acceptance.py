@@ -7,6 +7,7 @@ import binascii
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -539,6 +540,44 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             try:
                 with self.assertRaisesRegex(
                     RECORDER.AcceptanceError, "retained file claim"
+                ):
+                    claim.assert_current()
+            finally:
+                claim.close()
+
+    def test_retained_build_outputs_reject_replace_and_restore(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prefix = root / "prefix"
+            prefix.mkdir()
+            build = root / "build"
+            for index, (relative, _installed) in enumerate(
+                RECORDER.BINARY_PATHS.values()
+            ):
+                path = build / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(f"build-output-{index}".encode())
+                os.chmod(path, 0o755)
+            descriptor = os.open(prefix, RECORDER.directory_open_flags())
+            claim = RECORDER.RetainedDirectoryClaim(
+                prefix,
+                descriptor,
+                RECORDER.directory_identity(os.fstat(descriptor), "install-prefix"),
+                "install-prefix",
+            )
+            try:
+                claim.seal()
+                RECORDER.bind_build_outputs(build, claim)
+                target = build / RECORDER.BINARY_PATHS["installed_rust_cli"][0]
+                moved = root / "moved-pulp"
+                payload = target.read_bytes()
+                target.rename(moved)
+                target.write_bytes(payload)
+                os.chmod(target, 0o755)
+                target.unlink()
+                moved.rename(target)
+                with self.assertRaisesRegex(
+                    RECORDER.AcceptanceError, "mutation event"
                 ):
                     claim.assert_current()
             finally:

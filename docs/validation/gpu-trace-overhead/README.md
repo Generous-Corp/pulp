@@ -33,13 +33,14 @@ The recorder requires an exact clean canonical Pulp worktree at
 `--source-revision` and an external single-config Release build configured from
 that exact checkout with the same GPU/Scene3D/Three.js/V8/Rust feature contract
 as A2. `--install-prefix` must not exist. The recorder refreshes the Rust CLI,
-C++ delegate, and MCP targets after atomically claiming that new directory,
-retains and checks its no-follow device/inode identity around every installed
-CLI/MCP execution through final publication, retains and rehashes the exact
-CLI, delegate, MCP, trace, and trace-processor inodes around every launch, and
-seals them with macOS vnode mutation monitoring so replace-and-restore races
-remain observable across their complete path-ancestor chains. Each installed
-executable must be byte-identical to its exact build-tree output. Its
+C++ delegate, and MCP targets after atomically claiming that new directory.
+Immediately after the build it retains the CMake cache and all three exact
+build-output inodes before installation, then retains the installed build
+stamp, CLI, delegate, MCP, trace, and trace-processor inodes through final
+publication. Every claim is rehashed and sealed with macOS vnode mutation
+monitoring, so replace-and-restore races remain observable across complete
+path-ancestor chains. Each installed executable must be byte-identical to its
+retained exact build-tree output. Its
 receipt binds the CMake cache digest, build settings, targets, installed/build
 digests, and positive byte counts in addition to the installed
 `build_info.hpp` source stamp; a current header beside stale or mixed binaries

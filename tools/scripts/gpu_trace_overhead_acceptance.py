@@ -699,7 +699,7 @@ class RetainedDirectoryClaim:
         if not hasattr(select, "kqueue") or any(
             not hasattr(select, name) for name in required
         ):
-            raise ValueError("exact executable sealing requires macOS kqueue")
+            raise ValueError("exact file sealing requires macOS kqueue")
         return sum(getattr(select, name) for name in required)
 
     @staticmethod
@@ -760,14 +760,17 @@ class RetainedDirectoryClaim:
             events = self.monitor.control(None, 64, 0)
             if events:
                 raise ValueError(
-                    f"{self.label} or a retained executable had a mutation event"
+                    f"{self.label} or a retained file had a mutation event"
                 )
 
-    def bind_file(self, path: Path, label: str, expected_sha256: str) -> None:
+    def bind_file(
+        self, path: Path, label: str, expected_sha256: str | None = None
+    ) -> str:
         self._bind_ancestor_chain(path)
         descriptor = os.open(
             path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         )
+        claim: dict[str, Any] | None = None
         try:
             metadata = os.fstat(descriptor)
             named = os.stat(path, follow_symlinks=False)
@@ -775,22 +778,34 @@ class RetainedDirectoryClaim:
             if (
                 not stat_module.S_ISREG(metadata.st_mode)
                 or {"device": named.st_dev, "inode": named.st_ino} != identity
-                or sha256_descriptor(descriptor) != expected_sha256
             ):
-                raise ValueError(f"{label} does not match its exact executable claim")
+                raise ValueError(f"{label} does not match its exact file claim")
+            claim = {
+                "path": path,
+                "descriptor": descriptor,
+                "identity": identity,
+                "sha256": "",
+                "bytes": metadata.st_size,
+                "label": label,
+            }
+            self.file_claims.append(claim)
+            if self.monitor is not None:
+                self._register_monitor(descriptor, is_file=True)
+                self._assert_no_mutation_events()
+            actual_sha256 = sha256_descriptor(descriptor)
+            if expected_sha256 is not None and actual_sha256 != expected_sha256:
+                raise ValueError(f"{label} does not match its exact file claim")
+            claim["sha256"] = actual_sha256
+            named = os.stat(path, follow_symlinks=False)
+            if {"device": named.st_dev, "inode": named.st_ino} != identity:
+                raise ValueError(f"{label} does not match its exact file claim")
+            self._assert_no_mutation_events()
         except BaseException:
+            if claim is not None:
+                self.file_claims.remove(claim)
             os.close(descriptor)
             raise
-        self.file_claims.append({
-            "path": path,
-            "descriptor": descriptor,
-            "identity": identity,
-            "sha256": expected_sha256,
-            "label": label,
-        })
-        if self.monitor is not None:
-            self._register_monitor(descriptor, is_file=True)
-            self._assert_no_mutation_events()
+        return actual_sha256
 
     def assert_current(self) -> None:
         if self.closed:
@@ -815,7 +830,7 @@ class RetainedDirectoryClaim:
                 or sha256_descriptor(claim["descriptor"]) != claim["sha256"]
             ):
                 raise ValueError(
-                    f"{claim['label']} no longer matches its retained executable claim"
+                    f"{claim['label']} no longer matches its retained file claim"
                 )
         self._assert_no_mutation_events()
 
@@ -975,8 +990,11 @@ def _release_build_contract(
 
 
 def _run_bounded_build(
-    command: list[str], *, repository: Path, environment: dict[str, str], timeout: int
+    command: list[str], *, repository: Path, environment: dict[str, str], timeout: int,
+    directory_claim: RetainedDirectoryClaim | None = None,
 ) -> None:
+    if directory_claim is not None:
+        directory_claim.assert_current()
     try:
         completed = subprocess.run(
             command, cwd=repository, env=environment, check=False,
@@ -984,6 +1002,9 @@ def _run_bounded_build(
         )
     except subprocess.TimeoutExpired as error:
         raise ValueError(f"A2T build/install timed out: {command[0]}") from error
+    finally:
+        if directory_claim is not None:
+            directory_claim.assert_current()
     if len(completed.stdout.encode()) + len(completed.stderr.encode()) > BUILD_OUTPUT_LIMIT:
         raise ValueError("A2T build/install output exceeds 4 MiB")
     if completed.returncode != 0:
@@ -991,24 +1012,56 @@ def _run_bounded_build(
         raise ValueError(f"A2T build/install failed: {detail}")
 
 
-def _build_install_binary_identity(build_dir: Path, prefix: Path) -> dict[str, Any]:
-    paths = {
+def _binary_paths(build_dir: Path, prefix: Path) -> dict[str, tuple[Path, Path]]:
+    return {
         "pulp": (build_dir / "pulp", prefix / "bin/pulp"),
         "pulp-cpp": (build_dir / "tools/cli/pulp-cpp", prefix / "bin/pulp-cpp"),
         "pulp-mcp": (build_dir / "tools/mcp/pulp-mcp", prefix / "bin/pulp-mcp"),
     }
+
+
+def _bind_build_outputs(
+    build_dir: Path, prefix: Path, claim: RetainedDirectoryClaim
+) -> dict[str, dict[str, Any]]:
+    outputs: dict[str, dict[str, Any]] = {}
+    for role, (built, _installed) in _binary_paths(build_dir, prefix).items():
+        if not built.is_file() or built.is_symlink() or not os.access(built, os.X_OK):
+            raise ValueError(f"{role} build output is not a regular executable")
+        digest = claim.bind_file(built, f"{role} build output")
+        retained = claim.file_claims[-1]
+        outputs[role] = {
+            "sha256": digest,
+            "bytes": retained["bytes"],
+            "identity": retained["identity"],
+        }
+    claim.assert_current()
+    return outputs
+
+
+def _build_install_binary_identity(
+    build_dir: Path, prefix: Path, build_outputs: dict[str, dict[str, Any]],
+    claim: RetainedDirectoryClaim,
+) -> dict[str, Any]:
+    paths = _binary_paths(build_dir, prefix)
+    if set(build_outputs) != set(paths):
+        raise ValueError("retained build outputs do not bind the exact executable set")
     rows: dict[str, Any] = {}
-    for role, (built, installed) in paths.items():
+    for role, (_built, installed) in paths.items():
         if (
-            not built.is_file() or built.is_symlink()
-            or not installed.is_file() or installed.is_symlink()
-            or not os.access(built, os.X_OK) or not os.access(installed, os.X_OK)
+            not installed.is_file() or installed.is_symlink()
+            or not os.access(installed, os.X_OK)
         ):
             raise ValueError(f"{role} is not a regular executable build/install pair")
-        built_digest = sha256(built)
-        installed_digest = sha256(installed)
-        if built_digest != installed_digest:
-            raise ValueError(f"installed {role} bytes differ from the exact build output")
+        built_digest = build_outputs[role]["sha256"]
+        try:
+            installed_digest = claim.bind_file(
+                installed, f"installed {role}", built_digest
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"installed {role} bytes differ from the exact build output"
+            ) from error
+        retained = claim.file_claims[-1]
         rows[role] = {
             "installed_role": f"installed-prefix/bin/{role}",
             "build_output_role": {
@@ -1018,19 +1071,20 @@ def _build_install_binary_identity(build_dir: Path, prefix: Path) -> dict[str, A
             }[role],
             "sha256": installed_digest,
             "build_output_sha256": built_digest,
-            "bytes": installed.stat().st_size,
+            "bytes": retained["bytes"],
+            "build_output_bytes": build_outputs[role]["bytes"],
         }
     if rows["pulp"]["sha256"] == rows["pulp-cpp"]["sha256"]:
         raise ValueError("installed pulp is a C++ copy rather than the required Rust front")
+    claim.assert_current()
     return rows
 
 
 def exact_build_install_identity(
     repository: Path, revision: str, build_dir: Path, prefix: Path,
-    cli: Path, mcp: Path,
+    cli: Path, mcp: Path, binaries: dict[str, Any], cmake_cache_sha256: str,
 ) -> dict[str, Any]:
     _values, settings = _release_build_contract(repository, build_dir)
-    binaries = _build_install_binary_identity(build_dir, prefix)
     identity = installed_source_identity(repository, revision, cli, mcp)
     try:
         prefix_claim = _directory_identity(os.stat(prefix, follow_symlinks=False))
@@ -1040,7 +1094,7 @@ def exact_build_install_identity(
         "method": "fresh-external-cmake-build-install-byte-identity-v1",
         "install_prefix_initial_state": "absent-and-atomically-claimed",
         "install_prefix_claim": prefix_claim,
-        "cmake_cache_sha256": sha256(build_dir / "CMakeCache.txt"),
+        "cmake_cache_sha256": cmake_cache_sha256,
         "cmake_home_revision": revision,
         "build_targets": list(BUILD_TARGETS),
         "build_settings": settings,
@@ -1073,35 +1127,42 @@ def refresh_exact_build_install(
         _run_bounded_build(
             ["cmake", "--build", str(build_dir), "--target", *BUILD_TARGETS, "--parallel"],
             repository=repository, environment=environment, timeout=3600,
+            directory_claim=retained_claim,
         )
+        retained_claim.seal()
+        cmake_cache_sha256 = retained_claim.bind_file(
+            build_dir / "CMakeCache.txt", "refreshed CMake cache",
+        )
+        _release_build_contract(repository, build_dir)
+        build_outputs = _bind_build_outputs(build_dir, prefix, retained_claim)
         _assert_directory_path_identity(
             prefix, prefix_descriptor, prefix_claim, "install-prefix"
         )
         _run_bounded_build(
             ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
             repository=repository, environment=environment, timeout=1800,
+            directory_claim=retained_claim,
         )
         _assert_directory_path_identity(
             prefix, prefix_descriptor, prefix_claim, "install-prefix"
         )
         cli = prefix / "bin/pulp"
         mcp = prefix / "bin/pulp-mcp"
-        binaries = _build_install_binary_identity(build_dir, prefix)
-        installed_paths = {
-            "pulp": cli,
-            "pulp-cpp": prefix / "bin/pulp-cpp",
-            "pulp-mcp": mcp,
-        }
-        for role, path in installed_paths.items():
-            retained_claim.bind_file(
-                path, f"installed {role}", binaries[role]["sha256"]
-            )
-        retained_claim.seal()
-        retained_claim.assert_current()
-        identity = exact_build_install_identity(
-            repository, revision, build_dir, prefix, cli, mcp
+        build_info_sha256 = retained_claim.bind_file(
+            prefix / "include/pulp/runtime/build_info.hpp",
+            "installed build_info.hpp",
+        )
+        binaries = _build_install_binary_identity(
+            build_dir, prefix, build_outputs, retained_claim
         )
         retained_claim.assert_current()
+        identity = exact_build_install_identity(
+            repository, revision, build_dir, prefix, cli, mcp,
+            binaries, cmake_cache_sha256,
+        )
+        retained_claim.assert_current()
+        if identity["build_info_sha256"] != build_info_sha256:
+            raise ValueError("installed build_info differs from its retained claim")
         if identity["build_provenance"]["install_prefix_claim"] != prefix_claim:
             raise ValueError("installed provenance differs from the claimed prefix identity")
         return cli, mcp, identity, retained_claim
@@ -2514,7 +2575,9 @@ def main() -> int:
         if source_binding(repository, args.source_revision, trace) != binding:
             raise ValueError("source binding changed during A2T recording")
         if exact_build_install_identity(
-            repository, args.source_revision, build_dir, prefix, cli, mcp
+            repository, args.source_revision, build_dir, prefix, cli, mcp,
+            installed_identity["build_provenance"]["binaries"],
+            installed_identity["build_provenance"]["cmake_cache_sha256"],
         ) != installed_identity:
             raise ValueError("installed CLI/MCP provenance changed during A2T recording")
         if trace_processor_identity(repository, processor) != processor_identity:

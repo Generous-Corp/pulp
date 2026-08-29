@@ -37,6 +37,13 @@ ADDITIONAL_PULP_PATH_CANARIES = {
 }
 SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 MAX_COMMAND_OUTPUT = 4 * 1024 * 1024
+BINARY_PATHS = {
+    "installed_rust_cli": (Path("pulp"), Path("bin/pulp")),
+    "installed_cpp_delegate": (
+        Path("tools/cli/pulp-cpp"), Path("bin/pulp-cpp")
+    ),
+    "installed_mcp": (Path("tools/mcp/pulp-mcp"), Path("bin/pulp-mcp")),
+}
 
 
 class AcceptanceError(RuntimeError):
@@ -276,6 +283,7 @@ class RetainedDirectoryClaim:
                 "descriptor": descriptor,
                 "identity": identity,
                 "sha256": "",
+                "bytes": metadata.st_size,
                 "label": label,
             }
             self.file_claims.append(claim)
@@ -337,17 +345,62 @@ class RetainedDirectoryClaim:
         self.close()
 
 
+def bind_build_outputs(
+    build_dir: Path, claim: RetainedDirectoryClaim
+) -> dict[str, dict[str, Any]]:
+    outputs: dict[str, dict[str, Any]] = {}
+    for role, (build_relative, _installed_relative) in BINARY_PATHS.items():
+        path = build_dir / build_relative
+        if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
+            raise AcceptanceError(f"{role} build output is not a regular executable")
+        digest = claim.bind_file(path, f"{role} build output")
+        retained = claim.file_claims[-1]
+        outputs[role] = {
+            "sha256": digest,
+            "bytes": retained["bytes"],
+            "identity": retained["identity"],
+        }
+    claim.assert_current()
+    return outputs
+
+
+def bind_installed_outputs(
+    prefix: Path,
+    build_outputs: dict[str, dict[str, Any]],
+    claim: RetainedDirectoryClaim,
+) -> dict[str, dict[str, Any]]:
+    binaries: dict[str, dict[str, Any]] = {}
+    for role, (_build_relative, installed_relative) in BINARY_PATHS.items():
+        path = prefix / installed_relative
+        if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
+            raise AcceptanceError(f"{role} is not a regular refreshed executable")
+        try:
+            installed_digest = claim.bind_file(
+                path, role, build_outputs[role]["sha256"]
+            )
+        except AcceptanceError as error:
+            raise AcceptanceError(
+                f"{role} installed bytes differ from the retained build output"
+            ) from error
+        retained = claim.file_claims[-1]
+        binaries[role] = {
+            "sha256": installed_digest,
+            "bytes": retained["bytes"],
+            "build_output_sha256": build_outputs[role]["sha256"],
+            "build_output_bytes": build_outputs[role]["bytes"],
+        }
+    if binaries["installed_rust_cli"]["sha256"] == binaries[
+        "installed_cpp_delegate"
+    ]["sha256"]:
+        raise AcceptanceError("installed pulp is a C++ copy, not the required Rust front")
+    claim.assert_current()
+    return binaries
+
+
 def refresh_install(
     repository: Path, build_dir: Path, prefix: Path, build_environment: dict[str, str]
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], RetainedDirectoryClaim]:
-    cache = require_release_pulp_build(build_dir, repository)
-    build = run_bounded(
-        ["cmake", "--build", str(build_dir), "--target",
-         "pulp-rust-cli", "pulp-cli", "pulp-mcp", "--parallel"],
-        cwd=repository, environment=build_environment, timeout=3600,
-    )
-    if build.returncode != 0:
-        raise AcceptanceError(f"Pulp CLI/MCP refresh failed: {build.stderr[-2000:]}")
+    require_release_pulp_build(build_dir, repository)
     try:
         prefix.mkdir(mode=0o700)
         prefix_descriptor = os.open(prefix, directory_open_flags())
@@ -359,71 +412,61 @@ def refresh_install(
     retained_claim = RetainedDirectoryClaim(
         prefix, prefix_descriptor, prefix_claim, "install-prefix"
     )
-    install = run_bounded(
-        ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
-        cwd=repository, environment=build_environment, timeout=1800,
-        directory_claim=retained_claim,
-    )
-    if install.returncode != 0:
-        raise AcceptanceError(f"Pulp install refresh failed: {install.stderr[-2000:]}")
-    installed_paths = {
-        "installed_rust_cli": prefix / "bin/pulp",
-        "installed_cpp_delegate": prefix / "bin/pulp-cpp",
-        "installed_mcp": prefix / "bin/pulp-mcp",
-    }
-    build_paths = {
-        "installed_rust_cli": build_dir / "pulp",
-        "installed_cpp_delegate": build_dir / "tools/cli/pulp-cpp",
-        "installed_mcp": build_dir / "tools/mcp/pulp-mcp",
-    }
-    binaries: dict[str, dict[str, Any]] = {}
-    for role in installed_paths:
-        installed_path = installed_paths[role]
-        built_path = build_paths[role]
-        if (
-            not installed_path.is_file() or installed_path.is_symlink()
-            or not built_path.is_file() or built_path.is_symlink()
-            or not os.access(installed_path, os.X_OK)
-        ):
-            raise AcceptanceError(f"{role} is not a regular refreshed executable")
-        installed_digest = sha256(installed_path)
-        build_digest = sha256(built_path)
-        if installed_digest != build_digest:
-            raise AcceptanceError(f"{role} installed bytes differ from the refreshed build")
-        binaries[role] = {
-            "sha256": installed_digest,
-            "bytes": installed_path.stat().st_size,
-            "build_output_sha256": build_digest,
-        }
-    if binaries["installed_rust_cli"]["sha256"] == binaries["installed_cpp_delegate"]["sha256"]:
-        raise AcceptanceError("installed pulp is a C++ copy, not the required Rust front")
-    for role, path in installed_paths.items():
-        retained_claim.bind_file(path, role, binaries[role]["sha256"])
-    retained_claim.seal()
-    retained_claim.assert_current()
-    revision = provenance._git_text(repository, "rev-parse", "HEAD")
-    installed_identity = provenance.installed_source_identity(
-        repository, revision, installed_paths["installed_rust_cli"], installed_paths["installed_mcp"]
-    )
-    retained_claim.assert_current()
-    return ({
-        "cmake_cache_sha256": sha256(build_dir / "CMakeCache.txt"),
-        "cmake_home_revision": revision,
-        "cmake_build_type": cache["CMAKE_BUILD_TYPE"],
-        "rust_profile": cache["PULP_RUST_CLI_PROFILE"],
-        "feature_contract": {
-            key: cache[key] for key in (
-                "PULP_ENABLE_GPU", "PULP_ENABLE_SCENE3D",
-                "PULP_ENABLE_THREEJS_RUNTIME", "PULP_ENABLE_JS",
-                "PULP_JS_ENGINE", "PULP_BUILD_RUST_CLI", "PULP_HAS_THREEJS",
-            )
-        },
-        "build_info": installed_identity["build_info"],
-        "build_info_sha256": installed_identity["build_info_sha256"],
-        "install_prefix_initial_state": "absent-and-atomically-claimed",
-        "install_prefix_claim": prefix_claim,
-        "build_install_binary_identity": "pass",
-    }, binaries, retained_claim)
+    try:
+        build = run_bounded(
+            ["cmake", "--build", str(build_dir), "--target",
+             "pulp-rust-cli", "pulp-cli", "pulp-mcp", "--parallel"],
+            cwd=repository, environment=build_environment, timeout=3600,
+            directory_claim=retained_claim,
+        )
+        if build.returncode != 0:
+            raise AcceptanceError(f"Pulp CLI/MCP refresh failed: {build.stderr[-2000:]}")
+        retained_claim.seal()
+        cache_digest = retained_claim.bind_file(
+            build_dir / "CMakeCache.txt", "refreshed CMake cache"
+        )
+        cache = require_release_pulp_build(build_dir, repository)
+        build_outputs = bind_build_outputs(build_dir, retained_claim)
+        install = run_bounded(
+            ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
+            cwd=repository, environment=build_environment, timeout=1800,
+            directory_claim=retained_claim,
+        )
+        if install.returncode != 0:
+            raise AcceptanceError(f"Pulp install refresh failed: {install.stderr[-2000:]}")
+        build_info_digest = retained_claim.bind_file(
+            prefix / "include/pulp/runtime/build_info.hpp",
+            "installed build_info.hpp",
+        )
+        binaries = bind_installed_outputs(prefix, build_outputs, retained_claim)
+        revision = provenance._git_text(repository, "rev-parse", "HEAD")
+        installed_identity = provenance.installed_source_identity(
+            repository, revision, prefix / "bin/pulp", prefix / "bin/pulp-mcp"
+        )
+        if installed_identity["build_info_sha256"] != build_info_digest:
+            raise AcceptanceError("installed build_info differs from its retained claim")
+        retained_claim.assert_current()
+        return ({
+            "cmake_cache_sha256": cache_digest,
+            "cmake_home_revision": revision,
+            "cmake_build_type": cache["CMAKE_BUILD_TYPE"],
+            "rust_profile": cache["PULP_RUST_CLI_PROFILE"],
+            "feature_contract": {
+                key: cache[key] for key in (
+                    "PULP_ENABLE_GPU", "PULP_ENABLE_SCENE3D",
+                    "PULP_ENABLE_THREEJS_RUNTIME", "PULP_ENABLE_JS",
+                    "PULP_JS_ENGINE", "PULP_BUILD_RUST_CLI", "PULP_HAS_THREEJS",
+                )
+            },
+            "build_info": installed_identity["build_info"],
+            "build_info_sha256": build_info_digest,
+            "install_prefix_initial_state": "absent-and-atomically-claimed",
+            "install_prefix_claim": prefix_claim,
+            "build_install_binary_identity": "pass",
+        }, binaries, retained_claim)
+    except BaseException:
+        retained_claim.close()
+        raise
 
 
 def canonical_result(value: dict[str, Any]) -> dict[str, Any]:

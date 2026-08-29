@@ -230,7 +230,24 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 installed.write_bytes(payload)
                 os.chmod(built, 0o755)
                 os.chmod(installed, 0o755)
-            identity = MODULE._build_install_binary_identity(build, prefix)
+            def retained_identity():
+                descriptor = os.open(prefix, MODULE._directory_open_flags())
+                claim = MODULE.RetainedDirectoryClaim(
+                    prefix,
+                    descriptor,
+                    MODULE._directory_identity(os.fstat(descriptor)),
+                    "install-prefix",
+                )
+                try:
+                    claim.seal()
+                    build_outputs = MODULE._bind_build_outputs(build, prefix, claim)
+                    return MODULE._build_install_binary_identity(
+                        build, prefix, build_outputs, claim
+                    )
+                finally:
+                    claim.close()
+
+            identity = retained_identity()
             self.assertEqual(
                 identity["pulp-mcp"]["sha256"],
                 identity["pulp-mcp"]["build_output_sha256"],
@@ -239,7 +256,45 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             stale_mcp.write_bytes(b"stale-mixed-prefix-mcp")
             os.chmod(stale_mcp, 0o755)
             with self.assertRaisesRegex(ValueError, "differ from the exact build output"):
-                MODULE._build_install_binary_identity(build, prefix)
+                retained_identity()
+
+    def test_retained_build_output_rejects_replace_and_restore(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build = root / "build"
+            prefix = root / "prefix"
+            prefix.mkdir()
+            pairs = {
+                "pulp": build / "pulp",
+                "pulp-cpp": build / "tools/cli/pulp-cpp",
+                "pulp-mcp": build / "tools/mcp/pulp-mcp",
+            }
+            for index, path in enumerate(pairs.values()):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(f"build-output-{index}".encode())
+                os.chmod(path, 0o755)
+            descriptor = os.open(prefix, MODULE._directory_open_flags())
+            claim = MODULE.RetainedDirectoryClaim(
+                prefix,
+                descriptor,
+                MODULE._directory_identity(os.fstat(descriptor)),
+                "install-prefix",
+            )
+            try:
+                claim.seal()
+                MODULE._bind_build_outputs(build, prefix, claim)
+                target = pairs["pulp"]
+                moved = root / "moved-pulp"
+                payload = target.read_bytes()
+                target.rename(moved)
+                target.write_bytes(payload)
+                os.chmod(target, 0o755)
+                target.unlink()
+                moved.rename(target)
+                with self.assertRaisesRegex(ValueError, "mutation event"):
+                    claim.assert_current()
+            finally:
+                claim.close()
 
     def test_output_must_be_new_and_outside_every_protected_tree(self):
         with tempfile.TemporaryDirectory() as temporary:

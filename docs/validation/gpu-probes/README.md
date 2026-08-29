@@ -26,10 +26,12 @@ not create or promote a receipt during an implementation turn.
 - A dedicated Pulp build directory and a not-yet-created install-prefix path
   outside the worktree. The recorder atomically claims the empty prefix before
   installing and binds its no-follow device/inode identity through the final
-  proof. It also retains and rehashes the exact installed CLI, delegate, MCP,
-  and Forge executable inodes around every launch and seals them with macOS
-  vnode mutation monitoring across their complete path-ancestor chains, so a
-  replace-and-restore race is still detected.
+  proof. Immediately after the exact-head build it retains the CMake cache and
+  all three build-output inodes before installation, then retains the installed
+  build stamp, CLI, delegate, MCP, and Forge executable inodes through final
+  publication. Every claim is rehashed and sealed with macOS vnode mutation
+  monitoring across its complete path-ancestor chain, so a replace-and-restore
+  race is still detected.
   Receipt publication likewise
   uses retained directory descriptors,
   source/destination inode comparisons, relative no-replace links, and a
