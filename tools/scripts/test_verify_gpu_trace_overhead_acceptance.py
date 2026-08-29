@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mutation tests for the terminal A2T acceptance verifier."""
+"""Mutation tests for A2T structural verification boundaries."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
     _scope_key: str | None = None
     _scope_inventory: dict | None = None
 
-    def terminal_receipt(self):
+    def structural_receipt(self):
         head = CONTRACT._git_text(ROOT, "rev-parse", "HEAD")
         trace = ROOT / "test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace"
         binding = CONTRACT.source_binding(ROOT, head, trace)
@@ -81,15 +81,8 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             self.__class__._scope_key = head
             self.__class__._scope_inventory = CONTRACT.a2t_scope_inventory(ROOT, head)
         scope_inventory = copy.deepcopy(self.__class__._scope_inventory)
-        human, human_source = CONTRACT.bind_tracked_human_review_receipt(
-            ROOT,
-            head,
-            ROOT / "docs/validation/gpu-trace-overhead/"
-            "m3-a2t-offline-analysis-20260828.json",
-            question="gpu-startup",
-            trace_sha256=trace_digest,
-            semantic_result=startup,
-        )
+        human = None
+        human_source = None
         provider_tree = {
             "method": "retained-complete-tree-vnode-and-descriptor-v1",
             "file_count": 3,
@@ -285,26 +278,75 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "human_perfetto_ui_correlation": human,
             "human_perfetto_ui_review_source": human_source,
             "acceptance": {
-                "terminal_status": "pass", "semantic_parity": "pass",
+                "terminal_status": CONTRACT.OFFLINE_STRUCTURAL_STATUS,
+                "semantic_parity": "pass",
                 "same_installed_prefix": "pass",
-                "human_perfetto_ui_correlation": "pass",
+                "human_perfetto_ui_correlation": (
+                    "unverified-no-human-perfetto-ui-correlation"
+                ),
                 "offline_latency_budget": "unverified-no-ratified-budget",
                 "producer_overhead_budget": "not-applicable-no-a2t-scoped-producer-delta",
                 "xrun_check": "not-applicable-offline-no-audio-thread",
             },
         }
 
-    def test_terminal_exact_head_receipt_passes(self):
-        self.assertEqual(MODULE.verify(self.terminal_receipt(), ROOT), [])
+    @staticmethod
+    def attach_historical_agent_review(receipt):
+        relative = (
+            "docs/validation/gpu-trace-overhead/"
+            "m3-a2t-offline-analysis-20260828.json"
+        )
+        data = (ROOT / relative).read_bytes()
+        prior = json.loads(data)
+        head = receipt["source_revision"]
+        receipt["human_perfetto_ui_correlation"] = copy.deepcopy(
+            prior["human_perfetto_ui_correlation"]
+        )
+        receipt["human_perfetto_ui_review_source"] = {
+            "method": "preexisting-tracked-git-blob-v1",
+            "repository_path": relative,
+            "source_revision": head,
+            "git_blob_sha1": CONTRACT._git_text(
+                ROOT, "rev-parse", f"{head}:{relative}"
+            ),
+            "sha256": CONTRACT.hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+            "existed_unchanged_in_direct_parent": True,
+        }
+        receipt["acceptance"]["human_perfetto_ui_correlation"] = "pass"
 
-    def test_nonterminal_and_old_receipts_fail_closed(self):
-        receipt = self.terminal_receipt()
-        receipt["acceptance"]["terminal_status"] = "nonterminal"
-        self.assertIn("receipt is nonterminal", MODULE.verify(receipt, ROOT))
+    def test_synthetic_exact_head_receipt_passes_structural_validation_only(self):
+        self.assertEqual(MODULE.verify(self.structural_receipt(), ROOT), [])
+
+    def test_synthetic_receipt_cannot_request_terminal_certification(self):
+        receipt = self.structural_receipt()
+        errors = MODULE.verify(receipt, ROOT, require_terminal=True)
+        self.assertTrue(any(
+            "standalone A2T verification is structural-only" in error
+            for error in errors
+        ))
+
+    def test_terminal_claim_and_old_receipts_fail_closed(self):
+        receipt = self.structural_receipt()
+        receipt["acceptance"]["terminal_status"] = "pass"
+        self.assertTrue(any(
+            "terminal_status differs" in error for error in MODULE.verify(receipt, ROOT)
+        ))
         old = json.loads((ROOT / "docs/validation/gpu-trace-overhead/"
                           "m3-a2t-offline-analysis-20260828.json").read_text())
         errors = MODULE.verify(old, ROOT)
         self.assertTrue(any("receipt schema" in error for error in errors))
+
+    def test_stale_parent_cannot_request_terminal_certification(self):
+        receipt = self.structural_receipt()
+        parent = CONTRACT._git_text(ROOT, "rev-parse", "HEAD^")
+        receipt["source_revision"] = parent
+        receipt["mcp_source_revision"] = parent
+        receipt["integration_head"] = parent
+        errors = MODULE.verify(receipt, ROOT, require_terminal=True)
+        self.assertTrue(any(
+            "to equal live checkout HEAD" in error for error in errors
+        ))
 
     def test_processor_plan_and_fixture_mutations_fail_closed(self):
         mutations = [
@@ -316,18 +358,18 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         ]
         for mutate, expected in mutations:
             with self.subTest(expected=expected):
-                receipt = self.terminal_receipt()
+                receipt = self.structural_receipt()
                 mutate(receipt)
                 self.assertTrue(any(expected in error for error in MODULE.verify(receipt, ROOT)))
 
     def test_empty_installed_source_stamp_fails_closed(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         receipt["installed_source_identity"]["build_info"]["kGitSha"] = ""
         errors = MODULE.verify(receipt, ROOT)
         self.assertIn("installed build stamp is not bound to source_revision", errors)
 
     def test_mixed_installed_binary_and_build_output_fails_closed(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         receipt["installed_source_identity"]["build_provenance"]["binaries"][
             "pulp-mcp"
         ]["build_output_sha256"] = "6" * 64
@@ -337,7 +379,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             errors,
         )
 
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         receipt["artifacts"]["cli"]["sha256"] = "7" * 64
         errors = MODULE.verify(receipt, ROOT)
         self.assertIn("measured cli artifact differs from build provenance", errors)
@@ -345,7 +387,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
     def test_build_output_bytes_are_required_typed_and_equal(self):
         for value in (None, False, 2):
             with self.subTest(value=value):
-                receipt = self.terminal_receipt()
+                receipt = self.structural_receipt()
                 row = receipt["installed_source_identity"]["build_provenance"][
                     "binaries"
                 ]["pulp-mcp"]
@@ -360,21 +402,21 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 )
 
     def test_source_and_forced_clean_build_claims_are_required(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         del receipt["installed_source_identity"]["build_provenance"][
             "source_tree_claim"
         ]
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("retained exact Git source" in error for error in errors))
 
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         receipt["installed_source_identity"]["build_provenance"][
             "build_input_claim"
         ]["build_targets"] = []
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("forced-clean build inputs" in error for error in errors))
 
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         receipt["installed_source_identity"]["build_provenance"][
             "render_provider_input_claim"
         ]["providers"]["v8"]["required_members"].pop()
@@ -382,7 +424,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertTrue(any("V8 provider" in error for error in errors))
 
     def test_consumed_adjacent_skia_source_provider_cannot_be_omitted(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         claim = receipt["installed_source_identity"]["build_provenance"][
             "render_provider_input_claim"
         ]
@@ -405,7 +447,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertTrue(any("sealed render providers" in error for error in errors))
 
     def test_render_provider_root_provenance_cannot_be_forged(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         claim = receipt["installed_source_identity"]["build_provenance"][
             "render_provider_input_claim"
         ]
@@ -426,14 +468,14 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertTrue(any("exact root provenance" in error for error in errors))
 
     def test_no_producer_disposition_is_recomputed_from_git(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         inventory = receipt["producer_overhead_disposition"]["evidence"]
         inventory["path_deltas"][0]["source_blob"] = "0" * 40
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("path-scoped tree delta" in error for error in errors))
 
     def test_no_producer_inventory_cannot_omit_real_a2t_behavior_delta(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         deltas = receipt["producer_overhead_disposition"]["evidence"]["path_deltas"]
         target = "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs"
         deltas[:] = [row for row in deltas if row["path"] != target]
@@ -441,7 +483,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertTrue(any("complete path-scoped tree delta" in error for error in errors))
 
     def test_later_non_a2t_product_producers_cannot_be_hidden(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         receipt["producer_overhead_disposition"]["evidence"][
             "non_a2t_product_producers"
         ] = []
@@ -449,30 +491,38 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertTrue(any("every later non-A2T product producer" in error for error in errors))
 
     def test_fixture_semantic_question_cannot_be_relabelled(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         receipt["fixture_replay"][0]["semantic_result"]["question"] = "gpu-probe"
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("semantic result has the wrong question" in error for error in errors))
 
-    def test_human_observation_must_match_current_semantics(self):
-        receipt = self.terminal_receipt()
-        receipt["human_perfetto_ui_correlation"]["observed_spans"][0]["duration_ns"] = 1
+    def test_historical_agent_review_cannot_satisfy_human_acceptance(self):
+        receipt = self.structural_receipt()
+        self.attach_historical_agent_review(receipt)
         errors = MODULE.verify(receipt, ROOT)
-        self.assertTrue(any("human Perfetto UI correlation" in error for error in errors))
+        self.assertTrue(any(
+            "reviewer_kind=human" in error or "automated agent or model" in error
+            for error in errors
+        ))
 
-    def test_terminal_human_review_cannot_self_authenticate(self):
-        receipt = self.terminal_receipt()
+    def test_human_review_cannot_self_authenticate(self):
+        receipt = self.structural_receipt()
+        self.attach_historical_agent_review(receipt)
         del receipt["human_perfetto_ui_review_source"]
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("human Perfetto UI correlation" in error for error in errors))
 
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
+        self.attach_historical_agent_review(receipt)
         receipt["human_perfetto_ui_review_source"]["git_blob_sha1"] = "0" * 40
         errors = MODULE.verify(receipt, ROOT)
-        self.assertTrue(any("immutable Git provenance" in error for error in errors))
+        self.assertTrue(any(
+            "reviewer_kind=human" in error or "automated agent or model" in error
+            for error in errors
+        ))
 
     def test_sample_count_and_order_mutations_fail_closed(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         receipt["measured"]["raw_samples"].pop()
         receipt["fresh_start"]["raw_samples"][1]["order"] = "cli-first"
         errors = MODULE.verify(receipt, ROOT)
@@ -480,7 +530,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertTrue(any("fresh trial 2" in error for error in errors))
 
     def test_published_statistics_must_match_raw_samples(self):
-        receipt = self.terminal_receipt()
+        receipt = self.structural_receipt()
         receipt["measured"]["cli"]["median_ms"] = 999.0
         receipt["measured"]["confidence"]["ci_high_ms"] = 999.0
         receipt["fresh_start"]["mcp_process_initialize_request_shutdown"][

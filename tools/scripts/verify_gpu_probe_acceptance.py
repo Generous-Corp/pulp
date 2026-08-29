@@ -123,6 +123,11 @@ EXPECTED_PLAN_BLOB = "2d1c461d3ea640f75786a72c312d074f68f59028"
 EXPECTED_FORGE_REVISION = "0750a88dea3af7fca927a8c02887e071109407ae"
 EXPECTED_FORGE_ROOT_TREE = "b31fb3effd109b30381007f43de208f81d6926a7"
 EXPECTED_FORGE_PULP_REF_BLOB = "3e54500140a1dc5de0dbefaab29612916f257ecd"
+OFFLINE_STRUCTURAL_STATUS = "nonterminal-offline-structural-evidence"
+OFFLINE_TERMINAL_ERROR = (
+    "standalone GPU-probe verification is structural-only; terminal "
+    "certification requires a fresh gpu_probe_acceptance.py recorder run"
+)
 RESULT_SCHEMA = (
     Path(__file__).resolve().parents[2]
     / "docs/contracts/gpu-probe-result-v1.schema.json"
@@ -727,15 +732,18 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         )
     acceptance = _mapping(receipt.get("acceptance"), "acceptance", errors)
     expected_acceptance = {
-        "terminal_status": "pass", "all_four_installed_cli": "pass",
+        "terminal_status": OFFLINE_STRUCTURAL_STATUS,
+        "all_four_installed_cli": "pass",
         "all_four_installed_mcp": "pass", "seeded_negative_controls": "pass",
         "forge_modular_and_additional_pulp_path_canaries": "pass",
     }
     if acceptance != expected_acceptance:
-        errors.append("v2 terminal acceptance fields are incomplete or non-passing")
+        errors.append(
+            "v2 structural acceptance fields are incomplete or claim terminal authority"
+        )
 
 
-def verify(root: Path) -> list[str]:
+def verify(root: Path, *, require_terminal: bool = False) -> list[str]:
     errors: list[str] = []
     try:
         result_schema = _load(RESULT_SCHEMA)
@@ -1054,6 +1062,20 @@ def verify(root: Path) -> list[str]:
                 errors.append(f"MCP {label} evidence is not the installed CLI recipe result")
     if v2:
         _verify_v2_metadata(root, receipt, errors)
+    if require_terminal:
+        errors.append(OFFLINE_TERMINAL_ERROR)
+        if GIT_SHA.fullmatch(integration_head):
+            try:
+                live_head = subprocess.run(
+                    ["git", "rev-parse", "HEAD"], cwd=ROOT, check=False,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+            except OSError:
+                live_head = ""
+            if live_head != integration_head:
+                errors.append(
+                    "terminal certification requires integration_head to equal live checkout HEAD"
+                )
 
     return errors
 
@@ -1061,15 +1083,24 @@ def verify(root: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("receipt_dir", type=Path)
+    parser.add_argument(
+        "--terminal", action="store_true",
+        help=(
+            "Fail with guidance: terminal certification is available only from "
+            "the fresh recorder process"
+        ),
+    )
     args = parser.parse_args(argv)
-    errors = verify(args.receipt_dir)
+    errors = verify(args.receipt_dir, require_terminal=args.terminal)
     if errors:
         for error in errors:
             print(f"gpu-probe-acceptance: FAIL: {error}", file=sys.stderr)
         return 1
     schema = _load(args.receipt_dir / "receipt.json").get("schema")
     if schema == "pulp.gpu-probe-acceptance-receipt.v2":
-        print("gpu-probe-acceptance: ok (terminal v2; installed all-four CLI/MCP parity)")
+        print(
+            "gpu-probe-acceptance: ok (v2 structural integrity only; nonterminal)"
+        )
     else:
         print("gpu-probe-acceptance: ok (historical v1 integrity; nonterminal)")
     return 0

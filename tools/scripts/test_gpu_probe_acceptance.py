@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Portable mutation tests for the terminal A2 acceptance recorder contract."""
+"""Portable mutation tests for A2 structural proof and fresh-run certification."""
 
 from __future__ import annotations
 
@@ -310,7 +310,8 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 },
             },
             "acceptance": {
-                "terminal_status": "pass", "all_four_installed_cli": "pass",
+                "terminal_status": VERIFIER.OFFLINE_STRUCTURAL_STATUS,
+                "all_four_installed_cli": "pass",
                 "all_four_installed_mcp": "pass", "seeded_negative_controls": "pass",
                 "forge_modular_and_additional_pulp_path_canaries": "pass",
             },
@@ -325,11 +326,46 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
         receipt["raw_sha256"][name] = hashlib.sha256((directory / name).read_bytes()).hexdigest()
         receipt_path.write_text(json.dumps(receipt))
 
-    def test_v2_all_four_exact_head_fixture_passes(self):
+    def test_synthetic_v2_fixture_passes_structural_validation_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.v2_fixture(root)
             self.assertEqual(VERIFIER.verify(root), [])
+
+    def test_synthetic_v2_fixture_cannot_request_terminal_certification(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt = self.v2_fixture(root)
+            errors = VERIFIER.verify(root, require_terminal=True)
+            self.assertIn(VERIFIER.OFFLINE_TERMINAL_ERROR, errors)
+            with self.assertRaisesRegex(
+                RECORDER.AcceptanceError, "recorder-owned retained claims"
+            ):
+                RECORDER.certify_fresh_recording(
+                    ROOT,
+                    receipt["integration_head"],
+                    root,
+                    staging_claim=object(),
+                    output_parent_claim=object(),
+                    execution_claim=object(),
+                    source_tree_claim=object(),
+                    build_input_claim=object(),
+                    provider_input_claim=object(),
+                )
+
+    def test_stale_parent_cannot_request_terminal_certification(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt = self.v2_fixture(root)
+            parent = subprocess_text(["git", "rev-parse", "HEAD^"], ROOT)
+            receipt["integration_head"] = parent
+            receipt["source_identity"]["revision"] = parent
+            (root / "receipt.json").write_text(json.dumps(receipt))
+            errors = VERIFIER.verify(root, require_terminal=True)
+            self.assertTrue(any(
+                "integration_head to equal live checkout HEAD" in error
+                for error in errors
+            ))
 
     def test_v2_source_binding_includes_retained_tree_helper(self):
         helper = "tools/scripts/gpu_trace_overhead_acceptance.py"

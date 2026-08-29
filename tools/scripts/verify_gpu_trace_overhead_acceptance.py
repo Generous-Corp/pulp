@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify a terminal exact-head A2T offline-analysis acceptance receipt."""
+"""Verify A2T offline receipt structure without claiming terminal execution."""
 
 from __future__ import annotations
 
@@ -378,7 +378,7 @@ def _verify_installed_build_provenance(
 
 
 def verify(
-    receipt: Any, repository: Path, *, require_terminal: bool = True
+    receipt: Any, repository: Path, *, require_terminal: bool = False
 ) -> list[str]:
     errors: list[str] = []
     if not isinstance(receipt, dict):
@@ -626,6 +626,7 @@ def verify(
 
     acceptance = _object(receipt.get("acceptance"), "acceptance", errors)
     expected_acceptance = {
+        "terminal_status": contract.OFFLINE_STRUCTURAL_STATUS,
         "semantic_parity": "pass",
         "same_installed_prefix": "pass",
         "offline_latency_budget": "unverified-no-ratified-budget",
@@ -638,10 +639,21 @@ def verify(
     human = receipt.get("human_perfetto_ui_correlation")
     human_source = receipt.get("human_perfetto_ui_review_source")
     if require_terminal:
-        if acceptance.get("terminal_status") != "pass":
-            errors.append("receipt is nonterminal")
-        if acceptance.get("human_perfetto_ui_correlation") != "pass":
-            errors.append("human Perfetto UI correlation did not pass")
+        errors.append(
+            "standalone A2T verification is structural-only; terminal "
+            "certification requires a fresh gpu_trace_overhead_acceptance.py "
+            "recorder run"
+        )
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repository, check=False,
+            capture_output=True, text=True,
+        )
+        live_head = completed.stdout.strip() if completed.returncode == 0 else ""
+        if source_revision != live_head or receipt.get("integration_head") != live_head:
+            errors.append(
+                "terminal certification requires source_revision and integration_head "
+                "to equal live checkout HEAD"
+            )
     if human is None and human_source is not None:
         errors.append("human review source exists without a carried correlation")
     elif human is not None and isinstance(measured_semantic, dict) and trace_path is not None:
@@ -675,19 +687,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("receipt", type=Path)
     parser.add_argument("--repository", type=Path, default=Path.cwd())
-    parser.add_argument("--allow-nonterminal", action="store_true")
+    parser.add_argument(
+        "--terminal", action="store_true",
+        help=(
+            "Fail with guidance: terminal certification is available only from "
+            "the fresh recorder process"
+        ),
+    )
     args = parser.parse_args(argv)
     try:
         payload = json.loads(args.receipt.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         print(f"gpu-trace-overhead-acceptance: FAIL: {error}", file=sys.stderr)
         return 1
-    errors = verify(payload, args.repository, require_terminal=not args.allow_nonterminal)
+    errors = verify(payload, args.repository, require_terminal=args.terminal)
     if errors:
         for error in errors:
             print(f"gpu-trace-overhead-acceptance: FAIL: {error}", file=sys.stderr)
         return 1
-    print("gpu-trace-overhead-acceptance: ok (v3 exact-head, SDK-matched, same artifact)")
+    print(
+        "gpu-trace-overhead-acceptance: ok "
+        "(v3 structural integrity only; nonterminal)"
+    )
     return 0
 
 

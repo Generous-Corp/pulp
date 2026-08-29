@@ -60,7 +60,7 @@ drift is not an acceptable landing path.
 This v1 evidence no longer closes final A2 acceptance. It used direct C++
 Renderer3D/Three.js roles, exercised installed MCP only for compute, predates
 exact installed build/plan provenance and current source, and carries only the
-older Forge proof. The v2 recorder and terminal contract are documented in the
+older Forge proof. The v2 fresh-recorder and structural-receipt contract are documented in the
 parent `docs/validation/gpu-probes/README.md`; preserve this directory without
 rewriting it.
 

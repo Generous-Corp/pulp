@@ -58,6 +58,16 @@ sdk_provenance = _load_local_source("sdk_provenance", "sdk_provenance.py")
 EXPECTED_EXIT = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
 ANALYSIS_TIMEOUT_SECONDS = 300
 MCP_RESPONSE_LIMIT_BYTES = 1024 * 1024
+OFFLINE_STRUCTURAL_STATUS = "nonterminal-offline-structural-evidence"
+NON_HUMAN_REVIEWER = re.compile(
+    r"\b(?:agent|bot|codex|claude|chatgpt|gemini|copilot|llm|model|"
+    r"automation|automated|artificial[ -]intelligence)\b",
+    re.IGNORECASE,
+)
+BROAD_PROVIDER_ROOT_NAMES = frozenset({
+    "code", "projects", "repositories", "repos", "source", "src",
+    "workspace", "workspaces",
+})
 A2T_ANALYZER_SOURCE_PATHS = {
     "CMakeLists.txt",
     ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
@@ -605,9 +615,7 @@ def clean_source_identity(repository: Path, revision: str) -> dict[str, Any]:
     top = Path(_git_text(repository, "rev-parse", "--show-toplevel")).resolve()
     if top != repository:
         raise ValueError("repository must be its exact Git worktree root")
-    head = _git_text(repository, "rev-parse", "HEAD")
-    if head != revision:
-        raise ValueError("source-revision must equal the exact recording checkout HEAD")
+    head = assert_exact_live_head(repository, revision)
     status = _git_text(
         repository,
         "status",
@@ -628,6 +636,14 @@ def clean_source_identity(repository: Path, revision: str) -> dict[str, Any]:
         "clean": True,
         "status_sha256": hashlib.sha256(status.encode()).hexdigest(),
     }
+
+
+def assert_exact_live_head(repository: Path, revision: str) -> str:
+    """Require a fresh recorder run to target the checkout's exact live HEAD."""
+    head = _git_text(repository.resolve(), "rev-parse", "HEAD")
+    if head != revision:
+        raise ValueError("source-revision must equal the exact recording checkout HEAD")
+    return head
 
 
 def plan_identity(
@@ -1506,7 +1522,17 @@ def _provider_root_is_bounded(path: Path) -> bool:
         resolved = path.resolve(strict=True)
     except (OSError, RuntimeError):
         return False
-    return resolved.is_dir() and len(resolved.parts) >= 4
+    if not resolved.is_dir() or len(resolved.parts) < 4:
+        return False
+    try:
+        account_root = Path.home().resolve(strict=True)
+    except (OSError, RuntimeError):
+        account_root = Path.home().resolve()
+    if resolved == account_root or resolved.parent == account_root:
+        return False
+    if resolved.name.casefold() in BROAD_PROVIDER_ROOT_NAMES:
+        return False
+    return True
 
 
 def _absolute_lexical_path(path: Path) -> Path:
@@ -3315,9 +3341,18 @@ def preserve_human_perfetto_ui_correlation(
         raise ValueError("prior human review is not bound to its receipt trace artifact")
     if human_digest != trace_sha256:
         raise ValueError("prior human-review receipt is not bound to the measured trace")
+    if human.get("reviewer_kind") != "human":
+        raise ValueError(
+            "prior human-review receipt must declare reviewer_kind=human"
+        )
     for field in ("reviewer", "reviewed_utc", "ui_revision", "delivery"):
         if not isinstance(human.get(field), str) or not human[field].strip():
             raise ValueError(f"prior human-review receipt lacks nonempty {field}")
+    reviewer = human["reviewer"].strip()
+    if len(reviewer) > 200 or NON_HUMAN_REVIEWER.search(reviewer):
+        raise ValueError(
+            "prior human-review reviewer identity names an automated agent or model"
+        )
     if not isinstance(human.get("observed_spans"), list) or not human["observed_spans"]:
         raise ValueError("prior human-review receipt lacks observed span details")
     contributors = semantic_result.get("contributors")
@@ -3468,6 +3503,91 @@ def bind_tracked_human_review_receipt(
         "sha256": hashlib.sha256(data).hexdigest(),
         "bytes": len(data),
         "existed_unchanged_in_direct_parent": True,
+    }
+
+
+def certify_fresh_recording(
+    evidence: dict[str, Any],
+    repository: Path,
+    source_revision: str,
+    output: Path,
+    *,
+    output_parent_claim: RetainedDirectoryClaim,
+    execution_claim: CombinedClaims,
+    source_tree_claim: RetainedTreeClaim,
+    build_input_claim: RetainedTreeClaim,
+    provider_input_claim: RetainedClaimSet,
+) -> dict[str, str]:
+    """Certify only the live recorder run while every retained claim is open.
+
+    The returned result is deliberately process-local.  It is printed by the
+    recorder, never serialized into the offline receipt, because a standalone
+    JSON file cannot attest that the commands and retained descriptors existed.
+    """
+    if (
+        type(output_parent_claim) is not RetainedDirectoryClaim
+        or type(execution_claim) is not CombinedClaims
+        or type(source_tree_claim) is not RetainedTreeClaim
+        or type(build_input_claim) is not RetainedTreeClaim
+        or type(provider_input_claim) is not RetainedClaimSet
+    ):
+        raise ValueError(
+            "fresh A2T certification requires recorder-owned retained claims"
+        )
+    assert_exact_live_head(repository, source_revision)
+    execution_claim.assert_current()
+    source_tree_claim.assert_full()
+    build_input_claim.assert_full()
+    provider_input_claim.assert_full()
+    output_parent_claim.assert_current()
+
+    expected_bytes = (
+        json.dumps(evidence, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    expected_digest = hashlib.sha256(expected_bytes).hexdigest()
+    matching_claims = [
+        claim for claim in output_parent_claim.file_claims
+        if claim.get("path") == output
+        and claim.get("sha256") == expected_digest
+        and claim.get("bytes") == len(expected_bytes)
+    ]
+    if len(matching_claims) != 1:
+        raise ValueError(
+            "fresh A2T certification requires the retained published receipt bytes"
+        )
+
+    structural_verifier = _load_local_source(
+        "verify_gpu_trace_overhead_acceptance_fresh_run",
+        "verify_gpu_trace_overhead_acceptance.py",
+    )
+    problems = structural_verifier.verify(
+        evidence, repository, require_terminal=False
+    )
+    if problems:
+        raise ValueError("A2T structural self-verification failed: " + "; ".join(problems))
+    acceptance = evidence.get("acceptance")
+    protocol = evidence.get("protocol")
+    if not isinstance(acceptance, dict) or not isinstance(protocol, dict):
+        raise ValueError("fresh A2T certification lacks acceptance/protocol objects")
+    status = terminal_acceptance_status(
+        evidence.get("human_perfetto_ui_correlation"),
+        warmups=protocol.get("warmups"),
+        trials=protocol.get("measured_paired_trials"),
+        fresh_start_trials=protocol.get("fresh_start_paired_trials"),
+    )
+    if status != "pass":
+        raise ValueError(f"fresh A2T recording is {status}")
+
+    assert_exact_live_head(repository, source_revision)
+    execution_claim.assert_current()
+    source_tree_claim.assert_full()
+    build_input_claim.assert_full()
+    provider_input_claim.assert_full()
+    output_parent_claim.assert_current()
+    return {
+        "fresh_recorder_certification": "pass",
+        "source_revision": source_revision,
+        "durable_receipt_status": OFFLINE_STRUCTURAL_STATUS,
     }
 
 
@@ -3797,12 +3917,7 @@ def main() -> int:
             "raw_samples": fresh_rows,
         },
         "acceptance": {
-            "terminal_status": terminal_acceptance_status(
-                human_perfetto_ui_correlation,
-                warmups=args.warmups,
-                trials=args.trials,
-                fresh_start_trials=args.fresh_start_trials,
-            ),
+            "terminal_status": OFFLINE_STRUCTURAL_STATUS,
             "semantic_parity": "pass", "same_installed_prefix": "pass",
             "human_perfetto_ui_correlation": (
                 "pass" if human_perfetto_ui_correlation is not None
@@ -3815,17 +3930,39 @@ def main() -> int:
     }
     execution_claim.assert_current()
     atomic_write_json(output, evidence, output_parent_claim)
+    output_parent_claim.bind_file(
+        output,
+        "published A2T structural receipt",
+        hashlib.sha256(
+            (json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        ).hexdigest(),
+    )
     execution_claim.assert_current()
     source_tree_claim.assert_full()
     build_input_claim.assert_full()
     provider_input_claim.assert_full()
     output_parent_claim.assert_current()
+    certification = certify_fresh_recording(
+        evidence,
+        repository,
+        args.source_revision,
+        output,
+        output_parent_claim=output_parent_claim,
+        execution_claim=execution_claim,
+        source_tree_claim=source_tree_claim,
+        build_input_claim=build_input_claim,
+        provider_input_claim=provider_input_claim,
+    )
     install_claim.close()
     provider_input_claim.close()
     build_input_claim.close()
     source_tree_claim.close()
     output_parent_claim.close()
-    print(json.dumps({"output": str(output), "acceptance": evidence["acceptance"]}))
+    print(json.dumps({
+        "output": str(output),
+        "acceptance": evidence["acceptance"],
+        **certification,
+    }))
     return 0
 
 

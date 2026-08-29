@@ -43,7 +43,8 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "artifacts": {"trace": {"sha256": trace_digest}},
             "human_perfetto_ui_correlation": {
                 "artifact_sha256": trace_digest,
-                "reviewer": "human reviewer",
+                "reviewer_kind": "human",
+                "reviewer": "Daniel Raffel",
                 "reviewed_utc": "2026-08-28T05:34:54Z",
                 "ui_revision": "v58.3-11fbaed8",
                 "delivery": "official localhost embedding protocol",
@@ -227,6 +228,34 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 semantic_result=self.semantic_result(),
             )
 
+    def test_human_review_rejects_agent_or_missing_human_identity(self):
+        for reviewer_kind, reviewer in (
+            (None, "Daniel Raffel"),
+            ("agent", "Daniel Raffel"),
+            ("human", "Codex visual acceptance agent"),
+            ("human", "automated review bot"),
+        ):
+            with self.subTest(
+                reviewer_kind=reviewer_kind, reviewer=reviewer
+            ):
+                receipt = self.human_review_receipt()
+                if reviewer_kind is None:
+                    del receipt["human_perfetto_ui_correlation"]["reviewer_kind"]
+                else:
+                    receipt["human_perfetto_ui_correlation"][
+                        "reviewer_kind"
+                    ] = reviewer_kind
+                receipt["human_perfetto_ui_correlation"]["reviewer"] = reviewer
+                with self.assertRaisesRegex(
+                    ValueError, "reviewer_kind=human|automated agent or model"
+                ):
+                    MODULE.preserve_human_perfetto_ui_correlation(
+                        receipt,
+                        question="gpu-startup",
+                        trace_sha256="1" * 64,
+                        semantic_result=self.semantic_result(),
+                    )
+
     def test_human_review_rejects_missing_or_untyped_contributor_fields(self):
         for semantic_field, observed_field, invalid in (
             ("duration_ns", "duration_ns", None),
@@ -277,6 +306,26 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertFalse(MODULE.source_revisions_match(revision, "b" * 40))
         self.assertTrue(MODULE.valid_lower_hex(revision, 40))
         self.assertFalse(MODULE.valid_lower_hex("HEAD", 40))
+
+    def test_fresh_certification_rejects_synthetic_claim_objects(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(ValueError, "recorder-owned retained claims"):
+            MODULE.certify_fresh_recording(
+                {},
+                ROOT,
+                head,
+                Path("/tmp/synthetic-a2t-receipt.json"),
+                output_parent_claim=object(),
+                execution_claim=object(),
+                source_tree_claim=object(),
+                build_input_claim=object(),
+                provider_input_claim=object(),
+            )
+
+    def test_fresh_certification_rejects_stale_parent_revision(self):
+        parent = MODULE._git_text(ROOT, "rev-parse", "HEAD^")
+        with self.assertRaisesRegex(ValueError, "exact recording checkout HEAD"):
+            MODULE.assert_exact_live_head(ROOT, parent)
 
     def test_mixed_install_prefix_cannot_borrow_current_build_stamp(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -622,6 +671,16 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
     def test_provider_root_guard_rejects_broad_inventory_roots(self):
         self.assertFalse(MODULE._provider_root_is_bounded(Path("/")))
         self.assertFalse(MODULE._provider_root_is_bounded(Path.home()))
+        self.assertFalse(
+            MODULE._provider_root_is_bounded(Path("/Volumes/Workshop/Code"))
+        )
+        self.assertFalse(
+            MODULE._provider_root_is_bounded(Path("/Users/danielraffel/Code"))
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            provider = Path(temporary) / "dependencies" / "skia-dawn"
+            provider.mkdir(parents=True)
+            self.assertTrue(MODULE._provider_root_is_bounded(provider))
 
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -733,23 +792,22 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             errors = MODULE.source_binding_errors(receipt, ROOT)
         self.assertIn(f"current checkout source blob drift for {target}", errors)
 
-    def test_checked_in_receipt_preserves_a3_human_review_binding(self):
+    def test_checked_in_agent_review_is_not_human_acceptance(self):
         receipt = json.loads(
             (ROOT / "docs" / "validation" / "gpu-trace-overhead" /
              "m3-a2t-offline-analysis-20260828.json").read_text(encoding="utf-8")
         )
         trace_digest = receipt["artifacts"]["trace"]["sha256"]
-        correlation = MODULE.preserve_human_perfetto_ui_correlation(
-            receipt, question=receipt["protocol"]["question"],
-            trace_sha256=trace_digest,
-            semantic_result=receipt["semantic_result"],
-        )
         self.assertEqual(receipt["protocol"]["question"], "gpu-startup")
-        self.assertEqual(
-            receipt["acceptance"]["human_perfetto_ui_correlation"], "pass"
-        )
-        self.assertEqual(correlation, receipt["human_perfetto_ui_correlation"])
-        self.assertEqual(correlation["artifact_sha256"], trace_digest)
+        with self.assertRaisesRegex(
+            ValueError, "reviewer_kind=human|automated agent or model"
+        ):
+            MODULE.preserve_human_perfetto_ui_correlation(
+                receipt,
+                question=receipt["protocol"]["question"],
+                trace_sha256=trace_digest,
+                semantic_result=receipt["semantic_result"],
+            )
 
     def test_percentile_interpolates(self):
         self.assertEqual(MODULE.percentile([1.0, 2.0, 3.0], 0.5), 2.0)

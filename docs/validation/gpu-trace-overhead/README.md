@@ -24,10 +24,13 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --plan-revision "$PLAN_REVISION" \
   --plan-sha256 "$PLAN_SHA256" \
   --planning-repository "$PWD/planning" \
-  --prior-human-review-receipt \
-    docs/validation/gpu-trace-overhead/m3-a2t-offline-analysis-20260828.json \
+  --prior-human-review-receipt "$HUMAN_REVIEW_RECEIPT" \
   --output /tmp/gpu-trace-overhead.json
 ```
+
+`$HUMAN_REVIEW_RECEIPT` must name an independently committed genuine-human
+same-artifact review satisfying the contract below. The historical M3 agent
+receipt is not a valid value.
 
 The recorder requires an exact clean canonical Pulp worktree at
 `--source-revision` and an external single-config Release build configured from
@@ -135,8 +138,9 @@ first-frame pipeline/upload stall, incomplete-capture, and wrong-category
 fixtures twice through the installed CLI and once through the installed MCP.
 It requires deterministic checked-view replay, typed exit/`isError` behavior,
 text/structured MCP identity, all semantic fields, and the intended
-verdict/stage/action. The terminal verifier correlates the timed result to that
-same replay row and checked-in artifact digest.
+verdict/stage/action. The structural verifier correlates the timed result to
+that same replay row and checked-in artifact digest; it does not certify that a
+saved JSON object came from a live recorder process.
 
 The recorder derives the complete path-scoped A2T tree delta from the immutable
 pre-A2T boundary to the exact measured source head. A caller cannot shorten or
@@ -168,29 +172,33 @@ adds no xrun. Offline analysis cannot waive or stand in for that B6 gate.
 
 ## Human Perfetto correlation
 
-Automation proves that the typed result cites the saved artifact and emits an
+Automation proves that the typed result cites the saved artifact and emits a
 `ui_correlation.open_command` plus bounded search terms. The committed M3
-receipt also records the completed visual acceptance against the exact
-`9fd7cf0d...` artifact: Perfetto UI selected `gpu_pipeline_prepare` (1.8 ms)
-and `gpu_resource_upload` (0.9 ms) on the expected GPU track and displayed the
-shared `4444...4444` evidence ID plus the expected frame and sequence fields.
-The fixture was delivered through Perfetto's official localhost embedding
-protocol with `localOnly` browser-memory handling; it was not uploaded or
-shared. Future receipts must retain the reviewer, date, artifact digest, UI
-revision, and observed span details; an executable open command is not itself
-visual inspection.
+receipt records an agent observation against the exact `9fd7cf0d...` artifact:
+the recorded Perfetto selection was `gpu_pipeline_prepare` (1.8 ms) and
+`gpu_resource_upload` (0.9 ms) on the expected GPU track, with the shared
+`4444...4444` evidence ID and expected frame/sequence fields. Its reviewer is
+`Codex visual acceptance agent`, so it is not human acceptance and cannot close
+the plan's human same-artifact gate. The fixture was delivered through
+Perfetto's official localhost embedding protocol with `localOnly`
+browser-memory handling; it was not uploaded or shared. Current evidence
+therefore remains nonterminal until a named person reviews that same artifact.
 
-Regenerating analyzer timings does not repeat or silently manufacture that
-visual acceptance. For a `gpu-startup` rerun, pass a prior accepted A2T receipt
+Regenerating analyzer timings does not repeat or silently manufacture visual
+acceptance. For a `gpu-startup` rerun, pass a prior accepted A2T receipt
 that is already tracked below `docs/validation/gpu-trace-overhead/` with
 `--prior-human-review-receipt`. The generator requires the checkout bytes to be
 the exact Git blob at the final source revision, requires that same blob to have
 existed unchanged in a direct parent, records its path/blob/SHA-256/byte-count
 provenance, and carries its `human_perfetto_ui_correlation` root object forward
-verbatim. The terminal verifier independently re-reads that prior Git blob; it
-never treats the new receipt's own fields as review authority. It records
+verbatim. The review object must declare `reviewer_kind: human`, name the person
+who directly performed the inspection, and retain the date, artifact digest,
+UI revision, delivery, and observed-span details. Reviewer identities naming
+Codex, another model, an agent, automation, or a bot fail closed. The structural
+verifier independently re-reads that prior Git blob; it never treats the new
+receipt's own fields as review authority. It records
 `acceptance.human_perfetto_ui_correlation: pass` only when the prior receipt is
-also a `gpu-startup` receipt with passing human acceptance and its trace
+also a `gpu-startup` receipt with genuine human acceptance and its trace
 artifact SHA-256 exactly matches the trace being measured. A missing object,
 different question, non-passing acceptance, or changed artifact fails closed.
 The current top two typed contributors must also match the human-observed span
@@ -198,20 +206,27 @@ name, duration, evidence ID, frame index, sequence, and health state exactly.
 Do not pass this option for `gpu-health` or `gpu-probe`; those runs cannot
 inherit a startup UI review.
 
-After recording, verify terminal status from the exact integration checkout:
+After recording, replay structural integrity from the exact integration
+checkout:
 
 ```bash
 python3 tools/scripts/verify_gpu_trace_overhead_acceptance.py \
   /tmp/gpu-trace-overhead.json --repository "$PWD"
 ```
 
-`--allow-nonterminal` exists only for inspecting an intentionally incomplete
-draft. It must not be used by a checked-in final acceptance gate. The existing
-`m3-a2t-offline-analysis-20260828.json` is historical: it predates v3 installed
+The standalone verifier is always nonterminal. `--terminal` intentionally fails
+with instructions to rerun the recorder; no caller-selected JSON field, copied
+directory, or recomputed hash can attest execution. Terminal A2T proof is the
+fresh recorder process's `fresh_recorder_certification: pass` output while the
+installed binaries, trace, SDK-matched processor, source/build/provider trees,
+published receipt inode, and exact live `HEAD` remain descriptor-bound in that
+process. The existing `m3-a2t-offline-analysis-20260828.json` is historical: it
+predates v3 installed
 provider provenance, complete fixture replay, expanded semantic parity, and
 exact same-artifact contributor correlation, so it is not terminal evidence.
-Its independently published human-review object may still be inherited through
-the immutable tracked-blob rule above.
+Its agent-review object cannot be inherited as human acceptance. A genuine
+human same-artifact review must be published independently before the final
+fresh recorder run.
 
 Perfetto is a localization tool, not an oracle for every platform state
 machine. A real resize investigation demonstrated the correct evidence chain:

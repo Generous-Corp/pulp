@@ -1,6 +1,7 @@
 # Final A2 GPU-probe acceptance
 
-`tools/scripts/gpu_probe_acceptance.py` is the terminal A2 recorder. It refreshes
+`tools/scripts/gpu_probe_acceptance.py` is the A2 fresh-run certification
+orchestrator. It refreshes
 one exact-head Release Pulp build/install, then runs all four canonical recipes
 twice plus their seeded negative controls through installed Rust `pulp`. It
 replays every positive and negative through installed `pulp-mcp`, rebuilds the
@@ -11,8 +12,12 @@ examples for paths that Forge Modular does not exercise, so the executed STFT
 and Three.js rows are recorded as additional Pulp path canaries rather than
 Forge evidence. The recorder writes to a new directory outside all checkouts,
 self-verifies, atomically claims the destination without replacement, links all
-regular evidence files, and publishes `receipt.json` last as the terminal
-marker.
+regular evidence files, and publishes `receipt.json` last. The durable receipt
+is structural evidence, not a self-authenticating terminal certificate. Only
+the still-running recorder can emit `fresh_recorder_certification: pass`, after
+it rechecks the exact live `HEAD`, every retained descriptor/inode/digest, the
+published hard-link identities, and the structural verifier in that same
+process.
 
 The recorder must run only after the final integration SHA is fixed. It does
 not create or promote a receipt during an implementation turn.
@@ -127,12 +132,18 @@ python3 tools/scripts/gpu_probe_acceptance.py \
 python3 tools/scripts/verify_gpu_probe_acceptance.py "$A2_RECEIPT"
 ```
 
-The terminal directory contains 12 CLI JSON results, a nine-response MCP JSONL
+The receipt directory contains 12 CLI JSON results, a nine-response MCP JSONL
 transcript, the Forge Modular PNG, Forge-cwd doctor JSON, and `receipt.json`.
-The verifier rejects missing recipe parity, direct C++ substitutions for the
+The standalone verifier checks structural integrity only. It rejects missing
+recipe parity, direct C++ substitutions for the
 Rust front, stale source blobs, forged plan/build stamps, non-authentic hardware,
 blank screenshots, missing negative controls, Forge drift, and non-passing
-terminal fields.
+structural fields, but it cannot prove that a saved directory came from a live
+recorder. `--terminal` therefore fails closed with instructions to rerun the
+orchestrator; no JSON marker or recomputed hash can upgrade an offline directory.
+Terminal A2 proof is the successful recorder process and its
+`fresh_recorder_certification: pass` output at the final live `HEAD`, captured
+by the independent campaign runner together with this structural receipt.
 
 Publication never replaces an output directory that appears during the run.
 Before any build or recipe execution the recorder retains the exact existing
@@ -141,7 +152,10 @@ live through self-verification and publication. The recorder claims the final
 directory with a no-replace `mkdir`, publishes regular files by no-replace hard
 links, fsyncs them, and links `receipt.json` only after the other evidence is
 durable. A raced parent/destination or partial interrupted directory is
-nonterminal and must not be promoted.
+nonterminal and must not be promoted. A copied or hand-built directory may pass
+structural checks when its internal bytes are coherent, but cannot request
+terminal certification because it has no process-local retained-claim
+capability.
 
 Expected recorder runtime is roughly 10–30 minutes with warm build caches and
 45–90 minutes from cold dependencies. The bounded subprocess timeouts are one
