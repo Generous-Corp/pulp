@@ -119,6 +119,14 @@ bounded contributor query and return no rows unless every candidate carries
 the same valid 32-lowercase-hex evidence ID. The closed analyzer interprets an
 empty mixed-ID result as unavailable. A future multi-run UX should add an
 explicit evidence-ID selector rather than weakening this singleton boundary.
+Category discovery follows the same boundary: join slices through
+`thread_track.utid` to the stable `thread.upid`, and accept categories only
+when the question rows and category rows resolve to one evidence ID and one
+UPID/PID process instance. Never union global trace categories into a scoped
+answer. Probe verdict SQL also owns a closed causal-failure diagnostic set;
+`cpu_oracle_mismatch` and `magnitude_dispatch_failed` remain failures even if
+the same row inconsistently reports `health_state=healthy`. Do not generalize
+that rule to every nonempty diagnostic because healthy diagnostics are valid.
 
 **One definition, three surfaces.** The L0 CLI preset names map **1:1** onto
 these views: `slowest-frames → pulp_slowest_frames`, `xruns → pulp_xruns`,

@@ -86,6 +86,8 @@ WITH candidates AS (
   SELECT
     c.*,
     tt.utid,
+    th.upid,
+    p.pid,
     (
       SELECT MAX(anchor.ts + anchor.dur)
       FROM candidates AS anchor
@@ -96,6 +98,8 @@ WITH candidates AS (
   FROM candidates AS c
   JOIN selected_lifecycle USING (evidence_id)
   LEFT JOIN thread_track AS tt ON c.track_id = tt.id
+  LEFT JOIN thread AS th ON tt.utid = th.utid
+  LEFT JOIN process AS p ON th.upid = p.upid
 ), attributed AS (
   SELECT
     selected_rows.*,
@@ -126,6 +130,8 @@ SELECT
   stage,
   dur AS duration_ns,
   evidence_id,
+  upid AS process_upid,
+  pid AS process_pid,
   COALESCE(
     CAST(EXTRACT_ARG(arg_set_id, 'debug.diagnostic_code') AS TEXT),
     CAST(EXTRACT_ARG(arg_set_id, 'args.debug.diagnostic_code') AS TEXT)) AS diagnostic_code,

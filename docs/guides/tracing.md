@@ -43,6 +43,11 @@ later unindexed work is `unknown`, never silently folded into steady or cold.
 Zero-byte/never-flushed captures, processor-reported truncation, positive Perfetto data-loss/no-flush stats,
 unfinished slices, missing categories, and invalid evidence correlation are
 typed `unavailable` outcomes with `capture_complete:false`.
+Observed categories are accepted only from the same evidence ID and stable
+Perfetto process instance as the question rows; an unrelated process cannot
+complete that category set. The closed probe view also treats the producer's
+`cpu_oracle_mismatch` and `magnitude_dispatch_failed` diagnostics as failures,
+even alongside an inconsistent `healthy` state.
 
 For repeatable installed CLI/MCP timing and artifact-binding evidence, use
 `tools/scripts/gpu_trace_overhead_acceptance.py`; its receipt keeps five

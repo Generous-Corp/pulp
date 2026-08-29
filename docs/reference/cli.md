@@ -1483,9 +1483,13 @@ intervals cover the complete contributor; partial coverage remains unavailable.
 Unindexed spans without a first-frame temporal anchor use phase `unknown`.
 `capture_integrity` records
 whole-trace slice, unfinished-slice, data-loss, and no-flush counts.
-`observed_categories` is derived
-independently from the parsed trace, never supplied by a scenario adapter, so
-acceptance tools can reject a capture that omitted required categories.
+`observed_categories` is derived independently from the parsed trace, never
+supplied by a scenario adapter. `category_scope` binds those categories to the
+single evidence ID and stable Perfetto process instance (`process_upid` plus
+OS PID) selected by the named question; categories from another process or
+evidence cohort cannot satisfy an acceptance requirement. Probe diagnostics
+`cpu_oracle_mismatch` and `magnitude_dispatch_failed` are closed causal
+failures even if an inconsistent producer also labels adapter health healthy.
 Empty/never-flushed files, processor-reported truncation, positive data-loss/no-flush stats, missing
 categories, unfinished slices, and invalid probe correlation return
 `unavailable` with exit 2; they do not silently pass. Long acquire/present wall

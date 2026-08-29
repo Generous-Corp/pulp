@@ -444,3 +444,14 @@ retains the real capture, but intentionally returns INCONCLUSIVE until
 product-specific A2T/A3, same-process adapter identity, metric, logical-input,
 and fidelity producers are available. Never rename its subprocess wall time to
 CPU/frame/interaction time.
+
+Terminal DPR evidence additionally requires the named trace answers to report
+one `category_scope` whose evidence ID and stable Perfetto process instance are
+shared across startup, health, and probe. Global or unrelated-process trace
+categories cannot complete a cell.
+
+The runner caps each adapter stdout and stderr stream at 1 MiB and terminates
+the adapter process group when either cap is crossed. The Pulp-native adapter
+applies the same per-stream cap to its product measurement producer. An output
+cap or timeout is resumable incomplete evidence; inspect the nonce-specific
+logs instead of increasing the cap to accommodate sample data.

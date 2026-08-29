@@ -81,6 +81,17 @@ Path(a.receipt).write_text(json.dumps(receipt)+'\\n')
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+def noisy_measurement_producer(path: Path) -> None:
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, time\n"
+        "os.write(2, b'x' * (1024 * 1024 + 65536))\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
 def request(root: Path, expected_digest: str) -> dict:
     return {
         "schema": "pulp.gpu-dpr-cell-request.v1",
@@ -170,7 +181,7 @@ def main() -> int:
         # field. The outer runner still validates raw samples and Perfetto.
         document["expected_content_digest"] = digest(source)
         write_json(request_path, document)
-        producer = tmp / "native-measurement-producer"
+        producer = tmp / "native-measurement-producer.exe"
         fake_measurement_producer(producer)
         measured_env = dict(env)
         measured_env["PULP_DPR_NATIVE_MEASUREMENT_BIN"] = str(producer.resolve())
@@ -185,6 +196,7 @@ def main() -> int:
         identity = receipt["build_identity"]["measurement_producer"]
         pinned = Path(identity["path"])
         assert pinned.is_file() and not pinned.is_symlink()
+        assert pinned.suffix == ".exe"
         assert identity["sha256"] == digest(pinned) == digest(producer)
         attestation = receipt["measurement_attestation"]
         assert attestation["producer_sha256"] == identity["sha256"]
@@ -203,6 +215,22 @@ def main() -> int:
         assert receipt["outcome"] == "inconclusive"
         assert "did not attest every same-process evidence field" in receipt["reason"]
         assert "native-measurement-producer:dense-text-thin-strokes" in receipt["dependencies"]
+
+        # A noisy product producer is terminated at the one-MiB per-stream
+        # boundary and becomes resumable incomplete evidence.
+        noisy_measurement_producer(producer)
+        completed = subprocess.run(
+            [sys.executable, str(ADAPTER), "--request", str(request_path),
+             "--receipt", str(receipt_path)],
+            env=measured_env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert completed.returncode == 3, completed
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        assert "output exceeded 1048576 bytes per stream" in receipt["reason"]
+        producer_log = tmp / (
+            f"measurement-producer-{document['attempt_nonce']}.stderr.log"
+        )
+        assert producer_log.stat().st_size == 1024 * 1024
 
     print(
         "gpu_dpr_pulp_native_adapter_selftest=true real_capture_protocol=pass "

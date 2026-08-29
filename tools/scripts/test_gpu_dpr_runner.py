@@ -14,7 +14,8 @@ import gpu_dpr_runner as runner
 from gpu_dpr_test_support import (
     dependency_receipts, exact_binary, forged_minimal_dependencies,
     malformed_adapter_script, no_receipt_adapter_script, test_adapter_script,
-    timeout_adapter_script, trace_analyzer_script, wrong_nonce_adapter_script,
+    noisy_adapter_script, timeout_adapter_script, trace_analyzer_script,
+    wrong_nonce_adapter_script,
 )
 
 SHA_A = "3" * 40
@@ -300,11 +301,54 @@ def main() -> int:
         assert adaptive_request["adaptive_profile"] == manifest["adaptive_profile"]
         assert adaptive_request["pulp_source_root"] == str(experiment.ROOT.resolve())
 
+        # Only the newest issued generation for a cell remains authorized.
+        # Request bytes and paths remain immutable so an overlapping adapter
+        # cannot read a later attempt's nonce through a fixed filename.
+        retry_run = root / "retry-generation-run"
+        retry_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(retry_run, retry_state)
+        nonce_a, request_a = runner.issue_attempt(
+            retry_run, retry_state, manifest, adaptive_request_key
+        )
+        request_a_bytes = request_a.read_bytes()
+        retry_state = runner.load_state(retry_run)
+        nonce_b, request_b = runner.issue_attempt(
+            retry_run, retry_state, manifest, adaptive_request_key
+        )
+        assert request_a != request_b
+        assert request_a.read_bytes() == request_a_bytes
+        assert runner.load_json(request_a)["attempt_nonce"] == nonce_a
+        assert runner.load_json(request_b)["attempt_nonce"] == nonce_b
+        retry_state = runner.load_state(retry_run)
+        assert retry_state["issued_attempts"] == {nonce_b: adaptive_request_key}
+        receipt_b = make_receipt(
+            retry_run, retry_state, manifest, adaptive_request_key,
+            analyzer=analyzer, binary=binary, outcome="skip", attempt_nonce=nonce_b,
+        )
+        ingest_receipt(retry_run, receipt_b)
+        accepted_state = runner.load_state(retry_run)
+        late_a = runner.cell_directory(retry_run, adaptive_request_key) / "late-a.json"
+        late_document = runner.load_json(
+            Path(accepted_state["cells"][adaptive_request_key]["attempts"][-1]["receipt"])
+        )
+        late_document["attempt_nonce"] = nonce_a
+        write_json(late_a, late_document)
+        try:
+            runner.ingest_receipt(retry_run, late_a, nonce_a)
+        except runner.EvidenceError:
+            pass
+        else:
+            raise AssertionError("superseded retry nonce was accepted after the current attempt")
+        assert runner.load_state(retry_run) == accepted_state
+
         initialized_run = root / "initialized-run"
         initialized_run.mkdir()
         initialized = runner.initialize_run(
             initialized_run, planned, manifest, manifest_path, analyzer
         )
+        assert Path(initialized["trace_analyzer"]["path"]).suffix == ".py"
         initialized_digest = initialized["trace_analyzer"]["sha256"]
         analyzer_source_bytes = analyzer.read_bytes()
         analyzer.write_bytes(analyzer_source_bytes + b"# source mutation\n")
@@ -475,6 +519,52 @@ def main() -> int:
         )
         planted += 1
 
+        bad_scope_analyzer = root / "bad-category-scope-analyzer"
+        bad_scope_analyzer.write_text(
+            analyzer.read_text(encoding="utf-8").replace(
+                "'evidence_id':evidence[0]", "'evidence_id':'f'*32"
+            ),
+            encoding="utf-8",
+        )
+        bad_scope_analyzer.chmod(0o755)
+        bad_scope_state = runner.initial_state(
+            planned, manifest, manifest_path,
+            {"path": str(bad_scope_analyzer.resolve()),
+             "sha256": runner.sha256_file(bad_scope_analyzer)},
+        )
+        bad_scope_receipt = make_receipt(
+            run_dir, bad_scope_state, manifest, dense,
+            analyzer=bad_scope_analyzer, binary=binary,
+        )
+        expect_rejected(
+            bad_scope_receipt, bad_scope_state, manifest, run_dir,
+            "required categories from a different evidence/process scope",
+        )
+        planted += 1
+
+        missing_categories_analyzer = root / "missing-correlated-categories-analyzer"
+        missing_categories_analyzer.write_text(
+            analyzer.read_text(encoding="utf-8").replace(
+                "['gpu','js','layout','render','text']", "['gpu']"
+            ),
+            encoding="utf-8",
+        )
+        missing_categories_analyzer.chmod(0o755)
+        missing_categories_state = runner.initial_state(
+            planned, manifest, manifest_path,
+            {"path": str(missing_categories_analyzer.resolve()),
+             "sha256": runner.sha256_file(missing_categories_analyzer)},
+        )
+        missing_categories_receipt = make_receipt(
+            run_dir, missing_categories_state, manifest, dense,
+            analyzer=missing_categories_analyzer, binary=binary,
+        )
+        expect_rejected(
+            missing_categories_receipt, missing_categories_state, manifest, run_dir,
+            "required categories missing from the correlated evidence/process scope",
+        )
+        planted += 1
+
         analyzer_receipt = make_receipt(
             run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
         )
@@ -627,9 +717,14 @@ def main() -> int:
         )
         runner.save_state(adapter_run, adapter_state)
         adapter = test_adapter_script(root)
+        adapter_exe = root / "test-adapter.exe"
+        shutil.copy2(adapter, adapter_exe)
+        adapter_exe.chmod(0o755)
         runner.run_cells(
-            adapter_run, {"dense-text-thin-strokes": adapter}, {dense}, None
+            adapter_run, {"dense-text-thin-strokes": adapter_exe}, {dense}, None
         )
+        pinned_adapters = list((adapter_run / "tooling" / "adapters").rglob("*.exe"))
+        assert len(pinned_adapters) == 1 and pinned_adapters[0].is_file()
         adapter_state = runner.load_state(adapter_run)
         assert adapter_state["cells"][dense]["status"] == "skip"
         assert runner.project_result(adapter_state)["status"] == "incomplete"
@@ -690,6 +785,30 @@ def main() -> int:
             "adapter:dense-text-thin-strokes:timeout"
         ]
         assert runner.project_result(timeout_state)["status"] == "incomplete"
+
+        noisy_run = root / "noisy-run"
+        noisy_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(noisy_run, noisy_state)
+        runner.run_cells(
+            noisy_run,
+            {"dense-text-thin-strokes": noisy_adapter_script(root)},
+            {dense},
+            None,
+            timeout_seconds=10,
+        )
+        noisy_state = runner.load_state(noisy_run)
+        noisy_cell = noisy_state["cells"][dense]
+        assert noisy_cell["status"] == "inconclusive"
+        assert noisy_cell["dependencies"] == [
+            "adapter:dense-text-thin-strokes:output-limit"
+        ]
+        noisy_attempt = noisy_cell["attempts"][-1]
+        noisy_log = runner.cell_directory(noisy_run, dense) / (
+            f"adapter-{noisy_attempt['nonce']}.stdout.log"
+        )
+        assert noisy_log.stat().st_size == runner.OUTPUT_CAP_BYTES
 
         malformed_run = root / "malformed-run"
         malformed_state = runner.initial_state(

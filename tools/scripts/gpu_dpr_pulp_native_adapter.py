@@ -21,6 +21,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ from typing import Any
 REQUEST_SCHEMA = "pulp.gpu-dpr-cell-request.v1"
 RECEIPT_SCHEMA = "pulp.gpu-dpr-cell-receipt.v1"
 PREFLIGHT_SCHEMA = "pulp.gpu-dpr-native-preflight.v1"
+OUTPUT_CAP_BYTES = 1024 * 1024
 MEASUREMENT_SCOPE_SCHEMA = "pulp.gpu-dpr-native-measurement-scope.v1"
 MEASUREMENT_ATTESTATION_SCHEMA = "pulp.gpu-dpr-native-measurement-attestation.v1"
 ARTIFACT_KINDS = {"capture", "trace", "raw_samples", "input_receipt"}
@@ -204,7 +206,8 @@ def run_measurement_producer(
 ) -> int:
     cell_dir = receipt_path.parent
     nonce = request["attempt_nonce"]
-    pinned = cell_dir / f"measurement-producer-{nonce}"
+    suffix = producer.suffix
+    pinned = cell_dir / f"measurement-producer-{nonce}{suffix}"
     if pinned.exists() or pinned.is_symlink():
         pinned.unlink()
     shutil.copyfile(producer, pinned)
@@ -215,40 +218,71 @@ def run_measurement_producer(
         producer_receipt.unlink()
     process = subprocess.Popen(
         [str(pinned), "--request", str(request_path), "--receipt", str(producer_receipt)],
-        cwd=cell_dir, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cwd=cell_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         start_new_session=os.name == "posix",
     )
+    buffers = [bytearray(), bytearray()]
+    output_exceeded = threading.Event()
+
+    def drain(index: int, stream: Any) -> None:
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                return
+            remaining = OUTPUT_CAP_BYTES - len(buffers[index])
+            buffers[index].extend(chunk[:max(remaining, 0)])
+            if len(chunk) > remaining:
+                output_exceeded.set()
+                return
+
+    threads = [
+        threading.Thread(target=drain, args=(0, process.stdout), daemon=True),
+        threading.Thread(target=drain, args=(1, process.stderr), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + 600
     timed_out = False
-    try:
-        stdout, stderr = process.communicate(timeout=600)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        try:
-            if os.name == "posix":
-                os.killpg(process.pid, signal.SIGTERM)
-            else:
-                process.terminate()
-        except ProcessLookupError:
-            pass
-        try:
-            stdout, stderr = process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
+    while process.poll() is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+        if timed_out or output_exceeded.wait(max(0.0, min(0.05, remaining))):
             try:
                 if os.name == "posix":
-                    os.killpg(process.pid, signal.SIGKILL)
+                    os.killpg(process.pid, signal.SIGTERM)
                 else:
-                    process.kill()
+                    process.terminate()
             except ProcessLookupError:
                 pass
-            stdout, stderr = process.communicate()
-    (cell_dir / "measurement-producer.stdout.log").write_text(
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    if os.name == "posix":
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
+                except ProcessLookupError:
+                    pass
+                process.wait()
+            break
+    for thread in threads:
+        thread.join(timeout=2)
+    stdout = buffers[0].decode("utf-8", errors="replace")
+    stderr = buffers[1].decode("utf-8", errors="replace")
+    (cell_dir / f"measurement-producer-{nonce}.stdout.log").write_text(
         stdout, encoding="utf-8"
     )
-    (cell_dir / "measurement-producer.stderr.log").write_text(
+    (cell_dir / f"measurement-producer-{nonce}.stderr.log").write_text(
         stderr, encoding="utf-8"
     )
     if timed_out:
         raise TimeoutError("measurement producer exceeded the 600 second limit")
+    if output_exceeded.is_set():
+        raise ValueError(
+            f"measurement producer output exceeded {OUTPUT_CAP_BYTES} bytes per stream"
+        )
     if sha256(pinned) != pinned_digest:
         raise ValueError("measurement producer changed its pinned executable during capture")
     if git_head(root) != request["pulp_sha"]:

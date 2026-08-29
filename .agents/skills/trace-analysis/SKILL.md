@@ -499,6 +499,12 @@ incomplete; it is not evidence that the cost was zero.
 required categories, and named `gpu-startup`, `gpu-health`, and `gpu-probe`
 receipts before ingestion. It does not run substitute SQL or turn missing GPU
 timing into zero; missing or rejected trace evidence remains resumable.
+Each named answer must expose one `category_scope` matching the trial evidence
+ID and stable Perfetto process instance across all three questions. Categories
+from another PID/UPID or nonce do not satisfy the manifest. Treat the closed
+probe failure diagnostics `cpu_oracle_mismatch` and
+`magnitude_dispatch_failed` as causal failures even if adapter health was
+reported healthy.
 
 ## Correlating GPU-health startup snapshots
 

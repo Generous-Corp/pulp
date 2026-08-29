@@ -93,6 +93,94 @@ fn healthy_fixture_preserves_question_specific_verdicts() {
 }
 
 #[test]
+fn categories_are_scoped_to_one_evidence_process_instance() {
+    let evidence = "abababababababababababababababab";
+    // Reuse the nonce deliberately: process identity, not nonce uniqueness,
+    // must keep these unrelated categories out of the named answer.
+    let unrelated = evidence;
+    let trace = tempfile::NamedTempFile::new().expect("cross-process category trace");
+    let fixture = serde_json::json!({"traceEvents": [
+        {"name":"gpu_health_transition","cat":"gpu","ph":"X","ts":1000,
+         "dur":20,"pid":51,"tid":51,"args":{"debug.gpu_evidence_id":evidence,
+         "debug.health_state":"healthy","debug.sequence":1}},
+        {"name":"gpu_probe_scoped","cat":"gpu","ph":"X","ts":1100,
+         "dur":40,"pid":51,"tid":51,"args":{"debug.gpu_evidence_id":evidence,
+         "debug.health_state":"healthy","debug.sequence":2}},
+        {"name":"unrelated_render","cat":"render","ph":"X","ts":1200,
+         "dur":10,"pid":52,"tid":52,"args":{"debug.gpu_evidence_id":unrelated}},
+        {"name":"unrelated_text","cat":"text","ph":"X","ts":1210,
+         "dur":10,"pid":52,"tid":52,"args":{"debug.gpu_evidence_id":unrelated}},
+        {"name":"unrelated_js","cat":"js","ph":"X","ts":1220,
+         "dur":10,"pid":52,"tid":52,"args":{"debug.gpu_evidence_id":unrelated}},
+        {"name":"unrelated_layout","cat":"layout","ph":"X","ts":1230,
+         "dur":10,"pid":52,"tid":52,"args":{"debug.gpu_evidence_id":unrelated}}
+    ]});
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    for question in ["gpu-health", "gpu-probe"] {
+        let result = run_path(question, trace.path(), 0);
+        assert_eq!(result["evidence_ids"], serde_json::json!([evidence]));
+        assert_eq!(result["observed_categories"], serde_json::json!(["gpu"]));
+        assert_eq!(result["category_scope"]["evidence_id"], evidence);
+        assert_eq!(result["category_scope"]["process_pid"], 51);
+        assert!(result["category_scope"]["process_upid"].as_i64().is_some());
+    }
+
+    let positive = tempfile::NamedTempFile::new().expect("same-process category trace");
+    let events = fixture["traceEvents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .take(2)
+        .cloned()
+        .chain(
+            ["render", "text", "js", "layout"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, category)| {
+                    serde_json::json!({
+                        "name": format!("scoped_{category}"), "cat": category, "ph": "X",
+                        "ts": 1300 + index * 10, "dur": 5, "pid": 51, "tid": 51,
+                        "args": {"debug.gpu_evidence_id": evidence}
+                    })
+                }),
+        )
+        .collect::<Vec<_>>();
+    std::fs::write(
+        positive.path(),
+        serde_json::to_vec(&serde_json::json!({"traceEvents": events})).unwrap(),
+    )
+    .unwrap();
+    let result = run_path("gpu-health", positive.path(), 0);
+    assert_eq!(
+        result["observed_categories"],
+        serde_json::json!(["gpu", "js", "layout", "render", "text"])
+    );
+    assert_eq!(result["category_scope"]["evidence_id"], evidence);
+    assert_eq!(result["category_scope"]["process_pid"], 51);
+}
+
+#[test]
+fn causal_probe_failure_diagnostic_cannot_be_laundered_by_healthy_state() {
+    let evidence = "efefefefefefefefefefefefefefefef";
+    let trace = tempfile::NamedTempFile::new().expect("probe oracle mismatch trace");
+    let fixture = serde_json::json!({"traceEvents": [{
+        "name": "gpu_probe_renderer3d_hardcoded_cube", "cat": "gpu", "ph": "X",
+        "ts": 1000, "dur": 20, "pid": 61, "tid": 61,
+        "args": {"debug.gpu_evidence_id": evidence,
+                 "debug.health_state": "healthy",
+                 "debug.diagnostic_code": "cpu_oracle_mismatch",
+                 "debug.sequence": 1}
+    }]});
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let result = run_path("gpu-probe", trace.path(), 1);
+    assert_eq!(result["verdict"], "fail");
+    assert_eq!(result["evidence_ids"], serde_json::json!([evidence]));
+    assert_eq!(result["next_actions"][0]["code"], "inspect-readback-oracle");
+}
+
+#[test]
 fn compile_failure_is_ranked_with_a_concrete_fix() {
     for question in ["gpu-health", "gpu-probe"] {
         let result = run(question, "compile-failure.pftrace", 1);
@@ -485,7 +573,8 @@ fn health_and_probe_reject_mixed_evidence_before_the_row_cap() {
         assert_eq!(mixed["verdict"], "unavailable");
         assert_eq!(mixed["capture_complete"], false);
         assert_eq!(mixed["unavailable_reason"], "missing-question-category");
-        assert_eq!(mixed["observed_categories"], serde_json::json!(["gpu"]));
+        assert_eq!(mixed["observed_categories"], serde_json::json!([]));
+        assert_eq!(mixed["category_scope"], serde_json::Value::Null);
         assert_eq!(mixed["contributors"], serde_json::json!([]));
         assert_eq!(mixed["evidence_ids"], serde_json::json!([]));
     }

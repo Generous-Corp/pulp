@@ -14,7 +14,7 @@ const ROW_MARKER: &str = "__PULP_GPU_ROW__";
 const CATEGORY_MARKER: &str = "__PULP_GPU_CATEGORY__";
 const INTEGRITY_MARKER: &str = "__PULP_GPU_INTEGRITY__";
 const ROW_QUERY: &str = "SELECT '__PULP_GPU_ROW__' || hex(stage) || '|' || duration_ns || '|' || hex(COALESCE(evidence_id,'')) || '|' || hex(COALESCE(diagnostic_code,'')) || '|' || hex(COALESCE(health_state,'')) || '|' || COALESCE(sequence,-1) || '|' || COALESCE(frame_index,-1) || '|' || hex(timing_phase) || '|' || COALESCE(cpu_running_ns,-1) || '|' || has_scheduler_evidence || '|' || is_incomplete || '|' || is_failure FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY timing_phase ORDER BY is_incomplete DESC, is_failure DESC, CASE health_state WHEN 'failed' THEN 4 WHEN 'lost' THEN 4 WHEN 'unavailable' THEN 3 WHEN 'unverified' THEN 2 WHEN 'healthy' THEN 0 ELSE 1 END DESC, CASE WHEN evidence_id IS NULL OR length(evidence_id) != 32 OR lower(evidence_id) GLOB '*[^0-9a-f]*' THEN 1 ELSE 0 END DESC, duration_ns DESC) AS phase_rank FROM {view}) WHERE phase_rank <= 16";
-const CATEGORY_QUERY: &str = "SELECT '__PULP_GPU_CATEGORY__' || hex(category) FROM (SELECT DISTINCT category FROM slice WHERE category IS NOT NULL AND category != '' ORDER BY category LIMIT 64)";
+const CATEGORY_QUERY: &str = "SELECT '__PULP_GPU_CATEGORY__' || hex(category) || '|' || hex(evidence_id) || '|' || upid || '|' || pid FROM (SELECT categories.category, categories.evidence_id, categories.upid, categories.pid FROM (SELECT DISTINCT s.category AS category, COALESCE(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_evidence_id') AS TEXT), CAST(EXTRACT_ARG(s.arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id, th.upid AS upid, p.pid AS pid FROM slice AS s JOIN thread_track AS tt ON s.track_id = tt.id JOIN thread AS th ON tt.utid = th.utid JOIN process AS p ON th.upid = p.upid WHERE s.category IS NOT NULL AND s.category != '') AS categories JOIN (SELECT DISTINCT evidence_id, process_upid, process_pid FROM {view}) AS question_scope ON categories.evidence_id = question_scope.evidence_id AND categories.upid = question_scope.process_upid AND categories.pid = question_scope.process_pid WHERE length(categories.evidence_id) = 32 AND categories.evidence_id NOT GLOB '*[^0-9a-f]*' ORDER BY categories.evidence_id, categories.upid, categories.category LIMIT 256)";
 const INTEGRITY_QUERY: &str = "SELECT '__PULP_GPU_INTEGRITY__' || (SELECT COUNT(*) FROM slice) || '|' || (SELECT COUNT(*) FROM slice WHERE dur = -1) || '|' || COALESCE((SELECT SUM(value) FROM stats WHERE severity = 'data_loss' AND value > 0),0) || '|' || COALESCE((SELECT SUM(value) FROM stats WHERE value > 0 AND (name GLOB '*no_flush*' OR name GLOB '*not_flushed*')),0)";
 
 const STARTUP_SQL: &str =
@@ -118,6 +118,13 @@ struct UiCorrelation {
     search_terms: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct CategoryScope {
+    evidence_id: String,
+    process_upid: i64,
+    process_pid: i64,
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize)]
 struct CaptureIntegrity {
     slice_count: i64,
@@ -140,6 +147,9 @@ struct GpuAnalysisResult {
     /// Categories independently observed in the parsed trace. These are not
     /// inferred from contributor stage names or supplied by an adapter.
     observed_categories: Vec<String>,
+    /// Stable process-instance scope shared by every observed category. Null
+    /// means categories could not be tied to one evidence cohort.
+    category_scope: Option<CategoryScope>,
     contributors: Vec<Contributor>,
     cold_start_contributors: Vec<Contributor>,
     steady_state_contributors: Vec<Contributor>,
@@ -164,6 +174,14 @@ struct RawRow {
     scheduler_evidence: bool,
     incomplete: bool,
     failure: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RawCategoryScope {
+    categories: Vec<String>,
+    evidence_id: String,
+    process_upid: i64,
+    process_pid: i64,
 }
 
 fn create_exclusive_sql(path: &Path, sql: &str) -> io::Result<()> {
@@ -309,8 +327,8 @@ fn parse_integrity(output: &str) -> Result<CaptureIntegrity> {
     })
 }
 
-fn parse_categories(output: &str) -> Vec<String> {
-    let mut categories = Vec::new();
+fn parse_category_scopes(output: &str) -> Vec<RawCategoryScope> {
+    let mut scopes = Vec::new();
     for occurrence in output
         .match_indices(CATEGORY_MARKER)
         .map(|(index, _)| index)
@@ -318,11 +336,29 @@ fn parse_categories(output: &str) -> Vec<String> {
         let encoded = &output[occurrence + CATEGORY_MARKER.len()..];
         let encoded: String = encoded
             .chars()
-            .take_while(|character| character.is_ascii_hexdigit())
+            .take_while(|character| character.is_ascii_hexdigit() || *character == '|')
             .collect();
-        let Some(decoded) = decode_hex(&encoded) else {
+        let fields = encoded.split('|').collect::<Vec<_>>();
+        if fields.len() != 4 {
+            continue;
+        }
+        let Some(decoded) = decode_hex(fields[0]) else {
             continue;
         };
+        let Some(evidence_id) = decode_hex(fields[1]).filter(|value| valid_evidence_id(value))
+        else {
+            continue;
+        };
+        let Ok(process_upid) = fields[2].parse::<i64>() else {
+            continue;
+        };
+        let Ok(process_pid) = fields[3].parse::<i64>() else {
+            continue;
+        };
+        if process_upid < 0 || process_pid < 0 {
+            continue;
+        }
+        let mut categories = Vec::new();
         for category in decoded
             .split(',')
             .map(str::trim)
@@ -337,9 +373,17 @@ fn parse_categories(output: &str) -> Vec<String> {
                 categories.push(category.to_owned());
             }
         }
+        categories.sort();
+        if !categories.is_empty() {
+            scopes.push(RawCategoryScope {
+                categories,
+                evidence_id,
+                process_upid,
+                process_pid,
+            });
+        }
     }
-    categories.sort();
-    categories
+    scopes
 }
 
 fn valid_evidence_id(value: &str) -> bool {
@@ -347,6 +391,53 @@ fn valid_evidence_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn correlated_categories(
+    rows: &[RawRow],
+    scopes: &[RawCategoryScope],
+) -> (Vec<String>, Option<CategoryScope>) {
+    let mut evidence_ids = rows
+        .iter()
+        .filter_map(|row| row.evidence_id.as_deref())
+        .filter(|value| valid_evidence_id(value))
+        .collect::<Vec<_>>();
+    evidence_ids.sort_unstable();
+    evidence_ids.dedup();
+    if evidence_ids.len() != 1 {
+        return (Vec::new(), None);
+    }
+    let evidence_id = evidence_ids[0];
+    let mut process_scopes = scopes
+        .iter()
+        .filter(|scope| scope.evidence_id == evidence_id)
+        .map(|scope| (scope.process_upid, scope.process_pid))
+        .collect::<Vec<_>>();
+    process_scopes.sort_unstable();
+    process_scopes.dedup();
+    if process_scopes.len() != 1 {
+        return (Vec::new(), None);
+    }
+    let (process_upid, process_pid) = process_scopes[0];
+    let mut categories = scopes
+        .iter()
+        .filter(|scope| {
+            scope.evidence_id == evidence_id
+                && scope.process_upid == process_upid
+                && scope.process_pid == process_pid
+        })
+        .flat_map(|scope| scope.categories.iter().cloned())
+        .collect::<Vec<_>>();
+    categories.sort();
+    categories.dedup();
+    (
+        categories,
+        Some(CategoryScope {
+            evidence_id: evidence_id.to_owned(),
+            process_upid,
+            process_pid,
+        }),
+    )
 }
 
 fn execution_state_for(row: &RawRow) -> &'static str {
@@ -376,6 +467,15 @@ fn action_for(
         return NextAction {
             code: "fix-shader-compile".to_owned(),
             fix: "Inspect the cited compile span and stable diagnostic code, then correct the shader before rerunning the same probe.".to_owned(),
+        };
+    }
+    if matches!(
+        diagnostic_code,
+        Some("cpu_oracle_mismatch" | "magnitude_dispatch_failed")
+    ) {
+        return NextAction {
+            code: "inspect-readback-oracle".to_owned(),
+            fix: "Compare the correlated GPU result with the CPU oracle and numeric artifacts; a causal probe diagnostic cannot be overridden by a healthy adapter state.".to_owned(),
         };
     }
     let (code, fix) = match stage {
@@ -462,10 +562,11 @@ fn result_from_rows_and_categories(
     question: GpuQuestion,
     trace: &Path,
     mut rows: Vec<RawRow>,
-    observed_categories: Vec<String>,
+    category_scopes: Vec<RawCategoryScope>,
     capture_integrity: CaptureIntegrity,
 ) -> GpuAnalysisResult {
     rows.sort_by(|a, b| b.duration_ns.max(0).cmp(&a.duration_ns.max(0)));
+    let (observed_categories, category_scope) = correlated_categories(&rows, &category_scopes);
     let incomplete = rows.iter().any(|row| row.incomplete);
     let evidence_malformed = rows.iter().any(|row| {
         row.evidence_id
@@ -642,6 +743,7 @@ fn result_from_rows_and_categories(
         unavailable_reason,
         dominant_stage,
         observed_categories,
+        category_scope,
         contributors,
         cold_start_contributors,
         steady_state_contributors,
@@ -756,7 +858,7 @@ pub(crate) fn run_gpu_analysis_with_processor(
     let sql = format!(
         "{}\n{}\nUNION ALL\n{}\nUNION ALL\n{};\n",
         args.question.sql(),
-        CATEGORY_QUERY,
+        CATEGORY_QUERY.replace("{view}", args.question.view()),
         INTEGRITY_QUERY,
         ROW_QUERY.replace("{view}", args.question.view())
     );
@@ -808,7 +910,7 @@ pub(crate) fn run_gpu_analysis_with_processor(
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let rows = parse_rows(&stdout)?;
-    let categories = parse_categories(&stdout);
+    let categories = parse_category_scopes(&stdout);
     let integrity = parse_integrity(&stdout)?;
     write_result(
         &result_from_rows_and_categories(args.question, &args.trace, rows, categories, integrity),

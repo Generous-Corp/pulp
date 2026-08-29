@@ -157,9 +157,24 @@ evidence=[data[len(prefix):].decode()] if good else []
 print(json.dumps({'schema':'pulp.trace-gpu-analysis.v1','question':question,
                   'verdict':verdict,'capture_complete':good,
                   'evidence_ids':evidence,
+                  'category_scope':({'evidence_id':evidence[0],
+                    'process_upid':7,'process_pid':42} if good else None),
                   'observed_categories':['gpu','js','layout','render','text'] if good else []}))
 raise SystemExit(0 if verdict == 'pass' else 2)
 """,
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+def noisy_adapter_script(root: Path) -> Path:
+    script = root / "noisy-adapter.py"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, time\n"
+        "os.write(1, b'x' * (1024 * 1024 + 65536))\n"
+        "time.sleep(30)\n",
         encoding="utf-8",
     )
     script.chmod(0o755)

@@ -323,10 +323,11 @@ def exact_executable(identity: Any, label: str) -> tuple[Path, str]:
 
 def analyze_trace(
     analyzer_identity: dict[str, str], trace_path: Path, expected_evidence_id: str,
-) -> tuple[list[str], set[str]]:
+) -> tuple[list[str], set[str], dict[str, Any]]:
     analyzer, _ = exact_executable(analyzer_identity, "runner-pinned trace analyzer")
     evidence_ids: list[str] = []
     observed_categories: set[str] = set()
+    category_scope: dict[str, Any] | None = None
     for question in sorted(TRACE_QUESTIONS):
         completed = subprocess.run(
             [str(analyzer), "trace", question, "--trace", str(trace_path.resolve()), "--json"],
@@ -370,8 +371,28 @@ def analyze_trace(
             or categories != sorted(set(categories))
         ):
             raise EvidenceError(f"trace analyzer did not derive categories for {question}")
+        scope = result.get("category_scope")
+        if (
+            not isinstance(scope, dict)
+            or set(scope) != {"evidence_id", "process_upid", "process_pid"}
+            or scope.get("evidence_id") != expected_evidence_id
+            or isinstance(scope.get("process_upid"), bool)
+            or not isinstance(scope.get("process_upid"), int)
+            or scope["process_upid"] < 0
+            or isinstance(scope.get("process_pid"), bool)
+            or not isinstance(scope.get("process_pid"), int)
+            or scope["process_pid"] < 0
+        ):
+            raise EvidenceError(
+                f"trace categories are not scoped to the cell evidence/process for {question}"
+            )
+        if category_scope is not None and scope != category_scope:
+            raise EvidenceError("trace questions resolved different category process scopes")
+        category_scope = scope
         observed_categories.update(categories)
-    return evidence_ids, observed_categories
+    if category_scope is None:
+        raise EvidenceError("trace analyzer returned no correlated category scope")
+    return evidence_ids, observed_categories, category_scope
 
 
 def validate_trace(
@@ -383,7 +404,7 @@ def validate_trace(
         raise EvidenceError("trace receipt is absent or incomplete")
     if set(trace) != {"complete"}:
         raise EvidenceError("trace metadata must be derived by the pinned analyzer")
-    evidence_ids, categories = analyze_trace(
+    evidence_ids, categories, _ = analyze_trace(
         analyzer_identity, trace_path, expected_evidence_id
     )
     missing = set(manifest["trial_contract"]["required_trace_categories"]) - categories

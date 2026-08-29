@@ -7,15 +7,20 @@
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_health_transitions AS
 WITH candidates AS (
   SELECT
-    name,
-    dur,
-    arg_set_id,
+    s.name,
+    s.dur,
+    s.arg_set_id,
+    th.upid AS process_upid,
+    p.pid AS process_pid,
     COALESCE(
-      CAST(EXTRACT_ARG(arg_set_id, 'debug.gpu_evidence_id') AS TEXT),
-      CAST(EXTRACT_ARG(arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id
-  FROM slice
-  WHERE category GLOB 'gpu*'
-    AND (name GLOB 'gpu_health_transition*' OR name GLOB 'gpu_device_loss*')
+      CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_evidence_id') AS TEXT),
+      CAST(EXTRACT_ARG(s.arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id
+  FROM slice AS s
+  JOIN thread_track AS tt ON s.track_id = tt.id
+  JOIN thread AS th ON tt.utid = th.utid
+  JOIN process AS p ON th.upid = p.upid
+  WHERE s.category GLOB 'gpu*'
+    AND (s.name GLOB 'gpu_health_transition*' OR s.name GLOB 'gpu_device_loss*')
 ), selected_evidence AS (
   SELECT MIN(evidence_id) AS evidence_id
   FROM candidates
@@ -31,6 +36,8 @@ SELECT
   END AS stage,
   dur AS duration_ns,
   evidence_id,
+  process_upid,
+  process_pid,
   COALESCE(
     CAST(EXTRACT_ARG(arg_set_id, 'debug.diagnostic_code') AS TEXT),
     CAST(EXTRACT_ARG(arg_set_id, 'args.debug.diagnostic_code') AS TEXT)) AS diagnostic_code,

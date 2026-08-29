@@ -10,6 +10,8 @@ import os
 import secrets
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,7 @@ from gpu_dpr_evidence import (  # noqa: E402
 RUN_SCHEMA = "pulp.gpu-dpr-run-state.v1"
 REQUEST_SCHEMA = "pulp.gpu-dpr-cell-request.v1"
 B5_SCHEMA = "pulp.gpu-dpr-b5-gate.v1"
+OUTPUT_CAP_BYTES = 1024 * 1024
 
 
 def initial_state(
@@ -97,7 +100,9 @@ def initialize_run(
 ) -> dict[str, Any]:
     if not analyzer_source.is_absolute():
         raise EvidenceError("trace analyzer must be an absolute executable path")
-    pinned = run_dir / "tooling" / "trace-analyzer"
+    pinned = executable_snapshot_path(
+        run_dir / "tooling" / "trace-analyzer", analyzer_source
+    )
     digest = snapshot_file(
         analyzer_source, pinned, "trace analyzer", executable=True,
     )
@@ -105,6 +110,11 @@ def initialize_run(
         plan, manifest, manifest_path,
         {"path": str(pinned.resolve()), "sha256": digest},
     )
+
+
+def executable_snapshot_path(base: Path, source: Path) -> Path:
+    """Keep the source executable suffix while choosing a confined snapshot name."""
+    return base.with_name(base.name + source.suffix) if source.suffix else base
 
 
 def run_paths(run_dir: Path) -> tuple[Path, Path, Path]:
@@ -234,7 +244,7 @@ def write_request(
         "pulp_source_root": str(experiment.ROOT.resolve()),
         "cell_directory": str(cell_dir.resolve()),
     }
-    path = cell_dir / "request.json"
+    path = cell_dir / f"request-attempt-{attempt_nonce}.json"
     atomic_json(path, request)
     return path
 
@@ -246,14 +256,17 @@ def issue_attempt(
         raise EvidenceError(f"unknown cell selector: {key}")
     cell_dir = checked_cell_directory(run_dir, key, create=True)
     nonce = secrets.token_hex(NONCE_HEX_LENGTH // 2)
-    state.setdefault("issued_attempts", {})[nonce] = key
+    issued = state.setdefault("issued_attempts", {})
+    for predecessor in [value for value, cell in issued.items() if cell == key]:
+        del issued[predecessor]
+    issued[nonce] = key
     request = write_request(state, manifest, key, cell_dir, nonce)
     save_state(run_dir, state)
     return nonce, request
 
 
-def terminate_adapter(process: subprocess.Popen[str]) -> tuple[str, str]:
-    """Stop a timed-out adapter and collect its bounded diagnostic output."""
+def terminate_adapter(process: subprocess.Popen[bytes]) -> None:
+    """Stop an adapter process group without collecting unbounded output."""
     try:
         if os.name == "posix":
             os.killpg(process.pid, 15)
@@ -262,13 +275,58 @@ def terminate_adapter(process: subprocess.Popen[str]) -> tuple[str, str]:
     except ProcessLookupError:
         pass
     try:
-        return process.communicate(timeout=2)
+        process.wait(timeout=2)
     except subprocess.TimeoutExpired:
         if os.name == "posix":
             os.killpg(process.pid, 9)
         else:
             process.kill()
-        return process.communicate()
+        process.wait()
+
+
+def communicate_bounded(
+    process: subprocess.Popen[bytes], timeout_seconds: float,
+) -> tuple[str, str, bool, bool]:
+    """Drain both pipes concurrently with a strict one-MiB cap per stream."""
+    buffers = [bytearray(), bytearray()]
+    exceeded = threading.Event()
+
+    def drain(index: int, stream: Any) -> None:
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                return
+            remaining = OUTPUT_CAP_BYTES - len(buffers[index])
+            buffers[index].extend(chunk[:max(remaining, 0)])
+            if len(chunk) > remaining:
+                exceeded.set()
+                return
+
+    threads = [
+        threading.Thread(target=drain, args=(0, process.stdout), daemon=True),
+        threading.Thread(target=drain, args=(1, process.stderr), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + timeout_seconds
+    timed_out = False
+    while process.poll() is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            terminate_adapter(process)
+            break
+        if exceeded.wait(min(0.05, remaining)):
+            terminate_adapter(process)
+            break
+    for thread in threads:
+        thread.join(timeout=2)
+    return (
+        buffers[0].decode("utf-8", errors="replace"),
+        buffers[1].decode("utf-8", errors="replace"),
+        timed_out,
+        exceeded.is_set(),
+    )
 
 
 def run_cells(
@@ -309,7 +367,10 @@ def run_cells(
         attempt_nonce, request = issue_attempt(
             run_dir, state, manifest, key
         )
-        pinned_adapter = run_dir / "tooling" / "adapters" / key / attempt_nonce
+        pinned_adapter = executable_snapshot_path(
+            run_dir / "tooling" / "adapters" / key / attempt_nonce,
+            executable,
+        )
         snapshot_file(
             executable, pinned_adapter, f"adapter:{cell['scenario_id']}",
             executable=True,
@@ -320,33 +381,44 @@ def run_cells(
         legacy_receipt = cell_dir / "receipt.json"
         if legacy_receipt.exists():
             legacy_receipt.unlink()
-        receipt = cell_dir / f"receipt-attempt-{len(cell['attempts']) + 1}.json"
+        receipt = cell_dir / f"receipt-attempt-{attempt_nonce}.json"
         if receipt.exists():
             receipt.unlink()
         process = subprocess.Popen(
             [str(pinned_adapter), "--request", str(request), "--receipt", str(receipt)],
             cwd=cell_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, start_new_session=True,
+            start_new_session=True,
         )
-        try:
-            stdout, stderr = process.communicate(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired:
-            stdout, stderr = terminate_adapter(process)
-            (cell_dir / "adapter.stdout.log").write_text(stdout, encoding="utf-8")
-            (cell_dir / "adapter.stderr.log").write_text(stderr, encoding="utf-8")
+        stdout, stderr, timed_out, output_exceeded = communicate_bounded(
+            process, timeout_seconds
+        )
+        if timed_out or output_exceeded:
+            (cell_dir / f"adapter-{attempt_nonce}.stdout.log").write_text(
+                stdout, encoding="utf-8"
+            )
+            (cell_dir / f"adapter-{attempt_nonce}.stderr.log").write_text(
+                stderr, encoding="utf-8"
+            )
             state = load_state(run_dir)
+            dependency = "output-limit" if output_exceeded else "timeout"
             record_attempt(
                 state, key, "inconclusive", None,
-                f"adapter exceeded the {timeout_seconds:g}s bounded runtime",
-                [f"adapter:{cell['scenario_id']}:timeout"], None, attempt_nonce,
+                (f"adapter output exceeded {OUTPUT_CAP_BYTES} bytes per stream"
+                 if output_exceeded else
+                 f"adapter exceeded the {timeout_seconds:g}s bounded runtime"),
+                [f"adapter:{cell['scenario_id']}:{dependency}"], None, attempt_nonce,
             )
             save_state(run_dir, state)
             continue
         completed = subprocess.CompletedProcess(
             process.args, process.returncode, stdout, stderr
         )
-        (cell_dir / "adapter.stdout.log").write_text(completed.stdout, encoding="utf-8")
-        (cell_dir / "adapter.stderr.log").write_text(completed.stderr, encoding="utf-8")
+        (cell_dir / f"adapter-{attempt_nonce}.stdout.log").write_text(
+            completed.stdout, encoding="utf-8"
+        )
+        (cell_dir / f"adapter-{attempt_nonce}.stderr.log").write_text(
+            completed.stderr, encoding="utf-8"
+        )
         if receipt.is_file():
             try:
                 receipt_document = regular_json(receipt, "adapter cell receipt")

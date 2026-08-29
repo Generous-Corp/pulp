@@ -26,8 +26,66 @@ fn parses_capture_integrity_counts() {
 
 #[test]
 fn parses_bounded_trace_categories_without_trusting_stage_names() {
-    let output = "__PULP_GPU_CATEGORY__677075\n__PULP_GPU_CATEGORY__72656E6465722C74657874\n__PULP_GPU_CATEGORY__2E2E2F756E73616665\n";
-    assert_eq!(parse_categories(output), vec!["gpu", "render", "text"]);
+    let evidence = "3031323334353637383961626364656630313233343536373839616263646566";
+    let output = format!(
+        "__PULP_GPU_CATEGORY__677075|{evidence}|7|42\n\
+         __PULP_GPU_CATEGORY__72656E6465722C74657874|{evidence}|7|42\n\
+         __PULP_GPU_CATEGORY__2E2E2F756E73616665|{evidence}|7|42\n"
+    );
+    let scopes = parse_category_scopes(&output);
+    assert_eq!(scopes.len(), 2);
+    assert_eq!(scopes[0].categories, vec!["gpu"]);
+    assert_eq!(scopes[1].categories, vec!["render", "text"]);
+    assert!(scopes.iter().all(|scope| {
+        scope.evidence_id == "0123456789abcdef0123456789abcdef"
+            && scope.process_upid == 7
+            && scope.process_pid == 42
+    }));
+}
+
+#[test]
+fn category_scope_excludes_other_evidence_and_rejects_cross_process_reuse() {
+    let evidence = "0123456789abcdef0123456789abcdef";
+    let row = RawRow {
+        stage: "probe".to_owned(),
+        duration_ns: 42,
+        evidence_id: Some(evidence.to_owned()),
+        diagnostic_code: None,
+        health_state: Some("healthy".to_owned()),
+        sequence: Some(1),
+        frame_index: None,
+        timing_phase: "not-applicable".to_owned(),
+        cpu_running_ns: None,
+        scheduler_evidence: false,
+        incomplete: false,
+        failure: false,
+    };
+    let own = RawCategoryScope {
+        categories: vec!["gpu".to_owned()],
+        evidence_id: evidence.to_owned(),
+        process_upid: 7,
+        process_pid: 42,
+    };
+    let unrelated = RawCategoryScope {
+        categories: vec!["js".to_owned(), "layout".to_owned(), "render".to_owned()],
+        evidence_id: "ffffffffffffffffffffffffffffffff".to_owned(),
+        process_upid: 8,
+        process_pid: 43,
+    };
+    let (categories, scope) =
+        correlated_categories(std::slice::from_ref(&row), &[own.clone(), unrelated]);
+    assert_eq!(categories, vec!["gpu"]);
+    assert_eq!(scope.unwrap().process_upid, 7);
+
+    let reused_in_other_process = RawCategoryScope {
+        categories: vec!["text".to_owned()],
+        evidence_id: evidence.to_owned(),
+        process_upid: 9,
+        process_pid: 44,
+    };
+    let (categories, scope) = correlated_categories(&[row], &[own, reused_in_other_process]);
+    assert!(categories.is_empty());
+    assert!(scope.is_none());
 }
 
 #[test]
@@ -92,7 +150,7 @@ fn scheduler_attribution_and_data_loss_are_not_inferred_from_wall_time() {
         GpuQuestion::GpuStartup,
         Path::new("/tmp/lost.pftrace"),
         vec![row],
-        vec!["gpu".to_owned()],
+        Vec::new(),
         CaptureIntegrity {
             slice_count: 1,
             incomplete_slice_count: 0,
