@@ -1,3 +1,11 @@
+# SUPERSEDED — invalid A4 Three.js authority binding
+
+Do not count this corpus. Its plan incorrectly copied the Pulp SHA into
+`plan_revision` and `forge_sha`; those fields did not bind the canonical plan
+or Forge baseline. The corrected exact-authority recapture is
+`../m3-a4-owned-9770c1-20260828/README.md`. The files remain only to make the
+audit trail explicit and prevent accidental reuse.
+
 # A4 maintained Three.js DPR tranche — 2026-08-28
 
 This directory is the compact, checked-in corpus for the 12
@@ -50,4 +58,3 @@ The producer target was built in Release with `PULP_BENCHMARK=ON`,
 three cases. The Python runner suite passed 41 planted bad-evidence cases,
 including rejection of any zero GPU timing sample, and the native adapter
 self-test passed its measured-producer and provenance controls.
-
