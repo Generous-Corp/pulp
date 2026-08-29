@@ -921,14 +921,17 @@ class IdempotencyStamp(unittest.TestCase):
                 "a missing library must re-fetch even when the stamp exists",
             )
 
-    def test_missing_stamp_uses_matching_version_doc(self):
+    def test_missing_stamp_refetches_despite_matching_version_doc(self):
         with _in_tempdir() as td:
-            sha = "a" * 64
-            asset_url = (
-                "https://github.com/danielraffel/skia-builder/releases/download/"
-                "chrome/m149/skia-build-mac-arm64-gpu-release.zip"
+            zip_path = td / "skia-build-mac-arm64-gpu-release.zip"
+            sha = _make_zip(
+                zip_path,
+                {
+                    "build/mac-gpu/lib/Release/libskia.a": b"fresh-skia",
+                    "build/mac-gpu/lib/Release/libdawn_combined.a": b"fresh-dawn",
+                },
             )
-            _write_manifest(td, asset_url, sha, "mac-arm64")
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
 
             lib = td / fetch_skia.expected_library_path("darwin-arm64")
             lib.parent.mkdir(parents=True)
@@ -948,13 +951,8 @@ class IdempotencyStamp(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            def _boom(*args, **kwargs):
-                raise AssertionError("matching VERSION.md must skip download")
-
             out = io.StringIO()
-            with mock.patch.object(
-                fetch_skia.urllib.request, "urlopen", side_effect=_boom
-            ), contextlib.redirect_stdout(out):
+            with contextlib.redirect_stdout(out):
                 rc = fetch_skia.main(
                     ["fetch_skia_for_release.py", "darwin-arm64"]
                 )
@@ -962,7 +960,9 @@ class IdempotencyStamp(unittest.TestCase):
             self.assertEqual(rc, 0)
             stamp = td / "external/skia-build/.skia-asset-sha256"
             self.assertEqual(stamp.read_text(encoding="utf-8").strip(), sha)
-            self.assertIn("VERSION.md records", out.getvalue())
+            self.assertEqual(lib.read_bytes(), b"fresh-skia")
+            self.assertEqual(dawn.read_bytes(), b"fresh-dawn")
+            self.assertIn("without a verified asset stamp", out.getvalue())
 
     def test_version_doc_digest_mismatch_refetches(self):
         with _in_tempdir() as td:

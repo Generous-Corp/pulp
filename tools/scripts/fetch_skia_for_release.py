@@ -75,7 +75,6 @@ import socket
 import sys
 import tempfile
 import time
-import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -346,19 +345,6 @@ def expected_dawn_library_path(
     return skia.with_name(dawn_name)
 
 
-def _version_doc_has_asset_digest(
-    version_path: Path, asset_name: str, expected_sha: str
-) -> bool:
-    if not asset_name or not version_path.is_file():
-        return False
-    expected_sha = expected_sha.lower()
-    try:
-        lines = version_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return False
-    return any(asset_name in line and expected_sha in line.lower() for line in lines)
-
-
 def _main(argv: list[str]) -> int:
     dest_root = "external/skia-build"
     args = argv[1:]
@@ -541,17 +527,11 @@ def _main(argv: list[str]) -> int:
                 "pin changed since the last fetch; re-downloading."
             )
         else:
-            asset_name = Path(urllib.parse.urlparse(url).path).name
-            version_path = Path(dest_root) / "VERSION.md"
-            if (cache_generation_materialized(Path(dest_root), matrix_platform)
-                    and _version_doc_has_asset_digest(version_path, asset_name, expected_sha)):
-                stamp_path.write_text(expected_sha + "\n", encoding="utf-8")
-                print(
-                    "OK: Skia already present and VERSION.md records the "
-                    f"pinned asset digest (sha256 {expected_sha}); seeded "
-                    "asset stamp and skipping download"
-                )
-                return 0
+            print(
+                "Skia libraries are present without a verified asset stamp; "
+                "re-downloading the pinned archive instead of trusting "
+                "checkout metadata."
+            )
 
     zip_fd, zip_name = tempfile.mkstemp(prefix=".skia-release-asset-", suffix=".zip", dir=".")
     os.close(zip_fd)
