@@ -35,6 +35,10 @@ SAME_PROCESS_FIELDS = {
     "logical_input", "trace_correlation",
 }
 OUTPUT_CAP_BYTES = 1024 * 1024
+WEB_UI_NAMES = (
+    "PulpSuperConvolverUi.data", "PulpSuperConvolverUi.js",
+    "PulpSuperConvolverUi.wasm",
+)
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -52,6 +56,19 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def web_ui_identity(build: Path) -> tuple[dict[str, dict[str, str]], str]:
+    identities: dict[str, dict[str, str]] = {}
+    binding = ""
+    for name in WEB_UI_NAMES:
+        path = build / name
+        if path.is_symlink() or not path.is_file() or path.resolve().parent != build.resolve():
+            raise FileNotFoundError(f"exact web UI artifact is unavailable: {name}")
+        digest = sha256(path)
+        identities[name] = {"path": str(path.resolve()), "sha256": digest}
+        binding += f"{name}:{digest}\n"
+    return identities, hashlib.sha256(binding.encode()).hexdigest()
 
 
 def exact_executable(value: str | None, label: str) -> Path:
@@ -155,7 +172,8 @@ def incomplete(request: dict[str, Any], reason: str) -> dict[str, Any]:
 
 def validate_receipt(
     request: dict[str, Any], receipt: dict[str, Any], cell: Path,
-    script: Path, browser: Path,
+    script: Path, browser: Path, build_artifacts: dict[str, dict[str, str]],
+    build_digest: str,
 ) -> dict[str, Any]:
     scenario = request["scenario"]
     expected = {
@@ -240,13 +258,18 @@ def validate_receipt(
             or trial.get("producer_sha256") != browser_digest
             or trial.get("content_digest") != request["expected_content_digest"]
             or trial.get("pulp_sha") != request["pulp_sha"]
+            or trial.get("build_sha256") != build_digest
             or trial.get("adapter") != adapter
             or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 or pid in pids
         ):
             raise ValueError("fresh browser process ledger is mixed or unbound")
         pids.add(pid)
     build = receipt.get("build_identity")
-    if not isinstance(build, dict) or build.get("pulp_sha") != request["pulp_sha"]:
+    if (
+        not isinstance(build, dict) or build.get("pulp_sha") != request["pulp_sha"]
+        or build.get("web_ui_artifacts") != build_artifacts
+        or build.get("web_ui_bundle_sha256") != build_digest
+    ):
         raise ValueError("browser receipt lacks exact Pulp identity")
     script_digest = sha256(script)
     build["measurement_producer"] = {"path": str(browser), "sha256": browser_digest}
@@ -255,6 +278,7 @@ def validate_receipt(
         "schema": ATTESTATION_SCHEMA,
         "producer_sha256": browser_digest,
         "script_sha256": script_digest,
+        "build_sha256": build_digest,
         "same_process": same,
         "audio_device_opened": False,
     }
@@ -315,8 +339,10 @@ def run(request_path: Path, receipt_path: Path) -> int:
         browser = exact_executable(os.environ.get("PULP_DPR_BROWSER_BIN"), "Chrome/Chromium")
         browser_identity = browser_product_identity(browser)
         build = Path(os.environ.get("PULP_DPR_WEB_BUILD_DIR", ""))
-        if not build.is_absolute() or build.is_symlink() or not (build / "PulpSuperConvolverUi.js").is_file():
+        if not build.is_absolute() or build.is_symlink():
             raise FileNotFoundError("exact SuperConvolver web UI build is unavailable")
+        build = build.resolve()
+        build_artifacts, build_digest = web_ui_identity(build)
         cell = receipt_path.parent
         pinned = cell / f"browser-measurement-{request['attempt_nonce']}{producer.suffix}"
         shutil.copyfile(producer, pinned); pinned.chmod(0o555)
@@ -332,12 +358,19 @@ def run(request_path: Path, receipt_path: Path) -> int:
         (cell / "browser.stderr.log").write_bytes(stderr)
         if not produced.is_file() or produced.is_symlink():
             raise ValueError(f"browser producer exited {process.returncode} without receipt")
-        receipt = validate_receipt(request, load_json(produced), cell, pinned, browser)
+        receipt = validate_receipt(
+            request, load_json(produced), cell, pinned, browser,
+            build_artifacts, build_digest,
+        )
         receipt["build_identity"]["browser_product"] = browser_identity
         expected_exit = 0 if receipt["outcome"] == "pass" else 1
         if process.returncode != expected_exit:
             raise ValueError("browser producer exit disagrees with receipt")
-        if sha256(source) != request["expected_content_digest"] or sha256(pinned) != sha256(producer):
+        if (
+            sha256(source) != request["expected_content_digest"]
+            or sha256(pinned) != sha256(producer)
+            or web_ui_identity(build) != (build_artifacts, build_digest)
+        ):
             raise ValueError("browser source or pinned measurement script changed during run")
         write_json(receipt_path, receipt)
         return expected_exit

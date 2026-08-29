@@ -279,6 +279,10 @@ def validate_fresh_process_ledger(
         "producer_sha256", "content_digest", "pulp_sha",
         "first_frame_time_ms", "adapter",
     }
+    expected_build_sha = None
+    if receipt.get("scenario_kind") == "maintained_web_canary":
+        expected_keys.add("build_sha256")
+        expected_build_sha = build.get("web_ui_bundle_sha256")
     pids: set[int] = set()
     for index, (trial, sample) in enumerate(zip(trials, samples)):
         if not isinstance(trial, dict) or set(trial) != expected_keys:
@@ -295,6 +299,7 @@ def validate_fresh_process_ledger(
             or trial.get("producer_sha256") != producer.get("sha256")
             or trial.get("content_digest") != receipt.get("content_digest")
             or trial.get("pulp_sha") != build.get("pulp_sha")
+            or trial.get("build_sha256") != expected_build_sha
             or trial.get("adapter") != expected_adapter
             or isinstance(measured, bool) or not isinstance(measured, (int, float))
             or not math.isfinite(float(measured)) or float(measured) < 0
@@ -379,6 +384,18 @@ def exact_executable(identity: Any, label: str) -> tuple[Path, str]:
     actual = hashlib.sha256(regular_file_bytes(path, label)).hexdigest()
     if digest != actual:
         raise EvidenceError(f"{label} digest does not match its executable bytes")
+    return path, actual
+
+
+def exact_regular_file(identity: Any, label: str) -> tuple[Path, str]:
+    if not isinstance(identity, dict) or set(identity) != {"path", "sha256"}:
+        raise EvidenceError(f"{label} identity is missing")
+    path = Path(identity["path"])
+    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+        raise EvidenceError(f"{label} identity is not an absolute regular file")
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if identity["sha256"] != actual:
+        raise EvidenceError(f"{label} digest does not match the file bytes")
     return path, actual
 
 
@@ -619,6 +636,23 @@ def validate_identity(
             del script
             if attestation.get("script_sha256") != script_digest:
                 raise EvidenceError("browser attestation names different script bytes")
+            web_artifacts = build.get("web_ui_artifacts")
+            if not isinstance(web_artifacts, dict) or set(web_artifacts) != {
+                "PulpSuperConvolverUi.js", "PulpSuperConvolverUi.wasm",
+                "PulpSuperConvolverUi.data",
+            }:
+                raise EvidenceError("browser build artifact identity is missing")
+            binding = ""
+            for name in sorted(web_artifacts):
+                path, digest = exact_regular_file(web_artifacts[name], f"browser build {name}")
+                del path
+                binding += f"{name}:{digest}\n"
+            build_digest = hashlib.sha256(binding.encode()).hexdigest()
+            if (
+                build.get("web_ui_bundle_sha256") != build_digest
+                or attestation.get("build_sha256") != build_digest
+            ):
+                raise EvidenceError("browser build identity differs from measured bytes")
 
     requirements = set(scenario["required_oracles"])
     if "authentic_gpu" in requirements:
@@ -889,6 +923,34 @@ def snapshot_receipt_bundle(
                 "path": str(pinned_producer.resolve()),
                 "sha256": producer_digest,
             }
+            if scenario.get("kind") == "maintained_web_canary":
+                script_path, script_digest = exact_executable(
+                    build.get("measurement_script"), "browser measurement script"
+                )
+                pinned_script = evidence_dir / "browser-measurement-script"
+                snapshot_file(
+                    script_path, pinned_script, "browser measurement script",
+                    executable=True, expected_sha256=script_digest,
+                )
+                build["measurement_script"] = {
+                    "path": str(pinned_script.resolve()),
+                    "sha256": script_digest,
+                }
+                web_artifacts = build.get("web_ui_artifacts")
+                if not isinstance(web_artifacts, dict):
+                    raise EvidenceError("browser build artifact identity is missing")
+                for name in sorted(web_artifacts):
+                    source, digest = exact_regular_file(
+                        web_artifacts[name], f"browser build {name}"
+                    )
+                    pinned = evidence_dir / f"web-ui-{name}"
+                    snapshot_file(
+                        source, pinned, f"browser build {name}",
+                        expected_sha256=digest,
+                    )
+                    web_artifacts[name] = {
+                        "path": str(pinned.resolve()), "sha256": digest,
+                    }
 
     receipt_snapshot = evidence_dir / "receipt.json"
     atomic_json(receipt_snapshot, receipt)

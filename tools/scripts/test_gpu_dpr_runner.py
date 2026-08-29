@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -233,6 +234,18 @@ def make_receipt(
     elif is_web:
         browser_digest = runner.sha256_file(binary)
         script_digest = runner.sha256_file(analyzer)
+        web_names = (
+            "PulpSuperConvolverUi.data", "PulpSuperConvolverUi.js",
+            "PulpSuperConvolverUi.wasm",
+        )
+        web_artifacts = {
+            name: {"path": str(binary.resolve()), "sha256": browser_digest}
+            for name in web_names
+        }
+        web_binding = "".join(
+            f"{name}:{browser_digest}\n" for name in web_names
+        )
+        web_digest = hashlib.sha256(web_binding.encode()).hexdigest()
         receipt["build_identity"].update({
             "measurement_producer": {
                 "path": str(binary.resolve()), "sha256": browser_digest,
@@ -245,11 +258,14 @@ def make_receipt(
                 "codesign_identifier": "com.google.Chrome",
                 "team_identifier": "EQHXZ8M8AV",
             },
+            "web_ui_artifacts": web_artifacts,
+            "web_ui_bundle_sha256": web_digest,
         })
         receipt["measurement_attestation"] = {
             "schema": "pulp.gpu-dpr-browser-measurement-attestation.v1",
             "producer_sha256": browser_digest,
             "script_sha256": script_digest,
+            "build_sha256": web_digest,
             "same_process": {
                 field: True for field in {
                     "adapter_identity", "capture", "frame_metrics",
@@ -271,6 +287,8 @@ def make_receipt(
         "pulp_sha": state["plan"]["pulp_sha"],
         "first_frame_time_ms": raw["metrics"]["first_frame_time"][index],
         "adapter": adapter,
+        **({"build_sha256": receipt["build_identity"]["web_ui_bundle_sha256"]}
+           if is_web else {}),
     } for index in range(20)]
     write_json(cell_dir / "raw-samples.json", raw)
     for artifact in artifacts:
@@ -1227,6 +1245,29 @@ def main() -> int:
             complete_run, "adaptive-candidate", str(a2t_receipt),
             budget_id, str(a3_receipt),
         )
+        web_key = runner.cell_key("super-convolver-web", "exact", 1)
+        web_snapshot_receipt = runner.regular_json(
+            Path(runner.load_state(complete_run)["cells"][web_key]["attempts"][-1]["receipt"]),
+            "web receipt",
+        )
+        pinned_web_data = Path(
+            web_snapshot_receipt["build_identity"]["web_ui_artifacts"]
+            ["PulpSuperConvolverUi.data"]["path"]
+        )
+        pinned_web_bytes = pinned_web_data.read_bytes()
+        pinned_web_data.chmod(0o644)
+        pinned_web_data.write_bytes(pinned_web_bytes + b"# mutation\n")
+        try:
+            runner.finalize(
+                complete_run, "adaptive-candidate", str(a2t_receipt),
+                budget_id, str(a3_receipt),
+            )
+        except runner.EvidenceError:
+            planted += 1
+        else:
+            raise AssertionError("pinned browser build mutation was accepted")
+        pinned_web_data.write_bytes(pinned_web_bytes)
+        pinned_web_data.chmod(0o444)
         forge_snapshot_receipt = runner.regular_json(
             Path(runner.load_state(complete_run)["cells"][forge_key]["attempts"][-1]["receipt"]),
             "Forge receipt",

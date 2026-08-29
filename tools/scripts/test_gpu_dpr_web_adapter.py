@@ -39,6 +39,10 @@ def main() -> int:
         req = request(root); cell = root / "cell"; cell.mkdir()
         browser = root / "fake-browser"
         browser.write_text("#!/bin/sh\necho definitely-not-chrome\n"); browser.chmod(0o755)
+        build = root / "build"; build.mkdir()
+        for name in web.WEB_UI_NAMES:
+            (build / name).write_bytes(f"fixture:{name}".encode())
+        build_artifacts, build_digest = web.web_ui_identity(build)
         try: web.browser_product_identity(browser)
         except ValueError: pass
         else: raise AssertionError("fake browser product identity passed")
@@ -62,7 +66,8 @@ def main() -> int:
         trials = [{"schema":web.FIRST_FRAME_SCHEMA,"version":1,
                    "attempt_nonce":req["attempt_nonce"],"attempt_number":1,"pid":1000+i,
                    "producer_sha256":browser_digest,"content_digest":req["expected_content_digest"],
-                   "pulp_sha":req["pulp_sha"],"first_frame_time_ms":first[i],"adapter":adapter}
+                   "pulp_sha":req["pulp_sha"],"build_sha256":build_digest,
+                   "first_frame_time_ms":first[i],"adapter":adapter}
                   for i in range(20)]
         raw = cell / "raw.json"
         write_json(raw, {"metrics":{"gpu_frame_time":[0.2] * 30},
@@ -75,28 +80,40 @@ def main() -> int:
             "mode":"exact","requested_dpr":1,"observed_dpr":1,
             "physical_size":{"width":760,"height":520},
             "content_digest":req["expected_content_digest"],"outcome":"pass",
-            "adapter":adapter,"build_identity":{"pulp_sha":req["pulp_sha"]},
+            "adapter":adapter,"build_identity":{"pulp_sha":req["pulp_sha"],
+              "web_ui_artifacts":build_artifacts,"web_ui_bundle_sha256":build_digest},
             "measurement_scope":{"schema":web.SCOPE_SCHEMA,
               "same_process":{key:True for key in web.SAME_PROCESS_FIELDS},
               "audio_device_opened":False},
             "artifacts":[artifact("capture",capture),artifact("trace",trace),
                          artifact("raw_samples",raw),artifact("input_receipt",inputs)]}
-        assert web.validate_receipt(req, receipt, cell, browser, browser)["outcome"] == "pass"
-        planted = json.loads(raw.read_text()); planted["metrics"]["gpu_frame_time"][0] = 0
+        validate = lambda: web.validate_receipt(
+            req, receipt, cell, browser, browser, build_artifacts, build_digest,
+        )
+        assert validate()["outcome"] == "pass"
+        baseline = json.loads(raw.read_text())
+        planted = json.loads(json.dumps(baseline)); planted["metrics"]["gpu_frame_time"][0] = 0
         write_json(raw, planted); receipt["artifacts"][2] = artifact("raw_samples", raw)
-        try: web.validate_receipt(req, receipt, cell, browser, browser)
+        try: validate()
         except ValueError: pass
         else: raise AssertionError("zero browser GPU timing passed")
-        planted["metrics"]["gpu_frame_time"][0] = 0.2
+        planted = json.loads(json.dumps(baseline))
         planted["fresh_process_trials"][1]["pid"] = planted["fresh_process_trials"][0]["pid"]
         write_json(raw, planted); receipt["artifacts"][2] = artifact("raw_samples", raw)
-        try: web.validate_receipt(req, receipt, cell, browser, browser)
+        try: validate()
         except ValueError: pass
         else: raise AssertionError("reused browser process passed")
         receipt["adapter"] = dict(adapter, name="SwiftShader Device")
-        try: web.validate_receipt(req, receipt, cell, browser, browser)
+        try: validate()
         except ValueError: pass
         else: raise AssertionError("software WebGL adapter passed")
+        receipt["adapter"] = adapter
+        planted = json.loads(json.dumps(baseline))
+        planted["fresh_process_trials"][1]["build_sha256"] = "0" * 64
+        write_json(raw, planted); receipt["artifacts"][2] = artifact("raw_samples", raw)
+        try: validate()
+        except ValueError: pass
+        else: raise AssertionError("mixed browser build identity passed")
 
         manifest = {"trial_contract":{"required_trace_categories":["render","gpu","text","js","layout"]}}
         trace_raw = {"trace":{"complete":True,"kind":"browser-devtools","process_pid":77}}
@@ -125,7 +142,7 @@ def main() -> int:
         try: evidence.validate_identity(unattested, scenario, plan)
         except evidence.EvidenceError: pass
         else: raise AssertionError("unattested browser evidence passed")
-    print("gpu_dpr_web_adapter_selftest=true planted_fake_browser=pass planted_native=pass planted_zero_gpu=pass planted_reused_process=pass planted_trace_scope=pass")
+    print("gpu_dpr_web_adapter_selftest=true planted_fake_browser=pass planted_native=pass planted_zero_gpu=pass planted_reused_process=pass planted_mixed_build=pass planted_trace_scope=pass")
     return 0
 
 
