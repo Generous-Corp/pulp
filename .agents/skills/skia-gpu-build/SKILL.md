@@ -533,7 +533,10 @@ existing Standalone product test remains a one-observation wiring preflight,
 not a 20-trial campaign. When the adapter owns the controls, use the two
 receipt-producing focused test invocations in
 `docs/validation/gpu-first-visible-a3-acceptance.md`; setting a seed alone is
-not durable evidence.
+not durable evidence. Set `PULP_A3_CONTROL_SOURCE_ROOT` to the clean exact Pulp
+revision that built both native control targets. The adapter verifies each
+embedded target/source/revision/blob/build identity and retains the executable
+and provenance refs; a copied script or shape-valid receipt fails closed.
 
 The checked-in `gpu_first_visible_a3_external_adapter.py` is the reusable
 Pulp-owned envelope for those roles. Configure the exact role producer with

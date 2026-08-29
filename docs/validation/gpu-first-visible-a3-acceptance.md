@@ -48,7 +48,12 @@ real product and host binaries, 10 cold plus 10 warm trials with lifecycle,
 process, and cache-boundary provenance, a full health response, and a nonempty
 same-campaign trace plus typed analysis. Add `--require-controls` to exactly one
 real role run to require the caught blank negative and external audio-thread
-exclusion proof as part of the same runner-owned evidence directory.
+exclusion proof as part of the same runner-owned evidence directory. Those
+controls must be the two native CMake targets named below, built from the exact
+clean `PULP_A3_CONTROL_SOURCE_ROOT` revision. Each executable embeds its target,
+source path, Git revision/blob, configuration, and build ID; the adapter retains
+that marker, executable digest, and producer receipt through final validation.
+A copied script or shape-valid JSON receipt is not control evidence.
 
 Each adapter is an absolute executable that accepts `--request PATH --receipt
 PATH`. The request is `pulp.gpu-first-visible-campaign-request.v1`; the adapter
@@ -124,6 +129,7 @@ PULP_A3_STANDALONE_BUILD_DRIVER_SOURCE_PATH="$STANDALONE_BUILD_DRIVER_SOURCE_PAT
 PULP_A3_STANDALONE_BUILD_ATTESTATION="$STANDALONE_BUILD_ATTESTATION" \
 PULP_A3_STANDALONE_BUILD_PROVENANCE="$STANDALONE_BUILD_PROVENANCE" \
 PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_standalone_producer.py" \
+PULP_A3_CONTROL_SOURCE_ROOT="$PWD" \
 PULP_A3_BLANK_CONTROL_BIN="$BLANK_CONTROL_BIN" \
 PULP_A3_AUDIO_CONTROL_BIN="$AUDIO_CONTROL_BIN" \
 python3 tools/scripts/gpu_first_visible_a3_campaign.py run-role \
