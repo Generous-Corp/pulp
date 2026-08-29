@@ -148,8 +148,36 @@ parse_dpr_measurement_request(std::string_view json, std::string* error) {
     if (request.logical_input_x < 0 || request.logical_input_y < 0 ||
         request.logical_input_x >= request.logical_width ||
         request.logical_input_y >= request.logical_height ||
-        request.logical_input_target != "root-hit")
+        request.logical_input_target != (
+            request.scenario_id == "threejs-audio-reactive"
+                ? "view:pulp-dpr-threejs-canvas" : "view:root"))
         return fail("scenario.logical_input_oracle is outside the owned native contract");
+    const auto read_roi = [&](const choc::value::ValueView& regions,
+                              const char* name,
+                              DprMeasurementRequest::FidelityRoi& out) {
+        if (!regions.hasObjectMember(name) || !regions[name].isObject()) return false;
+        const auto region = regions[name];
+        if (!read_finite_number(region["x"], out.x) ||
+            !read_finite_number(region["y"], out.y) ||
+            !read_finite_number(region["width"], out.width) ||
+            !read_finite_number(region["height"], out.height) ||
+            out.x < 0 || out.y < 0 || out.width <= 0 || out.height <= 0 ||
+            out.x + out.width > request.logical_width ||
+            out.y + out.height > request.logical_height)
+            return false;
+        out.available = true;
+        return true;
+    };
+    if (scenario.hasObjectMember("fidelity_oracle")) {
+        const auto regions = scenario["fidelity_oracle"];
+        if (!regions.isObject() ||
+            !read_roi(regions, "small_text_roi", request.small_text_roi) ||
+            !read_roi(regions, "thin_stroke_roi", request.thin_stroke_roi))
+            return fail("scenario.fidelity_oracle contains an invalid region");
+    }
+    if (request.scenario_id == "dense-text-thin-strokes" &&
+        (!request.small_text_roi.available || !request.thin_stroke_roi.available))
+        return fail("dense-text scenario requires frozen fidelity regions");
 
     std::string source_root, cell_directory;
     if (!read_string(root, "pulp_source_root", source_root, message) ||

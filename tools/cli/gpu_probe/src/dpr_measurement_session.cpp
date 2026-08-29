@@ -151,6 +151,8 @@ struct Session {
     std::uint32_t capture_width = 0;
     std::uint32_t capture_height = 0;
     bool threejs = false;
+    view::Point delivered_input_position{};
+    bool delivered_input_event = false;
 
     bool initialize(const DprMeasurementRequest& request,
                     const std::filesystem::path& source, std::string& error) {
@@ -259,6 +261,15 @@ struct Session {
                                         "gpu_evidence_id", request.attempt_nonce);
             root.layout_children();
         }
+        const auto product_pointer_handler = root.on_pointer_event;
+        root.on_pointer_event = [this, product_pointer_handler](
+                                    const view::MouseEvent& event) {
+            if (event.phase == view::MousePhase::press) {
+                delivered_input_position = event.window_position;
+                delivered_input_event = true;
+            }
+            if (product_pointer_handler) product_pointer_handler(event);
+        };
         return true;
     }
 
@@ -302,8 +313,36 @@ struct Session {
     bool set_scale(const DprMeasurementRequest& request, double scale,
                    std::uint32_t index, double& cpu_ms, double& gpu_ms) {
         geometry.scale = static_cast<float>(scale);
-        return frame(request, index, false, cpu_ms, gpu_ms) &&
-            std::abs(static_cast<double>(geometry.scale) - scale) < 1e-6;
+        const auto physical_width = static_cast<std::uint32_t>(std::lround(
+            static_cast<double>(request.logical_width) * scale));
+        const auto physical_height = static_cast<std::uint32_t>(std::lround(
+            static_cast<double>(request.logical_height) * scale));
+        surfaces.gpu->resize(physical_width, physical_height);
+        surfaces.skia->resize(request.logical_width, request.logical_height,
+                              static_cast<float>(scale));
+        return frame(request, index, true, cpu_ms, gpu_ms) &&
+            std::abs(static_cast<double>(geometry.scale) - scale) < 1e-6 &&
+            capture_width == physical_width && capture_height == physical_height;
+    }
+
+    bool route_physical_pointer(view::Point physical, view::Point& logical,
+                                std::string& target_name) {
+        if (!std::isfinite(physical.x) || !std::isfinite(physical.y) ||
+            geometry.scale <= 0.0f)
+            return false;
+        // This is the tooling host's physical-input boundary: callers supply
+        // device pixels, while the public pointer dispatcher consumes root
+        // logical coordinates. The event callback above is the independent
+        // observation; it is not populated from the requested oracle.
+        logical = {physical.x / geometry.scale, physical.y / geometry.scale};
+        auto* target = root.hit_test(logical);
+        delivered_input_event = false;
+        if (!target ||
+            !view::deliver_mouse_down(root, target, logical, 0, 1, true))
+            return false;
+        target_name = "view:" + (target == &root ? std::string("root") : target->id());
+        if (target_name == "view:") target_name = "view:<anonymous>";
+        return delivered_input_event;
     }
 };
 
@@ -750,23 +789,25 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
                                   static_cast<float>(request.logical_input_y)};
         const view::Point physical{logical.x * session.geometry.scale,
                                    logical.y * session.geometry.scale};
-        const view::Point observed{physical.x / session.geometry.scale,
-                                   physical.y / session.geometry.scale};
+        view::Point observed{};
+        std::string observed_target_name;
         auto* expected_target = session.root.hit_test(logical);
-        auto* observed_target = session.root.hit_test(observed);
         const auto interaction_started = Clock::now();
-        const bool delivered = observed_target &&
-            view::deliver_mouse_down(session.root, observed_target, observed, 0);
-        if (!expected_target || observed_target != expected_target ||
-            !delivered) {
+        if (!expected_target ||
+            !session.route_physical_pointer(physical, observed,
+                                            observed_target_name) ||
+            session.delivered_input_position.x != observed.x ||
+            session.delivered_input_position.y != observed.y ||
+            observed_target_name != request.logical_input_target) {
             message = "logical-input target changed after physical-to-logical mapping";
             break;
         }
         last_physical = physical;
         last_observed_logical = observed;
-        last_observed_target = "root-hit";
+        last_observed_target = observed_target_name;
         input_event_received = true;
-        view::deliver_mouse_up(session.root, observed_target, observed, 0, 1, {});
+        view::deliver_mouse_up(session.root, session.root.hit_test(observed), observed,
+                               0, 1, {});
         if (!session.frame(request, i + request.warmups + 17, false, cpu, gpu) ||
             !std::isfinite(gpu) || gpu <= 0.0) {
             message = "measured GPU frame did not complete";
@@ -843,6 +884,19 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
         if (error) *error = message;
         return 3;
     }
+    const auto analyze_roi = [&](const DprMeasurementRequest::FidelityRoi& roi) {
+        if (!roi.available) return view::ScreenshotContentStats{};
+        const auto scale = effective_dpr(request);
+        const auto cropped = view::crop_png(
+            png,
+            static_cast<std::uint32_t>(std::lround(roi.x * scale)),
+            static_cast<std::uint32_t>(std::lround(roi.y * scale)),
+            static_cast<std::uint32_t>(std::lround(roi.width * scale)),
+            static_cast<std::uint32_t>(std::lround(roi.height * scale)));
+        return view::analyze_screenshot_content(cropped);
+    };
+    const auto text_content = analyze_roi(request.small_text_roi);
+    const auto stroke_content = analyze_roi(request.thin_stroke_roi);
 
     auto metrics = choc::value::createObject("");
     const auto put_samples = [&](const char* name, const char* provenance,
@@ -923,8 +977,20 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
     auto fidelity = choc::value::createObject("");
     fidelity.setMember("content_floor_passed", content.passes_content_floor());
     fidelity.setMember("capture_similarity", comparison.similarity);
-    fidelity.setMember("small_text_luminance_stddev", content.luminance_stddev);
-    fidelity.setMember("thin_stroke_coverage", content.non_background_coverage);
+    fidelity.setMember("small_text_luminance_stddev", text_content.luminance_stddev);
+    fidelity.setMember("thin_stroke_coverage", stroke_content.non_background_coverage);
+    if (request.small_text_roi.available && request.thin_stroke_roi.available) {
+        const auto put_roi = [](const DprMeasurementRequest::FidelityRoi& roi) {
+            auto value = choc::value::createObject("");
+            value.setMember("x", roi.x); value.setMember("y", roi.y);
+            value.setMember("width", roi.width); value.setMember("height", roi.height);
+            return value;
+        };
+        auto regions = choc::value::createObject("");
+        regions.setMember("small_text_roi", put_roi(request.small_text_roi));
+        regions.setMember("thin_stroke_roi", put_roi(request.thin_stroke_roi));
+        fidelity.setMember("oracle_regions", std::move(regions));
+    }
     auto comparison_identity = choc::value::createObject("");
     comparison_identity.setMember("method", "pulp-png-pixel-comparison");
     comparison_identity.setMember("reference_sha256",
@@ -1018,8 +1084,10 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
     receipt.setMember("mode", request.mode);
     receipt.setMember("requested_dpr", request.requested_dpr);
     const bool fidelity_passed = content.passes_content_floor() &&
-        comparison.similarity >= 0.99f && content.luminance_stddev >= 1.0 &&
-        content.non_background_coverage >= 0.001;
+        comparison.similarity >= 0.99f &&
+        (!request.small_text_roi.available || text_content.luminance_stddev >= 1.0) &&
+        (!request.thin_stroke_roi.available ||
+         stroke_content.non_background_coverage >= 0.001);
     receipt.setMember("outcome", fidelity_passed
         ? "pass" : "fail");
     receipt.setMember("observed_dpr", effective_dpr(request));

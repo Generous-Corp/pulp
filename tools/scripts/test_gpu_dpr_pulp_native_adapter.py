@@ -118,7 +118,11 @@ def request(root: Path, expected_digest: str) -> dict:
             "kind": "pulp_screenshot",
             "source": "dense-text-thin-strokes.ui.js",
             "logical_size": {"width": 640, "height": 360},
-            "logical_input_oracle": {"point": [320, 180], "target": "root-hit"},
+            "logical_input_oracle": {"point": [8, 8], "target": "view:root"},
+            "fidelity_oracle": {
+                "small_text_roi": {"x": 24, "y": 24, "width": 592, "height": 105},
+                "thin_stroke_roi": {"x": 24, "y": 155, "width": 592, "height": 145},
+            },
             "required_oracles": ["small_text", "thin_strokes", "logical_input"],
         },
         "mode": "exact",

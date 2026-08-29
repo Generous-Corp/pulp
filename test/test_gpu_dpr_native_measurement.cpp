@@ -23,8 +23,12 @@ std::string request(std::string_view scenario = "dense-text-thin-strokes",
         + R"("gpu_timer_extra_work_multiplier":8},"scenario":{"id":")"
         + std::string{scenario} + R"(","kind":")" + std::string{kind}
         + (scenario == "threejs-audio-reactive"
-            ? R"(","source":"examples/threejs-native-demo/main.cpp","logical_size":{"width":900,"height":600},"logical_input_oracle":{"point":[450,300],"target":"root-hit"}}})"
-            : R"(","source":"dense-text-thin-strokes.ui.js","logical_size":{"width":640,"height":360},"logical_input_oracle":{"point":[320,180],"target":"root-hit"}}})");
+            ? R"(","source":"examples/threejs-native-demo/main.cpp","logical_size":{"width":900,"height":600},"logical_input_oracle":{"point":[8,8],"target":"view:pulp-dpr-threejs-canvas"}}})"
+            : std::string{R"(","source":"dense-text-thin-strokes.ui.js","logical_size":{"width":640,"height":360},"logical_input_oracle":{"point":[8,8],"target":"view:root"})"}
+              + (scenario == "dense-text-thin-strokes"
+                  ? R"(,"fidelity_oracle":{"small_text_roi":{"x":24,"y":24,"width":592,"height":105},"thin_stroke_roi":{"x":24,"y":155,"width":592,"height":145}})"
+                  : "")
+              + "}}");
 }
 
 } // namespace
@@ -44,8 +48,7 @@ TEST_CASE("native DPR measurement recognizes the three Pulp-owned fixtures",
         REQUIRE(parsed);
         CHECK(parsed->scenario_id == scenario);
         CHECK(parsed->attempt_number == 1);
-        CHECK(parsed->logical_input_x ==
-              (std::string_view{scenario} == "threejs-audio-reactive" ? 450.0 : 320.0));
+        CHECK(parsed->logical_input_x == 8.0);
     }
 }
 
