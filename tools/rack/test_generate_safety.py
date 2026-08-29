@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -276,6 +277,31 @@ class ToolchainHeaderClosureSafety(unittest.TestCase):
 
 
 class RackLaunchSafety(unittest.TestCase):
+    def _archive_runtime(self, directory: pathlib.Path) -> str:
+        decoder = directory / "rack_patch_decode"
+        completed = subprocess.run(
+            [str(HERE / "build_rack_patch_decode.sh"), str(decoder)],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        return str(decoder)
+
+    @unittest.skipUnless(sys.platform == "darwin",
+                         "requested Mach-O architecture is a macOS surface")
+    def test_decoder_build_honors_requested_architecture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            decoder = pathlib.Path(tmp) / "rack_patch_decode"
+            environment = os.environ.copy()
+            environment["PULP_RACK_PATCH_DECODE_ARCH"] = "x86_64"
+            completed = subprocess.run(
+                [str(HERE / "build_rack_patch_decode.sh"), str(decoder)],
+                env=environment, capture_output=True, text=True, timeout=60)
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            architecture = subprocess.run(
+                ["/usr/bin/lipo", "-archs", str(decoder)],
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(0, architecture.returncode, architecture.stderr)
+            self.assertEqual("x86_64", architecture.stdout.strip())
+
     def launch_fixture(self, artifact_name="demo.vcv", module_count=1):
         temp = tempfile.TemporaryDirectory()
         root = pathlib.Path(temp.name)
@@ -318,6 +344,122 @@ class RackLaunchSafety(unittest.TestCase):
         read.assert_called_once_with()
         self.assertEqual(2, modules)
         self.assertEqual(hashlib.sha256(payload).hexdigest(), digest)
+
+    @unittest.skipUnless(sys.platform == "darwin",
+                         "Rack's packaged launcher is a macOS surface")
+    def test_rack_saved_zstd_tar_uses_raw_archive_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            decoder = self._archive_runtime(pathlib.Path(tmp))
+            for name in ("rack-saved-rack2-valid.vcv",
+                         "rack-saved-valid.vcv"):
+                with self.subTest(name=name):
+                    fixture = HERE / "test_fixtures/rack-open" / name
+                    payload = fixture.read_bytes()
+                    modules, digest = rack_open._patch_identity(
+                        str(fixture), _decoder=decoder)
+                    self.assertEqual(2, modules)
+                    self.assertEqual(
+                        hashlib.sha256(payload).hexdigest(), digest)
+
+    @unittest.skipUnless(sys.platform == "darwin",
+                         "Rack's packaged launcher is a macOS surface")
+    def test_packaged_launcher_reads_saved_patch_without_tool_path(self) -> None:
+        fixture = HERE / "test_fixtures/rack-open/rack-saved-rack2-valid.vcv"
+        with tempfile.TemporaryDirectory() as tmp:
+            isolated_root = pathlib.Path(tmp)
+            built_decoder = self._archive_runtime(isolated_root / "build")
+            isolated = isolated_root / "rack_open.py"
+            shutil.copy2(HERE / "rack_open.py", isolated)
+            shutil.copy2(built_decoder, isolated_root / "rack_patch_decode")
+            probe = (
+                "import importlib.util,json,sys;"
+                "s=importlib.util.spec_from_file_location('rack_open',sys.argv[1]);"
+                "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+                "print(json.dumps(m._patch_identity(sys.argv[2])))")
+            completed = subprocess.run(
+                [sys.executable, "-I", "-c", probe,
+                 str(isolated), str(fixture)],
+                env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+                capture_output=True, text=True, timeout=30)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        modules, digest = json.loads(completed.stdout)
+        self.assertEqual(2, modules)
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), digest)
+
+    @unittest.skipUnless(sys.platform == "darwin",
+                         "Rack's packaged launcher is a macOS surface")
+    def test_saved_archive_failures_are_specific(self) -> None:
+        fixtures = HERE / "test_fixtures/rack-open"
+        with tempfile.TemporaryDirectory() as tmp:
+            decoder = self._archive_runtime(pathlib.Path(tmp) / "build")
+            cases = [
+                ("rack-saved-missing.vcv",
+                 "unsupported regular member: readme.txt"),
+                ("rack-saved-malformed.vcv", "patch.json is not valid JSON"),
+            ]
+            for name, message in cases:
+                with self.subTest(name=name), self.assertRaisesRegex(
+                        ValueError, message):
+                    rack_open._patch_identity(
+                        str(fixtures / name), _decoder=decoder)
+
+            valid = (fixtures / "rack-saved-valid.vcv").read_bytes()
+            truncated = pathlib.Path(tmp) / "truncated.vcv"
+            truncated.write_bytes(valid[:32])
+            with self.assertRaisesRegex(ValueError, "malformed"):
+                rack_open._patch_identity(
+                    str(truncated), _decoder=decoder)
+
+    @unittest.skipUnless(sys.platform == "darwin",
+                         "Rack's packaged launcher is a macOS surface")
+    def test_saved_archive_decoder_rejects_unsafe_members_without_writes(
+            self) -> None:
+        fixtures = HERE / "test_fixtures/rack-open"
+        cases = {
+            "rack-saved-traversal.vcv": "traverses its root",
+            "rack-saved-absolute.vcv": "absolute",
+            "rack-saved-symlink.vcv": "non-regular",
+            "rack-saved-hardlink.vcv": "non-regular",
+            "rack-saved-oversized.vcv": "exceeds the safety limit",
+            "rack-saved-duplicate.vcv": "duplicate patch.json",
+            "rack-saved-checksum.vcv": "checksum does not match",
+            "rack-saved-trailing.vcv": "ambiguous trailing data",
+            "rack-saved-nonregular.vcv": "unsupported directory",
+            "rack-saved-root-directory-payload.vcv": "unsupported directory",
+            "rack-saved-nested-directory.vcv": "unsupported directory",
+            "rack-saved-extra-root-regular.vcv":
+                "unsupported regular member: readme.txt",
+            "rack-saved-extra-nested-regular.vcv":
+                "unsupported regular member: metadata/readme.txt",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            decoder = self._archive_runtime(root / "build")
+            sentinel = root / "escape"
+            sentinel.write_bytes(b"unchanged sentinel")
+            before = {
+                path.relative_to(root): path.read_bytes()
+                for path in root.rglob("*") if path.is_file()
+            }
+            environment = {
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "TMPDIR": str(root / "private"),
+            }
+            (root / "private").mkdir()
+            for name, message in cases.items():
+                with self.subTest(name=name):
+                    completed = subprocess.run(
+                        [decoder], input=(fixtures / name).read_bytes(),
+                        env=environment, capture_output=True, timeout=10)
+                    self.assertEqual(1, completed.returncode)
+                    self.assertIn(message, completed.stderr.decode())
+            after = {
+                path.relative_to(root): path.read_bytes()
+                for path in root.rglob("*")
+                if path.is_file() and path != pathlib.Path(decoder)
+            }
+            before.pop(pathlib.Path(decoder).relative_to(root))
+            self.assertEqual(before, after)
 
     def test_rack_edition_selection_prefers_the_installed_pro_product(self) -> None:
         pro, free, generic = generate.RACK_APPS
@@ -1244,6 +1386,105 @@ class PromptBudgetSafety(unittest.TestCase):
 
 
 class BundledToolchainSafety(unittest.TestCase):
+    def test_installer_copies_prebuilt_decoder_without_compiler_and_preserves_it(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            source = root / "source"
+            here = source / "tools/rack"
+            here.mkdir(parents=True)
+            for name in ("install_toolchain.sh", "build_rack_patch_decode.sh",
+                         "rack_patch_decode.cpp"):
+                shutil.copy2(HERE / name, here / name)
+            shutil.copytree(HERE / "vendor", here / "vendor")
+            fixture_dir = here / "test_fixtures/rack-open"
+            fixture_dir.mkdir(parents=True)
+            shutil.copy2(
+                HERE / "test_fixtures/rack-open/rack-saved-rack2-valid.vcv",
+                fixture_dir)
+            (here / "generate.py").write_text(
+                "ROOT = 'fixture'\n"
+                "def preflight(root):\n    return None\n")
+            (here / "forge_modular.py").write_text(
+                "import sys\nraise SystemExit(0)\n")
+            vocabulary = source / "tools/dsp_vocabulary.py"
+            vocabulary.write_text(
+                "for index in range(25): print(f'capability-{index}')\n")
+            capability = source / "docs/status/agent-capabilities.json"
+            capability.parent.mkdir(parents=True)
+            capability.write_text("{}\n")
+            (source / "external/fonts").mkdir(parents=True)
+            (source / "external/fonts/fixture.txt").write_text("font fixture\n")
+            modules = source / "examples/forge-modular/modules"
+            modules.mkdir(parents=True)
+            (modules / "_plugin.json").write_text("{}\n")
+            (modules / "sample.json").write_text("{}\n")
+            (source / "examples/forge-modular/src").mkdir()
+            for component in ("signal", "format", "audio", "state",
+                              "platform", "runtime", "timebase"):
+                include = source / f"core/{component}/include"
+                include.mkdir(parents=True)
+                (include / "fixture.hpp").write_text("// fixture\n")
+            shaper = source / "build/shape_text"
+            shaper.parent.mkdir()
+            shaper.write_text("#!/bin/sh\nexit 0\n")
+            shaper.chmod(0o755)
+            decoder = source / "build/rack_patch_decode"
+            built = subprocess.run(
+                [str(here / "build_rack_patch_decode.sh"), str(decoder)],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(0, built.returncode, built.stderr)
+
+            destination = root / "Application Support/Forge Modular"
+            environment = os.environ.copy()
+            environment.update({
+                "HOME": str(root / "home"),
+                "FORGE_MODULAR_HOME": str(destination),
+                "CC": "/compiler/must/not/be-used",
+                "CXX": "/compiler/must/not/be-used",
+            })
+            command = ["/bin/bash", str(here / "install_toolchain.sh")]
+            first = subprocess.run(
+                command, env=environment, capture_output=True,
+                text=True, timeout=120)
+            self.assertEqual(0, first.returncode, first.stderr)
+            self.assertIn(
+                "verified the self-contained Rack saved-patch decoder",
+                first.stdout)
+            installed_decoder = destination / "tools/rack/rack_patch_decode"
+            self.assertEqual(0o755, installed_decoder.stat().st_mode & 0o777)
+            installed_hash = hashlib.sha256(
+                installed_decoder.read_bytes()).hexdigest()
+
+            preserved_patch = destination / "examples/forge-modular/patches/user.vcv"
+            preserved_patch.parent.mkdir(parents=True, exist_ok=True)
+            preserved_patch.write_bytes(b"user patch")
+            valid_decoder = decoder.read_bytes()
+            decoder.write_bytes(b"not an executable")
+            decoder.chmod(0o755)
+            rejected = subprocess.run(
+                command, env=environment, capture_output=True,
+                text=True, timeout=120)
+            self.assertNotEqual(0, rejected.returncode)
+            self.assertEqual(
+                installed_hash,
+                hashlib.sha256(installed_decoder.read_bytes()).hexdigest())
+            self.assertEqual(b"user patch", preserved_patch.read_bytes())
+            decoder.write_bytes(valid_decoder)
+            decoder.chmod(0o755)
+            repeated = subprocess.run(
+                command, env=environment, capture_output=True,
+                text=True, timeout=120)
+            self.assertEqual(0, repeated.returncode, repeated.stderr)
+            decoded = subprocess.run(
+                [str(installed_decoder)], input=(
+                    fixture_dir / "rack-saved-rack2-valid.vcv").read_bytes(),
+                env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+                capture_output=True, timeout=10)
+            self.assertEqual(0, decoded.returncode, decoded.stderr.decode())
+            self.assertEqual(2, len(json.loads(decoded.stdout)["modules"]))
+            self.assertEqual(b"user patch", preserved_patch.read_bytes())
+
     def test_writable_developer_bundle_still_seeds_application_support(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp) / "Forge Modular.app" / "Contents" / "Resources"

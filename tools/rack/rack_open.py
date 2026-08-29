@@ -31,6 +31,8 @@ DEFAULT_IDENTITY = os.path.expanduser(
 
 _PROC_PIDTBSDINFO = 3
 _PROC_PIDPATHINFO_MAXSIZE = 4096
+_ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+_MAX_PATCH_JSON_BYTES = 256 * 1024 * 1024
 
 
 class _ProcBsdInfo(ctypes.Structure):
@@ -67,10 +69,61 @@ def patch_module_count(patch: str) -> int:
     return modules
 
 
-def _patch_identity(patch: str) -> tuple[int, str]:
+def _read_archived_patch_json(payload: bytes, *,
+                              _decoder: str | None = None) -> bytes:
+    """Decode one immutable Rack archive snapshot in a crash-isolated helper."""
+    decoder = Path(_decoder) if _decoder else Path(__file__).with_name(
+        "rack_patch_decode")
+    if not decoder.is_file() or not os.access(decoder, os.X_OK):
+        raise ValueError(
+            "the installed Rack saved-patch decoder is unavailable; "
+            "reinstall the Forge Modular toolchain")
+
+    try:
+        completed = subprocess.run(
+            [str(decoder)], input=payload, capture_output=True,
+            timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(
+            f"the Rack saved-patch decoder could not run: {error}") from error
+    if completed.returncode != 0:
+        if completed.returncode < 0:
+            detail = f"terminated by signal {-completed.returncode}"
+        else:
+            detail = completed.stderr.decode("utf-8", errors="replace").strip()
+            if detail.startswith("FAIL: "):
+                detail = detail[6:]
+            detail = detail or f"exit {completed.returncode}"
+        raise ValueError(f"the Rack saved-patch archive is malformed: {detail}")
+    if len(completed.stdout) > _MAX_PATCH_JSON_BYTES:
+        raise ValueError(
+            "patch.json in the Rack archive exceeds the 256 MiB safety limit")
+    return completed.stdout
+
+
+def _decode_patch_document(payload: bytes, *,
+                           _decoder: str | None = None) -> dict:
+    archived = payload.startswith(_ZSTD_MAGIC)
+    document_bytes = (_read_archived_patch_json(payload, _decoder=_decoder)
+                      if archived else payload)
+    try:
+        document = json.loads(document_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        source = "Rack archive's patch.json" if archived else "Rack patch"
+        raise ValueError(f"the {source} is not valid JSON: {error}") from error
+    if not isinstance(document, dict):
+        source = "Rack archive's patch.json" if archived else "Rack patch"
+        raise ValueError(f"the {source} must contain a JSON object")
+    return document
+
+
+def _patch_identity(patch: str, *,
+                    _decoder: str | None = None) -> tuple[int, str]:
     """Derive declared module count and digest from one immutable byte read."""
     payload = Path(patch).read_bytes()
-    document = json.loads(payload)
+    if len(payload) > _MAX_PATCH_JSON_BYTES:
+        raise ValueError("the Rack patch exceeds the 256 MiB safety limit")
+    document = _decode_patch_document(payload, _decoder=_decoder)
     modules = document.get("modules")
     if not isinstance(modules, list) or not modules:
         raise ValueError("the Rack patch contains no modules")
