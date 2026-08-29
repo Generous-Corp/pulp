@@ -277,10 +277,64 @@ class ImmutableKeyedCache(unittest.TestCase):
             dest.mkdir(parents=True)
             sentinel = dest / "do-not-mutate"
             sentinel.write_text("retained")
-            rc = fetch_skia.main(["fetch", "darwin-arm64", "--cache-root", str(root),
-                                  "--cache-lock-timeout", "1"])
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                rc = fetch_skia.main([
+                    "fetch", "darwin-arm64", "--cache-root", str(root),
+                    "--cache-lock-timeout", "1",
+                ])
             self.assertEqual(rc, 1)
             self.assertEqual(sentinel.read_text(), "retained")
+            self.assertIn("Move that exact generation aside", errors.getvalue())
+
+    def test_checkout_build_symlink_seals_resolved_provider_bytes(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"linked")
+            shared_build = td / "shared-build"
+            shared_build.mkdir()
+            dest = td / "checkout-provider"
+            dest.mkdir()
+            (dest / "build").symlink_to(shared_build, target_is_directory=True)
+
+            self.assertEqual(
+                fetch_skia.main(["fetch", "darwin-arm64", "--dest", str(dest)]),
+                0,
+            )
+            self.assertTrue(
+                fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha)
+            )
+            receipt = json.loads(
+                (dest / fetch_skia.GENERATION_RECEIPT).read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                "build/mac-gpu/lib/Release/libskia.a",
+                {entry["path"] for entry in receipt["files"]},
+            )
+
+    def test_stale_receipt_temporary_is_excluded_from_next_seal(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"interrupted")
+            dest = td / "provider"
+            self.assertEqual(
+                fetch_skia.main(["fetch", "darwin-arm64", "--dest", str(dest)]),
+                0,
+            )
+            receipt = dest / fetch_skia.GENERATION_RECEIPT
+            receipt.unlink()
+            temporary = dest / (fetch_skia.GENERATION_RECEIPT + ".tmp")
+            temporary.write_text("stale partial receipt", encoding="utf-8")
+
+            fetch_skia.write_generation_receipt(dest, "darwin-arm64", sha)
+
+            self.assertFalse(temporary.exists())
+            self.assertTrue(
+                fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha)
+            )
+            payload = json.loads(receipt.read_text(encoding="utf-8"))["files"]
+            self.assertNotIn(
+                fetch_skia.GENERATION_RECEIPT + ".tmp",
+                {entry["path"] for entry in payload},
+            )
 
     def test_generation_rejects_missing_dawn_archive(self):
         with _in_tempdir() as td:

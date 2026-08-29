@@ -201,6 +201,7 @@ def keyed_cache_dest(cache_root: str, matrix_platform: str, asset_sha: str) -> P
 
 _ASSET_STAMP = ".skia-asset-sha256"
 GENERATION_RECEIPT = ".skia-generation-manifest.json"
+_GENERATION_RECEIPT_TMP = GENERATION_RECEIPT + ".tmp"
 
 
 def _file_sha256(path: Path) -> str:
@@ -212,18 +213,52 @@ def _file_sha256(path: Path) -> str:
 
 
 def _generation_payload(dest: Path) -> list[dict[str, str | int]]:
-    """Describe every extracted provider file, rejecting symlink substitution."""
+    """Describe every extracted provider file, rejecting symlink substitution.
+
+    Legacy checkout materializations may make only ``build`` a symlink to the
+    machine-local shared provider tree. Seal the resolved tree under the logical
+    ``build/`` prefix, while immutable keyed generations still reject every
+    symlink (including nested links in the shared tree).
+    """
     entries: list[dict[str, str | int]] = []
+
+    def append_tree(root: Path, logical_prefix: Path | None = None) -> None:
+        for path in sorted(root.rglob("*")):
+            if path.is_symlink():
+                raise ValueError(f"Skia generation contains symlink: {path}")
+            if not path.is_file() or path.name in {
+                _ASSET_STAMP, GENERATION_RECEIPT, _GENERATION_RECEIPT_TMP,
+            }:
+                continue
+            relative = path.relative_to(root)
+            logical = relative if logical_prefix is None else logical_prefix / relative
+            entries.append({
+                "path": logical.as_posix(),
+                "sha256": _file_sha256(path),
+                "size": path.stat().st_size,
+            })
+
+    build_entry = dest / "build"
     for path in sorted(dest.rglob("*")):
         if path.is_symlink():
+            if path == build_entry:
+                continue
             raise ValueError(f"Skia generation contains symlink: {path}")
-        if not path.is_file() or path.name in {_ASSET_STAMP, GENERATION_RECEIPT}:
+        if not path.is_file() or path.name in {
+            _ASSET_STAMP, GENERATION_RECEIPT, _GENERATION_RECEIPT_TMP,
+        }:
             continue
         entries.append({
             "path": path.relative_to(dest).as_posix(),
             "sha256": _file_sha256(path),
             "size": path.stat().st_size,
         })
+
+    if build_entry.is_symlink():
+        resolved_build = build_entry.resolve(strict=True)
+        if not resolved_build.is_dir():
+            raise ValueError(f"Skia build symlink does not resolve to a directory: {build_entry}")
+        append_tree(resolved_build, Path("build"))
     return entries
 
 
@@ -236,7 +271,8 @@ def write_generation_receipt(dest: Path, matrix_platform: str, asset_sha: str) -
         "files": _generation_payload(dest),
     }
     path = dest / GENERATION_RECEIPT
-    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary = dest / _GENERATION_RECEIPT_TMP
+    temporary.unlink(missing_ok=True)
     temporary.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(temporary, path)
 
@@ -290,10 +326,17 @@ def _archive_member_target(dest: Path, member_name: str) -> Path:
             or PureWindowsPath(member_name).is_absolute()):
         raise ValueError(f"unsafe archive member path: {member_name!r}")
     target = dest.joinpath(*relative.parts)
-    dest_resolved = dest.resolve()
     target_resolved = target.resolve(strict=False)
+    allowed_root = dest.resolve()
+    # Legacy checkout materializations may route exactly the top-level build/
+    # directory into a machine-local shared provider cache. Keep lexical path
+    # traversal forbidden, then constrain resolved archive members to that
+    # build target. Nested symlinks that escape it still fail closed.
+    build_entry = dest / "build"
+    if relative.parts[0] == "build" and build_entry.is_symlink():
+        allowed_root = build_entry.resolve(strict=False)
     try:
-        target_resolved.relative_to(dest_resolved)
+        target_resolved.relative_to(allowed_root)
     except ValueError as error:
         raise ValueError(f"archive member escapes destination: {member_name!r}") from error
     return target
@@ -311,7 +354,8 @@ def publish_keyed_cache(matrix_platform: str, cache_root: str,
             if dest.exists():
                 print(
                     f"ERROR: immutable Skia cache generation exists but is invalid: {dest}; "
-                    "refusing in-place mutation while consumers may be bound to it",
+                    "refusing in-place mutation while consumers may be bound to it. "
+                    "Move that exact generation aside, then rerun the fetcher to republish it",
                     file=sys.stderr,
                 )
                 return 1

@@ -6,8 +6,13 @@ from __future__ import annotations
 import tempfile
 import json
 from pathlib import Path
+import sys
 import unittest
 from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from tools.deps import validate_render_update as validator
 

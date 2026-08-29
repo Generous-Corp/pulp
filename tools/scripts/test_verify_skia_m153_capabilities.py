@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+import sys
 import unittest
 from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from tools.scripts import verify_skia_m153_capabilities as probe
 
@@ -31,7 +36,7 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
     def test_wrong_manifest_release_is_rejected_before_compile(self) -> None:
         with mock.patch.object(
             probe, "_manifest_skia", return_value={"version": "chrome/m152"}
-        ):
+        ), mock.patch.object(probe, "_require_native_host"):
             with self.assertRaisesRegex(RuntimeError, r"requires chrome/m153\+"):
                 probe.verify(Path("/does/not/matter"), "darwin-arm64")
 
@@ -43,6 +48,7 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
             },
         }
         with mock.patch.object(probe, "_manifest_skia", return_value=dependency), \
+             mock.patch.object(probe, "_require_native_host"), \
              mock.patch.object(
                  probe.skia_fetch, "cache_generation_valid", return_value=False
              ):
@@ -65,6 +71,7 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
             },
         }
         with mock.patch.object(probe, "_manifest_skia", return_value=dependency), \
+             mock.patch.object(probe, "_require_native_host"), \
              mock.patch.object(
                  probe.skia_fetch, "cache_generation_valid", return_value=False
              ):

@@ -340,6 +340,9 @@ jobs:
           # them late and by symptom.
           python3 tools/scripts/test_checkout_preflight.py
           python3 tools/scripts/test_fetch_skia_for_release.py
+          python3 tools/scripts/test_verify_skia_m153_capabilities.py
+          python3 tools/deps/test_validate_render_update.py
+          python3 tools/deps/test_validate_hosts.py
           python3 tools/scripts/test_setup_shared_skia.py
           python3 tools/scripts/test_skia_cross_process_cache.py
           python3 tools/ci/test_pulp_worktree_cache_env.py
