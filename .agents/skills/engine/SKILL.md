@@ -170,7 +170,7 @@ Use `recommend` logic above, but **never auto-switch** — always confirm first.
   old header comment, not the implementation.
 - `quickjs`: Explicit QuickJS. Same as auto today.
 - `jsc`: JavaScriptCore on Apple. Build fails on non-Apple.
-- `v8`: V8 on desktop/Android via the pinned sealed `libv8` (fetched into `external/v8-build/`). Build fails if not fetched; iOS errors out (no JIT). See "V8 provider library" below.
+- `v8`: V8 on desktop and Android API 29+ via the pinned sealed `libv8` (fetched into `external/v8-build/`). Build fails if not fetched; Android API 26-28 and iOS fail closed for this provider. See "V8 provider library" below.
 
 The engine choice is a **build-time** CMake option. Changing it requires reconfigure + rebuild. The abstraction ensures all JS bridge code works identically across engines — the switch is invisible to UI scripts.
 
@@ -218,7 +218,7 @@ prebuilt `libv8`** from the
 fork — the same pin/fetch/Find pattern as Skia:
 
 1. **Pin:** the `V8` entry in `tools/deps/manifest.json`
-   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-15.2.24-lkgr-97440bd4f523`).
+   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-m153-15.3.76.5-26cef0256b0e`).
 2. **Fetch:** `python3 tools/scripts/fetch_v8_for_release.py <platform>`
    downloads + sha256-verifies + unpacks to `external/v8-build/<platform>/`
    (`include/` + `lib/`). Platforms: `darwin-arm64`, `darwin-x64`,
@@ -249,6 +249,8 @@ a baked V8 (golden VMs: `V8_DIR=~/pulp-v8-build`).
 - `PULP_JS_ENGINE=v8` on **iOS** is a configure-time `FATAL_ERROR` — V8
   needs JIT, forbidden in iOS apps / AUv3 extensions. Use QuickJS (the
   default) or select JSC explicitly.
+- `PULP_JS_ENGINE=v8` on **Android** requires API 29+ for the pinned m153
+  provider. Pulp's general Android floor remains API 26; use QuickJS below 29.
 
 **Why the sealed build (the ICU caveat):** the v8-builder `libv8` exports
 only the `v8::`/`cppgc::` API and keeps its bundled ICU/zlib/Abseil
@@ -262,7 +264,7 @@ header.
 
 ## Windows sealed v8-builder V8 (clang-cl + Chromium libc++ `__Cr`)
 
-The v8-builder sealed Windows `v8.dll` (e.g. `v8-15.2.24-lkgr-97440bd4f523`) is a special
+The v8-builder sealed Windows `v8.dll` (e.g. `v8-m153-15.3.76.5-26cef0256b0e`) is a special
 ABI lane, NOT a drop-in for MSVC cl. It is built (v8-builder
 `build-v8.py:win_gn_args()`) with **pointer compression ON**, **Chromium's
 bundled libc++ (`__Cr` ABI namespace)**, sandbox OFF, rtti OFF. So
@@ -305,7 +307,7 @@ On Windows, additionally supply `PULP_V8_WIN_LIBCXX_INCLUDE` and
 `__Cr`-ABI `libc++.lib`). `core/view/CMakeLists.txt` links `v8::v8` and
 then calls `pulp_v8_windows_apply_abi(pulp-view-script)` (no-op off
 Windows). Proven: choc V8 consumer init + `evaluateExpression
-("40 + 2") == 42`, `V8::GetVersion() == 15.2.24`. The mac/linux sealed
+("40 + 2") == 42`, `V8::GetVersion() == 15.3.76.5`. The mac/linux sealed
 artifacts use the **system** libc++ (no `__Cr`) and need none of this —
 the `__Cr` contract is Windows-only.
 

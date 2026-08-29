@@ -15,9 +15,12 @@ This procedure expects `ghapp` and `python3`, and operates on
 `tools/deps/manifest.json`, `tools/scripts/fetch_skia_for_release.py`, and
 `tools/scripts/fetch_v8_for_release.py`.
 
-Pulp's default is a milestone-matched set: the published `skia-builder` release,
-the Dawn revision that Skia itself built from, and the V8 revision from the Chromium
-milestone branch whose DEPS pins that exact Skia commit. `v8-builder` may also publish
+Pulp's default is a milestone-matched, provider-validated set: the published
+`skia-builder` release, the Dawn revision that Skia itself built from, and the V8
+revision from the same Chromium milestone branch. Chromium's raw Skia/Dawn DEPS pins
+may differ from the later published Skia branch head; that is valid only when the
+v8-builder release records both generations, binds `built_skia`/`built_dawn` to the
+published provider, and passes the combined provider-identity/ODR gate. `v8-builder` may also publish
 newer weekly LKGR releases; those remain valid opt-in V8 choices, but they are not the
 default pin for a milestone update.
 
@@ -29,21 +32,25 @@ Keep these values distinct in notes and manifests:
 - `built_dawn`: Dawn from that Skia commit's own `DEPS`; this is the Dawn actually
   compiled into the Skia/Dawn artifacts.
 - `v8`: V8 from Chromium `refs/branch-heads/<branch>` DEPS for milestone NNN, after
-  asserting that Chromium's `skia_revision` equals the published Skia commit.
+  recording Chromium's raw Skia revision separately from the provider generation
+  validated by the matched release.
 - `dawn`: Chromium's Dawn pin. It can differ from `built_dawn`; record the mismatch.
   Do not claim all three are one identical Chromium DEPS tuple when it differs.
 
 `v8-builder/tools/milestone_pin.py` resolves and enforces this contract. For example:
 
 ```bash
-python3 ../v8-builder/tools/milestone_pin.py 152 \
-  --skia-release-tag chrome/m152 > /tmp/m152-render-lock.json
-python3 -m json.tool /tmp/m152-render-lock.json
+python3 ../v8-builder/tools/milestone_pin.py 153 \
+  --skia-release-tag chrome/m153 > /tmp/m153-render-lock.json
+python3 -m json.tool /tmp/m153-render-lock.json
 ```
 
-The result must have the requested `milestone`, `skia_release_tag`, exact `skia` and
-`v8` SHAs, and `built_dawn`. A false `dawn_matches_chromium` is disclosed provenance,
-not a failure: Skia is built against its own Dawn pin.
+The result must have the requested `milestone`, `skia_release_tag`, exact Chromium
+`skia`/`v8`/`dawn` SHAs, and exact `built_skia`/`built_dawn` provider SHAs. False
+`skia_matches_chromium` or `dawn_matches_chromium` values are disclosed provenance,
+not failures: acceptance instead requires `validated_skia_release` to equal the
+active Skia version, `built_skia`/`built_dawn` to equal Pulp's active provider, every
+asset's embedded pair to agree, and the combined provider-identity/ODR gate to pass.
 
 ## Release lanes
 
@@ -58,8 +65,8 @@ For a historical Skia release or recovery, manually start the same idempotent la
 ```bash
 ghapp workflow run matched-milestone.yml \
   --repo danielraffel/v8-builder \
-  -f milestone=152 \
-  -f skia_release_tag=chrome/m152
+  -f milestone=153 \
+  -f skia_release_tag=chrome/m153
 ```
 
 Do not update Pulp's V8 pin until that matched release is published and every requested
@@ -72,9 +79,9 @@ Present the Skia/Dawn and V8 release URLs together as the milestone collection, 
 download only the assets the user needs:
 
 ```bash
-ghapp release view chrome/m152 --repo danielraffel/skia-builder --json url
+ghapp release view chrome/m153 --repo danielraffel/skia-builder --json url
 ghapp release list --repo danielraffel/v8-builder --limit 100 --json tagName \
-  --jq '.[] | select(.tagName | startswith("v8-m152-")) |
+  --jq '.[] | select(.tagName | startswith("v8-m153-")) |
     "https://github.com/danielraffel/v8-builder/releases/tag/\(.tagName)"'
 ```
 
@@ -190,7 +197,8 @@ retain those fields in the PR/landing evidence.
 ## Common traps
 
 - A Skia milestone name alone does not select a V8 revision. Resolve through Chromium's
-  milestone branch and assert the exact Skia SHA.
+  milestone branch, preserve its raw Skia SHA, and separately prove the release's
+  validated `built_skia`/`built_dawn` pair equals Pulp's active provider.
 - Skia's Dawn pin and Chromium's Dawn pin are separate dependency surfaces.
 - GitHub release tags containing `/` must remain correctly URL-encoded/handled.
 - Linux x64 Skia and V8 assets must retain the portable glibc floor; do not replace

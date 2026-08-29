@@ -130,7 +130,7 @@
       "unit": "glibc_version",
       "floor": null,
       "binding": null,
-      "note": "Not yet measured (Linux replication pending).",
+      "note": "Skia/Dawn remain unmeasured for Linux ARM64, so the aggregate floor is still unknown. The exact m153 V8 asset was measured at GLIBC 2.39 and GLIBCXX 3.4.32; unlike linux-x64, it is not a portable Ubuntu 22.04 provider.",
       "deps": {
         "skia": {
           "measured": null,
@@ -143,9 +143,10 @@
           "always_linked": true
         },
         "v8": {
-          "measured": null,
+          "measured": "2.39",
           "expected": null,
-          "always_linked": false
+          "always_linked": false,
+          "source": "v8-builder m153 linux-arm64 lib/libv8.so; objdump -T maximum GLIBC_2.39 (GLIBCXX_3.4.32 also measured)"
         }
       }
     },

@@ -4,7 +4,7 @@ Unit tests for fetch_v8_for_release.py.
 
 Covers the per-platform unpack layout, sha256 verification, the
 idempotency stamp (skip when the pin matches, re-fetch when it changes),
-and the header-only iOS-simulator case (library: false).
+and the deliberately runtime-disabled iOS-simulator framework (library: false).
 
 Run with:
 
@@ -73,6 +73,42 @@ def _write_manifest(repo_root, asset_url, sha, key, *, library=True):
     )
 
 
+def _matched_pair_fixture() -> tuple[dict, dict]:
+    pair = {
+        "pair_kind": "chromium-milestone", "milestone": 153,
+        "built_revision": "a" * 40, "v8": "a" * 40,
+        "chromium_revision": "b" * 40, "chromium_deps_blob": "c" * 40,
+        "chromium_branch": "8010", "skia": "d" * 40,
+        "built_skia": "e" * 40, "skia_matches_chromium": False,
+        "built_dawn": "f" * 40, "dawn": "1" * 40,
+        "dawn_matches_chromium": False,
+        "validated_skia_release": "chrome/m153",
+    }
+    pair_sha = hashlib.sha256(
+        json.dumps(pair, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    determinism = {
+        "pair_kind": pair["pair_kind"], "milestone": pair["milestone"],
+        "built_revision": pair["built_revision"],
+        "chromium_revision": pair["chromium_revision"],
+        "chromium_deps_blob": pair["chromium_deps_blob"],
+        "chromium_branch": pair["chromium_branch"],
+        "chromium_skia": pair["skia"], "paired_skia": pair["built_skia"],
+        "skia_matches_chromium": pair["skia_matches_chromium"],
+        "paired_dawn": pair["built_dawn"], "chromium_dawn": pair["dawn"],
+        "dawn_matches_chromium": pair["dawn_matches_chromium"],
+        "skia_release_tag": pair["validated_skia_release"],
+        "pair_manifest_sha256": pair_sha,
+    }
+    manifest = {"dependencies": [
+        {"name": "Skia", "version": "chrome/m153", "determinism": {
+            "skia_commit": pair["built_skia"], "built_dawn": pair["built_dawn"]}},
+        {"name": "V8", "version": "v8-m153-15.3.76.5-aaaaaaaaaaaa",
+         "determinism": determinism},
+    ]}
+    return manifest, pair
+
+
 class ExpectedLibraryPath(unittest.TestCase):
     def test_mac(self):
         self.assertEqual(
@@ -100,8 +136,75 @@ class ExpectedLibraryPath(unittest.TestCase):
             "external/v8-build/android-arm64/jniLibs/arm64-v8a/libv8.so",
         )
 
-    def test_ios_is_header_only(self):
+    def test_ios_runtime_is_disabled(self):
         self.assertIsNone(fetch_v8.expected_library_path("ios-simulator-arm64"))
+
+    def test_ios_framework_header_is_required(self):
+        self.assertEqual(
+            str(fetch_v8.expected_header_path("ios-simulator-arm64")),
+            "external/v8-build/ios-simulator-arm64/V8.framework/Headers/v8.h",
+        )
+
+    def test_matched_windows_requires_runtime_import_and_libcxx(self):
+        root = pathlib.Path("sealed")
+        required = {
+            str(path) for path in fetch_v8.required_materialized_paths(
+                root, "win-x64", matched_milestone=True)
+        }
+        self.assertEqual(required, {
+            "sealed/include/v8.h", "sealed/lib/v8.dll",
+            "sealed/lib/v8.dll.lib", "sealed/lib/libc++.lib",
+        })
+
+
+class EmbeddedPairManifest(unittest.TestCase):
+    def _archive(self, root: pathlib.Path, embedded: dict | None) -> zipfile.ZipFile:
+        path = root / "pair.zip"
+        with zipfile.ZipFile(path, "w") as zf:
+            if embedded is not None:
+                zf.writestr("manifest.json", json.dumps(embedded))
+        return zipfile.ZipFile(path)
+
+    def test_exact_pair_and_active_provider_pass(self):
+        manifest, pair = _matched_pair_fixture()
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), {"v8_version": "15.3.76.5", "platform": "mac",
+                                   "arch": "arm64", "lib": "lib/libv8.dylib",
+                                   "shared": True, "sealed": True, "i18n": True,
+                                   "pair": pair}) as zf:
+            fetch_v8.validate_embedded_manifest(
+                zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
+    def test_missing_embedded_manifest_fails_closed(self):
+        manifest, _ = _matched_pair_fixture()
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), None) as zf:
+            with self.assertRaisesRegex(ValueError, "no embedded manifest"):
+                fetch_v8.validate_embedded_manifest(
+                    zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
+    def test_pair_or_active_provider_drift_fails_closed(self):
+        manifest, pair = _matched_pair_fixture()
+        pair["built_skia"] = "9" * 40
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), {"v8_version": "15.3.76.5", "platform": "mac",
+                                   "arch": "arm64", "lib": "lib/libv8.dylib",
+                                   "shared": True, "sealed": True, "i18n": True,
+                                   "pair": pair}) as zf:
+            with self.assertRaisesRegex(ValueError, "provenance mismatch"):
+                fetch_v8.validate_embedded_manifest(
+                    zf, manifest, manifest["dependencies"][1], "mac-arm64")
+
+    def test_top_level_artifact_identity_drift_fails_closed(self):
+        manifest, pair = _matched_pair_fixture()
+        embedded = {"v8_version": "15.3.76.5", "platform": "mac",
+                    "arch": "x86_64", "lib": "lib/libv8.dylib",
+                    "shared": True, "sealed": True, "i18n": True, "pair": pair}
+        with tempfile.TemporaryDirectory() as td, self._archive(
+                pathlib.Path(td), embedded) as zf:
+            with self.assertRaisesRegex(ValueError, "artifact arch"):
+                fetch_v8.validate_embedded_manifest(
+                    zf, manifest, manifest["dependencies"][1], "mac-arm64")
 
 
 class MatrixMap(unittest.TestCase):
@@ -196,12 +299,13 @@ class HappyPath(unittest.TestCase):
             self.assertTrue((td / "external/v8-build/win-x64/lib/v8.dll.lib").is_file())
 
 
-class IosHeaderOnly(unittest.TestCase):
+class IosRuntimeDisabled(unittest.TestCase):
     def test_ios_simulator_no_library_succeeds(self):
         with _in_tempdir() as td:
             zip_path = td / "v8-ios.zip"
             sha = _make_zip(zip_path, {
-                "include/v8.h": b"// v8 header",
+                "V8.framework/Headers/v8.h": b"// v8 header",
+                "V8.framework/V8": b"unused-jitless-framework",
                 "manifest.json": b"{}",
             })
             _write_manifest(
@@ -209,8 +313,8 @@ class IosHeaderOnly(unittest.TestCase):
                 "ios-simulator-arm64", library=False,
             )
             rc = fetch_v8.main(["fetch_v8_for_release.py", "ios-simulator-arm64"])
-            self.assertEqual(rc, 0, "header-only iOS asset must succeed")
-            self.assertTrue((td / "external/v8-build/ios-simulator-arm64/include/v8.h").is_file())
+            self.assertEqual(rc, 0, "runtime-disabled iOS provider must validate")
+            self.assertTrue((td / "external/v8-build/ios-simulator-arm64/V8.framework/Headers/v8.h").is_file())
             self.assertTrue((td / "external/v8-build/ios-simulator-arm64/.v8-asset-sha256").is_file())
 
 
@@ -301,7 +405,9 @@ class BakedV8FastPath(unittest.TestCase):
             _write_manifest(td, "file:///definitely/missing.zip", sha, "mac-arm64")
             baked = td / "baked"
             (baked / "mac-arm64" / "lib").mkdir(parents=True)
+            (baked / "mac-arm64" / "include").mkdir(parents=True)
             (baked / "mac-arm64" / "lib" / "libv8.dylib").write_bytes(b"baked")
+            (baked / "mac-arm64" / "include" / "v8.h").write_bytes(b"header")
             (baked / "mac-arm64" / ".v8-asset-sha256").write_text(sha + "\n")
             out = io.StringIO()
             with self._env(PULP_USE_BAKED_V8="1", V8_DIR=str(baked)), \
@@ -311,6 +417,23 @@ class BakedV8FastPath(unittest.TestCase):
             self.assertIn("using baked V8", out.getvalue())
             # No download/unpack happened into the checkout.
             self.assertFalse((td / "external/v8-build/mac-arm64/lib/libv8.dylib").exists())
+
+    def test_baked_missing_header_falls_through_to_fetch(self):
+        with _in_tempdir() as td:
+            zip_path = td / "v8.zip"
+            sha = _make_zip(zip_path, {
+                "include/v8.h": b"real-header", "lib/libv8.dylib": b"real"})
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+            baked = td / "baked"
+            (baked / "mac-arm64" / "lib").mkdir(parents=True)
+            (baked / "mac-arm64" / "lib" / "libv8.dylib").write_bytes(b"baked")
+            (baked / "mac-arm64" / ".v8-asset-sha256").write_text(sha + "\n")
+            with self._env(PULP_USE_BAKED_V8="1", V8_DIR=str(baked)):
+                self.assertEqual(
+                    fetch_v8.main(["fetch_v8_for_release.py", "darwin-arm64"]), 0)
+            self.assertEqual(
+                (td / "external/v8-build/mac-arm64/include/v8.h").read_bytes(),
+                b"real-header")
 
     def test_baked_stale_stamp_falls_through_to_fetch(self):
         with _in_tempdir() as td:

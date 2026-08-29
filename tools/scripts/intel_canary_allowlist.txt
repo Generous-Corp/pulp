@@ -68,6 +68,7 @@ tools/scripts/fetch_skia_for_release.py :: "darwin-arm64": "mac-arm64"
 tools/scripts/fetch_skia_for_release.py :: darwin-arm64, darwin-x64, darwin-universal
 tools/scripts/fetch_v8_for_release.py :: "darwin-arm64": "mac-arm64"
 tools/scripts/fetch_v8_for_release.py :: darwin-arm64, darwin-x64, linux-x64
+tools/scripts/fetch_v8_for_release.py :: "mac-arm64": {"platform": "mac", "arch": "arm64"
 
 # ── Class 5: deliberately arm64-only Apple toolchains ─────────────────────────
 # iOS DEVICE is arm64-only by construction (the simulator entry is universal).
