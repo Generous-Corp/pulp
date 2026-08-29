@@ -18,6 +18,16 @@ target_compile_definitions(pulp-browser-capture-backend PRIVATE
 target_link_libraries(pulp-browser-capture-backend PUBLIC
     pulp::platform)
 
+# Keep the pure CLI compatibility policy in one compiled object shared by the
+# production tool and its adapter tests. Besides avoiding implementation drift,
+# this lets coverage from the tests attribute to the exact production object.
+add_library(pulp-import-design-cli-policy STATIC
+    browser_import_cli_policy.cpp)
+target_include_directories(pulp-import-design-cli-policy PUBLIC
+    ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-import-design-cli-policy PUBLIC
+    pulp::view)
+
 add_executable(pulp-import-design
     pulp_import_design.cpp
     import_design_cli_help.cpp
@@ -56,6 +66,7 @@ target_compile_definitions(pulp-import-design PRIVATE
     PULP_IMPORT_DESIGN_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(pulp-import-design PRIVATE
     pulp::browser-capture-backend
+    pulp-import-design-cli-policy
     pulp::view
     pulp::state
     pulp::platform)

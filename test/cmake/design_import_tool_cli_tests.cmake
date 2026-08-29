@@ -121,6 +121,7 @@ target_compile_definitions(pulp-test-browser-capture-import PRIVATE
     PULP_BROWSER_CAPTURE_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/test/fixtures")
 target_link_libraries(pulp-test-browser-capture-import PRIVATE
     pulp::browser-capture-backend
+    pulp-import-design-cli-policy
     pulp::view
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-browser-capture-import

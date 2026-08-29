@@ -23,6 +23,12 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 using namespace pulp::platform;
 namespace fs = std::filesystem;
 
@@ -44,6 +50,43 @@ bool binary_exists() {
     return !bin.empty() && fs::exists(bin);
 }
 
+class UniqueChildCoverageProfile {
+public:
+    UniqueChildCoverageProfile() {
+        const char* profile = std::getenv("LLVM_PROFILE_FILE");
+        if (!profile || !*profile) return;
+        original_ = profile;
+#ifdef _WIN32
+        const auto parent_process_id = _getpid();
+#else
+        const auto parent_process_id = getpid();
+#endif
+        static unsigned child_sequence = 0;
+        const auto child_profile =
+            (fs::path(profile).parent_path() /
+             ("pulp-import-design-" + std::to_string(parent_process_id) +
+              "-" + std::to_string(child_sequence++) + "-%p.profraw"))
+                .string();
+#ifdef _WIN32
+        _putenv_s("LLVM_PROFILE_FILE", child_profile.c_str());
+#else
+        setenv("LLVM_PROFILE_FILE", child_profile.c_str(), 1);
+#endif
+    }
+
+    ~UniqueChildCoverageProfile() {
+        if (!original_) return;
+#ifdef _WIN32
+        _putenv_s("LLVM_PROFILE_FILE", original_->c_str());
+#else
+        setenv("LLVM_PROFILE_FILE", original_->c_str(), 1);
+#endif
+    }
+
+private:
+    std::optional<std::string> original_;
+};
+
 ProcessResult run_import_design(const std::vector<std::string>& args, int timeout_ms = 30000) {
     const auto bin = tool_binary();
     if (bin.empty() || !fs::exists(bin)) {
@@ -52,6 +95,7 @@ ProcessResult run_import_design(const std::vector<std::string>& args, int timeou
         r.stderr_output = "pulp-import-design binary not at " + bin.string();
         return r;
     }
+    UniqueChildCoverageProfile coverage_profile;
     return exec(bin.string(), args, timeout_ms);
 }
 
@@ -72,6 +116,7 @@ ProcessResult run_import_design_in(const fs::path& cwd,
     ProcessOptions opts;
     opts.working_directory = cwd.string();
     opts.timeout_ms = timeout_ms;
+    UniqueChildCoverageProfile coverage_profile;
     return ChildProcess::run(fs::absolute(bin).string(), args, opts);
 }
 

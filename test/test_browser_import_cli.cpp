@@ -141,6 +141,33 @@ TEST_CASE("browser CLI adapter tags non-browser input as not applicable",
     CHECK(std::holds_alternative<id::BrowserImportNotApplicable>(result));
 }
 
+TEST_CASE("authored-frame CLI policy rejects every incompatible route",
+          "[import-design][browser-capture][cli-adapter]") {
+    using id::validate_browser_import_cli_options;
+    using id::validate_fit_authored_frame_source_cli;
+
+    CHECK(validate_browser_import_cli_options(
+              true, true, false, false, false, false, false, false) == 2);
+    CHECK(validate_browser_import_cli_options(
+              true, false, true, false, false, false, false, false) == 2);
+    CHECK(validate_browser_import_cli_options(
+              true, false, false, true, false, false, false, false) == 2);
+    CHECK(validate_browser_import_cli_options(
+              true, false, false, false, true, false, false, false) == 2);
+    CHECK(validate_browser_import_cli_options(
+              true, false, false, false, false, true, false, false) == 2);
+    CHECK(validate_browser_import_cli_options(
+              false, false, false, false, false, false, true, true) == 2);
+    CHECK_FALSE(validate_browser_import_cli_options(
+        true, false, false, false, false, false, false, false));
+
+    CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "html"));
+    CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "claude"));
+    CHECK_FALSE(validate_fit_authored_frame_source_cli(true, "stitch"));
+    CHECK_FALSE(validate_fit_authored_frame_source_cli(false, "figma"));
+    CHECK(validate_fit_authored_frame_source_cli(true, "figma") == 2);
+}
+
 TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
           "[import-design][browser-capture][cli-adapter]") {
     TempTree tree;
