@@ -211,6 +211,7 @@ jobs:
     timeout-minutes: 120
     outputs:
       result: ${{ steps.report.outputs.result }}
+      capabilities: ${{ steps.capabilities.outputs.status }}
     env:
       BUILD_DIR: build-universal
 
@@ -400,6 +401,7 @@ jobs:
       A_RUNNER: ${{ needs.native-intel.outputs.runner }}
       B_RESULT: ${{ needs.universal-crosscheck.result }}
       B_VERDICT: ${{ needs.universal-crosscheck.outputs.result }}
+      B_CAPABILITIES: ${{ needs.universal-crosscheck.outputs.capabilities }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       RUN_SHA: ${{ github.sha }}
 
@@ -474,15 +476,16 @@ jobs:
             echo "|-----|--------|---------|"
             echo "| Native Intel | \`${A_RUNNER:-unknown}\` | ${A_VERDICT:-did-not-complete} (job=${A_RESULT}${A_INFRA:+, infra=${A_INFRA}}) |"
             echo "| Universal cross-check | \`macos-15\` | ${B_VERDICT:-did-not-complete} (job=${B_RESULT}) |"
+            echo "| Skia m153 universal capabilities | \`arm64 + Rosetta x86_64\` | ${B_CAPABILITIES:-not-run} |"
             echo
             if [ "$a_product_fail" = "true" ]; then
               echo "**Native Intel PRODUCT failure** — the x86_64 build/test broke on a real Intel CPU. This is a genuine portability regression; inspect \`nightly-intel-native-logs\`."
             elif [ "$a_infra" = "true" ] && [ "$b_ok" != "true" ]; then
-              echo "**Universal cross-check failed** while native Intel hit a runner-infra signature. The x86_64/universal packaging (lipo/codesign) or build regressed — inspect \`nightly-intel-universal-logs\`. The native-Intel red is runner-infra (do not page on it)."
+              echo "**Universal cross-check failed** while native Intel hit a runner-infra signature. Inspect the capability-step log first (provider/provenance/Rosetta/dual-arch compile-link-run), then \`skia-m153-universal-capabilities.json\` when present and the remaining \`nightly-intel-universal-logs\` (build/lipo/codesign/auval). The native-Intel red is runner-infra (do not page on it)."
             elif [ "$a_infra" = "true" ]; then
               echo "**Native Intel runner-infra signature** (linker-image / CPU-peg / timeout) — NOT a product failure. Do not page. Tracked because a run of infra-only reds delays Tier-1 promotion (see docs/guides/intel-support.md)."
             else
-              echo "**Universal cross-check failed** — inspect \`nightly-intel-universal-logs\` (lipo -archs / codesign --verify / build)."
+              echo "**Universal cross-check failed** — inspect the capability-step log first (provider/provenance/Rosetta/dual-arch compile-link-run), then \`skia-m153-universal-capabilities.json\` when present and \`nightly-intel-universal-logs\` (build/lipo/codesign/auval)."
             fi
             echo
             echo "**Run:** ${RUN_URL}"

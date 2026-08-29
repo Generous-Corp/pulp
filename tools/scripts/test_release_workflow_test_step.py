@@ -1564,6 +1564,18 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
         self.assertIn('[ "$capabilities" = "pass" ]', self.text)
         self.assertIn("skia-m153-universal-capabilities.json", self.text)
 
+    def test_nightly_watchdog_reports_capability_failure_surface(self) -> None:
+        self.assertIn(
+            "capabilities: ${{ steps.capabilities.outputs.status }}", self.text
+        )
+        self.assertIn(
+            "B_CAPABILITIES: ${{ needs.universal-crosscheck.outputs.capabilities }}",
+            self.text,
+        )
+        self.assertIn("Skia m153 universal capabilities", self.text)
+        self.assertIn("capability-step log first", self.text)
+        self.assertIn("skia-m153-universal-capabilities.json", self.text)
+
 
 class EveryLegIsIndividuallyRoutable(unittest.TestCase):
     """Each release leg must pick its runner from the resolver map.
