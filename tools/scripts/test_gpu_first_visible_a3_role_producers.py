@@ -48,7 +48,7 @@ def digest(path: Path) -> str:
 
 def write_driver(path: Path) -> None:
     source = r'''#!/usr/bin/env python3
-import argparse, hashlib, json, os, shutil, subprocess, sys
+import argparse, hashlib, json, os, shutil, subprocess, sys, time
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
@@ -127,8 +127,6 @@ if outcome == "pass":
                 "process_id", payload["samples"][0]["process_id"],
             ),
         )
-    elif mutation == "product-mutation":
-        Path(request["product"]["runtime_path"]).write_bytes(b"mutated")
     elif mutation == "snapshot-mutation":
         snapshot = root.parent / "identity" / "product.bin"
         snapshot.chmod(0o755)
@@ -154,36 +152,79 @@ if outcome == "pass":
 
 cold = json.loads((root / artifacts["raw_cold"]["path"]).read_text())["samples"] if outcome == "pass" else []
 warm = json.loads((root / artifacts["raw_warm"]["path"]).read_text())["samples"] if outcome == "pass" else []
-host_pid_by_process = {}
-for row in cold + warm:
-    host_pid_by_process.setdefault(
-        row["process_id"], 2_147_000_000 + len(host_pid_by_process),
-    )
-if mutation == "detached-host" and cold:
-    detached = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, start_new_session=True,
-    )
-    host_pid_by_process[cold[0]["process_id"]] = detached.pid
-    Path(os.environ["PULP_A3_TEST_DETACHED_HOST_MARKER"]).write_text(
-        str(detached.pid) + "\n"
-    )
 lifecycle = []
-for index, row in enumerate(cold + warm):
-    warm_row = index >= 10
-    lifecycle.append({
-        "sequence": index,
-        "cache_state": "warm" if warm_row else "cold",
-        "lifecycle_id": row["lifecycle_id"],
-        "process_id": row["process_id"],
-        "host_pid": host_pid_by_process[row["process_id"]],
-        "cache_boundary": row["cache_provenance"],
-        "prior_lifecycle_id": cold[index - 10]["lifecycle_id"] if warm_row else None,
-        "prior_process_id": row["process_id"] if warm_row else None,
-        "endpoint_observed": True,
-        "native_presented": request["role"] != "headless-constrained",
-    })
+trace_host_pid = None
+hosts = {}
+if outcome == "pass":
+    challenge = request["liveness_challenge"]
+    directory = Path(challenge["directory"])
+    for row in cold + warm:
+        if row["process_id"] not in hosts:
+            hosts[row["process_id"]] = subprocess.Popen(
+                [request["host"]["runtime_path"]], stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+    try:
+        for index, row in enumerate(cold + warm):
+            warm_row = index >= 10
+            host_process = hosts[row["process_id"]]
+            challenged_pid = os.getpid() if mutation == "liveness-stale-host" and index == 0 else host_process.pid
+            challenge_path = directory / f"challenge-{index:02}.json"
+            temporary = challenge_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps({
+                "schema": challenge["schema"],
+                "version": challenge["version"],
+                "attempt_nonce": challenge["attempt_nonce"],
+                "challenge_nonce": challenge["challenge_nonce"],
+                "sequence": index,
+                "process_id": row["process_id"],
+                "host_pid": challenged_pid,
+            }, indent=2, sort_keys=True) + "\n")
+            os.replace(temporary, challenge_path)
+            ack_path = directory / f"ack-{index:02}.json"
+            deadline = time.monotonic() + 3
+            while not ack_path.is_file() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            if not ack_path.is_file():
+                raise RuntimeError("producer did not acknowledge the live host")
+            ack = json.loads(ack_path.read_text())
+            lifecycle.append({
+                "sequence": index,
+                "cache_state": "warm" if warm_row else "cold",
+                "lifecycle_id": row["lifecycle_id"],
+                "process_id": row["process_id"],
+                "host_pid": host_process.pid,
+                "process_start_identity": ack["process_start_identity"],
+                "executable_sha256": ack["executable_sha256"],
+                "cache_boundary": row["cache_provenance"],
+                "prior_lifecycle_id": cold[index - 10]["lifecycle_id"] if warm_row else None,
+                "prior_process_id": row["process_id"] if warm_row else None,
+                "endpoint_observed": True,
+                "native_presented": request["role"] != "headless-constrained",
+            })
+        trace_host_pid = hosts[cold[0]["process_id"]].pid
+        Path(os.environ["PULP_A3_TEST_TRACE_PROCESS_PID_FILE"]).write_text(
+            str(trace_host_pid) + "\n"
+        )
+    finally:
+        for index, process in enumerate(hosts.values()):
+            if mutation == "detached-host" and index == 0:
+                Path(os.environ["PULP_A3_TEST_DETACHED_HOST_MARKER"]).write_text(
+                    str(process.pid) + "\n"
+                )
+                continue
+            try:
+                os.killpg(process.pid, 15)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, 9)
+                process.wait(timeout=2)
+if mutation == "product-mutation":
+    Path(request["product"]["runtime_path"]).write_bytes(b"mutated")
 if mutation == "lifecycle" and lifecycle:
     lifecycle[10]["prior_lifecycle_id"] = None
 elif mutation == "unknown-predecessor" and lifecycle:
@@ -206,6 +247,7 @@ receipt = {
     "product_sha256": request["product"]["sha256"],
     "host_sha256": request["host"]["sha256"],
     "driver_sha256": request["driver_sha256"],
+    "trace_host_pid": trace_host_pid,
     "lifecycle_provenance": lifecycle,
     "artifacts": artifacts,
 }
@@ -259,7 +301,11 @@ else:
     bundle = None
     product = output / f"{role}-product"
 product.parent.mkdir(parents=True, exist_ok=True)
-product.write_bytes(f"product:{role}".encode() + marker)
+template = (
+    Path(request["source_roots"]["pulp"]["path"])
+    / "tools" / "testing" / "a3" / "host-template"
+)
+product.write_bytes(template.read_bytes() + marker)
 if "source-build-mismatch" in str(args.request):
     product.write_bytes(b"source-built bytes differ")
 product.chmod(0o755)
@@ -327,6 +373,19 @@ def write_smoke(path: Path) -> None:
     )
     path.chmod(0o755)
     (path.parent / "insert_and_float.lua").write_text("-- fixture\n", encoding="utf-8")
+
+
+def write_host_template(path: Path) -> None:
+    source = path.with_suffix(".c")
+    source.write_text(
+        "#include <signal.h>\n#include <unistd.h>\n"
+        "int main(void) { for (;;) pause(); }\n",
+        encoding="utf-8",
+    )
+    compiler = shutil.which("cc")
+    assert compiler is not None
+    subprocess.run([compiler, str(source), "-o", str(path)], check=True)
+    path.chmod(0o755)
 
 
 def write_analyzer(path: Path) -> None:
@@ -405,7 +464,9 @@ else:
     if mutation == "analyzer-artifact-mutation":
         health = args.trace.parent / "health_result.json"
         health.write_text("{}\n")
-    process_pid = int(os.environ["PULP_A3_TEST_TRACE_PROCESS_PID"])
+    process_pid = int(
+        Path(os.environ["PULP_A3_TEST_TRACE_PROCESS_PID_FILE"]).read_text().strip()
+    )
     payload = {
         "schema": "pulp.trace-gpu-analysis.v1",
         "question": "gpu-startup",
@@ -432,7 +493,8 @@ raise SystemExit(exit_code)
 
 
 def make_pulp_root(
-    path: Path, smoke: Path, driver: Path, build_driver: Path, analyzer: Path,
+    path: Path, smoke: Path, driver: Path, build_driver: Path,
+    host_template: Path, analyzer: Path,
 ) -> str:
     path.mkdir()
     sources = {
@@ -445,6 +507,7 @@ def make_pulp_root(
         ),
         "tools/testing/a3/role-driver.py": driver,
         "tools/testing/a3/source-build-driver.py": build_driver,
+        "tools/testing/a3/host-template": host_template,
         "tools/scripts/gpu_first_visible_a3_trace_analyzer.py": analyzer,
         "tools/scripts/gpu_first_visible_a3_build_verifier.py": (
             SCRIPT_DIR / "gpu_first_visible_a3_build_verifier.py"
@@ -638,11 +701,12 @@ def run_role(
     }
     if mutation == "embedded-build-identity":
         embedded_identity["pulp_revision"] = "0" * 40
+    host_template = pulp_root / "tools/testing/a3/host-template"
     product.write_bytes(
-        f"product:{role}".encode() + build_verifier.encode_marker(embedded_identity)
+        host_template.read_bytes() + build_verifier.encode_marker(embedded_identity)
     )
     if host != product:
-        host.write_bytes(f"host:{role}".encode())
+        host.write_bytes(host_template.read_bytes())
     product.chmod(0o755)
     host.chmod(0o755)
     if role == "forge":
@@ -722,6 +786,7 @@ def run_role(
     attestation_path = root / f"{role}-{case_name}-build-attestation.json"
     write_json(attestation_path, attestation)
     detached_host_marker = root / f"{role}-{case_name}-detached-host.pid"
+    trace_process_pid_file = root / f"{role}-{case_name}-trace-host.pid"
     environment = dict(os.environ)
     environment.update({
         "PULP_A3_ROLE_PRODUCER_SUPPORT": str(
@@ -735,7 +800,7 @@ def run_role(
         "PULP_A3_TEST_ROLE_FIXTURE": str(evidence),
         "PULP_A3_TEST_ROLE_MUTATION": mutation,
         "PULP_A3_TEST_GPU_EVIDENCE_ID": gpu_evidence_id,
-        "PULP_A3_TEST_TRACE_PROCESS_PID": "2147000000",
+        "PULP_A3_TEST_TRACE_PROCESS_PID_FILE": str(trace_process_pid_file),
         "PULP_A3_TEST_DETACHED_HOST_MARKER": str(detached_host_marker),
         "PULP_A3_TEST_REAPER_SMOKE": smoke,
         f"{PREFIX[role]}_PRODUCT_BIN": str(product),
@@ -802,11 +867,13 @@ def main() -> int:
         write_json(evidence / "fixture-receipt.json", source_receipt)
         write_driver(root / "role-driver.py")
         write_build_driver(root / "source-build-driver.py")
+        write_host_template(root / "host-template")
         write_smoke(root / "reaper-smoke")
         write_analyzer(root / "trace-analyzer")
         make_pulp_root(
             root / "pulp-root", root / "reaper-smoke", root / "role-driver.py",
-            root / "source-build-driver.py", root / "trace-analyzer",
+            root / "source-build-driver.py", root / "host-template",
+            root / "trace-analyzer",
         )
         make_git_root(root / "forge-root")
         assert_signal_cleanup(root)
@@ -867,11 +934,15 @@ def main() -> int:
             ),
             (
                 "standalone", "embedded-build-identity", "pass",
-                "build-verifier result does not bind the closed control",
+                "independent source build differs",
             ),
             (
                 "standalone", "source-build-mismatch", "pass",
                 "independent source build differs",
+            ),
+            (
+                "standalone", "liveness-stale-host", "pass",
+                "wrong live executable",
             ),
             (
                 "standalone", "detached-host", "pass",
@@ -929,7 +1000,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=4 planted_negatives=37 cleanup_controls=2"
+            "positive=4 planted_negatives=38 cleanup_controls=2"
         )
     return 0
 

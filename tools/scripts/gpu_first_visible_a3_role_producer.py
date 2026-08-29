@@ -11,6 +11,7 @@ artifact confinement, and semantic validation of the returned campaign facts.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import math
@@ -86,7 +87,13 @@ DRIVER_RECEIPT_KEYS = {
     "schema", "version", "attempt_nonce", "role", "outcome", "reason",
     "dependencies", "identity", "measurement_endpoint", "product_sha256",
     "host_sha256", "driver_sha256", "artifacts",
-    "lifecycle_provenance",
+    "lifecycle_provenance", "trace_host_pid",
+}
+LIVENESS_CHALLENGE_SCHEMA = "pulp.gpu-first-visible-host-liveness-challenge.v1"
+LIVENESS_ACK_SCHEMA = "pulp.gpu-first-visible-host-liveness-ack.v1"
+LIVENESS_CHALLENGE_KEYS = {
+    "schema", "version", "attempt_nonce", "challenge_nonce", "sequence",
+    "process_id", "host_pid",
 }
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -970,7 +977,8 @@ def analyzer_payload(path: Path, exit_code: int, label: str) -> dict[str, Any]:
 def derive_trace_analysis(
     *, analyzer: Path, request: dict[str, Any], trace_path: Path,
     health_path: Path, health: dict[str, Any], artifact_directory: Path,
-    lifecycle_provenance: list[dict[str, Any]], pulp_root: Path,
+    lifecycle_provenance: list[dict[str, Any]], trace_host_pid: int,
+    pulp_root: Path,
 ) -> tuple[Path, list[Path]]:
     analyzer_environment = dict(os.environ)
     analyzer_environment.update({
@@ -1019,7 +1027,8 @@ def derive_trace_analysis(
         or scope["process_upid"] < 0
         or isinstance(scope.get("process_pid"), bool)
         or not isinstance(scope.get("process_pid"), int)
-        or scope["process_pid"] not in host_pids
+        or scope["process_pid"] != trace_host_pid
+        or trace_host_pid not in host_pids
     ):
         raise ProducerError(
             "pinned trace replay does not prove the campaign evidence cohort"
@@ -1070,6 +1079,142 @@ def process_exists(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def live_process_executable(pid: int) -> Path:
+    if sys.platform == "darwin":
+        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        buffer = ctypes.create_string_buffer(4096)
+        library.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        library.proc_pidpath.restype = ctypes.c_int
+        count = library.proc_pidpath(pid, buffer, len(buffer))
+        if count <= 0:
+            raise ProducerError(f"host process {pid} has no live executable identity")
+        return Path(os.fsdecode(buffer.value)).resolve()
+    proc_path = Path("/proc") / str(pid) / "exe"
+    if proc_path.exists():
+        return proc_path.resolve()
+    completed = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "comm="], stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        timeout=5, check=False,
+    )
+    value = completed.stdout.strip()
+    if completed.returncode != 0 or not value:
+        raise ProducerError(f"host process {pid} has no live executable identity")
+    return Path(value).resolve()
+
+
+def live_process_start_identity(pid: int) -> str:
+    completed = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "lstart="], stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        timeout=5, check=False,
+    )
+    value = " ".join(completed.stdout.split())
+    if completed.returncode != 0 or not value:
+        raise ProducerError(f"host process {pid} has no live start identity")
+    return f"pid={pid};started={value}"
+
+
+class HostLivenessMonitor:
+    """Challenge every claimed lifecycle while its exact host is alive."""
+
+    def __init__(
+        self, *, root: Path, request: dict[str, Any], host: Path, host_digest: str,
+    ) -> None:
+        self.root = root / "liveness"
+        self.root.mkdir()
+        self.request = request
+        self.host = host.resolve()
+        self.host_digest = host_digest
+        self.nonce = os.urandom(16).hex()
+        self.stop_event = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.error: BaseException | None = None
+        self.observations: dict[int, dict[str, Any]] = {}
+        self.artifacts: list[Path] = []
+
+    def contract(self) -> dict[str, Any]:
+        return {
+            "schema": LIVENESS_CHALLENGE_SCHEMA,
+            "version": 1,
+            "attempt_nonce": self.request["attempt_nonce"],
+            "challenge_nonce": self.nonce,
+            "directory": str(self.root),
+            "expected_count": 20,
+        }
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def _run(self) -> None:
+        try:
+            for sequence in range(20):
+                path = self.root / f"challenge-{sequence:02}.json"
+                while not path.is_file():
+                    if self.stop_event.wait(0.01):
+                        return
+                challenge = regular_json(path, f"host liveness challenge {sequence}")
+                exact_keys(
+                    challenge, LIVENESS_CHALLENGE_KEYS,
+                    f"host liveness challenge {sequence}",
+                )
+                if (
+                    challenge["schema"] != LIVENESS_CHALLENGE_SCHEMA
+                    or challenge["version"] != 1
+                    or challenge["attempt_nonce"] != self.request["attempt_nonce"]
+                    or challenge["challenge_nonce"] != self.nonce
+                    or challenge["sequence"] != sequence
+                    or not isinstance(challenge["process_id"], str)
+                    or not challenge["process_id"]
+                    or isinstance(challenge["host_pid"], bool)
+                    or not isinstance(challenge["host_pid"], int)
+                    or challenge["host_pid"] <= 1
+                ):
+                    raise ProducerError(
+                        f"host liveness challenge {sequence} differs from the closed request"
+                    )
+                pid = challenge["host_pid"]
+                executable = live_process_executable(pid)
+                if (
+                    executable != self.host
+                    or file_sha256(executable, "live host executable") != self.host_digest
+                ):
+                    raise ProducerError(
+                        f"host liveness challenge {sequence} names the wrong live executable"
+                    )
+                observation = {
+                    "sequence": sequence,
+                    "process_id": challenge["process_id"],
+                    "host_pid": pid,
+                    "process_start_identity": live_process_start_identity(pid),
+                    "executable_sha256": self.host_digest,
+                }
+                ack = {
+                    "schema": LIVENESS_ACK_SCHEMA,
+                    "version": 1,
+                    "attempt_nonce": self.request["attempt_nonce"],
+                    "challenge_nonce": self.nonce,
+                    **observation,
+                }
+                ack_path = self.root / f"ack-{sequence:02}.json"
+                atomic_json(ack_path, ack)
+                self.observations[sequence] = observation
+                self.artifacts.extend([path, ack_path])
+        except BaseException as error:  # surfaced synchronously by finish()
+            self.error = error
+
+    def finish(self) -> tuple[dict[int, dict[str, Any]], list[Path]]:
+        self.stop_event.set()
+        self.thread.join(timeout=5)
+        if self.thread.is_alive():
+            raise ProducerError("host liveness monitor did not stop")
+        if self.error is not None:
+            if isinstance(self.error, ProducerError):
+                raise self.error
+            raise ProducerError(f"host liveness monitor failed: {self.error}")
+        return self.observations, self.artifacts
 
 
 def assert_host_processes_stopped(
@@ -1336,7 +1481,8 @@ def deterministic_tar(path: Path, members: list[tuple[str, Path]]) -> None:
 def validate_driver_receipt(
     receipt: dict[str, Any], *, request: dict[str, Any], driver_root: Path,
     product_digest: str, host_digest: str, driver_digest: str, exit_code: int,
-) -> tuple[str, dict[str, Path], list[dict[str, Any]]]:
+    liveness: dict[int, dict[str, Any]],
+) -> tuple[str, dict[str, Path], list[dict[str, Any]], int | None]:
     exact_keys(receipt, DRIVER_RECEIPT_KEYS, "role-driver receipt")
     if receipt["schema"] != DRIVER_RECEIPT_SCHEMA or receipt["version"] != 1:
         raise ProducerError("role-driver receipt has the wrong schema or version")
@@ -1377,8 +1523,13 @@ def validate_driver_receipt(
         )
     lifecycle = receipt["lifecycle_provenance"]
     if outcome == "pass":
-        if not isinstance(lifecycle, list) or len(lifecycle) != 20:
-            raise ProducerError("passing role driver lacks 20 lifecycle provenance rows")
+        if (
+            not isinstance(lifecycle, list) or len(lifecycle) != 20
+            or set(liveness) != set(range(20))
+        ):
+            raise ProducerError(
+                "passing role driver lacks 20 lifecycle provenance rows with producer-observed live hosts"
+            )
         observed_lifecycles: dict[str, str] = {}
         process_pids: dict[str, int] = {}
         pid_processes: dict[int, str] = {}
@@ -1387,7 +1538,9 @@ def validate_driver_receipt(
                 "sequence", "cache_state", "lifecycle_id", "process_id",
                 "cache_boundary", "prior_lifecycle_id", "prior_process_id",
                 "endpoint_observed", "native_presented", "host_pid",
+                "process_start_identity", "executable_sha256",
             }, f"role-driver lifecycle {index}")
+            observed = liveness[index]
             expected_state = "cold" if index < 10 else "warm"
             expected_boundary = (
                 {"fresh-process", "explicit-cache-reset"}
@@ -1401,6 +1554,10 @@ def validate_driver_receipt(
                 or isinstance(row["host_pid"], bool)
                 or not isinstance(row["host_pid"], int)
                 or not 2 <= row["host_pid"] <= 2_147_483_647
+                or row["process_id"] != observed["process_id"]
+                or row["host_pid"] != observed["host_pid"]
+                or row["process_start_identity"] != observed["process_start_identity"]
+                or row["executable_sha256"] != observed["executable_sha256"]
                 or row["endpoint_observed"] is not True
             ):
                 raise ProducerError(f"role-driver lifecycle {index} lacks authentic provenance")
@@ -1436,9 +1593,17 @@ def validate_driver_receipt(
                     raise ProducerError("headless lifecycle cannot claim native presentation")
             elif row["native_presented"] is not True:
                 raise ProducerError("visible lifecycle lacks independent native presentation")
-    elif lifecycle != []:
-        raise ProducerError("non-passing role driver cannot retain unvalidated lifecycle claims")
-    return outcome, paths, lifecycle
+        trace_host_pid = receipt["trace_host_pid"]
+        if (
+            isinstance(trace_host_pid, bool) or not isinstance(trace_host_pid, int)
+            or trace_host_pid not in {item["host_pid"] for item in liveness.values()}
+        ):
+            raise ProducerError("role driver does not bind the trace to a challenged live host")
+    else:
+        if lifecycle != [] or receipt["trace_host_pid"] is not None:
+            raise ProducerError("non-passing role driver cannot retain unvalidated lifecycle claims")
+        trace_host_pid = None
+    return outcome, paths, lifecycle, trace_host_pid
 
 
 def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
@@ -1857,6 +2022,10 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
 
         driver_root = artifact_directory / "role-driver-artifacts"
         driver_root.mkdir()
+        liveness_monitor = HostLivenessMonitor(
+            root=driver_root, request=request, host=host_binary,
+            host_digest=host_digest,
+        )
         driver_request = {
             "schema": DRIVER_REQUEST_SCHEMA,
             "version": 1,
@@ -1877,6 +2046,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             "driver_sha256": driver_digest,
             "artifact_directory": str(driver_root),
             "role_context": role_context,
+            "liveness_challenge": liveness_monitor.contract(),
         }
         driver_request_path = artifact_directory / "role-driver-request.json"
         driver_receipt_path = artifact_directory / "role-driver-receipt.json"
@@ -1887,13 +2057,23 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         immutable_files.append((
             driver_request_path, driver_request_digest, "closed role-driver request",
         ))
-        driver_exit = bounded_run(
-            [str(driver_snapshot), "--request", str(driver_request_path),
-             "--receipt", str(driver_receipt_path)],
-            cwd=artifact_directory, environment=dict(os.environ), timeout_seconds=480,
-            stdout_path=artifact_directory / "logs" / "role-driver.stdout.log",
-            stderr_path=artifact_directory / "logs" / "role-driver.stderr.log",
-        )
+        liveness_monitor.start()
+        try:
+            driver_exit = bounded_run(
+                [str(driver_snapshot), "--request", str(driver_request_path),
+                 "--receipt", str(driver_receipt_path)],
+                cwd=artifact_directory, environment=dict(os.environ), timeout_seconds=480,
+                stdout_path=artifact_directory / "logs" / "role-driver.stdout.log",
+                stderr_path=artifact_directory / "logs" / "role-driver.stderr.log",
+            )
+        finally:
+            liveness_observations, liveness_artifacts = liveness_monitor.finish()
+        extra_members.extend(liveness_artifacts)
+        for path in liveness_artifacts:
+            immutable_files.append((
+                path, file_sha256(path, f"host liveness artifact {path.name}"),
+                f"host liveness artifact {path.name}",
+            ))
         assert_immutable_files(immutable_files)
         if file_sha256(product_binary, "configured product binary") != product_digest:
             raise ProducerError("configured product binary changed during the campaign")
@@ -1910,10 +2090,13 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         driver_receipt_digest = file_sha256(
             driver_receipt_path, "closed role-driver receipt",
         )
-        outcome, measured_paths, lifecycle_provenance = validate_driver_receipt(
+        outcome, measured_paths, lifecycle_provenance, trace_host_pid = (
+            validate_driver_receipt(
             driver_receipt, request=request, driver_root=driver_root,
             product_digest=product_digest, host_digest=host_digest,
             driver_digest=driver_digest, exit_code=driver_exit,
+            liveness=liveness_observations,
+            )
         )
         if outcome == "pass":
             assert_host_processes_stopped(lifecycle_provenance)
@@ -1939,6 +2122,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             health_path=measured_paths["health_result"], health=health,
             artifact_directory=artifact_directory,
             lifecycle_provenance=lifecycle_provenance,
+            trace_host_pid=trace_host_pid,
             pulp_root=pulp_root,
         )
         measured_paths["trace_analysis"] = trace_analysis_path
