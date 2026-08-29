@@ -277,8 +277,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-trace-overhead",
           "state": "pulp-owned-retained",
-          "revision": "0fb0d9092bdf1ff15a253c7695c8c1c56f564715",
-          "object_id": "929e96a4637cd235ac978e0a46ab008a1f00d41c",
+          "revision": "2e9a294ca317a111eafffe5543160a0388d91670",
+          "object_id": "ca86f61751157ff3a611de7f5df4f7484bec4082",
           "object_type": "tree"
         },
         {
@@ -301,8 +301,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "f72b8ac3346ef03d83b9dd3f16ee6cda9b8774d6",
-          "object_id": "2c2fbed56033e315d99d4cbc0275f7b6d18140d6",
+          "revision": "2e9a294ca317a111eafffe5543160a0388d91670",
+          "object_id": "eebad97ca6122a7d5fba1c9c6ff7eab70a8f95cc",
           "object_type": "blob"
         },
         {
@@ -921,8 +921,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-dpr",
           "state": "pulp-owned-retained",
-          "revision": "cac4923ac04a9c2402138aea5092c387ae391869",
-          "object_id": "f97d5a68b4795ae6516feda9296d2f5c00657144",
+          "revision": "2e9a294ca317a111eafffe5543160a0388d91670",
+          "object_id": "3cfb96a0e006fcac8c2531de4e34280f0e22ccf1",
           "object_type": "tree"
         },
         {
