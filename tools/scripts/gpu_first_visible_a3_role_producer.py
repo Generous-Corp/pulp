@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import os
+import plistlib
 import re
 import signal
 import stat
@@ -519,6 +520,28 @@ def require_bundle_executable(bundle: Path, product_binary: Path) -> None:
     if candidates != [product_binary]:
         raise ProducerError(
             "DAW product binary is not the sole executable loaded from the exact plugin bundle"
+        )
+
+
+def require_forge_bundle_identity(
+    bundle: Path, product_binary: Path, identity: dict[str, Any],
+) -> None:
+    plist_path = bundle / "Contents" / "Info.plist"
+    try:
+        payload = plistlib.loads(regular_file_bytes(plist_path, "Forge Info.plist"))
+    except plistlib.InvalidFileException as error:
+        raise ProducerError("Forge Info.plist is invalid") from error
+    if not isinstance(payload, dict):
+        raise ProducerError("Forge Info.plist is not a dictionary")
+    executable = payload.get("CFBundleExecutable")
+    if (
+        executable != product_binary.name
+        or payload.get("CFBundleIdentifier") != identity["product_id"]
+        or payload.get("CFBundleName") != identity["product_name"]
+        or product_binary != (bundle / "Contents" / "MacOS" / str(executable)).resolve()
+    ):
+        raise ProducerError(
+            "Forge Info.plist does not bind the requested bundle, product, and executable identity"
         )
 
 
@@ -1394,6 +1417,9 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 raise ProducerError(
                     "Forge product/host must be the same executable inside the exact app bundle"
                 )
+            require_forge_bundle_identity(
+                forge_bundle, product_binary, request["identity"],
+            )
             forge_snapshot, bundle_tree_digest = snapshot_directory(
                 forge_bundle,
                 artifact_directory / "identity" / "forge-app-bundle.tar",

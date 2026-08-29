@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import plistlib
 import signal
 import shutil
 import subprocess
@@ -489,6 +490,17 @@ def run_role(
         host.write_bytes(f"host:{role}".encode())
     product.chmod(0o755)
     host.chmod(0o755)
+    if role == "forge":
+        plist_payload = {
+            "CFBundleExecutable": product.name,
+            "CFBundleIdentifier": identity["product_id"],
+            "CFBundleName": identity["product_name"],
+        }
+        if mutation == "forge-plist-executable":
+            plist_payload["CFBundleExecutable"] = "Unrelated Executable"
+        (bundle / "Contents" / "Info.plist").write_bytes(
+            plistlib.dumps(plist_payload, fmt=plistlib.FMT_BINARY, sort_keys=True)
+        )
     if role == "daw" and mutation == "daw-extra-executable":
         extra_executable = bundle / "Contents" / "MacOS" / "other-product"
         extra_executable.write_bytes(b"unrelated executable")
@@ -712,6 +724,10 @@ def main() -> int:
                 "forge", "forge-untracked-source", "pass",
                 "tracked or untracked changes",
             ),
+            (
+                "forge", "forge-plist-executable", "pass",
+                "Info.plist does not bind",
+            ),
         ]
         for role, mutation, smoke, needle in negatives:
             completed, receipt = run_role(root, evidence, role, mutation=mutation, smoke=smoke)
@@ -738,7 +754,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=4 planted_negatives=33 cleanup_controls=2"
+            "positive=4 planted_negatives=34 cleanup_controls=2"
         )
     return 0
 
