@@ -727,6 +727,25 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
             problems.append(group.get("describe") or
                             "needs distinct source output lanes")
 
+    # Several requirements can each be present while belonging to different
+    # instances of the same role. A feedback sum is one such case: the dry
+    # source and filtered return must enter the same mixer whose output feeds
+    # both the delay and the audible tail. This binds only the participating
+    # role instance; unrelated mixers elsewhere in a larger patch remain valid.
+    for group in idiom.get("same_role_instance_groups") or []:
+        requirements = [topology.get(rid)
+                        for rid in group.get("requirements") or []]
+        instance_sets = [
+            _role_instances(patch, by_id, inv, roles, req, group.get("role"),
+                            candidates) if req else set()
+            for req in requirements
+        ]
+        if not requirements or any(req is None for req in requirements) \
+                or any(not instances for instances in instance_sets) \
+                or not set.intersection(*instance_sets):
+            problems.append(group.get("describe") or
+                            "needs one shared role instance")
+
     # A TECHNIQUE CAN BE DEFINED BY WHAT IS NOT PATCHED.
     #
     # A filter played as an oscillator is a filter with nothing in its audio
@@ -826,6 +845,27 @@ def _source_lanes(patch: dict, by_id: dict, inv: dict, roles: dict, req: dict,
         if dst_id in transparent:
             queue.extend((next_cable, origin)
                          for next_cable in outgoing.get(dst_id, []))
+    return found
+
+
+def _role_instances(patch: dict, by_id: dict, inv: dict, roles: dict,
+                    req: dict, role: str, candidates) -> set[int]:
+    """Role instances participating in the same witnesses as `_satisfied`."""
+    if req.get("from_module") == role:
+        return {module_id for module_id, _ in
+                _source_lanes(patch, by_id, inv, roles, req, candidates)}
+    if req.get("to_module") != role:
+        return set()
+    found: set[int] = set()
+    to_role = req.get("to_module", "any")
+    for module_id in candidates(to_role):
+        def narrowed(candidate_role: str) -> set[int]:
+            values = set(candidates(candidate_role))
+            return ({module_id} if candidate_role == to_role else values)
+        satisfied, _ = _satisfied(patch, by_id, inv, roles, req, narrowed,
+                                  blind_ok=True)
+        if satisfied:
+            found.add(module_id)
     return found
 
 
@@ -1367,6 +1407,18 @@ def library_problems(idioms: dict | None = None,
     #    both words, and states in data that what separates them is a control
     #    this checker cannot read. Silence is what this rule refuses. Four
     #    pairs in the library were silently identical when it was written.
+    def canonical_ids(values: list) -> tuple[str, ...]:
+        """Stable shape identity even when malformed JSON reaches the lint."""
+        return tuple(sorted({json.dumps(value, sort_keys=True,
+                                        separators=(",", ":"),
+                                        ensure_ascii=False)
+                             for value in values}))
+
+    def requirement_list(group: dict) -> list:
+        """Return only the JSON-array form accepted by the idiom schema."""
+        values = group.get("requirements")
+        return values if isinstance(values, list) else []
+
     shapes: dict[tuple, str] = {}
     for slug, idiom in sorted(idioms.items()):
         shape = (tuple(sorted((r.get("from_module", "any"),
@@ -1378,6 +1430,10 @@ def library_problems(idioms: dict | None = None,
                               for r in idiom.get("topology") or [])),
                  tuple(sorted((idiom.get("at_least") or {}).items())),
                  tuple(sorted((idiom.get("exactly") or {}).items())),
+                 tuple(sorted((json.dumps(g.get("role"), sort_keys=True),
+                               canonical_ids(requirement_list(g)))
+                              for g in idiom.get("same_role_instance_groups")
+                              or [])),
                  tuple(sorted((r.get("from_module", "any"),
                                r.get("to_module", "any"),
                                r.get("to_port", "any_in"))
@@ -1409,9 +1465,12 @@ def library_problems(idioms: dict | None = None,
             if not isinstance(count, int) or isinstance(count, bool) or count < 0:
                 bad.append(f"{slug} has an invalid exact count {count!r} for "
                            f"{role}")
-        topology_ids = {r.get("id") for r in idiom.get("topology") or []}
+        topology_ids = [r.get("id") for r in idiom.get("topology") or []]
         for group in idiom.get("distinct_source_lanes") or []:
-            requirement_ids = group.get("requirements") or []
+            requirement_ids = requirement_list(group)
+            if not isinstance(group.get("requirements"), list):
+                bad.append(f"{slug} distinct-source group requirements must "
+                           "be a list")
             if len(requirement_ids) < 2:
                 bad.append(f"{slug} has a distinct-source group with fewer "
                            "than two requirements")
@@ -1421,6 +1480,38 @@ def library_problems(idioms: dict | None = None,
                                f"requirement {requirement_id!r}")
             if not group.get("describe"):
                 bad.append(f"{slug} has a distinct-source group with no "
+                           "description")
+        for group in idiom.get("same_role_instance_groups") or []:
+            requirement_ids = requirement_list(group)
+            if not isinstance(group.get("requirements"), list):
+                bad.append(f"{slug} same-instance group requirements must be "
+                           "a list")
+            valid_requirement_ids = [requirement_id
+                                     for requirement_id in requirement_ids
+                                     if isinstance(requirement_id, str)]
+            role = group.get("role")
+            if role not in roles.get("roles", {}):
+                bad.append(f"{slug} has a same-instance group for unknown "
+                           f"role {role!r}")
+            for requirement_id in requirement_ids:
+                if not isinstance(requirement_id, str):
+                    bad.append(f"{slug} same-instance group has non-string "
+                               f"requirement id {requirement_id!r}")
+            if len(set(valid_requirement_ids)) < 2:
+                bad.append(f"{slug} has a same-instance group with fewer "
+                           "than two distinct requirements")
+            for requirement_id in valid_requirement_ids:
+                requirement = next((r for r in idiom.get("topology") or []
+                                    if r.get("id") == requirement_id), None)
+                if requirement is None:
+                    bad.append(f"{slug} same-instance group names unknown "
+                               f"requirement {requirement_id!r}")
+                elif role not in (requirement.get("from_module"),
+                                  requirement.get("to_module")):
+                    bad.append(f"{slug} same-instance requirement "
+                               f"{requirement_id!r} does not name role {role!r}")
+            if not group.get("describe"):
+                bad.append(f"{slug} has a same-instance group with no "
                            "description")
         for modifier in idiom.get("hard_modifiers") or []:
             phrases = modifier.get("phrases") or []
@@ -1473,6 +1564,21 @@ def library_problems(idioms: dict | None = None,
                 for m in idiom.get("common_mistakes") or []):
             bad.append(f"{slug} forbids a connection and never patches one, so "
                        f"the ban holds by default and proves nothing")
+        for group in idiom.get("same_role_instance_groups") or []:
+            role = group.get("role")
+            requirement_ids = {requirement_id
+                               for requirement_id in
+                               requirement_list(group)
+                               if isinstance(requirement_id, str)}
+            covered = any(
+                mistake.get("do") == "split_role_instance" and
+                mistake.get("module") == role and
+                mistake.get("requirement") in requirement_ids
+                for mistake in idiom.get("common_mistakes") or [])
+            if not covered:
+                bad.append(f"{slug} binds requirements to one {role} instance "
+                           "and never splits that group across two instances, "
+                           "so the binding has no negative control")
 
         # 5. An axis is a continuum written down: the members are separate
         #    idioms with separate structures, linked so neither the model nor
@@ -1694,6 +1800,29 @@ def apply_mistake(patch: dict, mistake: dict, inv: dict, roles: dict) -> dict | 
             return None
         target_cable["outputModuleId"] = donor_cable["outputModuleId"]
         target_cable["outputId"] = donor_cable["outputId"]
+        return out
+
+    if kind == "split_role_instance":
+        target = matching_cables(mistake.get("requirement"))
+        if not target:
+            return None
+        cable = target[0]
+        role = mistake.get("module")
+        source_side = next((r for r in mistake.get("_topology", [])
+                            if r.get("id") == mistake.get("requirement")), {}) \
+            .get("from_module") == role
+        endpoint = "outputModuleId" if source_side else "inputModuleId"
+        original = next((m for m in out.get("modules", [])
+                         if m.get("id") == cable.get(endpoint)), None)
+        if original is None or not _module_matches(role, _entry(inv, original),
+                                                   roles):
+            return None
+        clone = dict(original)
+        clone["id"] = max((m.get("id", 0) for m in out.get("modules", [])
+                           if isinstance(m, dict) and
+                           type(m.get("id")) is int), default=0) + 1
+        out.setdefault("modules", []).append(clone)
+        cable[endpoint] = clone["id"]
         return out
 
     if kind == "drop_module":

@@ -40,6 +40,7 @@ RESOLUTIONS = [
     ("make it stay in key", "quantized-voice"),
     ("a wind and rain atmosphere", "noise-texture"),
     ("delay repeats that build on themselves", "feedback-delay-texture"),
+    ("a dub-inspired feedback texture", "dub-feedback-texture"),
     ("a tuned marimba roll whose speed I can change", "marimba-roll"),
     # Nothing claimed: a request with no idiom must resolve to nothing rather
     # than to whatever matched loosest. A checker that always finds an idiom
@@ -733,6 +734,45 @@ LINT_CASES = [
          [m for m in i["self-oscillating-filter-voice"]["common_mistakes"]
           if m.get("do") != "wire"]),
      "holds by default"),
+
+    ("a same-instance role with no role-specific split control",
+     lambda i: i["dub-feedback-texture"].__setitem__(
+         "common_mistakes",
+         [m for m in i["dub-feedback-texture"]["common_mistakes"]
+          if m.get("do") != "split_role_instance" or
+          m.get("module") == "mixer"]),
+     "one delay instance"),
+
+    ("a same-instance group repeating one requirement",
+     lambda i: i["dub-feedback-texture"]["same_role_instance_groups"][0]
+     .__setitem__("requirements", ["dub-source", "dub-source"]),
+     "fewer than two distinct requirements"),
+
+    ("a same-instance group with a non-string requirement id",
+     lambda i: i["dub-feedback-texture"]["same_role_instance_groups"][0]
+     ["requirements"].append(["dub-source"]),
+     "non-string requirement id"),
+
+    ("a same-instance group with scalar requirements",
+     lambda i: i["dub-feedback-texture"]["same_role_instance_groups"][0]
+     .__setitem__("requirements", 7),
+     "requirements must be a list"),
+
+    ("a same-instance group with object requirements",
+     lambda i: i["dub-feedback-texture"]["same_role_instance_groups"][0]
+     .__setitem__("requirements", {"dub-source": 1, "dub-output": 2}),
+     "requirements must be a list"),
+
+    ("two same-instance records hiding behind requirement order",
+     lambda i: i.__setitem__(
+         "dub-feedback-texture-again",
+         dict(i["dub-feedback-texture"], slug="dub-feedback-texture-again",
+              names=["dub feedback texture again"],
+              same_role_instance_groups=[
+                  dict(group, requirements=list(reversed(group["requirements"])))
+                  for group in reversed(
+                      i["dub-feedback-texture"]["same_role_instance_groups"])])),
+     "asserts exactly the structure"),
 ]
 
 
