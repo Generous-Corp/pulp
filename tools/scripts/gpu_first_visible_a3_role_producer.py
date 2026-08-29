@@ -43,10 +43,13 @@ SOURCE_BUILD_RECEIPT_SCHEMA = "pulp.gpu-first-visible-source-build-receipt.v1"
 BUILD_VERIFIER_SOURCE_PATH = "tools/scripts/gpu_first_visible_a3_build_verifier.py"
 TRACE_ANALYZER_SOURCE_PATH = "tools/scripts/gpu_first_visible_a3_trace_analyzer.py"
 TRACE_ANALYZER_RECEIPT_SCHEMA = "pulp.gpu-first-visible-prepared-trace-analyzer.v1"
-TRACE_ANALYZER_SOURCE_FILES = {
-    "experimental/pulp-rs/Cargo.toml",
-    "experimental/pulp-rs/Cargo.lock",
-}
+TRACE_ANALYZER_SOURCE_PREFIXES = (
+    "experimental/pulp-rs",
+    ".agents/skills/trace-sql",
+    "tools/packages/tool-registry.json",
+    "tools/scripts/release_product_matrix.json",
+    "tools/import-design/browser_capture/runtime_manifest.txt",
+)
 OUTCOME_EXIT = {"pass": 0, "fail": 1, "inconclusive": 2, "skip": 3}
 ENDPOINT_BY_ROLE = {
     "standalone": "native-compositor-presentation",
@@ -124,10 +127,12 @@ BUILD_VERIFIER_RECEIPT_KEYS = {
 }
 TRACE_ANALYZER_RECEIPT_KEYS = {
     "schema", "version", "pulp_revision", "source_files", "cargo", "rustc",
-    "cargo_home_mode", "target_directory_fresh", "analyzer_sha256",
+    "source_snapshot_sha256", "cargo_home_mode", "target_directory_fresh",
+    "analyzer_sha256",
 }
 TRACE_ANALYZER_TOOL_KEYS = {
-    "command_path", "resolved_path", "sha256", "version",
+    "command_path", "resolved_path", "sha256", "version", "retained_path",
+    "retained_sha256",
 }
 SOURCE_BUILD_RECEIPT_KEYS = {
     "schema", "version", "attempt_nonce", "role", "outcome", "reason",
@@ -176,6 +181,16 @@ def regular_file_bytes(path: Path, label: str) -> bytes:
 
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def trace_lifetime_evidence_id(
+    attempt_nonce: str, challenge_nonce: str, process_id: str,
+) -> str:
+    material = (
+        "pulp-a3-live-trace-v1\0" + attempt_nonce + "\0"
+        + challenge_nonce + "\0" + process_id
+    ).encode("utf-8")
+    return sha256_bytes(material)[:32]
 
 
 def file_sha256(path: Path, label: str) -> str:
@@ -345,6 +360,25 @@ def git_file_bytes(root: Path, revision: str, relative: str, label: str) -> byte
             f"cannot resolve source-bound {label}: {completed.stderr.decode(errors='replace').strip()}"
         )
     return completed.stdout
+
+
+def git_revision_files(
+    root: Path, revision: str, prefixes: tuple[str, ...], label: str,
+) -> list[str]:
+    completed = subprocess.run(
+        ["/usr/bin/git", "-C", str(root), "ls-tree", "-r", "--name-only",
+         revision, "--", *prefixes],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        check=False, timeout=30,
+    )
+    if completed.returncode != 0:
+        raise ProducerError(
+            f"cannot enumerate source-bound {label}: {completed.stderr.strip()}"
+        )
+    files = sorted(line for line in completed.stdout.splitlines() if line)
+    if not files:
+        raise ProducerError(f"source-bound {label} is empty")
+    return files
 
 
 def require_source_file(
@@ -764,20 +798,27 @@ def run_build_verifier(
     return real_receipt_digest, retained
 
 
-def validate_analyzer_tool(value: Any, label: str) -> None:
+def validate_analyzer_tool(value: Any, workspace: Path, label: str) -> Path:
     exact_keys(value, TRACE_ANALYZER_TOOL_KEYS, label)
     command = Path(value["command_path"])
     resolved = Path(value["resolved_path"])
+    retained = Path(value["retained_path"])
     if (
         not command.is_absolute() or not command.is_file()
         or command.resolve() != resolved
         or not resolved.is_absolute() or not resolved.is_file()
         or not os.access(command, os.X_OK)
         or value["sha256"] != file_sha256(resolved, label)
+        or not retained.is_absolute() or retained.is_symlink()
+        or workspace.resolve() not in retained.resolve().parents
+        or not retained.is_file() or not os.access(retained, os.X_OK)
+        or value["retained_sha256"] != value["sha256"]
+        or file_sha256(retained, f"retained {label}") != value["sha256"]
         or not isinstance(value["version"], str) or not value["version"]
         or "\n" in value["version"]
     ):
         raise ProducerError(f"{label} does not bind an exact executable toolchain")
+    return retained
 
 
 def prepare_trace_analyzer(
@@ -804,29 +845,46 @@ def prepare_trace_analyzer(
     receipt = regular_json(receipt_path, "prepared trace analyzer receipt")
     exact_keys(receipt, TRACE_ANALYZER_RECEIPT_KEYS, "prepared trace analyzer receipt")
     source_files = receipt["source_files"]
-    exact_keys(source_files, TRACE_ANALYZER_SOURCE_FILES, "prepared analyzer sources")
+    expected_paths = git_revision_files(
+        pulp_root, request["identity"]["pulp_revision"],
+        TRACE_ANALYZER_SOURCE_PREFIXES, "prepared analyzer sources",
+    )
+    if not isinstance(source_files, dict) or set(source_files) != set(expected_paths):
+        raise ProducerError("prepared analyzer sources have the wrong files")
     revision = request["identity"]["pulp_revision"]
     expected_sources = {
         relative: sha256_bytes(git_file_bytes(
             pulp_root, revision, relative, f"prepared analyzer source {relative}",
         ))
-        for relative in TRACE_ANALYZER_SOURCE_FILES
+        for relative in expected_paths
     }
-    validate_analyzer_tool(receipt["cargo"], "prepared analyzer Cargo")
-    validate_analyzer_tool(receipt["rustc"], "prepared analyzer rustc")
+    retained_cargo = validate_analyzer_tool(
+        receipt["cargo"], workspace, "prepared analyzer Cargo",
+    )
+    retained_rustc = validate_analyzer_tool(
+        receipt["rustc"], workspace, "prepared analyzer rustc",
+    )
+    source_snapshot = workspace / "source-snapshot.tar"
     analyzer_digest = file_sha256(analyzer, "prepared trace analyzer")
     if (
         receipt["schema"] != TRACE_ANALYZER_RECEIPT_SCHEMA
         or receipt["version"] != 1
         or receipt["pulp_revision"] != revision
         or source_files != expected_sources
+        or not isinstance(receipt["source_snapshot_sha256"], str)
+        or SHA256.fullmatch(receipt["source_snapshot_sha256"]) is None
+        or file_sha256(source_snapshot, "prepared analyzer source snapshot")
+        != receipt["source_snapshot_sha256"]
         or receipt["cargo_home_mode"] != "fresh-config-free-linked-locked-cache"
         or receipt["target_directory_fresh"] is not True
         or receipt["analyzer_sha256"] != analyzer_digest
         or not os.access(analyzer, os.X_OK)
     ):
         raise ProducerError("prepared trace analyzer is not sealed to the requested source/toolchain")
-    return analyzer, analyzer_digest, [receipt_path, stdout_path, stderr_path]
+    return analyzer, analyzer_digest, [
+        receipt_path, stdout_path, stderr_path, source_snapshot,
+        retained_cargo, retained_rustc,
+    ]
 
 
 def safe_built_path(root: Path, value: Any, label: str) -> Path:
@@ -847,116 +905,171 @@ def run_independent_source_build(
     source_authorities: dict[str, tuple[Path, str]], product_digest: str,
     bundle_digest: str | None, artifact_directory: Path,
 ) -> tuple[str, list[Path], list[tuple[Path, str, str]]]:
-    output = (artifact_directory / "independent-build-output").resolve()
-    if output.exists() or output.is_symlink():
-        raise ProducerError("independent source-build output is not fresh")
     source_roots = {
         owner: {"path": str(root), "revision": revision}
         for owner, (root, revision) in sorted(source_authorities.items())
-    }
-    build_request = {
-        "schema": SOURCE_BUILD_REQUEST_SCHEMA,
-        "version": 1,
-        "attempt_nonce": request["attempt_nonce"],
-        "role": request["role"],
-        "identity": request["identity"],
-        "source_roots": source_roots,
-        "output_directory": str(output),
-        "bundle_required": request["role"] in {"daw", "forge"},
     }
     request_path = artifact_directory / "tooling" / "source-build-request.json"
     receipt_path = artifact_directory / "tooling" / "source-build-receipt.json"
     stdout_path = artifact_directory / "logs" / "source-build.stdout.log"
     stderr_path = artifact_directory / "logs" / "source-build.stderr.log"
-    atomic_json(request_path, build_request)
-    environment = {
-        key: value for key, value in os.environ.items()
-        if not key.startswith("PULP_A3_")
-    }
-    exit_code = bounded_run(
-        [str(build_driver), "--request", str(request_path),
-         "--receipt", str(receipt_path)],
-        cwd=artifact_directory, environment=environment, timeout_seconds=900,
-        stdout_path=stdout_path, stderr_path=stderr_path,
-    )
-    if not receipt_path.is_file() or receipt_path.is_symlink():
-        raise ProducerError("source-bound build driver omitted its receipt")
-    receipt = regular_json(receipt_path, "source-build receipt")
-    exact_keys(receipt, SOURCE_BUILD_RECEIPT_KEYS, "source-build receipt")
-    outcome = receipt["outcome"]
-    if (
-        receipt["schema"] != SOURCE_BUILD_RECEIPT_SCHEMA
-        or receipt["version"] != 1
-        or receipt["attempt_nonce"] != request["attempt_nonce"]
-        or receipt["role"] != request["role"]
-        or receipt["identity"] != request["identity"]
-        or receipt["source_revisions"] != {
-            owner: value["revision"] for owner, value in source_roots.items()
-        }
-        or receipt["driver_sha256"] != build_driver_digest
-        or outcome not in OUTCOME_EXIT
-        or exit_code != OUTCOME_EXIT[outcome]
-    ):
-        raise ProducerError("source-build receipt differs from the closed request")
-    if outcome != "pass":
-        if not isinstance(receipt["reason"], str) or not receipt["reason"]:
-            raise ProducerError("non-passing source build lacks a reason")
+    if sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file():
         raise ProducerBlocked(
-            receipt["reason"], f"source-build-driver:{request['role']}", outcome,
+            "independent source proof requires the macOS sandbox used by the M5 campaign",
+            "source-build-isolation:macos-sandbox",
         )
-    if receipt["reason"] is not None:
-        raise ProducerError("passing source build cannot carry a reason")
-    command = receipt["build_command"]
-    if (
-        not isinstance(command, list) or not 1 <= len(command) <= 64
-        or any(not isinstance(item, str) or not item for item in command)
-        or not isinstance(receipt["builder_id"], str) or not receipt["builder_id"]
+    artifact_root = artifact_directory.resolve()
+    if any(
+        artifact_root == Path(value["path"]).resolve()
+        or artifact_root in Path(value["path"]).resolve().parents
+        for value in source_roots.values()
     ):
-        raise ProducerError("source-build receipt lacks a bounded builder identity")
-    started = parse_utc(receipt["build_started_utc"], "source build start")
-    finished = parse_utc(receipt["build_finished_utc"], "source build finish")
-    if finished < started:
-        raise ProducerError("source build finishes before it starts")
-    product = safe_built_path(output, receipt["product_path"], "source-built product")
-    observed_product = file_sha256(product, "source-built product")
-    if (
-        receipt["product_sha256"] != observed_product
-        or observed_product != product_digest
-        or not os.access(product, os.X_OK)
-    ):
-        raise ProducerError("independent source build differs from the measured product")
-    evidence = [request_path, receipt_path, stdout_path, stderr_path, product]
-    guards = [(product, observed_product, "independent source-built product")]
-    if bundle_digest is None:
-        if receipt["bundle_path"] is not None or receipt["bundle_tree_sha256"] is not None:
-            raise ProducerError("non-bundle source build claims a bundle")
-        if [entry[0] for entry in directory_entries(output, "source-build output")] != [
-            product.relative_to(output).as_posix()
-        ]:
-            raise ProducerError("non-bundle source build retained unrelated output")
-    else:
-        bundle = safe_built_path(output, receipt["bundle_path"], "source-built bundle")
-        if not bundle.is_dir() or bundle.is_symlink():
-            raise ProducerError("source-built bundle is not a regular directory")
-        observed_bundle = directory_digest(bundle, "source-built bundle")
+        raise ProducerError("independent source roots overlap the measured artifact directory")
+    with tempfile.TemporaryDirectory(prefix="pulp-a3-independent-build-") as temporary:
+        workspace = Path(temporary).resolve()
+        output = workspace / "output"
+        local_driver, observed_driver_digest = snapshot_file(
+            build_driver, workspace / f"source-build-driver{build_driver.suffix}",
+            "isolated source-build driver",
+        )
+        if observed_driver_digest != build_driver_digest:
+            raise ProducerError("isolated source-build driver changed before execution")
+        local_request = workspace / "request.json"
+        local_receipt = workspace / "receipt.json"
+        build_request = {
+            "schema": SOURCE_BUILD_REQUEST_SCHEMA,
+            "version": 1,
+            "attempt_nonce": request["attempt_nonce"],
+            "role": request["role"],
+            "identity": request["identity"],
+            "source_roots": source_roots,
+            "output_directory": str(output),
+            "bundle_required": request["role"] in {"daw", "forge"},
+        }
+        atomic_json(local_request, build_request)
+        (workspace / "home").mkdir()
+        (workspace / "tmp").mkdir()
+        path_entries = list(dict.fromkeys((
+            str(Path(sys.executable).resolve().parent), "/opt/homebrew/bin",
+            "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+        )))
+        environment = {
+            "HOME": str(workspace / "home"),
+            "LC_ALL": "C",
+            "PATH": ":".join(path_entries),
+            "TMPDIR": str(workspace / "tmp"),
+        }
+        for name in ("DEVELOPER_DIR", "SDKROOT"):
+            if os.environ.get(name):
+                environment[name] = os.environ[name]
+        quoted_artifacts = json.dumps(str(artifact_root))
+        sandbox_profile = (
+            "(version 1)\n(allow default)\n"
+            f"(deny file-read* (subpath {quoted_artifacts}))\n"
+            f"(deny file-write* (subpath {quoted_artifacts}))\n"
+        )
+        exit_code = bounded_run(
+            ["/usr/bin/sandbox-exec", "-p", sandbox_profile, str(local_driver),
+             "--request", str(local_request), "--receipt", str(local_receipt)],
+            cwd=workspace, environment=environment, timeout_seconds=900,
+            stdout_path=stdout_path, stderr_path=stderr_path,
+        )
+        if not local_receipt.is_file() or local_receipt.is_symlink():
+            raise ProducerError("source-bound build driver omitted its receipt")
+        receipt = regular_json(local_receipt, "source-build receipt")
+        exact_keys(receipt, SOURCE_BUILD_RECEIPT_KEYS, "source-build receipt")
+        outcome = receipt["outcome"]
         if (
-            receipt["bundle_tree_sha256"] != observed_bundle
-            or observed_bundle != bundle_digest
-            or bundle.resolve() not in product.parents
+            receipt["schema"] != SOURCE_BUILD_RECEIPT_SCHEMA
+            or receipt["version"] != 1
+            or receipt["attempt_nonce"] != request["attempt_nonce"]
+            or receipt["role"] != request["role"]
+            or receipt["identity"] != request["identity"]
+            or receipt["source_revisions"] != {
+                owner: value["revision"] for owner, value in source_roots.items()
+            }
+            or receipt["driver_sha256"] != build_driver_digest
+            or outcome not in OUTCOME_EXIT
+            or exit_code != OUTCOME_EXIT[outcome]
         ):
-            raise ProducerError("independent source-built bundle differs from the measured bundle")
-        bundle_snapshot, _ = snapshot_directory(
-            bundle, artifact_directory / "identity" / "independent-source-bundle.tar",
-            "independent source-built bundle",
+            raise ProducerError("source-build receipt differs from the closed request")
+        if outcome != "pass":
+            if not isinstance(receipt["reason"], str) or not receipt["reason"]:
+                raise ProducerError("non-passing source build lacks a reason")
+            raise ProducerBlocked(
+                receipt["reason"], f"source-build-driver:{request['role']}", outcome,
+            )
+        if receipt["reason"] is not None:
+            raise ProducerError("passing source build cannot carry a reason")
+        command = receipt["build_command"]
+        if (
+            not isinstance(command, list) or not 1 <= len(command) <= 64
+            or any(not isinstance(item, str) or not item for item in command)
+            or not isinstance(receipt["builder_id"], str) or not receipt["builder_id"]
+        ):
+            raise ProducerError("source-build receipt lacks a bounded builder identity")
+        started = parse_utc(receipt["build_started_utc"], "source build start")
+        finished = parse_utc(receipt["build_finished_utc"], "source build finish")
+        if finished < started:
+            raise ProducerError("source build finishes before it starts")
+        if not output.is_dir() or output.is_symlink() or output.resolve() != output:
+            raise ProducerError("independent source-build output root is not a fresh directory")
+        product = safe_built_path(output, receipt["product_path"], "source-built product")
+        observed_product = file_sha256(product, "source-built product")
+        if (
+            receipt["product_sha256"] != observed_product
+            or observed_product != product_digest
+            or not os.access(product, os.X_OK)
+        ):
+            raise ProducerError("independent source build differs from the measured product")
+        product_snapshot, snapshot_digest = snapshot_file(
+            product, artifact_directory / "identity" / "independent-source-product.bin",
+            "independent source-built product",
         )
-        evidence.append(bundle_snapshot)
-        guards.append((
-            bundle_snapshot,
-            file_sha256(bundle_snapshot, "independent source bundle snapshot"),
-            "independent source bundle snapshot",
-        ))
-        if request["role"] == "forge":
-            require_forge_bundle_identity(bundle, product, request["identity"])
+        if snapshot_digest != observed_product:
+            raise ProducerError("independent source-built product changed during snapshot")
+        evidence = [request_path, receipt_path, stdout_path, stderr_path, product_snapshot]
+        guards = [(
+            product_snapshot, observed_product, "independent source-built product snapshot",
+        )]
+        if bundle_digest is None:
+            if receipt["bundle_path"] is not None or receipt["bundle_tree_sha256"] is not None:
+                raise ProducerError("non-bundle source build claims a bundle")
+            if [entry[0] for entry in directory_entries(output, "source-build output")] != [
+                product.relative_to(output).as_posix()
+            ]:
+                raise ProducerError("non-bundle source build retained unrelated output")
+        else:
+            bundle = safe_built_path(output, receipt["bundle_path"], "source-built bundle")
+            if not bundle.is_dir() or bundle.is_symlink():
+                raise ProducerError("source-built bundle is not a regular directory")
+            observed_bundle = directory_digest(bundle, "source-built bundle")
+            output_entries = [entry[0] for entry in directory_entries(
+                output, "source-build output",
+            )]
+            bundle_prefix = bundle.relative_to(output).as_posix() + "/"
+            if any(not relative.startswith(bundle_prefix) for relative in output_entries):
+                raise ProducerError("bundle source build retained unrelated output")
+            if (
+                receipt["bundle_tree_sha256"] != observed_bundle
+                or observed_bundle != bundle_digest
+                or bundle.resolve() not in product.parents
+            ):
+                raise ProducerError("independent source-built bundle differs from the measured bundle")
+            if request["role"] == "forge":
+                require_forge_bundle_identity(bundle, product, request["identity"])
+            bundle_snapshot, _ = snapshot_directory(
+                bundle, artifact_directory / "identity" / "independent-source-bundle.tar",
+                "independent source-built bundle",
+            )
+            evidence.append(bundle_snapshot)
+            guards.append((
+                bundle_snapshot,
+                file_sha256(bundle_snapshot, "independent source bundle snapshot"),
+                "independent source bundle snapshot",
+            ))
+        snapshot_file(local_request, request_path, "source-build request")
+        snapshot_file(local_receipt, receipt_path, "source-build receipt")
     return file_sha256(receipt_path, "source-build receipt"), evidence, guards
 
 
@@ -1389,7 +1502,7 @@ def validate_raw(
 def validate_health_and_trace(
     *, request: dict[str, Any], health_path: Path, cold_path: Path,
     warm_path: Path, trace_path: Path,
-    lifecycle_provenance: list[dict[str, Any]],
+    lifecycle_provenance: list[dict[str, Any]], expected_gpu_evidence_id: str,
 ) -> dict[str, Any]:
     cold = validate_raw(regular_json(cold_path, "raw cold"), request=request, cache_state="cold")
     warm = validate_raw(regular_json(warm_path, "raw warm"), request=request, cache_state="warm")
@@ -1451,8 +1564,13 @@ def validate_health_and_trace(
         raise ProducerError("role health result lacks same-instance correlation")
     gpu_id = correlation.get("gpu_evidence_id")
     trace_id = correlation.get("trace_evidence_id")
-    if not isinstance(gpu_id, str) or GPU_EVIDENCE_ID.fullmatch(gpu_id) is None:
-        raise ProducerError("role health result lacks a GPU evidence ID")
+    if (
+        not isinstance(gpu_id, str) or GPU_EVIDENCE_ID.fullmatch(gpu_id) is None
+        or gpu_id != expected_gpu_evidence_id
+    ):
+        raise ProducerError(
+            "role health result GPU evidence ID is not derived from the live-host challenge"
+        )
     if not isinstance(trace_id, str) or not trace_id or trace_id == gpu_id:
         raise ProducerError("role health result lacks a distinct trace evidence ID")
     if not regular_file_bytes(trace_path, "same-instance Perfetto trace"):
@@ -1769,11 +1887,12 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 artifact_directory / "identity" / "plugin-bundle.tar",
                 "DAW plugin bundle",
             )
-            smoke, extra_members, reaper_guards = run_reaper_preflight(
+            smoke, reaper_members, reaper_guards = run_reaper_preflight(
                 request=request, product_bundle=product_bundle,
                 product_binary=product_binary, host_binary=host_binary,
                 artifact_directory=artifact_directory, pulp_root=pulp_root,
             )
+            extra_members.extend(reaper_members)
             if (
                 directory_digest(product_bundle, "DAW plugin bundle")
                 != bundle_tree_digest
@@ -2106,6 +2225,30 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 dependencies=driver_receipt["dependencies"], artifacts=artifacts,
             ))
             return OUTCOME_EXIT[outcome]
+        trace_process_ids = {
+            observation["process_id"]
+            for observation in liveness_observations.values()
+            if observation["host_pid"] == trace_host_pid
+        }
+        if len(trace_process_ids) != 1:
+            raise ProducerError(
+                "challenged trace host does not resolve to one live process identity"
+            )
+        expected_gpu_evidence_id = trace_lifetime_evidence_id(
+            request["attempt_nonce"], liveness_monitor.nonce,
+            next(iter(trace_process_ids)),
+        )
+        trace_observation = next(
+            observation for observation in liveness_observations.values()
+            if observation["host_pid"] == trace_host_pid
+        )
+        preflight["trace_lifetime_binding"] = {
+            "derivation": "sha256(pulp-a3-live-trace-v1,attempt,challenge,process-id)[:32]",
+            "gpu_evidence_id": expected_gpu_evidence_id,
+            "process_id": trace_observation["process_id"],
+            "host_pid": trace_observation["host_pid"],
+            "process_start_identity": trace_observation["process_start_identity"],
+        }
         measured_guards = [(
             path, driver_receipt["artifacts"][name]["sha256"],
             f"role-driver {name}",
@@ -2115,6 +2258,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             cold_path=measured_paths["raw_cold"], warm_path=measured_paths["raw_warm"],
             trace_path=measured_paths["trace"],
             lifecycle_provenance=lifecycle_provenance,
+            expected_gpu_evidence_id=expected_gpu_evidence_id,
         )
         trace_analysis_path, analyzer_evidence = derive_trace_analysis(
             analyzer=prepared_analyzer, request=request,

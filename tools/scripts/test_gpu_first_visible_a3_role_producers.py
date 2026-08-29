@@ -11,6 +11,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -204,8 +205,26 @@ if outcome == "pass":
                 "native_presented": request["role"] != "headless-constrained",
             })
         trace_host_pid = hosts[cold[0]["process_id"]].pid
-        Path(os.environ["PULP_A3_TEST_TRACE_PROCESS_PID_FILE"]).write_text(
+        trace_pid_path = Path(os.environ["PULP_A3_TEST_TRACE_PROCESS_PID_FILE"])
+        trace_pid_path.write_text(
             str(trace_host_pid) + "\n"
+        )
+        trace_evidence_id = hashlib.sha256((
+            "pulp-a3-live-trace-v1\0" + request["attempt_nonce"] + "\0"
+            + challenge["challenge_nonce"] + "\0" + cold[0]["process_id"]
+        ).encode()).hexdigest()[:32]
+        if mutation != "trace-lifetime-id":
+            mutate_json(
+                "health_result",
+                lambda payload: payload["startup"]["correlation"].__setitem__(
+                    "gpu_evidence_id", trace_evidence_id,
+                ),
+            )
+        health_payload = json.loads(
+            (root / artifacts["health_result"]["path"]).read_text()
+        )
+        trace_pid_path.with_suffix(".evidence-id").write_text(
+            health_payload["startup"]["correlation"]["gpu_evidence_id"] + "\n"
         )
     finally:
         for index, process in enumerate(hosts.values()):
@@ -305,8 +324,16 @@ template = (
     Path(request["source_roots"]["pulp"]["path"])
     / "tools" / "testing" / "a3" / "host-template"
 )
-product.write_bytes(template.read_bytes() + marker)
-if "source-build-mismatch" in str(args.request):
+if "source-build-read-measured" in request["attempt_nonce"]:
+    measured = (
+        Path(request["source_roots"]["pulp"]["path"]).parent
+        / f"run-{role}-source-build-read-measured"
+        / "adapter-output" / "artifacts" / "identity" / "product.bin"
+    )
+    product.write_bytes(measured.read_bytes())
+else:
+    product.write_bytes(template.read_bytes() + marker)
+if "source-build-mismatch" in request["attempt_nonce"]:
     product.write_bytes(b"source-built bytes differ")
 product.chmod(0o755)
 if role == "forge":
@@ -315,6 +342,8 @@ if role == "forge":
         "CFBundleIdentifier": identity["product_id"],
         "CFBundleName": identity["product_name"],
     }, fmt=plistlib.FMT_BINARY, sort_keys=True))
+if "source-build-extra-output" in request["attempt_nonce"]:
+    (output / "unrelated-build-log.txt").write_text("must not be retained\n")
 
 def tree_digest(root):
     entries = []
@@ -356,6 +385,10 @@ receipt = {
     "bundle_path": bundle.relative_to(output).as_posix() if bundle else None,
     "bundle_tree_sha256": tree_digest(bundle) if bundle else None,
 }
+if "source-build-output-symlink" in request["attempt_nonce"]:
+    real_output = output.with_name("output-real")
+    output.rename(real_output)
+    output.symlink_to(real_output, target_is_directory=True)
 args.receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
 ''',
         encoding="utf-8",
@@ -391,7 +424,7 @@ def write_host_template(path: Path) -> None:
 def write_analyzer(path: Path) -> None:
     path.write_text(
         r'''#!/usr/bin/env python3
-import argparse, hashlib, json, os, shutil, sys
+import argparse, hashlib, json, os, shutil, subprocess, sys, tarfile
 from pathlib import Path
 
 if len(sys.argv) > 1 and sys.argv[1] == "prepare":
@@ -406,19 +439,42 @@ if len(sys.argv) > 1 and sys.argv[1] == "prepare":
     prepared.output.chmod(0o500)
     root = Path(os.environ["PULP_A3_PULP_ROOT"])
     executable = Path(sys.executable).resolve()
+    retained_tools = prepared.workspace / "retained-tools"
+    retained_tools.mkdir()
+    retained_executable = retained_tools / executable.name
+    shutil.copyfile(executable, retained_executable)
+    retained_executable.chmod(0o500)
     tool = {
         "command_path": str(executable),
         "resolved_path": str(executable),
         "sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
         "version": "Python fixture toolchain",
+        "retained_path": str(retained_executable),
+        "retained_sha256": hashlib.sha256(retained_executable.read_bytes()).hexdigest(),
     }
+    prefixes = (
+        "experimental/pulp-rs", ".agents/skills/trace-sql",
+        "tools/packages/tool-registry.json",
+        "tools/scripts/release_product_matrix.json",
+        "tools/import-design/browser_capture/runtime_manifest.txt",
+    )
+    files = subprocess.run(
+        ["/usr/bin/git", "-C", str(root), "ls-tree", "-r", "--name-only",
+         os.environ["PULP_A3_PULP_REVISION"], "--", *prefixes],
+        check=True, text=True, stdout=subprocess.PIPE,
+    ).stdout.splitlines()
     source_files = {
-        relative: hashlib.sha256((root / relative).read_bytes()).hexdigest()
-        for relative in (
-            "experimental/pulp-rs/Cargo.toml",
-            "experimental/pulp-rs/Cargo.lock",
-        )
+        relative: hashlib.sha256(subprocess.run(
+            ["/usr/bin/git", "-C", str(root), "show",
+             os.environ["PULP_A3_PULP_REVISION"] + ":" + relative],
+            check=True, stdout=subprocess.PIPE,
+        ).stdout).hexdigest()
+        for relative in files
     }
+    source_snapshot = prepared.workspace / "source-snapshot.tar"
+    with tarfile.open(source_snapshot, "w") as archive:
+        for relative in files:
+            archive.add(root / relative, arcname=relative)
     mutation = next(
         (name for name in ("prepared-analyzer-source", "prepared-analyzer-target")
          if name in str(prepared.workspace)),
@@ -431,6 +487,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "prepare":
         "version": 1,
         "pulp_revision": os.environ["PULP_A3_PULP_REVISION"],
         "source_files": source_files,
+        "source_snapshot_sha256": hashlib.sha256(source_snapshot.read_bytes()).hexdigest(),
         "cargo": tool,
         "rustc": tool,
         "cargo_home_mode": "fresh-config-free-linked-locked-cache",
@@ -457,7 +514,9 @@ if trace == b"not-a-perfetto-trace":
     }
     exit_code = 2
 else:
-    evidence_id = os.environ["PULP_A3_TEST_GPU_EVIDENCE_ID"]
+    evidence_id = Path(
+        os.environ["PULP_A3_TEST_TRACE_PROCESS_PID_FILE"]
+    ).with_suffix(".evidence-id").read_text().strip()
     mutation = os.environ.get("PULP_A3_TEST_ROLE_MUTATION")
     if mutation == "trace-id":
         evidence_id = "f" * 32
@@ -654,7 +713,7 @@ def run_role(
     request = {
         "schema": "pulp.gpu-first-visible-campaign-request.v1",
         "version": 1,
-        "attempt_nonce": f"attempt-{role}",
+        "attempt_nonce": f"attempt-{role}-{mutation or smoke}",
         "role": role,
         "identity": identity,
         "measurement_endpoint": campaign["measurement_endpoint"],
@@ -886,12 +945,21 @@ def main() -> int:
             assert all(receipt["artifacts"].values())
             host_archive = root / f"run-{role}-pass" / receipt["artifacts"]["host_artifact"]["path"]
             assert digest(host_archive) == receipt["artifacts"]["host_artifact"]["sha256"]
+            if role == "daw":
+                with tarfile.open(host_archive, "r:") as archive:
+                    names = set(archive.getnames())
+                assert "preflight/receipt.json" in names
+                assert "preflight/source-snapshot.tar" in names
 
         negatives = [
             ("standalone", "nine-cold", "pass", "20 lifecycle"),
             ("standalone", "visible-no-present", "pass", "native presentation"),
             ("headless-constrained", "headless-present", "pass", "cannot claim"),
             ("standalone", "trace-id", "pass", "pinned trace replay"),
+            (
+                "standalone", "trace-lifetime-id", "pass",
+                "live-host challenge",
+            ),
             ("standalone", "analyzer-fail", "pass", "pinned trace replay"),
             ("standalone", "analyzer-scope", "pass", "pinned trace replay"),
             ("standalone", "analyzer-process", "pass", "pinned trace replay"),
@@ -939,6 +1007,18 @@ def main() -> int:
             (
                 "standalone", "source-build-mismatch", "pass",
                 "independent source build differs",
+            ),
+            (
+                "standalone", "source-build-read-measured", "pass",
+                "omitted its receipt",
+            ),
+            (
+                "standalone", "source-build-output-symlink", "pass",
+                "output root is not a fresh directory",
+            ),
+            (
+                "forge", "source-build-extra-output", "pass",
+                "retained unrelated output",
             ),
             (
                 "standalone", "liveness-stale-host", "pass",

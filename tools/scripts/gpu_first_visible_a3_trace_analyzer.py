@@ -11,12 +11,19 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 from typing import Any
 
 GIT_REVISION = re.compile(r"^[0-9a-f]{40}$")
 RECEIPT_SCHEMA = "pulp.gpu-first-visible-prepared-trace-analyzer.v1"
-SOURCE_PATHS = ("experimental/pulp-rs/Cargo.toml", "experimental/pulp-rs/Cargo.lock")
+SOURCE_PREFIXES = (
+    "experimental/pulp-rs",
+    ".agents/skills/trace-sql",
+    "tools/packages/tool-registry.json",
+    "tools/scripts/release_product_matrix.json",
+    "tools/import-design/browser_capture/runtime_manifest.txt",
+)
 
 
 def sha256(path: Path) -> str:
@@ -46,12 +53,14 @@ def tool_candidate(name: str) -> Path:
     raise RuntimeError(f"sealed analyzer could not locate {name} in fixed toolchain roots")
 
 
-def tool_record(path: Path, environment: dict[str, str]) -> dict[str, str]:
+def tool_record(
+    path: Path, retained: Path, environment: dict[str, str], *, cwd: Path,
+) -> dict[str, str]:
     resolved = path.resolve()
     version = subprocess.run(
         [str(path), "--version"], env=environment, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        timeout=30, check=True,
+        timeout=30, check=True, cwd=cwd,
     ).stdout.strip()
     if not version or "\n" in version:
         raise RuntimeError(f"{path.name} returned an invalid version")
@@ -60,21 +69,91 @@ def tool_record(path: Path, environment: dict[str, str]) -> dict[str, str]:
         "resolved_path": str(resolved),
         "sha256": sha256(resolved),
         "version": version,
+        "retained_path": str(retained),
+        "retained_sha256": sha256(retained),
     }
 
 
-def source_digest(root: Path, revision: str, relative: str) -> str:
+def source_files(root: Path, revision: str) -> list[str]:
     completed = subprocess.run(
-        ["/usr/bin/git", "show", f"{revision}:{relative}"], cwd=root,
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        ["/usr/bin/git", "ls-tree", "-r", "--name-only", revision, "--", *SOURCE_PREFIXES],
+        cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True,
         timeout=30, check=False,
     )
     if completed.returncode != 0:
-        raise RuntimeError(f"cannot resolve {relative} at the requested Pulp revision")
-    checkout = root / relative
-    if sha256(checkout) != hashlib.sha256(completed.stdout).hexdigest():
-        raise RuntimeError(f"checkout bytes differ from requested revision for {relative}")
-    return hashlib.sha256(completed.stdout).hexdigest()
+        raise RuntimeError("cannot enumerate exact-revision analyzer inputs")
+    files = sorted(line for line in completed.stdout.splitlines() if line)
+    if not files or "experimental/pulp-rs/Cargo.toml" not in files:
+        raise RuntimeError("exact-revision analyzer input set is incomplete")
+    return files
+
+
+def source_digests(root: Path, revision: str, files: list[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for relative in files:
+        completed = subprocess.run(
+            ["/usr/bin/git", "show", f"{revision}:{relative}"], cwd=root,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=30, check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"cannot resolve {relative} at the requested Pulp revision")
+        result[relative] = hashlib.sha256(completed.stdout).hexdigest()
+    return result
+
+
+def export_source_snapshot(
+    root: Path, revision: str, workspace: Path,
+) -> tuple[Path, Path, dict[str, str]]:
+    files = source_files(root, revision)
+    digests = source_digests(root, revision, files)
+    archive = workspace / "source-snapshot.tar"
+    completed = subprocess.run(
+        ["/usr/bin/git", "archive", "--format=tar", "--output", str(archive),
+         revision, "--", *SOURCE_PREFIXES],
+        cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, timeout=120, check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("cannot export exact-revision analyzer input snapshot")
+    snapshot = workspace / "source"
+    snapshot.mkdir(mode=0o700)
+    with tarfile.open(archive, "r:") as handle:
+        members = handle.getmembers()
+        if any(
+            member.issym() or member.islnk() or member.name.startswith("/")
+            or ".." in Path(member.name).parts
+            for member in members
+        ):
+            raise RuntimeError("analyzer input snapshot contains an unsafe member")
+        handle.extractall(snapshot, filter="data")
+    observed = {
+        relative: sha256(snapshot / relative)
+        for relative in files
+        if (snapshot / relative).is_file()
+    }
+    if observed != digests:
+        raise RuntimeError("exported analyzer inputs differ from the exact revision")
+    return archive, snapshot, digests
+
+
+def actual_toolchain(
+    rustc_selector: Path, *, cwd: Path, environment: dict[str, str],
+) -> tuple[Path, Path]:
+    completed = subprocess.run(
+        [str(rustc_selector), "--print", "sysroot"], cwd=cwd, env=environment,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, timeout=30, check=False,
+    )
+    if completed.returncode != 0 or not completed.stdout.strip():
+        raise RuntimeError("sealed analyzer could not resolve the selected Rust sysroot")
+    tool_bin = Path(completed.stdout.strip()).resolve() / "bin"
+    cargo = tool_bin / ("cargo.exe" if os.name == "nt" else "cargo")
+    rustc = tool_bin / ("rustc.exe" if os.name == "nt" else "rustc")
+    if any(not path.is_file() or not os.access(path, os.X_OK) for path in (cargo, rustc)):
+        raise RuntimeError("selected Rust sysroot lacks executable Cargo/rustc binaries")
+    return cargo.resolve(), rustc.resolve()
 
 
 def link_cache(source_home: Path, cargo_home: Path) -> None:
@@ -108,14 +187,30 @@ def prepare(argv: list[str]) -> int:
     ):
         raise RuntimeError("sealed analyzer requires a fresh confined workspace")
     workspace.mkdir(parents=True, mode=0o700)
+    source_archive, source_root, source_files = export_source_snapshot(
+        root, revision, workspace,
+    )
+    manifest = source_root / "experimental/pulp-rs/Cargo.toml"
     cargo_home = workspace / "cargo-home"
     target = workspace / "target"
     temporary = workspace / "tmp"
     temporary.mkdir(mode=0o700)
     source_home = Path(pwd.getpwuid(os.getuid()).pw_dir) / ".cargo"
     link_cache(source_home.resolve(), cargo_home)
-    cargo = tool_candidate("cargo")
-    rustc = tool_candidate("rustc")
+    cargo_selector = tool_candidate("cargo")
+    rustc_selector = tool_candidate("rustc")
+    selector_path = ":".join(dict.fromkeys((
+        str(cargo_selector.parent), str(rustc_selector.parent),
+        "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+    )))
+    selector_environment = {
+        "HOME": str(workspace), "LC_ALL": "C", "PATH": selector_path,
+        "RUSTUP_HOME": str(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".rustup"),
+        "TMPDIR": str(temporary),
+    }
+    cargo, rustc = actual_toolchain(
+        rustc_selector, cwd=manifest.parent, environment=selector_environment,
+    )
     path_entries = []
     for entry in (cargo.parent, rustc.parent, Path("/usr/bin"), Path("/bin"),
                   Path("/usr/sbin"), Path("/sbin")):
@@ -133,17 +228,24 @@ def prepare(argv: list[str]) -> int:
         "RUSTC": str(rustc),
         "TMPDIR": str(temporary),
     }
-    cargo_record = tool_record(cargo, environment)
-    rustc_record = tool_record(rustc, environment)
-    source_files = {
-        relative: source_digest(root, revision, relative)
-        for relative in SOURCE_PATHS
-    }
-    manifest = root / SOURCE_PATHS[0]
+    retained_tools = workspace / "retained-tools"
+    retained_tools.mkdir(mode=0o700)
+    retained_cargo = retained_tools / cargo.name
+    retained_rustc = retained_tools / rustc.name
+    shutil.copyfile(cargo, retained_cargo)
+    shutil.copyfile(rustc, retained_rustc)
+    retained_cargo.chmod(0o500)
+    retained_rustc.chmod(0o500)
+    cargo_record = tool_record(
+        cargo, retained_cargo, environment, cwd=manifest.parent,
+    )
+    rustc_record = tool_record(
+        rustc, retained_rustc, environment, cwd=manifest.parent,
+    )
     completed = subprocess.run(
         [str(cargo), "build", "--quiet", "--release", "--locked", "--offline",
          "--manifest-path", str(manifest), "--bin", "pulp"],
-        cwd=workspace, env=environment, stdin=subprocess.DEVNULL,
+        cwd=manifest.parent, env=environment, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600, check=False,
     )
     if completed.returncode != 0:
@@ -160,11 +262,13 @@ def prepare(argv: list[str]) -> int:
     shutil.rmtree(target)
     shutil.rmtree(cargo_home)
     shutil.rmtree(temporary)
+    shutil.rmtree(source_root)
     atomic_json(receipt, {
         "schema": RECEIPT_SCHEMA,
         "version": 1,
         "pulp_revision": revision,
         "source_files": source_files,
+        "source_snapshot_sha256": sha256(source_archive),
         "cargo": cargo_record,
         "rustc": rustc_record,
         "cargo_home_mode": "fresh-config-free-linked-locked-cache",
