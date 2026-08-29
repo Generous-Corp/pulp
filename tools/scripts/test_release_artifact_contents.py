@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -146,14 +147,55 @@ def interface_library_targets_from_text(text: str) -> set[str]:
     )
 
 
+def cmake_definition_files(root: Path = ROOT) -> list[Path]:
+    """Return source-owned CMake definitions, never generated build trees."""
+
+    try:
+        tracked = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--",
+                "CMakeLists.txt",
+                "*CMakeLists.txt",
+                "tools/cmake/*.cmake",
+            ],
+            check=True,
+            capture_output=True,
+        ).stdout
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        tracked = b""
+    if tracked:
+        return sorted(
+            root / path.decode("utf-8")
+            for path in tracked.split(b"\0")
+            if path
+        )
+
+    candidates = [
+        root / "CMakeLists.txt",
+        *root.rglob("CMakeLists.txt"),
+        *(root / "tools" / "cmake").rglob("*.cmake"),
+    ]
+    definitions = []
+    for path in candidates:
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if any(part.startswith(("build", "cmake-build")) for part in relative.parts):
+            continue
+        if any((parent / "CMakeCache.txt").is_file() for parent in path.parents if parent != root):
+            continue
+        definitions.append(path)
+    return sorted(set(definitions))
+
+
 def interface_library_targets() -> set[str]:
     targets: set[str] = set()
-    definition_files = [
-        ROOT / "CMakeLists.txt",
-        *ROOT.rglob("CMakeLists.txt"),
-        *(ROOT / "tools" / "cmake").rglob("*.cmake"),
-    ]
-    for path in definition_files:
+    for path in cmake_definition_files():
         text = path.read_text(encoding="utf-8")
         targets.update(interface_library_targets_from_text(text))
     return targets
@@ -383,6 +425,25 @@ def make_platform(root: Path, platform: str) -> tuple[set[str], set[str]]:
 
 
 class ReleaseArtifactContentsTests(unittest.TestCase):
+
+    def test_cmake_definition_scan_excludes_generated_build_trees(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tools" / "cmake").mkdir(parents=True)
+            (root / "CMakeLists.txt").write_text(
+                "add_library(pulp-real INTERFACE)\n", encoding="utf-8"
+            )
+            generated = root / "build-regression" / "fixture"
+            generated.mkdir(parents=True)
+            (root / "build-regression" / "CMakeCache.txt").write_text(
+                "# generated\n", encoding="utf-8"
+            )
+            (generated / "CMakeLists.txt").write_text(
+                "add_library(pulp-format INTERFACE)\n", encoding="utf-8"
+            )
+            files = cmake_definition_files(root)
+            self.assertEqual(files, [root / "CMakeLists.txt"])
+
     def test_relocated_backfill_verifier_resolves_registry_from_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as td, mock.patch.dict(
             os.environ, {"GITHUB_WORKSPACE": str(ROOT)}
