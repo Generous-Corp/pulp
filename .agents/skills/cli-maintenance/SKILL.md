@@ -3016,6 +3016,19 @@ archive-extraction containment. It is still lexical-only; its callers currently
 pass pre-canonicalized paths, but it is the same fail-open shape if that ever
 stops being true.
 
+## DPR measurement CLI targets use typed evidence
+
+`pulp-gpu-dpr-native-measurement` is a tooling-only target, but its request and
+receipt are still a versioned CLI protocol. Keep manifest expectations
+independent from observations: the request freezes the logical point and target;
+the producer reports the physical event, recovered logical point, and actual
+hit. Every raw metric declares `measured`, `derived`, or `unavailable`, and an
+unavailable metric has no samples or invented percentile. GPU timing requires
+five baseline plus five eight-times-known-work calibration trials. Fidelity
+requires two independently hashed same-content captures and numeric similarity,
+text, and stroke observations. Update the runner, both adapters, contract tests,
+and the mapped validation/skill docs together when this protocol changes.
+
 ## A new browser-capture module must be registered for `pulp upgrade`
 
 `tools/import-design/browser_capture/` is a module graph the capture imports at

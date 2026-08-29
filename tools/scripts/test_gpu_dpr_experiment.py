@@ -25,7 +25,11 @@ DIGEST_B = "2" * 64
 
 
 def statistic(unit: str, median: float, p95: float) -> dict[str, Any]:
-    return {"unit": unit, "median": median, "p95": p95, "sample_count": 30}
+    return {
+        "unit": unit, "provenance": "measured",
+        "definition": "synthetic contract fixture measurement",
+        "median": median, "p95": p95, "sample_count": 30,
+    }
 
 
 def observation(
@@ -79,8 +83,10 @@ def observation(
         "trace_evidence_ids": ["synthetic:frame:1"],
         "artifacts": [
             {"kind": "capture", "path": "fixture/capture.png", "sha256": DIGEST_A},
+            {"kind": "reference_capture", "path": "fixture/reference.png", "sha256": DIGEST_B},
             {"kind": "trace", "path": "fixture/trace.pftrace", "sha256": DIGEST_B},
             {"kind": "raw_samples", "path": "fixture/samples.json", "sha256": DIGEST_A},
+            {"kind": "input_receipt", "path": "fixture/input.json", "sha256": DIGEST_B},
         ],
     }
 
@@ -132,6 +138,16 @@ def main() -> int:
     manifest = contract.load_json(contract.DEFAULT_MANIFEST)
     assert not contract.manifest_errors(manifest, contract.DEFAULT_MANIFEST)
     assert len(contract.expected_matrix(manifest)) == 84
+    validity = contract.load_json(
+        ROOT / "docs/validation/gpu-dpr/instrument-validity-state.json"
+    )
+    assert validity["schema"] == "pulp.gpu-dpr-evidence-validity.v1"
+    assert validity["entries"]
+    for entry in validity["entries"]:
+        assert entry["validity"] == "SUPERSEDED"
+        assert entry["disposition_eligibility"] == "NONCOUNTED"
+        assert entry["counted_cells"] == 0
+        assert entry["reasons"]
     manifest_mutations: list[tuple[str, Any]] = [
         ("missing", None),
         ("boolean", True),
@@ -187,6 +203,14 @@ def main() -> int:
     synthetic_policy = copy.deepcopy(fixture)
     synthetic_policy["eligible_for_policy"] = True
     mutations.append(("synthetic evidence eligible for policy", synthetic_policy))
+    unavailable_policy = copy.deepcopy(fixture)
+    unavailable_policy["evidence_kind"] = "measured"
+    unavailable_policy["eligible_for_policy"] = True
+    unavailable = unavailable_policy["observations"][0]["metrics"]["gpu_frame_time"]
+    unavailable.update(
+        provenance="unavailable", median=None, p95=None, sample_count=0
+    )
+    mutations.append(("unavailable metric eligible for policy", unavailable_policy))
     no_a3 = copy.deepcopy(fixture)
     no_a3["dependencies"]["a3_receipt"] = None
     mutations.append(("complete result without A3 receipt", no_a3))

@@ -24,7 +24,9 @@ RAW_SCHEMA = "pulp.gpu-dpr-raw-samples.v1"
 COMPLETE_OUTCOMES = {"pass", "fail"}
 INCOMPLETE_OUTCOMES = {"skip", "inconclusive"}
 ALL_OUTCOMES = COMPLETE_OUTCOMES | INCOMPLETE_OUTCOMES
-ARTIFACT_KINDS = {"capture", "trace", "raw_samples", "input_receipt"}
+ARTIFACT_KINDS = {
+    "capture", "reference_capture", "trace", "raw_samples", "input_receipt"
+}
 TRACE_QUESTIONS = {"gpu-startup", "gpu-health", "gpu-probe"}
 TRACE_ANALYSIS_SCHEMA = "pulp.trace-gpu-analysis.v1"
 A2T_RECEIPT_SCHEMA = "pulp.gpu-trace-overhead-acceptance.v1"
@@ -224,7 +226,24 @@ def nearest_rank_p95(samples: list[float]) -> float:
     return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
 
-def metric_statistic(name: str, samples: Any, manifest: dict[str, Any]) -> dict[str, Any]:
+def metric_statistic(name: str, metric: Any, manifest: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(metric, dict) or set(metric) != {"provenance", "definition", "samples"}:
+        raise EvidenceError(f"raw metric {name} lacks typed provenance")
+    provenance = metric.get("provenance")
+    definition = metric.get("definition")
+    samples = metric.get("samples")
+    if provenance not in {"measured", "derived", "unavailable"}:
+        raise EvidenceError(f"raw metric {name} has invalid provenance")
+    if not isinstance(definition, str) or not definition.strip():
+        raise EvidenceError(f"raw metric {name} lacks a definition")
+    if provenance == "unavailable":
+        if samples != []:
+            raise EvidenceError(f"unavailable raw metric {name} carries samples")
+        return {
+            "unit": METRIC_UNITS[name], "provenance": provenance,
+            "definition": definition, "median": None, "p95": None,
+            "sample_count": 0,
+        }
     if not isinstance(samples, list) or not samples:
         raise EvidenceError(f"raw metric {name} has no samples")
     if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in samples):
@@ -245,6 +264,8 @@ def metric_statistic(name: str, samples: Any, manifest: dict[str, Any]) -> dict[
     median = statistics.median(values)
     return {
         "unit": METRIC_UNITS[name],
+        "provenance": provenance,
+        "definition": definition,
         "median": median,
         "p95": max(median, nearest_rank_p95(values)),
         "sample_count": len(values),
@@ -258,7 +279,8 @@ def validate_fresh_process_ledger(
     producer_pid = raw.get("producer_pid")
     trials = raw.get("fresh_process_trials")
     expected_count = manifest["trial_contract"]["fresh_process_first_frame_trials"]
-    samples = raw.get("metrics", {}).get("first_frame_time")
+    first_frame = raw.get("metrics", {}).get("first_frame_time", {})
+    samples = first_frame.get("samples") if isinstance(first_frame, dict) else None
     attempt_number = receipt.get("attempt_number")
     if (
         isinstance(producer_pid, bool) or not isinstance(producer_pid, int)
@@ -312,28 +334,90 @@ def validate_fresh_process_ledger(
         pids.add(pid)
 
 
-def validate_logical_input(raw: dict[str, Any]) -> bool:
+def validate_logical_input(
+    raw: dict[str, Any], scenario: dict[str, Any], observed_dpr: float
+) -> bool:
     trials = raw.get("logical_input_trials")
     if not isinstance(trials, list) or not trials:
         raise EvidenceError("logical-input oracle has no trials")
+    oracle = scenario.get("logical_input_oracle")
+    if not isinstance(oracle, dict):
+        raise EvidenceError("scenario lacks an independent logical-input oracle")
+    expected_point = oracle.get("point")
+    expected_target = oracle.get("target")
+    expected_physical = [round(float(value) * observed_dpr, 6) for value in expected_point]
     passed = True
     for trial in trials:
         expected = trial.get("expected_logical")
         observed = trial.get("observed_logical")
+        requested_physical = trial.get("requested_physical")
+        observed_physical = trial.get("observed_physical")
         if not (
             isinstance(expected, list) and isinstance(observed, list)
-            and len(expected) == 2 and len(observed) == 2
-            and all(isinstance(value, (int, float)) for value in [*expected, *observed])
+            and isinstance(requested_physical, list) and isinstance(observed_physical, list)
+            and all(len(value) == 2 for value in (
+                expected, observed, requested_physical, observed_physical
+            ))
+            and all(
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in [*expected, *observed, *requested_physical, *observed_physical]
+            )
         ):
             raise EvidenceError("logical-input trial is malformed")
-        coordinate_match = all(
+        if expected != expected_point or trial.get("expected_target") != expected_target:
+            raise EvidenceError("logical-input trial differs from the frozen scenario oracle")
+        if not all(
             math.isclose(float(left), float(right), abs_tol=1e-6)
-            for left, right in zip(expected, observed)
+            for left, right in zip(requested_physical, expected_physical)
+        ):
+            raise EvidenceError("logical-input request does not apply the observed DPR")
+        mapped = [float(value) / observed_dpr for value in observed_physical]
+        coordinate_match = all(
+            math.isclose(float(left), float(right), abs_tol=max(1e-6, 0.5 / observed_dpr))
+            for left, right in zip(expected, mapped)
+        ) and all(
+            math.isclose(float(left), float(right), abs_tol=1e-6)
+            for left, right in zip(observed, mapped)
         )
-        passed = passed and coordinate_match and (
-            trial.get("expected_target") == trial.get("observed_target")
+        passed = passed and coordinate_match and trial.get("event_received") is True and (
+            expected_target == trial.get("observed_target")
         )
     return passed
+
+
+def validate_gpu_timer_calibration(raw: dict[str, Any], manifest: dict[str, Any]) -> None:
+    calibration = raw.get("gpu_timer_calibration")
+    required = {
+        "schema", "version", "clock", "resolution_ms", "baseline_samples_ms",
+        "extra_work_samples_ms", "extra_work_multiplier", "control_detected",
+    }
+    if not isinstance(calibration, dict) or set(calibration) != required:
+        raise EvidenceError("GPU timer calibration is missing or malformed")
+    trials = manifest["trial_contract"]["gpu_timer_calibration_trials"]
+    multiplier = manifest["trial_contract"]["gpu_timer_extra_work_multiplier"]
+    baseline = calibration.get("baseline_samples_ms")
+    extra = calibration.get("extra_work_samples_ms")
+    resolution = calibration.get("resolution_ms")
+    if (
+        calibration.get("schema") != "pulp.gpu-dpr-timer-calibration.v1"
+        or calibration.get("version") != 1
+        or calibration.get("clock") not in {"dawn-gpu-timestamp", "webgl2-timer-query"}
+        or calibration.get("extra_work_multiplier") != multiplier
+        or calibration.get("control_detected") is not True
+        or not isinstance(baseline, list) or len(baseline) != trials
+        or not isinstance(extra, list) or len(extra) != trials
+        or isinstance(resolution, bool) or not isinstance(resolution, (int, float))
+        or not math.isfinite(float(resolution)) or float(resolution) <= 0
+        or any(isinstance(value, bool) or not isinstance(value, (int, float))
+               or not math.isfinite(float(value)) or float(value) <= 0
+               for value in [*baseline, *extra])
+    ):
+        raise EvidenceError("GPU timer calibration contract is invalid")
+    baseline_median = statistics.median(float(value) for value in baseline)
+    extra_median = statistics.median(float(value) for value in extra)
+    detectable = max(float(resolution) * 2.0, baseline_median * 0.10)
+    if extra_median < baseline_median + detectable:
+        raise EvidenceError("GPU timer known-extra-work control was not detected")
 
 
 def validate_adaptive_evidence(
@@ -345,27 +429,62 @@ def validate_adaptive_evidence(
             raise EvidenceError("non-adaptive cell carries adaptive policy evidence")
         return
     profile = manifest["adaptive_profile"]
-    if not isinstance(evidence, dict) or set(evidence) != {"profile", "downshift", "upshift"}:
+    if not isinstance(evidence, dict) or set(evidence) != {
+        "profile", "budget_ms", "initial_scale", "final_scale", "observations"
+    }:
         raise EvidenceError("adaptive cell lacks exact typed transition evidence")
     if evidence["profile"] != profile:
         raise EvidenceError("adaptive evidence differs from the ratified manifest profile")
     downshift_frames = profile["downshift_after_over_budget_frames"]
     upshift_frames = profile["upshift_after_under_budget_frames"]
-    expected_downshift = {
-        "consecutive_frames_before": downshift_frames - 1,
-        "transitioned_before": False,
-        "consecutive_frames_at": downshift_frames,
-        "transitioned_at": True,
+    budget = evidence.get("budget_ms")
+    observations = evidence.get("observations")
+    if (
+        isinstance(budget, bool) or not isinstance(budget, (int, float)) or budget <= 0
+        or not isinstance(observations, list)
+        or len(observations) != downshift_frames + upshift_frames
+    ):
+        raise EvidenceError("adaptive driver observations are incomplete")
+    down = observations[:downshift_frames]
+    up = observations[downshift_frames:]
+    expected_keys = {
+        "phase", "frame_index", "sample_ms", "scale_before", "scale_after", "transition"
     }
-    expected_upshift = {
-        "consecutive_frames_before": upshift_frames - 1,
-        "transitioned_before": False,
-        "consecutive_frames_at": upshift_frames,
-        "transitioned_at": True,
-        "budget_fraction": profile["upshift_budget_fraction"],
-    }
-    if evidence["downshift"] != expected_downshift or evidence["upshift"] != expected_upshift:
-        raise EvidenceError("adaptive hysteresis transition boundaries were not proven")
+    for index, observation in enumerate(observations):
+        if not isinstance(observation, dict) or set(observation) != expected_keys:
+            raise EvidenceError(f"adaptive observation {index} is malformed")
+    if any(item["phase"] != "over-budget" or item["sample_ms"] <= budget for item in down):
+        raise EvidenceError("adaptive downshift was not driven by over-budget measurements")
+    if any(
+        item["phase"] != "under-budget"
+        or item["sample_ms"] > budget * profile["upshift_budget_fraction"]
+        for item in up
+    ):
+        raise EvidenceError("adaptive upshift was not driven by under-budget measurements")
+    if any(item["transition"] is not False or item["scale_after"] != item["scale_before"] for item in down[:-1]):
+        raise EvidenceError("adaptive policy transitioned before its downshift boundary")
+    down_action = down[-1]["transition"]
+    if not (
+        down_action == "downshift" and down[-1]["scale_after"] < down[-1]["scale_before"]
+        or down_action == "floor-hold" and down[-1]["scale_after"] == down[-1]["scale_before"]
+            == min(profile["scale_ladder"])
+    ):
+        raise EvidenceError("adaptive policy did not apply its downshift boundary")
+    if any(item["transition"] is not False or item["scale_after"] != item["scale_before"] for item in up[:-1]):
+        raise EvidenceError("adaptive policy transitioned before its upshift boundary")
+    up_action = up[-1]["transition"]
+    if not (
+        up_action == "upshift" and up[-1]["scale_after"] > up[-1]["scale_before"]
+        or up_action == "ceiling-hold" and up[-1]["scale_after"] == up[-1]["scale_before"]
+            == max(profile["scale_ladder"])
+    ):
+        raise EvidenceError("adaptive policy did not apply its upshift boundary")
+    if (
+        evidence.get("initial_scale") != down[0]["scale_before"]
+        or evidence.get("final_scale") != up[-1]["scale_after"]
+        or up[0]["scale_before"] != down[-1]["scale_after"]
+    ):
+        raise EvidenceError("adaptive scale observations do not form one state-machine sequence")
 
 
 def exact_executable(identity: Any, label: str) -> tuple[Path, str]:
@@ -741,7 +860,7 @@ def receipt_observation(
         kind = artifact.get("kind")
         if kind not in ARTIFACT_KINDS or kind in by_kind:
             raise EvidenceError(
-                "artifact kinds must be unique capture/trace/raw_samples/input_receipt"
+                "artifact kinds must be unique capture/reference_capture/trace/raw_samples/input_receipt"
             )
         path = safe_artifact(artifact_root, artifact.get("path", ""))
         digest = artifact.get("sha256")
@@ -755,7 +874,9 @@ def receipt_observation(
         }
         artifact_payloads[kind] = artifact_bytes
     if set(by_kind) != ARTIFACT_KINDS:
-        raise EvidenceError("cell requires capture/trace/raw_samples/input_receipt artifacts")
+        raise EvidenceError(
+            "cell requires capture/reference_capture/trace/raw_samples/input_receipt artifacts"
+        )
 
     raw_artifact = next(item for item in artifacts if item["kind"] == "raw_samples")
     safe_artifact(artifact_root, raw_artifact["path"])
@@ -771,6 +892,7 @@ def receipt_observation(
     metrics = {
         name: metric_statistic(name, metrics_raw[name], manifest) for name in METRIC_UNITS
     }
+    validate_gpu_timer_calibration(raw, manifest)
     validate_fresh_process_ledger(raw, receipt, manifest)
     trace_artifact = next(item for item in artifacts if item["kind"] == "trace")
     trace_path = safe_artifact(artifact_root, trace_artifact["path"])
@@ -779,16 +901,50 @@ def receipt_observation(
         scenario["kind"],
     )
 
-    logical_input_passed = validate_logical_input(raw)
+    observed_dpr = receipt.get("observed_dpr")
+    if (
+        isinstance(observed_dpr, bool)
+        or not isinstance(observed_dpr, (int, float))
+        or observed_dpr <= 0
+    ):
+        raise EvidenceError("receipt lacks a positive observed DPR")
+    logical_input_passed = validate_logical_input(raw, scenario, float(observed_dpr))
     validate_adaptive_evidence(raw, cell["mode"], manifest)
     fidelity_raw = raw.get("fidelity")
     if not isinstance(fidelity_raw, dict):
         raise EvidenceError("fidelity oracle receipt is missing")
+    comparison = fidelity_raw.get("comparison")
+    capture_digest = by_kind["capture"]["sha256"]
+    reference_digest = by_kind["reference_capture"]["sha256"]
+    if (
+        not isinstance(comparison, dict)
+        or comparison.get("method") not in {
+            "pulp-png-pixel-comparison", "pulp-ui-capture-vs-browser-canvas"
+        }
+        or comparison.get("reference_sha256") != reference_digest
+        or comparison.get("capture_sha256") != capture_digest
+        or not isinstance(comparison.get("same_content_token"), str)
+        or not comparison["same_content_token"]
+    ):
+        raise EvidenceError("fidelity comparison is not bound to same-content artifacts")
+    text_contrast = fidelity_raw.get("small_text_luminance_stddev")
+    stroke_coverage = fidelity_raw.get("thin_stroke_coverage")
+    if (
+        isinstance(text_contrast, bool) or not isinstance(text_contrast, (int, float))
+        or not math.isfinite(float(text_contrast)) or text_contrast < 0
+        or isinstance(stroke_coverage, bool) or not isinstance(stroke_coverage, (int, float))
+        or not math.isfinite(float(stroke_coverage)) or not 0 <= stroke_coverage <= 1
+    ):
+        raise EvidenceError("fidelity text/stroke measurements are malformed")
     fidelity = {
         "content_floor_passed": fidelity_raw.get("content_floor_passed") is True,
         "capture_similarity": fidelity_raw.get("capture_similarity"),
-        "small_text_legible": fidelity_raw.get("small_text_legible") is True,
-        "thin_strokes_preserved": fidelity_raw.get("thin_strokes_preserved") is True,
+        "small_text_legible": text_contrast >= manifest["trial_contract"][
+            "small_text_luminance_stddev_minimum"
+        ],
+        "thin_strokes_preserved": stroke_coverage >= manifest["trial_contract"][
+            "thin_stroke_coverage_minimum"
+        ],
         "logical_input_correct": logical_input_passed,
     }
     if (
@@ -817,9 +973,6 @@ def receipt_observation(
     if outcome == "fail" and all_fidelity:
         raise EvidenceError("fail receipt contains no failing fidelity oracle")
 
-    observed_dpr = receipt.get("observed_dpr")
-    if not isinstance(observed_dpr, (int, float)) or observed_dpr <= 0:
-        raise EvidenceError("receipt lacks a positive observed DPR")
     requested_dpr = float(cell["requested_dpr"])
     configured_max: float | None = None
     adaptive: str | None = None

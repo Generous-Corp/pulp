@@ -1049,6 +1049,18 @@ trace PIDs/nonces, native adapters, or handwritten category claims are invalid.
 The checked-in Python tests prove those rejection paths; they do not replace a
 real browser run.
 
+Install exactly `playwright-core@1.61.1` in the isolated measurement package;
+the producer records and verifies that version and rejects drift. Each metric
+declares measured/derived/unavailable provenance. WebGL timing includes five
+baseline and five eight-times-known-work query trials and must detect the extra
+work above its empirical resolution. The scenario manifest—not the page—owns
+the expected logical point/target; the page reports the actual pointer event and
+parameter hit. Compare a CPU reference PNG with a WebGL canvas PNG at identical
+content/state, bind both hashes to one token, and retain numeric similarity,
+small-text luminance variation, and thin-stroke coverage. Adaptive mode must
+record real DPR overrides and measured scale transitions. Old incompatible
+receipts remain `SUPERSEDED`/`NONCOUNTED` in the checked-in instrument state.
+
 Every full-canvas editor MUST handle these, all learned the hard way on SuperConvolver:
 
 - **Narrow breakpoint.** The UI `scale()` keys off HEIGHT, so a tall skinny phone canvas

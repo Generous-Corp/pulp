@@ -450,6 +450,16 @@ one `category_scope` whose evidence ID and stable Perfetto process instance are
 shared across startup, health, and probe. Global or unrelated-process trace
 categories cannot complete a cell.
 
+Treat the two fidelity images as independent evidence artifacts: hash both,
+bind them to the same content/state token, and compute numeric pixel similarity,
+small-text luminance variation, and thin-stroke coverage. A producer-authored
+boolean is not an oracle. Logical input is equally independent: take the
+expected logical point/target from the frozen scenario, then compare it with the
+physical pointer event and hit target reported by the runtime. Every metric must
+name `measured`, `derived`, or `unavailable`; unavailable values have no samples
+or fake percentiles and cannot select policy. Preserve superseded captures as
+`NONCOUNTED` in `docs/validation/gpu-dpr/instrument-validity-state.json`.
+
 The runner caps each adapter stdout and stderr stream at 1 MiB and terminates
 the adapter process group when either cap is crossed. The Pulp-native adapter
 applies the same per-stream cap to its product measurement producer. An output

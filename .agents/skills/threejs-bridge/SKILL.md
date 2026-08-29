@@ -303,6 +303,15 @@ no-sample sentinel, not a fast frame; the producer and evidence verifier must
 both reject it. Only strictly positive, same-process GPU samples can make a
 cell terminal.
 
+Positive alone is not sufficient: the producer records an empirical timestamp
+resolution and must distinguish five one-frame baseline trials from five trials
+that sum eight frames of known work. Every metric declares
+measured/derived/unavailable provenance. The frozen scenario supplies the
+independent logical input point/target, fidelity uses two hashed same-content
+captures plus numeric text/stroke observations, and adaptive mode records the
+measured samples and actual scale transitions rather than echoing requested
+metadata.
+
 When `PULP_BENCHMARK=ON`, `pulp-threejs-native-demo` exposes a
 headless benchmark that drives the JS→GPU upload path without a
 visible window:

@@ -147,7 +147,10 @@ configure a separate Release build with both `PULP_BENCHMARK=ON` and
 `pulp-gpu-dpr-native-measurement` through `tools/ci/governed-build.sh`. The
 producer opts into GPU timing on its public editor surface, refuses non-hardware
 Dawn adapters, and reports incomplete when timestamp queries or authentic
-counter evidence are unavailable. Do not reuse this dev tracing build as a
+counter evidence are unavailable. Its empirical timer floor is derived from
+positive samples and must distinguish five baseline trials from five trials
+with eight times the known GPU work; a quantized nonzero timer with no detectable
+control is not valid measurement. Do not reuse this dev tracing build as a
 shipping artifact.
 
 ## Gotchas (each cost real time)

@@ -513,6 +513,13 @@ unique PID, producer/content/build digests, exact adapter identity, and the
 sample. The adapter and runner revalidate that ledger; a reused PID or mixed
 identity is incomplete evidence, even when the aggregate sample count is 20.
 
+Trace timing does not bypass instrument validity. The raw metric must say
+whether it is measured, derived, or unavailable, and GPU timer evidence must
+include an empirical resolution plus five baseline and five eight-times-work
+calibration trials whose medians are distinguishable. Adaptive traces must bind
+the actual measured samples and scale-before/scale-after transitions; a mode
+label or requested scale alone is not observed adaptive behavior.
+
 ## Correlating GPU-health startup snapshots
 
 The Pulp-owned product host creates distinct bounded GPU and trace evidence IDs

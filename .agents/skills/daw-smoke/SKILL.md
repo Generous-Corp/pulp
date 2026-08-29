@@ -220,7 +220,11 @@ way and say plainly that this rung is unproven.
   does not authorize screen-driving.
   Drive or ingest that cell through `tools/scripts/gpu_dpr_runner.py`; the DAW
   adapter must emit the exact format, binary, scan-cache, raw-sample, artifact,
-  and machine receipts. Timeout is INCONCLUSIVE and durable for resumption.
+  and machine receipts. Metrics must retain measured/derived/unavailable
+  provenance, and the input expectation must come from the frozen scenario—not
+  from the DAW producer that reports the observed event/hit. Two same-content
+  image artifacts and numeric fidelity oracles replace producer-authored pass
+  booleans. Timeout is INCONCLUSIVE and durable for resumption.
 - **REAPER license is a secret** (`~/.config/pulp/secrets/reaper-license.txt`,
   personal non-commercial) — never commit, echo, or bake into a TartCI golden. Local
   Macs (m1/m3/m5) are already serialized; local is the primary lane.

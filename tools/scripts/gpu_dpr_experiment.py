@@ -109,6 +109,19 @@ def manifest_errors(manifest: dict[str, Any], manifest_path: Path) -> list[str]:
             errors.append(f"{scenario['id']}: source digest drift")
         if not scenario.get("required_oracles"):
             errors.append(f"{scenario['id']}: no required oracle")
+        logical_size = scenario.get("logical_size", {})
+        oracle = scenario.get("logical_input_oracle")
+        point = oracle.get("point") if isinstance(oracle, dict) else None
+        target = oracle.get("target") if isinstance(oracle, dict) else None
+        if (
+            not isinstance(point, list) or len(point) != 2
+            or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                   for value in point)
+            or not isinstance(target, str) or not target
+            or not 0 <= float(point[0]) < float(logical_size.get("width", 0))
+            or not 0 <= float(point[1]) < float(logical_size.get("height", 0))
+        ):
+            errors.append(f"{scenario['id']}: logical-input oracle is not a frozen in-bounds point/target")
 
     adaptive = manifest.get("adaptive_profile", {})
     if adaptive.get("shipping") is not False:
@@ -125,6 +138,17 @@ def manifest_errors(manifest: dict[str, Any], manifest_path: Path) -> list[str]:
         or not 0 <= similarity_minimum <= 1
     ):
         errors.append("capture similarity minimum must be a number in 0..1")
+    for field in (
+        "small_text_luminance_stddev_minimum",
+        "thin_stroke_coverage_minimum",
+    ):
+        value = trial.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            errors.append(f"{field} must be a positive number")
+    if trial.get("gpu_timer_calibration_trials", 0) < 3:
+        errors.append("GPU timer calibration requires at least three trials")
+    if trial.get("gpu_timer_extra_work_multiplier", 0) < 2:
+        errors.append("GPU timer calibration extra-work multiplier must be at least two")
     for gate in (
         "capture_similarity", "small_text_legible",
         "thin_strokes_preserved", "logical_input_correct",
@@ -205,7 +229,10 @@ def result_semantic_errors(
             if item["adaptive_profile_id"] != manifest["adaptive_profile"]["id"]:
                 errors.append(f"{scenario}: adaptive profile differs from the corpus")
         for statistic in item["metrics"].values():
-            if statistic["p95"] < statistic["median"]:
+            if (
+                statistic["provenance"] != "unavailable"
+                and statistic["p95"] < statistic["median"]
+            ):
                 errors.append(f"{scenario}: p95 is below median")
         similarity = item.get("fidelity", {}).get("capture_similarity")
         if (
@@ -236,6 +263,11 @@ def result_semantic_errors(
         if result["eligible_for_policy"]:
             errors.append("synthetic evidence is eligible for policy")
     elif result["status"] == "complete":
+        all_metrics_available = all(
+            statistic["provenance"] != "unavailable"
+            for item in observations
+            for statistic in item["metrics"].values()
+        )
         fidelity_passed = all(
             (
                 item["fidelity"][gate]
@@ -248,8 +280,11 @@ def result_semantic_errors(
                 "thin_strokes_preserved", "logical_input_correct"
             )
         )
-        if result["eligible_for_policy"] != fidelity_passed:
-            errors.append("policy eligibility disagrees with the fidelity gates")
+        policy_ready = fidelity_passed and all_metrics_available
+        if result["eligible_for_policy"] != policy_ready:
+            errors.append(
+                "policy eligibility disagrees with fidelity gates or metric availability"
+            )
     elif result["eligible_for_policy"]:
         errors.append("incomplete measured evidence is eligible for policy")
     return errors

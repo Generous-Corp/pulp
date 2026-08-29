@@ -123,6 +123,29 @@ and its sample; the producer, adapter, and runner all verify that provenance.
 Without `PULP_DPR_NATIVE_MEASUREMENT_BIN`, the adapter retains its safe
 capture-only preflight and deliberately returns `INCONCLUSIVE`.
 
+Each raw metric carries an explicit `measured`, `derived`, or `unavailable`
+provenance plus its definition. `unavailable` has no samples or invented
+percentiles and cannot make a cell policy-eligible. GPU timing also carries an
+empirical resolution estimate and five baseline/five known-extra-work trials;
+the extra-work control must be independently distinguishable before any timer
+sample is accepted. The input oracle is frozen in the scenario manifest. The
+producer reports the actual physical pointer event, logical point recovered
+from that event, and hit target rather than supplying both sides of its own
+expectation.
+
+Fidelity compares two independently hashed PNGs of the same content/state and
+reports numeric pixel similarity, small-text luminance variation, and
+thin-stroke coverage. Adaptive trials retain the measured over/under-budget
+samples and every scale transition; copied mode metadata is not adaptive
+evidence. The browser producer requires exactly `playwright-core@1.61.1` and
+refuses another installed version. Old receipts invalidated by these instrument
+rules remain preserved, but
+`docs/validation/gpu-dpr/instrument-validity-state.json` marks them
+`SUPERSEDED`/`NONCOUNTED`; never delete or silently promote them. Install the
+browser dependency from its exact lock with `npm ci --ignore-scripts` in
+`examples/web-demos/super-convolver-ui/browser-test`; do not use an unpinned
+global Playwright package.
+
 `ingest` accepts an independently produced cell receipt and applies the same
 fidelity, logical-input, artifact-hash, identity, trace-category, and raw-sample
 checks. Every closed trace question must return exactly the cell's issued

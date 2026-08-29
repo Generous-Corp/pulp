@@ -400,6 +400,14 @@ scenario-specific executable adapter. The adapter receipt must bind the exact
 Forge/Pulp SHAs and binary; missing native, DAW, or browser legs stay explicit
 dependencies and must not be replaced with a Pulp example.
 
+The Forge producer must also use the shared instrument-validity contract: each
+metric declares measured/derived/unavailable provenance; timer samples carry a
+detectable known-extra-work calibration; the expected logical point/target
+comes from the frozen scenario while Forge reports the actual event and hit;
+and two same-content captures supply numeric similarity, text, and stroke
+oracles. Preserve any older self-satisfying or constant-valued receipts as
+`SUPERSEDED`/`NONCOUNTED`, not as partial terminal cells.
+
 ## Forge GPU-health canary
 
 Forge shells may reuse `ControlGpuHealthViewAdapter` by supplying their real

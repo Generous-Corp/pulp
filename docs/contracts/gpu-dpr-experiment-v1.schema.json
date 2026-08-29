@@ -64,19 +64,21 @@
   "$defs": {
     "statistic": {
       "type": "object", "additionalProperties": false,
-      "required": ["unit", "median", "p95", "sample_count"],
+      "required": ["unit", "provenance", "definition", "median", "p95", "sample_count"],
       "properties": {
         "unit": { "enum": ["ms", "bytes"] },
-        "median": { "type": "number", "minimum": 0 },
-        "p95": { "type": "number", "minimum": 0 },
-        "sample_count": { "type": "integer", "minimum": 1 }
+        "provenance": { "enum": ["measured", "derived", "unavailable"] },
+        "definition": { "type": "string", "minLength": 1 },
+        "median": { "type": ["number", "null"], "minimum": 0 },
+        "p95": { "type": ["number", "null"], "minimum": 0 },
+        "sample_count": { "type": "integer", "minimum": 0 }
       }
     },
     "artifact": {
       "type": "object", "additionalProperties": false,
       "required": ["kind", "path", "sha256"],
       "properties": {
-        "kind": { "enum": ["capture", "trace", "raw_samples", "input_receipt"] },
+        "kind": { "enum": ["capture", "reference_capture", "trace", "raw_samples", "input_receipt"] },
         "path": { "type": "string", "minLength": 1 },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
@@ -137,7 +139,7 @@
           "items": { "type": "string", "minLength": 1 }
         },
         "artifacts": {
-          "type": "array", "minItems": 3,
+          "type": "array", "minItems": 5,
           "items": { "$ref": "#/$defs/artifact" }
         }
       }

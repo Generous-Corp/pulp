@@ -49,31 +49,55 @@ def raw_samples(
     fidelity_ok: bool = True,
     capture_similarity: float = 0.99,
 ) -> dict:
-    expected = [123.25, 45.5]
-    observed = expected if logical_input_ok else [61.625, 22.75]
+    expected = [320, 180]
+    observed_physical = expected if logical_input_ok else [160, 90]
+    semantics = {
+        "cpu_frame_time": ("measured", "steady-frame CPU submit latency"),
+        "gpu_frame_time": ("measured", "GPU timestamp elapsed time"),
+        "first_frame_time": ("measured", "fresh-process first output latency"),
+        "interaction_latency": ("measured", "input dispatch and render completion latency"),
+        "render_target_bytes": ("derived", "RGBA8 physical dimensions times four"),
+        "resident_bytes": ("derived", "render target plus observed resident allocations"),
+        "upload_bytes": ("measured", "instrumented CPU-to-GPU upload bytes"),
+    }
+    samples = {
+        "cpu_frame_time": [2.0 + index / 100 for index in range(30)],
+        "gpu_frame_time": [1.0 + index / 100 for index in range(30)],
+        "first_frame_time": [10.0 + index / 10 for index in range(20)],
+        "interaction_latency": [4.0 + index / 100 for index in range(30)],
+        "render_target_bytes": [1024 + index for index in range(30)],
+        "resident_bytes": [4096 + index for index in range(30)],
+        "upload_bytes": [512 + index for index in range(30)],
+    }
     return {
         "schema": runner.RAW_SCHEMA,
         "version": 1,
         "metrics": {
-            "cpu_frame_time": [2.0 + index / 100 for index in range(30)],
-            "gpu_frame_time": [1.0 + index / 100 for index in range(30)],
-            "first_frame_time": [10.0 + index / 10 for index in range(20)],
-            "interaction_latency": [4.0 + index / 100 for index in range(30)],
-            "render_target_bytes": [1024 + index for index in range(30)],
-            "resident_bytes": [4096 + index for index in range(30)],
-            "upload_bytes": [512 + index for index in range(30)],
+            name: {"provenance": semantics[name][0], "definition": semantics[name][1],
+                   "samples": values}
+            for name, values in samples.items()
+        },
+        "gpu_timer_calibration": {
+            "schema": "pulp.gpu-dpr-timer-calibration.v1", "version": 1,
+            "clock": "dawn-gpu-timestamp", "resolution_ms": 0.01,
+            "baseline_samples_ms": [1.0, 1.01, 1.02, 1.03, 1.04],
+            "extra_work_samples_ms": [4.0, 4.01, 4.02, 4.03, 4.04],
+            "extra_work_multiplier": 8, "control_detected": True,
         },
         "fidelity": {
             "content_floor_passed": fidelity_ok,
             "capture_similarity": capture_similarity,
-            "small_text_legible": fidelity_ok,
-            "thin_strokes_preserved": fidelity_ok,
+            "small_text_luminance_stddev": 2.0 if fidelity_ok else 0.0,
+            "thin_stroke_coverage": 0.1 if fidelity_ok else 0.0,
         },
         "logical_input_trials": [{
             "expected_logical": expected,
-            "observed_logical": observed,
-            "expected_target": "gain-knob",
-            "observed_target": "gain-knob",
+            "observed_logical": observed_physical,
+            "requested_physical": expected,
+            "observed_physical": observed_physical,
+            "expected_target": "root-hit",
+            "observed_target": "root-hit",
+            "event_received": True,
         }],
         "trace": {
             "complete": True,
@@ -123,6 +147,21 @@ def make_receipt(
         fidelity_ok=fidelity_ok,
         capture_similarity=capture_similarity,
     )
+    requested = float(cell["requested_dpr"])
+    observed = (
+        min(requested, float(manifest["configured_max_dpr"]))
+        if cell["mode"] == "configured_max" else requested
+    )
+    oracle = scenario["logical_input_oracle"]
+    logical_trial = raw["logical_input_trials"][0]
+    expected_point = oracle["point"]
+    logical_trial["expected_logical"] = expected_point
+    logical_trial["requested_physical"] = [value * observed for value in expected_point]
+    logical_trial["expected_target"] = oracle["target"]
+    logical_trial["observed_target"] = oracle["target"]
+    if logical_input_ok:
+        logical_trial["observed_physical"] = logical_trial["requested_physical"]
+        logical_trial["observed_logical"] = expected_point
     is_web = scenario["kind"] == "maintained_web_canary"
     if is_web:
         raw["trace"] = {
@@ -130,34 +169,59 @@ def make_receipt(
         }
     if cell["mode"] == "adaptive_simulation":
         profile = manifest["adaptive_profile"]
+        down_count = profile["downshift_after_over_budget_frames"]
+        up_count = profile["upshift_after_under_budget_frames"]
+        ladder = [float(value) for value in profile["scale_ladder"]]
+        initial_scale = float(cell["requested_dpr"])
+        initial_index = ladder.index(initial_scale)
+        down_scale = ladder[max(0, initial_index - 1)]
+        up_scale = ladder[min(len(ladder) - 1, max(0, initial_index - 1) + 1)]
+        observations = []
+        scale = initial_scale
+        for index in range(down_count):
+            after = down_scale if index == down_count - 1 else scale
+            observations.append({
+                "phase": "over-budget", "frame_index": index, "sample_ms": 12.0,
+                "scale_before": scale, "scale_after": after,
+                "transition": (
+                    "downshift" if down_scale < initial_scale else "floor-hold"
+                ) if index == down_count - 1 else False,
+            })
+            scale = after
+        for index in range(up_count):
+            after = up_scale if index == up_count - 1 else scale
+            observations.append({
+                "phase": "under-budget", "frame_index": down_count + index,
+                "sample_ms": 4.0, "scale_before": scale, "scale_after": after,
+                "transition": (
+                    "upshift" if up_scale > scale else "ceiling-hold"
+                ) if index == up_count - 1 else False,
+            })
+            scale = after
         raw["adaptive_policy_evidence"] = {
             "profile": profile,
-            "downshift": {
-                "consecutive_frames_before":
-                    profile["downshift_after_over_budget_frames"] - 1,
-                "transitioned_before": False,
-                "consecutive_frames_at":
-                    profile["downshift_after_over_budget_frames"],
-                "transitioned_at": True,
-            },
-            "upshift": {
-                "consecutive_frames_before":
-                    profile["upshift_after_under_budget_frames"] - 1,
-                "transitioned_before": False,
-                "consecutive_frames_at":
-                    profile["upshift_after_under_budget_frames"],
-                "transitioned_at": True,
-                "budget_fraction": profile["upshift_budget_fraction"],
-            },
+            "budget_ms": 10.0,
+            "initial_scale": initial_scale,
+            "final_scale": up_scale,
+            "observations": observations,
         }
     browser_trace = json.dumps({"traceEvents": [{
         "name": f"pulp.dpr.{nonce}.{category}", "ph": "X", "pid": 77, "dur": 1,
     } for category in manifest["trial_contract"]["required_trace_categories"]]}).encode()
     files = {
         "capture": ("capture.png", b"real-capture-bytes"),
+        "reference_capture": ("reference.png", b"real-reference-bytes"),
         "trace": ("trace.pftrace", browser_trace if is_web else b"real-trace-bytes:" + nonce.encode("ascii")),
         "raw_samples": ("raw-samples.json", None),
         "input_receipt": ("input-receipt.json", b'{"logical":true}\n'),
+    }
+    capture_digest = hashlib.sha256(files["capture"][1]).hexdigest()
+    reference_digest = hashlib.sha256(files["reference_capture"][1]).hexdigest()
+    raw["fidelity"]["comparison"] = {
+        "method": "pulp-png-pixel-comparison",
+        "reference_sha256": reference_digest,
+        "capture_sha256": capture_digest,
+        "same_content_token": nonce,
     }
     write_json(cell_dir / "raw-samples.json", raw)
     artifacts = []
@@ -167,11 +231,6 @@ def make_receipt(
             path.write_bytes(content)
         artifacts.append({"kind": kind, "path": name, "sha256": runner.sha256_file(path)})
 
-    requested = float(cell["requested_dpr"])
-    if cell["mode"] == "configured_max":
-        observed = min(requested, float(manifest["configured_max_dpr"]))
-    else:
-        observed = requested
     logical = scenario["logical_size"]
     adapter = {
         "class": "hardware",
@@ -294,7 +353,7 @@ def make_receipt(
         "producer_sha256": producer_digest,
         "content_digest": receipt["content_digest"],
         "pulp_sha": state["plan"]["pulp_sha"],
-        "first_frame_time_ms": raw["metrics"]["first_frame_time"][index],
+        "first_frame_time_ms": raw["metrics"]["first_frame_time"]["samples"][index],
         "adapter": adapter,
         **({"build_sha256": receipt["build_identity"]["web_ui_bundle_sha256"]}
            if is_web else {}),
@@ -459,7 +518,7 @@ def main() -> int:
         )
         zero_gpu_raw_path = runner.cell_directory(run_dir, dense) / "raw-samples.json"
         zero_gpu_raw = runner.load_json(zero_gpu_raw_path)
-        zero_gpu_raw["metrics"]["gpu_frame_time"][7] = 0.0
+        zero_gpu_raw["metrics"]["gpu_frame_time"]["samples"][7] = 0.0
         write_json(zero_gpu_raw_path, zero_gpu_raw)
         zero_gpu_document = runner.load_json(zero_gpu)
         next(
@@ -470,6 +529,22 @@ def main() -> int:
         expect_rejected(zero_gpu, state, manifest, run_dir, "missing GPU sample")
 
         planted = 0
+        def reject_raw_mutation(label: str, mutate) -> None:
+            receipt_path = make_receipt(
+                run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+            )
+            raw_path = runner.cell_directory(run_dir, dense) / "raw-samples.json"
+            raw_document = runner.load_json(raw_path)
+            mutate(raw_document)
+            write_json(raw_path, raw_document)
+            receipt_document = runner.load_json(receipt_path)
+            next(
+                item for item in receipt_document["artifacts"]
+                if item["kind"] == "raw_samples"
+            )["sha256"] = runner.sha256_file(raw_path)
+            write_json(receipt_path, receipt_document)
+            expect_rejected(receipt_path, state, manifest, run_dir, label)
+
         bad_digest = runner.load_json(good)
         bad_digest["artifacts"][0]["sha256"] = "0" * 64
         write_json(good, bad_digest)
@@ -481,6 +556,40 @@ def main() -> int:
             logical_input_ok=False,
         )
         expect_rejected(good, state, manifest, run_dir, "logical coordinate scaling")
+        planted += 1
+
+        reject_raw_mutation(
+            "producer-authored logical expectation",
+            lambda raw: raw["logical_input_trials"][0].update(
+                expected_logical=[319, 180]
+            ),
+        )
+        planted += 1
+        reject_raw_mutation(
+            "logical target substitution",
+            lambda raw: raw["logical_input_trials"][0].update(
+                observed_target="different-target"
+            ),
+        )
+        planted += 1
+        reject_raw_mutation(
+            "metric provenance removal",
+            lambda raw: raw["metrics"]["gpu_frame_time"].pop("provenance"),
+        )
+        planted += 1
+        reject_raw_mutation(
+            "undetectable GPU timer control",
+            lambda raw: raw["gpu_timer_calibration"].update(
+                extra_work_samples_ms=raw["gpu_timer_calibration"]["baseline_samples_ms"]
+            ),
+        )
+        planted += 1
+        reject_raw_mutation(
+            "unbound fidelity reference",
+            lambda raw: raw["fidelity"]["comparison"].update(
+                reference_sha256="0" * 64
+            ),
+        )
         planted += 1
 
         good = make_receipt(
@@ -620,7 +729,7 @@ def main() -> int:
             analyzer=analyzer, binary=binary,
         )
         adaptive_raw = runner.load_json(adaptive_raw_path)
-        adaptive_raw["adaptive_policy_evidence"]["upshift"]["consecutive_frames_at"] -= 1
+        adaptive_raw["adaptive_policy_evidence"]["observations"][-2]["transition"] = "upshift"
         write_json(adaptive_raw_path, adaptive_raw)
         adaptive_document = runner.load_json(adaptive_receipt)
         next(

@@ -289,6 +289,12 @@ and adjacent policy self-tests. When adding a new Python policy test there,
 register the test explicitly in the same change; merely creating a
 `tools/ci/test_*.py` file does not make CTest execute it.
 
+That registry also runs the browser DPR adapter self-test. Keep its exact
+Playwright-version, artifact-confinement, product-digest, typed-metric, timer
+calibration, logical-input, and same-content fidelity negatives registered;
+an executable measurement script without the CTest entry is not maintained
+evidence tooling.
+
 That registry also carries the trusted Vellum merge self-test. Keep its clean
 base+head positive control and real content-conflict negative control together:
 the required gate must prove it can construct the exact two-parent candidate,
