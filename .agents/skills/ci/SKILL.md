@@ -2717,6 +2717,26 @@ or `manual`, but agents should not choose those workflows unless the user
 explicitly asks for a manual/emergency bypass. `pulp status` reports the
 effective workflow and whether its required local tool is installed.
 
+### Gotcha: amending after `shipyard pr` leaves the body describing the old commit
+
+A PR body is written **once, at creation**, from the commit message — by
+`shipyard pr`, `gh pr create`, and the web UI alike — and nothing updates it
+afterwards. So an amend + force-push moves the commit and silently leaves the
+body describing code that no longer exists. Reviewers do not read your commit;
+they read that body.
+
+It is worse than a stale description, because it meets the `COMMIT_OR_PR_TITLE`
+squash policy documented below: on a **multi-commit** PR the body becomes the
+landed commit message, so stale text is not merely misleading — it is written
+into `main`'s history permanently. A one-commit PR squashes from the commit and
+escapes this, which is exactly why the hazard stays invisible until the PR that
+has two.
+
+**After any force-push that changed a commit message, re-read the body and
+refresh it** (`ghapp pr edit <n> --body-file …`), preserving any provenance
+footer the original had. Nothing warns you; it is visible only if you go back
+and check that your own edit still describes the branch.
+
 ### Gotcha: shipyard-merged PRs don't reliably auto-close linked issues
 
 **Always verify an issue actually closed after a shipyard merge; close it
