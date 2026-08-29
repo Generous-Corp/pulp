@@ -325,6 +325,32 @@ target_link_libraries(pulp-test-cli-tartci-lease PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-tartci-lease)
 
+# Stale git lock detection behind the `pulp doctor` "git locks" check.
+# Links only the lock module so the held-lock control runs without the
+# rest of the doctor helper surface.
+add_executable(pulp-test-cli-git-lock-health
+    test_cli_git_lock_health.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp)
+target_include_directories(pulp-test-cli-git-lock-health PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli
+    ${CMAKE_BINARY_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-git-lock-health PRIVATE
+    pulp::runtime
+    pulp::platform
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-git-lock-health)
+
 add_executable(pulp-test-cli-docs-command
     test_cli_docs_command.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cmd_docs.cpp
