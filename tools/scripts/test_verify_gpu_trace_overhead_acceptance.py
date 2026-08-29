@@ -188,6 +188,12 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 mutate(receipt)
                 self.assertTrue(any(expected in error for error in MODULE.verify(receipt, ROOT)))
 
+    def test_empty_installed_source_stamp_fails_closed(self):
+        receipt = self.terminal_receipt()
+        receipt["installed_source_identity"]["build_info"]["kGitSha"] = ""
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertIn("installed build stamp is not bound to source_revision", errors)
+
     def test_fixture_semantic_question_cannot_be_relabelled(self):
         receipt = self.terminal_receipt()
         receipt["fixture_replay"][0]["semantic_result"]["question"] = "gpu-probe"

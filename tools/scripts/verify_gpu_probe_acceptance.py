@@ -19,6 +19,7 @@ import json_schema_lite
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
+SOURCE_STAMP = re.compile(r"^[0-9a-f]{7,40}$")
 GROUPS = {
     "compute": "gpu-compute.magnitude.v1",
     "stft": "gpu-audio.stft.v1",
@@ -188,6 +189,8 @@ def _png_metrics(path: Path) -> dict[str, int]:
         if (binascii.crc32(kind + payload) & 0xffffffff) != declared_crc:
             raise ValueError("Forge screenshot PNG has an invalid chunk CRC")
         if kind == b"IHDR":
+            if len(payload) != 13:
+                raise ValueError("Forge screenshot PNG has a malformed IHDR")
             width, height, bit_depth, color_type, _compression, _filter, interlace = struct.unpack(
                 ">IIBBBBB", payload
             )
@@ -293,6 +296,7 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         or build_info.get("kBuildType") != "Release"
         or build_info.get("kGitDirty") is not False
         or not isinstance(stamped, str)
+        or SOURCE_STAMP.fullmatch(stamped) is None
         or not revision.startswith(stamped)
     ):
         errors.append("v2 installed CLI provenance is not the exact clean Release source")

@@ -217,6 +217,15 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             self.assertTrue(any("installed CLI provenance" in error for error in errors))
             self.assertTrue(any("Forge bundle stamp" in error for error in errors))
 
+    def test_v2_rejects_empty_installed_source_stamp(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt = self.v2_fixture(root)
+            receipt["install_provenance"]["build_info"]["kGitSha"] = ""
+            (root / "receipt.json").write_text(json.dumps(receipt))
+            errors = VERIFIER.verify(root)
+            self.assertTrue(any("installed CLI provenance" in error for error in errors))
+
     def test_png_content_cap_rejects_blank_even_when_digest_rebound(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -225,6 +234,17 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             self.rebind(root, "forge-modular-screenshot.png")
             errors = VERIFIER.verify(root)
             self.assertTrue(any("blank" in error for error in errors))
+
+    def test_malformed_png_ihdr_returns_a_verifier_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.v2_fixture(root)
+            malformed = b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", b"\0" * 12)
+            malformed += png_chunk(b"IEND", b"")
+            (root / "forge-modular-screenshot.png").write_bytes(malformed)
+            self.rebind(root, "forge-modular-screenshot.png")
+            errors = VERIFIER.verify(root)
+            self.assertTrue(any("malformed IHDR" in error for error in errors))
 
     def test_release_build_contract_rejects_missing_threejs(self):
         with tempfile.TemporaryDirectory() as temporary:

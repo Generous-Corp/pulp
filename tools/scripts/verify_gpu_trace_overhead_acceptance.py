@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ import gpu_trace_overhead_acceptance as contract
 EXPECTED_PLAN_REVISION = "641649b7e7fece6baae34380b6e719904506af22"
 EXPECTED_PLAN_SHA256 = "00bdb8bd55fb90fb42d98a09442d2b168505a23a4208cb5b9edb67b01de69f07"
 EXPECTED_PLAN_BLOB = "2d1c461d3ea640f75786a72c312d074f68f59028"
+SOURCE_STAMP = re.compile(r"^[0-9a-f]{7,40}$")
 
 
 def _object(value: Any, label: str, errors: list[str]) -> dict[str, Any]:
@@ -65,7 +67,12 @@ def verify(
     if build_info.get("kBuildType") != "Release" or build_info.get("kGitDirty") is not False:
         errors.append("installed CLI/MCP are not stamped as a clean Release build")
     stamped_sha = build_info.get("kGitSha")
-    if not isinstance(stamped_sha, str) or not isinstance(source_revision, str) or not source_revision.startswith(stamped_sha):
+    if (
+        not isinstance(stamped_sha, str)
+        or SOURCE_STAMP.fullmatch(stamped_sha) is None
+        or not isinstance(source_revision, str)
+        or not source_revision.startswith(stamped_sha)
+    ):
         errors.append("installed build stamp is not bound to source_revision")
     if not contract.valid_lower_hex(str(installed.get("build_info_sha256", "")), 64):
         errors.append("installed build_info lacks an exact SHA-256")
