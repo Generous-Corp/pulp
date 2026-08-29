@@ -589,6 +589,13 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");'
             ),
         )
+        oversized = (
+            'PULP_TRACE_SCOPE_NAMED("gpu", "'
+            + ("x" * MODULE.MAX_PRODUCT_TRACE_CALL_BYTES)
+            + '");'
+        )
+        with self.assertRaisesRegex(ValueError, "exceeds the bounded scan"):
+            MODULE.product_producer_signatures(oversized)
 
     def test_product_producer_delta_catches_gpu_call_without_evidence_literal(self):
         before = 'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");'

@@ -1345,7 +1345,9 @@ def _bounded_product_trace_calls(text: str) -> tuple[str, ...]:
                     break
             cursor += 1
         if call_end is None:
-            continue
+            raise ValueError(
+                "recognized product trace call is unterminated or exceeds the bounded scan"
+            )
         cursor = call_end
         while cursor < len(text) and text[cursor].isspace():
             cursor += 1
