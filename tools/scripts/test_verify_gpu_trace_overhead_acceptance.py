@@ -102,7 +102,8 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 },
                 "build_provenance": {
                     "method": "fresh-external-cmake-build-install-byte-identity-v1",
-                    "install_prefix_initial_state": "absent",
+                    "install_prefix_initial_state": "absent-and-atomically-claimed",
+                    "install_prefix_claim": {"device": 1, "inode": 2},
                     "cmake_cache_sha256": "5" * 64,
                     "cmake_home_revision": head,
                     "build_targets": list(CONTRACT.BUILD_TARGETS),

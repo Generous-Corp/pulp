@@ -108,9 +108,22 @@ def _verify_installed_build_provenance(
     if (
         provenance.get("method")
         != "fresh-external-cmake-build-install-byte-identity-v1"
-        or provenance.get("install_prefix_initial_state") != "absent"
+        or provenance.get("install_prefix_initial_state")
+        != "absent-and-atomically-claimed"
     ):
         errors.append("installed binaries lack a fresh isolated build/install proof")
+    prefix_claim = provenance.get("install_prefix_claim")
+    if (
+        not isinstance(prefix_claim, dict)
+        or set(prefix_claim) != {"device", "inode"}
+        or any(
+            not isinstance(prefix_claim.get(field), int)
+            or isinstance(prefix_claim.get(field), bool)
+            or prefix_claim[field] < 0
+            for field in ("device", "inode")
+        )
+    ):
+        errors.append("installed build provenance lacks the claimed prefix identity")
     if not contract.valid_lower_hex(str(provenance.get("cmake_cache_sha256", "")), 64):
         errors.append("installed build provenance lacks an exact CMake cache digest")
     if provenance.get("cmake_home_revision") != source_revision:

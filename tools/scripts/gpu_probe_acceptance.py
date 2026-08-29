@@ -10,6 +10,7 @@ import os
 import re
 import select
 import shutil
+import stat as stat_module
 import subprocess
 import sys
 import tempfile
@@ -102,6 +103,37 @@ def require_release_pulp_build(build_dir: Path, repository: Path) -> dict[str, s
     return values
 
 
+def directory_open_flags() -> int:
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+
+
+def directory_identity(value: os.stat_result, label: str) -> dict[str, int]:
+    if not stat_module.S_ISDIR(value.st_mode):
+        raise AcceptanceError(f"{label} identity is not a directory")
+    return {"device": value.st_dev, "inode": value.st_ino}
+
+
+def assert_directory_claim(
+    path: Path, expected: dict[str, int], label: str, descriptor: int | None = None
+) -> None:
+    try:
+        path_identity = directory_identity(
+            os.stat(path, follow_symlinks=False), label
+        )
+        descriptor_identity = (
+            directory_identity(os.fstat(descriptor), label)
+            if descriptor is not None else expected
+        )
+    except OSError as error:
+        raise AcceptanceError(f"{label} claim is no longer reachable") from error
+    if path_identity != expected or descriptor_identity != expected:
+        raise AcceptanceError(f"{label} path no longer names its claimed directory")
+
+
 def refresh_install(
     repository: Path, build_dir: Path, prefix: Path, build_environment: dict[str, str]
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
@@ -114,15 +146,23 @@ def refresh_install(
     if build.returncode != 0:
         raise AcceptanceError(f"Pulp CLI/MCP refresh failed: {build.stderr[-2000:]}")
     try:
-        prefix.mkdir()
+        prefix.mkdir(mode=0o700)
+        prefix_descriptor = os.open(prefix, directory_open_flags())
     except OSError as error:
         raise AcceptanceError(
             "install-prefix was not fresh when the recorder atomically claimed it"
         ) from error
-    install = run_bounded(
-        ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
-        cwd=repository, environment=build_environment, timeout=1800,
-    )
+    prefix_claim = directory_identity(os.fstat(prefix_descriptor), "install-prefix")
+    try:
+        install = run_bounded(
+            ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
+            cwd=repository, environment=build_environment, timeout=1800,
+        )
+        assert_directory_claim(
+            prefix, prefix_claim, "install-prefix", prefix_descriptor
+        )
+    finally:
+        os.close(prefix_descriptor)
     if install.returncode != 0:
         raise AcceptanceError(f"Pulp install refresh failed: {install.stderr[-2000:]}")
     installed_paths = {
@@ -175,6 +215,7 @@ def refresh_install(
         "build_info": installed_identity["build_info"],
         "build_info_sha256": installed_identity["build_info_sha256"],
         "install_prefix_initial_state": "absent-and-atomically-claimed",
+        "install_prefix_claim": prefix_claim,
         "build_install_binary_identity": "pass",
     }, binaries)
 
@@ -540,42 +581,142 @@ def validate_generated_paths(
 
 
 def publish_receipt_directory_no_replace(staging: Path, output: Path) -> None:
-    entries = sorted(staging.iterdir(), key=lambda path: path.name)
-    receipt = staging / "receipt.json"
-    if receipt not in entries or any(
-        not path.is_file() or path.is_symlink() for path in entries
-    ):
-        raise AcceptanceError("staging must contain only regular evidence files")
+    if output.name in {"", ".", ".."}:
+        raise AcceptanceError("output-dir must have a safe final path component")
+    parent_descriptor: int | None = None
+    staging_descriptor: int | None = None
+    output_descriptor: int | None = None
     try:
-        output.mkdir()
+        parent_descriptor = os.open(output.parent, directory_open_flags())
+        staging_descriptor = os.open(staging, directory_open_flags())
     except OSError as error:
-        raise AcceptanceError("output-dir appeared before no-replace publication") from error
-    for source in (path for path in entries if path != receipt):
-        with source.open("rb") as handle:
-            os.fsync(handle.fileno())
+        if staging_descriptor is not None:
+            os.close(staging_descriptor)
+        if parent_descriptor is not None:
+            os.close(parent_descriptor)
+        raise AcceptanceError("publication directories must be real, reachable directories") from error
+    try:
+        parent_claim = directory_identity(
+            os.fstat(parent_descriptor), "output-parent"
+        )
+        assert_directory_claim(
+            output.parent, parent_claim, "output-parent", parent_descriptor
+        )
         try:
-            os.link(source, output / source.name, follow_symlinks=False)
+            names = sorted(os.listdir(staging_descriptor))
+        except OSError as error:
+            raise AcceptanceError("cannot enumerate the staged evidence directory") from error
+        if "receipt.json" not in names:
+            raise AcceptanceError("staging must contain receipt.json")
+        for name in names:
+            if name in {"", ".", ".."} or Path(name).name != name:
+                raise AcceptanceError("staging contains an unsafe evidence filename")
+            try:
+                metadata = os.stat(
+                    name, dir_fd=staging_descriptor, follow_symlinks=False
+                )
+            except OSError as error:
+                raise AcceptanceError(f"cannot stat staged evidence {name}") from error
+            if not stat_module.S_ISREG(metadata.st_mode):
+                raise AcceptanceError("staging must contain only regular evidence files")
+
+        try:
+            os.mkdir(output.name, mode=0o700, dir_fd=parent_descriptor)
+            output_descriptor = os.open(
+                output.name, directory_open_flags(), dir_fd=parent_descriptor
+            )
         except OSError as error:
             raise AcceptanceError(
-                f"no-replace publication failed for {source.name}"
+                "output-dir appeared before no-replace publication"
             ) from error
-    descriptor = os.open(output, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-    with receipt.open("rb") as handle:
-        os.fsync(handle.fileno())
-    try:
-        os.link(receipt, output / receipt.name, follow_symlinks=False)
-    except OSError as error:
-        raise AcceptanceError("no-replace publication failed for receipt.json") from error
-    for directory_path in (output, output.parent):
-        descriptor = os.open(directory_path, os.O_RDONLY)
+        output_claim = directory_identity(os.fstat(output_descriptor), "output-dir")
+
+        def assert_named_output_claim() -> None:
+            assert_directory_claim(
+                output.parent, parent_claim, "output-parent", parent_descriptor
+            )
+            try:
+                path_identity = directory_identity(
+                    os.stat(
+                        output.name,
+                        dir_fd=parent_descriptor,
+                        follow_symlinks=False,
+                    ),
+                    "output-dir",
+                )
+                descriptor_identity = directory_identity(
+                    os.fstat(output_descriptor), "output-dir"
+                )
+            except OSError as error:
+                raise AcceptanceError(
+                    "output-dir claim is no longer reachable"
+                ) from error
+            if path_identity != output_claim or descriptor_identity != output_claim:
+                raise AcceptanceError(
+                    "output-dir path no longer names its claimed directory"
+                )
+
+        for name in (candidate for candidate in names if candidate != "receipt.json"):
+            source_descriptor = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=staging_descriptor,
+            )
+            try:
+                if not stat_module.S_ISREG(os.fstat(source_descriptor).st_mode):
+                    raise AcceptanceError(
+                        "staging must contain only regular evidence files"
+                    )
+                os.fsync(source_descriptor)
+            finally:
+                os.close(source_descriptor)
+            try:
+                os.link(
+                    name,
+                    name,
+                    src_dir_fd=staging_descriptor,
+                    dst_dir_fd=output_descriptor,
+                    follow_symlinks=False,
+                )
+            except OSError as error:
+                raise AcceptanceError(
+                    f"no-replace publication failed for {name}"
+                ) from error
+
+        os.fsync(output_descriptor)
+        assert_named_output_claim()
+
+        receipt_descriptor = os.open(
+            "receipt.json",
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=staging_descriptor,
+        )
         try:
-            os.fsync(descriptor)
+            if not stat_module.S_ISREG(os.fstat(receipt_descriptor).st_mode):
+                raise AcceptanceError("receipt.json is not a regular evidence file")
+            os.fsync(receipt_descriptor)
         finally:
-            os.close(descriptor)
+            os.close(receipt_descriptor)
+        try:
+            os.link(
+                "receipt.json",
+                "receipt.json",
+                src_dir_fd=staging_descriptor,
+                dst_dir_fd=output_descriptor,
+                follow_symlinks=False,
+            )
+        except OSError as error:
+            raise AcceptanceError(
+                "no-replace publication failed for receipt.json"
+            ) from error
+        os.fsync(output_descriptor)
+        os.fsync(parent_descriptor)
+        assert_named_output_claim()
+    finally:
+        if output_descriptor is not None:
+            os.close(output_descriptor)
+        os.close(staging_descriptor)
+        os.close(parent_descriptor)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -725,6 +866,11 @@ def main(argv: list[str] | None = None) -> int:
                 raise AcceptanceError("Pulp source identity changed during A2 recording")
             if source_blobs(repository, revision) != blobs:
                 raise AcceptanceError("Pulp source binding changed during A2 recording")
+            assert_directory_claim(
+                prefix,
+                install_provenance["install_prefix_claim"],
+                "install-prefix",
+            )
             (staging / "receipt.json").write_text(
                 json.dumps(receipt, indent=2, sort_keys=True) + "\n"
             )

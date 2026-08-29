@@ -18,6 +18,7 @@ import platform
 import random
 import re
 import select
+import stat as stat_module
 import statistics
 import subprocess
 import sys
@@ -599,6 +600,32 @@ def _require_external_path(path: Path, repositories: tuple[Path, ...], label: st
         raise ValueError(f"{label} must be outside every protected tree")
 
 
+def _directory_open_flags() -> int:
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+
+
+def _directory_identity(value: os.stat_result) -> dict[str, int]:
+    if not stat_module.S_ISDIR(value.st_mode):
+        raise ValueError("claimed install-prefix identity is not a directory")
+    return {"device": value.st_dev, "inode": value.st_ino}
+
+
+def _assert_directory_path_identity(
+    path: Path, descriptor: int, expected: dict[str, int], label: str
+) -> None:
+    try:
+        descriptor_identity = _directory_identity(os.fstat(descriptor))
+        path_identity = _directory_identity(os.stat(path, follow_symlinks=False))
+    except OSError as error:
+        raise ValueError(f"{label} claim is no longer reachable") from error
+    if descriptor_identity != expected or path_identity != expected:
+        raise ValueError(f"{label} path no longer names the atomically claimed directory")
+
+
 def validate_output_path(output: Path, protected: tuple[Path, ...]) -> None:
     _require_external_path(output, protected, "output")
     if output.exists() or output.is_symlink() or not output.parent.is_dir():
@@ -700,9 +727,14 @@ def exact_build_install_identity(
     _values, settings = _release_build_contract(repository, build_dir)
     binaries = _build_install_binary_identity(build_dir, prefix)
     identity = installed_source_identity(repository, revision, cli, mcp)
+    try:
+        prefix_claim = _directory_identity(os.stat(prefix, follow_symlinks=False))
+    except OSError as error:
+        raise ValueError("installed prefix claim is no longer reachable") from error
     identity["build_provenance"] = {
         "method": "fresh-external-cmake-build-install-byte-identity-v1",
-        "install_prefix_initial_state": "absent",
+        "install_prefix_initial_state": "absent-and-atomically-claimed",
+        "install_prefix_claim": prefix_claim,
         "cmake_cache_sha256": sha256(build_dir / "CMakeCache.txt"),
         "cmake_home_revision": revision,
         "build_targets": list(BUILD_TARGETS),
@@ -723,19 +755,37 @@ def refresh_exact_build_install(
     if prefix.exists() or prefix.is_symlink() or not prefix.parent.is_dir():
         raise ValueError("install-prefix must be a new path under an existing directory")
     _release_build_contract(repository, build_dir)
-    _run_bounded_build(
-        ["cmake", "--build", str(build_dir), "--target", *BUILD_TARGETS, "--parallel"],
-        repository=repository, environment=environment, timeout=3600,
-    )
-    _run_bounded_build(
-        ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
-        repository=repository, environment=environment, timeout=1800,
-    )
-    cli = prefix / "bin/pulp"
-    mcp = prefix / "bin/pulp-mcp"
-    return cli, mcp, exact_build_install_identity(
-        repository, revision, build_dir, prefix, cli, mcp
-    )
+    try:
+        prefix.mkdir(mode=0o700)
+        prefix_descriptor = os.open(prefix, _directory_open_flags())
+    except OSError as error:
+        raise ValueError("install-prefix could not be atomically claimed") from error
+    prefix_claim = _directory_identity(os.fstat(prefix_descriptor))
+    try:
+        _run_bounded_build(
+            ["cmake", "--build", str(build_dir), "--target", *BUILD_TARGETS, "--parallel"],
+            repository=repository, environment=environment, timeout=3600,
+        )
+        _assert_directory_path_identity(
+            prefix, prefix_descriptor, prefix_claim, "install-prefix"
+        )
+        _run_bounded_build(
+            ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
+            repository=repository, environment=environment, timeout=1800,
+        )
+        _assert_directory_path_identity(
+            prefix, prefix_descriptor, prefix_claim, "install-prefix"
+        )
+        cli = prefix / "bin/pulp"
+        mcp = prefix / "bin/pulp-mcp"
+        identity = exact_build_install_identity(
+            repository, revision, build_dir, prefix, cli, mcp
+        )
+        if identity["build_provenance"]["install_prefix_claim"] != prefix_claim:
+            raise ValueError("installed provenance differs from the claimed prefix identity")
+        return cli, mcp, identity
+    finally:
+        os.close(prefix_descriptor)
 
 
 def _processor_source_contract(repository: Path) -> tuple[str, dict[str, str]]:

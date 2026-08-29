@@ -25,7 +25,10 @@ not create or promote a receipt during an implementation turn.
   mix headers and libraries from different Skia builds.
 - A dedicated Pulp build directory and a not-yet-created install-prefix path
   outside the worktree. The recorder atomically claims the empty prefix before
-  installing, so stale SDK files cannot survive from an earlier build.
+  installing and binds its no-follow device/inode identity through the final
+  proof. Receipt publication likewise uses retained directory descriptors,
+  relative no-replace links, and a receipt-last identity check, so neither
+  path substitution nor stale SDK files can be accepted.
 - A fresh Forge worktree detached at
   `0750a88dea3af7fca927a8c02887e071109407ae`. The only allowed difference is
   the plan-required `PULP_SDK_REF` overlay containing the final Pulp SHA; it

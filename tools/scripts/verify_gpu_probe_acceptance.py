@@ -309,6 +309,18 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         errors.append("v2 installed binaries were not byte-identical to refreshed build outputs")
     if install.get("install_prefix_initial_state") != "absent-and-atomically-claimed":
         errors.append("v2 install prefix was not fresh and atomically claimed")
+    prefix_claim = install.get("install_prefix_claim")
+    if (
+        not isinstance(prefix_claim, dict)
+        or set(prefix_claim) != {"device", "inode"}
+        or any(
+            not isinstance(prefix_claim.get(field), int)
+            or isinstance(prefix_claim.get(field), bool)
+            or prefix_claim[field] < 0
+            for field in ("device", "inode")
+        )
+    ):
+        errors.append("v2 install prefix lacks its claimed directory identity")
     for field in ("cmake_cache_sha256", "build_info_sha256"):
         if not SHA256.fullmatch(str(install.get(field, ""))):
             errors.append(f"v2 installed provenance lacks exact {field}")

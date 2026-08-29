@@ -264,6 +264,24 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 MODULE.atomic_write_json(existing, {"must_not": "replace"})
             self.assertEqual(existing.read_text(encoding="utf-8"), "do not overwrite")
 
+    def test_claimed_install_prefix_rejects_path_substitution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prefix = root / "prefix"
+            prefix.mkdir()
+            descriptor = os.open(prefix, MODULE._directory_open_flags())
+            claim = MODULE._directory_identity(os.fstat(descriptor))
+            moved = root / "moved-prefix"
+            prefix.rename(moved)
+            prefix.mkdir()
+            try:
+                with self.assertRaisesRegex(ValueError, "no longer names"):
+                    MODULE._assert_directory_path_identity(
+                        prefix, descriptor, claim, "install-prefix"
+                    )
+            finally:
+                os.close(descriptor)
+
     def test_checked_in_receipt_uses_one_source_checkout(self):
         receipt = json.loads(
             (ROOT / "docs" / "validation" / "gpu-trace-overhead" /

@@ -107,6 +107,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 "cmake_home_revision": head, "cmake_build_type": "Release",
                 "rust_profile": "release", "build_install_binary_identity": "pass",
                 "install_prefix_initial_state": "absent-and-atomically-claimed",
+                "install_prefix_claim": {"device": 1, "inode": 2},
                 "cmake_cache_sha256": "7" * 64, "build_info_sha256": "8" * 64,
                 "feature_contract": {
                     "PULP_ENABLE_GPU": "ON", "PULP_ENABLE_SCENE3D": "ON",
@@ -341,6 +342,86 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 sorted(path.name for path in output.iterdir()),
                 ["evidence.json", "receipt.json"],
             )
+
+    def test_receipt_publication_rejects_named_directory_swap_before_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / "staging"
+            staging.mkdir()
+            (staging / "evidence.json").write_text("{}\n", encoding="utf-8")
+            (staging / "receipt.json").write_text("{}\n", encoding="utf-8")
+            output = root / "published"
+            moved = root / "moved-published"
+            real_link = RECORDER.os.link
+            swapped = False
+
+            def swap_after_first_link(*args, **kwargs):
+                nonlocal swapped
+                result = real_link(*args, **kwargs)
+                if not swapped:
+                    output.rename(moved)
+                    output.mkdir()
+                    swapped = True
+                return result
+
+            with mock.patch.object(
+                RECORDER.os, "link", side_effect=swap_after_first_link
+            ):
+                with self.assertRaisesRegex(RECORDER.AcceptanceError, "no longer names"):
+                    RECORDER.publish_receipt_directory_no_replace(staging, output)
+            self.assertFalse((moved / "receipt.json").exists())
+            self.assertEqual(list(output.iterdir()), [])
+
+    def test_receipt_publication_rejects_parent_directory_swap_before_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / "staging"
+            staging.mkdir()
+            (staging / "evidence.json").write_text("{}\n", encoding="utf-8")
+            (staging / "receipt.json").write_text("{}\n", encoding="utf-8")
+            parent = root / "publication-parent"
+            parent.mkdir()
+            output = parent / "published"
+            moved_parent = root / "moved-publication-parent"
+            real_link = RECORDER.os.link
+            swapped = False
+
+            def swap_parent_after_first_link(*args, **kwargs):
+                nonlocal swapped
+                result = real_link(*args, **kwargs)
+                if not swapped:
+                    parent.rename(moved_parent)
+                    parent.mkdir()
+                    swapped = True
+                return result
+
+            with mock.patch.object(
+                RECORDER.os, "link", side_effect=swap_parent_after_first_link
+            ):
+                with self.assertRaisesRegex(RECORDER.AcceptanceError, "no longer names"):
+                    RECORDER.publish_receipt_directory_no_replace(staging, output)
+            self.assertFalse((moved_parent / "published" / "receipt.json").exists())
+            self.assertEqual(list(parent.iterdir()), [])
+
+    def test_claimed_install_prefix_rejects_path_substitution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prefix = root / "prefix"
+            prefix.mkdir()
+            descriptor = RECORDER.os.open(prefix, RECORDER.directory_open_flags())
+            claim = RECORDER.directory_identity(
+                RECORDER.os.fstat(descriptor), "install-prefix"
+            )
+            moved = root / "moved-prefix"
+            prefix.rename(moved)
+            prefix.mkdir()
+            try:
+                with self.assertRaisesRegex(RECORDER.AcceptanceError, "no longer names"):
+                    RECORDER.assert_directory_claim(
+                        prefix, claim, "install-prefix", descriptor
+                    )
+            finally:
+                RECORDER.os.close(descriptor)
 
     def test_additional_pulp_path_claim_must_bind_executed_canary_rows(self):
         with tempfile.TemporaryDirectory() as temporary:
