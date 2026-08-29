@@ -241,6 +241,29 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "differ from the exact build output"):
                 MODULE._build_install_binary_identity(build, prefix)
 
+    def test_output_must_be_new_and_outside_every_protected_tree(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            external = Path(temporary)
+            allowed = external / "receipt.json"
+            MODULE.validate_output_path(allowed, (ROOT,))
+
+            with self.assertRaisesRegex(ValueError, "outside every protected tree"):
+                MODULE.validate_output_path(ROOT / "receipt.json", (ROOT,))
+
+            existing = external / "existing.json"
+            existing.write_text("do not overwrite", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "must be a new path"):
+                MODULE.validate_output_path(existing, (ROOT,))
+
+            symlink = external / "receipt-link.json"
+            symlink.symlink_to(existing)
+            with self.assertRaisesRegex(ValueError, "must be a new path"):
+                MODULE.validate_output_path(symlink, (ROOT,))
+
+            with self.assertRaises(FileExistsError):
+                MODULE.atomic_write_json(existing, {"must_not": "replace"})
+            self.assertEqual(existing.read_text(encoding="utf-8"), "do not overwrite")
+
     def test_checked_in_receipt_uses_one_source_checkout(self):
         receipt = json.loads(
             (ROOT / "docs" / "validation" / "gpu-trace-overhead" /

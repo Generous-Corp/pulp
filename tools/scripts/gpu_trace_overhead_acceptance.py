@@ -21,6 +21,7 @@ import select
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -595,7 +596,34 @@ def _require_external_path(path: Path, repositories: tuple[Path, ...], label: st
             path.resolve().relative_to(repository.resolve())
         except ValueError:
             continue
-        raise ValueError(f"{label} must be outside every source checkout")
+        raise ValueError(f"{label} must be outside every protected tree")
+
+
+def validate_output_path(output: Path, protected: tuple[Path, ...]) -> None:
+    _require_external_path(output, protected, "output")
+    if output.exists() or output.is_symlink() or not output.parent.is_dir():
+        raise ValueError("output must be a new path under an existing external directory")
+
+
+def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
+    data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output.name}.", suffix=".tmp", dir=output.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, output)
+        directory = os.open(output.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _release_build_contract(
@@ -1532,6 +1560,7 @@ def main() -> int:
 
     build_dir = args.build_dir.resolve()
     prefix = args.install_prefix.resolve()
+    output = args.output.absolute()
     trace = args.trace.resolve()
     processor = args.trace_processor.resolve()
     if args.warmups < 0 or args.trials < 2 or args.fresh_start_trials < 1:
@@ -1562,6 +1591,9 @@ def main() -> int:
     ):
         build_environment.pop(inherited_override, None)
     try:
+        validate_output_path(
+            output, (repository, planning_repository, build_dir, prefix)
+        )
         source_identity = clean_source_identity(repository, args.source_revision)
         accepted_plan = plan_identity(
             planning_repository, args.plan_revision, args.plan_sha256
@@ -1796,9 +1828,8 @@ def main() -> int:
             "xrun_check": "not-applicable-offline-no-audio-thread",
         },
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
-    print(json.dumps({"output": str(args.output), "acceptance": evidence["acceptance"]}))
+    atomic_write_json(output, evidence)
+    print(json.dumps({"output": str(output), "acceptance": evidence["acceptance"]}))
     return 0
 
 
