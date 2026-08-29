@@ -340,11 +340,14 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "install-prefix",
             )
             claim.bind_file(binary, "installed Rust CLI", MODULE.sha256(binary))
+            claim.seal()
             moved = binary.with_name("pulp-original")
             binary.rename(moved)
             binary.write_bytes(b"substituted executable")
+            binary.unlink()
+            moved.rename(binary)
             try:
-                with self.assertRaisesRegex(ValueError, "retained executable claim"):
+                with self.assertRaisesRegex(ValueError, "mutation event"):
                     claim.assert_current()
             finally:
                 claim.close()

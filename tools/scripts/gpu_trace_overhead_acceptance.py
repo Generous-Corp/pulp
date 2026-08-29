@@ -677,6 +677,47 @@ class RetainedDirectoryClaim:
         self.label = label
         self.closed = False
         self.file_claims: list[dict[str, Any]] = []
+        self.monitor: Any | None = None
+
+    @staticmethod
+    def _vnode_flags() -> int:
+        required = (
+            "KQ_NOTE_DELETE", "KQ_NOTE_WRITE", "KQ_NOTE_EXTEND",
+            "KQ_NOTE_ATTRIB", "KQ_NOTE_LINK", "KQ_NOTE_RENAME",
+            "KQ_NOTE_REVOKE",
+        )
+        if not hasattr(select, "kqueue") or any(
+            not hasattr(select, name) for name in required
+        ):
+            raise ValueError("exact executable sealing requires macOS kqueue")
+        return sum(getattr(select, name) for name in required)
+
+    def _register_monitor(self, descriptor: int) -> None:
+        assert self.monitor is not None
+        event = select.kevent(
+            descriptor,
+            filter=select.KQ_FILTER_VNODE,
+            flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+            fflags=self._vnode_flags(),
+        )
+        self.monitor.control([event], 0, 0)
+
+    def seal(self) -> None:
+        if self.monitor is not None:
+            raise ValueError(f"{self.label} claim is already sealed")
+        self.monitor = select.kqueue()
+        self._register_monitor(self.descriptor)
+        for claim in self.file_claims:
+            self._register_monitor(claim["descriptor"])
+        self._assert_no_mutation_events()
+
+    def _assert_no_mutation_events(self) -> None:
+        if self.monitor is not None:
+            events = self.monitor.control(None, 64, 0)
+            if events:
+                raise ValueError(
+                    f"{self.label} or a retained executable had a mutation event"
+                )
 
     def bind_file(self, path: Path, label: str, expected_sha256: str) -> None:
         descriptor = os.open(
@@ -702,10 +743,14 @@ class RetainedDirectoryClaim:
             "sha256": expected_sha256,
             "label": label,
         })
+        if self.monitor is not None:
+            self._register_monitor(descriptor)
+            self._assert_no_mutation_events()
 
     def assert_current(self) -> None:
         if self.closed:
             raise ValueError(f"{self.label} claim closed before proof completion")
+        self._assert_no_mutation_events()
         _assert_directory_path_identity(
             self.path, self.descriptor, self.identity, self.label
         )
@@ -722,9 +767,12 @@ class RetainedDirectoryClaim:
                 raise ValueError(
                     f"{claim['label']} no longer matches its retained executable claim"
                 )
+        self._assert_no_mutation_events()
 
     def close(self) -> None:
         if not self.closed:
+            if self.monitor is not None:
+                self.monitor.close()
             for claim in self.file_claims:
                 os.close(claim["descriptor"])
             os.close(self.descriptor)
@@ -974,6 +1022,7 @@ def refresh_exact_build_install(
             retained_claim.bind_file(
                 path, f"installed {role}", binaries[role]["sha256"]
             )
+        retained_claim.seal()
         retained_claim.assert_current()
         identity = exact_build_install_identity(
             repository, revision, build_dir, prefix, cli, mcp

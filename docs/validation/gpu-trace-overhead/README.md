@@ -37,8 +37,9 @@ C++ delegate, and MCP targets after atomically claiming that new directory,
 retains and checks its no-follow device/inode identity around every installed
 CLI/MCP execution through final publication, retains and rehashes the exact
 CLI, delegate, MCP, trace, and trace-processor inodes around every launch, and
-requires each installed executable to be byte-identical to its exact build-tree
-output. Its
+seals them with macOS vnode mutation monitoring so replace-and-restore races
+remain observable. Each installed executable must be byte-identical to its
+exact build-tree output. Its
 receipt binds the CMake cache digest, build settings, targets, installed/build
 digests, and positive byte counts in addition to the installed
 `build_info.hpp` source stamp; a current header beside stale or mixed binaries

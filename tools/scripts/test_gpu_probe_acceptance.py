@@ -496,10 +496,14 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 "install-prefix",
             )
             claim.bind_file(binary, "installed Rust CLI", RECORDER.sha256(binary))
+            claim.seal()
 
             def swap_during_launch(*_args, **_kwargs):
-                binary.rename(binary.with_name("pulp-original"))
+                original = binary.with_name("pulp-original")
+                binary.rename(original)
                 binary.write_bytes(b"substituted executable")
+                binary.unlink()
+                original.rename(binary)
                 return RECORDER.subprocess.CompletedProcess([str(binary)], 0, "", "")
 
             try:
@@ -507,7 +511,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     RECORDER.subprocess, "run", side_effect=swap_during_launch
                 ):
                     with self.assertRaisesRegex(
-                        RECORDER.AcceptanceError, "retained executable claim"
+                        RECORDER.AcceptanceError, "mutation event"
                     ):
                         RECORDER.run_bounded(
                             [str(binary)], cwd=root, environment={}, timeout=1,

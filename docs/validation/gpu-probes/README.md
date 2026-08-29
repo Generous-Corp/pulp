@@ -27,7 +27,9 @@ not create or promote a receipt during an implementation turn.
   outside the worktree. The recorder atomically claims the empty prefix before
   installing and binds its no-follow device/inode identity through the final
   proof. It also retains and rehashes the exact installed CLI, delegate, MCP,
-  and Forge executable inodes around every launch. Receipt publication likewise
+  and Forge executable inodes around every launch and seals them with macOS
+  vnode mutation monitoring, so a replace-and-restore race is still detected.
+  Receipt publication likewise
   uses retained directory descriptors,
   source/destination inode comparisons, relative no-replace links, and a
   receipt-last identity check, so neither path or staged-file substitution nor
