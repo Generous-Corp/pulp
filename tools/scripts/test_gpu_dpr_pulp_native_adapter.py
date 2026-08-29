@@ -57,6 +57,7 @@ if r['mode']=='configured_max': dpr=min(dpr, 2.0)
 logical=r['scenario']['logical_size']; w=round(logical['width']*dpr); h=round(logical['height']*dpr)
 capture=root/'measured-capture.png'
 capture.write_bytes(b'\\x89PNG\\r\\n\\x1a\\n'+struct.pack('>I',13)+b'IHDR'+struct.pack('>II',w,h))
+reference=root/'measured-reference.png'; reference.write_bytes(capture.read_bytes())
 trace=root/'measured-trace.pftrace'; trace.write_bytes(b'real-perfetto-trace')
 producer_digest=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 adapter={{'class':'hardware','name':'Selftest GPU','backend':'Metal','driver':'selftest-1','authentic_identity':True}}
@@ -68,7 +69,7 @@ trials=[{{'schema':'pulp.gpu-dpr-first-frame-trial.v1','version':1,
  'first_frame_time_ms':samples[i],'adapter':adapter}} for i in range(20)]
 raw=root/'measured-raw.json'; raw.write_text(json.dumps({{
  'schema':'pulp.gpu-dpr-raw-samples.v1','version':1,'producer_pid':9999,
- 'metrics':{{'first_frame_time':samples}},'fresh_process_trials':trials}})+'\\n')
+ 'metrics':{{'first_frame_time':{{'provenance':'measured','definition':'fresh process first frame','samples':samples}}}},'fresh_process_trials':trials}})+'\\n')
 inputs=root/'measured-input.json'; inputs.write_text(json.dumps({{'logical_input':True}})+'\\n')
 def artifact(kind, file): return {{'kind':kind,'path':file.name,'sha256':hashlib.sha256(file.read_bytes()).hexdigest()}}
 receipt={{
@@ -85,7 +86,7 @@ receipt={{
    'same_process':{{'adapter_identity':True,'capture':True,'frame_metrics':True,
      'memory_metrics':True,'logical_input':True,'trace_correlation':{scope_value}}},
    'audio_device_opened':False}},
- 'artifacts':[artifact('capture',capture),artifact('trace',trace),
+ 'artifacts':[artifact('capture',capture),artifact('reference_capture',reference),artifact('trace',trace),
               artifact('raw_samples',raw),artifact('input_receipt',inputs)]}}
 Path(a.receipt).write_text(json.dumps(receipt)+'\\n')
 ''',
@@ -117,12 +118,17 @@ def request(root: Path, expected_digest: str) -> dict:
             "kind": "pulp_screenshot",
             "source": "dense-text-thin-strokes.ui.js",
             "logical_size": {"width": 640, "height": 360},
+            "logical_input_oracle": {"point": [320, 180], "target": "root-hit"},
             "required_oracles": ["small_text", "thin_strokes", "logical_input"],
         },
         "mode": "exact",
         "requested_dpr": 1.5,
         "expected_content_digest": expected_digest,
-        "trial_contract": {"fresh_process_first_frame_trials": 20},
+        "trial_contract": {
+            "fresh_process_first_frame_trials": 20,
+            "gpu_timer_calibration_trials": 5,
+            "gpu_timer_extra_work_multiplier": 8,
+        },
         "pulp_sha": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=root, text=True
         ).strip(),

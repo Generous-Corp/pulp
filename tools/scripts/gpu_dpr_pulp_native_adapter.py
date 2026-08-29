@@ -34,7 +34,9 @@ OUTPUT_CAP_BYTES = 1024 * 1024
 MEASUREMENT_SCOPE_SCHEMA = "pulp.gpu-dpr-native-measurement-scope.v1"
 MEASUREMENT_ATTESTATION_SCHEMA = "pulp.gpu-dpr-native-measurement-attestation.v1"
 FIRST_FRAME_TRIAL_SCHEMA = "pulp.gpu-dpr-first-frame-trial.v1"
-ARTIFACT_KINDS = {"capture", "trace", "raw_samples", "input_receipt"}
+ARTIFACT_KINDS = {
+    "capture", "reference_capture", "trace", "raw_samples", "input_receipt"
+}
 SAME_PROCESS_FIELDS = {
     "adapter_identity", "capture", "frame_metrics", "memory_metrics",
     "logical_input", "trace_correlation",
@@ -105,7 +107,11 @@ def validate_fresh_process_ledger(
     expected_count = request.get("trial_contract", {}).get(
         "fresh_process_first_frame_trials"
     )
-    first_frames = raw.get("metrics", {}).get("first_frame_time")
+    first_frame_metric = raw.get("metrics", {}).get("first_frame_time")
+    first_frames = (
+        first_frame_metric.get("samples") if isinstance(first_frame_metric, dict)
+        else None
+    )
     if (
         isinstance(producer_pid, bool) or not isinstance(producer_pid, int)
         or producer_pid <= 0
@@ -236,6 +242,10 @@ def validate_measurement_receipt(
         expected_physical["width"], expected_physical["height"]
     ):
         raise ValueError("measurement capture dimensions differ from the receipt")
+    if physical_size(by_kind["reference_capture"]) != (
+        expected_physical["width"], expected_physical["height"]
+    ):
+        raise ValueError("measurement reference dimensions differ from the receipt")
     if not by_kind["trace"].read_bytes():
         raise ValueError("measurement trace artifact is empty")
     raw = load_json(by_kind["raw_samples"])

@@ -56,6 +56,15 @@ bool read_positive_u32(const choc::value::ValueView& object, const char* field,
     return true;
 }
 
+bool read_finite_number(const choc::value::ValueView& value, double& result) {
+    if (value.isFloat64()) result = value.getFloat64();
+    else if (value.isFloat32()) result = value.getFloat32();
+    else if (value.isInt32() || value.isInt64())
+        result = static_cast<double>(value.getInt64());
+    else return false;
+    return std::isfinite(result);
+}
+
 } // namespace
 
 std::optional<DprMeasurementRequest>
@@ -126,6 +135,21 @@ parse_dpr_measurement_request(std::string_view json, std::string* error) {
         : request.logical_width == 640 && request.logical_height == 360;
     if (!expected_size)
         return fail("Pulp-native DPR logical size differs from its frozen scenario");
+    if (!scenario.hasObjectMember("logical_input_oracle") ||
+        !scenario["logical_input_oracle"].isObject())
+        return fail("scenario.logical_input_oracle is required");
+    const auto oracle = scenario["logical_input_oracle"];
+    if (!oracle.hasObjectMember("point") || !oracle["point"].isArray() ||
+        oracle["point"].size() != 2 ||
+        !read_finite_number(oracle["point"][0], request.logical_input_x) ||
+        !read_finite_number(oracle["point"][1], request.logical_input_y) ||
+        !read_string(oracle, "target", request.logical_input_target, message))
+        return fail("scenario.logical_input_oracle must contain a point and target");
+    if (request.logical_input_x < 0 || request.logical_input_y < 0 ||
+        request.logical_input_x >= request.logical_width ||
+        request.logical_input_y >= request.logical_height ||
+        request.logical_input_target != "root-hit")
+        return fail("scenario.logical_input_oracle is outside the owned native contract");
 
     std::string source_root, cell_directory;
     if (!read_string(root, "pulp_source_root", source_root, message) ||
@@ -157,11 +181,17 @@ parse_dpr_measurement_request(std::string_view json, std::string* error) {
         !read_positive_u32(trials, "measured_trials", request.measured_trials,
                            message) ||
         !read_positive_u32(trials, "fresh_process_first_frame_trials",
-                           request.fresh_process_first_frame_trials, message))
+                           request.fresh_process_first_frame_trials, message) ||
+        !read_positive_u32(trials, "gpu_timer_calibration_trials",
+                           request.gpu_timer_calibration_trials, message) ||
+        !read_positive_u32(trials, "gpu_timer_extra_work_multiplier",
+                           request.gpu_timer_extra_work_multiplier, message))
         return fail("trial_contract." + message);
     if (request.warmups != 5 || request.measured_trials != 30 ||
-        request.fresh_process_first_frame_trials != 20)
-        return fail("Pulp-native DPR trial counts must remain 5/30/20");
+        request.fresh_process_first_frame_trials != 20 ||
+        request.gpu_timer_calibration_trials != 5 ||
+        request.gpu_timer_extra_work_multiplier != 8)
+        return fail("Pulp-native DPR trial counts must remain 5/30/20 with 5x8 timer calibration");
     if (request.mode == "adaptive_simulation") {
         if (!root.hasObjectMember("adaptive_profile") ||
             !root["adaptive_profile"].isObject())

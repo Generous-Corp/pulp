@@ -29,9 +29,14 @@ struct DprMeasurementRequest {
     std::string pulp_sha;
     std::uint32_t logical_width = 0;
     std::uint32_t logical_height = 0;
+    double logical_input_x = 0.0;
+    double logical_input_y = 0.0;
+    std::string logical_input_target;
     std::uint32_t warmups = 0;
     std::uint32_t measured_trials = 0;
     std::uint32_t fresh_process_first_frame_trials = 0;
+    std::uint32_t gpu_timer_calibration_trials = 0;
+    std::uint32_t gpu_timer_extra_work_multiplier = 0;
     std::string adaptive_profile_json;
 };
 
