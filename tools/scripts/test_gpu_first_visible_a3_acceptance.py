@@ -39,6 +39,49 @@ def write_json(root: Path, name: str, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def write_control_evidence(
+    root: Path, control: str, campaign_identity: dict[str, Any], receipt_name: str,
+    receipt_payload: dict[str, Any],
+) -> tuple[dict[str, str], dict[str, str]]:
+    spec = a3.CONTROL_SPECS[control]
+    source_blob = a2t.git_blobs(
+        ROOT, PULP_REVISION, {spec["source_path"]},
+    )[spec["source_path"]]
+    build_identity = {
+        "schema": "pulp.gpu-first-visible-control-build-identity.v1",
+        "version": 1,
+        "target": spec["target"],
+        "source_path": spec["source_path"],
+        "source_revision": PULP_REVISION,
+        "source_blob": source_blob,
+        "build_id": "a" * 64 + "-Release",
+        "build_config": "Release",
+        "configured_at_utc": "2026-08-28T12:00:00Z",
+        "git_dirty": False,
+    }
+    payload = json.dumps(build_identity, sort_keys=True, separators=(",", ":")).encode()
+    executable_name = f"{control}-control.bin"
+    (root / executable_name).write_bytes(
+        b"\xcf\xfa\xed\xfe" + a3.CONTROL_MARKER_PREFIX + payload
+        + a3.CONTROL_MARKER_SUFFIX
+    )
+    receipt_payload["control_build"] = build_identity
+    write_json(root, receipt_name, receipt_payload)
+    provenance_name = f"{control}-provenance.json"
+    write_json(root, provenance_name, {
+        "schema": "pulp.gpu-first-visible-control-provenance.v1",
+        "version": 1,
+        "attempt_nonce": f"fixture-{control}",
+        "control": control,
+        "campaign_id": campaign_identity["campaign_id"],
+        "product_build_id": campaign_identity["build_id"],
+        "executable_sha256": a3.sha256_bytes((root / executable_name).read_bytes()),
+        "marker_sha256": a3.sha256_bytes(payload),
+        "build_identity": build_identity,
+    })
+    return auto(executable_name), auto(provenance_name)
+
+
 def auto(path: str) -> dict[str, str]:
     return {"path": path, "sha256": "auto"}
 
@@ -381,7 +424,7 @@ raise SystemExit(code)
         "health_result_sha256": a3.sha256_bytes((root / "forge-health.json").read_bytes()),
     }
     write_json(root, "binding.json", binding)
-    write_json(root, "blank.json", {
+    blank_executable, blank_provenance = write_control_evidence(root, "blank-negative", causal["identity"], "blank.json", {
         "schema": "pulp.gpu-first-visible-blank-negative.v1",
         "version": 1,
         "injection": "transparent-first-frame",
@@ -394,7 +437,7 @@ raise SystemExit(code)
          "non_audio_thread_events": 20 if index < 2 else 0}
         for index, entry_point in enumerate(a3.AUDIO_PROVIDER_ENTRY_POINTS)
     ]
-    write_json(root, "audio.json", {
+    audio_executable, audio_provenance = write_control_evidence(root, "audio-thread-exclusion", causal["identity"], "audio.json", {
         "schema": "pulp.gpu-first-visible-audio-thread-exclusion.v1",
         "version": 1,
         "policy": "gpu-health-work-must-not-run-on-audio-thread",
@@ -476,8 +519,14 @@ raise SystemExit(code)
         "blank_negative": {
             "status": "caught", "diagnostic_code": "gpu.startup.blank",
             "receipt": auto("blank.json"),
+            "executable": blank_executable,
+            "provenance": blank_provenance,
         },
-        "audio_thread_exclusion": {"status": "pass", "receipt": auto("audio.json")},
+        "audio_thread_exclusion": {
+            "status": "pass", "receipt": auto("audio.json"),
+            "executable": audio_executable,
+            "provenance": audio_provenance,
+        },
         "trace_producer_overhead": {
             "status": "pass",
             "reason": "The source-bound four-state product control passed.",
@@ -1019,6 +1068,20 @@ def main() -> int:
         mutated["blank_negative"]["status"] = "not-caught"
         expect_failure(mutated, root, "caught blank negative")
 
+        copy_only = root / "copy-only-control.py"
+        copy_only.write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n", encoding="utf-8")
+        copy_only.chmod(0o700)
+        mutated = copy.deepcopy(receipt)
+        mutated["blank_negative"]["executable"] = {
+            "path": copy_only.name,
+            "sha256": a3.sha256_bytes(copy_only.read_bytes()),
+        }
+        expect_failure(mutated, root, "not a native compiled executable")
+
+        mutated = copy.deepcopy(receipt)
+        mutated["blank_negative"]["provenance"] = None
+        expect_failure(mutated, root, "caught blank negative")
+
         mutated = copy.deepcopy(receipt)
         audio_ref = mutated["audio_thread_exclusion"]["receipt"]
         audio_path = root / audio_ref["path"]
@@ -1225,7 +1288,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         ) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=51 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=53 "
             "checked_in_nonterminal=verified"
         )
     return 0

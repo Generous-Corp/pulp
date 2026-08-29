@@ -15,11 +15,48 @@ import sys
 import tarfile
 import tempfile
 import threading
+import types
 from pathlib import Path
 from typing import Any
 
-import gpu_first_visible_a3_trace_producer_overhead_analyzer as trace_replay
-import gpu_first_visible_a3_role_producer as role_support
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
+    """Load an authenticated sibling from source bytes, never bytecode."""
+    path = SCRIPT_DIR / filename
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 2 * 1024 * 1024:
+            raise RuntimeError(f"local source module is not a bounded regular file: {filename}")
+        data = b""
+        while len(data) <= 2 * 1024 * 1024:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            data += chunk
+        if len(data) > 2 * 1024 * 1024:
+            raise RuntimeError(f"local source module is unbounded: {filename}")
+    finally:
+        os.close(descriptor)
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    exec(compile(data, str(path), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+trace_replay = _load_local_source(
+    "gpu_first_visible_a3_trace_producer_overhead_analyzer",
+    "gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+)
+role_support = _load_local_source(
+    "gpu_first_visible_a3_role_producer",
+    "gpu_first_visible_a3_role_producer.py",
+)
 
 RAW_SCHEMA = "pulp.gpu-first-visible-trace-producer-overhead-raw.v1"
 RECEIPT_SCHEMA = "pulp.gpu-first-visible-trace-producer-overhead.v1"

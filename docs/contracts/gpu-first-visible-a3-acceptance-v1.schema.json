@@ -22,8 +22,8 @@
         { "type": "null" },
         {
           "type": "object",
-          "minProperties": 30,
-          "maxProperties": 30,
+          "minProperties": 31,
+          "maxProperties": 31,
           "propertyNames": { "type": "string", "minLength": 1, "maxLength": 512 },
           "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
         }
@@ -130,21 +130,25 @@
     },
     "blank_negative": {
       "type": "object",
-      "required": ["status", "diagnostic_code", "receipt"],
+      "required": ["status", "diagnostic_code", "receipt", "executable", "provenance"],
       "additionalProperties": false,
       "properties": {
         "status": { "enum": ["missing", "caught", "not-caught"] },
         "diagnostic_code": { "type": ["string", "null"], "enum": ["gpu.startup.blank", null] },
-        "receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+        "receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "executable": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "provenance": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
       }
     },
     "audio_thread_exclusion": {
       "type": "object",
-      "required": ["status", "receipt"],
+      "required": ["status", "receipt", "executable", "provenance"],
       "additionalProperties": false,
       "properties": {
         "status": { "enum": ["missing", "pass", "fail"] },
-        "receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
+        "receipt": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "executable": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+        "provenance": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] }
       }
     },
     "trace_producer_overhead": {

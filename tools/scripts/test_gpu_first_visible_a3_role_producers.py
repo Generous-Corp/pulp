@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import plistlib
+import py_compile
 import signal
 import shutil
 import subprocess
@@ -30,6 +32,35 @@ PRODUCERS = {
     "daw": SCRIPT_DIR / "gpu_first_visible_a3_reaper_producer.py",
     "forge": SCRIPT_DIR / "gpu_first_visible_a3_forge_producer.py",
 }
+
+
+def assert_entrypoints_ignore_role_support_bytecode() -> None:
+    with tempfile.TemporaryDirectory(prefix="pulp-a3-role-entrypoint-pyc-") as temporary:
+        root = Path(temporary)
+        support = root / "gpu_first_visible_a3_role_producer.py"
+        safe = b"def main_entry(role):\n    return 0\n"
+        malicious = b'raise SystemExit("planted role-support bytecode executed")\n'
+        malicious += b"#" * (len(safe) - len(malicious)) if len(safe) >= len(malicious) else b""
+        if len(malicious) > len(safe):
+            safe += b"#" * (len(malicious) - len(safe))
+        support.write_bytes(malicious)
+        timestamp = int(support.stat().st_mtime)
+        cache = Path(importlib.util.cache_from_source(str(support)))
+        cache.parent.mkdir(parents=True)
+        py_compile.compile(
+            str(support), cfile=str(cache), doraise=True,
+            invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP,
+        )
+        support.write_bytes(safe)
+        os.utime(support, (timestamp, timestamp))
+        environment = dict(os.environ)
+        environment["PULP_A3_ROLE_PRODUCER_SUPPORT"] = str(support)
+        for role, entrypoint in PRODUCERS.items():
+            completed = subprocess.run(
+                [sys.executable, str(entrypoint)], env=environment,
+                text=True, capture_output=True, check=False,
+            )
+            assert completed.returncode == 0, (role, completed.stdout, completed.stderr)
 PREFIX = {
     "standalone": "PULP_A3_STANDALONE",
     "headless-constrained": "PULP_A3_HEADLESS",
@@ -925,6 +956,7 @@ def run_role(
 
 
 def main() -> int:
+    assert_entrypoints_ignore_role_support_bytecode()
     with tempfile.TemporaryDirectory(prefix="pulp-a3-role-producers-") as temporary:
         root = Path(temporary)
         evidence = root / "fixture"

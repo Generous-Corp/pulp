@@ -47,11 +47,15 @@
   "blank_negative": {
     "status": "missing",
     "diagnostic_code": null,
-    "receipt": null
+    "receipt": null,
+    "executable": null,
+    "provenance": null
   },
   "audio_thread_exclusion": {
     "status": "missing",
-    "receipt": null
+    "receipt": null,
+    "executable": null,
+    "provenance": null
   },
   "trace_producer_overhead": {
     "status": "unavailable",

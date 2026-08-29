@@ -4,15 +4,64 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import os
+import py_compile
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
 import gpu_first_visible_a3_trace_producer_overhead as overhead
+
+
+def plant_bytecode(source: Path, malicious: bytes, mode: py_compile.PycInvalidationMode) -> None:
+    """Plant bytecode that a normal sibling import would accept."""
+    original = source.read_bytes()
+    if mode == py_compile.PycInvalidationMode.TIMESTAMP:
+        if len(malicious) > len(original):
+            raise AssertionError("malicious timestamp source exceeds its safe replacement")
+        malicious += b"#" * (len(original) - len(malicious))
+    source.write_bytes(malicious)
+    timestamp = int(source.stat().st_mtime)
+    cache = Path(importlib.util.cache_from_source(str(source)))
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    py_compile.compile(
+        str(source), cfile=str(cache), doraise=True, invalidation_mode=mode,
+    )
+    source.write_bytes(original)
+    if mode == py_compile.PycInvalidationMode.TIMESTAMP:
+        os.utime(source, (timestamp, timestamp))
+
+
+def assert_transitive_source_graph_ignores_bytecode() -> None:
+    with tempfile.TemporaryDirectory(prefix="pulp-a3-overhead-pyc-") as temporary:
+        root = Path(temporary)
+        for filename in (
+            "gpu_first_visible_a3_trace_producer_overhead.py",
+            "gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+            "gpu_first_visible_a3_role_producer.py",
+        ):
+            shutil.copyfile(Path(__file__).with_name(filename), root / filename)
+        plant_bytecode(
+            root / "gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+            b'raise SystemExit("unchecked analyzer bytecode executed")\n',
+            py_compile.PycInvalidationMode.UNCHECKED_HASH,
+        )
+        plant_bytecode(
+            root / "gpu_first_visible_a3_role_producer.py",
+            b'raise SystemExit("timestamp role-support bytecode executed")\n',
+            py_compile.PycInvalidationMode.TIMESTAMP,
+        )
+        completed = subprocess.run(
+            [sys.executable, str(root / "gpu_first_visible_a3_trace_producer_overhead.py"),
+             "--help"],
+            text=True, capture_output=True, check=False,
+        )
+        assert completed.returncode == 0, (completed.stdout, completed.stderr)
 
 
 def write_collection_host(path: Path) -> None:
@@ -544,6 +593,7 @@ def expect_failure(
 
 
 def main() -> int:
+    assert_transitive_source_graph_ignores_bytecode()
     with tempfile.TemporaryDirectory(prefix="pulp-a3-trace-overhead-") as temporary:
         temp_root = Path(temporary)
         paths, _ = make_fixture(temp_root / "positive")

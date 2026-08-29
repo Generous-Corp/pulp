@@ -22,13 +22,46 @@ import sys
 import tempfile
 import threading
 import time
+import types
 from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
-sys.path.insert(0, str(SCRIPT_DIR))
-import gpu_first_visible_a3_acceptance as a3  # noqa: E402
+
+
+def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
+    """Load a bounded sibling from source bytes without consulting bytecode."""
+    path = SCRIPT_DIR / filename
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 2 * 1024 * 1024:
+            raise RuntimeError(f"local source module is not a bounded regular file: {filename}")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 2 * 1024 * 1024:
+                raise RuntimeError(f"local source module is unbounded: {filename}")
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    exec(compile(b"".join(chunks), str(path), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+a3 = _load_local_source(
+    "gpu_first_visible_a3_acceptance", "gpu_first_visible_a3_acceptance.py"
+)
 
 REQUEST_SCHEMA = "pulp.gpu-first-visible-campaign-request.v1"
 ADAPTER_SCHEMA = "pulp.gpu-first-visible-campaign-adapter.v1"
@@ -40,6 +73,7 @@ ADAPTER_ARTIFACT_KEYS = {
     "host_artifact", "trace", "trace_analysis", "blank_negative",
     "audio_thread_exclusion", "measurement_producer",
     "blank_control_binary", "audio_control_binary",
+    "blank_control_provenance", "audio_control_provenance",
 }
 
 
@@ -306,7 +340,8 @@ def validate_adapter_receipt(
     }
     control_artifacts = {
         "blank_negative", "audio_thread_exclusion", "blank_control_binary",
-        "audio_control_binary",
+        "audio_control_binary", "blank_control_provenance",
+        "audio_control_provenance",
     }
     resolved = {
         name: validate_adapter_ref(
@@ -371,15 +406,20 @@ def validate_adapter_receipt(
         a3.validate_campaign_trace(campaign, health, run_dir, "campaign")
         if require_controls:
             control_receipt = {
+                "identity": identity,
                 "blank_negative": {
                     "status": "caught", "diagnostic_code": "gpu.startup.blank",
                     "receipt": resolved["blank_negative"],
+                    "executable": resolved["blank_control_binary"],
+                    "provenance": resolved["blank_control_provenance"],
                 },
                 "audio_thread_exclusion": {
                     "status": "pass", "receipt": resolved["audio_thread_exclusion"],
+                    "executable": resolved["audio_control_binary"],
+                    "provenance": resolved["audio_control_provenance"],
                 },
             }
-            a3.validate_controls(control_receipt, run_dir)
+            a3.validate_controls(control_receipt, run_dir, ROOT)
     except a3.AcceptanceError as error:
         raise CampaignError(str(error)) from error
     return outcome, campaign, resolved
@@ -533,6 +573,8 @@ def run_role(args: argparse.Namespace) -> int:
             "audio_thread_exclusion": artifacts["audio_thread_exclusion"],
             "blank_control_binary": artifacts["blank_control_binary"],
             "audio_control_binary": artifacts["audio_control_binary"],
+            "blank_control_provenance": artifacts["blank_control_provenance"],
+            "audio_control_provenance": artifacts["audio_control_provenance"],
         }
         if args.require_controls else None
     )

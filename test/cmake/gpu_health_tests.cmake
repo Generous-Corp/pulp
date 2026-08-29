@@ -20,6 +20,55 @@ if(TARGET pulp-test-gpu-health-provider)
 endif()
 
 if(PULP_ENABLE_INSPECTOR)
+function(_pulp_attach_a3_control_build_identity target source_path)
+    set(_revision "0000000000000000000000000000000000000000")
+    set(_source_blob "0000000000000000000000000000000000000000")
+    set(_dirty 1)
+    find_package(Git QUIET)
+    if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" rev-parse HEAD
+            OUTPUT_VARIABLE _candidate_revision
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _revision_result
+            ERROR_QUIET)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}"
+                    rev-parse "HEAD:${source_path}"
+            OUTPUT_VARIABLE _candidate_blob
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _blob_result
+            ERROR_QUIET)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}"
+                    status --porcelain=v1 --untracked-files=all
+            OUTPUT_VARIABLE _status
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _status_result
+            ERROR_QUIET)
+        if(_revision_result EQUAL 0 AND _blob_result EQUAL 0)
+            set(_revision "${_candidate_revision}")
+            set(_source_blob "${_candidate_blob}")
+        endif()
+        if(_status_result EQUAL 0 AND _status STREQUAL "")
+            set(_dirty 0)
+        endif()
+    endif()
+    string(TIMESTAMP _configured_at_utc "%Y-%m-%dT%H:%M:%SZ" UTC)
+    string(SHA256 _build_id
+        "${target}|${_revision}|${_source_blob}|${_configured_at_utc}|${CMAKE_GENERATOR}")
+    target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/test")
+    target_compile_definitions(${target} PRIVATE
+        PULP_A3_CONTROL_TARGET="${target}"
+        PULP_A3_CONTROL_SOURCE_PATH="${source_path}"
+        PULP_A3_CONTROL_SOURCE_REVISION="${_revision}"
+        PULP_A3_CONTROL_SOURCE_BLOB="${_source_blob}"
+        PULP_A3_CONTROL_BUILD_ID="${_build_id}-$<CONFIG>"
+        PULP_A3_CONTROL_BUILD_CONFIG="$<CONFIG>"
+        PULP_A3_CONTROL_CONFIGURED_AT_UTC="${_configured_at_utc}"
+        PULP_A3_CONTROL_GIT_DIRTY="${_dirty}")
+endfunction()
+
 add_executable(pulp-test-control-gpu-health-read-executor
     test_control_gpu_health_read_executor.cpp)
 target_link_libraries(pulp-test-control-gpu-health-read-executor PRIVATE
@@ -29,6 +78,8 @@ catch_discover_tests(pulp-test-control-gpu-health-read-executor
 
 add_executable(pulp-test-control-gpu-health-provider
     test_control_gpu_health_provider.cpp)
+_pulp_attach_a3_control_build_identity(
+    pulp-test-control-gpu-health-provider test/test_control_gpu_health_provider.cpp)
 target_link_libraries(pulp-test-control-gpu-health-provider PRIVATE
     pulp::inspect-ui-runtime pulp::tool-gpu-health-model Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-gpu-health-provider
@@ -69,6 +120,9 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
     add_executable(pulp-test-control-gpu-health-standalone-product
         test_control_gpu_health_standalone_product.cpp
         ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
+    _pulp_attach_a3_control_build_identity(
+        pulp-test-control-gpu-health-standalone-product
+        test/test_control_gpu_health_standalone_product.cpp)
     set_target_properties(pulp-test-control-gpu-health-standalone-product PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/a3-product")
     target_include_directories(pulp-test-control-gpu-health-standalone-product PRIVATE

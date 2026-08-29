@@ -41,7 +41,18 @@ json_schema_lite = _load_local_source("json_schema_lite", "json_schema_lite.py")
 a2t_acceptance = _load_local_source(
     "gpu_trace_overhead_acceptance", "gpu_trace_overhead_acceptance.py"
 )
-import gpu_first_visible_a3_trace_producer_overhead as trace_producer_overhead  # noqa: E402
+_load_local_source(
+    "gpu_first_visible_a3_trace_producer_overhead_analyzer",
+    "gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+)
+_load_local_source(
+    "gpu_first_visible_a3_role_producer",
+    "gpu_first_visible_a3_role_producer.py",
+)
+trace_producer_overhead = _load_local_source(
+    "gpu_first_visible_a3_trace_producer_overhead",
+    "gpu_first_visible_a3_trace_producer_overhead.py",
+)
 
 SCHEMA_PATH = ROOT / "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json"
 HEALTH_SCHEMA_PATH = ROOT / "docs/contracts/gpu-health-read-result-v1.schema.json"
@@ -113,6 +124,7 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "test/cmake/view_widget_bridge_tests.cmake",
     "test/test_control_gpu_health_provider.cpp",
     "test/test_control_gpu_health_standalone_product.cpp",
+    "test/support/a3_control_build_identity.hpp",
     "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
     "tools/cli/gpu_health/src/health_read_result_json.cpp",
     "tools/scripts/gpu_first_visible_a3_acceptance.py",
@@ -1017,28 +1029,165 @@ def validate_same_instance(
     return derived
 
 
-def validate_controls(receipt: dict[str, Any], evidence_root: Path) -> None:
+CONTROL_MARKER_PREFIX = b"\0PULP_A3_CONTROL_BUILD_IDENTITY_V1:"
+CONTROL_MARKER_SUFFIX = b":END_PULP_A3_CONTROL_BUILD_IDENTITY\0"
+CONTROL_BUILD_KEYS = {
+    "schema", "version", "target", "source_path", "source_revision",
+    "source_blob", "build_id", "build_config", "configured_at_utc", "git_dirty",
+}
+CONTROL_PROVENANCE_KEYS = {
+    "schema", "version", "attempt_nonce", "control", "campaign_id",
+    "product_build_id", "executable_sha256", "marker_sha256", "build_identity",
+}
+CONTROL_SPECS = {
+    "blank-negative": {
+        "target": "pulp-test-control-gpu-health-standalone-product",
+        "source_path": "test/test_control_gpu_health_standalone_product.cpp",
+    },
+    "audio-thread-exclusion": {
+        "target": "pulp-test-control-gpu-health-provider",
+        "source_path": "test/test_control_gpu_health_provider.cpp",
+    },
+}
+
+
+def control_build_from_executable(snapshot: ArtifactSnapshot, label: str) -> tuple[dict[str, Any], str]:
+    data = snapshot.data
+    native = (
+        data.startswith(b"\x7fELF")
+        or data.startswith(b"MZ")
+        or data[:4] in {
+            b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
+            b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+            b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+        }
+    )
+    if not native:
+        raise AcceptanceError(f"{label} is not a native compiled executable")
+    if data.count(CONTROL_MARKER_PREFIX) != 1:
+        raise AcceptanceError(f"{label} lacks one exact embedded build identity")
+    start = data.index(CONTROL_MARKER_PREFIX) + len(CONTROL_MARKER_PREFIX)
+    end = data.find(CONTROL_MARKER_SUFFIX, start)
+    if end < 0 or data.find(CONTROL_MARKER_SUFFIX, end + 1) >= 0:
+        raise AcceptanceError(f"{label} embedded build identity is truncated or duplicated")
+    payload = data[start:end]
+    if len(payload) > 16 * 1024:
+        raise AcceptanceError(f"{label} embedded build identity is unbounded")
+    try:
+        identity = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AcceptanceError(f"{label} embedded build identity is invalid JSON") from error
+    exact_keys(identity, CONTROL_BUILD_KEYS, f"{label} embedded build identity")
+    return identity, sha256_bytes(payload)
+
+
+def validate_control_provenance(
+    control: dict[str, Any], *, control_name: str, receipt: dict[str, Any],
+    evidence_root: Path, repository: Path,
+) -> dict[str, Any]:
+    executable = resolve_artifact(
+        control["executable"], evidence_root, f"{control_name}.executable",
+    )
+    embedded, marker_sha256 = control_build_from_executable(
+        executable, f"{control_name}.executable",
+    )
+    provenance = artifact_json(
+        control["provenance"], evidence_root, f"{control_name}.provenance",
+    )
+    exact_keys(provenance, CONTROL_PROVENANCE_KEYS, f"{control_name}.provenance")
+    spec = CONTROL_SPECS[control_name]
+    revision = receipt["identity"]["pulp_revision"]
+    historical = a2t_acceptance.git_blobs(repository, revision, {spec["source_path"]})
+    head = a2t_acceptance.git_blobs(repository, "HEAD", {spec["source_path"]})
+    checkout = a2t_acceptance.checkout_blobs(repository, {spec["source_path"]})
+    source_blob = historical.get(spec["source_path"])
+    if (
+        source_blob is None
+        or head.get(spec["source_path"]) != source_blob
+        or checkout.get(spec["source_path"]) != source_blob
+    ):
+        raise AcceptanceError(f"{control_name} control source does not match the exact revision")
+    if (
+        embedded["schema"] != "pulp.gpu-first-visible-control-build-identity.v1"
+        or embedded["version"] != 1
+        or embedded["target"] != spec["target"]
+        or embedded["source_path"] != spec["source_path"]
+        or embedded["source_revision"] != revision
+        or embedded["source_blob"] != source_blob
+        or embedded["git_dirty"] is not False
+        or not isinstance(embedded["build_id"], str)
+        or not embedded["build_id"]
+        or not isinstance(embedded["build_config"], str)
+        or not embedded["build_config"]
+        or not isinstance(embedded["configured_at_utc"], str)
+        or not embedded["configured_at_utc"].endswith("Z")
+    ):
+        raise AcceptanceError(
+            f"{control_name} control does not bind the exact source/build/revision"
+        )
+    expected_provenance = {
+        "schema": "pulp.gpu-first-visible-control-provenance.v1",
+        "version": 1,
+        "attempt_nonce": provenance["attempt_nonce"],
+        "control": control_name,
+        "campaign_id": receipt["identity"]["campaign_id"],
+        "product_build_id": receipt["identity"]["build_id"],
+        "executable_sha256": executable.sha256,
+        "marker_sha256": marker_sha256,
+        "build_identity": embedded,
+    }
+    if (
+        not isinstance(provenance["attempt_nonce"], str)
+        or not provenance["attempt_nonce"]
+        or provenance != expected_provenance
+    ):
+        raise AcceptanceError(f"{control_name} provenance does not bind its executable and campaign")
+    return embedded
+
+
+def validate_controls(
+    receipt: dict[str, Any], evidence_root: Path, repository: Path = ROOT,
+) -> None:
     blank = receipt["blank_negative"]
-    if blank["status"] != "caught" or blank["diagnostic_code"] != "gpu.startup.blank" or blank["receipt"] is None:
+    if (
+        blank["status"] != "caught"
+        or blank["diagnostic_code"] != "gpu.startup.blank"
+        or any(blank[field] is None for field in ("receipt", "executable", "provenance"))
+    ):
         raise AcceptanceError("complete receipt requires a caught blank negative")
+    blank_build = validate_control_provenance(
+        blank, control_name="blank-negative", receipt=receipt,
+        evidence_root=evidence_root, repository=repository,
+    )
     blank_payload = artifact_json(blank["receipt"], evidence_root, "blank_negative.receipt")
-    blank_keys = {"schema", "version", "injection", "expected_diagnostic_code", "observed_diagnostic_code", "caught"}
+    blank_keys = {
+        "schema", "version", "injection", "expected_diagnostic_code",
+        "observed_diagnostic_code", "caught", "control_build",
+    }
     exact_keys(blank_payload, blank_keys, "blank_negative.receipt")
     if blank_payload != {
         "schema": "pulp.gpu-first-visible-blank-negative.v1", "version": 1,
         "injection": "transparent-first-frame", "expected_diagnostic_code": "gpu.startup.blank",
         "observed_diagnostic_code": "gpu.startup.blank", "caught": True,
+        "control_build": blank_build,
     }:
         raise AcceptanceError("blank negative receipt does not prove the intended failure")
     audio = receipt["audio_thread_exclusion"]
-    if audio["status"] != "pass" or audio["receipt"] is None:
+    if (
+        audio["status"] != "pass"
+        or any(audio[field] is None for field in ("receipt", "executable", "provenance"))
+    ):
         raise AcceptanceError("complete receipt requires audio-thread exclusion proof")
+    audio_build = validate_control_provenance(
+        audio, control_name="audio-thread-exclusion", receipt=receipt,
+        evidence_root=evidence_root, repository=repository,
+    )
     audio_payload = artifact_json(audio["receipt"], evidence_root, "audio_thread_exclusion.receipt")
     audio_keys = {
         "schema", "version", "policy", "proof_scope", "provider_type",
         "instrumentation_entry_points", "thread_classification_source",
         "known_audio_thread_ids", "entry_point_observations", "observed_audio_thread_events",
-        "positive_control_non_audio_events", "runtime_claim",
+        "positive_control_non_audio_events", "runtime_claim", "control_build",
     }
     exact_keys(audio_payload, audio_keys, "audio_thread_exclusion.receipt")
     if (
@@ -1052,6 +1201,7 @@ def validate_controls(receipt: dict[str, Any], evidence_root: Path) -> None:
         or not audio_payload["known_audio_thread_ids"]
         or audio_payload["observed_audio_thread_events"] != 0
         or audio_payload["runtime_claim"] != "external-harness-only-not-product-runtime-proof"
+        or audio_payload["control_build"] != audio_build
     ):
         raise AcceptanceError("audio-thread exclusion receipt lacks a positive control or observed zero")
     if any(
@@ -1509,7 +1659,7 @@ def validate_receipt(
     campaigns = validate_campaigns(receipt, evidence_root, budget)
     validate_trace_producer_overhead_campaign(overhead, campaigns)
     derived_analysis = validate_same_instance(receipt, evidence_root, campaigns)
-    validate_controls(receipt, evidence_root)
+    validate_controls(receipt, evidence_root, repository)
     validate_b4(receipt, evidence_root, campaigns, derived_analysis)
     return True
 

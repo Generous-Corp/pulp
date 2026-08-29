@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -92,6 +93,58 @@ raise SystemExit({{"pass": 0, "inconclusive": 2}}[outcome])
 
 
 def write_control(path: Path, evidence: Path, kind: str) -> None:
+    control = "blank-negative" if kind == "blank" else "audio-thread-exclusion"
+    spec = fixture.a3.CONTROL_SPECS[control]
+    source_blob = fixture.a2t.git_blobs(
+        fixture.ROOT, fixture.PULP_REVISION, {spec["source_path"]},
+    )[spec["source_path"]]
+    build = {
+        "schema": "pulp.gpu-first-visible-control-build-identity.v1",
+        "version": 1,
+        "target": spec["target"],
+        "source_path": spec["source_path"],
+        "source_revision": fixture.PULP_REVISION,
+        "source_blob": source_blob,
+        "build_id": "b" * 64 + "-Test",
+        "build_config": "Test",
+        "configured_at_utc": "2026-08-29T12:00:00Z",
+        "git_dirty": False,
+    }
+    receipt = json.loads(
+        (evidence / ("blank.json" if kind == "blank" else "audio.json")).read_text()
+    )
+    receipt["control_build"] = build
+    environment = (
+        "PULP_A3_BLANK_NEGATIVE_RECEIPT_PATH"
+        if kind == "blank"
+        else "PULP_A3_AUDIO_THREAD_EXCLUSION_RECEIPT_PATH"
+    )
+    payload = json.dumps(build, sort_keys=True, separators=(",", ":")).encode()
+    marker = (
+        fixture.a3.CONTROL_MARKER_PREFIX + payload + fixture.a3.CONTROL_MARKER_SUFFIX
+    )
+    source = path.with_suffix(".c")
+    source.write_text(
+        "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n"
+        "__attribute__((used)) static const unsigned char marker[] = {"
+        + ",".join(str(byte) for byte in marker) + "};\n"
+        + f"static const char receipt[] = {json.dumps(json.dumps(receipt, sort_keys=True) + chr(10))};\n"
+        + "int main(void) {\n"
+        + f"  const char *destination = getenv({json.dumps(environment)});\n"
+        + f"  const char *mutation = getenv(\"PULP_A3_TEST_CONTROL_MUTATION\");\n"
+        + f"  if (mutation && strcmp(mutation, {json.dumps(kind)}) == 0) return 1;\n"
+        + "  if (!destination) return 64; FILE *f = fopen(destination, \"wb\");\n"
+        + "  if (!f) return 65; size_t n = fwrite(receipt, 1, sizeof(receipt) - 1, f);\n"
+        + "  return fclose(f) == 0 && n == sizeof(receipt) - 1 ? 0 : 66;\n}\n",
+        encoding="utf-8",
+    )
+    compiler = shutil.which("cc")
+    assert compiler is not None
+    subprocess.run([compiler, str(source), "-o", str(path)], check=True)
+    path.chmod(0o755)
+
+
+def write_fake_control(path: Path, evidence: Path, kind: str) -> None:
     source = evidence / ("blank.json" if kind == "blank" else "audio.json")
     environment = (
         "PULP_A3_BLANK_NEGATIVE_RECEIPT_PATH"
@@ -99,19 +152,8 @@ def write_control(path: Path, evidence: Path, kind: str) -> None:
         else "PULP_A3_AUDIO_THREAD_EXCLUSION_RECEIPT_PATH"
     )
     path.write_text(
-        f'''#!/usr/bin/env python3
-import os, shutil, sys
-from pathlib import Path
-source = Path({str(source)!r})
-destination = os.environ.get({environment!r})
-if not destination:
-    raise SystemExit(64)
-if os.environ.get("PULP_A3_TEST_CONTROL_MUTATION") == {kind!r}:
-    raise SystemExit(1)
-Path(destination).parent.mkdir(parents=True, exist_ok=True)
-shutil.copyfile(source, destination)
-raise SystemExit(0)
-''',
+        "#!/usr/bin/env python3\nimport os, shutil\n"
+        f"shutil.copyfile({str(source)!r}, os.environ[{environment!r}])\n",
         encoding="utf-8",
     )
     path.chmod(0o755)
@@ -142,6 +184,7 @@ def run_case(
         "PULP_A3_AUDIO_CONTROL_BIN", "PULP_A3_TEST_PRODUCER_MUTATION",
         "PULP_A3_TEST_CONTROL_MUTATION", "PULP_A3_PULP_ROOT",
         "PULP_A3_ROLE_PRODUCER_SUPPORT",
+        "PULP_A3_CONTROL_SOURCE_ROOT",
     ):
         environment.pop(name, None)
     if configure_producer:
@@ -153,6 +196,7 @@ def run_case(
     if controls and configure_controls:
         environment["PULP_A3_BLANK_CONTROL_BIN"] = str(blank.resolve())
         environment["PULP_A3_AUDIO_CONTROL_BIN"] = str(audio.resolve())
+        environment["PULP_A3_CONTROL_SOURCE_ROOT"] = str(fixture.ROOT.resolve())
     if producer_mutation:
         environment["PULP_A3_TEST_PRODUCER_MUTATION"] = producer_mutation
     if control_mutation:
@@ -193,6 +237,8 @@ def main() -> int:
         assert result["measurement_producer"]["sha256"] == digest(producer)
         assert result["controls"]["blank_control_binary"]["sha256"] == digest(blank)
         assert result["controls"]["audio_control_binary"]["sha256"] == digest(audio)
+        assert result["controls"]["blank_control_provenance"] is not None
+        assert result["controls"]["audio_control_provenance"] is not None
 
         completed, result = run_case(
             root, evidence, identity_path, producer, blank, audio,
@@ -238,7 +284,7 @@ def main() -> int:
         )
         assert completed.returncode == 2
         assert result["status"] == "incomplete"
-        assert result["dependencies"] == ["control:blank-negative-binary"]
+        assert result["dependencies"] == ["control:source-root"]
 
         completed, result = run_case(
             root, evidence, identity_path, producer, blank, audio,
@@ -247,6 +293,18 @@ def main() -> int:
         assert completed.returncode == 1
         assert result["status"] == "fail"
         assert "audio-thread-exclusion-control exited 1" in result["reason"]
+
+        fake_blank = root / "copy-only-blank.py"
+        fake_audio = root / "copy-only-audio.py"
+        write_fake_control(fake_blank, evidence, "blank")
+        write_fake_control(fake_audio, evidence, "audio")
+        completed, result = run_case(
+            root, evidence, identity_path, producer, fake_blank, fake_audio,
+            "copy-only-controls", controls=True,
+        )
+        assert completed.returncode == 1
+        assert result["status"] == "fail"
+        assert "not a native compiled executable" in result["reason"]
 
         symlink = root / "producer-symlink"
         symlink.symlink_to(producer)
@@ -268,7 +326,7 @@ def main() -> int:
         assert result["status"] == "fail"
         assert "checked-in role entry point" in result["reason"]
 
-    print("gpu-first-visible-a3-external-adapter: positive=2 planted_negatives=9")
+    print("gpu-first-visible-a3-external-adapter: positive=2 planted_negatives=10")
     return 0
 
 

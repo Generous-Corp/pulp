@@ -6,6 +6,8 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp_tooling/gpu_health/health_read_result.hpp>
 
+#include "support/a3_control_build_identity.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -139,7 +141,9 @@ void write_audio_thread_receipt_if_requested(std::uint64_t audio_thread_id) {
   ],
   "observed_audio_thread_events": 0,
   "positive_control_non_audio_events": 8,
-  "runtime_claim": "external-harness-only-not-product-runtime-proof"
+  "runtime_claim": "external-harness-only-not-product-runtime-proof",
+  "control_build": )"
+           << pulp::test::kA3ControlBuildIdentityJson << R"(
 }
 )";
     REQUIRE(output.good());

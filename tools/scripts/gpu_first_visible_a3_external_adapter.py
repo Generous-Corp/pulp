@@ -47,6 +47,7 @@ CORE_ARTIFACT_KEYS = {
 ADAPTER_ARTIFACT_KEYS = CORE_ARTIFACT_KEYS | {
     "blank_negative", "audio_thread_exclusion", "measurement_producer",
     "blank_control_binary", "audio_control_binary",
+    "blank_control_provenance", "audio_control_provenance",
 }
 PRODUCER_KEYS = {
     "schema", "version", "attempt_nonce", "role", "outcome", "reason",
@@ -57,6 +58,22 @@ ROLE_PRODUCER_NAMES = {
     "headless-constrained": "gpu_first_visible_a3_headless_producer.py",
     "daw": "gpu_first_visible_a3_reaper_producer.py",
     "forge": "gpu_first_visible_a3_forge_producer.py",
+}
+CONTROL_MARKER_PREFIX = b"\0PULP_A3_CONTROL_BUILD_IDENTITY_V1:"
+CONTROL_MARKER_SUFFIX = b":END_PULP_A3_CONTROL_BUILD_IDENTITY\0"
+CONTROL_BUILD_KEYS = {
+    "schema", "version", "target", "source_path", "source_revision",
+    "source_blob", "build_id", "build_config", "configured_at_utc", "git_dirty",
+}
+CONTROL_SPECS = {
+    "blank-negative": {
+        "target": "pulp-test-control-gpu-health-standalone-product",
+        "source_path": "test/test_control_gpu_health_standalone_product.cpp",
+    },
+    "audio-thread-exclusion": {
+        "target": "pulp-test-control-gpu-health-provider",
+        "source_path": "test/test_control_gpu_health_provider.cpp",
+    },
 }
 
 
@@ -249,6 +266,85 @@ def artifact_ref(path: Path, run_dir: Path) -> dict[str, str]:
     }
 
 
+def git_output(repository: Path, arguments: list[str], label: str) -> str:
+    completed = subprocess.run(
+        ["git", *arguments], cwd=repository, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+    )
+    if completed.returncode != 0:
+        raise AdapterError(f"cannot resolve {label} from the configured Pulp source")
+    return completed.stdout.strip()
+
+
+def extract_control_build(
+    executable: Path, *, control: str, request: dict[str, Any], repository: Path,
+) -> tuple[dict[str, Any], str]:
+    data = regular_file_bytes(executable, f"{control} control executable")
+    native = (
+        data.startswith(b"\x7fELF")
+        or data.startswith(b"MZ")
+        or data[:4] in {
+            b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
+            b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+            b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+        }
+    )
+    if not native:
+        raise AdapterError(f"{control} control is not a native compiled executable")
+    if data.count(CONTROL_MARKER_PREFIX) != 1:
+        raise AdapterError(f"{control} control lacks one exact embedded build identity")
+    start = data.index(CONTROL_MARKER_PREFIX) + len(CONTROL_MARKER_PREFIX)
+    end = data.find(CONTROL_MARKER_SUFFIX, start)
+    if end < 0 or data.find(CONTROL_MARKER_SUFFIX, end + 1) >= 0:
+        raise AdapterError(f"{control} control build identity is truncated or duplicated")
+    payload = data[start:end]
+    if len(payload) > 16 * 1024:
+        raise AdapterError(f"{control} control build identity is unbounded")
+    try:
+        identity = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AdapterError(f"{control} control build identity is invalid JSON") from error
+    exact_keys(identity, CONTROL_BUILD_KEYS, f"{control} control build identity")
+    spec = CONTROL_SPECS[control]
+    revision = request["identity"]["pulp_revision"]
+    source_blob = git_output(
+        repository, ["rev-parse", f"{revision}:{spec['source_path']}"],
+        f"{control} control source blob",
+    )
+    if (
+        identity["schema"] != "pulp.gpu-first-visible-control-build-identity.v1"
+        or identity["version"] != 1
+        or identity["target"] != spec["target"]
+        or identity["source_path"] != spec["source_path"]
+        or identity["source_revision"] != revision
+        or identity["source_blob"] != source_blob
+        or identity["git_dirty"] is not False
+        or not isinstance(identity["build_id"], str)
+        or not identity["build_id"]
+        or not isinstance(identity["build_config"], str)
+        or not identity["build_config"]
+        or not isinstance(identity["configured_at_utc"], str)
+        or not identity["configured_at_utc"].endswith("Z")
+    ):
+        raise AdapterError(
+            f"{control} control build identity does not bind the exact source/build/revision"
+        )
+    head = git_output(repository, ["rev-parse", "HEAD"], "Pulp HEAD")
+    status = git_output(
+        repository, ["status", "--porcelain=v1", "--untracked-files=all"],
+        "Pulp worktree status",
+    )
+    checkout_blob = git_output(
+        repository, ["hash-object", spec["source_path"]],
+        f"checked-out {control} control source",
+    )
+    if head != revision or status or checkout_blob != source_blob:
+        raise AdapterError(
+            f"{control} control source checkout is not the exact clean requested revision"
+        )
+    return identity, hashlib.sha256(payload).hexdigest()
+
+
 def validate_artifact_ref(
     ref: Any, artifact_directory: Path, run_dir: Path, label: str,
 ) -> None:
@@ -387,7 +483,8 @@ def run_control(
     *, request: dict[str, Any], artifact_directory: Path, run_dir: Path,
     environment_name: str, dependency: str, snapshot_name: str,
     receipt_name: str, receipt_environment: str, test_filter: str,
-) -> tuple[dict[str, str], dict[str, str]]:
+    control: str, repository: Path,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     source = configured_executable(environment_name, dependency)
     suffix = source.suffix
     pinned, digest = pin_executable(
@@ -410,7 +507,27 @@ def run_control(
     binary_ref = artifact_ref(pinned, run_dir)
     if binary_ref["sha256"] != digest:
         raise AdapterError(f"{snapshot_name} snapshot changed while it ran")
-    return artifact_ref(receipt_path, run_dir), binary_ref
+    build_identity, marker_sha256 = extract_control_build(
+        pinned, control=control, request=request, repository=repository,
+    )
+    control_receipt = regular_json(receipt_path, f"{control} control receipt")
+    if control_receipt.get("control_build") != build_identity:
+        raise AdapterError(f"{control} control receipt differs from its executable identity")
+    provenance_path = artifact_directory / "controls" / f"{control}-provenance.json"
+    atomic_json(provenance_path, {
+        "schema": "pulp.gpu-first-visible-control-provenance.v1",
+        "version": 1,
+        "attempt_nonce": request["attempt_nonce"],
+        "control": control,
+        "campaign_id": request["identity"]["campaign_id"],
+        "product_build_id": request["identity"]["build_id"],
+        "executable_sha256": binary_ref["sha256"],
+        "marker_sha256": marker_sha256,
+        "build_identity": build_identity,
+    })
+    return artifact_ref(receipt_path, run_dir), binary_ref, artifact_ref(
+        provenance_path, run_dir,
+    )
 
 
 def run(request_path: Path, receipt_path: Path) -> int:
@@ -511,7 +628,13 @@ def run(request_path: Path, receipt_path: Path) -> int:
 
     if request["require_controls"]:
         try:
-            (artifacts["blank_negative"], artifacts["blank_control_binary"]) = run_control(
+            pulp_root = configured_directory(
+                "PULP_A3_CONTROL_SOURCE_ROOT", "control:source-root",
+            )
+            (
+                artifacts["blank_negative"], artifacts["blank_control_binary"],
+                artifacts["blank_control_provenance"],
+            ) = run_control(
                 request=request, artifact_directory=artifact_directory, run_dir=run_dir,
                 environment_name="PULP_A3_BLANK_CONTROL_BIN",
                 dependency="control:blank-negative-binary",
@@ -519,10 +642,12 @@ def run(request_path: Path, receipt_path: Path) -> int:
                 receipt_name="blank-negative.json",
                 receipt_environment="PULP_A3_BLANK_NEGATIVE_RECEIPT_PATH",
                 test_filter="exact Standalone product catches the seeded transparent first frame",
+                control="blank-negative", repository=pulp_root,
             )
             (
                 artifacts["audio_thread_exclusion"],
                 artifacts["audio_control_binary"],
+                artifacts["audio_control_provenance"],
             ) = run_control(
                 request=request, artifact_directory=artifact_directory, run_dir=run_dir,
                 environment_name="PULP_A3_AUDIO_CONTROL_BIN",
@@ -534,6 +659,7 @@ def run(request_path: Path, receipt_path: Path) -> int:
                     "external harness observes every GPU health entry point off a registered "
                     "audio thread"
                 ),
+                control="audio-thread-exclusion", repository=pulp_root,
             )
         except AdapterBlocked as error:
             atomic_json(receipt_path, adapter_receipt(

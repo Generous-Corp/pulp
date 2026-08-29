@@ -2,6 +2,7 @@
 
 #include "control_broker_daemon.hpp"
 #include "control_static_code_identity.hpp"
+#include "support/a3_control_build_identity.hpp"
 #include "support/control_runtime_closure_sanitizer.hpp"
 
 #include <pulp/inspect/control_client.hpp>
@@ -356,6 +357,9 @@ TEST_CASE("exact Standalone product catches the seeded transparent first frame")
     receipt.addMember("expected_diagnostic_code", choc::value::createString("gpu.startup.blank"));
     receipt.addMember("observed_diagnostic_code", choc::value::createString("gpu.startup.blank"));
     receipt.addMember("caught", choc::value::createBool(true));
+    receipt.addMember(
+        "control_build",
+        choc::json::parse(std::string(pulp::test::kA3ControlBuildIdentityJson)));
     std::ofstream output(receipt_path, std::ios::binary | std::ios::trunc);
     REQUIRE(output.good());
     output << choc::json::toString(receipt, true) << '\n';

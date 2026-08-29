@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
+import os
+import py_compile
 import subprocess
 import sys
 import tempfile
@@ -17,6 +20,33 @@ RUNNER = SCRIPT_DIR / "gpu_first_visible_a3_campaign.py"
 sys.path.insert(0, str(SCRIPT_DIR))
 import gpu_first_visible_a3_campaign as campaign  # noqa: E402
 import test_gpu_first_visible_a3_acceptance as fixture  # noqa: E402
+
+
+def assert_runner_ignores_acceptance_bytecode() -> None:
+    with tempfile.TemporaryDirectory(prefix="pulp-a3-campaign-pyc-") as temporary:
+        root = Path(temporary)
+        copied_runner = root / RUNNER.name
+        copied_runner.write_bytes(RUNNER.read_bytes())
+        safe = root / "gpu_first_visible_a3_acceptance.py"
+        safe_source = b'CAMPAIGN_ROLES={"standalone"}\n'
+        malicious = b'raise SystemExit("planted acceptance bytecode executed")\n'
+        safe_source += b"#" * max(0, len(malicious) - len(safe_source))
+        malicious += b"#" * max(0, len(safe_source) - len(malicious))
+        safe.write_bytes(malicious)
+        timestamp = int(safe.stat().st_mtime)
+        cache = Path(importlib.util.cache_from_source(str(safe)))
+        cache.parent.mkdir(parents=True)
+        py_compile.compile(
+            str(safe), cfile=str(cache), doraise=True,
+            invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP,
+        )
+        safe.write_bytes(safe_source)
+        os.utime(safe, (timestamp, timestamp))
+        completed = subprocess.run(
+            [sys.executable, str(copied_runner), "--help"],
+            text=True, capture_output=True, check=False,
+        )
+        assert completed.returncode == 0, (completed.stdout, completed.stderr)
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -47,6 +77,7 @@ artifacts = {{
     "trace_analysis": None, "blank_negative": None,
     "audio_thread_exclusion": None, "measurement_producer": None,
     "blank_control_binary": None, "audio_control_binary": None,
+    "blank_control_provenance": None, "audio_control_provenance": None,
 }}
 outcome = "inconclusive" if MUTATION == "inconclusive" else "pass"
 reason = "external product is unavailable" if outcome != "pass" else None
@@ -69,8 +100,10 @@ if outcome == "pass":
     if request["require_controls"] and MUTATION != "missing-controls":
         sources["blank_negative"] = SOURCE / "blank.json"
         sources["audio_thread_exclusion"] = SOURCE / "audio.json"
-        sources["blank_control_binary"] = SOURCE / f"{{role}}-product.bin"
-        sources["audio_control_binary"] = SOURCE / f"{{role}}-host.bin"
+        sources["blank_control_binary"] = SOURCE / "blank-negative-control.bin"
+        sources["audio_control_binary"] = SOURCE / "audio-thread-exclusion-control.bin"
+        sources["blank_control_provenance"] = SOURCE / "blank-negative-provenance.json"
+        sources["audio_control_provenance"] = SOURCE / "audio-thread-exclusion-provenance.json"
     for name, source_path in sources.items():
         suffix = source_path.suffix or ".bin"
         destination = root / f"{{name}}{{suffix}}"
@@ -87,6 +120,13 @@ if outcome == "pass":
         callback(payload)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\\n")
         ref["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    if request["require_controls"] and MUTATION != "missing-controls":
+        for provenance_name in ("blank_control_provenance", "audio_control_provenance"):
+            mutate_json(provenance_name, lambda value: value.update({{
+                "campaign_id": request["identity"]["campaign_id"],
+                "product_build_id": request["identity"]["build_id"],
+            }}))
 
     if MUTATION == "warm-provenance":
         mutate_json("raw_warm", lambda value: value["samples"][0].__setitem__(
@@ -151,6 +191,7 @@ def run_adapter(
 
 
 def main() -> int:
+    assert_runner_ignores_acceptance_bytecode()
     with tempfile.TemporaryDirectory(prefix="pulp-a3-campaign-") as temporary:
         root = Path(temporary)
         evidence = root / "evidence"
@@ -170,6 +211,8 @@ def main() -> int:
         assert result["controls"]["audio_thread_exclusion"] is not None
         assert result["controls"]["blank_control_binary"] is not None
         assert result["controls"]["audio_control_binary"] is not None
+        assert result["controls"]["blank_control_provenance"] is not None
+        assert result["controls"]["audio_control_provenance"] is not None
         assert result["measurement_producer"] is not None
         assert result["campaign"]["identity"] == identity
 
