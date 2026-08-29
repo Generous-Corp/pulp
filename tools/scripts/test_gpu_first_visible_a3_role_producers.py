@@ -258,15 +258,24 @@ else:
     if mutation == "analyzer-artifact-mutation":
         health = args.trace.parent / "health_result.json"
         health.write_text("{}\n")
+    process_pid = int(os.environ["PULP_A3_TEST_TRACE_PROCESS_PID"])
     payload = {
         "schema": "pulp.trace-gpu-analysis.v1",
         "question": "gpu-startup",
-        "verdict": "fail" if mutation == "analyzer-fail" else "pass",
+        "verdict": "fail" if mutation == "analyzer-fail" else "unverified",
         "capture_complete": True,
         "evidence_ids": [evidence_id],
-        "category_scope": {"evidence_id": evidence_id},
+        "category_scope": {
+            "evidence_id": evidence_id,
+            "process_upid": 7,
+            "process_pid": (
+                process_pid + 1000 if mutation == "analyzer-process" else process_pid
+            ),
+        },
     }
-    exit_code = 1 if mutation == "analyzer-fail" else 0
+    if mutation == "analyzer-scope":
+        payload["category_scope"] = {"evidence_id": evidence_id}
+    exit_code = 1 if mutation == "analyzer-fail" else 2
 print(json.dumps(payload, sort_keys=True))
 raise SystemExit(exit_code)
 ''',
@@ -541,6 +550,7 @@ def run_role(
         "PULP_A3_TEST_ROLE_FIXTURE": str(evidence),
         "PULP_A3_TEST_ROLE_MUTATION": mutation,
         "PULP_A3_TEST_GPU_EVIDENCE_ID": gpu_evidence_id,
+        "PULP_A3_TEST_TRACE_PROCESS_PID": "2147000000",
         "PULP_A3_TEST_DETACHED_HOST_MARKER": str(detached_host_marker),
         "PULP_A3_TEST_REAPER_SMOKE": smoke,
         f"{PREFIX[role]}_PRODUCT_BIN": str(product),
@@ -622,6 +632,8 @@ def main() -> int:
             ("headless-constrained", "headless-present", "pass", "cannot claim"),
             ("standalone", "trace-id", "pass", "pinned trace replay"),
             ("standalone", "analyzer-fail", "pass", "pinned trace replay"),
+            ("standalone", "analyzer-scope", "pass", "pinned trace replay"),
+            ("standalone", "analyzer-process", "pass", "pinned trace replay"),
             (
                 "standalone", "analyzer-artifact-mutation", "pass",
                 "role-driver health_result changed",
@@ -703,7 +715,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=4 planted_negatives=30 cleanup_controls=2"
+            "positive=4 planted_negatives=32 cleanup_controls=2"
         )
     return 0
 

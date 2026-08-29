@@ -265,9 +265,13 @@ The producer therefore owns the facts only its product can observe: 10 real
 cold and 10 real warm lifecycles, the declared cache reset/reopen boundary,
 first nonblank native-compositor presentation (or constrained headless capture
 completion), exact product/host identity, and same-campaign GPU/trace evidence
-IDs. For the one `--require-controls` role, the envelope separately snapshots
-and runs the two focused harness binaries named above and rejects a passing
-producer when either independent control is absent.
+IDs. The campaign trace keeps the ratified startup-budget `verdict` separate
+from `trace_replay_verdict`: a complete real `gpu-startup` replay is normally
+`unverified` because that analyzer has no A3 budget. Its exact evidence ID,
+Perfetto process identity, and process PID must resolve to one of the 20
+recorded host lifecycles. For the one `--require-controls` role, the envelope
+separately snapshots and runs the two focused harness binaries named above and
+rejects a passing producer when either independent control is absent.
 
 The DAW adapter must first prove the exact format scans and opens in REAPER;
 for example, a VST3 preflight uses `reaper_smoke.py --mode editor-open --format

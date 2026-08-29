@@ -676,7 +676,8 @@ def validate_campaign_trace(
         raise AcceptanceError(f"{label}.trace must be non-empty")
     analysis = artifact_json(campaign["trace_analysis"], evidence_root, f"{label}.trace_analysis")
     keys = {
-        "schema", "version", "question", "verdict", "capture_complete", "campaign_id",
+        "schema", "version", "question", "verdict", "trace_replay_verdict",
+        "capture_complete", "campaign_id",
         "instance_id", "build_id", "gpu_evidence_id", "trace_evidence_id", "trace_sha256",
         "health_result_sha256", "evidence_ids", "measurement_endpoint",
         "capture_integrity", "instrumentation_coverage", "missing_trace_categories",
@@ -690,6 +691,7 @@ def validate_campaign_trace(
         "version": 1,
         "question": "gpu-startup",
         "verdict": health["startup"]["verdict"],
+        "trace_replay_verdict": analysis["trace_replay_verdict"],
         "capture_complete": not missing_categories,
         "measurement_endpoint": campaign["measurement_endpoint"],
         "capture_integrity": "lossless",
@@ -704,6 +706,10 @@ def validate_campaign_trace(
         "health_result_sha256": campaign["health_result"]["sha256"],
         "evidence_ids": [correlation["gpu_evidence_id"]],
     }
+    if analysis["trace_replay_verdict"] not in {"pass", "unverified"}:
+        raise AcceptanceError(
+            f"{label}.trace_analysis did not preserve a complete structural replay"
+        )
     if analysis != expected:
         raise AcceptanceError(f"{label}.trace_analysis does not exactly corroborate the campaign")
 

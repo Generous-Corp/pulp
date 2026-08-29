@@ -218,6 +218,7 @@ def make_fixture(root: Path) -> dict[str, Any]:
             "version": 1,
             "question": "gpu-startup",
             "verdict": result["startup"]["verdict"],
+            "trace_replay_verdict": "unverified",
             "capture_complete": role != "headless-constrained",
             "measurement_endpoint": result["startup"]["measurement_endpoint"],
             "capture_integrity": "lossless",

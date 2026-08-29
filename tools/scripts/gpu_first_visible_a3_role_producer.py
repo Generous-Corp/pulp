@@ -627,6 +627,7 @@ def analyzer_payload(path: Path, exit_code: int, label: str) -> dict[str, Any]:
 def derive_trace_analysis(
     *, analyzer: Path, request: dict[str, Any], trace_path: Path,
     health_path: Path, health: dict[str, Any], artifact_directory: Path,
+    lifecycle_provenance: list[dict[str, Any]],
 ) -> tuple[Path, list[Path]]:
     invalid_trace = artifact_directory / "tooling" / "invalid-trace.pftrace"
     invalid_trace.write_bytes(b"not-a-perfetto-trace")
@@ -656,12 +657,21 @@ def derive_trace_analysis(
     startup = health["startup"]
     correlation = startup["correlation"]
     gpu_id = correlation["gpu_evidence_id"]
+    scope = derived.get("category_scope")
+    host_pids = {row["host_pid"] for row in lifecycle_provenance}
     if (
-        derived["verdict"] != startup["verdict"]
+        derived["verdict"] not in {"pass", "unverified"}
         or derived.get("capture_complete") is not True
         or derived.get("evidence_ids") != [gpu_id]
-        or not isinstance(derived.get("category_scope"), dict)
-        or derived["category_scope"].get("evidence_id") != gpu_id
+        or not isinstance(scope, dict)
+        or set(scope) != {"evidence_id", "process_upid", "process_pid"}
+        or scope.get("evidence_id") != gpu_id
+        or isinstance(scope.get("process_upid"), bool)
+        or not isinstance(scope.get("process_upid"), int)
+        or scope["process_upid"] < 0
+        or isinstance(scope.get("process_pid"), bool)
+        or not isinstance(scope.get("process_pid"), int)
+        or scope["process_pid"] not in host_pids
     ):
         raise ProducerError(
             "pinned trace replay does not prove the campaign evidence cohort"
@@ -672,7 +682,8 @@ def derive_trace_analysis(
         "schema": "pulp.gpu-first-visible-campaign-trace.v1",
         "version": 1,
         "question": "gpu-startup",
-        "verdict": derived["verdict"],
+        "verdict": startup["verdict"],
+        "trace_replay_verdict": derived["verdict"],
         "capture_complete": not missing,
         "measurement_endpoint": request["measurement_endpoint"],
         "capture_integrity": "lossless",
@@ -1445,6 +1456,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             trace_path=measured_paths["trace"],
             health_path=measured_paths["health_result"], health=health,
             artifact_directory=artifact_directory,
+            lifecycle_provenance=lifecycle_provenance,
         )
         measured_paths["trace_analysis"] = trace_analysis_path
         extra_members.extend(analyzer_evidence)
