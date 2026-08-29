@@ -1040,6 +1040,31 @@ class IdempotencyStamp(unittest.TestCase):
             self.assertEqual((release / "libdawn_combined.a").read_bytes(), b"new-dawn")
             self.assertFalse((release / "arm64").exists())
 
+    def test_direct_refetch_preserves_checkout_metadata_outside_archive_roots(self):
+        with _in_tempdir() as td:
+            dest = td / "external/skia-build"
+            tracked_version = dest / "VERSION.md"
+            tracked_header = dest / "include/core/SkTypes.h"
+            tracked_version.parent.mkdir(parents=True)
+            tracked_header.parent.mkdir(parents=True)
+            tracked_version.write_text("tracked version\n", encoding="utf-8")
+            tracked_header.write_text("tracked header\n", encoding="utf-8")
+            stale = dest / "build/old-gpu/lib/Release/libstale.a"
+            stale.parent.mkdir(parents=True)
+            stale.write_bytes(b"stale")
+
+            zip_path = td / "skia.zip"
+            sha = _make_zip(
+                zip_path,
+                {"build/mac-gpu/lib/Release/libskia.a": b"fresh"},
+            )
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+
+            self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+            self.assertEqual(tracked_version.read_text(encoding="utf-8"), "tracked version\n")
+            self.assertEqual(tracked_header.read_text(encoding="utf-8"), "tracked header\n")
+            self.assertFalse(stale.exists(), "the archive-owned build tree must be replaced")
+
     def test_missing_lib_with_stamp_refetches(self):
         with _in_tempdir() as td:
             zip_path = td / "skia.zip"

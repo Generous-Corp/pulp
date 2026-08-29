@@ -655,6 +655,14 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         self.assertIn("--skia-dir external/skia-build", self.text)
         self.assertIn("matrix.platform == 'darwin-arm64' || matrix.platform == 'linux-x64'", self.text)
 
+    def test_release_path_builds_bind_to_the_verified_checkout_provider(self) -> None:
+        self.assertEqual(
+            self.text.count('-DSKIA_DIR="$PWD/external/skia-build"'),
+            2,
+            "both release-path configure calls must consume the provider that "
+            "the preceding receipt/capability step verified",
+        )
+
     def test_darwin_leg_requires_mixed_provider_render_proof(self) -> None:
         self.assertIn(
             "python3 tools/scripts/fetch_v8_for_release.py darwin-arm64",

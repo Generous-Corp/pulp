@@ -724,8 +724,12 @@ def _main(argv: list[str]) -> int:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    # A refetch replaces the complete provider generation. Otherwise files
-    # from the prior pin can survive and shadow the new arch-subdir libraries.
+    # A direct refetch replaces every top-level tree supplied by the provider
+    # archive. Otherwise files from the prior pin can survive and shadow the
+    # new arch-subdir libraries. Preserve checkout-owned siblings such as
+    # VERSION.md and the tracked source headers: current release assets contain
+    # only build/, and deleting the entire default external/skia-build directory
+    # would dirty the checkout without those files being restored by the ZIP.
     absolute_dest = dest.absolute()
     forbidden = {Path("/").absolute(), Path.cwd().absolute(), Path.home().absolute()}
     if absolute_dest in forbidden:
@@ -733,13 +737,22 @@ def _main(argv: list[str]) -> int:
         return 1
     if dest.is_symlink():
         dest.unlink()
-    elif dest.exists():
-        for child in dest.iterdir():
-            if child.is_symlink() or child.is_file():
-                child.unlink()
-            else:
-                shutil.rmtree(child)
     dest.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as archive:
+        archive_roots = {
+            PurePosixPath(member.filename.replace("\\", "/")).parts[0]
+            for member in archive.infolist()
+            if PurePosixPath(member.filename.replace("\\", "/")).parts
+        }
+    for name in sorted(archive_roots):
+        child = dest / name
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.exists():
+            shutil.rmtree(child)
+    for generated_name in (_ASSET_STAMP, GENERATION_RECEIPT,
+                           _GENERATION_RECEIPT_TMP, SOURCE_ARCHIVE):
+        (dest / generated_name).unlink(missing_ok=True)
     # Self-heal a corrupted warm cache: a dangling `build` symlink (its target
     # gone) makes mkdir see the path as both present (the link exists) and
     # unusable (a child cannot be created because the target is missing), which
