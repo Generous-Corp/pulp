@@ -123,6 +123,52 @@ std::optional<double> trial_percentile(
     return values[rank - 1];
 }
 
+void derive_startup_state(gh::StartupMeasurements& startup) {
+    startup.observed_percentile_ms = trial_percentile(
+        startup.trials, startup.budget.percentile,
+        &gh::StartupTrial::editor_open_to_first_nonblank_ms);
+    startup.interaction_hitch_percentile_ms = trial_percentile(
+        startup.trials, startup.budget.percentile,
+        &gh::StartupTrial::interaction_hitch_ms);
+
+    const bool exact_trial_count = startup.trials.size() == startup.budget.trial_count;
+    const auto cold_count = std::ranges::count_if(startup.trials, [](const auto& value) {
+        return value.cache_state == gh::CacheState::cold;
+    });
+    const auto warm_count = startup.trials.size() - cold_count;
+    const bool exact_composition = exact_trial_count &&
+                                   cold_count == startup.budget.cold_trial_count &&
+                                   warm_count == startup.budget.warm_trial_count;
+    const bool unresolved = std::ranges::any_of(startup.trials, [](const auto& value) {
+        return value.verdict == gh::Verdict::unavailable ||
+               value.verdict == gh::Verdict::unverified;
+    });
+    const bool capture_complete = !startup.capture.truncated &&
+                                  startup.capture.dropped_event_count == 0 &&
+                                  startup.capture.missing_trace_categories.empty();
+    if (exact_composition && capture_complete && !unresolved) {
+        startup.status = gh::MeasurementStatus::complete;
+    } else if (exact_composition && capture_complete) {
+        startup.status = gh::MeasurementStatus::unverified;
+    } else {
+        startup.status = gh::MeasurementStatus::incomplete;
+    }
+
+    startup.verdict = gh::Verdict::unverified;
+    if (startup.status == gh::MeasurementStatus::complete &&
+        startup.budget.status == gh::BudgetStatus::ratified &&
+        startup.observed_percentile_ms && startup.interaction_hitch_percentile_ms) {
+        const bool blank_failure = std::ranges::any_of(
+            startup.trials, [](const auto& value) {
+                return value.diagnostic_code == "gpu.startup.blank";
+            });
+        startup.verdict = blank_failure ||
+                *startup.observed_percentile_ms > *startup.budget.threshold_ms
+            ? gh::Verdict::fail
+            : gh::Verdict::pass;
+    }
+}
+
 } // namespace
 
 struct ControlGpuHealthProvider::Impl {
@@ -381,53 +427,9 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
                                                : "gpu.startup.trace_incomplete";
     }
     result->startup.trials.push_back(std::move(trial));
-    result->startup.observed_percentile_ms = trial_percentile(
-        result->startup.trials, result->startup.budget.percentile,
-        &gh::StartupTrial::editor_open_to_first_nonblank_ms);
-    result->startup.interaction_hitch_percentile_ms = trial_percentile(
-        result->startup.trials, result->startup.budget.percentile,
-        &gh::StartupTrial::interaction_hitch_ms);
     if (impl_->config.gpu_evidence_id && evidence_id(*impl_->config.gpu_evidence_id))
         result->startup.correlation.gpu_evidence_id = impl_->config.gpu_evidence_id;
-    const auto& startup = result->startup;
-    const bool exact_trial_count =
-        startup.trials.size() == startup.budget.trial_count;
-    const auto cold_count = std::ranges::count_if(startup.trials, [](const auto& value) {
-        return value.cache_state == gh::CacheState::cold;
-    });
-    const auto warm_count = startup.trials.size() - cold_count;
-    const bool exact_composition = exact_trial_count &&
-                                   cold_count == startup.budget.cold_trial_count &&
-                                   warm_count == startup.budget.warm_trial_count;
-    const bool unresolved = std::ranges::any_of(startup.trials, [](const auto& value) {
-        return value.verdict == gh::Verdict::unavailable ||
-               value.verdict == gh::Verdict::unverified;
-    });
-    const bool capture_complete = !startup.capture.truncated &&
-                                  startup.capture.dropped_event_count == 0 &&
-                                  startup.capture.missing_trace_categories.empty();
-    if (exact_composition && capture_complete && !unresolved) {
-        result->startup.status = gh::MeasurementStatus::complete;
-    } else if (exact_composition && capture_complete) {
-        result->startup.status = gh::MeasurementStatus::unverified;
-    } else {
-        result->startup.status = gh::MeasurementStatus::incomplete;
-    }
-    result->startup.verdict = gh::Verdict::unverified;
-    if (result->startup.status == gh::MeasurementStatus::complete &&
-        result->startup.budget.status == gh::BudgetStatus::ratified &&
-        result->startup.observed_percentile_ms &&
-        result->startup.interaction_hitch_percentile_ms) {
-        const bool blank_failure = std::ranges::any_of(
-            result->startup.trials, [](const auto& value) {
-                return value.diagnostic_code == "gpu.startup.blank";
-            });
-        result->startup.verdict = blank_failure ||
-                *result->startup.observed_percentile_ms >
-                    *result->startup.budget.threshold_ms
-            ? gh::Verdict::fail
-            : gh::Verdict::pass;
-    }
+    derive_startup_state(result->startup);
     impl_->requested_at.reset();
     impl_->publish(std::move(result));
     return true;
@@ -456,6 +458,7 @@ bool ControlGpuHealthProvider::record_timeout(
     trial.diagnostic_code = "gpu.startup.timeout";
     result->startup.trials.push_back(std::move(trial));
     record_capture_event(result->startup.capture);
+    derive_startup_state(result->startup);
     impl_->requested_at.reset();
     impl_->publish(std::move(result));
     return true;
@@ -483,6 +486,7 @@ bool ControlGpuHealthProvider::record_instance_lost() noexcept {
     trial.diagnostic_code = "gpu.startup.instance_lost";
     result->startup.trials.push_back(std::move(trial));
     record_capture_event(result->startup.capture);
+    derive_startup_state(result->startup);
     impl_->requested_at.reset();
     impl_->publish(std::move(result));
     return true;
@@ -510,6 +514,7 @@ bool ControlGpuHealthProvider::record_dropped_events(std::uint64_t count) noexce
         trial.verdict = gh::Verdict::unverified;
         trial.diagnostic_code = "gpu.startup.event_loss";
     }
+    derive_startup_state(result->startup);
     impl_->publish(std::move(result));
     return true;
 }

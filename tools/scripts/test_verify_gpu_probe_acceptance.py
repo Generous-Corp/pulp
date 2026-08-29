@@ -135,6 +135,18 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
             self.assertTrue(any("digest mismatch" in error for error in errors))
             self.assertTrue(any("isError=true" in error for error in errors))
 
+    def test_digest_rebound_mcp_positive_cannot_report_is_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "receipt"
+            shutil.copytree(FIXTURE, copied)
+            path = copied / "mcp-transcript.jsonl"
+            rows = [json.loads(line) for line in path.read_text().splitlines()]
+            rows[1]["result"]["isError"] = True
+            path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+            self._rebind(copied, "mcp-transcript.jsonl")
+            errors = MODULE.verify(copied)
+            self.assertTrue(any("preserve isError=false" in error for error in errors))
+
     def test_digest_rebound_role_swap_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             copied = Path(temporary) / "receipt"

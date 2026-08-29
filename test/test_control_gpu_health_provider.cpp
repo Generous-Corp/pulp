@@ -45,6 +45,45 @@ pulp::inspect::ControlGpuHealthProvider::FrameObservation frame(bool content) {
     };
 }
 
+pulp::inspect::ControlGpuHealthProvider::Config ratified_campaign_config() {
+    return {
+        .pulp_build_id = "test-build",
+        .campaign_id = "campaign-native-lifecycle",
+        .gpu_evidence_id = "0123456789abcdef0123456789abcdef",
+        .budget_ratified = true,
+        .threshold_ms = 20.0,
+        .threshold_source = "receipt:reference-host-campaign",
+        .reference_hosts = {{.host_id = "m5-60hz", .refresh_rate_hz = 60.0}},
+        .source_signature_sha256 = std::string(64, 'b'),
+        .shader_signature_sha256 = std::string(64, 'c'),
+        .expected_target_signature_sha256 = std::string(64, 'a'),
+        .timeout = 5ms,
+    };
+}
+
+void record_complete_campaign_trial(pulp::inspect::ControlGpuHealthProvider& provider,
+                                    std::uint32_t index) {
+    const auto requested_at = std::chrono::steady_clock::time_point{} +
+                              std::chrono::milliseconds(index * 30);
+    const auto cache_state = index < 10
+        ? pulp::inspect::ControlGpuHealthProvider::CacheState::cold
+        : pulp::inspect::ControlGpuHealthProvider::CacheState::warm;
+    REQUIRE(provider.begin_editor_open(cache_state, requested_at));
+    auto observed = frame(true);
+    observed.lifecycle_id = "lifecycle-" + std::to_string(index);
+    observed.observed_cache_state = cache_state;
+    observed.native_present_observed = true;
+    observed.interaction_hitch_ms = 1.0;
+    observed.shader_compile_ms = index < 10 ? 2.0 : 0.0;
+    observed.upload_ms = 1.0;
+    observed.hidden_frame_ms = 0.0;
+    observed.present_ms = 2.0;
+    observed.trace_evidence_id = "trace-native-lifecycle";
+    observed.observed_at = requested_at + 10ms;
+    observed.native_presented_at = requested_at + 10ms;
+    REQUIRE(provider.record_presented_frame(observed));
+}
+
 void configure_visible_test_view(pulp::view::View& root) {
     root.set_theme(pulp::view::Theme::dark());
     root.flex().direction = pulp::view::FlexDirection::column;
@@ -115,42 +154,9 @@ TEST_CASE("GPU health provider keeps an authentic capture-only upper bound unver
 }
 
 TEST_CASE("GPU health provider can complete a ratified native lifecycle campaign") {
-    const auto target_signature = std::string(64, 'a');
-    pulp::inspect::ControlGpuHealthProvider provider({
-        .pulp_build_id = "test-build",
-        .campaign_id = "campaign-native-lifecycle",
-        .gpu_evidence_id = "0123456789abcdef0123456789abcdef",
-        .budget_ratified = true,
-        .threshold_ms = 20.0,
-        .threshold_source = "receipt:reference-host-campaign",
-        .reference_hosts = {{.host_id = "m5-60hz", .refresh_rate_hz = 60.0}},
-        .source_signature_sha256 = std::string(64, 'b'),
-        .shader_signature_sha256 = std::string(64, 'c'),
-        .expected_target_signature_sha256 = target_signature,
-    });
-    const auto epoch = std::chrono::steady_clock::time_point{};
-    for (std::uint32_t index = 0; index < 20; ++index) {
-        const auto requested_at = epoch + std::chrono::milliseconds(index * 30);
-        REQUIRE(provider.begin_editor_open(
-            index < 10 ? pulp::inspect::ControlGpuHealthProvider::CacheState::cold
-                       : pulp::inspect::ControlGpuHealthProvider::CacheState::warm,
-            requested_at));
-        auto observed = frame(true);
-        observed.lifecycle_id = "lifecycle-" + std::to_string(index);
-        observed.observed_cache_state =
-            index < 10 ? pulp::inspect::ControlGpuHealthProvider::CacheState::cold
-                       : pulp::inspect::ControlGpuHealthProvider::CacheState::warm;
-        observed.native_present_observed = true;
-        observed.interaction_hitch_ms = 1.0;
-        observed.shader_compile_ms = index < 10 ? 2.0 : 0.0;
-        observed.upload_ms = 1.0;
-        observed.hidden_frame_ms = 0.0;
-        observed.present_ms = 2.0;
-        observed.trace_evidence_id = "trace-native-lifecycle";
-        observed.observed_at = requested_at + 10ms;
-        observed.native_presented_at = requested_at + 10ms;
-        REQUIRE(provider.record_presented_frame(observed));
-    }
+    pulp::inspect::ControlGpuHealthProvider provider(ratified_campaign_config());
+    for (std::uint32_t index = 0; index < 20; ++index)
+        record_complete_campaign_trial(provider, index);
 
     require_valid(provider);
     const auto snapshot = provider.snapshot();
@@ -169,6 +175,46 @@ TEST_CASE("GPU health provider can complete a ratified native lifecycle campaign
         REQUIRE(trial.verdict == gh::Verdict::pass);
         REQUIRE(trial.diagnostic_code == "gpu.startup.pass");
     }
+}
+
+TEST_CASE("GPU health provider derives final state after a terminal twentieth trial") {
+    for (const bool instance_lost : {false, true}) {
+        CAPTURE(instance_lost);
+        pulp::inspect::ControlGpuHealthProvider provider(ratified_campaign_config());
+        for (std::uint32_t index = 0; index < 19; ++index)
+            record_complete_campaign_trial(provider, index);
+
+        const auto requested_at = std::chrono::steady_clock::time_point{} + 570ms;
+        REQUIRE(provider.begin_editor_open(
+            pulp::inspect::ControlGpuHealthProvider::CacheState::warm, requested_at));
+        if (instance_lost)
+            REQUIRE(provider.record_instance_lost());
+        else
+            REQUIRE(provider.record_timeout(requested_at + 6ms));
+
+        require_valid(provider);
+        const auto snapshot = provider.snapshot();
+        REQUIRE(snapshot->startup.trials.size() == 20);
+        REQUIRE(snapshot->startup.status == gh::MeasurementStatus::unverified);
+        REQUIRE(snapshot->startup.verdict == gh::Verdict::unverified);
+        REQUIRE(snapshot->startup.trials.back().diagnostic_code ==
+                (instance_lost ? "gpu.startup.instance_lost" : "gpu.startup.timeout"));
+    }
+}
+
+TEST_CASE("GPU health provider invalidates a completed campaign after event loss") {
+    pulp::inspect::ControlGpuHealthProvider provider(ratified_campaign_config());
+    for (std::uint32_t index = 0; index < 20; ++index)
+        record_complete_campaign_trial(provider, index);
+    REQUIRE(provider.snapshot()->startup.status == gh::MeasurementStatus::complete);
+
+    REQUIRE(provider.record_dropped_events(1));
+    require_valid(provider);
+    const auto snapshot = provider.snapshot();
+    REQUIRE(snapshot->startup.capture.truncated);
+    REQUIRE(snapshot->startup.status == gh::MeasurementStatus::incomplete);
+    REQUIRE(snapshot->startup.verdict == gh::Verdict::unverified);
+    REQUIRE(snapshot->startup.trials.back().diagnostic_code == "gpu.startup.event_loss");
 }
 
 TEST_CASE("GPU health provider seeded blank first frame fails closed") {

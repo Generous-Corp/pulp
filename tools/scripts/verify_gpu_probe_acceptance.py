@@ -306,6 +306,11 @@ def verify(root: Path) -> list[str]:
         transcript = []
     if len(transcript) != 3 or [row.get("id") for row in transcript] != [1, 2, 3]:
         errors.append("MCP transcript must contain initialize, positive, and negative responses")
+    elif (
+        "isError" in transcript[1].get("result", {})
+        and transcript[1]["result"]["isError"] is not False
+    ):
+        errors.append("MCP positive result must omit isError or preserve isError=false")
     elif transcript[1].get("result", {}).get("structuredContent", {}).get("exit_code") != 0:
         errors.append("MCP positive result did not preserve exit 0")
     else:
