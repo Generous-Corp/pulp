@@ -1092,6 +1092,7 @@ def git_file_sha256(repository: Path, revision: str, path: str) -> str:
 
 def validate_trace_producer_overhead(
     receipt: dict[str, Any], evidence_root: Path, repository: Path, *, require_pass: bool,
+    allow_fixture_overhead: bool = False,
 ) -> dict[str, Any] | None:
     control = receipt["trace_producer_overhead"]
     status = control["status"]
@@ -1112,6 +1113,8 @@ def validate_trace_producer_overhead(
         try:
             trace_producer_overhead.validate_receipt(
                 payload, evidence_root, require_pass=status == "pass",
+                allow_fixture_collection=allow_fixture_overhead,
+                allow_fixture_chrome_json=allow_fixture_overhead,
             )
         except trace_producer_overhead.OverheadError as error:
             raise AcceptanceError(
@@ -1148,6 +1151,42 @@ def validate_trace_producer_overhead(
             raise AcceptanceError(
                 "trace-producer overhead baseline is not the exact pre-producer parent"
             )
+        input_revision = trace_producer_overhead.INPUT_TO_PRESENT_REVISION
+        if not git_revision_is_ancestor_of(repository, input_revision, candidate_revision):
+            raise AcceptanceError(
+                "trace-producer overhead candidate lacks the input-to-present package"
+            )
+        changed = subprocess.run(
+            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", input_revision],
+            cwd=repository, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, check=False,
+        )
+        if (
+            changed.returncode != 0
+            or sorted(line for line in changed.stdout.splitlines() if line)
+            != sorted(trace_producer_overhead.INPUT_TO_PRESENT_PATHS)
+        ):
+            raise AcceptanceError(
+                "input-to-present producer package does not bind its immutable five paths"
+            )
+        delta = subprocess.run(
+            ["git", "diff", f"{input_revision}^", input_revision, "--",
+             *trace_producer_overhead.INPUT_TO_PRESENT_PATHS],
+            cwd=repository, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, check=False,
+        )
+        expected_signatures = {
+            f'PULP_TRACE_SCOPE_NAMED("render", "{name}")': 1
+            for name in ("gpu_acquire", "gpu_submit", "gpu_present")
+        }
+        added = [line[1:] for line in delta.stdout.splitlines() if line.startswith("+")]
+        if delta.returncode != 0 or any(
+            sum(signature in line for line in added) != count
+            for signature, count in expected_signatures.items()
+        ):
+            raise AcceptanceError(
+                "input-to-present producer package lacks its exact three trace signatures"
+            )
         driver = payload["measurement_driver"]
         declared_digest = driver["sha256"]
         path = driver["path"]
@@ -1160,6 +1199,15 @@ def validate_trace_producer_overhead(
         ):
             raise AcceptanceError(
                 "trace-producer overhead driver is not current and source-bound"
+            )
+        workload = payload["workload"]
+        if (
+            workload["adapter_revision"] != candidate_revision
+            or workload["adapter_path"] != path
+            or workload["adapter_sha256"] != declared_digest
+        ):
+            raise AcceptanceError(
+                "trace-producer workload adapter differs from its source-bound driver"
             )
     if require_pass and status != "pass":
         raise AcceptanceError(
@@ -1386,6 +1434,7 @@ def validate_b4(
 
 def validate_receipt(
     receipt: dict[str, Any], evidence_root: Path, repository: Path = ROOT,
+    *, allow_fixture_overhead: bool = False,
 ) -> bool:
     schema = load_json(SCHEMA_PATH)
     problems = json_schema_lite.validate(receipt, schema)
@@ -1400,6 +1449,7 @@ def validate_receipt(
             )
     overhead = validate_trace_producer_overhead(
         receipt, evidence_root, repository, require_pass=receipt["status"] == "complete",
+        allow_fixture_overhead=allow_fixture_overhead,
     )
     if receipt["status"] == "incomplete":
         if not receipt["missing_evidence"]:

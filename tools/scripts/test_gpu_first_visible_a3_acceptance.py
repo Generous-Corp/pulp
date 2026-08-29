@@ -173,6 +173,7 @@ def make_fixture(root: Path) -> dict[str, Any]:
         trace_producer_overhead.build_receipt(
             overhead_paths, evidence_root=root,
             generated_utc="2026-08-28T12:00:00Z",
+            allow_fixture_collection=True, allow_fixture_chrome_json=True,
         ),
     )
     budget_cold = {
@@ -497,7 +498,7 @@ raise SystemExit(code)
 
 def expect_failure(receipt: dict[str, Any], root: Path, needle: str) -> None:
     try:
-        a3.validate_receipt(receipt, root)
+        a3.validate_receipt(receipt, root, allow_fixture_overhead=True)
     except a3.AcceptanceError as error:
         if needle not in str(error):
             raise AssertionError(f"expected {needle!r}, got {error!r}") from error
@@ -676,7 +677,7 @@ def main() -> int:
         receipt = json.loads(output.read_text(encoding="utf-8"))
         assert receipt["implementation_head"] == PULP_REVISION
         assert receipt["source_blobs"] == template["source_blobs"]
-        assert a3.validate_receipt(receipt, root) is True
+        assert a3.validate_receipt(receipt, root, allow_fixture_overhead=True) is True
 
         ratified_output = root / "ratified-by-tool.json"
         ratified = subprocess.run(
@@ -712,12 +713,16 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="pulp-a3-partial-pass-") as partial:
             partial_root = Path(partial)
             partial_pass = make_partial_causal_fixture(partial_root, budget_fail=False)
-            assert a3.validate_receipt(partial_pass, partial_root) is True
+            assert a3.validate_receipt(
+                partial_pass, partial_root, allow_fixture_overhead=True,
+            ) is True
 
         with tempfile.TemporaryDirectory(prefix="pulp-a3-investigation-") as partial:
             partial_root = Path(partial)
             investigation = make_partial_causal_fixture(partial_root, budget_fail=True)
-            assert a3.validate_receipt(investigation, partial_root) is True
+            assert a3.validate_receipt(
+                investigation, partial_root, allow_fixture_overhead=True,
+            ) is True
 
             wrong_endpoint = copy.deepcopy(investigation)
             headless = next(
@@ -808,7 +813,9 @@ def main() -> int:
             "disposition": None, "status": "withheld", "reason": "Acceptance is incomplete.",
             "evidence": None,
         }
-        assert a3.validate_receipt(incomplete, root) is False
+        assert a3.validate_receipt(
+            incomplete, root, allow_fixture_overhead=True,
+        ) is False
         incomplete["status"] = "complete"
         expect_failure(incomplete, root, "cannot list missing evidence")
 
@@ -837,6 +844,7 @@ def main() -> int:
             trace_producer_overhead.build_receipt(
                 raw_paths, evidence_root=root,
                 generated_utc="2026-08-28T12:00:00Z",
+                allow_fixture_collection=True, allow_fixture_chrome_json=True,
             ),
         )
         rehash(mutated, root, overhead_ref)
@@ -1180,7 +1188,9 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
                 encoding="utf-8"
             )
         )
-        assert a3.validate_receipt(current_receipt, current_root) is False
+        assert a3.validate_receipt(
+            current_receipt, current_root, allow_fixture_overhead=True,
+        ) is False
 
         print(
             "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=49 "

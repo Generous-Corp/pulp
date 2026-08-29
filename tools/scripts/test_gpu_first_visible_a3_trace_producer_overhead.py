@@ -5,11 +5,150 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
 import gpu_first_visible_a3_trace_producer_overhead as overhead
+
+
+def write_collection_host(path: Path) -> None:
+    source = path.with_suffix(".c")
+    source.write_text(
+        "#include <signal.h>\n#include <unistd.h>\n"
+        "int main(void) { for (;;) pause(); }\n",
+        encoding="utf-8",
+    )
+    compiler = shutil.which("cc")
+    assert compiler is not None
+    subprocess.run([compiler, str(source), "-o", str(path)], check=True)
+    path.chmod(0o755)
+
+
+def write_collection_driver(path: Path) -> None:
+    path.write_text(
+        r'''#!/usr/bin/env python3
+import argparse, hashlib, json, os, signal, subprocess, time
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--request", required=True, type=Path)
+parser.add_argument("--receipt", required=True, type=Path)
+args = parser.parse_args()
+request = json.loads(args.request.read_text())
+root = Path(request["artifact_directory"])
+challenge = request["liveness_challenge"]
+challenge_root = Path(challenge["directory"])
+binary = Path(request["binary"]["runtime_path"])
+driver_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+samples = {"warmups": [], "measured": [], "fresh_process": []}
+global_index = 0
+for section, count in (("warmups", 5), ("measured", 30), ("fresh_process", 20)):
+    for sequence in range(count):
+        host = subprocess.Popen(
+            [str(binary)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+        try:
+            evidence_id = f"{global_index + 1:032x}"
+            started = time.monotonic_ns()
+            finished = started + 10_000_000
+            challenge_payload = {
+                "schema": "pulp.gpu-first-visible-trace-producer-challenge.v1",
+                "version": 1,
+                "attempt_nonce": request["attempt_nonce"],
+                "challenge_nonce": request["challenge_nonce"],
+                "state": request["state"],
+                "section": section,
+                "sequence": sequence,
+                "evidence_id": evidence_id,
+                "host_pid": host.pid,
+                "audio_thread_tids": [host.pid],
+                "started_monotonic_ns": started,
+                "finished_monotonic_ns": finished,
+                "xrun_count": 0,
+            }
+            challenge_path = challenge_root / f"challenge-{global_index:02}.json"
+            temporary = challenge_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(challenge_payload, sort_keys=True) + "\n")
+            os.replace(temporary, challenge_path)
+            ack_path = challenge_root / f"ack-{global_index:02}.json"
+            deadline = time.monotonic() + 5
+            while not ack_path.is_file() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            if not ack_path.is_file():
+                raise RuntimeError("collector did not acknowledge the live host")
+            ack = json.loads(ack_path.read_text())
+            metrics_path = root / f"metrics-{global_index:02}.json"
+            metrics = {
+                "schema": "pulp.gpu-first-visible-trace-producer-runtime-metrics.v1",
+                "version": 1,
+                "state": request["state"],
+                "sequence": sequence,
+                "evidence_id": evidence_id,
+                "host_pid": host.pid,
+                "process_start_identity": ack["process_start_identity"],
+                "executable_sha256": request["binary"]["sha256"],
+                "audio_thread_tids": challenge_payload["audio_thread_tids"],
+                "started_monotonic_ns": started,
+                "finished_monotonic_ns": finished,
+                "xrun_count": 0,
+                "collection_challenge_nonce": request["challenge_nonce"],
+                "driver_sha256": driver_sha,
+            }
+            metrics_path.write_text(json.dumps(metrics, sort_keys=True) + "\n")
+            samples[section].append({
+                "sequence": sequence,
+                "evidence_id": evidence_id,
+                "duration_ms": 10.0,
+                "runtime_metrics": {
+                    "path": metrics_path.relative_to(root).as_posix(),
+                    "sha256": hashlib.sha256(metrics_path.read_bytes()).hexdigest(),
+                },
+                "trace": None,
+            })
+        finally:
+            try:
+                os.killpg(host.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            host.wait(timeout=3)
+        global_index += 1
+receipt = {
+    "schema": "pulp.gpu-first-visible-trace-producer-driver-receipt.v1",
+    "version": 1,
+    "attempt_nonce": request["attempt_nonce"],
+    "challenge_nonce": request["challenge_nonce"],
+    "state": request["state"],
+    "outcome": "pass",
+    "reason": None,
+    "binary_sha256": request["binary"]["sha256"],
+    "driver_sha256": driver_sha,
+    "samples": samples,
+}
+args.receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+''',
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def make_collection_source(path: Path) -> tuple[Path, str]:
+    driver = path / "tools/testing/a3/trace-producer-overhead-driver.py"
+    driver.parent.mkdir(parents=True)
+    write_collection_driver(driver)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "a3@example.invalid"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "A3 Test"], cwd=path, check=True)
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=path, check=True)
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=path, text=True,
+    ).strip()
+    return driver, revision
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -40,12 +179,16 @@ def make_fixture(
         "workload_id": "forge-first-visible-reference",
         "content_sha256": "d" * 64,
         "adapter_sha256": "e" * 64,
+        "adapter_revision": candidate_revision,
+        "adapter_path": driver_path,
     }
+    workload["adapter_sha256"] = driver_sha256
     driver = {
         "revision": candidate_revision,
         "path": driver_path,
         "sha256": driver_sha256,
     }
+    challenge_nonce = "0" * 32
     duration = {
         "pre-change-baseline": 10.0,
         "candidate-compile-out": 10.05,
@@ -98,6 +241,8 @@ def make_fixture(
                     "started_monotonic_ns": started_ns,
                     "finished_monotonic_ns": finished_ns,
                     "xrun_count": 0,
+                    "collection_challenge_nonce": challenge_nonce,
+                    "driver_sha256": driver_sha256,
                 })
                 trace_ref = None
                 if active:
@@ -114,6 +259,7 @@ def make_fixture(
                                 "process_start_identity": process_start,
                                 "executable_sha256": binary_sha256,
                                 "session_config_sha256": session_config_ref["sha256"],
+                                "collection_challenge_nonce": challenge_nonce,
                                 "audio_thread_tids_sha256": (
                                     overhead.trace_replay.tids_digest(audio_tids)
                                 ),
@@ -131,6 +277,19 @@ def make_fixture(
                             "dur": max(1, (finished_ns - started_ns) / 1000),
                             "args": {"gpu_evidence_id": evidence_id},
                         },
+                        *[
+                            {
+                                "name": name,
+                                "cat": "render",
+                                "ph": "X",
+                                "pid": host_pid,
+                                "tid": host_pid,
+                                "ts": started_ns / 1000,
+                                "dur": 1,
+                                "args": {"gpu_evidence_id": evidence_id},
+                            }
+                            for name in ("gpu_acquire", "gpu_submit", "gpu_present")
+                        ],
                     ]})
                     trace_ref = {
                         **overhead.artifact_ref(trace, root),
@@ -153,6 +312,7 @@ def make_fixture(
             "version": 1,
             "state": state,
             "producer_revision": overhead.PRODUCER_REVISION,
+            "producer_packages": copy.deepcopy(overhead.PRODUCER_PACKAGES),
             "source_revision": (
                 baseline_revision if state == "pre-change-baseline"
                 else candidate_revision
@@ -175,6 +335,7 @@ def make_fixture(
                 "session_active": session_active,
                 "ring_bytes": ring_bytes,
             },
+            "collection": None,
             "warmups": samples("warmup", 5),
             "measured": samples("measured", 30),
             "fresh_process": samples("fresh", 20),
@@ -220,6 +381,7 @@ def expect_failure(
     try:
         receipt = overhead.build_receipt(
             paths, evidence_root=root, generated_utc="2026-08-29T12:00:00Z",
+            allow_fixture_collection=True, allow_fixture_chrome_json=True,
         )
     except overhead.OverheadError:
         return
@@ -235,11 +397,88 @@ def main() -> int:
         receipt = overhead.build_receipt(
             paths, evidence_root=temp_root / "positive",
             generated_utc="2026-08-29T12:00:00Z",
+            allow_fixture_collection=True, allow_fixture_chrome_json=True,
         )
         assert receipt["verdict"] == "pass"
         receipt_path = temp_root / "positive" / "receipt.json"
         write_json(receipt_path, receipt)
-        overhead.validate_receipt(receipt, temp_root / "positive")
+        overhead.validate_receipt(
+            receipt, temp_root / "positive",
+            allow_fixture_collection=True, allow_fixture_chrome_json=True,
+        )
+        for kwargs, label in (
+            ({}, "terminal receipt without a live collection"),
+            ({"allow_fixture_collection": True}, "terminal Chrome JSON fixture"),
+        ):
+            try:
+                overhead.build_receipt(
+                    paths, evidence_root=temp_root / "positive",
+                    generated_utc="2026-08-29T12:00:00Z", **kwargs,
+                )
+            except overhead.OverheadError:
+                pass
+            else:
+                raise AssertionError(f"planted negative passed: {label}")
+
+        active_row = json.loads(
+            (temp_root / "positive" / receipt["raw_artifacts"]["candidate-active"]["path"])
+            .read_text(encoding="utf-8")
+        )["measured"][0]
+        metrics = json.loads(
+            (temp_root / "positive" / active_row["runtime_metrics"]["path"])
+            .read_text(encoding="utf-8")
+        )
+        replay_request = {
+            "evidence_id": metrics["evidence_id"],
+            "host_pid": metrics["host_pid"],
+            "process_start_identity": metrics["process_start_identity"],
+            "executable_sha256": metrics["executable_sha256"],
+            "audio_thread_tids": metrics["audio_thread_tids"],
+            "session_config_sha256": receipt["trace_session_config"]["sha256"],
+            "ring_bytes": overhead.RING_BYTES,
+            "collection_challenge_nonce": metrics["collection_challenge_nonce"],
+        }
+        fake_marker = temp_root / "fake-processor-ran"
+        fake_processor = temp_root / "fake-trace-processor"
+        fake_processor.write_text(
+            "#!/bin/sh\ntouch " + str(fake_marker) + "\n", encoding="utf-8",
+        )
+        fake_processor.chmod(0o755)
+        binary_trace = temp_root / "binary.pftrace"
+        binary_trace.write_bytes(b"\x0a\x03bad")
+        try:
+            overhead.trace_replay.analyze_trace(
+                binary_trace, replay_request, fake_processor,
+            )
+        except overhead.trace_replay.TraceReplayError:
+            pass
+        else:
+            raise AssertionError("unpinned trace processor unexpectedly passed")
+        assert not fake_marker.exists(), "unpinned trace processor was executed"
+
+        valid_result = {
+            "trace_format": "perfetto-proto", "request": replay_request,
+            "producer_events": 1, "foreign_producer_events": 0,
+            "producer_pids": [metrics["host_pid"]], "producer_tids": [metrics["host_pid"]],
+            "producer_upids": [7], "session_events": 1, "session_upids": [7],
+            "xrun_events": 0, "incomplete_slices": 0,
+            "data_loss_count": 0, "no_flush_count": 0,
+            "input_to_present_events": {
+                "gpu_acquire": 1, "gpu_submit": 1, "gpu_present": 1,
+            },
+            "input_to_present_pids": [metrics["host_pid"]],
+            "input_to_present_tids": [metrics["host_pid"]],
+            "input_to_present_upids": [7],
+        }
+        for field, value in (("incomplete_slices", 1), ("session_upids", [8])):
+            mutated = dict(valid_result)
+            mutated[field] = value
+            try:
+                overhead.trace_replay.result(**mutated)
+            except overhead.trace_replay.TraceReplayError:
+                pass
+            else:
+                raise AssertionError(f"trace replay accepted planted {field}")
 
         def mutation_table(case_root: Path) -> list[
             Callable[[dict[str, dict[str, Any]], dict[str, Path]], None]
@@ -287,9 +526,21 @@ def main() -> int:
                     docs["candidate-active"]["measured"][2]["runtime_metrics"],
                     lambda value: value.__setitem__("executable_sha256", "a" * 64),
                 ),
+                lambda docs, _: rewrite_artifact(
+                    case_root, docs["candidate-active"]["measured"][3]["trace"],
+                    lambda value: value.__setitem__(
+                        "traceEvents", [
+                            event for event in value["traceEvents"]
+                            if event.get("name") != "gpu_present"
+                        ],
+                    ),
+                ),
+                lambda docs, _: docs["candidate-active"]["producer_packages"][
+                    "mac-input-to-present"
+                ].__setitem__("revision", "0" * 40),
             ]
 
-        for index in range(12):
+        for index in range(14):
             case_root = temp_root / f"negative-{index}"
             case_root.mkdir()
             expect_failure(case_root, mutation_table(case_root)[index], str(index))
@@ -297,15 +548,129 @@ def main() -> int:
         mutated_receipt = copy.deepcopy(receipt)
         mutated_receipt["comparisons"]["candidate-active"]["pass"] = False
         try:
-            overhead.validate_receipt(mutated_receipt, temp_root / "positive")
+            overhead.validate_receipt(
+                mutated_receipt, temp_root / "positive",
+                allow_fixture_collection=True, allow_fixture_chrome_json=True,
+            )
         except overhead.OverheadError:
             pass
         else:
             raise AssertionError("derived receipt mutation did not fire")
 
+        collection_evidence = temp_root / "live-collection"
+        collection_evidence.mkdir()
+        source_root = temp_root / "collection-source"
+        source_root.mkdir()
+        collection_driver, candidate_revision = make_collection_source(source_root)
+        collection_host = temp_root / "collection-host"
+        write_collection_host(collection_host)
+        session_config = collection_evidence / "trace-session-config.json"
+        write_json(session_config, {
+            "schema": overhead.SESSION_CONFIG_SCHEMA,
+            "version": 1,
+            "ring_bytes": overhead.RING_BYTES,
+            "fill_policy": "ring-buffer",
+            "categories": ["dsp", "gpu", "metadata", "render"],
+        })
+        driver_relative = "tools/testing/a3/trace-producer-overhead-driver.py"
+        collection_request = {
+            "schema": overhead.COLLECTION_REQUEST_SCHEMA,
+            "version": 1,
+            "state": "candidate-compiled-in-idle",
+            "producer_revision": overhead.PRODUCER_REVISION,
+            "producer_packages": copy.deepcopy(overhead.PRODUCER_PACKAGES),
+            "source_revision": candidate_revision,
+            "baseline_revision": overhead.BASELINE_REVISION,
+            "candidate_revision": candidate_revision,
+            "campaign_role": "standalone",
+            "campaign_id": "live-collection-campaign",
+            "build_family_id": "live-collection-build",
+            "product_id": "dev.pulp.live-collection",
+            "product_name": "Live Collection Product",
+            "plugin_format": "standalone",
+            "binary_sha256": overhead.sha256_file(collection_host, "collection host"),
+            "machine": {
+                "machine_id": "fixture-mac",
+                "operating_system": "macOS",
+                "architecture": "arm64",
+            },
+            "workload": {
+                "workload_id": "live-collection-workload",
+                "content_sha256": "d" * 64,
+                "adapter_sha256": overhead.sha256_file(
+                    collection_driver, "collection driver",
+                ),
+                "adapter_revision": candidate_revision,
+                "adapter_path": driver_relative,
+            },
+            "measurement_driver": {
+                "revision": candidate_revision,
+                "path": driver_relative,
+                "sha256": overhead.sha256_file(collection_driver, "collection driver"),
+            },
+            "trace_session_config": overhead.artifact_ref(
+                session_config, collection_evidence,
+            ),
+            "tracing": {
+                "compiled_in": True,
+                "session_active": False,
+                "ring_bytes": 0,
+            },
+        }
+        collection_request_path = collection_evidence / "request.json"
+        write_json(collection_request_path, collection_request)
+        foreign_driver = temp_root / "foreign-driver.py"
+        foreign_driver.write_bytes(collection_driver.read_bytes())
+        foreign_driver.chmod(0o755)
+        try:
+            overhead.collect_state(
+                request_path=collection_request_path,
+                evidence_root=collection_evidence, source_root=source_root,
+                binary=collection_host, driver=foreign_driver,
+                output=collection_evidence / "foreign.json", trace_processor=None,
+            )
+        except overhead.OverheadError:
+            pass
+        else:
+            raise AssertionError("non-source-bound collection driver passed")
+        collection_output = collection_evidence / "candidate-compiled-in-idle.json"
+        live_raw = overhead.collect_state(
+            request_path=collection_request_path, evidence_root=collection_evidence,
+            source_root=source_root, binary=collection_host, driver=collection_driver,
+            output=collection_output, trace_processor=None,
+        )
+        overhead.validate_raw(
+            live_raw, state="candidate-compiled-in-idle",
+            evidence_root=collection_evidence, trace_processor=None,
+            label="live-collection", allow_fixture_collection=False,
+            allow_fixture_chrome_json=False,
+        )
+        collection_receipt_path = (
+            collection_evidence / live_raw["collection"]["path"]
+        )
+        original_collection_receipt = collection_receipt_path.read_bytes()
+        collection_receipt = json.loads(original_collection_receipt)
+        collection_receipt["handshake_artifacts"].pop()
+        write_json(collection_receipt_path, collection_receipt)
+        live_raw["collection"]["sha256"] = overhead.sha256_file(
+            collection_receipt_path, "mutated collection receipt",
+        )
+        try:
+            overhead.validate_raw(
+                live_raw, state="candidate-compiled-in-idle",
+                evidence_root=collection_evidence, trace_processor=None,
+                label="live-collection", allow_fixture_collection=False,
+                allow_fixture_chrome_json=False,
+            )
+        except overhead.OverheadError:
+            pass
+        else:
+            raise AssertionError("incomplete live handshake unexpectedly passed")
+        collection_receipt_path.write_bytes(original_collection_receipt)
+
         print(
             "gpu-first-visible-a3-trace-producer-overhead: "
-            "positive=1 planted_negatives=13"
+            "positive=2 planted_negatives=22"
         )
     return 0
 
