@@ -327,5 +327,3 @@ target_link_libraries(pulp-test-design-import-screenshot-parity
     PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import-screenshot-parity
     PROPERTIES LABELS "parser-import")
-
-# Value-driven silhouette fill (design-import shape-fill — item 3): exercises

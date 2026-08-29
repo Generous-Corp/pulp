@@ -1,6 +1,8 @@
 # Design import runtime bridge test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# Value-driven silhouette fill (design-import shape-fill — item 3): exercises
+# ImageView::set_fill_value + the canvas url() image mask on the Skia raster
 # backend (no GPU window).
 add_executable(pulp-test-image-view-fill
     test_image_view_fill.cpp)
