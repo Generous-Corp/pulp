@@ -166,9 +166,11 @@ upgrade that bounded claim.
 
 Copy each passing `run.json` campaign fragment and the requested control refs
 into the final template, add the same-instance A2T bundle, and run the closed
-generator above. It independently derives exactly one B4 disposition from the
-validated causal campaign and replayed pinned analyzer; any submitted
-disposition or evidence that disagrees is rejected.
+generator above. Each final campaign preserves and re-verifies the exact outer
+adapter and nested role-producer bytes, so an opaque or later-replaced harness
+cannot inherit the trials. The generator independently derives exactly one B4
+disposition from the validated causal campaign and replayed pinned analyzer;
+any submitted disposition or evidence that disagrees is rejected.
 
 ## Current standalone production boundary
 

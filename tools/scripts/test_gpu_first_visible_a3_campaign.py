@@ -107,6 +107,8 @@ if outcome == "pass":
         product = args.request.parent / ref["path"]
         product.write_bytes(b"")
         ref["sha256"] = hashlib.sha256(b"").hexdigest()
+    elif MUTATION == "request-mutation":
+        args.request.write_text("{{}}\\n")
 
 receipt = {{
     "schema": {campaign.ADAPTER_SCHEMA!r}, "version": 1,
@@ -162,6 +164,8 @@ def main() -> int:
         assert run.returncode == 0, run.stderr
         assert result["status"] == "pass"
         assert result["campaign"]["role"] == "standalone"
+        assert result["campaign"]["adapter"] == result["adapter"]
+        assert result["campaign"]["measurement_producer"] == result["measurement_producer"]
         assert result["controls"]["blank_negative"] is not None
         assert result["controls"]["audio_thread_exclusion"] is not None
         assert result["controls"]["blank_control_binary"] is not None
@@ -182,6 +186,7 @@ def main() -> int:
             "trace-evidence": "does not exactly corroborate the campaign",
             "empty-product": "product artifact is empty",
             "exit-mismatch": "exit code disagrees",
+            "request-mutation": "digest mismatch",
         }
         for mutation, needle in negatives.items():
             run, result = run_adapter(root, evidence, identity_path, mutation)
@@ -211,7 +216,7 @@ def main() -> int:
         else:
             raise AssertionError("Forge campaign accepted a non-standalone product format")
 
-        print("gpu-first-visible-a3-campaign: positive=2 planted_negatives=11")
+        print("gpu-first-visible-a3-campaign: positive=2 planted_negatives=12")
     return 0
 
 

@@ -704,8 +704,8 @@ def validate_campaigns(
         if campaign["status"] != "pass":
             raise AcceptanceError(f"{label} is not pass")
         if any(campaign[key] is None for key in (
-            "health_result", "raw_cold", "raw_warm", "product_artifact", "host_artifact",
-            "trace", "trace_analysis",
+            "adapter", "measurement_producer", "health_result", "raw_cold", "raw_warm",
+            "product_artifact", "host_artifact", "trace", "trace_analysis",
         )):
             raise AcceptanceError(f"{label} is missing a required artifact")
         expected_endpoint = MEASUREMENT_ENDPOINT_BY_ROLE[role]
@@ -745,6 +745,11 @@ def validate_campaigns(
         )
         resolve_artifact(campaign["product_artifact"], evidence_root, f"{label}.product_artifact")
         resolve_artifact(campaign["host_artifact"], evidence_root, f"{label}.host_artifact")
+        resolve_artifact(campaign["adapter"], evidence_root, f"{label}.adapter")
+        resolve_artifact(
+            campaign["measurement_producer"], evidence_root,
+            f"{label}.measurement_producer",
+        )
         validate_campaign_trace(campaign, health, evidence_root, label)
         results[role] = (campaign, health)
     return results

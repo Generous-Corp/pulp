@@ -74,7 +74,7 @@
       "uniqueItems": true,
       "items": {
         "type": "object",
-        "required": ["role", "status", "identity", "health_result", "raw_cold", "raw_warm", "product_artifact", "host_artifact", "trace", "trace_analysis"],
+        "required": ["role", "status", "identity", "adapter", "measurement_producer", "health_result", "raw_cold", "raw_warm", "product_artifact", "host_artifact", "trace", "trace_analysis"],
         "additionalProperties": false,
         "properties": {
           "role": { "enum": ["standalone", "headless-constrained", "daw", "forge"] },
@@ -98,6 +98,8 @@
               "campaign_id": { "type": "string", "minLength": 1, "maxLength": 256 }
             }
           },
+          "adapter": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
+          "measurement_producer": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
           "health_result": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
           "raw_cold": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },
           "raw_warm": { "oneOf": [{ "type": "null" }, { "$comment": "artifact-ref", "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 1024 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }] },

@@ -339,6 +339,7 @@ def validate_adapter_receipt(
         "measurement_endpoint": endpoint,
         "status": "pass",
         "identity": identity,
+        "measurement_producer": resolved["measurement_producer"],
         **{name: resolved[name] for name in (
             "health_result", "raw_cold", "raw_warm", "product_artifact",
             "host_artifact", "trace", "trace_analysis",
@@ -441,6 +442,10 @@ def run_role(args: argparse.Namespace) -> int:
     }
     request_path = run_dir / "request.json"
     atomic_json(request_path, request)
+    request_ref = {
+        "path": request_path.relative_to(run_dir).as_posix(),
+        "sha256": hashlib.sha256(regular_file_bytes(request_path, "campaign request")).hexdigest(),
+    }
     receipt_path = run_dir / "adapter-output" / "receipt.json"
     process = subprocess.Popen(
         [adapter_snapshot["path"], "--request", str(request_path.resolve()),
@@ -461,6 +466,7 @@ def run_role(args: argparse.Namespace) -> int:
         "identity_source": identity_ref,
         "measurement_endpoint": request["measurement_endpoint"],
         "adapter": adapter_ref,
+        "request": request_ref,
         "budget": budget_refs,
         "logs": logs,
     }
@@ -469,6 +475,7 @@ def run_role(args: argparse.Namespace) -> int:
         a3.validate_declared_artifacts({
             "identity_source": identity_ref,
             "adapter": adapter_ref,
+            "request": request_ref,
             "budget": budget_refs,
         }, run_dir, "runner-owned inputs")
     except a3.AcceptanceError as error:
@@ -518,6 +525,8 @@ def run_role(args: argparse.Namespace) -> int:
             "controls": None, "partial_artifacts": artifacts,
         })
         return 1 if outcome == "fail" else 2
+    assert campaign is not None
+    campaign["adapter"] = adapter_ref
     controls = (
         {
             "blank_negative": artifacts["blank_negative"],

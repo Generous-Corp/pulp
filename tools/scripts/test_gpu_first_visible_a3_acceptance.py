@@ -201,6 +201,8 @@ def make_fixture(root: Path) -> dict[str, Any]:
         write_json(root, f"{role}-health.json", result)
         (root / f"{role}-product.bin").write_bytes(f"product:{role}".encode())
         (root / f"{role}-host.bin").write_bytes(f"host:{role}".encode())
+        (root / f"{role}-adapter.bin").write_bytes(f"adapter:{role}".encode())
+        (root / f"{role}-producer.bin").write_bytes(f"producer:{role}".encode())
         trace_bytes = (
             (ROOT / TRACE_SOURCE_PATH).read_bytes()
             if role == "forge" else f"trace:{role}".encode()
@@ -234,6 +236,8 @@ def make_fixture(root: Path) -> dict[str, Any]:
             "measurement_endpoint": result["startup"]["measurement_endpoint"],
             "status": "pass",
             "identity": campaign_identity,
+            "adapter": auto(f"{role}-adapter.bin"),
+            "measurement_producer": auto(f"{role}-producer.bin"),
             "health_result": auto(f"{role}-health.json"),
             "raw_cold": auto(f"{role}-cold.json"),
             "raw_warm": auto(f"{role}-warm.json"),
@@ -979,6 +983,10 @@ def main() -> int:
         expect_failure(mutated, root, "every required role")
 
         mutated = copy.deepcopy(receipt)
+        mutated["campaigns"][0]["measurement_producer"] = None
+        expect_failure(mutated, root, "missing a required artifact")
+
+        mutated = copy.deepcopy(receipt)
         forge = next(campaign for campaign in mutated["campaigns"] if campaign["role"] == "forge")
         forge["identity"]["plugin_format"] = "auv2"
         expect_failure(mutated, root, "standalone shell")
@@ -1090,7 +1098,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=44 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=45 "
             "checked_in_nonterminal=verified"
         )
     return 0

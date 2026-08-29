@@ -428,7 +428,7 @@ def run(request_path: Path, receipt_path: Path) -> int:
             timeout_seconds=780,
             log_prefix=artifact_directory / "logs" / "measurement-producer",
         )
-        if artifacts["measurement_producer"]["sha256"] != producer_digest:
+        if regular_file_sha256(producer, "measurement producer snapshot") != producer_digest:
             raise AdapterError("measurement producer snapshot changed while it ran")
         if not producer_receipt_path.is_file() or producer_receipt_path.is_symlink():
             raise AdapterError(
