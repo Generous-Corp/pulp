@@ -1276,7 +1276,8 @@ void View::paint_post_decorations(canvas::Canvas& canvas,
     // importer owns the opt-in flag, so authored hover treatments can disable
     // this overlay rather than receiving two competing effects.
     if (default_hover_feedback_ && hovered_ && enabled_) {
-        canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, 15));
+        const auto hover_tint = resolve_color("text.primary", canvas::Color::rgba8(255, 255, 255));
+        canvas.set_fill_color(hover_tint.with_alpha(15.0f / 255.0f));
         if (eff_r > 0.0f) {
             canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
         } else {
