@@ -30,6 +30,7 @@ FORBIDDEN_PATTERNS = [
 
 EXPECTED_PUBLIC_HEADERS = [
     "core/scene/include/pulp/scene/bake_preflight.hpp",
+    "core/scene/include/pulp/scene/draco_scene_adapter.hpp",
     "core/scene/include/pulp/scene/gltf_loader.hpp",
     "core/scene/include/pulp/scene/material_key.hpp",
     "core/scene/include/pulp/scene/render_packet.hpp",
@@ -38,7 +39,6 @@ EXPECTED_PUBLIC_HEADERS = [
     "core/scene/include/pulp/scene/scene_graph.hpp",
     "core/scene/include/pulp/scene/scene_stats.hpp",
     "core/scene/include/pulp/scene/sidecar.hpp",
-    "core/render/include/pulp/render/draco_scene_adapter.hpp",
     "core/render/include/pulp/render/renderer3d.hpp",
 ]
 
@@ -56,7 +56,6 @@ def verify_default_header_set(repo_root: Path):
     expected = {repo_root / relative for relative in EXPECTED_PUBLIC_HEADERS}
     discovered = set((repo_root / "core/scene/include/pulp/scene").glob("*.hpp"))
     discovered.update([
-        repo_root / "core/render/include/pulp/render/draco_scene_adapter.hpp",
         repo_root / "core/render/include/pulp/render/renderer3d.hpp",
     ])
 
