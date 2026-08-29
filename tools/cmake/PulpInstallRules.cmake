@@ -36,7 +36,11 @@ list(APPEND PULP_SDK_TARGETS
     pulp-playback pulp-events
     pulp-sample-bank-manifest pulp-state
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
-    pulp-audio pulp-midi pulp-signal pulp-graph pulp-format pulp-sequence
+    pulp-audio pulp-midi pulp-signal pulp-graph
+    # pulp-format is the umbrella; both halves must be exported too or a
+    # consumer resolving Pulp::format finds an interface naming targets the
+    # export set never defined.
+    pulp-format pulp-format-core pulp-format-view pulp-sequence
     pulp-osc pulp-canvas pulp-view-core pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )

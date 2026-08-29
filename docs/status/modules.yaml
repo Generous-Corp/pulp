@@ -149,7 +149,14 @@ modules:
     docs: reference/modules.md#state
 
   - name: format
-    summary: Plugin format adapters (VST3, AU, CLAP, standalone, headless), validation harness, diagnostic reporter
+    summary: >-
+      Plugin format adapters (VST3, AU, CLAP, standalone, headless), validation
+      harness, diagnostic reporter. Ships as three targets: pulp::format-core
+      (the authoring surface, view-free), pulp::format-view (ViewBridge, editor
+      chrome and the CLAP adapter, which carry the core/view dependency), and
+      pulp::format, an umbrella linking both so existing consumers are
+      unchanged. Link pulp::format-core to author a Processor without pulling
+      in the UI layer.
     status: usable
     dependencies: [state, audio, midi, timebase]
     docs: reference/modules.md#format
