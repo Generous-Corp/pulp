@@ -649,6 +649,20 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         self.assertIn("lfs: false", self.text)
         self.assertNotIn("lfs: true", self.text)
 
+    def test_darwin_leg_requires_mixed_provider_render_proof(self) -> None:
+        self.assertIn(
+            "python3 tools/scripts/fetch_v8_for_release.py darwin-arm64",
+            self.text,
+        )
+        self.assertIn("-DPULP_JS_ENGINE=v8", self.text)
+        self.assertIn("-DPULP_VALIDATE_V8_PROVIDER_STRICT=ON", self.text)
+        self.assertIn(
+            "tools/ci/governed-build.sh cmake --build build --config Release",
+            self.text,
+        )
+        self.assertIn("provider_identity_test.cmake", self.text)
+        self.assertIn("matrix.platform == 'darwin-arm64'", self.text)
+
 
 class ReleaseCliDualBinaryPackaging(unittest.TestCase):
     """release-cli.yml must keep `pulp` and `pulp-cpp` bundled and smoked.
