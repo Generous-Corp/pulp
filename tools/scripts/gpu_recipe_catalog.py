@@ -313,8 +313,8 @@ def validate_handoff(document: Any) -> list[str]:
             "retain-pulp": ("Generous-Corp/pulp", None, False),
             "retain-pulp-followup": ("Generous-Corp/pulp", None, False),
             "retain-pulp-product-adapters": ("Generous-Corp/pulp", "B1-B3", False),
-            "retain-pulp-analysis-replace-generic-producers":
-                ("Generous-Corp/pulp", "B4", True),
+            "retain-pulp-analysis-migrate-generic-producers":
+                ("Generous-Corp/pulp", "B6", True),
             "retain-pulp-control-replace-generic-event-sources":
                 ("Generous-Corp/pulp", "B4", True),
             "retain-pulp-experiment-replace-policy-consumption":

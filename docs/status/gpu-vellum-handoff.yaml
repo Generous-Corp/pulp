@@ -65,10 +65,10 @@
         "tools/scripts/gpu_trace_overhead_acceptance.py",
         "tools/scripts/test_gpu_trace_overhead_acceptance.py"
       ],
-      "cutover_action": "retain-pulp-analysis-replace-generic-producers",
-      "vellum_phase": "B4",
-      "delete_after": "Delete only producer-specific compatibility queries named by B0 after an installed Vellum trace emits equivalent versioned categories, identities, loss accounting, and same-instance correlation and the pinned CLI/MCP/A2T rerun passes.",
-      "reason": "Pulp retains product questions, installed analyzers, MCP adaptation, SQL interpretation, and A2T receipts. Generic render-span production is the replaceable Vellum side."
+      "cutover_action": "retain-pulp-analysis-migrate-generic-producers",
+      "vellum_phase": "B6",
+      "delete_after": "Delete only producer-specific compatibility queries named by B0 after B6 proves an installed Vellum trace emits equivalent versioned categories, identities, loss accounting, and same-instance correlation and the pinned CLI/MCP/A2T rerun passes.",
+      "reason": "Pulp retains product questions, installed analyzers, MCP adaptation, SQL interpretation, and A2T receipts. B6 migrates generic render-span production; only exact causal gaps selected by A3 route through B4 investigation."
     },
     {
       "id": "a3-pulp-runtime-control-adapters",

@@ -8,12 +8,13 @@ is usable today. Live lifecycle control is broker-authorized and fail-closed.
 
 Tracing is a dev-only tool. Never ship a plugin with `PULP_TRACING` enabled.
 
-## Four paths (pick by what you have)
+## Five paths (pick by what you have)
 
 | You have | Path | Tool |
 |---|---|---|
 | Authorized control session + want a DSP flamegraph | **Experimental live trace** | Start/stop through canonical control |
 | A `.pftrace` + a question | **Query** | `pulp trace query "<sql>" --trace FILE.pftrace` |
+| A GPU startup, health, or probe question | **Named GPU analysis** | `pulp trace gpu-startup|gpu-health|gpu-probe --trace FILE.pftrace` |
 | Want to hand an agent / human the raw file | **Return the path** | `pulp trace stop` prints it; open in ui.perfetto.dev |
 | A UI hitch to correlate | **Frame trace + motion join** | trace `render,layout` while a motion trace runs; query on shared `trace_id` |
 
@@ -35,6 +36,25 @@ pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" \
   --trace /tmp/pulp-trace.pftrace
 
 ```
+
+## Named GPU analysis
+
+Use the closed questions before writing free-form SQL:
+
+```bash
+pulp trace gpu-startup --trace /tmp/pulp-trace.pftrace --json
+pulp trace gpu-health  --trace /tmp/pulp-trace.pftrace --json
+pulp trace gpu-probe   --trace /tmp/pulp-trace.pftrace --json
+pulp trace open /tmp/pulp-trace.pftrace
+```
+
+The three verbs run the checked-in PerfettoSQL views and share their typed
+result with MCP `pulp_trace_analyze`. `gpu-startup` remains `unverified` until
+the matching A3 product budget is ratified. Empty, truncated, never-flushed,
+CPU-raster-host, and wrong-category captures fail closed; they are not zero GPU
+cost. Keep the returned evidence IDs when moving from the ranked Perfetto cause
+to a focused host/GPU harness and planted regression. Perfetto localizes the
+expensive stage; it does not by itself prove an application state-machine fix.
 
 ## Control methods
 
