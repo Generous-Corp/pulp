@@ -543,8 +543,11 @@ pins all three executables and fails closed on missing configuration or
 protocol drift. It does not provide generic present/cache instrumentation and
 must not be used to relabel capture completion as native presentation.
 Select the checked-in standalone, constrained-headless, REAPER, or Forge role
-producer rather than an undocumented producer path. Each role entry point pins
-the configured product, host, and lifecycle-driver bytes and validates 20
-role-appropriate endpoint observations. The driver remains an explicit
+producer rather than an undocumented producer path. The adapter pins the role
+entry point and its checked-in support from the exact Pulp source root. Each
+role entry point pins the configured product, host, lifecycle driver, final-head
+trace analyzer, and digest-bound build attestation/receipt; it rehashes those
+inputs and validates 20 role-appropriate endpoint observations plus named trace
+replay. The driver remains an explicit
 external prerequisite wherever the current Dawn/AppKit/host seam cannot expose
 native presentation without Vellum-owned work.

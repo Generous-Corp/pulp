@@ -256,9 +256,11 @@ nonterminal `run.json`, never a passing campaign.
 
 Use the checked-in `gpu_first_visible_a3_external_adapter.py` as the immutable
 envelope and select `gpu_first_visible_a3_reaper_producer.py`. Configure its
-exact REAPER, plugin binary/bundle, and role-driver paths; the producer runs the
-qualified-format preflight and then requires the driver to perform all 20
-editor opens. It retains the exact driver request/receipt and binaries in the
-host evidence tar. Missing automation or native-present truth is nonterminal;
+exact source-bound smoke/Lua helpers, REAPER, plugin binary/bundle, role driver,
+final-head trace analyzer, and digest-bound product build attestation/receipt;
+the producer runs the qualified-format preflight and then requires the driver
+to perform all 20 editor opens. It retains and rehashes those inputs with the
+exact driver request/receipt in the host evidence tar. Missing automation,
+build provenance, analyzer replay, or native-present truth is nonterminal;
 the producer cannot promote the `editor-open` smoke or a screenshot completion
 into campaign evidence.

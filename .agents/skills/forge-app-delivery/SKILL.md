@@ -436,7 +436,9 @@ For the executable handoff, use
 `gpu_first_visible_a3_external_adapter.py` with the checked-in
 `gpu_first_visible_a3_forge_producer.py`. Configure clean exact-revision Pulp
 and Forge roots, the exact app executable for both product and host identity,
-and the product-specific lifecycle driver. The producer pins those bytes and
-requires 10+10 reopen/reset rows, independent native presentation, and
-same-instance Perfetto evidence. A missing driver, dirty/wrong source head,
-different Forge build, or Pulp demo stays nonterminal or fails closed.
+the product-specific lifecycle driver, final-head trace analyzer, and the
+digest-bound Forge build attestation/receipt. The producer pins and rehashes
+those inputs and requires 10+10 reopen/reset rows, independent native
+presentation, and named same-instance Perfetto replay. A missing driver,
+provenance, dirty/wrong source head, different Forge build, or Pulp demo stays
+nonterminal or fails closed.
