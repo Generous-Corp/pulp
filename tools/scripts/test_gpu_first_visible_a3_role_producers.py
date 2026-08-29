@@ -159,7 +159,7 @@ elif mutation == "unknown-predecessor" and lifecycle:
 elif mutation == "prior-process" and lifecycle:
     lifecycle[10]["prior_process_id"] = "unrelated-process"
 elif mutation == "lifecycle-raw-mismatch" and lifecycle:
-    lifecycle[0]["lifecycle_id"] = "unrelated-lifecycle"
+    lifecycle[-1]["lifecycle_id"] = "unrelated-lifecycle"
 
 receipt = {
     "schema": "pulp.gpu-first-visible-role-driver-receipt.v1",
