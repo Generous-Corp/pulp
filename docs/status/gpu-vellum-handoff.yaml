@@ -687,8 +687,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "test/cmake/gpu_health_tests.cmake",
           "state": "pulp-owned-retained",
-          "revision": "0cbe6b8e34f1c5c7415e7e5770e9405eb60ac7df",
-          "object_id": "dd6aa967fdc13e6d55cdaf378615bc93dab9c5ac",
+          "revision": "d180de0f20287059c8df149ae9f57d2d7cfe4bc8",
+          "object_id": "ed13a71d6b8fbef18e7af61fea89a025b61f1113",
           "object_type": "blob"
         },
         {
