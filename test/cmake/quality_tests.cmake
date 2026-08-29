@@ -382,7 +382,9 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_read_contract.py")
     add_test(NAME gpu-probe-acceptance-verifier-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_probe_acceptance.py")
-    add_test(NAME gpu-probe-current-acceptance COMMAND ${Python3_EXECUTABLE}
+    add_test(NAME gpu-probe-terminal-recorder-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_probe_acceptance.py")
+    add_test(NAME gpu-probe-historical-v1-acceptance COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/verify_gpu_probe_acceptance.py"
         "${CMAKE_SOURCE_DIR}/docs/validation/gpu-probes/m3-a2-real-probes-20260828")
     add_test(NAME gpu-first-visible-acceptance-selftest COMMAND ${Python3_EXECUTABLE}

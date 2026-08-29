@@ -46,6 +46,7 @@ EXPECTED_BINARY_ROLES = {
     "renderer": "scene3d_cpp_cli",
     "threejs": "v8_threejs_cpp_cli",
 }
+EXPECTED_BINARY_ROLES_V2 = {group: "installed_rust_cli" for group in GROUPS}
 EXPECTED_SOURCE_BLOBS = {
     "core/render/include/pulp/render/gpu_compute.hpp",
     "core/render/include/pulp/render/renderer3d.hpp",
@@ -64,10 +65,44 @@ EXPECTED_BINARIES = {
     "scene3d_cpp_cli",
     "v8_threejs_cpp_cli",
 }
+EXPECTED_BINARIES_V2 = {
+    "installed_rust_cli",
+    "installed_cpp_delegate",
+    "installed_mcp",
+}
+EXPECTED_SOURCE_BLOBS_V2 = EXPECTED_SOURCE_BLOBS | {
+    "CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "docs/contracts/gpu-probe-result-v1.schema.json",
+    "docs/contracts/gpu-health-result-v1.schema.json",
+    "docs/status/gpu-recipes.schema.json",
+    "docs/status/gpu-recipes.yaml",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/src/fallthrough.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/cmd_gpu.cpp",
+    "tools/cli/gpu_probe/CMakeLists.txt",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp",
+    "tools/cli/gpu_recipe_catalog_data.h.in",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/gpu_probe_acceptance.py",
+    "tools/scripts/verify_gpu_probe_acceptance.py",
+}
+EXPECTED_PLAN_REVISION = "641649b7e7fece6baae34380b6e719904506af22"
+EXPECTED_PLAN_SHA256 = "00bdb8bd55fb90fb42d98a09442d2b168505a23a4208cb5b9edb67b01de69f07"
+EXPECTED_PLAN_BLOB = "2d1c461d3ea640f75786a72c312d074f68f59028"
+EXPECTED_FORGE_REVISION = "0750a88dea3af7fca927a8c02887e071109407ae"
+EXPECTED_FORGE_PULP_REF_BLOB = "3e54500140a1dc5de0dbefaab29612916f257ecd"
 RESULT_SCHEMA = (
     Path(__file__).resolve().parents[2]
     / "docs/contracts/gpu-probe-result-v1.schema.json"
 )
+HEALTH_SCHEMA = RESULT_SCHEMA.with_name("gpu-health-result-v1.schema.json")
 
 
 def _load(path: Path) -> Any:
@@ -130,6 +165,259 @@ def _canonical_repeat(result: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
+def _png_metrics(path: Path) -> dict[str, int]:
+    """Decode a bounded 8-bit RGB/RGBA PNG and prove nonblank content."""
+    import binascii
+    import struct
+    import zlib
+
+    data = path.read_bytes()
+    if len(data) > 8 * 1024 * 1024 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("Forge screenshot is not a bounded PNG")
+    offset = 8
+    width = height = bit_depth = color_type = interlace = None
+    compressed = bytearray()
+    while offset + 12 <= len(data):
+        length = struct.unpack(">I", data[offset:offset + 4])[0]
+        kind = data[offset + 4:offset + 8]
+        end = offset + 12 + length
+        if end > len(data):
+            raise ValueError("Forge screenshot PNG is truncated")
+        payload = data[offset + 8:offset + 8 + length]
+        declared_crc = struct.unpack(">I", data[end - 4:end])[0]
+        if (binascii.crc32(kind + payload) & 0xffffffff) != declared_crc:
+            raise ValueError("Forge screenshot PNG has an invalid chunk CRC")
+        if kind == b"IHDR":
+            width, height, bit_depth, color_type, _compression, _filter, interlace = struct.unpack(
+                ">IIBBBBB", payload
+            )
+        elif kind == b"IDAT":
+            compressed.extend(payload)
+        elif kind == b"IEND":
+            break
+        offset = end
+    if (
+        not isinstance(width, int) or not isinstance(height, int)
+        or width < 320 or height < 240 or width * height > 4_000_000
+        or bit_depth != 8 or color_type not in {2, 6} or interlace != 0
+    ):
+        raise ValueError("Forge screenshot has unsupported or implausible PNG geometry")
+    channels = 3 if color_type == 2 else 4
+    stride = width * channels
+    expected_filtered_bytes = (stride + 1) * height
+    try:
+        inflater = zlib.decompressobj()
+        filtered = inflater.decompress(bytes(compressed), expected_filtered_bytes + 1)
+        if inflater.unconsumed_tail:
+            raise ValueError("Forge screenshot PNG expands beyond its declared geometry")
+    except zlib.error as error:
+        raise ValueError(f"Forge screenshot PNG data is invalid: {error}") from error
+    if len(filtered) != expected_filtered_bytes or not inflater.eof or inflater.unused_data:
+        raise ValueError("Forge screenshot PNG scanline size is incoherent")
+    previous = bytearray(stride)
+    colors: set[bytes] = set()
+    luminance_min = 255
+    luminance_max = 0
+    cursor = 0
+    for _row_index in range(height):
+        filter_type = filtered[cursor]
+        cursor += 1
+        encoded = filtered[cursor:cursor + stride]
+        cursor += stride
+        row = bytearray(stride)
+        for index, value in enumerate(encoded):
+            left = row[index - channels] if index >= channels else 0
+            up = previous[index]
+            upper_left = previous[index - channels] if index >= channels else 0
+            if filter_type == 0:
+                predictor = 0
+            elif filter_type == 1:
+                predictor = left
+            elif filter_type == 2:
+                predictor = up
+            elif filter_type == 3:
+                predictor = (left + up) // 2
+            elif filter_type == 4:
+                p = left + up - upper_left
+                distances = (abs(p - left), abs(p - up), abs(p - upper_left))
+                predictor = (left, up, upper_left)[distances.index(min(distances))]
+            else:
+                raise ValueError("Forge screenshot uses an invalid PNG filter")
+            row[index] = (value + predictor) & 0xff
+        for index in range(0, stride, channels):
+            rgb = bytes(row[index:index + 3])
+            if len(colors) < 4096:
+                colors.add(rgb)
+            luminance = (int(rgb[0]) + int(rgb[1]) + int(rgb[2])) // 3
+            luminance_min = min(luminance_min, luminance)
+            luminance_max = max(luminance_max, luminance)
+        previous = row
+    if len(colors) < 16 or luminance_max - luminance_min < 20:
+        raise ValueError("Forge screenshot is blank or lacks a credible UI content range")
+    return {
+        "width": width,
+        "height": height,
+        "decoded_pixel_count": width * height,
+        "distinct_rgb_lower_bound": len(colors),
+        "luminance_range": luminance_max - luminance_min,
+    }
+
+
+def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) -> None:
+    source = _mapping(receipt.get("source_identity"), "source_identity", errors)
+    if source.get("repository") != "Generous-Corp/pulp" or source.get("clean") is not True:
+        errors.append("v2 source identity is not a clean canonical Pulp checkout")
+    if source.get("revision") != receipt.get("integration_head"):
+        errors.append("v2 source identity differs from integration_head")
+    if not SHA256.fullmatch(str(source.get("status_sha256", ""))):
+        errors.append("v2 source identity lacks the clean-status digest")
+    plan = _mapping(receipt.get("accepted_plan"), "accepted_plan", errors)
+    expected_plan = {
+        "repository": "danielraffel/pulp-planning",
+        "revision": EXPECTED_PLAN_REVISION,
+        "path": "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md",
+        "blob": EXPECTED_PLAN_BLOB,
+        "sha256": EXPECTED_PLAN_SHA256,
+    }
+    for key, value in expected_plan.items():
+        if plan.get(key) != value:
+            errors.append(f"v2 accepted plan {key} differs from the canonical plan")
+    install = _mapping(receipt.get("install_provenance"), "install_provenance", errors)
+    build_info = _mapping(install.get("build_info"), "install build_info", errors)
+    revision = str(receipt.get("integration_head", ""))
+    stamped = build_info.get("kGitSha")
+    if (
+        install.get("cmake_home_revision") != revision
+        or install.get("cmake_build_type") != "Release"
+        or install.get("rust_profile") != "release"
+        or build_info.get("kBuildType") != "Release"
+        or build_info.get("kGitDirty") is not False
+        or not isinstance(stamped, str)
+        or not revision.startswith(stamped)
+    ):
+        errors.append("v2 installed CLI provenance is not the exact clean Release source")
+    if install.get("build_install_binary_identity") != "pass":
+        errors.append("v2 installed binaries were not byte-identical to refreshed build outputs")
+    for field in ("cmake_cache_sha256", "build_info_sha256"):
+        if not SHA256.fullmatch(str(install.get(field, ""))):
+            errors.append(f"v2 installed provenance lacks exact {field}")
+    features = _mapping(install.get("feature_contract"), "install feature_contract", errors)
+    expected_features = {
+        "PULP_ENABLE_GPU": "ON", "PULP_ENABLE_SCENE3D": "ON",
+        "PULP_ENABLE_THREEJS_RUNTIME": "ON", "PULP_ENABLE_JS": "ON",
+        "PULP_JS_ENGINE": "v8", "PULP_BUILD_RUST_CLI": "ON",
+        "PULP_HAS_THREEJS": "TRUE",
+    }
+    if features != expected_features:
+        errors.append("v2 installed build lacks the exact all-four feature contract")
+    binaries = receipt.get("binaries")
+    if isinstance(binaries, dict):
+        for role, binary in binaries.items():
+            if isinstance(binary, dict) and binary.get("build_output_sha256") != binary.get("sha256"):
+                errors.append(f"v2 binary {role} differs from its refreshed build output")
+        rust = binaries.get("installed_rust_cli")
+        cpp = binaries.get("installed_cpp_delegate")
+        if (
+            isinstance(rust, dict) and isinstance(cpp, dict)
+            and rust.get("sha256") == cpp.get("sha256")
+        ):
+            errors.append("v2 installed pulp is a C++ copy rather than the Rust front")
+    forge = _mapping(receipt.get("forge_downstream"), "forge_downstream", errors)
+    if forge.get("repository") != "Generous-Corp/forge" or forge.get("revision") != EXPECTED_FORGE_REVISION:
+        errors.append("v2 Forge proof does not name the exact accepted Forge revision")
+    overlay = _mapping(forge.get("pulp_sdk_ref_overlay"), "Forge PULP_SDK_REF overlay", errors)
+    if overlay.get("path") != "PULP_SDK_REF" or overlay.get("content") != revision:
+        errors.append("v2 Forge proof lacks the exact one-file Pulp SDK overlay")
+    if overlay.get("original_blob") != EXPECTED_FORGE_PULP_REF_BLOB:
+        errors.append("v2 Forge proof lacks the accepted original PULP_SDK_REF blob")
+    if forge.get("all_other_tracked_files_clean") is not True:
+        errors.append("v2 Forge proof has source drift beyond PULP_SDK_REF")
+    stamp = _mapping(forge.get("bundle_build_info"), "Forge bundle build info", errors)
+    if (
+        stamp.get("product") != "Forge Modular"
+        or stamp.get("schema") != "1"
+        or not str(stamp.get("version", "")).strip()
+        or not str(stamp.get("product_id", "")).strip()
+        or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(stamp.get("packaged", "")))
+        or stamp.get("role") != "Rack module and patch generator"
+        or stamp.get("format") != "Standalone application"
+        or "Release" not in str(stamp.get("build", ""))
+        or revision[:12] not in str(stamp.get("pulp_sdk", ""))
+        or stamp.get("expected_pulp_sdk_ref") not in {None, ""}
+    ):
+        errors.append("v2 Forge bundle stamp does not bind the Modular shell to this Pulp SDK")
+    if forge.get("codesign_verify") != "pass" or forge.get("build_target") != "ForgeModular_Standalone":
+        errors.append("v2 Forge standalone was not rebuilt and signature-verified")
+    for field in ("cmake_cache_sha256", "bundle_build_info_sha256", "bundle_binary_sha256"):
+        if not SHA256.fullmatch(str(forge.get(field, ""))):
+            errors.append(f"v2 Forge proof lacks exact {field}")
+    screenshot_path = root / "forge-modular-screenshot.png"
+    try:
+        metrics = _png_metrics(screenshot_path)
+    except (OSError, ValueError) as error:
+        errors.append(f"Forge screenshot content proof failed: {error}")
+    else:
+        if metrics != forge.get("screenshot_metrics"):
+            errors.append("Forge screenshot metrics differ from decoded PNG content")
+    try:
+        doctor = _load(root / "forge-gpu-doctor.json")
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"cannot parse Forge GPU doctor evidence: {error}")
+    else:
+        try:
+            health_schema = _load(HEALTH_SCHEMA)
+        except (OSError, json.JSONDecodeError) as error:
+            errors.append(f"cannot read GPU health schema: {error}")
+        else:
+            for problem in json_schema_lite.validate(doctor, health_schema):
+                errors.append(f"Forge GPU doctor schema: {problem}")
+        if (
+            doctor.get("schema") != "pulp.gpu-health-result.v1"
+            or doctor.get("verdict") != "pass"
+            or doctor.get("health_state") != "healthy"
+            or doctor.get("recommendations") != []
+        ):
+            errors.append("Forge-cwd GPU doctor did not return a healthy typed pass")
+        probes = doctor.get("probes")
+        if not isinstance(probes, list) or not probes or any(
+            not isinstance(probe, dict) or probe.get("verdict") != "pass"
+            for probe in probes
+        ):
+            errors.append("Forge-cwd GPU doctor lacks all-passing real probes")
+        else:
+            required_probes = [probe for probe in probes if probe.get("required") is True]
+            if not required_probes:
+                errors.append("Forge-cwd GPU doctor lacks a required real probe")
+            elif any(
+                probe.get("adapter", {}).get("status") != "authentic"
+                or probe.get("adapter", {}).get("class") != "hardware"
+                or "Metal" not in (
+                    str(probe.get("adapter", {}).get("backend", ""))
+                    + str(probe.get("adapter", {}).get("architecture", ""))
+                )
+                for probe in required_probes
+            ):
+                errors.append("Forge-cwd GPU doctor did not use authentic Metal hardware")
+            else:
+                measurements = [probe.get("measurements", {}) for probe in required_probes]
+                for field in (
+                    "command_submitted", "readback_completed", "pixel_output_produced",
+                    "content_floor_passed", "compute_initialized", "compute_oracle_passed",
+                ):
+                    if not any(value.get(field) is True for value in measurements):
+                        errors.append(f"Forge-cwd GPU doctor did not prove {field}")
+    if forge.get("threejs_canary") != "pass" or forge.get("gpu_audio_canary") != "pass":
+        errors.append("Forge proof does not bind the missing-path Three.js/GPU-audio canaries")
+    acceptance = _mapping(receipt.get("acceptance"), "acceptance", errors)
+    expected_acceptance = {
+        "terminal_status": "pass", "all_four_installed_cli": "pass",
+        "all_four_installed_mcp": "pass", "seeded_negative_controls": "pass",
+        "forge_modular_and_missing_path_canaries": "pass",
+    }
+    if acceptance != expected_acceptance:
+        errors.append("v2 terminal acceptance fields are incomplete or non-passing")
+
+
 def verify(root: Path) -> list[str]:
     errors: list[str] = []
     try:
@@ -142,23 +430,29 @@ def verify(root: Path) -> list[str]:
     except (OSError, json.JSONDecodeError) as error:
         return [f"cannot read receipt.json: {error}"]
 
-    if receipt.get("schema") != "pulp.gpu-probe-acceptance-receipt.v1":
+    schema = receipt.get("schema")
+    v2 = schema == "pulp.gpu-probe-acceptance-receipt.v2"
+    if schema not in {
+        "pulp.gpu-probe-acceptance-receipt.v1",
+        "pulp.gpu-probe-acceptance-receipt.v2",
+    }:
         errors.append("receipt schema mismatch")
     integration_head = str(receipt.get("integration_head", ""))
     if not GIT_SHA.fullmatch(integration_head):
         errors.append("integration_head must be an exact Git SHA")
     source_blobs = _mapping(receipt.get("source_blobs"), "source_blobs", errors)
-    if set(source_blobs) != EXPECTED_SOURCE_BLOBS:
+    expected_source_blobs = EXPECTED_SOURCE_BLOBS_V2 if v2 else EXPECTED_SOURCE_BLOBS
+    if set(source_blobs) != expected_source_blobs:
         errors.append("source_blobs does not bind the exact recipe source set")
     historical_blobs = (
-        _git_blobs(integration_head, EXPECTED_SOURCE_BLOBS)
+        _git_blobs(integration_head, expected_source_blobs)
         if GIT_SHA.fullmatch(integration_head)
         else {}
     )
-    head_blobs = _git_blobs("HEAD", EXPECTED_SOURCE_BLOBS)
-    checkout_blobs = _checkout_blobs(EXPECTED_SOURCE_BLOBS)
+    head_blobs = _git_blobs("HEAD", expected_source_blobs)
+    checkout_blobs = _checkout_blobs(expected_source_blobs)
     for path, declared_blob in source_blobs.items():
-        if path not in EXPECTED_SOURCE_BLOBS:
+        if path not in expected_source_blobs:
             continue
         if not GIT_SHA.fullmatch(str(declared_blob)):
             errors.append(f"source blob {path} must be an exact Git blob SHA")
@@ -184,22 +478,37 @@ def verify(root: Path) -> list[str]:
     if context.get("path") != "/usr/bin:/bin:/usr/sbin:/sbin":
         errors.append("installed fronts did not use the bounded system-only PATH")
     binaries = _mapping(receipt.get("binaries"), "binaries", errors)
-    if set(binaries) != EXPECTED_BINARIES:
+    expected_binaries = EXPECTED_BINARIES_V2 if v2 else EXPECTED_BINARIES
+    if set(binaries) != expected_binaries:
         errors.append("binaries does not bind the exact installed executable set")
-    for role, digest in binaries.items():
+    for role, value in binaries.items():
+        digest = value.get("sha256") if v2 and isinstance(value, dict) else value
         if not SHA256.fullmatch(str(digest)):
             errors.append(f"binary {role} lacks a SHA-256 digest")
+        if v2 and (not isinstance(value, dict) or not isinstance(value.get("bytes"), int)
+                   or value.get("bytes", 0) <= 0):
+            errors.append(f"binary {role} lacks a positive byte count")
 
     declared = _mapping(receipt.get("raw_sha256"), "raw_sha256", errors)
     expected_files = {
         *(f"{group}-{suffix}.json" for group in GROUPS for suffix in ("run1", "run2", "negative")),
         "mcp-transcript.jsonl",
     }
+    if v2:
+        expected_files |= {"forge-modular-screenshot.png", "forge-gpu-doctor.json"}
     if set(declared) != expected_files:
-        errors.append("raw_sha256 does not name the exact 13-file evidence set")
+        errors.append(
+            f"raw_sha256 does not name the exact {len(expected_files)}-file evidence set"
+        )
     for name, digest in declared.items():
         path = root / name
         try:
+            limit = 8 * 1024 * 1024 if name in {
+                "mcp-transcript.jsonl", "forge-modular-screenshot.png"
+            } else 1024 * 1024
+            if path.stat().st_size > limit:
+                errors.append(f"{name} exceeds its {limit}-byte evidence cap")
+                continue
             observed = hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError as error:
             errors.append(f"cannot read {name}: {error}")
@@ -219,7 +528,8 @@ def verify(root: Path) -> list[str]:
         if run_group.get("recipe") != recipe:
             errors.append(f"receipt run group {group} does not bind recipe {recipe}")
         role = run_group.get("binary_role")
-        if role != EXPECTED_BINARY_ROLES[group] or role not in binaries:
+        expected_roles = EXPECTED_BINARY_ROLES_V2 if v2 else EXPECTED_BINARY_ROLES
+        if role != expected_roles[group] or role not in binaries:
             errors.append(f"receipt run group {group} has the wrong executable role")
         runs: dict[str, dict[str, Any]] = {}
         for suffix in ("run1", "run2", "negative"):
@@ -304,18 +614,37 @@ def verify(root: Path) -> list[str]:
     except (OSError, json.JSONDecodeError) as error:
         errors.append(f"cannot parse MCP transcript: {error}")
         transcript = []
-    if len(transcript) != 3 or [row.get("id") for row in transcript] != [1, 2, 3]:
-        errors.append("MCP transcript must contain initialize, positive, and negative responses")
-    elif (
-        "isError" in transcript[1].get("result", {})
-        and transcript[1]["result"]["isError"] is not False
+    expected_transcript_length = 1 + (2 * len(GROUPS) if v2 else 2)
+    if len(transcript) != expected_transcript_length or [row.get("id") for row in transcript] != list(
+        range(1, expected_transcript_length + 1)
     ):
-        errors.append("MCP positive result must omit isError or preserve isError=false")
-    elif transcript[1].get("result", {}).get("structuredContent", {}).get("exit_code") != 0:
-        errors.append("MCP positive result did not preserve exit 0")
+        errors.append(
+            "MCP transcript must contain initialize plus all-four positive/negative responses"
+            if v2 else
+            "MCP transcript must contain initialize, positive, and negative responses"
+        )
     else:
         mcp_evidence: dict[str, Any] = {}
-        for label, row in (("positive", transcript[1]), ("negative", transcript[2])):
+        pairs = []
+        if v2:
+            for index, group in enumerate(GROUPS):
+                pairs.extend(((f"{group}-positive", transcript[1 + 2 * index]),
+                              (f"{group}-negative", transcript[2 + 2 * index])))
+        else:
+            pairs = [("positive", transcript[1]), ("negative", transcript[2])]
+        for label, row in pairs:
+            result = row.get("result", {})
+            positive = label.endswith("positive") or label == "positive"
+            expected_exit = 0 if positive else 1
+            if bool(result.get("isError", False)) != (not positive):
+                if not v2 and positive:
+                    errors.append("MCP positive result must omit isError or preserve isError=false")
+                elif not v2:
+                    errors.append("MCP completed failure did not preserve isError=true")
+                else:
+                    errors.append(f"MCP {label} did not preserve typed isError status")
+            if result.get("structuredContent", {}).get("exit_code") != expected_exit:
+                errors.append(f"MCP {label} did not preserve exit {expected_exit}")
             evidence = row.get("result", {}).get("structuredContent", {}).get("evidence")
             for problem in json_schema_lite.validate(evidence, result_schema):
                 errors.append(f"MCP {label} evidence schema: {problem}")
@@ -329,17 +658,20 @@ def verify(root: Path) -> list[str]:
             else:
                 if text_evidence != evidence:
                     errors.append(f"MCP {label} text and structured evidence disagree")
-        for label, raw_name in (("positive", "compute-run1.json"), ("negative", "compute-negative.json")):
+        comparisons = (
+            [(f"{group}-positive", f"{group}-run1.json") for group in GROUPS]
+            + [(f"{group}-negative", f"{group}-negative.json") for group in GROUPS]
+            if v2 else
+            [("positive", "compute-run1.json"), ("negative", "compute-negative.json")]
+        )
+        for label, raw_name in comparisons:
             if label not in mcp_evidence:
                 continue
             raw = _load(root / raw_name)
             if _canonical_repeat(mcp_evidence[label]) != _canonical_repeat(raw):
                 errors.append(f"MCP {label} evidence is not the installed CLI recipe result")
-        negative_result = transcript[2].get("result", {})
-        if negative_result.get("isError") is not True:
-            errors.append("MCP completed failure did not preserve isError=true")
-        if negative_result.get("structuredContent", {}).get("exit_code") != 1:
-            errors.append("MCP completed failure did not preserve exit 1")
+    if v2:
+        _verify_v2_metadata(root, receipt, errors)
 
     return errors
 
@@ -353,7 +685,11 @@ def main(argv: list[str] | None = None) -> int:
         for error in errors:
             print(f"gpu-probe-acceptance: FAIL: {error}", file=sys.stderr)
         return 1
-    print("gpu-probe-acceptance: ok (4 recipes, 12 runs, installed MCP pass/fail)")
+    schema = _load(args.receipt_dir / "receipt.json").get("schema")
+    if schema == "pulp.gpu-probe-acceptance-receipt.v2":
+        print("gpu-probe-acceptance: ok (terminal v2; installed all-four CLI/MCP parity)")
+    else:
+        print("gpu-probe-acceptance: ok (historical v1 integrity; nonterminal)")
     return 0
 
 

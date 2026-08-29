@@ -1,6 +1,6 @@
-# A2 real GPU-probe acceptance — M3 Ultra
+# Historical A2 GPU-probe evidence — M3 Ultra
 
-This directory is the durable raw receipt for the four A2 recipes exercised on
+This directory is the durable historical raw receipt for the four A2 recipes exercised on
 2026-08-28. The installed CLI/MCP runs used a fresh temporary working directory
 outside every checkout and a system-only `PATH`. Each group contains two
 positive runs and one seeded negative control. The raw v1 results are preserved
@@ -57,7 +57,13 @@ exact source commit `146716041f20e9cd5e599f11f4697369d3218519` after the final s
 the receipt-rebind commit; metadata-only rebinding or suppression of source
 drift is not an acceptable landing path.
 
-Once that exact source/receipt rebind passes, this evidence closes the A2
-real-offscreen and agent-front acceptance on this host. It makes no
+This v1 evidence no longer closes final A2 acceptance. It used direct C++
+Renderer3D/Three.js roles, exercised installed MCP only for compute, predates
+exact installed build/plan provenance and current source, and carries only the
+older Forge proof. The v2 recorder and terminal contract are documented in the
+parent `docs/validation/gpu-probes/README.md`; preserve this directory without
+rewriting it.
+
+The historical evidence makes no
 Windows/Linux backend claim and does not replace A3's real visible-host/DAW
 acceptance.

@@ -32,7 +32,7 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
         ).hexdigest()
         receipt_path.write_text(json.dumps(receipt))
 
-    def test_checked_in_receipt_passes(self) -> None:
+    def test_checked_in_historical_receipt_integrity_passes(self) -> None:
         head = MODULE._git_blobs("HEAD", MODULE.EXPECTED_SOURCE_BLOBS)
         with mock.patch.object(MODULE, "_checkout_blobs", return_value=head):
             self.assertEqual(MODULE.verify(FIXTURE), [])
