@@ -130,7 +130,7 @@ def _verify_producer_disposition(
 
 def _verify_installed_build_provenance(
     installed: dict[str, Any], artifacts: dict[str, Any], source_revision: Any,
-    errors: list[str],
+    repository: Path, errors: list[str],
 ) -> None:
     provenance = _object(
         installed.get("build_provenance"), "installed build_provenance", errors
@@ -328,7 +328,7 @@ def verify(
         ):
             errors.append(f"{role} binary has no positive byte count")
     _verify_installed_build_provenance(
-        installed, artifacts, source_revision, errors
+        installed, artifacts, source_revision, repository, errors
     )
 
     processor = _object(artifacts.get("trace_processor"), "trace_processor", errors)
