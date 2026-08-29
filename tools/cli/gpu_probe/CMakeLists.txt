@@ -16,6 +16,21 @@ else()
 endif()
 
 if(PULP_ENABLE_GPU)
+    add_library(pulp-tool-gpu-dpr-measurement STATIC
+        src/dpr_measurement.cpp
+        src/dpr_measurement_session.cpp)
+    target_compile_features(pulp-tool-gpu-dpr-measurement PUBLIC cxx_std_20)
+    target_include_directories(pulp-tool-gpu-dpr-measurement
+        PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        PRIVATE $<BUILD_INTERFACE:${choc_SOURCE_DIR}>)
+    target_link_libraries(pulp-tool-gpu-dpr-measurement
+        PUBLIC pulp::render pulp::runtime pulp::state pulp::view)
+
+    add_executable(pulp-gpu-dpr-native-measurement EXCLUDE_FROM_ALL
+        src/dpr_measurement_main.cpp)
+    target_link_libraries(pulp-gpu-dpr-native-measurement PRIVATE
+        pulp-tool-gpu-dpr-measurement)
+
     file(SHA256 "${CMAKE_SOURCE_DIR}/core/render/src/renderer3d.cpp"
         PULP_RENDERER3D_TRANSLATION_UNIT_SHA256)
     file(READ "${CMAKE_SOURCE_DIR}/test/fixtures/scene3d/renderer3d-goldens.json"
@@ -75,6 +90,13 @@ if(PULP_BUILD_TESTS)
     add_test(NAME gpu-probe-result COMMAND pulp-test-gpu-probe-result)
 
     if(PULP_ENABLE_GPU)
+        add_executable(pulp-test-gpu-dpr-native-measurement
+            ${CMAKE_SOURCE_DIR}/test/test_gpu_dpr_native_measurement.cpp)
+        target_link_libraries(pulp-test-gpu-dpr-native-measurement PRIVATE
+            pulp-tool-gpu-dpr-measurement Catch2::Catch2WithMain)
+        add_test(NAME gpu-dpr-native-measurement
+            COMMAND pulp-test-gpu-dpr-native-measurement)
+
         add_executable(pulp-test-gpu-probe-native-recipes
             ${CMAKE_SOURCE_DIR}/test/test_gpu_probe_native_recipes.cpp)
         target_link_libraries(pulp-test-gpu-probe-native-recipes PRIVATE

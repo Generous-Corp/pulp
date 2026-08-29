@@ -21,9 +21,11 @@ WITH candidates AS (
   JOIN process AS p ON th.upid = p.upid
   WHERE s.category GLOB 'gpu*'
     AND (s.name GLOB 'gpu_probe*' OR s.name GLOB 'gpu_readback*' OR s.name GLOB 'gpu_submit*')
+), identified_candidates AS (
+  SELECT * FROM candidates WHERE evidence_id IS NOT NULL
 ), selected_evidence AS (
   SELECT MIN(evidence_id) AS evidence_id
-  FROM candidates
+  FROM identified_candidates
   HAVING COUNT(*) = COUNT(evidence_id)
     AND COUNT(DISTINCT evidence_id) = 1
     AND MIN(length(evidence_id)) = 32
@@ -63,6 +65,6 @@ SELECT
      CAST(EXTRACT_ARG(arg_set_id, 'debug.diagnostic_code') AS TEXT),
      CAST(EXTRACT_ARG(arg_set_id, 'args.debug.diagnostic_code') AS TEXT), '')
      IN ('cpu_oracle_mismatch', 'magnitude_dispatch_failed')) AS is_failure
-FROM candidates
+FROM identified_candidates
 JOIN selected_evidence USING (evidence_id)
 WHERE dur >= 0;

@@ -246,6 +246,62 @@ def metric_statistic(name: str, samples: Any, manifest: dict[str, Any]) -> dict[
     }
 
 
+def validate_fresh_process_ledger(
+    raw: dict[str, Any], receipt: dict[str, Any], manifest: dict[str, Any]
+) -> None:
+    """Fail closed unless every first-frame sample has fresh bound provenance."""
+    producer_pid = raw.get("producer_pid")
+    trials = raw.get("fresh_process_trials")
+    expected_count = manifest["trial_contract"]["fresh_process_first_frame_trials"]
+    samples = raw.get("metrics", {}).get("first_frame_time")
+    attempt_number = receipt.get("attempt_number")
+    if (
+        isinstance(producer_pid, bool) or not isinstance(producer_pid, int)
+        or producer_pid <= 0
+        or isinstance(attempt_number, bool) or not isinstance(attempt_number, int)
+        or attempt_number <= 0
+        or not isinstance(trials, list) or len(trials) != expected_count
+        or not isinstance(samples, list) or len(samples) != expected_count
+    ):
+        raise EvidenceError("fresh-process first-frame ledger shape is invalid")
+    build = receipt.get("build_identity", {})
+    producer = build.get("measurement_producer") or build.get("binary")
+    if not isinstance(producer, dict) or not isinstance(producer.get("sha256"), str):
+        raise EvidenceError("fresh-process ledger lacks exact producer identity")
+    expected_adapter = receipt.get("adapter")
+    expected_keys = {
+        "schema", "version", "attempt_nonce", "attempt_number", "pid",
+        "producer_sha256", "content_digest", "pulp_sha",
+        "first_frame_time_ms", "adapter",
+    }
+    pids: set[int] = set()
+    for index, (trial, sample) in enumerate(zip(trials, samples)):
+        if not isinstance(trial, dict) or set(trial) != expected_keys:
+            raise EvidenceError(f"fresh-process trial {index} has an invalid contract")
+        pid = trial.get("pid")
+        measured = trial.get("first_frame_time_ms")
+        if (
+            trial.get("schema") != "pulp.gpu-dpr-first-frame-trial.v1"
+            or trial.get("version") != 1
+            or trial.get("attempt_nonce") != receipt.get("attempt_nonce")
+            or trial.get("attempt_number") != attempt_number
+            or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+            or pid == producer_pid or pid in pids
+            or trial.get("producer_sha256") != producer.get("sha256")
+            or trial.get("content_digest") != receipt.get("content_digest")
+            or trial.get("pulp_sha") != build.get("pulp_sha")
+            or trial.get("adapter") != expected_adapter
+            or isinstance(measured, bool) or not isinstance(measured, (int, float))
+            or not math.isfinite(float(measured)) or float(measured) < 0
+            or isinstance(sample, bool) or not isinstance(sample, (int, float))
+            or float(sample) != float(measured)
+        ):
+            raise EvidenceError(
+                f"fresh-process trial {index} is not bound to this cell attempt"
+            )
+        pids.add(pid)
+
+
 def validate_logical_input(raw: dict[str, Any]) -> bool:
     trials = raw.get("logical_input_trials")
     if not isinstance(trials, list) or not trials:
@@ -554,6 +610,7 @@ def receipt_observation(
     metrics = {
         name: metric_statistic(name, metrics_raw[name], manifest) for name in METRIC_UNITS
     }
+    validate_fresh_process_ledger(raw, receipt, manifest)
     trace_artifact = next(item for item in artifacts if item["kind"] == "trace")
     trace_path = safe_artifact(artifact_root, trace_artifact["path"])
     trace_ids = validate_trace(

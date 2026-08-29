@@ -96,11 +96,17 @@ Three.js, Forge-native, real-DAW, browser, logical-input, and A2T tools may be
 wrapped as scenario adapters, but no generic adapter is implied: absent product
 legs remain explicit dependencies.
 
-The checked-in Pulp-native adapter is a safe first rung for the three frozen
-native fixtures. Point it at an exact-SHA `pulp-screenshot` build:
+The checked-in Pulp-native adapter supports both a capture-only preflight and a
+terminal measurement producer for the three frozen native fixtures. Build the
+producer with benchmark counters and tracing enabled, then point the adapter at
+that exact executable:
 
 ```bash
-PULP_DPR_SCREENSHOT_BIN=/absolute/exact-build/tools/screenshot/pulp-screenshot \
+cmake -S . -B build-dpr -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BENCHMARK=ON -DPULP_TRACING=ON
+tools/ci/governed-build.sh cmake --build build-dpr --config Release \
+  --target pulp-gpu-dpr-native-measurement
+PULP_DPR_NATIVE_MEASUREMENT_BIN="$PWD/build-dpr/tools/cli/gpu_probe/pulp-gpu-dpr-native-measurement" \
 python3 tools/scripts/gpu_dpr_runner.py run \
   --run-dir /tmp/pulp-dpr-run \
   --adapter dense-text-thin-strokes="$PWD/tools/scripts/gpu_dpr_pulp_native_adapter.py" \
@@ -108,14 +114,14 @@ python3 tools/scripts/gpu_dpr_runner.py run \
   --adapter meters-waveforms="$PWD/tools/scripts/gpu_dpr_pulp_native_adapter.py"
 ```
 
-It performs a real Skia/GPU capture, verifies frozen source bytes and physical
-dimensions, and preserves binary/machine identity plus a capture digest in each
-cell. It deliberately returns `INCONCLUSIVE`: a subprocess PNG cannot truthfully
-provide same-process adapter identity, correlated A2T spans, A3 budget evidence,
-GPU/frame/memory/upload measurements, logical-input delivery, or independent
-text/stroke/reference oracles. The durable dependency list is the handoff to a
-product-specific measured adapter; subprocess wall time is recorded only as
-preflight context and is never relabeled as frame time.
+The producer uses one public editor-surface/WidgetBridge tree for capture,
+logical input, 30 steady frame/counter samples, authentic Dawn identity, and
+the nonce-correlated Perfetto trace. First-frame timing comes from 20 sequential
+fresh child processes. Each child ledger row binds the attempt number/nonce,
+unique PID, producer and content digests, Pulp build identity, exact adapter,
+and its sample; the producer, adapter, and runner all verify that provenance.
+Without `PULP_DPR_NATIVE_MEASUREMENT_BIN`, the adapter retains its safe
+capture-only preflight and deliberately returns `INCONCLUSIVE`.
 
 `ingest` accepts an independently produced cell receipt and applies the same
 fidelity, logical-input, artifact-hash, identity, trace-category, and raw-sample

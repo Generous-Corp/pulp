@@ -227,6 +227,7 @@ def write_request(
         "experiment_id": state["experiment_id"],
         "cell_key": key,
         "attempt_nonce": attempt_nonce,
+        "attempt_number": len(state["cells"][key]["attempts"]) + 1,
         "scenario": scenario,
         "mode": state["cells"][key]["mode"],
         "requested_dpr": state["cells"][key]["requested_dpr"],

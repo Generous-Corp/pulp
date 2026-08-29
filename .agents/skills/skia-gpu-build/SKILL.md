@@ -141,6 +141,15 @@ A headless `render_to_png(root, w, h, scale, ScreenshotBackend::skia)` (or an
 example's `--screenshot`) is the cheapest proof the Skia pipeline links + runs
 without opening a window.
 
+For terminal A4 native DPR measurements, a normal GPU build is insufficient:
+configure a separate Release build with both `PULP_BENCHMARK=ON` and
+`PULP_TRACING=ON`, then build only
+`pulp-gpu-dpr-native-measurement` through `tools/ci/governed-build.sh`. The
+producer opts into GPU timing on its public editor surface, refuses non-hardware
+Dawn adapters, and reports incomplete when timestamp queries or authentic
+counter evidence are unavailable. Do not reuse this dev tracing build as a
+shipping artifact.
+
 ## Gotchas (each cost real time)
 
 - **Release Skia archives require `SK_RELEASE` in every consumer, including

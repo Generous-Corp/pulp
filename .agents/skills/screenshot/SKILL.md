@@ -434,16 +434,16 @@ the cell directory; SKIP, INCONCLUSIVE, timeout, or a rejected receipt remains
 resumable incomplete evidence.
 
 For the frozen Pulp-native fixtures,
-`tools/scripts/gpu_dpr_pulp_native_adapter.py` is the capture preflight adapter.
-Set `PULP_DPR_SCREENSHOT_BIN` to an exact-SHA `pulp-screenshot` binary and
-register it for `dense-text-thin-strokes`, `shader-heavy-controls`, and
-`meters-waveforms`. The runner binds the exact Pulp source root into every cell
-request before it snapshots the adapter, so the canonical command does not need
-`PULP_DPR_SOURCE_ROOT`. The adapter verifies source and PNG dimensions and
-retains the real capture, but intentionally returns INCONCLUSIVE until
-product-specific A2T/A3, same-process adapter identity, metric, logical-input,
-and fidelity producers are available. Never rename its subprocess wall time to
-CPU/frame/interaction time.
+`tools/scripts/gpu_dpr_pulp_native_adapter.py` accepts either a capture-only
+preflight or the dedicated `pulp-gpu-dpr-native-measurement` producer. Build
+that target with `PULP_BENCHMARK=ON` and `PULP_TRACING=ON`, then set
+`PULP_DPR_NATIVE_MEASUREMENT_BIN` to its absolute path. Terminal first-frame
+samples require 20 fresh processes whose typed rows bind attempt nonce/number,
+unique PID, producer/content/build digests, exact Dawn adapter, and sample. The
+same WidgetBridge/editor-surface session owns capture, logical input, 30 steady
+metrics, and the correlated trace. With only `PULP_DPR_SCREENSHOT_BIN`, the
+adapter retains a real preflight but deliberately returns INCONCLUSIVE; never
+rename subprocess wall time to CPU/frame/interaction time.
 
 Terminal DPR evidence additionally requires the named trace answers to report
 one `category_scope` whose evidence ID and stable Perfetto process instance are

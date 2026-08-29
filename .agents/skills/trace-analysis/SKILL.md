@@ -506,6 +506,13 @@ probe failure diagnostics `cpu_oracle_mismatch` and
 `magnitude_dispatch_failed` as causal failures even if adapter health was
 reported healthy.
 
+The native DPR producer emits the 30 steady samples in the same process as the
+correlated trace. Its 20 first-frame values are different: each comes from a
+fresh child process and has a typed ledger row binding attempt nonce/number,
+unique PID, producer/content/build digests, exact adapter identity, and the
+sample. The adapter and runner revalidate that ledger; a reused PID or mixed
+identity is incomplete evidence, even when the aggregate sample count is 20.
+
 ## Correlating GPU-health startup snapshots
 
 `ControlGpuHealthProvider` may emit a GPU evidence ID from the observed frame,

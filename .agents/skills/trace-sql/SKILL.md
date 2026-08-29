@@ -114,10 +114,12 @@ evidence exists; CPU/non-running attribution is exposed only when those
 intervals cover the complete slice. Partial or absent coverage remains NULL
 rather than becoming a blocking claim. Unindexed work is cold only when a
 correlated frame-zero anchor proves that it began before first-frame completion;
-later unindexed work is `unknown`. Health and probe inspect their full candidate set before the CLI's
-bounded contributor query and return no rows unless every candidate carries
-the same valid 32-lowercase-hex evidence ID. The closed analyzer interprets an
-empty mixed-ID result as unavailable. A future multi-run UX should add an
+later unindexed work is `unknown`. Tooling-owned correlation rows are selected
+from candidates that carry an evidence ID; generic Dawn/Skia backend spans may
+remain untagged because they are not allowed to supply the cohort. The selected
+rows return no result when their tagged candidates carry multiple IDs or lack
+one valid 32-lowercase-hex ID. The closed analyzer interprets an empty mixed-ID
+result as unavailable. A future multi-run UX should add an
 explicit evidence-ID selector rather than weakening this singleton boundary.
 Category discovery follows the same boundary: join slices through
 `thread_track.utid` to the stable `thread.upid`, and accept categories only

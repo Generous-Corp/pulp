@@ -45,9 +45,17 @@ WITH candidates AS (
         OR s.name GLOB 'gpu_submit*'
         OR s.name GLOB 'gpu_present*'))
       OR (s.category GLOB 'render*' AND s.name GLOB 'frame*'))
+), identified_candidates AS (
+  SELECT * FROM candidates WHERE evidence_id IS NOT NULL
+), identified_evidence AS (
+  SELECT MIN(evidence_id) AS evidence_id
+  FROM identified_candidates
+  HAVING COUNT(DISTINCT evidence_id) = 1
+    AND MIN(length(evidence_id)) = 32
+    AND MIN(evidence_id) NOT GLOB '*[^0-9a-f]*'
 ), first_indexed_anchor AS (
   SELECT evidence_id
-  FROM candidates
+  FROM identified_candidates
   WHERE stage = 'frame'
     AND frame_index = 0
   ORDER BY ts, evidence_id
@@ -59,28 +67,19 @@ WITH candidates AS (
     AND evidence_id NOT GLOB '*[^0-9a-f]*'
 ), singleton_unindexed_lifecycle AS (
   SELECT MIN(evidence_id) AS evidence_id
-  FROM candidates
+  FROM identified_candidates
   HAVING COUNT(*) = COUNT(evidence_id)
     AND COUNT(DISTINCT evidence_id) = 1
     AND MIN(length(evidence_id)) = 32
     AND MIN(evidence_id) NOT GLOB '*[^0-9a-f]*'
-), all_candidates_identified AS (
-  SELECT 1 AS valid
-  WHERE NOT EXISTS (
-    SELECT 1
-    FROM candidates
-    WHERE evidence_id IS NULL
-      OR length(evidence_id) != 32
-      OR evidence_id GLOB '*[^0-9a-f]*'
-  )
 ), selected_lifecycle AS (
-  SELECT evidence_id
+  SELECT first_indexed_lifecycle.evidence_id
   FROM first_indexed_lifecycle
-  JOIN all_candidates_identified
+  JOIN identified_evidence USING (evidence_id)
   UNION ALL
-  SELECT evidence_id
+  SELECT singleton_unindexed_lifecycle.evidence_id
   FROM singleton_unindexed_lifecycle
-  JOIN all_candidates_identified
+  JOIN identified_evidence USING (evidence_id)
   WHERE NOT EXISTS (SELECT 1 FROM first_indexed_anchor)
 ), selected_rows AS (
   SELECT
@@ -90,12 +89,12 @@ WITH candidates AS (
     p.pid,
     (
       SELECT MAX(anchor.ts + anchor.dur)
-      FROM candidates AS anchor
+      FROM identified_candidates AS anchor
       WHERE anchor.evidence_id = c.evidence_id
         AND anchor.stage = 'frame'
         AND anchor.frame_index = 0
     ) AS cold_frame_end_ts
-  FROM candidates AS c
+  FROM identified_candidates AS c
   JOIN selected_lifecycle USING (evidence_id)
   LEFT JOIN thread_track AS tt ON c.track_id = tt.id
   LEFT JOIN thread AS th ON tt.utid = th.utid

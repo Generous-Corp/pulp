@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import signal
@@ -32,6 +33,7 @@ PREFLIGHT_SCHEMA = "pulp.gpu-dpr-native-preflight.v1"
 OUTPUT_CAP_BYTES = 1024 * 1024
 MEASUREMENT_SCOPE_SCHEMA = "pulp.gpu-dpr-native-measurement-scope.v1"
 MEASUREMENT_ATTESTATION_SCHEMA = "pulp.gpu-dpr-native-measurement-attestation.v1"
+FIRST_FRAME_TRIAL_SCHEMA = "pulp.gpu-dpr-first-frame-trial.v1"
 ARTIFACT_KINDS = {"capture", "trace", "raw_samples", "input_receipt"}
 SAME_PROCESS_FIELDS = {
     "adapter_identity", "capture", "frame_metrics", "memory_metrics",
@@ -92,6 +94,57 @@ def checked_artifact(root: Path, value: Any, label: str) -> Path:
     return path
 
 
+def validate_fresh_process_ledger(
+    raw: dict[str, Any], request: dict[str, Any], receipt: dict[str, Any],
+    producer_digest: str,
+) -> None:
+    """Verify every first-frame sample came from one fresh, bound GPU process."""
+    producer_pid = raw.get("producer_pid")
+    trials = raw.get("fresh_process_trials")
+    expected_count = request.get("trial_contract", {}).get(
+        "fresh_process_first_frame_trials"
+    )
+    first_frames = raw.get("metrics", {}).get("first_frame_time")
+    if (
+        isinstance(producer_pid, bool) or not isinstance(producer_pid, int)
+        or producer_pid <= 0
+        or isinstance(expected_count, bool) or not isinstance(expected_count, int)
+        or not isinstance(trials, list) or len(trials) != expected_count
+        or not isinstance(first_frames, list) or len(first_frames) != expected_count
+    ):
+        raise ValueError("fresh-process first-frame ledger shape is invalid")
+    expected_adapter = receipt.get("adapter")
+    expected_keys = {
+        "schema", "version", "attempt_nonce", "attempt_number", "pid",
+        "producer_sha256", "content_digest", "pulp_sha",
+        "first_frame_time_ms", "adapter",
+    }
+    seen_pids: set[int] = set()
+    for index, (trial, sample) in enumerate(zip(trials, first_frames)):
+        if not isinstance(trial, dict) or set(trial) != expected_keys:
+            raise ValueError(f"fresh-process trial {index} has an invalid contract")
+        pid = trial.get("pid")
+        measured = trial.get("first_frame_time_ms")
+        if (
+            trial.get("schema") != FIRST_FRAME_TRIAL_SCHEMA
+            or trial.get("version") != 1
+            or trial.get("attempt_nonce") != request.get("attempt_nonce")
+            or trial.get("attempt_number") != request.get("attempt_number")
+            or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+            or pid == producer_pid or pid in seen_pids
+            or trial.get("producer_sha256") != producer_digest
+            or trial.get("content_digest") != request.get("expected_content_digest")
+            or trial.get("pulp_sha") != request.get("pulp_sha")
+            or trial.get("adapter") != expected_adapter
+            or isinstance(measured, bool) or not isinstance(measured, (int, float))
+            or not math.isfinite(float(measured)) or float(measured) < 0
+            or isinstance(sample, bool) or not isinstance(sample, (int, float))
+            or float(sample) != float(measured)
+        ):
+            raise ValueError(f"fresh-process trial {index} is not bound to this attempt")
+        seen_pids.add(pid)
+
+
 def validate_measurement_receipt(
     request: dict[str, Any], receipt: dict[str, Any], cell_dir: Path,
     pinned_producer: Path,
@@ -101,6 +154,7 @@ def validate_measurement_receipt(
         "schema": RECEIPT_SCHEMA,
         "version": 1,
         "attempt_nonce": request["attempt_nonce"],
+        "attempt_number": request["attempt_number"],
         "scenario_id": scenario["id"],
         "scenario_kind": scenario["kind"],
         "mode": request["mode"],
@@ -183,10 +237,11 @@ def validate_measurement_receipt(
         raise ValueError("measurement capture dimensions differ from the receipt")
     if not by_kind["trace"].read_bytes():
         raise ValueError("measurement trace artifact is empty")
-    for kind in ("raw_samples", "input_receipt"):
-        load_json(by_kind[kind])
+    raw = load_json(by_kind["raw_samples"])
+    load_json(by_kind["input_receipt"])
 
     producer_digest = sha256(pinned_producer)
+    validate_fresh_process_ledger(raw, request, receipt, producer_digest)
     build["measurement_producer"] = {
         "path": str(pinned_producer.resolve()),
         "sha256": producer_digest,

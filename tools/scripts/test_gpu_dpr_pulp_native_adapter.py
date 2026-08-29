@@ -12,6 +12,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import gpu_dpr_pulp_native_adapter as native_adapter
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
 ADAPTER = SCRIPT_DIR / "gpu_dpr_pulp_native_adapter.py"
@@ -46,7 +48,7 @@ def fake_measurement_producer(path: Path, *, complete_scope: bool = True) -> Non
     scope_value = "True" if complete_scope else "False"
     path.write_text(
         f'''#!/usr/bin/env python3
-import argparse, hashlib, json, struct
+import argparse, hashlib, json, os, struct
 from pathlib import Path
 p=argparse.ArgumentParser(); p.add_argument('--request'); p.add_argument('--receipt'); a=p.parse_args()
 r=json.loads(Path(a.request).read_text()); root=Path(a.receipt).parent
@@ -56,17 +58,28 @@ logical=r['scenario']['logical_size']; w=round(logical['width']*dpr); h=round(lo
 capture=root/'measured-capture.png'
 capture.write_bytes(b'\\x89PNG\\r\\n\\x1a\\n'+struct.pack('>I',13)+b'IHDR'+struct.pack('>II',w,h))
 trace=root/'measured-trace.pftrace'; trace.write_bytes(b'real-perfetto-trace')
-raw=root/'measured-raw.json'; raw.write_text(json.dumps({{'schema':'pulp.gpu-dpr-raw-samples.v1','version':1}})+'\\n')
+producer_digest=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+adapter={{'class':'hardware','name':'Selftest GPU','backend':'Metal','driver':'selftest-1','authentic_identity':True}}
+samples=[10.0+i/10 for i in range(20)]
+trials=[{{'schema':'pulp.gpu-dpr-first-frame-trial.v1','version':1,
+ 'attempt_nonce':r['attempt_nonce'],'attempt_number':r['attempt_number'],
+ 'pid':10000+i,'producer_sha256':producer_digest,
+ 'content_digest':r['expected_content_digest'],'pulp_sha':r['pulp_sha'],
+ 'first_frame_time_ms':samples[i],'adapter':adapter}} for i in range(20)]
+raw=root/'measured-raw.json'; raw.write_text(json.dumps({{
+ 'schema':'pulp.gpu-dpr-raw-samples.v1','version':1,'producer_pid':9999,
+ 'metrics':{{'first_frame_time':samples}},'fresh_process_trials':trials}})+'\\n')
 inputs=root/'measured-input.json'; inputs.write_text(json.dumps({{'logical_input':True}})+'\\n')
 def artifact(kind, file): return {{'kind':kind,'path':file.name,'sha256':hashlib.sha256(file.read_bytes()).hexdigest()}}
 receipt={{
  'schema':'pulp.gpu-dpr-cell-receipt.v1','version':1,
- 'attempt_nonce':r['attempt_nonce'],'scenario_id':r['scenario']['id'],
+ 'attempt_nonce':r['attempt_nonce'],'attempt_number':r['attempt_number'],
+ 'scenario_id':r['scenario']['id'],
  'scenario_kind':r['scenario']['kind'],'mode':r['mode'],'requested_dpr':r['requested_dpr'],
  'observed_dpr':dpr,'physical_size':{{'width':w,'height':h}},
  'content_digest':r['expected_content_digest'],'outcome':'pass','reason':None,'dependencies':[],
  'machine':{{'id':'selftest-m3','os':'macos','architecture':'arm64'}},
- 'adapter':{{'class':'hardware','name':'Selftest GPU','backend':'Metal','driver':'selftest-1','authentic_identity':True}},
+ 'adapter':adapter,
  'build_identity':{{'pulp_sha':r['pulp_sha']}},
  'measurement_scope':{{'schema':'pulp.gpu-dpr-native-measurement-scope.v1',
    'same_process':{{'adapter_identity':True,'capture':True,'frame_metrics':True,
@@ -97,6 +110,7 @@ def request(root: Path, expected_digest: str) -> dict:
         "schema": "pulp.gpu-dpr-cell-request.v1",
         "version": 1,
         "attempt_nonce": "1" * 32,
+        "attempt_number": 1,
         "cell_key": "dense-text-thin-strokes__exact__dpr-1.5",
         "scenario": {
             "id": "dense-text-thin-strokes",
@@ -108,6 +122,7 @@ def request(root: Path, expected_digest: str) -> dict:
         "mode": "exact",
         "requested_dpr": 1.5,
         "expected_content_digest": expected_digest,
+        "trial_contract": {"fresh_process_first_frame_trials": 20},
         "pulp_sha": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=root, text=True
         ).strip(),
@@ -201,6 +216,38 @@ def main() -> int:
         attestation = receipt["measurement_attestation"]
         assert attestation["producer_sha256"] == identity["sha256"]
         assert all(attestation["same_process"].values())
+
+        raw_path = tmp / next(
+            item["path"] for item in receipt["artifacts"]
+            if item["kind"] == "raw_samples"
+        )
+        valid_raw = json.loads(raw_path.read_text(encoding="utf-8"))
+        for label, mutation in [
+            ("nonce", ("attempt_nonce", "0" * 32)),
+            ("attempt", ("attempt_number", 2)),
+            ("digest", ("producer_sha256", "0" * 64)),
+            ("pid", ("pid", valid_raw["fresh_process_trials"][0]["pid"])),
+        ]:
+            planted = json.loads(json.dumps(valid_raw))
+            planted["fresh_process_trials"][1][mutation[0]] = mutation[1]
+            try:
+                native_adapter.validate_fresh_process_ledger(
+                    planted, document, receipt, identity["sha256"]
+                )
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"planted mixed {label} ledger passed")
+        planted = json.loads(json.dumps(valid_raw))
+        planted["fresh_process_trials"][1]["adapter"]["name"] = "Other GPU"
+        try:
+            native_adapter.validate_fresh_process_ledger(
+                planted, document, receipt, identity["sha256"]
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("planted mixed adapter ledger passed")
 
         # Negative control: one missing same-process claim must become a
         # durable inconclusive result, never a terminal pass.

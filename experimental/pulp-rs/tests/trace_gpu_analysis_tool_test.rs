@@ -181,6 +181,50 @@ fn causal_probe_failure_diagnostic_cannot_be_laundered_by_healthy_state() {
 }
 
 #[test]
+fn generic_untagged_backend_spans_cannot_poison_or_supply_a_probe_cohort() {
+    let evidence = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+    let trace = tempfile::NamedTempFile::new().expect("untagged backend trace");
+    let fixture = serde_json::json!({"traceEvents": [
+        {"name":"gpu_submit_internal","cat":"gpu","ph":"X","ts":900,
+         "dur":5,"pid":71,"tid":71},
+        {"name":"gpu_probe_scoped","cat":"gpu","ph":"X","ts":1000,
+         "dur":20,"pid":71,"tid":71,"args":{"debug.gpu_evidence_id":evidence,
+         "debug.health_state":"healthy","debug.sequence":1}},
+        {"name":"scoped_render","cat":"render","ph":"X","ts":1030,
+         "dur":5,"pid":71,"tid":71,"args":{"debug.gpu_evidence_id":evidence}},
+        {"name":"scoped_text","cat":"text","ph":"X","ts":1040,
+         "dur":5,"pid":71,"tid":71,"args":{"debug.gpu_evidence_id":evidence}},
+        {"name":"scoped_js","cat":"js","ph":"X","ts":1050,
+         "dur":5,"pid":71,"tid":71,"args":{"debug.gpu_evidence_id":evidence}},
+        {"name":"scoped_layout","cat":"layout","ph":"X","ts":1060,
+         "dur":5,"pid":71,"tid":71,"args":{"debug.gpu_evidence_id":evidence}}
+    ]});
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+    let result = run_path("gpu-probe", trace.path(), 0);
+    assert_eq!(result["verdict"], "pass");
+    assert_eq!(result["evidence_ids"], serde_json::json!([evidence]));
+    assert_eq!(
+        result["observed_categories"],
+        serde_json::json!(["gpu", "js", "layout", "render", "text"])
+    );
+
+    let mixed = tempfile::NamedTempFile::new().expect("mixed tagged probe trace");
+    let other = "edededededededededededededededed";
+    let mixed_fixture = serde_json::json!({"traceEvents": [
+        {"name":"gpu_probe_a","cat":"gpu","ph":"X","ts":1000,
+         "dur":20,"pid":71,"tid":71,"args":{"debug.gpu_evidence_id":evidence,
+         "debug.health_state":"healthy","debug.sequence":1}},
+        {"name":"gpu_probe_b","cat":"gpu","ph":"X","ts":1030,
+         "dur":20,"pid":71,"tid":71,"args":{"debug.gpu_evidence_id":other,
+         "debug.health_state":"healthy","debug.sequence":2}}
+    ]});
+    std::fs::write(mixed.path(), serde_json::to_vec(&mixed_fixture).unwrap()).unwrap();
+    let result = run_path("gpu-probe", mixed.path(), 2);
+    assert_eq!(result["verdict"], "unavailable");
+    assert!(result["evidence_ids"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn compile_failure_is_ranked_with_a_concrete_fix() {
     for question in ["gpu-health", "gpu-probe"] {
         let result = run(question, "compile-failure.pftrace", 1);
@@ -331,7 +375,7 @@ fn first_frame_stall_ranks_pipeline_before_upload() {
 }
 
 #[test]
-fn startup_uses_only_the_earliest_first_visible_lifecycle() {
+fn startup_rejects_multiple_tagged_first_visible_lifecycles() {
     let first_evidence = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     let later_evidence = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     let trace = tempfile::NamedTempFile::new().expect("mixed startup trace");
@@ -360,30 +404,11 @@ fn startup_uses_only_the_earliest_first_visible_lifecycle() {
     std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
 
     let result = run_path("gpu-startup", trace.path(), 2);
-    assert_eq!(result["verdict"], "unverified");
-    assert_eq!(result["capture_complete"], true);
-    assert_eq!(result["dominant_stage"], "pipeline-prepare");
-    assert_eq!(result["evidence_ids"], serde_json::json!([first_evidence]));
-    let contributors = result["contributors"].as_array().unwrap();
-    assert_eq!(contributors.len(), 4);
-    assert!(contributors
-        .iter()
-        .all(|row| row["evidence_id"] == first_evidence));
-    assert_eq!(
-        result["cold_start_contributors"].as_array().unwrap().len(),
-        3
-    );
-    assert_eq!(
-        result["steady_state_contributors"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        result["steady_state_contributors"][0]["timing_phase"],
-        "steady"
-    );
+    assert_eq!(result["verdict"], "unavailable");
+    assert_eq!(result["capture_complete"], false);
+    assert_eq!(result["unavailable_reason"], "missing-question-category");
+    assert_eq!(result["contributors"], serde_json::json!([]));
+    assert_eq!(result["evidence_ids"], serde_json::json!([]));
 }
 
 #[test]
@@ -498,7 +523,7 @@ fn processor_reported_truncated_capture_is_typed_unavailable() {
 }
 
 #[test]
-fn startup_rejects_an_uncorrelated_candidate_instead_of_ranking_partial_rows() {
+fn startup_ignores_generic_untagged_backend_candidates() {
     let evidence = "abababababababababababababababab";
     let trace = tempfile::NamedTempFile::new().expect("uncorrelated startup trace");
     let fixture = serde_json::json!({
@@ -517,11 +542,12 @@ fn startup_rejects_an_uncorrelated_candidate_instead_of_ranking_partial_rows() {
     std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
 
     let result = run_path("gpu-startup", trace.path(), 2);
-    assert_eq!(result["verdict"], "unavailable");
-    assert_eq!(result["capture_complete"], false);
-    assert_eq!(result["unavailable_reason"], "missing-question-category");
-    assert_eq!(result["contributors"], serde_json::json!([]));
-    assert_eq!(result["evidence_ids"], serde_json::json!([]));
+    assert_eq!(result["verdict"], "unverified");
+    assert_eq!(result["capture_complete"], true);
+    assert_eq!(result["evidence_ids"], serde_json::json!([evidence]));
+    assert!(result["contributors"].as_array().unwrap().iter().all(
+        |row| row["evidence_id"] == evidence
+    ));
 }
 
 #[test]

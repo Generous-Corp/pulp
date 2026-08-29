@@ -185,6 +185,7 @@ def make_receipt(
         ),
         "outcome": outcome,
         "attempt_nonce": nonce,
+        "attempt_number": 1,
         "reason": None,
         "dependencies": [],
         "machine": {"id": "selftest-m3", "os": "macos", "architecture": "arm64"},
@@ -220,6 +221,24 @@ def make_receipt(
             },
             "audio_device_opened": False,
         }
+    producer_digest = runner.sha256_file(measurement_producer or binary)
+    raw["producer_pid"] = 9999
+    raw["fresh_process_trials"] = [{
+        "schema": "pulp.gpu-dpr-first-frame-trial.v1",
+        "version": 1,
+        "attempt_nonce": nonce,
+        "attempt_number": 1,
+        "pid": 10000 + index,
+        "producer_sha256": producer_digest,
+        "content_digest": receipt["content_digest"],
+        "pulp_sha": state["plan"]["pulp_sha"],
+        "first_frame_time_ms": raw["metrics"]["first_frame_time"][index],
+        "adapter": adapter,
+    } for index in range(20)]
+    write_json(cell_dir / "raw-samples.json", raw)
+    for artifact in artifacts:
+        if artifact["kind"] == "raw_samples":
+            artifact["sha256"] = runner.sha256_file(cell_dir / artifact["path"])
     path = cell_dir / "receipt.json"
     write_json(path, receipt)
     return path
@@ -441,6 +460,53 @@ def main() -> int:
         expect_rejected(
             similarity_receipt, state, manifest, run_dir,
             "capture similarity below ratified threshold",
+        )
+        planted += 1
+
+        for label, mutate in [
+            ("fresh-process mixed nonce",
+             lambda trial: trial.__setitem__("attempt_nonce", "0" * 32)),
+            ("fresh-process mixed attempt",
+             lambda trial: trial.__setitem__("attempt_number", 2)),
+            ("fresh-process producer digest drift",
+             lambda trial: trial.__setitem__("producer_sha256", "0" * 64)),
+            ("fresh-process mixed adapter",
+             lambda trial: trial["adapter"].__setitem__("name", "Other GPU")),
+        ]:
+            ledger_receipt = make_receipt(
+                run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+            )
+            ledger_path = runner.cell_directory(run_dir, dense) / "raw-samples.json"
+            ledger_raw = runner.load_json(ledger_path)
+            mutate(ledger_raw["fresh_process_trials"][1])
+            write_json(ledger_path, ledger_raw)
+            ledger_document = runner.load_json(ledger_receipt)
+            next(
+                item for item in ledger_document["artifacts"]
+                if item["kind"] == "raw_samples"
+            )["sha256"] = runner.sha256_file(ledger_path)
+            write_json(ledger_receipt, ledger_document)
+            expect_rejected(ledger_receipt, state, manifest, run_dir, label)
+            planted += 1
+
+        reused_pid_receipt = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
+        )
+        reused_pid_path = runner.cell_directory(run_dir, dense) / "raw-samples.json"
+        reused_pid_raw = runner.load_json(reused_pid_path)
+        reused_pid_raw["fresh_process_trials"][1]["pid"] = (
+            reused_pid_raw["fresh_process_trials"][0]["pid"]
+        )
+        write_json(reused_pid_path, reused_pid_raw)
+        reused_pid_document = runner.load_json(reused_pid_receipt)
+        next(
+            item for item in reused_pid_document["artifacts"]
+            if item["kind"] == "raw_samples"
+        )["sha256"] = runner.sha256_file(reused_pid_path)
+        write_json(reused_pid_receipt, reused_pid_document)
+        expect_rejected(
+            reused_pid_receipt, state, manifest, run_dir,
+            "fresh-process reused pid",
         )
         planted += 1
 
