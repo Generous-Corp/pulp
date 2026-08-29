@@ -387,6 +387,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/docs/validation/gpu-probes/m3-a2-real-probes-20260828")
     add_test(NAME gpu-first-visible-acceptance-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_acceptance.py")
+    add_test(NAME gpu-first-visible-campaign-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_campaign.py")
     add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_trace_overhead_acceptance.py")
     # Typed, GPU-free negative controls for the DPR experiment evidence

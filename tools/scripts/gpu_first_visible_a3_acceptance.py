@@ -92,6 +92,7 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
     "tools/cli/gpu_health/src/health_read_result_json.cpp",
     "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
 }
 AUDIO_PROVIDER_ENTRY_POINTS = [
     "pulp::inspect::ControlGpuHealthProvider::begin_editor_open",
