@@ -138,7 +138,7 @@ jobs:
       # exactly why fontconfig + skunicode breakage went undetected
       # at PR time (#1962).
       - name: Fetch Skia binaries (release path)
-        run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
+        run: env -u PULP_USE_BAKED_SKIA -u SKIA_DIR python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
         shell: bash
 
       - name: Verify m153+ provider capabilities and extracted receipt

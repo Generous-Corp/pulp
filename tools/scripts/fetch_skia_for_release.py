@@ -202,6 +202,7 @@ def keyed_cache_dest(cache_root: str, matrix_platform: str, asset_sha: str) -> P
 _ASSET_STAMP = ".skia-asset-sha256"
 GENERATION_RECEIPT = ".skia-generation-manifest.json"
 _GENERATION_RECEIPT_TMP = GENERATION_RECEIPT + ".tmp"
+SOURCE_ARCHIVE = ".skia-source-archive.zip"
 
 
 def _file_sha256(path: Path) -> str:
@@ -228,6 +229,7 @@ def _generation_payload(dest: Path) -> list[dict[str, str | int]]:
                 raise ValueError(f"Skia generation contains symlink: {path}")
             if not path.is_file() or path.name in {
                 _ASSET_STAMP, GENERATION_RECEIPT, _GENERATION_RECEIPT_TMP,
+                SOURCE_ARCHIVE,
             }:
                 continue
             relative = path.relative_to(root)
@@ -246,6 +248,7 @@ def _generation_payload(dest: Path) -> list[dict[str, str | int]]:
             raise ValueError(f"Skia generation contains symlink: {path}")
         if not path.is_file() or path.name in {
             _ASSET_STAMP, GENERATION_RECEIPT, _GENERATION_RECEIPT_TMP,
+            SOURCE_ARCHIVE,
         }:
             continue
         entries.append({
@@ -277,17 +280,61 @@ def write_generation_receipt(dest: Path, matrix_platform: str, asset_sha: str) -
     os.replace(temporary, path)
 
 
+def _archive_generation_payload(
+    archive_path: Path, matrix_platform: str
+) -> list[dict[str, str | int]]:
+    """Derive the normalized provider payload from the trusted source archive."""
+    release_dir = expected_library_path(matrix_platform, ".").parent.as_posix().removeprefix("./")
+    entries: dict[str, dict[str, str | int]] = {}
+    with zipfile.ZipFile(archive_path) as archive:
+        file_names = {
+            PurePosixPath(info.filename.replace("\\", "/")).as_posix()
+            for info in archive.infolist()
+            if not info.is_dir()
+        }
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            raw_path = PurePosixPath(info.filename.replace("\\", "/"))
+            parts = raw_path.parts
+            release_parts = PurePosixPath(release_dir).parts
+            logical = raw_path
+            if matrix_platform not in _IOS_PRESERVE_ARCH_SUBDIR:
+                tail = parts[len(release_parts):] if parts[:len(release_parts)] == release_parts else ()
+                if len(tail) == 2:
+                    flat = PurePosixPath(*release_parts, tail[1])
+                    if flat.as_posix() not in file_names:
+                        logical = flat
+            digest = hashlib.sha256()
+            size = 0
+            with archive.open(info) as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    size += len(chunk)
+            key = logical.as_posix()
+            if key in entries:
+                raise ValueError(f"archive normalizes multiple files to {key}")
+            entries[key] = {"path": key, "sha256": digest.hexdigest(), "size": size}
+    return [entries[key] for key in sorted(entries)]
+
+
 def generation_receipt_valid(dest: Path, matrix_platform: str, asset_sha: str) -> bool:
     path = dest / GENERATION_RECEIPT
+    archive_path = dest / SOURCE_ARCHIVE
     try:
+        if _file_sha256(archive_path) != asset_sha:
+            return False
+        archive_payload = _archive_generation_payload(archive_path, matrix_platform)
+        disk_payload = _generation_payload(dest)
         receipt = json.loads(path.read_text(encoding="utf-8"))
         return (
             receipt.get("schema_version") == 1
             and receipt.get("platform") == matrix_platform
             and receipt.get("asset_sha256") == asset_sha
-            and receipt.get("files") == _generation_payload(dest)
+            and receipt.get("files") == disk_payload
+            and disk_payload == archive_payload
         )
-    except (OSError, ValueError, json.JSONDecodeError):
+    except (OSError, ValueError, zipfile.BadZipFile, json.JSONDecodeError):
         return False
 
 
@@ -668,6 +715,30 @@ def _main(argv: list[str]) -> int:
     print(f"sha256 verified: {actual_sha}")
 
     dest = Path(dest_root)
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            validation_root = dest.parent / f".{dest.name}.archive-validation-root"
+            for member in archive.infolist():
+                _archive_member_target(validation_root, member.filename)
+    except ValueError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
+    # A refetch replaces the complete provider generation. Otherwise files
+    # from the prior pin can survive and shadow the new arch-subdir libraries.
+    absolute_dest = dest.absolute()
+    forbidden = {Path("/").absolute(), Path.cwd().absolute(), Path.home().absolute()}
+    if absolute_dest in forbidden:
+        print(f"ERROR: refusing to replace unsafe Skia destination {absolute_dest}", file=sys.stderr)
+        return 1
+    if dest.is_symlink():
+        dest.unlink()
+    elif dest.exists():
+        for child in dest.iterdir():
+            if child.is_symlink() or child.is_file():
+                child.unlink()
+            else:
+                shutil.rmtree(child)
     dest.mkdir(parents=True, exist_ok=True)
     # Self-heal a corrupted warm cache: a dangling `build` symlink (its target
     # gone) makes mkdir see the path as both present (the link exists) and
@@ -683,14 +754,10 @@ def _main(argv: list[str]) -> int:
     # member whose target already exists. Create directories with exist_ok and
     # overwrite files so unpacking over a warm/cached checkout succeeds.
     with zipfile.ZipFile(zip_path) as zf:
-        try:
-            validated_members = [
-                (member, _archive_member_target(dest, member.filename))
-                for member in zf.infolist()
-            ]
-        except ValueError as error:
-            print(f"ERROR: {error}", file=sys.stderr)
-            return 1
+        validated_members = [
+            (member, _archive_member_target(dest, member.filename))
+            for member in zf.infolist()
+        ]
         for member, target in validated_members:
             if member.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
@@ -765,6 +832,11 @@ def _main(argv: list[str]) -> int:
         for p in sorted(dest.rglob("*"))[:50]:
             print(f"  {p}", file=sys.stderr)
         return 1
+
+    # Retain the exact SHA-verified archive. Warm validation derives the
+    # expected file map from these independently authenticated source bytes,
+    # so rewriting the adjacent receipt cannot bless a poisoned shared cache.
+    shutil.copyfile(zip_path, dest / SOURCE_ARCHIVE)
 
     # Seal the complete extracted tree as well as the archive identity. A
     # matching archive stamp alone cannot detect a later library/header swap.

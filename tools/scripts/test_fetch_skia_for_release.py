@@ -367,6 +367,21 @@ class ImmutableKeyedCache(unittest.TestCase):
             self.assertFalse(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
             self.assertEqual(fetch_skia.main(argv), 1)
 
+    def test_rewritten_receipt_cannot_bless_mutated_provider(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"archive-anchored")
+            dest = td / "provider"
+            self.assertEqual(
+                fetch_skia.main(["fetch", "darwin-arm64", "--dest", str(dest)]), 0
+            )
+            library = fetch_skia.expected_library_path("darwin-arm64", str(dest))
+            library.write_bytes(b"attacker-replacement")
+            # Simulate a cache writer regenerating the adjacent mutable receipt.
+            fetch_skia.write_generation_receipt(dest, "darwin-arm64", sha)
+            self.assertFalse(
+                fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha)
+            )
+
     def test_direct_warm_hit_rejects_missing_dawn_and_repairs(self):
         with _in_tempdir() as td:
             _, sha = self._asset(td, b"repair")
@@ -974,6 +989,35 @@ class IdempotencyStamp(unittest.TestCase):
             )
             stamp = td / "external/skia-build/.skia-asset-sha256"
             self.assertEqual(stamp.read_text(encoding="utf-8").strip(), sha_v2)
+
+    def test_pin_change_replaces_flat_library_with_new_arch_library(self):
+        with _in_tempdir() as td:
+            zip_v1 = td / "skia-v1.zip"
+            sha_v1 = _make_zip(
+                zip_v1,
+                {
+                    "build/mac-gpu/lib/Release/libskia.a": b"old-flat",
+                    "build/mac-gpu/lib/Release/libdawn_combined.a": b"old-dawn",
+                },
+            )
+            _write_manifest(td, f"file://{zip_v1.as_posix()}", sha_v1, "mac-arm64")
+            self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+
+            zip_v2 = td / "skia-v2.zip"
+            sha_v2 = _make_zip(
+                zip_v2,
+                {
+                    "build/mac-gpu/lib/Release/arm64/libskia.a": b"new-arch",
+                    "build/mac-gpu/lib/Release/arm64/libdawn_combined.a": b"new-dawn",
+                },
+            )
+            _write_manifest(td, f"file://{zip_v2.as_posix()}", sha_v2, "mac-arm64")
+            self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+
+            release = td / "external/skia-build/build/mac-gpu/lib/Release"
+            self.assertEqual((release / "libskia.a").read_bytes(), b"new-arch")
+            self.assertEqual((release / "libdawn_combined.a").read_bytes(), b"new-dawn")
+            self.assertFalse((release / "arm64").exists())
 
     def test_missing_lib_with_stamp_refetches(self):
         with _in_tempdir() as td:
