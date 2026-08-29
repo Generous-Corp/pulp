@@ -14,8 +14,8 @@
     "python3 tools/scripts/test_fetch_skia_for_release.py",
     "python3 tools/scripts/test_verify_skia_m153_capabilities.py",
     "python3 tools/scripts/test_release_workflow_test_step.py",
-    "python3 tools/scripts/vellum_freeze_check.py --base origin/main --head HEAD --source-head HEAD",
-    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD",
+    "python3 tools/scripts/vellum_freeze_check.py --base \"$(git rev-parse origin/main)\" --head \"$(git rev-parse HEAD)\" --source-head \"$(git rev-parse HEAD)\" --output /tmp/pr7896-vellum-freeze.json",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base \"$(git rev-parse origin/main)\" --head \"$(git rev-parse HEAD)\" --output /tmp/pr7896-vellum-watch.json",
     "python3 tools/scripts/test_vellum_expansion_watch_check.py",
     "release-path mixed Skia/Dawn m153 plus V8 m152 provider-identity and headless Three.js cube proof"
   ],

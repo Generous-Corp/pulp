@@ -218,7 +218,7 @@ class ImmutableKeyedCache(unittest.TestCase):
         c = fetch_skia.keyed_cache_dest("/cache", "linux-x64", "a" * 64)
         self.assertNotEqual(a, b)
         self.assertNotEqual(a, c)
-        self.assertTrue(a.name.endswith("-receipt-v2"))
+        self.assertTrue(a.name.endswith("-receipt-v3"))
 
     def test_private_stage_is_atomically_published_and_removed(self):
         with _in_tempdir() as td:
@@ -231,11 +231,11 @@ class ImmutableKeyedCache(unittest.TestCase):
             self.assertTrue(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
             self.assertEqual(list(root.glob(".*.staging-*")), [])
 
-    def test_stronger_receipt_generation_publishes_beside_legacy_v1(self):
+    def test_stronger_receipt_generation_publishes_beside_legacy_v2(self):
         with _in_tempdir() as td:
             _, sha = self._asset(td, b"format-v2")
             root = td / "cache"
-            legacy = root / f"darwin-arm64-{sha}-receipt-v1"
+            legacy = root / f"darwin-arm64-{sha}-receipt-v2"
             legacy.mkdir(parents=True)
             sentinel = legacy / "legacy-generation"
             sentinel.write_text("retained", encoding="utf-8")
@@ -398,7 +398,8 @@ class ImmutableKeyedCache(unittest.TestCase):
             library = fetch_skia.expected_library_path("darwin-arm64", str(dest))
             library.write_bytes(b"attacker-replacement")
             # Simulate a cache writer regenerating the adjacent mutable receipt.
-            fetch_skia.write_generation_receipt(dest, "darwin-arm64", sha)
+            with self.assertRaisesRegex(ValueError, "differs from authenticated"):
+                fetch_skia.write_generation_receipt(dest, "darwin-arm64", sha)
             self.assertFalse(
                 fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha)
             )
@@ -1064,6 +1065,13 @@ class IdempotencyStamp(unittest.TestCase):
             self.assertEqual(tracked_version.read_text(encoding="utf-8"), "tracked version\n")
             self.assertEqual(tracked_header.read_text(encoding="utf-8"), "tracked header\n")
             self.assertFalse(stale.exists(), "the archive-owned build tree must be replaced")
+            self.assertTrue(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+
+            zip_path.unlink()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+            self.assertIn("skipping download", out.getvalue())
 
     def test_missing_lib_with_stamp_refetches(self):
         with _in_tempdir() as td:

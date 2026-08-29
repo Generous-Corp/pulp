@@ -19,7 +19,7 @@ Usage:
         --cache-root ~/.cache/pulp/skia --cache-lock-timeout 300
 
 `--cache-root` is the host/worktree mode: it resolves an immutable
-`<platform>-<asset-sha256>-receipt-v2` generation, downloads into private sibling staging,
+`<platform>-<asset-sha256>-receipt-v3` generation, downloads into private sibling staging,
 and atomically renames the validated generation into place. Release workflows
 continue to use the default or explicit `--dest` mode for isolated matrix trees.
 
@@ -196,7 +196,7 @@ def keyed_cache_dest(cache_root: str, matrix_platform: str, asset_sha: str) -> P
     # Receipt format is part of the immutable generation identity. Adding a
     # stronger validator must publish beside old generations, never mutate one
     # that an active compiler may still have open.
-    return Path(cache_root).absolute() / f"{matrix_platform}-{asset_sha.lower()}-receipt-v2"
+    return Path(cache_root).absolute() / f"{matrix_platform}-{asset_sha.lower()}-receipt-v3"
 
 
 _ASSET_STAMP = ".skia-asset-sha256"
@@ -213,7 +213,9 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _generation_payload(dest: Path) -> list[dict[str, str | int]]:
+def _generation_payload(
+    dest: Path, archive_roots: set[str] | None = None
+) -> list[dict[str, str | int]]:
     """Describe every extracted provider file, rejecting symlink substitution.
 
     Legacy checkout materializations may make only ``build`` a symlink to the
@@ -240,38 +242,49 @@ def _generation_payload(dest: Path) -> list[dict[str, str | int]]:
                 "size": path.stat().st_size,
             })
 
-    build_entry = dest / "build"
-    for path in sorted(dest.rglob("*")):
-        if path.is_symlink():
-            if path == build_entry:
-                continue
-            raise ValueError(f"Skia generation contains symlink: {path}")
-        if not path.is_file() or path.name in {
-            _ASSET_STAMP, GENERATION_RECEIPT, _GENERATION_RECEIPT_TMP,
-            SOURCE_ARCHIVE,
-        }:
-            continue
-        entries.append({
-            "path": path.relative_to(dest).as_posix(),
-            "sha256": _file_sha256(path),
-            "size": path.stat().st_size,
-        })
-
-    if build_entry.is_symlink():
-        resolved_build = build_entry.resolve(strict=True)
-        if not resolved_build.is_dir():
-            raise ValueError(f"Skia build symlink does not resolve to a directory: {build_entry}")
-        append_tree(resolved_build, Path("build"))
+    excluded = {_ASSET_STAMP, GENERATION_RECEIPT, _GENERATION_RECEIPT_TMP,
+                SOURCE_ARCHIVE}
+    selected_roots = archive_roots or {
+        child.name for child in dest.iterdir() if child.name not in excluded
+    }
+    for name in sorted(selected_roots):
+        entry = dest / name
+        if entry.is_symlink():
+            if name != "build":
+                raise ValueError(f"Skia generation contains symlink: {entry}")
+            resolved = entry.resolve(strict=True)
+            if not resolved.is_dir():
+                raise ValueError(
+                    f"Skia build symlink does not resolve to a directory: {entry}"
+                )
+            append_tree(resolved, Path(name))
+        elif entry.is_dir():
+            append_tree(entry, Path(name))
+        elif entry.is_file():
+            entries.append({
+                "path": name,
+                "sha256": _file_sha256(entry),
+                "size": entry.stat().st_size,
+            })
+        else:
+            raise ValueError(f"Skia generation archive root is missing: {entry}")
     return entries
 
 
 def write_generation_receipt(dest: Path, matrix_platform: str, asset_sha: str) -> None:
     """Seal the extracted provider tree before it becomes a reusable warm hit."""
+    archive_payload = _archive_generation_payload(dest / SOURCE_ARCHIVE, matrix_platform)
+    archive_roots = sorted({PurePosixPath(str(item["path"])).parts[0]
+                            for item in archive_payload})
+    disk_payload = _generation_payload(dest, set(archive_roots))
+    if disk_payload != archive_payload:
+        raise ValueError("extracted Skia payload differs from authenticated source archive")
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "platform": matrix_platform,
         "asset_sha256": asset_sha,
-        "files": _generation_payload(dest),
+        "archive_roots": archive_roots,
+        "files": disk_payload,
     }
     path = dest / GENERATION_RECEIPT
     temporary = dest / _GENERATION_RECEIPT_TMP
@@ -325,12 +338,15 @@ def generation_receipt_valid(dest: Path, matrix_platform: str, asset_sha: str) -
         if _file_sha256(archive_path) != asset_sha:
             return False
         archive_payload = _archive_generation_payload(archive_path, matrix_platform)
-        disk_payload = _generation_payload(dest)
+        archive_roots = sorted({PurePosixPath(str(item["path"])).parts[0]
+                                for item in archive_payload})
+        disk_payload = _generation_payload(dest, set(archive_roots))
         receipt = json.loads(path.read_text(encoding="utf-8"))
         return (
-            receipt.get("schema_version") == 1
+            receipt.get("schema_version") == 2
             and receipt.get("platform") == matrix_platform
             and receipt.get("asset_sha256") == asset_sha
+            and receipt.get("archive_roots") == archive_roots
             and receipt.get("files") == disk_payload
             and disk_payload == archive_payload
         )

@@ -58,6 +58,17 @@ echo "Syncing skia-builder to $SKIA_BUILDER_REF..."
 git -C "$SKIA_BUILDER_DIR" fetch --depth 1 origin "$SKIA_BUILDER_REF"
 git -C "$SKIA_BUILDER_DIR" checkout --detach FETCH_HEAD
 
+# Fail before the expensive build when the mutable Chromium milestone branch
+# no longer resolves to the immutable Skia revision recorded in the manifest.
+# The post-build checkout check below remains authoritative against a race or a
+# builder that consumes different source than the advertised branch.
+SKIA_SOURCE_URL="${SKIA_SOURCE_URL:-https://skia.googlesource.com/skia.git}"
+resolved_skia_commit="$(git ls-remote "$SKIA_SOURCE_URL" "refs/heads/$SKIA_BRANCH" | awk 'NR == 1 {print $1}')"
+if [ -z "$resolved_skia_commit" ] || [ "$resolved_skia_commit" != "$SKIA_EXPECTED_COMMIT" ]; then
+    echo "ERROR: Skia branch $SKIA_BRANCH resolves to ${resolved_skia_commit:-<missing>}, expected $SKIA_EXPECTED_COMMIT" >&2
+    exit 1
+fi
+
 # Increase file limit on macOS
 if [ "$(uname)" = "Darwin" ]; then
     ulimit -n 2048

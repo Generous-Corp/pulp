@@ -676,10 +676,15 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         )
         self.assertIn("provider_identity_test.cmake", self.text)
         self.assertIn("matrix.platform == 'darwin-arm64'", self.text)
-        dependencies = (REPO_ROOT / "tools/cmake/PulpDependencies.cmake").read_text(
-            encoding="utf-8"
+        dependencies = (REPO_ROOT / "tools/cmake/PulpDependencies.cmake").read_text(encoding="utf-8")
+        match = re.search(
+            r"# three\.js .*?\n(?P<body>if\(\(PULP_BUILD_TESTS.*?\nendif\(\))",
+            dependencies,
+            re.DOTALL,
         )
-        self.assertIn("PULP_BUILD_EXAMPLES", dependencies)
+        self.assertIsNotNone(match, "could not isolate the three.js FetchContent guard")
+        guard = match.group("body")
+        self.assertIn("PULP_BUILD_EXAMPLES", guard)
         for exclusion in (
             "NOT ANDROID",
             "NOT IOS",
@@ -688,7 +693,7 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
             'NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten"',
             'NOT CMAKE_SYSTEM_NAME STREQUAL "WASI"',
         ):
-            self.assertIn(exclusion, dependencies)
+            self.assertIn(exclusion, guard)
 
 
 class ReleaseCliDualBinaryPackaging(unittest.TestCase):

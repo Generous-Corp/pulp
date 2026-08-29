@@ -26,7 +26,10 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
             header.write_text("// header\n", encoding="utf-8")
             library.write_bytes(b"archive")
             self.assertEqual(probe._find_include_root(root), root / "build/include")
-            self.assertEqual(probe._find_skia_library(root), library)
+            self.assertEqual(
+                probe.skia_fetch.expected_library_path("darwin-arm64", str(root)),
+                library,
+            )
 
     def test_missing_header_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -58,9 +61,13 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
     def test_source_fallback_fails_before_copy_on_commit_drift(self) -> None:
         script = (probe.REPO_ROOT / "tools/build-skia.sh").read_text(encoding="utf-8")
         self.assertIn('SKIA_EXPECTED_COMMIT="${SKIA_EXPECTED_COMMIT:-$(python3', script)
+        preflight = script.index('resolved_skia_commit="$(git ls-remote')
+        build_boundary = script.index('python3 build-skia.py')
         verification = script.index('actual_skia_commit="$(git -C')
         copy_boundary = script.index('echo "Copying build output to $SKIA_BUILD_OUTPUT..."')
+        self.assertLess(preflight, build_boundary)
         self.assertLess(verification, copy_boundary)
+        self.assertIn('resolved_skia_commit" != "$SKIA_EXPECTED_COMMIT', script)
         self.assertIn('actual_skia_commit" != "$SKIA_EXPECTED_COMMIT', script)
 
     def test_unverified_generation_is_rejected_before_compile(self) -> None:

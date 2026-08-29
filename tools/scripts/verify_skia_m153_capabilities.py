@@ -84,19 +84,6 @@ def _find_include_root(skia_dir: Path) -> Path:
     raise RuntimeError(f"SkLogHandler.h not found under {skia_dir}")
 
 
-def _find_skia_library(skia_dir: Path) -> Path:
-    names = (
-        "build/mac-gpu/lib/Release/libskia.a",
-        "build/linux-gpu/lib/Release/libskia.a",
-        "build/win-gpu/lib/Release/skia.lib",
-    )
-    for relative in names:
-        candidate = skia_dir / relative
-        if candidate.is_file():
-            return candidate
-    raise RuntimeError(f"materialized release Skia library not found under {skia_dir}")
-
-
 def _compiler() -> str:
     requested = os.environ.get("CXX")
     compiler = shutil.which(requested) if requested else None

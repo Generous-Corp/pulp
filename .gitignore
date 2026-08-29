@@ -145,6 +145,8 @@ external/skia-build/build
 external/skia-build/.skia-asset-sha256
 external/skia-build/.skia-generation-manifest.json
 external/skia-build/.skia-generation-manifest.json.tmp
+external/skia-build/.skia-source-archive.zip
+.skia-release-asset-*.zip
 
 # External SDKs cloned by setup.sh / FetchContent — never committed.
 external/AudioUnitSDK
