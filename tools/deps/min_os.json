@@ -57,13 +57,13 @@
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "skia-builder chrome/m153 mac-universal x86_64 slice; measure_min_os.py --measure over libskia.a"
+          "source": "skia-builder chrome/m153 skia-build-mac-x86_64-gpu-release.zip (sha256 0aeb3a4879d59bf42bb4a42a21cda292b6c5401fa24377b241623a600664471d); measure_min_os.py --measure over libskia.a"
         },
         "dawn": {
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "skia-builder chrome/m153 mac-universal x86_64 slice; measure_min_os.py --measure over libdawn_combined.a (bundled in the Skia toolchain)"
+          "source": "skia-builder chrome/m153 skia-build-mac-x86_64-gpu-release.zip (sha256 0aeb3a4879d59bf42bb4a42a21cda292b6c5401fa24377b241623a600664471d); measure_min_os.py --measure over libdawn_combined.a (bundled in the Skia toolchain)"
         },
         "libcxx": {
           "measured": "13.4",

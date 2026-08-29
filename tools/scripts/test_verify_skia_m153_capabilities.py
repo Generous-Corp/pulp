@@ -29,9 +29,25 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
                 probe._find_include_root(Path(temp))
 
     def test_wrong_manifest_release_is_rejected_before_compile(self) -> None:
-        with mock.patch.object(probe, "_manifest_release", return_value="chrome/m152"):
+        with mock.patch.object(
+            probe, "_manifest_skia", return_value={"version": "chrome/m152"}
+        ):
             with self.assertRaisesRegex(RuntimeError, "requires chrome/m153"):
-                probe.verify(Path("/does/not/matter"))
+                probe.verify(Path("/does/not/matter"), "darwin-arm64")
+
+    def test_unverified_generation_is_rejected_before_compile(self) -> None:
+        dependency = {
+            "version": "chrome/m153",
+            "determinism": {
+                "release_assets": {"mac-arm64": {"sha256": "a" * 64}}
+            },
+        }
+        with mock.patch.object(probe, "_manifest_skia", return_value=dependency), \
+             mock.patch.object(
+                 probe.skia_fetch, "cache_generation_valid", return_value=False
+             ):
+            with self.assertRaisesRegex(RuntimeError, "verified darwin-arm64"):
+                probe.verify(Path("/does/not/matter"), "darwin-arm64")
 
 
 if __name__ == "__main__":

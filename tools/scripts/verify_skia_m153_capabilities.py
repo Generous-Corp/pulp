@@ -18,6 +18,11 @@ import subprocess
 import sys
 import tempfile
 
+try:
+    from tools.scripts import fetch_skia_for_release as skia_fetch
+except ModuleNotFoundError:  # Direct script execution from outside the repo root.
+    import fetch_skia_for_release as skia_fetch
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "tools/deps/manifest.json"
@@ -55,11 +60,11 @@ int main(int argc, char**) {
 """
 
 
-def _manifest_release() -> str:
+def _manifest_skia() -> dict:
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     for dep in data.get("dependencies", []):
         if dep.get("name") == "Skia":
-            return str(dep.get("version", ""))
+            return dep
     raise RuntimeError("tools/deps/manifest.json has no Skia dependency")
 
 
@@ -92,15 +97,28 @@ def _compiler() -> str:
     return compiler
 
 
-def verify(skia_dir: Path) -> None:
-    release = _manifest_release()
+def verify(skia_dir: Path, platform: str) -> None:
+    dependency = _manifest_skia()
+    release = str(dependency.get("version", ""))
     if release != REQUIRED_RELEASE:
         raise RuntimeError(
             f"capability contract requires {REQUIRED_RELEASE}, manifest has {release or '<empty>'}"
         )
 
+    try:
+        manifest_key = skia_fetch.MATRIX_TO_MANIFEST[platform]
+        asset = dependency["determinism"]["release_assets"][manifest_key]
+        expected_sha = asset["sha256"]
+    except KeyError as error:
+        raise RuntimeError(f"manifest has no exact Skia asset for {platform}") from error
+    if not skia_fetch.cache_generation_valid(skia_dir, platform, expected_sha):
+        raise RuntimeError(
+            f"{skia_dir} is not the verified {platform} release generation "
+            f"for sha256 {expected_sha}"
+        )
+
     include_root = _find_include_root(skia_dir)
-    library = _find_skia_library(skia_dir)
+    library = skia_fetch.expected_library_path(platform, str(skia_dir))
     compiler = _compiler()
 
     with tempfile.TemporaryDirectory(prefix="pulp-skia-m153-probe-") as temp:
@@ -151,9 +169,15 @@ def main(argv: list[str] | None = None) -> int:
         default=REPO_ROOT / "external/skia-build",
         help="materialized skia-builder archive root",
     )
+    parser.add_argument(
+        "--platform",
+        required=True,
+        choices=sorted(skia_fetch.MATRIX_TO_MANIFEST),
+        help="release matrix platform whose exact manifest asset is materialized",
+    )
     args = parser.parse_args(argv)
     try:
-        verify(args.skia_dir.resolve())
+        verify(args.skia_dir.resolve(), args.platform)
     except (OSError, RuntimeError, json.JSONDecodeError) as error:
         print(f"verify_skia_m153_capabilities: ERROR: {error}", file=sys.stderr)
         return 1
