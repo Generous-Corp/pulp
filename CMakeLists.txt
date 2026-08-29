@@ -391,14 +391,6 @@ endif()
 # Render must come before view so pulp-view can link pulp-render via if(TARGET)
 if(PULP_ENABLE_GPU)
     add_subdirectory(core/render)
-    # Pulp's source-tree Scene3D composition supplies the CPU scene packet
-    # consumed by the Vellum-authoritative render target. Keep this product
-    # integration seam here so static-link consumers receive scene after render
-    # on GNU ld without widening the installed SDK export set.
-    if(PULP_ENABLE_SCENE3D)
-        target_link_libraries(pulp-render PRIVATE
-            $<BUILD_INTERFACE:pulp::scene>)
-    endif()
 endif()
 # After core/render so the GPU convolver node can link pulp::render when GPU is
 # enabled. The transport itself is GPU-agnostic and builds regardless.

@@ -178,7 +178,16 @@ target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE
     pulp::runtime pulp::tool-audio pulp::audio-analysis
     pulp::ship pulp::view pulp::render pulp::format pulp::host
-    pulp::tool-gpu-health-probes pulp::tool-gpu-probe-recipes)
+    pulp::tool-gpu-health-probes)
+if(PULP_LINUX AND PULP_ENABLE_SCENE3D)
+    # The GPU probe recipes pull Renderer3D from the static render archive,
+    # whose scene-packet references form a back-edge to pulp::scene. Rescan
+    # this CLI-only group on GNU ld instead of widening every render consumer.
+    target_link_libraries(pulp-cli PRIVATE
+        "$<LINK_GROUP:RESCAN,pulp::tool-gpu-probe-recipes,pulp::render,pulp::scene>")
+else()
+    target_link_libraries(pulp-cli PRIVATE pulp::tool-gpu-probe-recipes)
+endif()
 target_link_libraries(pulp-cli PRIVATE pulp::inspect-protocol)
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_link_libraries(pulp-cli PRIVATE pulp::tool-timeline)
