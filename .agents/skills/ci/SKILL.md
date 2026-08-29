@@ -5167,7 +5167,6 @@ and prove the second fetch is a no-download hit; do not rsync one runner's
 checkout cache to another.
 
 The `macOS local smoke` job resolves `runs-on` from
-`macOS local smoke` job resolves `runs-on` from
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` first and falls back to hosted `macos-15` only
 when the local selector variable is absent. On the persistent local runner,
 this job deliberately uses the installed `python3.12` and a worktree-local venv
