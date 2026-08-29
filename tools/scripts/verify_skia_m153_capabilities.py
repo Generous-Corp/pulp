@@ -95,9 +95,14 @@ def _compiler() -> str:
 
 def _require_native_host(platform: str) -> None:
     machine = host_platform.machine().lower()
+    if platform == "darwin-universal":
+        raise RuntimeError(
+            "darwin-universal capability acceptance requires separate arm64 and "
+            "x86_64 compile/link/run receipts from matching native hosts; this "
+            "single-host probe refuses to verify only one slice"
+        )
     if sys.platform == "darwin":
-        native = {"darwin-universal"}
-        native.add("darwin-arm64" if machine in {"arm64", "aarch64"} else "darwin-x64")
+        native = {"darwin-arm64" if machine in {"arm64", "aarch64"} else "darwin-x64"}
     elif sys.platform.startswith("linux"):
         native = {"linux-arm64" if machine in {"arm64", "aarch64"} else "linux-x64"}
     else:

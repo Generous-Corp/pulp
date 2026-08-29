@@ -108,6 +108,18 @@ class RenderUpdateValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "no-download warm hit"):
                 validator.validate(Path(temp), Path(temp) / "build", cache_only=True)
 
+    def test_full_mode_rejects_host_that_cannot_run_mixed_provider_proof(self) -> None:
+        with mock.patch.object(validator, "native_platform", return_value="linux-x64"), \
+             mock.patch.object(validator, "source_sha", return_value="a" * 40), \
+             mock.patch.object(validator.skia_fetch, "manifest_asset") as manifest_asset, \
+             mock.patch.object(validator, "run_checked") as run_checked:
+            with self.assertRaisesRegex(
+                RuntimeError, "full render-update validation requires a darwin-arm64 host"
+            ):
+                validator.validate(Path("/cache"), Path("/build"), cache_only=False)
+        manifest_asset.assert_not_called()
+        run_checked.assert_not_called()
+
     def test_source_change_during_validation_fails_closed(self) -> None:
         asset = {"sha256": "f" * 64}
         with tempfile.TemporaryDirectory() as temp:

@@ -89,7 +89,10 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
         with mock.patch.object(probe.sys, "platform", "darwin"), \
              mock.patch.object(probe.host_platform, "machine", return_value="arm64"):
             probe._require_native_host("darwin-arm64")
-            probe._require_native_host("darwin-universal")
+            with self.assertRaisesRegex(
+                RuntimeError, "separate arm64 and x86_64 compile/link/run receipts"
+            ):
+                probe._require_native_host("darwin-universal")
             with self.assertRaisesRegex(RuntimeError, "cannot compile and execute"):
                 probe._require_native_host("darwin-x64")
             with self.assertRaisesRegex(RuntimeError, "cannot compile and execute"):

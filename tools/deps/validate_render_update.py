@@ -91,6 +91,12 @@ def expected_v8_version() -> str:
 def validate(cache_root: Path, build_dir: Path, cache_only: bool) -> dict[str, object]:
     initial_source_sha = source_sha()
     matrix_platform = native_platform()
+    if not cache_only and matrix_platform != "darwin-arm64":
+        raise RuntimeError(
+            "full render-update validation requires a darwin-arm64 host so the "
+            "mixed Skia/Dawn m153 plus V8 provider proof cannot be skipped; "
+            "use --cache-only on this host and run the full leg on darwin-arm64"
+        )
     _, asset = skia_fetch.manifest_asset(matrix_platform)
     if asset is None:
         raise RuntimeError(f"manifest has no Skia provider for {matrix_platform}")
@@ -126,11 +132,6 @@ def validate(cache_root: Path, build_dir: Path, cache_only: bool) -> dict[str, o
     mixed_provider: dict[str, object]
     if cache_only:
         mixed_provider = {"status": "not-run-cache-only"}
-    elif matrix_platform != "darwin-arm64":
-        mixed_provider = {
-            "status": "not-applicable",
-            "reason": "required mixed-provider execution is owned by the darwin-arm64 release path",
-        }
     else:
         run_checked([sys.executable, "tools/scripts/fetch_v8_for_release.py", matrix_platform])
         run_checked([
