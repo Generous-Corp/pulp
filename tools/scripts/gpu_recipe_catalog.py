@@ -312,6 +312,13 @@ def validate_handoff(document: Any) -> list[str]:
         allowed = {
             "retain-pulp": ("Generous-Corp/pulp", None, False),
             "retain-pulp-followup": ("Generous-Corp/pulp", None, False),
+            "retain-pulp-product-adapters": ("Generous-Corp/pulp", "B1-B3", False),
+            "retain-pulp-analysis-replace-generic-producers":
+                ("Generous-Corp/pulp", "B4", True),
+            "retain-pulp-control-replace-generic-event-sources":
+                ("Generous-Corp/pulp", "B4", True),
+            "retain-pulp-experiment-replace-policy-consumption":
+                ("Generous-Corp/pulp", "B5", True),
             "replace-pulp-adapter-consumption": ("Generous-Corp/vellum", "B1", True),
             "adopt-when-proven": ("Generous-Corp/vellum", "B2", True),
             "adopt-only-if-a3-evidence-queues": ("Generous-Corp/vellum", "B4", True),

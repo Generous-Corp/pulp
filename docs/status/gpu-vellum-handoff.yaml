@@ -38,13 +38,13 @@
       "id": "a2-pulp-gpu-probe-adapters",
       "current_owner": "Generous-Corp/pulp",
       "paths": [
+        "docs/validation/gpu-probes",
         "tools/cli/gpu_health",
         "tools/cli/gpu_probe",
         "tools/cli/gpu_recipe_catalog_data.h.in",
         "tools/mcp/mcp_gpu_tools.cpp",
         "tools/scripts/gpu_recipe_catalog.py",
-        "tools/scripts/verify_gpu_probe_acceptance.py",
-        "docs/validation/gpu-probes"
+        "tools/scripts/verify_gpu_probe_acceptance.py"
       ],
       "cutover_action": "retain-pulp-product-adapters",
       "vellum_phase": "B1-B3",
@@ -55,15 +55,15 @@
       "id": "a2t-pulp-trace-analysis-adapters",
       "current_owner": "Generous-Corp/pulp",
       "paths": [
-        "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
-        "tools/mcp/mcp_trace_tools.cpp",
-        "tools/scripts/gpu_trace_overhead_acceptance.py",
-        "tools/scripts/test_gpu_trace_overhead_acceptance.py",
         ".agents/skills/trace-analysis/references/hints_gpu.md",
         ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
         ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
         ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
-        "docs/validation/gpu-trace-overhead"
+        "docs/validation/gpu-trace-overhead",
+        "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+        "tools/mcp/mcp_trace_tools.cpp",
+        "tools/scripts/gpu_trace_overhead_acceptance.py",
+        "tools/scripts/test_gpu_trace_overhead_acceptance.py"
       ],
       "cutover_action": "retain-pulp-analysis-replace-generic-producers",
       "vellum_phase": "B4",
@@ -74,18 +74,18 @@
       "id": "a3-pulp-runtime-control-adapters",
       "current_owner": "Generous-Corp/pulp",
       "paths": [
+        "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
+        "docs/contracts/gpu-health-read-result-v1.schema.json",
+        "docs/validation/gpu-first-visible-a3-acceptance.md",
         "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
-        "inspect/src/control_gpu_health_provider.cpp",
-        "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
-        "inspect/src/control_gpu_health_view_adapter.cpp",
         "inspect/include/pulp/inspect/control_gpu_health_read_executor.hpp",
+        "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+        "inspect/src/control_gpu_health_provider.cpp",
         "inspect/src/control_gpu_health_read_executor.cpp",
+        "inspect/src/control_gpu_health_view_adapter.cpp",
         "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
         "tools/cli/gpu_health/src/health_read_result_json.cpp",
-        "docs/contracts/gpu-health-read-result-v1.schema.json",
-        "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
-        "tools/scripts/gpu_first_visible_a3_acceptance.py",
-        "docs/validation/gpu-first-visible-a3-acceptance.md"
+        "tools/scripts/gpu_first_visible_a3_acceptance.py"
       ],
       "cutover_action": "retain-pulp-control-replace-generic-event-sources",
       "vellum_phase": "B4",
@@ -97,12 +97,12 @@
       "current_owner": "Generous-Corp/pulp",
       "paths": [
         "docs/contracts/gpu-dpr-experiment-v1.schema.json",
-        "tools/scripts/gpu_dpr_experiment.py",
-        "tools/scripts/gpu_dpr_runner.py",
-        "tools/scripts/gpu_dpr_pulp_native_adapter.py",
-        "tools/scripts/gpu_dpr_evidence.py",
+        "docs/validation/gpu-dpr",
         "test/fixtures/gpu-ux/dpr",
-        "docs/validation/gpu-dpr"
+        "tools/scripts/gpu_dpr_evidence.py",
+        "tools/scripts/gpu_dpr_experiment.py",
+        "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/gpu_dpr_runner.py"
       ],
       "cutover_action": "retain-pulp-experiment-replace-policy-consumption",
       "vellum_phase": "B5",
