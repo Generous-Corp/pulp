@@ -14,8 +14,8 @@ It does not claim that the saved fixture used this machine's GPU.
 
 ```bash
 python3 tools/scripts/gpu_trace_overhead_acceptance.py \
-  --cli /installed/prefix/bin/pulp \
-  --mcp /installed/prefix/bin/pulp-mcp \
+  --build-dir /external/exact-head-release-build \
+  --install-prefix /external/new-a2t-install-prefix \
   --trace test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace \
   --trace-processor "$HOME/.pulp/tools/trace-processor/v57.2/mac-arm64/trace_processor_shell" \
   --question gpu-startup \
@@ -30,9 +30,15 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
 ```
 
 The recorder requires an exact clean canonical Pulp worktree at
-`--source-revision`, plus a clean Release installed prefix whose generated
-`include/pulp/runtime/build_info.hpp` identifies that revision. `pulp` and
-`pulp-mcp` must be executable regular sibling files. During
+`--source-revision` and an external single-config Release build configured from
+that exact checkout with the same GPU/Scene3D/Three.js/V8/Rust feature contract
+as A2. `--install-prefix` must not exist. The recorder refreshes the Rust CLI,
+C++ delegate, and MCP targets, installs into that new prefix, and requires each
+installed executable to be byte-identical to its exact build-tree output. Its
+receipt binds the CMake cache digest, build settings, targets, installed/build
+digests, and positive byte counts in addition to the installed
+`build_info.hpp` source stamp; a current header beside stale or mixed binaries
+therefore fails closed. During
 measurement `PATH` excludes their prefix and all checkout build directories;
 MCP therefore succeeds only through its installed absolute-sibling binding.
 Semantic parity is checked on every warm-up and measured trial. Both binaries

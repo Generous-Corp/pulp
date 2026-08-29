@@ -34,20 +34,36 @@ import sdk_provenance
 EXPECTED_EXIT = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
 ANALYSIS_TIMEOUT_SECONDS = 300
 A2T_ANALYZER_SOURCE_PATHS = {
+    "CMakeLists.txt",
     ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
     ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
     ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/src/cmd/mod.rs",
     "experimental/pulp-rs/src/cmd/trace.rs",
     "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
     "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
     "experimental/pulp-rs/src/cmd/trace_fetch.rs",
+    "experimental/pulp-rs/src/cmd/trace_response.rs",
+    "experimental/pulp-rs/src/fallthrough.rs",
+    "experimental/pulp-rs/src/main.rs",
     "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
     "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
     "tools/deps/manifest.json",
+    "tools/cli/CMakeLists.txt",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_tools.hpp",
+    "tools/mcp/mcp_tools_internal.cpp",
+    "tools/mcp/mcp_tools_internal.hpp",
     "tools/mcp/mcp_trace_tools.cpp",
     "tools/mcp/pulp_mcp.cpp",
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/gpu_trace_overhead_scope.json",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
     "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
 }
 A2T_SCOPE_MANIFEST_PATH = "tools/scripts/gpu_trace_overhead_scope.json"
@@ -102,6 +118,19 @@ PRODUCT_PRODUCER_ROOTS = (
     "core/runtime", "core/render", "core/view", "core/format", "inspect",
 )
 PRODUCER_SOURCE_ANNOTATION = '"gpu_evidence_id"'
+BUILD_TARGETS = ("pulp-rust-cli", "pulp-cli", "pulp-mcp")
+REQUIRED_BUILD_SETTINGS = {
+    "CMAKE_BUILD_TYPE": "Release",
+    "PULP_ENABLE_GPU": "ON",
+    "PULP_ENABLE_SCENE3D": "ON",
+    "PULP_ENABLE_THREEJS_RUNTIME": "ON",
+    "PULP_ENABLE_JS": "ON",
+    "PULP_JS_ENGINE": "v8",
+    "PULP_BUILD_RUST_CLI": "ON",
+    "PULP_RUST_CLI_PROFILE": "release",
+    "PULP_HAS_THREEJS": "TRUE",
+}
+BUILD_OUTPUT_LIMIT = 4 * 1024 * 1024
 
 PINNED_PROCESSOR_VERSION = "v57.2"
 PROCESSOR_PLATFORM = {
@@ -542,6 +571,143 @@ def installed_source_identity(
         "build_info": build_info,
         "source_revision": revision,
     }
+
+
+def _cmake_cache(build_dir: Path) -> dict[str, str]:
+    path = build_dir / "CMakeCache.txt"
+    try:
+        payload = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise ValueError(f"cannot read A2T CMake cache: {error}") from error
+    if len(payload.encode()) > BUILD_OUTPUT_LIMIT:
+        raise ValueError("A2T CMake cache exceeds 4 MiB")
+    values: dict[str, str] = {}
+    for line in payload.splitlines():
+        match = re.match(r"^([^#/:=]+)(?::[^=]+)?=(.*)$", line)
+        if match:
+            values[match.group(1)] = match.group(2)
+    return values
+
+
+def _require_external_path(path: Path, repositories: tuple[Path, ...], label: str) -> None:
+    for repository in repositories:
+        try:
+            path.resolve().relative_to(repository.resolve())
+        except ValueError:
+            continue
+        raise ValueError(f"{label} must be outside every source checkout")
+
+
+def _release_build_contract(
+    repository: Path, build_dir: Path
+) -> tuple[dict[str, str], dict[str, str]]:
+    values = _cmake_cache(build_dir)
+    try:
+        home = Path(values["CMAKE_HOME_DIRECTORY"]).resolve()
+    except KeyError as error:
+        raise ValueError("A2T CMake cache lacks CMAKE_HOME_DIRECTORY") from error
+    if home != repository.resolve():
+        raise ValueError("A2T build is not configured from the exact source checkout")
+    for key, expected in REQUIRED_BUILD_SETTINGS.items():
+        if values.get(key) != expected:
+            raise ValueError(f"A2T build requires {key}={expected}")
+    return values, {key: values[key] for key in REQUIRED_BUILD_SETTINGS}
+
+
+def _run_bounded_build(
+    command: list[str], *, repository: Path, environment: dict[str, str], timeout: int
+) -> None:
+    try:
+        completed = subprocess.run(
+            command, cwd=repository, env=environment, check=False,
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValueError(f"A2T build/install timed out: {command[0]}") from error
+    if len(completed.stdout.encode()) + len(completed.stderr.encode()) > BUILD_OUTPUT_LIMIT:
+        raise ValueError("A2T build/install output exceeds 4 MiB")
+    if completed.returncode != 0:
+        detail = completed.stderr[-2000:] or completed.stdout[-2000:]
+        raise ValueError(f"A2T build/install failed: {detail}")
+
+
+def _build_install_binary_identity(build_dir: Path, prefix: Path) -> dict[str, Any]:
+    paths = {
+        "pulp": (build_dir / "pulp", prefix / "bin/pulp"),
+        "pulp-cpp": (build_dir / "tools/cli/pulp-cpp", prefix / "bin/pulp-cpp"),
+        "pulp-mcp": (build_dir / "tools/mcp/pulp-mcp", prefix / "bin/pulp-mcp"),
+    }
+    rows: dict[str, Any] = {}
+    for role, (built, installed) in paths.items():
+        if (
+            not built.is_file() or built.is_symlink()
+            or not installed.is_file() or installed.is_symlink()
+            or not os.access(built, os.X_OK) or not os.access(installed, os.X_OK)
+        ):
+            raise ValueError(f"{role} is not a regular executable build/install pair")
+        built_digest = sha256(built)
+        installed_digest = sha256(installed)
+        if built_digest != installed_digest:
+            raise ValueError(f"installed {role} bytes differ from the exact build output")
+        rows[role] = {
+            "installed_role": f"installed-prefix/bin/{role}",
+            "build_output_role": {
+                "pulp": "external-build/pulp",
+                "pulp-cpp": "external-build/tools/cli/pulp-cpp",
+                "pulp-mcp": "external-build/tools/mcp/pulp-mcp",
+            }[role],
+            "sha256": installed_digest,
+            "build_output_sha256": built_digest,
+            "bytes": installed.stat().st_size,
+        }
+    if rows["pulp"]["sha256"] == rows["pulp-cpp"]["sha256"]:
+        raise ValueError("installed pulp is a C++ copy rather than the required Rust front")
+    return rows
+
+
+def exact_build_install_identity(
+    repository: Path, revision: str, build_dir: Path, prefix: Path,
+    cli: Path, mcp: Path,
+) -> dict[str, Any]:
+    _values, settings = _release_build_contract(repository, build_dir)
+    binaries = _build_install_binary_identity(build_dir, prefix)
+    identity = installed_source_identity(repository, revision, cli, mcp)
+    identity["build_provenance"] = {
+        "method": "fresh-external-cmake-build-install-byte-identity-v1",
+        "install_prefix_initial_state": "absent",
+        "cmake_cache_sha256": sha256(build_dir / "CMakeCache.txt"),
+        "cmake_home_revision": revision,
+        "build_targets": list(BUILD_TARGETS),
+        "build_settings": settings,
+        "binaries": binaries,
+    }
+    return identity
+
+
+def refresh_exact_build_install(
+    repository: Path, revision: str, build_dir: Path, prefix: Path,
+    planning_repository: Path, environment: dict[str, str],
+) -> tuple[Path, Path, dict[str, Any]]:
+    _require_external_path(build_dir, (repository, planning_repository), "build-dir")
+    _require_external_path(prefix, (repository, planning_repository), "install-prefix")
+    if not build_dir.is_dir() or build_dir.is_symlink():
+        raise ValueError("build-dir must be an existing regular external directory")
+    if prefix.exists() or prefix.is_symlink() or not prefix.parent.is_dir():
+        raise ValueError("install-prefix must be a new path under an existing directory")
+    _release_build_contract(repository, build_dir)
+    _run_bounded_build(
+        ["cmake", "--build", str(build_dir), "--target", *BUILD_TARGETS, "--parallel"],
+        repository=repository, environment=environment, timeout=3600,
+    )
+    _run_bounded_build(
+        ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
+        repository=repository, environment=environment, timeout=1800,
+    )
+    cli = prefix / "bin/pulp"
+    mcp = prefix / "bin/pulp-mcp"
+    return cli, mcp, exact_build_install_identity(
+        repository, revision, build_dir, prefix, cli, mcp
+    )
 
 
 def _processor_source_contract(repository: Path) -> tuple[str, dict[str, str]]:
@@ -1233,7 +1399,7 @@ def source_binding_errors(receipt: Any, repository: Path) -> list[str]:
     declared = receipt.get("source_blobs")
     if not isinstance(declared, dict) or set(declared) != expected:
         errors.append(
-            "source_blobs does not bind the exact A2T analyzer/SQL/fixture/producer-authority set"
+            "source_blobs does not bind the exact A2T behavior/build/fixture/producer-authority set"
         )
         return errors
     historical = (
@@ -1337,8 +1503,8 @@ def preserve_human_perfetto_ui_correlation(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cli", type=Path, required=True)
-    parser.add_argument("--mcp", type=Path, required=True)
+    parser.add_argument("--build-dir", type=Path, required=True)
+    parser.add_argument("--install-prefix", type=Path, required=True)
     parser.add_argument("--trace", type=Path, required=True)
     parser.add_argument("--trace-processor", type=Path, required=True)
     parser.add_argument(
@@ -1364,11 +1530,10 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
-    cli = args.cli.resolve()
-    mcp = args.mcp.resolve()
+    build_dir = args.build_dir.resolve()
+    prefix = args.install_prefix.resolve()
     trace = args.trace.resolve()
     processor = args.trace_processor.resolve()
-    validate_paths(cli, mcp, trace, processor)
     if args.warmups < 0 or args.trials < 2 or args.fresh_start_trials < 1:
         parser.error("warmups >= 0, trials >= 2, and fresh-start-trials >= 1 are required")
     if not valid_lower_hex(args.plan_revision, 40):
@@ -1386,16 +1551,28 @@ def main() -> int:
         )
 
     repository = args.repository.resolve()
+    planning_repository = args.planning_repository.resolve()
+    build_environment = os.environ.copy()
+    for inherited_override in (
+        "PULP_SKIP_RUST_CLI",
+        "PULP_USE_CPP",
+        "PULP_RS_CPP_BINARY",
+        "PULP_RS_FALLTHROUGH",
+        "PULP_RS_NO_FALLTHROUGH",
+    ):
+        build_environment.pop(inherited_override, None)
     try:
         source_identity = clean_source_identity(repository, args.source_revision)
-        installed_identity = installed_source_identity(
-            repository, args.source_revision, cli, mcp
+        accepted_plan = plan_identity(
+            planning_repository, args.plan_revision, args.plan_sha256
         )
+        cli, mcp, installed_identity = refresh_exact_build_install(
+            repository, args.source_revision, build_dir, prefix,
+            planning_repository, build_environment,
+        )
+        validate_paths(cli, mcp, trace, processor)
         binding = source_binding(repository, args.source_revision, trace)
         processor_identity = trace_processor_identity(repository, processor)
-        accepted_plan = plan_identity(
-            args.planning_repository, args.plan_revision, args.plan_sha256
-        )
         producer_inventory = a2t_scope_inventory(repository, args.source_revision)
         if producer_inventory["no_a2t_scoped_producer_delta"] is not True:
             raise ValueError(
@@ -1415,7 +1592,7 @@ def main() -> int:
         except (OSError, json.JSONDecodeError) as error:
             parser.error(f"invalid prior-human-review-receipt: {error}")
 
-    environment = os.environ.copy()
+    environment = build_environment.copy()
     environment["PULP_TRACE_PROCESSOR"] = str(processor)
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     load_average_start = list(os.getloadavg()) if hasattr(os, "getloadavg") else None
@@ -1529,7 +1706,9 @@ def main() -> int:
             raise ValueError("source identity changed during A2T recording")
         if source_binding(repository, args.source_revision, trace) != binding:
             raise ValueError("source binding changed during A2T recording")
-        if installed_source_identity(repository, args.source_revision, cli, mcp) != installed_identity:
+        if exact_build_install_identity(
+            repository, args.source_revision, build_dir, prefix, cli, mcp
+        ) != installed_identity:
             raise ValueError("installed CLI/MCP provenance changed during A2T recording")
         if trace_processor_identity(repository, processor) != processor_identity:
             raise ValueError("trace processor identity changed during A2T recording")
@@ -1613,7 +1792,7 @@ def main() -> int:
                 else "unverified-no-human-perfetto-ui-correlation"
             ),
             "offline_latency_budget": "unverified-no-ratified-budget",
-            "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
+            "producer_overhead_budget": "not-applicable-no-a2t-scoped-producer-delta",
             "xrun_check": "not-applicable-offline-no-audio-thread",
         },
     }

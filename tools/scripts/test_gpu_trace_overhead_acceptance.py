@@ -2,6 +2,8 @@
 
 import importlib.util
 import json
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -205,6 +207,40 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertTrue(MODULE.valid_lower_hex(revision, 40))
         self.assertFalse(MODULE.valid_lower_hex("HEAD", 40))
 
+    def test_mixed_install_prefix_cannot_borrow_current_build_stamp(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build = root / "build"
+            prefix = root / "prefix"
+            pairs = {
+                "pulp": (build / "pulp", prefix / "bin/pulp", b"rust-front"),
+                "pulp-cpp": (
+                    build / "tools/cli/pulp-cpp", prefix / "bin/pulp-cpp",
+                    b"cpp-delegate",
+                ),
+                "pulp-mcp": (
+                    build / "tools/mcp/pulp-mcp", prefix / "bin/pulp-mcp",
+                    b"mcp-server",
+                ),
+            }
+            for built, installed, payload in pairs.values():
+                built.parent.mkdir(parents=True, exist_ok=True)
+                installed.parent.mkdir(parents=True, exist_ok=True)
+                built.write_bytes(payload)
+                installed.write_bytes(payload)
+                os.chmod(built, 0o755)
+                os.chmod(installed, 0o755)
+            identity = MODULE._build_install_binary_identity(build, prefix)
+            self.assertEqual(
+                identity["pulp-mcp"]["sha256"],
+                identity["pulp-mcp"]["build_output_sha256"],
+            )
+            stale_mcp = pairs["pulp-mcp"][1]
+            stale_mcp.write_bytes(b"stale-mixed-prefix-mcp")
+            os.chmod(stale_mcp, 0o755)
+            with self.assertRaisesRegex(ValueError, "differ from the exact build output"):
+                MODULE._build_install_binary_identity(build, prefix)
+
     def test_checked_in_receipt_uses_one_source_checkout(self):
         receipt = json.loads(
             (ROOT / "docs" / "validation" / "gpu-trace-overhead" /
@@ -228,7 +264,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         self.assertIn(
             (
                 "source_blobs does not bind the exact A2T "
-                "analyzer/SQL/fixture/producer-authority set"
+                "behavior/build/fixture/producer-authority set"
             ),
             errors,
         )

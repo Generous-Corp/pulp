@@ -98,6 +98,73 @@ def _verify_producer_disposition(
         errors.append("producer evidence does not expose the later A3 product producer")
 
 
+def _verify_installed_build_provenance(
+    installed: dict[str, Any], artifacts: dict[str, Any], source_revision: Any,
+    errors: list[str],
+) -> None:
+    provenance = _object(
+        installed.get("build_provenance"), "installed build_provenance", errors
+    )
+    if (
+        provenance.get("method")
+        != "fresh-external-cmake-build-install-byte-identity-v1"
+        or provenance.get("install_prefix_initial_state") != "absent"
+    ):
+        errors.append("installed binaries lack a fresh isolated build/install proof")
+    if not contract.valid_lower_hex(str(provenance.get("cmake_cache_sha256", "")), 64):
+        errors.append("installed build provenance lacks an exact CMake cache digest")
+    if provenance.get("cmake_home_revision") != source_revision:
+        errors.append("installed build CMake source revision differs from the receipt")
+    if provenance.get("build_targets") != list(contract.BUILD_TARGETS):
+        errors.append("installed build provenance does not bind the exact CLI/MCP targets")
+    if provenance.get("build_settings") != contract.REQUIRED_BUILD_SETTINGS:
+        errors.append("installed build provenance is not the required Release GPU build")
+    binaries = provenance.get("binaries")
+    expected_roles = {
+        "pulp": ("installed-prefix/bin/pulp", "external-build/pulp", "cli"),
+        "pulp-cpp": (
+            "installed-prefix/bin/pulp-cpp",
+            "external-build/tools/cli/pulp-cpp",
+            None,
+        ),
+        "pulp-mcp": (
+            "installed-prefix/bin/pulp-mcp",
+            "external-build/tools/mcp/pulp-mcp",
+            "mcp",
+        ),
+    }
+    if not isinstance(binaries, dict) or set(binaries) != set(expected_roles):
+        errors.append("installed build provenance lacks the exact binary inventory")
+        return
+    for name, (installed_role, build_role, artifact_role) in expected_roles.items():
+        row = binaries.get(name)
+        if not isinstance(row, dict):
+            errors.append(f"installed build provenance {name} row is malformed")
+            continue
+        digest = row.get("sha256")
+        if (
+            row.get("installed_role") != installed_role
+            or row.get("build_output_role") != build_role
+            or not isinstance(digest, str)
+            or not contract.valid_lower_hex(digest, 64)
+            or row.get("build_output_sha256") != digest
+            or not isinstance(row.get("bytes"), int)
+            or isinstance(row.get("bytes"), bool)
+            or row["bytes"] <= 0
+        ):
+            errors.append(f"installed {name} is not byte-identical to its exact build output")
+        if artifact_role is not None:
+            artifact = artifacts.get(artifact_role)
+            if (
+                not isinstance(artifact, dict)
+                or artifact.get("sha256") != digest
+                or artifact.get("bytes") != row.get("bytes")
+            ):
+                errors.append(f"measured {artifact_role} artifact differs from build provenance")
+    if binaries["pulp"].get("sha256") == binaries["pulp-cpp"].get("sha256"):
+        errors.append("installed pulp does not prove the required Rust front")
+
+
 def verify(
     receipt: Any, repository: Path, *, require_terminal: bool = True
 ) -> list[str]:
@@ -124,6 +191,12 @@ def verify(
         receipt.get("installed_source_identity"), "installed_source_identity", errors
     )
     build_info = _object(installed.get("build_info"), "installed build_info", errors)
+    if (
+        installed.get("prefix_role") != "isolated-clean-release-install"
+        or installed.get("build_info_role")
+        != "installed-prefix/include/pulp/runtime/build_info.hpp"
+    ):
+        errors.append("installed source identity does not name the isolated prefix stamp")
     if installed.get("source_revision") != source_revision:
         errors.append("installed source revision differs from the receipt")
     if build_info.get("kBuildType") != "Release" or build_info.get("kGitDirty") is not False:
@@ -157,10 +230,20 @@ def verify(
         errors.append("installed CLI/MCP sibling binding did not pass")
     for role in ("cli", "mcp"):
         artifact = _object(artifacts.get(role), f"artifacts.{role}", errors)
+        executable = "pulp" if role == "cli" else "pulp-mcp"
+        if artifact.get("role") != f"installed-prefix/bin/{executable}":
+            errors.append(f"{role} binary role does not name the installed sibling")
         if not contract.valid_lower_hex(str(artifact.get("sha256", "")), 64):
             errors.append(f"{role} binary lacks an exact SHA-256")
-        if not isinstance(artifact.get("bytes"), int) or artifact.get("bytes", 0) <= 0:
+        if (
+            not isinstance(artifact.get("bytes"), int)
+            or isinstance(artifact.get("bytes"), bool)
+            or artifact.get("bytes", 0) <= 0
+        ):
             errors.append(f"{role} binary has no positive byte count")
+    _verify_installed_build_provenance(
+        installed, artifacts, source_revision, errors
+    )
 
     processor = _object(artifacts.get("trace_processor"), "trace_processor", errors)
     version = processor.get("version")
@@ -334,7 +417,7 @@ def verify(
         "semantic_parity": "pass",
         "same_installed_prefix": "pass",
         "offline_latency_budget": "unverified-no-ratified-budget",
-        "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
+        "producer_overhead_budget": "not-applicable-no-a2t-scoped-producer-delta",
         "xrun_check": "not-applicable-offline-no-audio-thread",
     }
     for field, expected in expected_acceptance.items():

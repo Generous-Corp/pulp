@@ -92,11 +92,44 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "clean": True,
             },
             "installed_source_identity": {
+                "prefix_role": "isolated-clean-release-install",
+                "build_info_role": "installed-prefix/include/pulp/runtime/build_info.hpp",
                 "source_revision": head,
                 "build_info_sha256": "1" * 64,
                 "build_info": {
                     "kBuildType": "Release", "kGitDirty": False,
                     "kGitSha": head[:12], "kSdkVersion": "0.999.0",
+                },
+                "build_provenance": {
+                    "method": "fresh-external-cmake-build-install-byte-identity-v1",
+                    "install_prefix_initial_state": "absent",
+                    "cmake_cache_sha256": "5" * 64,
+                    "cmake_home_revision": head,
+                    "build_targets": list(CONTRACT.BUILD_TARGETS),
+                    "build_settings": dict(CONTRACT.REQUIRED_BUILD_SETTINGS),
+                    "binaries": {
+                        "pulp": {
+                            "installed_role": "installed-prefix/bin/pulp",
+                            "build_output_role": "external-build/pulp",
+                            "sha256": "2" * 64,
+                            "build_output_sha256": "2" * 64,
+                            "bytes": 1,
+                        },
+                        "pulp-cpp": {
+                            "installed_role": "installed-prefix/bin/pulp-cpp",
+                            "build_output_role": "external-build/tools/cli/pulp-cpp",
+                            "sha256": "4" * 64,
+                            "build_output_sha256": "4" * 64,
+                            "bytes": 1,
+                        },
+                        "pulp-mcp": {
+                            "installed_role": "installed-prefix/bin/pulp-mcp",
+                            "build_output_role": "external-build/tools/mcp/pulp-mcp",
+                            "sha256": "3" * 64,
+                            "build_output_sha256": "3" * 64,
+                            "bytes": 1,
+                        },
+                    },
                 },
             },
             "accepted_plan": {
@@ -124,8 +157,16 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
             },
             "artifacts": {
                 "sibling_binding": {"verified_same_resolved_parent": True},
-                "cli": {"sha256": "2" * 64, "bytes": 1},
-                "mcp": {"sha256": "3" * 64, "bytes": 1},
+                "cli": {
+                    "role": "installed-prefix/bin/pulp",
+                    "sha256": "2" * 64,
+                    "bytes": 1,
+                },
+                "mcp": {
+                    "role": "installed-prefix/bin/pulp-mcp",
+                    "sha256": "3" * 64,
+                    "bytes": 1,
+                },
                 "trace": {
                     "role": "repository/test/fixtures/perfetto-gpu/" + trace.name,
                     "sha256": trace_digest, "bytes": trace.stat().st_size,
@@ -183,7 +224,7 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "same_installed_prefix": "pass",
                 "human_perfetto_ui_correlation": "pass",
                 "offline_latency_budget": "unverified-no-ratified-budget",
-                "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
+                "producer_overhead_budget": "not-applicable-no-a2t-scoped-producer-delta",
                 "xrun_check": "not-applicable-offline-no-audio-thread",
             },
         }
@@ -219,6 +260,22 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         receipt["installed_source_identity"]["build_info"]["kGitSha"] = ""
         errors = MODULE.verify(receipt, ROOT)
         self.assertIn("installed build stamp is not bound to source_revision", errors)
+
+    def test_mixed_installed_binary_and_build_output_fails_closed(self):
+        receipt = self.terminal_receipt()
+        receipt["installed_source_identity"]["build_provenance"]["binaries"][
+            "pulp-mcp"
+        ]["build_output_sha256"] = "6" * 64
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertIn(
+            "installed pulp-mcp is not byte-identical to its exact build output",
+            errors,
+        )
+
+        receipt = self.terminal_receipt()
+        receipt["artifacts"]["cli"]["sha256"] = "7" * 64
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertIn("measured cli artifact differs from build provenance", errors)
 
     def test_no_producer_disposition_is_recomputed_from_git(self):
         receipt = self.terminal_receipt()
