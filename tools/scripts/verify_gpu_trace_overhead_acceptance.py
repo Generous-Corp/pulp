@@ -28,6 +28,30 @@ def _object(value: Any, label: str, errors: list[str]) -> dict[str, Any]:
     return value
 
 
+def _gitlinks(repository: Path, revision: str) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "ls-tree", "-rz", "-r", revision],
+        cwd=repository, check=False, capture_output=True,
+    )
+    if completed.returncode != 0:
+        return {}
+    values: dict[str, str] = {}
+    for raw in completed.stdout.split(b"\0"):
+        if not raw:
+            continue
+        try:
+            metadata, path = raw.split(b"\t", 1)
+            mode, kind, value = metadata.decode("ascii").split()
+            decoded = path.decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return {}
+        if mode == "160000" and kind == "commit" and contract.valid_lower_hex(
+            value, 40
+        ):
+            values[decoded] = value
+    return values
+
+
 def _artifact_trace_path(receipt: dict[str, Any], repository: Path) -> Path | None:
     artifacts = receipt.get("artifacts")
     trace = artifacts.get("trace") if isinstance(artifacts, dict) else None
@@ -115,6 +139,8 @@ def _verify_installed_build_provenance(
         != "fresh-external-cmake-build-install-byte-identity-v1"
         or provenance.get("install_prefix_initial_state")
         != "absent-and-atomically-claimed"
+        or provenance.get("install_prefix_claim_method")
+        != "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
     ):
         errors.append("installed binaries lack a fresh isolated build/install proof")
     prefix_claim = provenance.get("install_prefix_claim")
@@ -137,6 +163,44 @@ def _verify_installed_build_provenance(
         errors.append("installed build provenance does not bind the exact CLI/MCP targets")
     if provenance.get("build_settings") != contract.REQUIRED_BUILD_SETTINGS:
         errors.append("installed build provenance is not the required Release GPU build")
+    source_claim = provenance.get("source_tree_claim")
+    try:
+        expected_tree = contract._git_text(
+            repository, "rev-parse", f"{source_revision}^{{tree}}"
+        )
+    except ValueError:
+        expected_tree = ""
+    if (
+        not isinstance(source_claim, dict)
+        or source_claim.get("method")
+        != "retained-git-tree-vnode-and-descriptor-v1"
+        or source_claim.get("revision") != source_revision
+        or source_claim.get("root_tree") != expected_tree
+        or source_claim.get("overlay_paths") != []
+        or source_claim.get("excluded_gitlinks") != _gitlinks(repository, str(source_revision))
+        or not isinstance(source_claim.get("regular_or_symlink_files"), int)
+        or isinstance(source_claim.get("regular_or_symlink_files"), bool)
+        or source_claim["regular_or_symlink_files"] <= 0
+        or not isinstance(source_claim.get("retained_directories"), int)
+        or isinstance(source_claim.get("retained_directories"), bool)
+        or source_claim["retained_directories"] <= 0
+    ):
+        errors.append("installed build provenance lacks the retained exact Git source tree")
+    build_input_claim = provenance.get("build_input_claim")
+    if (
+        not isinstance(build_input_claim, dict)
+        or build_input_claim.get("method")
+        != "regenerated-cmake-ninja-input-descriptor-v1"
+        or not isinstance(build_input_claim.get("file_count"), int)
+        or isinstance(build_input_claim.get("file_count"), bool)
+        or build_input_claim["file_count"] < 3
+        or not contract.valid_lower_hex(
+            str(build_input_claim.get("manifest_sha256", "")), 64
+        )
+        or build_input_claim.get("forced_clean_targets")
+        != list(contract.BUILD_TARGETS)
+    ):
+        errors.append("installed build provenance lacks retained forced-clean build inputs")
     binaries = provenance.get("binaries")
     expected_roles = {
         "pulp": ("installed-prefix/bin/pulp", "external-build/pulp", "cli"),

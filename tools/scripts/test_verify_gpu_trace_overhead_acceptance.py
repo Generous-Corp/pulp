@@ -103,11 +103,31 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "build_provenance": {
                     "method": "fresh-external-cmake-build-install-byte-identity-v1",
                     "install_prefix_initial_state": "absent-and-atomically-claimed",
+                    "install_prefix_claim_method": (
+                        "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+                    ),
                     "install_prefix_claim": {"device": 1, "inode": 2},
                     "cmake_cache_sha256": "5" * 64,
                     "cmake_home_revision": head,
                     "build_targets": list(CONTRACT.BUILD_TARGETS),
                     "build_settings": dict(CONTRACT.REQUIRED_BUILD_SETTINGS),
+                    "source_tree_claim": {
+                        "method": "retained-git-tree-vnode-and-descriptor-v1",
+                        "revision": head,
+                        "root_tree": CONTRACT._git_text(
+                            ROOT, "rev-parse", f"{head}^{{tree}}"
+                        ),
+                        "overlay_paths": [],
+                        "excluded_gitlinks": MODULE._gitlinks(ROOT, head),
+                        "regular_or_symlink_files": 1,
+                        "retained_directories": 1,
+                    },
+                    "build_input_claim": {
+                        "method": "regenerated-cmake-ninja-input-descriptor-v1",
+                        "file_count": 3,
+                        "manifest_sha256": "6" * 64,
+                        "forced_clean_targets": list(CONTRACT.BUILD_TARGETS),
+                    },
                     "binaries": {
                         "pulp": {
                             "installed_role": "installed-prefix/bin/pulp",
@@ -298,6 +318,21 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     "installed pulp-mcp is not byte-identical to its exact build output",
                     errors,
                 )
+
+    def test_source_and_forced_clean_build_claims_are_required(self):
+        receipt = self.terminal_receipt()
+        del receipt["installed_source_identity"]["build_provenance"][
+            "source_tree_claim"
+        ]
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("retained exact Git source" in error for error in errors))
+
+        receipt = self.terminal_receipt()
+        receipt["installed_source_identity"]["build_provenance"][
+            "build_input_claim"
+        ]["forced_clean_targets"] = []
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("forced-clean build inputs" in error for error in errors))
 
     def test_no_producer_disposition_is_recomputed_from_git(self):
         receipt = self.terminal_receipt()

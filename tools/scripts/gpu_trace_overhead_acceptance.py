@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import ast
 from collections import Counter
+import ctypes
+import errno
 import hashlib
 import json
 import math
@@ -18,6 +20,7 @@ import os
 import platform
 import random
 import re
+import resource
 import secrets
 import select
 import stat as stat_module
@@ -849,19 +852,547 @@ class RetainedDirectoryClaim:
         self.close()
 
 
+def _renameat_no_replace(
+    source_parent: int, source_name: str, destination_parent: int,
+    destination_name: str,
+) -> None:
+    """Publish one relative path with macOS RENAME_EXCL semantics."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameatx = getattr(libc, "renameatx_np", None)
+    if renameatx is None:
+        raise ValueError("fresh directory claims require macOS renameatx_np")
+    renameatx.argtypes = (
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    renameatx.restype = ctypes.c_int
+    if renameatx(
+        source_parent, os.fsencode(source_name), destination_parent,
+        os.fsencode(destination_name), 0x00000004,
+    ) != 0:
+        value = ctypes.get_errno()
+        raise OSError(value, os.strerror(value), destination_name)
+
+
+def claim_fresh_directory(path: Path, label: str) -> RetainedDirectoryClaim:
+    """Create, retain, and no-replace publish the exact directory inode."""
+    if path.name in {"", ".", ".."}:
+        raise ValueError(f"{label} must have a safe final path component")
+    parent_descriptor = os.open(path.parent, _directory_open_flags())
+    temporary_name = f".{path.name}.{secrets.token_hex(16)}.claim"
+    temporary_descriptor: int | None = None
+    temporary_identity: dict[str, int] | None = None
+    temporary_exists = False
+    try:
+        parent_identity = _directory_identity(os.fstat(parent_descriptor))
+        _assert_directory_path_identity(
+            path.parent, parent_descriptor, parent_identity, f"{label}-parent"
+        )
+        os.mkdir(temporary_name, mode=0o700, dir_fd=parent_descriptor)
+        temporary_exists = True
+        temporary_descriptor = os.open(
+            temporary_name, _directory_open_flags(), dir_fd=parent_descriptor
+        )
+        temporary_identity = _directory_identity(os.fstat(temporary_descriptor))
+        named = _directory_identity(os.stat(
+            temporary_name, dir_fd=parent_descriptor, follow_symlinks=False
+        ))
+        if named != temporary_identity:
+            raise ValueError(f"{label} staging inode changed before publication")
+        _renameat_no_replace(
+            parent_descriptor, temporary_name,
+            parent_descriptor, path.name,
+        )
+        temporary_exists = False
+        _assert_directory_path_identity(
+            path.parent, parent_descriptor, parent_identity, f"{label}-parent"
+        )
+        published = _directory_identity(os.stat(
+            path.name, dir_fd=parent_descriptor, follow_symlinks=False
+        ))
+        if published != temporary_identity:
+            raise ValueError(f"{label} publication did not preserve its created inode")
+        os.fsync(parent_descriptor)
+        claim = RetainedDirectoryClaim(
+            path, temporary_descriptor, temporary_identity, label
+        )
+        temporary_descriptor = None
+        try:
+            claim.seal()
+            claim.assert_current()
+            return claim
+        except BaseException:
+            claim.close()
+            raise
+    except OSError as error:
+        if error.errno == errno.EEXIST:
+            raise ValueError(f"{label} was not fresh at no-replace publication") from error
+        raise ValueError(f"{label} could not be atomically claimed: {error}") from error
+    finally:
+        if temporary_descriptor is not None:
+            os.close(temporary_descriptor)
+        if temporary_exists and temporary_identity is not None:
+            try:
+                named = _directory_identity(os.stat(
+                    temporary_name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                ))
+                if named == temporary_identity:
+                    os.rmdir(temporary_name, dir_fd=parent_descriptor)
+                    os.fsync(parent_descriptor)
+            except OSError:
+                pass
+        os.close(parent_descriptor)
+
+
+def retain_existing_directory(path: Path, label: str) -> RetainedDirectoryClaim:
+    descriptor = os.open(path, _directory_open_flags())
+    claim: RetainedDirectoryClaim | None = None
+    try:
+        claim = RetainedDirectoryClaim(
+            path, descriptor, _directory_identity(os.fstat(descriptor)), label
+        )
+        descriptor = -1
+        claim.seal()
+        claim.assert_current()
+        return claim
+    except BaseException:
+        if claim is not None:
+            claim.close()
+        elif descriptor >= 0:
+            os.close(descriptor)
+        raise
+
+
+def _git_blob_digest_descriptor(descriptor: int) -> str:
+    metadata = os.fstat(descriptor)
+    digest = hashlib.sha1()
+    digest.update(f"blob {metadata.st_size}\0".encode())
+    offset = 0
+    while offset < metadata.st_size:
+        chunk = os.pread(
+            descriptor, min(1024 * 1024, metadata.st_size - offset), offset
+        )
+        if not chunk:
+            raise ValueError("retained Git source ended before its claimed size")
+        digest.update(chunk)
+        offset += len(chunk)
+    if os.fstat(descriptor).st_size != metadata.st_size:
+        raise ValueError("retained Git source size changed while hashing")
+    return digest.hexdigest()
+
+
+def _git_blob_digest_bytes(data: bytes) -> str:
+    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+
+
+def _raise_descriptor_limit(required: int) -> None:
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft >= required:
+        return
+    requested = required if hard == resource.RLIM_INFINITY else min(required, hard)
+    if requested < required:
+        raise ValueError("exact source sealing exceeds the process descriptor limit")
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (requested, hard))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            "cannot raise the descriptor limit for exact source sealing"
+        ) from error
+
+
+class RetainedTreeClaim:
+    """Retain every bounded tree input and fail on transient path/content writes."""
+
+    def __init__(
+        self, root: Path, label: str, expected: dict[str, tuple[str, str]],
+        *, watch_directory_writes: bool = True,
+    ):
+        self.root = root
+        self.label = label
+        self.expected = expected
+        self.watch_directory_writes = watch_directory_writes
+        self.closed = False
+        self.anchor: RetainedDirectoryClaim | None = None
+        self.root_descriptor = -1
+        self.monitor: Any | None = None
+        self.directory_claims: list[dict[str, Any]] = []
+        self.file_claims: list[dict[str, Any]] = []
+        try:
+            directory_names = {"."}
+            for relative in expected:
+                parent = Path(relative).parent
+                while str(parent) not in {"", "."}:
+                    directory_names.add(parent.as_posix())
+                    parent = parent.parent
+            _raise_descriptor_limit(len(expected) + len(directory_names) + 512)
+            self.anchor = retain_existing_directory(root, f"{label}-root")
+            self.root_descriptor = os.dup(self.anchor.descriptor)
+            self.monitor = select.kqueue()
+            for relative in sorted(
+                directory_names, key=lambda value: (len(Path(value).parts), value)
+            ):
+                descriptor = (
+                    os.dup(self.root_descriptor)
+                    if relative == "."
+                    else os.open(
+                        relative, _directory_open_flags(), dir_fd=self.root_descriptor
+                    )
+                )
+                metadata = os.fstat(descriptor)
+                named = os.fstat(self.root_descriptor) if relative == "." else os.stat(
+                    relative, dir_fd=self.root_descriptor, follow_symlinks=False
+                )
+                identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+                if (
+                    not stat_module.S_ISDIR(metadata.st_mode)
+                    or {"device": named.st_dev, "inode": named.st_ino} != identity
+                ):
+                    os.close(descriptor)
+                    raise ValueError(f"{label} directory claim is incoherent: {relative}")
+                self.directory_claims.append({
+                    "relative": relative, "descriptor": descriptor,
+                    "identity": identity,
+                })
+                self._register(descriptor, is_file=False)
+            for relative, (mode, expected_blob) in sorted(expected.items()):
+                self._bind(relative, mode, expected_blob)
+            self.assert_full()
+        except BaseException:
+            self.close()
+            raise
+
+    @staticmethod
+    def _file_flags() -> int:
+        return sum(getattr(select, name) for name in (
+            "KQ_NOTE_DELETE", "KQ_NOTE_WRITE", "KQ_NOTE_EXTEND",
+            "KQ_NOTE_ATTRIB", "KQ_NOTE_LINK", "KQ_NOTE_RENAME",
+            "KQ_NOTE_REVOKE",
+        ))
+
+    def _directory_flags(self) -> int:
+        names = ["KQ_NOTE_DELETE", "KQ_NOTE_RENAME", "KQ_NOTE_REVOKE"]
+        if self.watch_directory_writes:
+            names.append("KQ_NOTE_WRITE")
+        return sum(getattr(select, name) for name in names)
+
+    def _register(self, descriptor: int, *, is_file: bool) -> None:
+        assert self.monitor is not None
+        self.monitor.control([select.kevent(
+            descriptor,
+            filter=select.KQ_FILTER_VNODE,
+            flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+            fflags=self._file_flags() if is_file else self._directory_flags(),
+        )], 0, 0)
+
+    def _bind(self, relative: str, mode: str, expected_blob: str) -> None:
+        symlink = mode == "120000"
+        flags = os.O_RDONLY | (
+            getattr(os, "O_SYMLINK", 0)
+            if symlink else getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(relative, flags, dir_fd=self.root_descriptor)
+        try:
+            metadata = os.fstat(descriptor)
+            named = os.stat(
+                relative, dir_fd=self.root_descriptor, follow_symlinks=False
+            )
+            identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+            expected_kind = stat_module.S_ISLNK if symlink else stat_module.S_ISREG
+            if (
+                not expected_kind(metadata.st_mode)
+                or {"device": named.st_dev, "inode": named.st_ino} != identity
+            ):
+                raise ValueError(f"{self.label} source identity drift: {relative}")
+            if symlink:
+                target = os.readlink(relative, dir_fd=self.root_descriptor)
+                actual_blob = _git_blob_digest_bytes(os.fsencode(target))
+            else:
+                executable = bool(metadata.st_mode & 0o111)
+                if executable != (mode == "100755"):
+                    raise ValueError(f"{self.label} source mode drift: {relative}")
+                actual_blob = _git_blob_digest_descriptor(descriptor)
+            if expected_blob and actual_blob != expected_blob:
+                raise ValueError(f"{self.label} source blob drift: {relative}")
+            self.file_claims.append({
+                "relative": relative, "descriptor": descriptor,
+                "identity": identity, "mode": mode, "blob": actual_blob,
+            })
+            descriptor = -1
+            self._register(self.file_claims[-1]["descriptor"], is_file=True)
+            self._assert_no_events()
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    def _assert_no_events(self) -> None:
+        assert self.monitor is not None
+        events = self.monitor.control(None, 64, 0)
+        if events:
+            raise ValueError(f"{self.label} had a retained tree mutation event")
+
+    def assert_current(self) -> None:
+        if self.closed:
+            raise ValueError(f"{self.label} claim closed before proof completion")
+        self._assert_no_events()
+        assert self.anchor is not None
+        self.anchor.assert_current()
+        self._assert_no_events()
+
+    def assert_full(self) -> None:
+        self.assert_current()
+        for claim in self.directory_claims:
+            metadata = os.fstat(claim["descriptor"])
+            named = (
+                os.fstat(self.root_descriptor)
+                if claim["relative"] == "."
+                else os.stat(
+                    claim["relative"], dir_fd=self.root_descriptor,
+                    follow_symlinks=False,
+                )
+            )
+            identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+            if (
+                not stat_module.S_ISDIR(metadata.st_mode)
+                or identity != claim["identity"]
+                or {"device": named.st_dev, "inode": named.st_ino} != identity
+            ):
+                raise ValueError(
+                    f"{self.label} directory identity drift: {claim['relative']}"
+                )
+        for claim in self.file_claims:
+            metadata = os.fstat(claim["descriptor"])
+            named = os.stat(
+                claim["relative"], dir_fd=self.root_descriptor,
+                follow_symlinks=False,
+            )
+            identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
+            symlink = claim["mode"] == "120000"
+            actual_blob = (
+                _git_blob_digest_bytes(os.fsencode(os.readlink(
+                    claim["relative"], dir_fd=self.root_descriptor
+                )))
+                if symlink else _git_blob_digest_descriptor(claim["descriptor"])
+            )
+            if (
+                identity != claim["identity"]
+                or {"device": named.st_dev, "inode": named.st_ino} != identity
+                or actual_blob != claim["blob"]
+            ):
+                raise ValueError(
+                    f"{self.label} source changed during proof: {claim['relative']}"
+                )
+        self._assert_no_events()
+        assert self.anchor is not None
+        self.anchor.assert_current()
+
+    def evidence(self) -> dict[str, Any]:
+        return {
+            "method": "retained-git-tree-vnode-and-descriptor-v1",
+            "regular_or_symlink_files": len(self.file_claims),
+            "retained_directories": len(self.directory_claims),
+        }
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        if self.monitor is not None:
+            try:
+                self.monitor.close()
+            except BaseException:
+                pass
+        for claim in self.file_claims:
+            os.close(claim["descriptor"])
+        for claim in self.directory_claims:
+            os.close(claim["descriptor"])
+        if self.root_descriptor >= 0:
+            os.close(self.root_descriptor)
+        if self.anchor is not None:
+            self.anchor.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+
+def retain_git_source_tree(
+    repository: Path, revision: str, label: str,
+    *, overlays: dict[str, bytes] | None = None,
+) -> tuple[RetainedTreeClaim, dict[str, Any]]:
+    overlays = overlays or {}
+    if _git_text(repository, "rev-parse", "--show-object-format") != "sha1":
+        raise ValueError("exact source sealing currently requires SHA-1 Git objects")
+    completed = subprocess.run(
+        ["git", "ls-tree", "-rz", "-r", revision],
+        cwd=repository, check=False, capture_output=True,
+    )
+    if completed.returncode != 0 or len(completed.stdout) > 32 * 1024 * 1024:
+        raise ValueError(f"cannot enumerate bounded exact source for {label}")
+    expected: dict[str, tuple[str, str]] = {}
+    gitlinks: dict[str, str] = {}
+    for raw in completed.stdout.split(b"\0"):
+        if not raw:
+            continue
+        try:
+            metadata, raw_path = raw.split(b"\t", 1)
+            mode, kind, blob = metadata.decode("ascii").split()
+            relative = os.fsdecode(raw_path)
+        except (ValueError, UnicodeDecodeError) as error:
+            raise ValueError(f"cannot parse exact source inventory for {label}") from error
+        path = Path(relative)
+        if (
+            path.is_absolute() or ".." in path.parts or path.as_posix() != relative
+            or not re.fullmatch(r"[0-9a-f]{40}", blob)
+        ):
+            raise ValueError(f"unsafe exact source inventory for {label}")
+        if mode == "160000" and kind == "commit":
+            gitlinks[relative] = blob
+            continue
+        if mode not in {"100644", "100755", "120000"} or kind != "blob":
+            raise ValueError(f"unsupported exact source row for {label}: {relative}")
+        if relative in overlays:
+            blob = _git_blob_digest_bytes(overlays[relative])
+        expected[relative] = (mode, blob)
+    if set(overlays) - set(expected):
+        raise ValueError(f"{label} overlay does not name a tracked regular file")
+    claim = RetainedTreeClaim(repository, label, expected)
+    evidence = claim.evidence()
+    evidence.update({
+        "revision": revision,
+        "root_tree": _git_text(repository, "rev-parse", f"{revision}^{{tree}}"),
+        "overlay_paths": sorted(overlays),
+        "excluded_gitlinks": gitlinks,
+    })
+    return claim, evidence
+
+
+class CombinedClaims:
+    def __init__(self, *claims: Any):
+        self.claims = claims
+
+    def assert_current(self) -> None:
+        for claim in self.claims:
+            claim.assert_current()
+
+    def bind_file(
+        self, path: Path, label: str, expected_sha256: str | None = None
+    ) -> str:
+        binder = getattr(self.claims[0], "bind_file", None)
+        if binder is None:
+            raise ValueError("combined claim has no retained file binder")
+        return binder(path, label, expected_sha256)
+
+
+def retain_generated_build_inputs(
+    build_dir: Path, label: str,
+) -> tuple[RetainedTreeClaim, dict[str, Any]]:
+    """Retain regenerated CMake/Ninja/configure-time inputs through compilation."""
+    expected: dict[str, tuple[str, str]] = {}
+    total_bytes = 0
+    for path in build_dir.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(build_dir).as_posix()
+        if not (
+            relative == "CMakeCache.txt"
+            or path.name in {"build.ninja", "rules.ninja"}
+            or path.suffix in {".cmake", ".h", ".hpp", ".inc"}
+        ):
+            continue
+        metadata = path.stat()
+        total_bytes += metadata.st_size
+        if len(expected) >= 4096 or total_bytes > 64 * 1024 * 1024:
+            raise ValueError("regenerated build-input inventory is unsafe or unbounded")
+        mode = "100755" if metadata.st_mode & 0o111 else "100644"
+        expected[relative] = (mode, "")
+    required = {
+        "CMakeCache.txt", "build.ninja", "CMakeFiles/rules.ninja",
+    }
+    if not required.issubset(expected):
+        raise ValueError("regenerated build lacks the exact CMake/Ninja input graph")
+    claim = RetainedTreeClaim(
+        build_dir, label, expected, watch_directory_writes=False
+    )
+    manifest = [
+        {"path": row["relative"], "blob": row["blob"]}
+        for row in claim.file_claims
+    ]
+    digest = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return claim, {
+        "method": "regenerated-cmake-ninja-input-descriptor-v1",
+        "file_count": len(manifest),
+        "manifest_sha256": digest,
+        "forced_clean_targets": list(BUILD_TARGETS),
+    }
+
+
+def retain_current_regular_tree(
+    root: Path, label: str, *, maximum_files: int = 4096,
+    maximum_bytes: int = 256 * 1024 * 1024,
+) -> tuple[RetainedTreeClaim, dict[str, Any]]:
+    expected: dict[str, tuple[str, str]] = {}
+    total_bytes = 0
+    for path in root.rglob("*"):
+        metadata = path.lstat()
+        if stat_module.S_ISDIR(metadata.st_mode):
+            continue
+        relative = path.relative_to(root).as_posix()
+        if stat_module.S_ISLNK(metadata.st_mode):
+            mode = "120000"
+            total_bytes += len(os.fsencode(os.readlink(path)))
+        elif stat_module.S_ISREG(metadata.st_mode):
+            mode = "100755" if metadata.st_mode & 0o111 else "100644"
+            total_bytes += metadata.st_size
+        else:
+            raise ValueError(f"{label} contains a non-regular filesystem entry")
+        if len(expected) >= maximum_files or total_bytes > maximum_bytes:
+            raise ValueError(f"{label} inventory is unsafe or unbounded")
+        expected[relative] = (mode, "")
+    if not expected:
+        raise ValueError(f"{label} contains no retained files")
+    claim = RetainedTreeClaim(root, label, expected)
+    manifest = [
+        {"path": row["relative"], "blob": row["blob"], "mode": row["mode"]}
+        for row in claim.file_claims
+    ]
+    return claim, {
+        "method": "retained-complete-tree-vnode-and-descriptor-v1",
+        "file_count": len(manifest),
+        "bytes": total_bytes,
+        "manifest_sha256": hashlib.sha256(
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+
 def validate_output_path(output: Path, protected: tuple[Path, ...]) -> None:
     _require_external_path(output, protected, "output")
     if output.exists() or output.is_symlink() or not output.parent.is_dir():
         raise ValueError("output must be a new path under an existing external directory")
 
 
-def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
+def atomic_write_json(
+    output: Path, payload: dict[str, Any],
+    output_parent_claim: RetainedDirectoryClaim | None = None,
+) -> None:
     data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
     expected_digest = hashlib.sha256(data).hexdigest()
     if output.name in {"", ".", ".."}:
         raise ValueError("output must have a safe final path component")
-    parent_descriptor = os.open(output.parent, _directory_open_flags())
-    parent_claim = _directory_identity(os.fstat(parent_descriptor))
+    owned_parent_claim: RetainedDirectoryClaim | None = None
+    if output_parent_claim is None:
+        owned_parent_claim = retain_existing_directory(
+            output.parent, "output-parent"
+        )
+        output_parent_claim = owned_parent_claim
+    if output_parent_claim.path != output.parent:
+        raise ValueError("output publication requires its exact retained parent")
+    output_parent_claim.assert_current()
+    parent_descriptor = output_parent_claim.descriptor
+    parent_claim = output_parent_claim.identity
     temporary_name = f".{output.name}.{secrets.token_hex(16)}.tmp"
     temporary_descriptor: int | None = None
     output_linked = False
@@ -869,6 +1400,7 @@ def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
         _assert_directory_path_identity(
             output.parent, parent_descriptor, parent_claim, "output-parent"
         )
+        output_parent_claim.assert_current()
         temporary_descriptor = os.open(
             temporary_name,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
@@ -895,6 +1427,7 @@ def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
         _assert_directory_path_identity(
             output.parent, parent_descriptor, parent_claim, "output-parent"
         )
+        output_parent_claim.assert_current()
         os.link(
             temporary_name,
             output.name,
@@ -922,6 +1455,7 @@ def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
         _assert_directory_path_identity(
             output.parent, parent_descriptor, parent_claim, "output-parent"
         )
+        output_parent_claim.assert_current()
         published = os.stat(
             output.name, dir_fd=parent_descriptor, follow_symlinks=False
         )
@@ -951,6 +1485,7 @@ def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
         finally:
             os.close(published_descriptor)
         os.fsync(parent_descriptor)
+        output_parent_claim.assert_current()
     except BaseException:
         if output_linked:
             try:
@@ -967,10 +1502,9 @@ def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
         except FileNotFoundError:
             pass
         finally:
-            try:
-                os.fsync(parent_descriptor)
-            finally:
-                os.close(parent_descriptor)
+            os.fsync(parent_descriptor)
+            if owned_parent_claim is not None:
+                owned_parent_claim.close()
 
 
 def _release_build_contract(
@@ -991,7 +1525,7 @@ def _release_build_contract(
 
 def _run_bounded_build(
     command: list[str], *, repository: Path, environment: dict[str, str], timeout: int,
-    directory_claim: RetainedDirectoryClaim | None = None,
+    directory_claim: Any | None = None,
 ) -> None:
     if directory_claim is not None:
         directory_claim.assert_current()
@@ -1083,6 +1617,7 @@ def _build_install_binary_identity(
 def exact_build_install_identity(
     repository: Path, revision: str, build_dir: Path, prefix: Path,
     cli: Path, mcp: Path, binaries: dict[str, Any], cmake_cache_sha256: str,
+    source_tree_evidence: dict[str, Any], build_input_evidence: dict[str, Any],
 ) -> dict[str, Any]:
     _values, settings = _release_build_contract(repository, build_dir)
     identity = installed_source_identity(repository, revision, cli, mcp)
@@ -1093,11 +1628,16 @@ def exact_build_install_identity(
     identity["build_provenance"] = {
         "method": "fresh-external-cmake-build-install-byte-identity-v1",
         "install_prefix_initial_state": "absent-and-atomically-claimed",
+        "install_prefix_claim_method": (
+            "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+        ),
         "install_prefix_claim": prefix_claim,
         "cmake_cache_sha256": cmake_cache_sha256,
         "cmake_home_revision": revision,
         "build_targets": list(BUILD_TARGETS),
         "build_settings": settings,
+        "source_tree_claim": source_tree_evidence,
+        "build_input_claim": build_input_evidence,
         "binaries": binaries,
     }
     return identity
@@ -1106,7 +1646,10 @@ def exact_build_install_identity(
 def refresh_exact_build_install(
     repository: Path, revision: str, build_dir: Path, prefix: Path,
     planning_repository: Path, environment: dict[str, str],
-) -> tuple[Path, Path, dict[str, Any], RetainedDirectoryClaim]:
+) -> tuple[
+    Path, Path, dict[str, Any], RetainedDirectoryClaim,
+    RetainedTreeClaim, RetainedTreeClaim,
+]:
     _require_external_path(build_dir, (repository, planning_repository), "build-dir")
     _require_external_path(prefix, (repository, planning_repository), "install-prefix")
     if not build_dir.is_dir() or build_dir.is_symlink():
@@ -1114,22 +1657,53 @@ def refresh_exact_build_install(
     if prefix.exists() or prefix.is_symlink() or not prefix.parent.is_dir():
         raise ValueError("install-prefix must be a new path under an existing directory")
     _release_build_contract(repository, build_dir)
+    retained_claim = claim_fresh_directory(prefix, "install-prefix")
+    prefix_descriptor = retained_claim.descriptor
+    prefix_claim = retained_claim.identity
+    source_claim: RetainedTreeClaim | None = None
+    build_input_claim: RetainedTreeClaim | None = None
     try:
-        prefix.mkdir(mode=0o700)
-        prefix_descriptor = os.open(prefix, _directory_open_flags())
-    except OSError as error:
-        raise ValueError("install-prefix could not be atomically claimed") from error
-    prefix_claim = _directory_identity(os.fstat(prefix_descriptor))
-    retained_claim = RetainedDirectoryClaim(
-        prefix, prefix_descriptor, prefix_claim, "install-prefix"
-    )
-    try:
+        source_claim, source_tree_evidence = retain_git_source_tree(
+            repository, revision, "Pulp exact source"
+        )
+        prebuild_claim = CombinedClaims(retained_claim, source_claim)
+        _run_bounded_build(
+            ["cmake", "-S", str(repository), "-B", str(build_dir)],
+            repository=repository, environment=environment, timeout=1800,
+            directory_claim=prebuild_claim,
+        )
+        _release_build_contract(repository, build_dir)
+        build_input_claim, build_input_evidence = retain_generated_build_inputs(
+            build_dir, "Pulp regenerated build inputs"
+        )
+        compilation_claim = CombinedClaims(
+            retained_claim, source_claim, build_input_claim
+        )
+        _run_bounded_build(
+            ["cmake", "--build", str(build_dir), "--target", "clean"],
+            repository=repository, environment=environment, timeout=1800,
+            directory_claim=compilation_claim,
+        )
+        cargo_target = build_dir / "experimental/pulp-rs/cargo-target"
+        if cargo_target.is_symlink():
+            raise ValueError("Pulp Cargo target cache must not be a symlink")
+        if cargo_target.exists():
+            _run_bounded_build(
+                ["cmake", "-E", "remove_directory", str(cargo_target)],
+                repository=repository, environment=environment, timeout=1800,
+                directory_claim=compilation_claim,
+            )
+        if cargo_target.exists() or any(
+            built.exists() for built, _installed in _binary_paths(build_dir, prefix).values()
+        ):
+            raise ValueError("forced-clean Pulp build retained a measured target output")
         _run_bounded_build(
             ["cmake", "--build", str(build_dir), "--target", *BUILD_TARGETS, "--parallel"],
             repository=repository, environment=environment, timeout=3600,
-            directory_claim=retained_claim,
+            directory_claim=compilation_claim,
         )
-        retained_claim.seal()
+        source_claim.assert_full()
+        build_input_claim.assert_full()
         cmake_cache_sha256 = retained_claim.bind_file(
             build_dir / "CMakeCache.txt", "refreshed CMake cache",
         )
@@ -1141,7 +1715,7 @@ def refresh_exact_build_install(
         _run_bounded_build(
             ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
             repository=repository, environment=environment, timeout=1800,
-            directory_claim=retained_claim,
+            directory_claim=compilation_claim,
         )
         _assert_directory_path_identity(
             prefix, prefix_descriptor, prefix_claim, "install-prefix"
@@ -1159,14 +1733,21 @@ def refresh_exact_build_install(
         identity = exact_build_install_identity(
             repository, revision, build_dir, prefix, cli, mcp,
             binaries, cmake_cache_sha256,
+            source_tree_evidence, build_input_evidence,
         )
         retained_claim.assert_current()
         if identity["build_info_sha256"] != build_info_sha256:
             raise ValueError("installed build_info differs from its retained claim")
         if identity["build_provenance"]["install_prefix_claim"] != prefix_claim:
             raise ValueError("installed provenance differs from the claimed prefix identity")
-        return cli, mcp, identity, retained_claim
+        return (
+            cli, mcp, identity, retained_claim, source_claim, build_input_claim
+        )
     except BaseException:
+        if build_input_claim is not None:
+            build_input_claim.close()
+        if source_claim is not None:
+            source_claim.close()
         retained_claim.close()
         raise
 
@@ -2481,13 +3062,22 @@ def main() -> int:
         validate_output_path(
             output, (repository, planning_repository, build_dir, prefix)
         )
+        output_parent_claim = retain_existing_directory(
+            output.parent, "output-parent"
+        )
         source_identity = clean_source_identity(repository, args.source_revision)
         accepted_plan = plan_identity(
             planning_repository, args.plan_revision, args.plan_sha256
         )
-        cli, mcp, installed_identity, install_claim = refresh_exact_build_install(
+        (
+            cli, mcp, installed_identity, install_claim,
+            source_tree_claim, build_input_claim,
+        ) = refresh_exact_build_install(
             repository, args.source_revision, build_dir, prefix,
             planning_repository, build_environment,
+        )
+        execution_claim = CombinedClaims(
+            install_claim, source_tree_claim, build_input_claim
         )
         validate_paths(cli, mcp, trace, processor)
         binding = source_binding(repository, args.source_revision, trace)
@@ -2504,7 +3094,7 @@ def main() -> int:
             "SDK-matched trace processor",
             processor_identity["sha256"],
         )
-        install_claim.assert_current()
+        execution_claim.assert_current()
         producer_inventory = a2t_scope_inventory(repository, args.source_revision)
         if producer_inventory["no_a2t_scoped_producer_delta"] is not True:
             raise ValueError(
@@ -2530,16 +3120,16 @@ def main() -> int:
     load_average_start = list(os.getloadavg()) if hasattr(os, "getloadavg") else None
 
     fixture_replay = run_fixture_replay(
-        cli, mcp, repository, environment, install_claim
+        cli, mcp, repository, environment, execution_claim
     )
 
-    persistent = McpSession(mcp, environment, install_claim)
+    persistent = McpSession(mcp, environment, execution_claim)
     persistent.initialize()
     reference_projection: dict[str, Any] | None = None
     try:
         for _ in range(args.warmups):
             _, cli_payload = run_cli(
-                cli, args.question, trace, environment, install_claim
+                cli, args.question, trace, environment, execution_claim
             )
             _, mcp_payload = persistent.call(args.question, trace)
             if semantic_projection(cli_payload) != semantic_projection(mcp_payload):
@@ -2554,14 +3144,14 @@ def main() -> int:
         for trial in range(args.trials):
             if trial % 2 == 0:
                 cli_ns, cli_payload = run_cli(
-                    cli, args.question, trace, environment, install_claim
+                    cli, args.question, trace, environment, execution_claim
                 )
                 mcp_ns, mcp_payload = persistent.call(args.question, trace)
                 order = "cli-first"
             else:
                 mcp_ns, mcp_payload = persistent.call(args.question, trace)
                 cli_ns, cli_payload = run_cli(
-                    cli, args.question, trace, environment, install_claim
+                    cli, args.question, trace, environment, execution_claim
                 )
                 order = "mcp-first"
             if semantic_projection(cli_payload) != semantic_projection(mcp_payload):
@@ -2584,10 +3174,10 @@ def main() -> int:
     for trial in range(args.fresh_start_trials):
         if trial % 2 == 0:
             cli_ns, cli_payload = run_cli(
-                cli, args.question, trace, environment, install_claim
+                cli, args.question, trace, environment, execution_claim
             )
             start = time.perf_counter_ns()
-            session = McpSession(mcp, environment, install_claim)
+            session = McpSession(mcp, environment, execution_claim)
             try:
                 session.initialize()
                 _, mcp_payload = session.call(args.question, trace)
@@ -2597,7 +3187,7 @@ def main() -> int:
             order = "cli-first"
         else:
             start = time.perf_counter_ns()
-            session = McpSession(mcp, environment, install_claim)
+            session = McpSession(mcp, environment, execution_claim)
             try:
                 session.initialize()
                 _, mcp_payload = session.call(args.question, trace)
@@ -2605,7 +3195,7 @@ def main() -> int:
                 session.close()
             mcp_ns = time.perf_counter_ns() - start
             cli_ns, cli_payload = run_cli(
-                cli, args.question, trace, environment, install_claim
+                cli, args.question, trace, environment, execution_claim
             )
             order = "mcp-first"
         if semantic_projection(cli_payload) != semantic_projection(mcp_payload):
@@ -2646,7 +3236,9 @@ def main() -> int:
             parser.error(f"invalid prior-human-review-receipt: {error}")
 
     try:
-        install_claim.assert_current()
+        execution_claim.assert_current()
+        source_tree_claim.assert_full()
+        build_input_claim.assert_full()
         if clean_source_identity(repository, args.source_revision) != source_identity:
             raise ValueError("source identity changed during A2T recording")
         if source_binding(repository, args.source_revision, trace) != binding:
@@ -2655,13 +3247,15 @@ def main() -> int:
             repository, args.source_revision, build_dir, prefix, cli, mcp,
             installed_identity["build_provenance"]["binaries"],
             installed_identity["build_provenance"]["cmake_cache_sha256"],
+            installed_identity["build_provenance"]["source_tree_claim"],
+            installed_identity["build_provenance"]["build_input_claim"],
         ) != installed_identity:
             raise ValueError("installed CLI/MCP provenance changed during A2T recording")
         if trace_processor_identity(repository, processor) != processor_identity:
             raise ValueError("trace processor identity changed during A2T recording")
         if a2t_scope_inventory(repository, args.source_revision) != producer_inventory:
             raise ValueError("A2T path-scoped tree delta changed during recording")
-        install_claim.assert_current()
+        execution_claim.assert_current()
     except ValueError as error:
         parser.error(str(error))
 
@@ -2744,10 +3338,16 @@ def main() -> int:
             "xrun_check": "not-applicable-offline-no-audio-thread",
         },
     }
-    install_claim.assert_current()
-    atomic_write_json(output, evidence)
-    install_claim.assert_current()
+    execution_claim.assert_current()
+    atomic_write_json(output, evidence, output_parent_claim)
+    execution_claim.assert_current()
+    source_tree_claim.assert_full()
+    build_input_claim.assert_full()
+    output_parent_claim.assert_current()
     install_claim.close()
+    build_input_claim.close()
+    source_tree_claim.close()
+    output_parent_claim.close()
     print(json.dumps({"output": str(output), "acceptance": evidence["acceptance"]}))
     return 0
 

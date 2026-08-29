@@ -16,6 +16,7 @@ from typing import Any
 import json_schema_lite
 
 
+ROOT = Path(__file__).resolve().parents[2]
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -101,6 +102,7 @@ EXPECTED_PLAN_REVISION = "641649b7e7fece6baae34380b6e719904506af22"
 EXPECTED_PLAN_SHA256 = "00bdb8bd55fb90fb42d98a09442d2b168505a23a4208cb5b9edb67b01de69f07"
 EXPECTED_PLAN_BLOB = "2d1c461d3ea640f75786a72c312d074f68f59028"
 EXPECTED_FORGE_REVISION = "0750a88dea3af7fca927a8c02887e071109407ae"
+EXPECTED_FORGE_ROOT_TREE = "b31fb3effd109b30381007f43de208f81d6926a7"
 EXPECTED_FORGE_PULP_REF_BLOB = "3e54500140a1dc5de0dbefaab29612916f257ecd"
 RESULT_SCHEMA = (
     Path(__file__).resolve().parents[2]
@@ -167,6 +169,80 @@ def _canonical_repeat(result: dict[str, Any]) -> dict[str, Any]:
     value = copy.deepcopy(result)
     value.pop("gpu_evidence_id", None)
     return value
+
+
+def _expected_root_tree(repository: Path, revision: str) -> str | None:
+    completed = subprocess.run(
+        ["git", "rev-parse", f"{revision}^{{tree}}"],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    value = completed.stdout.strip()
+    return value if completed.returncode == 0 and GIT_SHA.fullmatch(value) else None
+
+
+def _expected_gitlinks(repository: Path, revision: str) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "ls-tree", "-rz", "-r", revision],
+        cwd=repository, check=False, capture_output=True,
+    )
+    if completed.returncode != 0:
+        return {}
+    values: dict[str, str] = {}
+    for raw in completed.stdout.split(b"\0"):
+        if not raw:
+            continue
+        try:
+            metadata, path = raw.split(b"\t", 1)
+            mode, kind, value = metadata.decode("ascii").split()
+        except (ValueError, UnicodeDecodeError):
+            return {}
+        if mode == "160000" and kind == "commit" and GIT_SHA.fullmatch(value):
+            values[path.decode("utf-8")] = value
+    return values
+
+
+def _verify_tree_claim(
+    claim: Any, *, revision: str, root_tree: str | None,
+    overlay_paths: list[str], label: str, errors: list[str],
+) -> None:
+    value = _mapping(claim, f"{label} source_tree_claim", errors)
+    gitlinks = value.get("excluded_gitlinks")
+    if (
+        value.get("method") != "retained-git-tree-vnode-and-descriptor-v1"
+        or value.get("revision") != revision
+        or root_tree is None
+        or value.get("root_tree") != root_tree
+        or value.get("overlay_paths") != overlay_paths
+        or not isinstance(value.get("regular_or_symlink_files"), int)
+        or isinstance(value.get("regular_or_symlink_files"), bool)
+        or value["regular_or_symlink_files"] <= 0
+        or not isinstance(value.get("retained_directories"), int)
+        or isinstance(value.get("retained_directories"), bool)
+        or value["retained_directories"] <= 0
+        or not isinstance(gitlinks, dict)
+        or any(
+            not isinstance(path, str)
+            or not isinstance(blob, str)
+            or GIT_SHA.fullmatch(blob) is None
+            for path, blob in gitlinks.items()
+        )
+    ):
+        errors.append(f"{label} source was not retained as its exact Git tree")
+
+
+def _verify_build_input_claim(value: Any, errors: list[str]) -> None:
+    claim = _mapping(value, "build_input_claim", errors)
+    if (
+        claim.get("method") != "regenerated-cmake-ninja-input-descriptor-v1"
+        or not isinstance(claim.get("file_count"), int)
+        or isinstance(claim.get("file_count"), bool)
+        or claim["file_count"] < 3
+        or not isinstance(claim.get("manifest_sha256"), str)
+        or SHA256.fullmatch(claim["manifest_sha256"]) is None
+        or claim.get("forced_clean_targets")
+        != ["pulp-rust-cli", "pulp-cli", "pulp-mcp"]
+    ):
+        errors.append("Pulp build inputs were not regenerated, retained, and forced clean")
 
 
 def _png_metrics(path: Path) -> dict[str, int]:
@@ -309,6 +385,10 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         errors.append("v2 installed binaries were not byte-identical to refreshed build outputs")
     if install.get("install_prefix_initial_state") != "absent-and-atomically-claimed":
         errors.append("v2 install prefix was not fresh and atomically claimed")
+    if install.get("install_prefix_claim_method") != (
+        "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+    ):
+        errors.append("v2 install prefix lacks atomic created-inode publication")
     prefix_claim = install.get("install_prefix_claim")
     if (
         not isinstance(prefix_claim, dict)
@@ -324,6 +404,21 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
     for field in ("cmake_cache_sha256", "build_info_sha256"):
         if not SHA256.fullmatch(str(install.get(field, ""))):
             errors.append(f"v2 installed provenance lacks exact {field}")
+    _verify_tree_claim(
+        install.get("source_tree_claim"),
+        revision=revision,
+        root_tree=_expected_root_tree(ROOT, revision),
+        overlay_paths=[],
+        label="Pulp",
+        errors=errors,
+    )
+    pulp_tree_claim = install.get("source_tree_claim")
+    if isinstance(pulp_tree_claim, dict) and (
+        pulp_tree_claim.get("excluded_gitlinks")
+        != _expected_gitlinks(ROOT, revision)
+    ):
+        errors.append("Pulp retained source claim omits or invents Git links")
+    _verify_build_input_claim(install.get("build_input_claim"), errors)
     features = _mapping(install.get("feature_contract"), "install feature_contract", errors)
     expected_features = {
         "PULP_ENABLE_GPU": "ON", "PULP_ENABLE_SCENE3D": "ON",
@@ -363,6 +458,49 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
         errors.append("v2 Forge proof lacks the accepted original PULP_SDK_REF blob")
     if forge.get("all_other_tracked_files_clean") is not True:
         errors.append("v2 Forge proof has source drift beyond PULP_SDK_REF")
+    _verify_tree_claim(
+        forge.get("source_tree_claim"),
+        revision=EXPECTED_FORGE_REVISION,
+        root_tree=EXPECTED_FORGE_ROOT_TREE,
+        overlay_paths=["PULP_SDK_REF"],
+        label="Forge",
+        errors=errors,
+    )
+    forge_tree_claim = forge.get("source_tree_claim")
+    if isinstance(forge_tree_claim, dict) and forge_tree_claim.get(
+        "excluded_gitlinks"
+    ) != {}:
+        errors.append("Forge retained source claim excludes Git links")
+    if forge.get("build_directory_claim_method") != (
+        "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+    ):
+        errors.append("Forge build directory lacks atomic created-inode publication")
+    forge_build_claim = forge.get("build_directory_claim")
+    if (
+        not isinstance(forge_build_claim, dict)
+        or set(forge_build_claim) != {"device", "inode"}
+        or any(
+            not isinstance(forge_build_claim.get(field), int)
+            or isinstance(forge_build_claim.get(field), bool)
+            or forge_build_claim[field] < 0
+            for field in ("device", "inode")
+        )
+    ):
+        errors.append("Forge build directory lacks its retained inode claim")
+    bundle_tree = forge.get("bundle_tree_claim")
+    if (
+        not isinstance(bundle_tree, dict)
+        or bundle_tree.get("method")
+        != "retained-complete-tree-vnode-and-descriptor-v1"
+        or not isinstance(bundle_tree.get("file_count"), int)
+        or isinstance(bundle_tree.get("file_count"), bool)
+        or bundle_tree["file_count"] <= 0
+        or not isinstance(bundle_tree.get("bytes"), int)
+        or isinstance(bundle_tree.get("bytes"), bool)
+        or bundle_tree["bytes"] <= 0
+        or not SHA256.fullmatch(str(bundle_tree.get("manifest_sha256", "")))
+    ):
+        errors.append("Forge bundle was not retained as one complete exact tree")
     stamp = _mapping(forge.get("bundle_build_info"), "Forge bundle build info", errors)
     if (
         stamp.get("product") != "Forge Modular"

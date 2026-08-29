@@ -115,8 +115,30 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 "cmake_home_revision": head, "cmake_build_type": "Release",
                 "rust_profile": "release", "build_install_binary_identity": "pass",
                 "install_prefix_initial_state": "absent-and-atomically-claimed",
+                "install_prefix_claim_method": (
+                    "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+                ),
                 "install_prefix_claim": {"device": 1, "inode": 2},
                 "cmake_cache_sha256": "7" * 64, "build_info_sha256": "8" * 64,
+                "source_tree_claim": {
+                    "method": "retained-git-tree-vnode-and-descriptor-v1",
+                    "revision": head,
+                    "root_tree": RECORDER.provenance._git_text(
+                        ROOT, "rev-parse", f"{head}^{{tree}}"
+                    ),
+                    "overlay_paths": [],
+                    "excluded_gitlinks": VERIFIER._expected_gitlinks(ROOT, head),
+                    "regular_or_symlink_files": 1,
+                    "retained_directories": 1,
+                },
+                "build_input_claim": {
+                    "method": "regenerated-cmake-ninja-input-descriptor-v1",
+                    "file_count": 3,
+                    "manifest_sha256": "9" * 64,
+                    "forced_clean_targets": [
+                        "pulp-rust-cli", "pulp-cli", "pulp-mcp"
+                    ],
+                },
                 "feature_contract": {
                     "PULP_ENABLE_GPU": "ON", "PULP_ENABLE_SCENE3D": "ON",
                     "PULP_ENABLE_THREEJS_RUNTIME": "ON", "PULP_ENABLE_JS": "ON",
@@ -150,6 +172,19 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     "original_blob": VERIFIER.EXPECTED_FORGE_PULP_REF_BLOB,
                 },
                 "all_other_tracked_files_clean": True,
+                "source_tree_claim": {
+                    "method": "retained-git-tree-vnode-and-descriptor-v1",
+                    "revision": VERIFIER.EXPECTED_FORGE_REVISION,
+                    "root_tree": VERIFIER.EXPECTED_FORGE_ROOT_TREE,
+                    "overlay_paths": ["PULP_SDK_REF"],
+                    "excluded_gitlinks": {},
+                    "regular_or_symlink_files": 1,
+                    "retained_directories": 1,
+                },
+                "build_directory_claim_method": (
+                    "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+                ),
+                "build_directory_claim": {"device": 1, "inode": 3},
                 "bundle_build_info": {
                     "schema": "1", "version": "1.0.0",
                     "packaged": "2026-08-29T00:00:00Z",
@@ -162,6 +197,12 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 "cmake_cache_sha256": "4" * 64,
                 "bundle_build_info_sha256": "5" * 64,
                 "bundle_binary_sha256": "6" * 64,
+                "bundle_tree_claim": {
+                    "method": "retained-complete-tree-vnode-and-descriptor-v1",
+                    "file_count": 3,
+                    "bytes": 3,
+                    "manifest_sha256": "a" * 64,
+                },
                 "screenshot_metrics": VERIFIER._png_metrics(screenshot),
             },
             "additional_pulp_path_canaries": {
@@ -254,6 +295,42 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 self.assertTrue(
                     any("refreshed build output" in error for error in errors)
                 )
+
+    def test_v2_rejects_unretained_source_build_and_forge_bundle_claims(self):
+        mutations = (
+            (
+                lambda receipt: receipt["install_provenance"].pop(
+                    "source_tree_claim"
+                ),
+                "Pulp source was not retained",
+            ),
+            (
+                lambda receipt: receipt["install_provenance"][
+                    "build_input_claim"
+                ].update({"forced_clean_targets": []}),
+                "forced clean",
+            ),
+            (
+                lambda receipt: receipt["forge_downstream"].pop(
+                    "source_tree_claim"
+                ),
+                "Forge source was not retained",
+            ),
+            (
+                lambda receipt: receipt["forge_downstream"].pop(
+                    "bundle_tree_claim"
+                ),
+                "Forge bundle was not retained",
+            ),
+        )
+        for mutate, expected in mutations:
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                receipt = self.v2_fixture(root)
+                mutate(receipt)
+                (root / "receipt.json").write_text(json.dumps(receipt))
+                errors = VERIFIER.verify(root)
+                self.assertTrue(any(expected in error for error in errors), errors)
 
     def test_png_content_cap_rejects_blank_even_when_digest_rebound(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -427,6 +504,59 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     self.publish(staging, output)
             self.assertFalse((moved_parent / "published" / "receipt.json").exists())
             self.assertEqual(list(parent.iterdir()), [])
+
+    def test_retained_output_parent_rejects_swap_before_publication(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "publication-parent"
+            parent.mkdir()
+            staging = root / "staging"
+            staging.mkdir()
+            (staging / "receipt.json").write_text("{}\n", encoding="utf-8")
+            staging_claim = RECORDER.retain_staged_evidence(staging)
+            parent_claim = RECORDER.retain_existing_directory(
+                parent, "output-parent"
+            )
+            moved = root / "moved-parent"
+            try:
+                parent.rename(moved)
+                moved.rename(parent)
+                with self.assertRaisesRegex(
+                    RECORDER.AcceptanceError, "mutation event"
+                ):
+                    RECORDER.publish_receipt_directory_no_replace(
+                        staging, parent / "published", staging_claim, parent_claim
+                    )
+            finally:
+                parent_claim.close()
+                staging_claim.close()
+
+    def test_fresh_directory_claim_rejects_staging_inode_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "prefix"
+            real_rename = RECORDER.renameat_no_replace
+
+            def swap_then_publish(source_parent, source_name, destination_parent,
+                                  destination_name):
+                os.rename(
+                    source_name, source_name + ".original",
+                    src_dir_fd=source_parent, dst_dir_fd=source_parent,
+                )
+                os.mkdir(source_name, dir_fd=source_parent)
+                return real_rename(
+                    source_parent, source_name,
+                    destination_parent, destination_name,
+                )
+
+            with mock.patch.object(
+                RECORDER, "renameat_no_replace", side_effect=swap_then_publish
+            ):
+                with self.assertRaisesRegex(
+                    RECORDER.AcceptanceError, "created inode"
+                ):
+                    RECORDER.claim_fresh_directory(path, "install-prefix")
+            self.assertTrue(path.is_dir())
 
     def test_receipt_publication_rejects_staged_inode_swap(self):
         with tempfile.TemporaryDirectory() as temporary:

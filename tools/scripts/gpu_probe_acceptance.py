@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import json
 import os
 import re
+import secrets
 import select
 import shutil
 import stat as stat_module
@@ -100,6 +103,38 @@ def cmake_cache(build_dir: Path) -> dict[str, str]:
         raise AcceptanceError(f"cannot read CMake cache {path}: {error}") from error
     if len(payload.encode()) > 4 * 1024 * 1024:
         raise AcceptanceError("CMake cache exceeds 4 MiB")
+    values: dict[str, str] = {}
+    for line in payload.splitlines():
+        match = re.match(r"^([^#/:=]+)(?::[^=]+)?=(.*)$", line)
+        if match:
+            values[match.group(1)] = match.group(2)
+    return values
+
+
+def bounded_descriptor_bytes(descriptor: int, limit: int, label: str) -> bytes:
+    metadata = os.fstat(descriptor)
+    if metadata.st_size > limit:
+        raise AcceptanceError(f"{label} exceeds its byte limit")
+    chunks: list[bytes] = []
+    offset = 0
+    while offset < metadata.st_size:
+        chunk = os.pread(
+            descriptor, min(1024 * 1024, metadata.st_size - offset), offset
+        )
+        if not chunk:
+            raise AcceptanceError(f"{label} ended before its claimed size")
+        chunks.append(chunk)
+        offset += len(chunk)
+    if os.fstat(descriptor).st_size != metadata.st_size:
+        raise AcceptanceError(f"{label} size changed while reading")
+    return b"".join(chunks)
+
+
+def parse_cmake_cache_bytes(data: bytes, label: str) -> dict[str, str]:
+    try:
+        payload = data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise AcceptanceError(f"{label} is not UTF-8") from error
     values: dict[str, str] = {}
     for line in payload.splitlines():
         match = re.match(r"^([^#/:=]+)(?::[^=]+)?=(.*)$", line)
@@ -345,6 +380,139 @@ class RetainedDirectoryClaim:
         self.close()
 
 
+def renameat_no_replace(
+    source_parent: int, source_name: str, destination_parent: int,
+    destination_name: str,
+) -> None:
+    """Publish one relative path with macOS RENAME_EXCL semantics."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameatx = getattr(libc, "renameatx_np", None)
+    if renameatx is None:
+        raise AcceptanceError("fresh directory claims require macOS renameatx_np")
+    renameatx.argtypes = (
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    renameatx.restype = ctypes.c_int
+    if renameatx(
+        source_parent, os.fsencode(source_name), destination_parent,
+        os.fsencode(destination_name), 0x00000004,
+    ) != 0:
+        value = ctypes.get_errno()
+        raise OSError(value, os.strerror(value), destination_name)
+
+
+def claim_fresh_directory(path: Path, label: str) -> RetainedDirectoryClaim:
+    """Create, retain, and no-replace publish the exact directory inode."""
+    if path.name in {"", ".", ".."}:
+        raise AcceptanceError(f"{label} must have a safe final path component")
+    parent_descriptor = os.open(path.parent, directory_open_flags())
+    temporary_name = f".{path.name}.{secrets.token_hex(16)}.claim"
+    temporary_descriptor: int | None = None
+    temporary_identity: dict[str, int] | None = None
+    temporary_exists = False
+    try:
+        parent_identity = directory_identity(
+            os.fstat(parent_descriptor), f"{label}-parent"
+        )
+        assert_directory_claim(
+            path.parent, parent_identity, f"{label}-parent", parent_descriptor
+        )
+        os.mkdir(temporary_name, mode=0o700, dir_fd=parent_descriptor)
+        temporary_exists = True
+        temporary_descriptor = os.open(
+            temporary_name, directory_open_flags(), dir_fd=parent_descriptor
+        )
+        temporary_identity = directory_identity(
+            os.fstat(temporary_descriptor), label
+        )
+        named = directory_identity(
+            os.stat(
+                temporary_name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            ),
+            label,
+        )
+        if named != temporary_identity:
+            raise AcceptanceError(f"{label} staging inode changed before publication")
+        renameat_no_replace(
+            parent_descriptor, temporary_name,
+            parent_descriptor, path.name,
+        )
+        temporary_exists = False
+        assert_directory_claim(
+            path.parent, parent_identity, f"{label}-parent", parent_descriptor
+        )
+        published = directory_identity(
+            os.stat(path.name, dir_fd=parent_descriptor, follow_symlinks=False),
+            label,
+        )
+        if published != temporary_identity:
+            raise AcceptanceError(
+                f"{label} publication did not preserve its created inode"
+            )
+        os.fsync(parent_descriptor)
+        claim = RetainedDirectoryClaim(
+            path, temporary_descriptor, temporary_identity, label
+        )
+        temporary_descriptor = None
+        try:
+            claim.seal()
+            claim.assert_current()
+            return claim
+        except BaseException:
+            claim.close()
+            raise
+    except OSError as error:
+        if error.errno == errno.EEXIST:
+            raise AcceptanceError(
+                f"{label} was not fresh at no-replace publication"
+            ) from error
+        raise AcceptanceError(
+            f"{label} could not be atomically claimed: {error}"
+        ) from error
+    finally:
+        if temporary_descriptor is not None:
+            os.close(temporary_descriptor)
+        if temporary_exists and temporary_identity is not None:
+            try:
+                named = directory_identity(
+                    os.stat(
+                        temporary_name,
+                        dir_fd=parent_descriptor,
+                        follow_symlinks=False,
+                    ),
+                    label,
+                )
+                if named == temporary_identity:
+                    os.rmdir(temporary_name, dir_fd=parent_descriptor)
+                    os.fsync(parent_descriptor)
+            except OSError:
+                pass
+        os.close(parent_descriptor)
+
+
+def retain_existing_directory(path: Path, label: str) -> RetainedDirectoryClaim:
+    descriptor = os.open(path, directory_open_flags())
+    claim: RetainedDirectoryClaim | None = None
+    try:
+        claim = RetainedDirectoryClaim(
+            path, descriptor,
+            directory_identity(os.fstat(descriptor), label), label,
+        )
+        descriptor = -1
+        claim.seal()
+        claim.assert_current()
+        return claim
+    except BaseException:
+        if claim is not None:
+            claim.close()
+        elif descriptor >= 0:
+            os.close(descriptor)
+        raise
+
+
 def bind_build_outputs(
     build_dir: Path, claim: RetainedDirectoryClaim
 ) -> dict[str, dict[str, Any]]:
@@ -399,29 +567,81 @@ def bind_installed_outputs(
 
 def refresh_install(
     repository: Path, build_dir: Path, prefix: Path, build_environment: dict[str, str]
-) -> tuple[dict[str, Any], dict[str, dict[str, Any]], RetainedDirectoryClaim]:
+) -> tuple[
+    dict[str, Any], dict[str, dict[str, Any]], RetainedDirectoryClaim,
+    provenance.RetainedTreeClaim, provenance.RetainedTreeClaim,
+]:
     require_release_pulp_build(build_dir, repository)
+    retained_claim = claim_fresh_directory(prefix, "install-prefix")
+    prefix_claim = retained_claim.identity
+    source_claim: provenance.RetainedTreeClaim | None = None
+    build_input_claim: provenance.RetainedTreeClaim | None = None
     try:
-        prefix.mkdir(mode=0o700)
-        prefix_descriptor = os.open(prefix, directory_open_flags())
-    except OSError as error:
-        raise AcceptanceError(
-            "install-prefix was not fresh when the recorder atomically claimed it"
-        ) from error
-    prefix_claim = directory_identity(os.fstat(prefix_descriptor), "install-prefix")
-    retained_claim = RetainedDirectoryClaim(
-        prefix, prefix_descriptor, prefix_claim, "install-prefix"
-    )
-    try:
+        revision = provenance._git_text(repository, "rev-parse", "HEAD")
+        source_claim, source_tree_evidence = provenance.retain_git_source_tree(
+            repository, revision, "Pulp exact source"
+        )
+        prebuild_claim = provenance.CombinedClaims(retained_claim, source_claim)
+        reconfigure = run_bounded(
+            ["cmake", "-S", str(repository), "-B", str(build_dir)],
+            cwd=repository, environment=build_environment, timeout=1800,
+            directory_claim=prebuild_claim,
+        )
+        if reconfigure.returncode != 0:
+            raise AcceptanceError(
+                f"Pulp exact-head reconfigure failed: {reconfigure.stderr[-2000:]}"
+            )
+        require_release_pulp_build(build_dir, repository)
+        try:
+            build_input_claim, build_input_evidence = (
+                provenance.retain_generated_build_inputs(
+                    build_dir, "Pulp regenerated build inputs"
+                )
+            )
+        except ValueError as error:
+            raise AcceptanceError(str(error)) from error
+        compilation_claim = provenance.CombinedClaims(
+            retained_claim, source_claim, build_input_claim
+        )
+        clean = run_bounded(
+            ["cmake", "--build", str(build_dir), "--target", "clean"],
+            cwd=repository, environment=build_environment, timeout=1800,
+            directory_claim=compilation_claim,
+        )
+        if clean.returncode != 0:
+            raise AcceptanceError(
+                f"Pulp forced-clean refresh failed: {clean.stderr[-2000:]}"
+            )
+        cargo_target = build_dir / "experimental/pulp-rs/cargo-target"
+        if cargo_target.is_symlink():
+            raise AcceptanceError("Pulp Cargo target cache must not be a symlink")
+        if cargo_target.exists():
+            cargo_clean = run_bounded(
+                ["cmake", "-E", "remove_directory", str(cargo_target)],
+                cwd=repository, environment=build_environment, timeout=1800,
+                directory_claim=compilation_claim,
+            )
+            if cargo_clean.returncode != 0:
+                raise AcceptanceError(
+                    f"Pulp Cargo forced-clean failed: {cargo_clean.stderr[-2000:]}"
+                )
+        if cargo_target.exists() or any(
+            (build_dir / relative).exists()
+            for relative, _installed in BINARY_PATHS.values()
+        ):
+            raise AcceptanceError(
+                "forced-clean Pulp build retained a measured target output"
+            )
         build = run_bounded(
             ["cmake", "--build", str(build_dir), "--target",
              "pulp-rust-cli", "pulp-cli", "pulp-mcp", "--parallel"],
             cwd=repository, environment=build_environment, timeout=3600,
-            directory_claim=retained_claim,
+            directory_claim=compilation_claim,
         )
         if build.returncode != 0:
             raise AcceptanceError(f"Pulp CLI/MCP refresh failed: {build.stderr[-2000:]}")
-        retained_claim.seal()
+        source_claim.assert_full()
+        build_input_claim.assert_full()
         cache_digest = retained_claim.bind_file(
             build_dir / "CMakeCache.txt", "refreshed CMake cache"
         )
@@ -430,7 +650,7 @@ def refresh_install(
         install = run_bounded(
             ["cmake", "--install", str(build_dir), "--prefix", str(prefix)],
             cwd=repository, environment=build_environment, timeout=1800,
-            directory_claim=retained_claim,
+            directory_claim=compilation_claim,
         )
         if install.returncode != 0:
             raise AcceptanceError(f"Pulp install refresh failed: {install.stderr[-2000:]}")
@@ -439,7 +659,6 @@ def refresh_install(
             "installed build_info.hpp",
         )
         binaries = bind_installed_outputs(prefix, build_outputs, retained_claim)
-        revision = provenance._git_text(repository, "rev-parse", "HEAD")
         installed_identity = provenance.installed_source_identity(
             repository, revision, prefix / "bin/pulp", prefix / "bin/pulp-mcp"
         )
@@ -458,13 +677,22 @@ def refresh_install(
                     "PULP_JS_ENGINE", "PULP_BUILD_RUST_CLI", "PULP_HAS_THREEJS",
                 )
             },
+            "source_tree_claim": source_tree_evidence,
+            "build_input_claim": build_input_evidence,
             "build_info": installed_identity["build_info"],
             "build_info_sha256": build_info_digest,
             "install_prefix_initial_state": "absent-and-atomically-claimed",
+            "install_prefix_claim_method": (
+                "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+            ),
             "install_prefix_claim": prefix_claim,
             "build_install_binary_identity": "pass",
-        }, binaries, retained_claim)
+        }, binaries, retained_claim, source_claim, build_input_claim)
     except BaseException:
+        if build_input_claim is not None:
+            build_input_claim.close()
+        if source_claim is not None:
+            source_claim.close()
         retained_claim.close()
         raise
 
@@ -658,8 +886,7 @@ def forge_source_identity(repository: Path, pulp_revision: str) -> dict[str, Any
     }
 
 
-def parse_forge_stamp(path: Path) -> dict[str, str]:
-    data = path.read_bytes()
+def parse_forge_stamp_bytes(data: bytes) -> dict[str, str]:
     if len(data) > 16 * 1024:
         raise AcceptanceError("FORGE_BUILD_INFO exceeds 16 KiB")
     try:
@@ -681,6 +908,10 @@ def parse_forge_stamp(path: Path) -> dict[str, str]:
     return values
 
 
+def parse_forge_stamp(path: Path) -> dict[str, str]:
+    return parse_forge_stamp_bytes(path.read_bytes())
+
+
 def prove_forge(
     repository: Path,
     build_dir: Path,
@@ -689,104 +920,212 @@ def prove_forge(
     staging: Path,
     build_environment: dict[str, str],
     runtime_environment: dict[str, str],
-    directory_claim: RetainedDirectoryClaim,
+    directory_claim: Any,
 ) -> dict[str, Any]:
     identity = forge_source_identity(repository, pulp_revision)
+    source_claim: provenance.RetainedTreeClaim | None = None
+    forge_build_claim: RetainedDirectoryClaim | None = None
+    bundle_claim: provenance.RetainedTreeClaim | None = None
     try:
-        build_dir.mkdir()
-    except OSError as error:
-        raise AcceptanceError(
-            "Forge build directory was not fresh when the recorder claimed it"
-        ) from error
-    expected_pulp_dir = (prefix / "lib/cmake/Pulp").resolve()
-    configure = run_bounded(
-        [
-            "cmake", "-S", str(repository), "-B", str(build_dir), "-G", "Ninja",
-            "-DCMAKE_BUILD_TYPE=Release",
-            f"-DCMAKE_PREFIX_PATH={prefix}",
-            f"-DPulp_DIR={expected_pulp_dir}",
-        ],
-        cwd=repository, environment=build_environment, timeout=1800,
-        directory_claim=directory_claim,
-    )
-    if configure.returncode != 0:
-        raise AcceptanceError(f"Forge Modular configure failed: {configure.stderr[-2000:]}")
-    cache = cmake_cache(build_dir)
-    if Path(cache.get("CMAKE_HOME_DIRECTORY", "")).resolve() != repository.resolve():
-        raise AcceptanceError("Forge build is not configured from the exact Forge checkout")
-    if cache.get("CMAKE_BUILD_TYPE") != "Release":
-        raise AcceptanceError("Forge build must be single-config Release")
-    if Path(cache.get("Pulp_DIR", "")).resolve() != expected_pulp_dir:
-        raise AcceptanceError("Forge build does not consume the accepted Pulp install")
-    build = run_bounded(
-        ["cmake", "--build", str(build_dir), "--target", "ForgeModular_Standalone", "--parallel"],
-        cwd=repository, environment=build_environment, timeout=3600,
-        directory_claim=directory_claim,
-    )
-    if build.returncode != 0:
-        raise AcceptanceError(f"Forge Modular refresh failed: {build.stderr[-2000:]}")
-    stamps = []
-    for candidate in build_dir.rglob("FORGE_BUILD_INFO"):
-        if len(stamps) >= 64:
+        try:
+            source_claim, source_evidence = provenance.retain_git_source_tree(
+                repository,
+                verifier.EXPECTED_FORGE_REVISION,
+                "Forge exact source",
+                overlays={"PULP_SDK_REF": f"{pulp_revision}\n".encode()},
+            )
+        except ValueError as error:
+            raise AcceptanceError(str(error)) from error
+        if source_evidence["excluded_gitlinks"]:
+            raise AcceptanceError("Forge source contains unsealed Git links")
+        forge_build_claim = claim_fresh_directory(
+            build_dir, "Forge build directory"
+        )
+        configure_claim = provenance.CombinedClaims(
+            directory_claim, source_claim, forge_build_claim
+        )
+        expected_pulp_dir = (prefix / "lib/cmake/Pulp").resolve()
+        configure = run_bounded(
+            [
+                "cmake", "-S", str(repository), "-B", str(build_dir),
+                "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                f"-DCMAKE_PREFIX_PATH={prefix}",
+                f"-DPulp_DIR={expected_pulp_dir}",
+            ],
+            cwd=repository, environment=build_environment, timeout=1800,
+            directory_claim=configure_claim,
+        )
+        if configure.returncode != 0:
+            raise AcceptanceError(
+                f"Forge Modular configure failed: {configure.stderr[-2000:]}"
+            )
+        cache_digest = forge_build_claim.bind_file(
+            build_dir / "CMakeCache.txt", "Forge CMake cache"
+        )
+        cache_descriptor = forge_build_claim.file_claims[-1]["descriptor"]
+        cache = parse_cmake_cache_bytes(
+            bounded_descriptor_bytes(
+                cache_descriptor, 4 * 1024 * 1024, "Forge CMake cache"
+            ),
+            "Forge CMake cache",
+        )
+        if Path(cache.get("CMAKE_HOME_DIRECTORY", "")).resolve() != repository.resolve():
+            raise AcceptanceError(
+                "Forge build is not configured from the exact Forge checkout"
+            )
+        if cache.get("CMAKE_BUILD_TYPE") != "Release":
+            raise AcceptanceError("Forge build must be single-config Release")
+        if Path(cache.get("Pulp_DIR", "")).resolve() != expected_pulp_dir:
+            raise AcceptanceError(
+                "Forge build does not consume the accepted Pulp install"
+            )
+        build = run_bounded(
+            [
+                "cmake", "--build", str(build_dir), "--target",
+                "ForgeModular_Standalone", "--parallel",
+            ],
+            cwd=repository, environment=build_environment, timeout=3600,
+            directory_claim=configure_claim,
+        )
+        if build.returncode != 0:
+            raise AcceptanceError(
+                f"Forge Modular refresh failed: {build.stderr[-2000:]}"
+            )
+        source_claim.assert_full()
+        forge_build_claim.assert_current()
+        stamps: list[tuple[Path, dict[str, str], int]] = []
+        candidates = list(build_dir.rglob("FORGE_BUILD_INFO"))
+        if len(candidates) > 64:
             raise AcceptanceError("Forge build contains too many build-info candidates")
-        if candidate.is_file() and not candidate.is_symlink():
-            values = parse_forge_stamp(candidate)
-            if values.get("product") == "Forge Modular" and values.get("format") == "Standalone application":
-                stamps.append((candidate, values))
-    if len(stamps) != 1:
-        raise AcceptanceError("Forge build must contain one exact Modular standalone stamp")
-    stamp_path, stamp = stamps[0]
-    bundle = stamp_path.parents[2]
-    if bundle.suffix != ".app":
-        raise AcceptanceError("Forge Modular stamp is not inside an app bundle")
-    executables = [path for path in (bundle / "Contents/MacOS").iterdir()
-                   if path.is_file() and not path.is_symlink() and os.access(path, os.X_OK)]
-    if len(executables) != 1:
-        raise AcceptanceError("Forge Modular bundle lacks one exact executable")
-    binary = executables[0]
-    binary_sha256 = sha256(binary)
-    directory_claim.bind_file(binary, "Forge Modular executable", binary_sha256)
-    signed = run_bounded(
-        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(bundle)],
-        cwd=repository, environment=runtime_environment, timeout=60,
-        directory_claim=directory_claim,
-    )
-    if signed.returncode != 0:
-        raise AcceptanceError(f"Forge Modular signature verification failed: {signed.stderr}")
-    screenshot = staging / "forge-modular-screenshot.png"
-    capture = run_bounded(
-        [str(binary), "--screenshot", str(screenshot)],
-        cwd=repository, environment=runtime_environment, timeout=300,
-        directory_claim=directory_claim,
-    )
-    if capture.returncode != 0:
-        raise AcceptanceError(f"Forge Modular screenshot smoke failed: {capture.stderr[-2000:]}")
-    metrics = verifier._png_metrics(screenshot)
-    doctor_path = staging / "forge-gpu-doctor.json"
-    doctor = run_bounded(
-        [str(prefix / "bin/pulp"), "doctor", "gpu", "--json"],
-        cwd=repository, environment=runtime_environment, timeout=300,
-        directory_claim=directory_claim,
-    )
-    if doctor.returncode != 0:
-        raise AcceptanceError(f"Forge-cwd GPU doctor failed: {doctor.stderr[-2000:]}")
-    try:
-        doctor_payload = json.loads(doctor.stdout)
-    except json.JSONDecodeError as error:
-        raise AcceptanceError("Forge-cwd GPU doctor returned malformed JSON") from error
-    doctor_path.write_text(json.dumps(doctor_payload, indent=2, sort_keys=True) + "\n")
-    if forge_source_identity(repository, pulp_revision) != identity:
-        raise AcceptanceError("Forge source identity changed during downstream proof")
-    return {
-        **identity,
-        "cmake_cache_sha256": sha256(build_dir / "CMakeCache.txt"),
-        "build_target": "ForgeModular_Standalone",
-        "bundle_build_info": stamp,
-        "bundle_build_info_sha256": sha256(stamp_path),
-        "bundle_binary_sha256": binary_sha256,
-        "codesign_verify": "pass",
-        "screenshot_metrics": metrics,
-    }
+        for candidate in candidates:
+            if not candidate.is_file() or candidate.is_symlink():
+                continue
+            forge_build_claim.bind_file(candidate, "Forge bundle build-info")
+            retained = forge_build_claim.file_claims[-1]
+            values = parse_forge_stamp_bytes(bounded_descriptor_bytes(
+                retained["descriptor"], 16 * 1024, "FORGE_BUILD_INFO"
+            ))
+            if (
+                values.get("product") == "Forge Modular"
+                and values.get("format") == "Standalone application"
+            ):
+                stamps.append((candidate, values, retained["descriptor"]))
+        if len(stamps) != 1:
+            raise AcceptanceError(
+                "Forge build must contain one exact Modular standalone stamp"
+            )
+        stamp_path, stamp, stamp_descriptor = stamps[0]
+        bundle = stamp_path.parents[2]
+        if bundle.suffix != ".app":
+            raise AcceptanceError("Forge Modular stamp is not inside an app bundle")
+        try:
+            bundle_claim, bundle_evidence = provenance.retain_current_regular_tree(
+                bundle, "Forge Modular bundle"
+            )
+        except ValueError as error:
+            raise AcceptanceError(str(error)) from error
+        executable_rows = [
+            row for row in bundle_claim.file_claims
+            if Path(row["relative"]).parent.as_posix() == "Contents/MacOS"
+            and row["mode"] == "100755"
+        ]
+        if len(executable_rows) != 1:
+            raise AcceptanceError("Forge Modular bundle lacks one exact executable")
+        binary_row = executable_rows[0]
+        binary = bundle / binary_row["relative"]
+        binary_sha256 = provenance.sha256_descriptor(binary_row["descriptor"])
+        bundle_stamp = next(
+            (
+                row for row in bundle_claim.file_claims
+                if bundle / row["relative"] == stamp_path
+            ),
+            None,
+        )
+        stamp_metadata = os.fstat(stamp_descriptor)
+        stamp_identity = {
+            "device": stamp_metadata.st_dev, "inode": stamp_metadata.st_ino
+        }
+        if (
+            bundle_stamp is None
+            or bundle_stamp["identity"] != stamp_identity
+            or provenance.sha256_descriptor(bundle_stamp["descriptor"])
+            != provenance.sha256_descriptor(stamp_descriptor)
+        ):
+            raise AcceptanceError("Forge bundle stamp differs from its retained claim")
+        proof_claim = provenance.CombinedClaims(
+            directory_claim, source_claim, forge_build_claim, bundle_claim
+        )
+        signed = run_bounded(
+            ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(bundle)],
+            cwd=repository, environment=runtime_environment, timeout=60,
+            directory_claim=proof_claim,
+        )
+        if signed.returncode != 0:
+            raise AcceptanceError(
+                f"Forge Modular signature verification failed: {signed.stderr}"
+            )
+        screenshot = staging / "forge-modular-screenshot.png"
+        capture = run_bounded(
+            [str(binary), "--screenshot", str(screenshot)],
+            cwd=repository, environment=runtime_environment, timeout=300,
+            directory_claim=proof_claim,
+        )
+        if capture.returncode != 0:
+            raise AcceptanceError(
+                f"Forge Modular screenshot smoke failed: {capture.stderr[-2000:]}"
+            )
+        metrics = verifier._png_metrics(screenshot)
+        doctor_path = staging / "forge-gpu-doctor.json"
+        doctor = run_bounded(
+            [str(prefix / "bin/pulp"), "doctor", "gpu", "--json"],
+            cwd=repository, environment=runtime_environment, timeout=300,
+            directory_claim=proof_claim,
+        )
+        if doctor.returncode != 0:
+            raise AcceptanceError(
+                f"Forge-cwd GPU doctor failed: {doctor.stderr[-2000:]}"
+            )
+        try:
+            doctor_payload = json.loads(doctor.stdout)
+        except json.JSONDecodeError as error:
+            raise AcceptanceError(
+                "Forge-cwd GPU doctor returned malformed JSON"
+            ) from error
+        doctor_path.write_text(
+            json.dumps(doctor_payload, indent=2, sort_keys=True) + "\n"
+        )
+        source_claim.assert_full()
+        forge_build_claim.assert_current()
+        bundle_claim.assert_full()
+        if forge_source_identity(repository, pulp_revision) != identity:
+            raise AcceptanceError(
+                "Forge source identity changed during downstream proof"
+            )
+        return {
+            **identity,
+            "source_tree_claim": source_evidence,
+            "build_directory_claim_method": (
+                "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+            ),
+            "build_directory_claim": forge_build_claim.identity,
+            "cmake_cache_sha256": cache_digest,
+            "build_target": "ForgeModular_Standalone",
+            "bundle_build_info": stamp,
+            "bundle_build_info_sha256": provenance.sha256_descriptor(
+                stamp_descriptor
+            ),
+            "bundle_binary_sha256": binary_sha256,
+            "bundle_tree_claim": bundle_evidence,
+            "codesign_verify": "pass",
+            "screenshot_metrics": metrics,
+        }
+    finally:
+        if bundle_claim is not None:
+            bundle_claim.close()
+        if forge_build_claim is not None:
+            forge_build_claim.close()
+        if source_claim is not None:
+            source_claim.close()
 
 
 def source_blobs(repository: Path, revision: str) -> dict[str, str]:
@@ -880,32 +1219,42 @@ def retain_staged_evidence(staging: Path) -> RetainedDirectoryClaim:
 
 
 def publish_receipt_directory_no_replace(
-    staging: Path, output: Path, staging_claim: RetainedDirectoryClaim
+    staging: Path, output: Path, staging_claim: RetainedDirectoryClaim,
+    output_parent_claim: RetainedDirectoryClaim | None = None,
 ) -> None:
     if output.name in {"", ".", ".."}:
         raise AcceptanceError("output-dir must have a safe final path component")
     if staging_claim.path != staging or staging_claim.label != "staging":
         raise AcceptanceError("publication requires the exact retained staging claim")
     staging_claim.assert_current()
-    parent_descriptor: int | None = None
+    owned_parent_claim: RetainedDirectoryClaim | None = None
+    if output_parent_claim is None:
+        owned_parent_claim = retain_existing_directory(
+            output.parent, "output-parent"
+        )
+        output_parent_claim = owned_parent_claim
+    if output_parent_claim.path != output.parent:
+        raise AcceptanceError(
+            "publication requires the exact retained output parent"
+        )
+    output_parent_claim.assert_current()
+    parent_descriptor = output_parent_claim.descriptor
     staging_descriptor: int | None = None
     output_descriptor: int | None = None
     try:
-        parent_descriptor = os.open(output.parent, directory_open_flags())
         staging_descriptor = os.open(staging, directory_open_flags())
     except OSError as error:
         if staging_descriptor is not None:
             os.close(staging_descriptor)
-        if parent_descriptor is not None:
-            os.close(parent_descriptor)
+        if owned_parent_claim is not None:
+            owned_parent_claim.close()
         raise AcceptanceError("publication directories must be real, reachable directories") from error
     try:
-        parent_claim = directory_identity(
-            os.fstat(parent_descriptor), "output-parent"
-        )
+        parent_claim = output_parent_claim.identity
         assert_directory_claim(
             output.parent, parent_claim, "output-parent", parent_descriptor
         )
+        output_parent_claim.assert_current()
         try:
             names = sorted(os.listdir(staging_descriptor))
         except OSError as error:
@@ -955,6 +1304,7 @@ def publish_receipt_directory_no_replace(
             assert_directory_claim(
                 output.parent, parent_claim, "output-parent", parent_descriptor
             )
+            output_parent_claim.assert_current()
             try:
                 path_identity = directory_identity(
                     os.stat(
@@ -1103,7 +1453,8 @@ def publish_receipt_directory_no_replace(
         if output_descriptor is not None:
             os.close(output_descriptor)
         os.close(staging_descriptor)
-        os.close(parent_descriptor)
+        if owned_parent_claim is not None:
+            owned_parent_claim.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1138,6 +1489,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         ensure_outside_checkout(output, (repository, planning, forge_repository))
         validate_generated_paths(build_dir, prefix, forge_build, output)
+        output_parent_claim = retain_existing_directory(
+            output.parent, "output-parent"
+        )
         revision = provenance._git_text(repository, "rev-parse", "HEAD")
         source_identity = provenance.clean_source_identity(repository, revision)
         accepted_plan = provenance.plan_identity(
@@ -1155,8 +1509,12 @@ def main(argv: list[str] | None = None) -> int:
             build_environment.pop(inherited_override, None)
         runtime_environment = build_environment.copy()
         runtime_environment["PATH"] = SYSTEM_PATH
-        install_provenance, binaries, install_claim = refresh_install(
-            repository, build_dir, prefix, build_environment
+        (
+            install_provenance, binaries, install_claim,
+            source_tree_claim, build_input_claim,
+        ) = refresh_install(repository, build_dir, prefix, build_environment)
+        execution_claim = provenance.CombinedClaims(
+            install_claim, source_tree_claim, build_input_claim
         )
         cli = prefix / "bin/pulp"
         mcp = prefix / "bin/pulp-mcp"
@@ -1179,7 +1537,7 @@ def main(argv: list[str] | None = None) -> int:
                         cli, recipe, execution / f"{group}-cli-{suffix}-artifacts",
                         negative=negative, cwd=execution,
                         environment=runtime_environment,
-                        directory_claim=install_claim,
+                        directory_claim=execution_claim,
                     )
                     cli_results[group][suffix] = result
                     (staging / f"{group}-{suffix}.json").write_text(
@@ -1191,7 +1549,7 @@ def main(argv: list[str] | None = None) -> int:
                 group: {} for group in RECIPES
             }
             session = McpSession(
-                mcp, execution, runtime_environment, install_claim
+                mcp, execution, runtime_environment, execution_claim
             )
             try:
                 session.initialize()
@@ -1215,7 +1573,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             forge = prove_forge(
                 forge_repository, forge_build, prefix, revision, staging,
-                build_environment, runtime_environment, install_claim,
+                build_environment, runtime_environment, execution_claim,
             )
             raw_names = {
                 *(f"{group}-{suffix}.json" for group in RECIPES
@@ -1274,13 +1632,19 @@ def main(argv: list[str] | None = None) -> int:
                         "self-verification failed: " + "; ".join(problems)
                     )
                 publish_receipt_directory_no_replace(
-                    staging, output, staging_claim
+                    staging, output, staging_claim, output_parent_claim
                 )
                 staging_claim.assert_current()
             finally:
                 staging_claim.close()
             install_claim.assert_current()
+            source_tree_claim.assert_full()
+            build_input_claim.assert_full()
             install_claim.close()
+            build_input_claim.close()
+            source_tree_claim.close()
+            output_parent_claim.assert_current()
+            output_parent_claim.close()
         print(json.dumps({"output": str(output), "integration_head": revision,
                           "terminal_status": "pass"}, sort_keys=True))
         return 0

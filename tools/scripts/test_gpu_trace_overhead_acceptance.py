@@ -405,6 +405,79 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     MODULE.atomic_write_json(output, {"status": "pass"})
             self.assertFalse(output.exists())
 
+    def test_output_parent_claim_spans_recording_before_publication(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "parent"
+            parent.mkdir()
+            output = parent / "receipt.json"
+            moved = root / "moved-parent"
+            claim = MODULE.retain_existing_directory(parent, "output-parent")
+            try:
+                parent.rename(moved)
+                moved.rename(parent)
+                with self.assertRaisesRegex(ValueError, "mutation event"):
+                    MODULE.atomic_write_json(
+                        output, {"status": "pass"}, claim
+                    )
+            finally:
+                claim.close()
+            self.assertFalse(output.exists())
+
+    def test_fresh_directory_claim_binds_created_inode_not_swapped_staging(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "prefix"
+            real_rename = MODULE._renameat_no_replace
+
+            def swap_then_publish(source_parent, source_name, destination_parent,
+                                  destination_name):
+                os.rename(
+                    source_name, source_name + ".original",
+                    src_dir_fd=source_parent, dst_dir_fd=source_parent,
+                )
+                os.mkdir(source_name, dir_fd=source_parent)
+                return real_rename(
+                    source_parent, source_name,
+                    destination_parent, destination_name,
+                )
+
+            with mock.patch.object(
+                MODULE, "_renameat_no_replace", side_effect=swap_then_publish
+            ):
+                with self.assertRaisesRegex(ValueError, "created inode"):
+                    MODULE.claim_fresh_directory(path, "install-prefix")
+            self.assertTrue(path.is_dir())
+
+    def test_retained_git_tree_rejects_source_write_and_restore(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary) / "repository"
+            repository.mkdir()
+            for command in (
+                ["git", "init", "-q"],
+                ["git", "config", "user.email", "test@example.com"],
+                ["git", "config", "user.name", "Test"],
+            ):
+                MODULE.subprocess.run(command, cwd=repository, check=True)
+            source = repository / "source.cpp"
+            source.write_text("exact\n", encoding="utf-8")
+            MODULE.subprocess.run(["git", "add", "source.cpp"], cwd=repository, check=True)
+            MODULE.subprocess.run(
+                ["git", "commit", "-qm", "source"], cwd=repository, check=True
+            )
+            revision = MODULE._git_text(repository, "rev-parse", "HEAD")
+            claim, evidence = MODULE.retain_git_source_tree(
+                repository, revision, "test source"
+            )
+            try:
+                self.assertEqual(evidence["revision"], revision)
+                source.write_text("substituted\n", encoding="utf-8")
+                source.write_text("exact\n", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "mutation event"):
+                    claim.assert_current()
+            finally:
+                claim.close()
+
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
