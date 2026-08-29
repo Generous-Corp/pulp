@@ -201,8 +201,12 @@ def make_fixture(root: Path) -> dict[str, Any]:
         write_json(root, f"{role}-health.json", result)
         (root / f"{role}-product.bin").write_bytes(f"product:{role}".encode())
         (root / f"{role}-host.bin").write_bytes(f"host:{role}".encode())
-        (root / f"{role}-adapter.bin").write_bytes(f"adapter:{role}".encode())
-        (root / f"{role}-producer.bin").write_bytes(f"producer:{role}".encode())
+        (root / f"{role}-adapter.bin").write_bytes(
+            (ROOT / "tools/scripts/gpu_first_visible_a3_external_adapter.py").read_bytes()
+        )
+        (root / f"{role}-producer.bin").write_bytes(
+            (ROOT / a3.ROLE_PRODUCER_PATHS[role]).read_bytes()
+        )
         trace_bytes = (
             (ROOT / TRACE_SOURCE_PATH).read_bytes()
             if role == "forge" else f"trace:{role}".encode()
@@ -987,6 +991,24 @@ def main() -> int:
         expect_failure(mutated, root, "missing a required artifact")
 
         mutated = copy.deepcopy(receipt)
+        adapter_ref = mutated["campaigns"][0]["adapter"]
+        adapter_path = root / adapter_ref["path"]
+        original_adapter = adapter_path.read_bytes()
+        adapter_path.write_bytes(original_adapter + b"\n# substituted adapter\n")
+        rehash(mutated, root, adapter_ref)
+        expect_failure(mutated, root, "source-bound checked-in adapter")
+        adapter_path.write_bytes(original_adapter)
+
+        mutated = copy.deepcopy(receipt)
+        producer_ref = mutated["campaigns"][0]["measurement_producer"]
+        producer_path = root / producer_ref["path"]
+        original_producer = producer_path.read_bytes()
+        producer_path.write_bytes(original_producer + b"\n# substituted producer\n")
+        rehash(mutated, root, producer_ref)
+        expect_failure(mutated, root, "source-bound role entry point")
+        producer_path.write_bytes(original_producer)
+
+        mutated = copy.deepcopy(receipt)
         forge = next(campaign for campaign in mutated["campaigns"] if campaign["role"] == "forge")
         forge["identity"]["plugin_format"] = "auv2"
         expect_failure(mutated, root, "standalone shell")
@@ -1098,7 +1120,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=45 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=47 "
             "checked_in_nonterminal=verified"
         )
     return 0

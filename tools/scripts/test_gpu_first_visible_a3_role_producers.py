@@ -19,6 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import test_gpu_first_visible_a3_acceptance as fixture  # noqa: E402
+import gpu_first_visible_a3_role_producer as producer_support  # noqa: E402
 
 PRODUCERS = {
     "standalone": SCRIPT_DIR / "gpu_first_visible_a3_standalone_producer.py",
@@ -60,7 +61,7 @@ root.mkdir(parents=True, exist_ok=True)
 role = request["role"]
 
 artifacts = {name: None for name in (
-    "health_result", "raw_cold", "raw_warm", "trace", "trace_analysis"
+    "health_result", "raw_cold", "raw_warm", "trace"
 )}
 outcome = "inconclusive" if mutation == "driver-nonpass" else "pass"
 reason = "external UI driver is unavailable" if outcome != "pass" else None
@@ -72,7 +73,6 @@ if outcome == "pass":
         "raw_cold": source / f"{role}-cold.json",
         "raw_warm": source / f"{role}-warm.json",
         "trace": source / f"{role}-trace.pftrace",
-        "trace_analysis": source / f"{role}-trace-analysis.json",
     }
     for name, source_path in sources.items():
         destination = root / f"{name}{source_path.suffix}"
@@ -114,13 +114,15 @@ if outcome == "pass":
                 "present_ms", 1,
             ),
         )
-    elif mutation == "trace-id":
-        mutate_json(
-            "trace_analysis",
-            lambda payload: payload.__setitem__("gpu_evidence_id", "f" * 32),
-        )
+    elif mutation == "fresh-process-reuse":
+        def reuse_prior_process(payload):
+            payload["samples"][0]["cache_provenance"] = "explicit-cache-reset"
+            payload["samples"][1]["process_id"] = payload["samples"][0]["process_id"]
+        mutate_json("raw_cold", reuse_prior_process)
     elif mutation == "product-mutation":
         Path(request["product"]["runtime_path"]).write_bytes(b"mutated")
+    elif mutation == "snapshot-mutation":
+        (root.parent / "identity" / "product.bin").write_bytes(b"mutated snapshot")
     elif mutation == "bundle-mutation":
         resource = (
             Path(os.environ["PULP_A3_REAPER_PLUGIN_BUNDLE"])
@@ -135,6 +137,10 @@ if outcome == "pass":
         )
         resource.parent.mkdir(parents=True, exist_ok=True)
         resource.write_text("changed during lifecycle\n")
+    elif mutation == "pulp-source-mutation":
+        (Path(os.environ["PULP_A3_PULP_ROOT"]) / "untracked-runtime-input.txt").write_text(
+            "must not be ignored\n"
+        )
 
 cold = json.loads((root / artifacts["raw_cold"]["path"]).read_text())["samples"] if outcome == "pass" else []
 warm = json.loads((root / artifacts["raw_warm"]["path"]).read_text())["samples"] if outcome == "pass" else []
@@ -196,6 +202,72 @@ def write_smoke(path: Path) -> None:
     )
     path.chmod(0o755)
     (path.parent / "insert_and_float.lua").write_text("-- fixture\n", encoding="utf-8")
+
+
+def write_analyzer(path: Path) -> None:
+    path.write_text(
+        r'''#!/usr/bin/env python3
+import argparse, json, os
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("command")
+parser.add_argument("question")
+parser.add_argument("--trace", required=True, type=Path)
+parser.add_argument("--json", action="store_true")
+args = parser.parse_args()
+trace = args.trace.read_bytes()
+if trace == b"not-a-perfetto-trace":
+    payload = {
+        "schema": "pulp.trace-gpu-analysis.v1",
+        "question": "gpu-startup",
+        "verdict": "unavailable",
+        "capture_complete": False,
+        "evidence_ids": [],
+    }
+    exit_code = 2
+else:
+    evidence_id = os.environ["PULP_A3_TEST_GPU_EVIDENCE_ID"]
+    if os.environ.get("PULP_A3_TEST_ROLE_MUTATION") == "trace-id":
+        evidence_id = "f" * 32
+    payload = {
+        "schema": "pulp.trace-gpu-analysis.v1",
+        "question": "gpu-startup",
+        "verdict": "pass",
+        "capture_complete": True,
+        "evidence_ids": [evidence_id],
+        "category_scope": {"evidence_id": evidence_id},
+    }
+    exit_code = 0
+print(json.dumps(payload, sort_keys=True))
+raise SystemExit(exit_code)
+''',
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def make_pulp_root(path: Path, smoke: Path) -> str:
+    path.mkdir()
+    sources = {
+        "tools/scripts/gpu_first_visible_a3_role_producer.py": (
+            SCRIPT_DIR / "gpu_first_visible_a3_role_producer.py"
+        ),
+        "tools/testing/daw-smoke/reaper_smoke.py": smoke,
+        "tools/testing/daw-smoke/insert_and_float.lua": (
+            smoke.parent / "insert_and_float.lua"
+        ),
+    }
+    for relative, source in sources.items():
+        destination = path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "a3@example.invalid"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "A3 Test"], cwd=path, check=True)
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "fixture"], cwd=path, check=True)
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=path, text=True).strip()
 
 
 def make_git_root(path: Path) -> str:
@@ -268,6 +340,36 @@ producer.bounded_run(
     assert not any(process_is_live(pid) for pid in child_pids), child_pids
 
 
+def assert_success_cleanup(root: Path) -> None:
+    marker = root / "success-child-pids.json"
+    child = root / "success-child.py"
+    child.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, pathlib, subprocess, sys\n"
+        "grandchild = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(60)'],\n"
+        "    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,\n"
+        "    stderr=subprocess.DEVNULL)\n"
+        "pathlib.Path(os.environ['PULP_A3_SUCCESS_MARKER']).write_text(\n"
+        "    json.dumps([os.getpid(), grandchild.pid]) + '\\n')\n",
+        encoding="utf-8",
+    )
+    child.chmod(0o755)
+    environment = dict(os.environ)
+    environment["PULP_A3_SUCCESS_MARKER"] = str(marker)
+    exit_code = producer_support.bounded_run(
+        [sys.executable, str(child)], cwd=root, environment=environment,
+        timeout_seconds=5, stdout_path=root / "success.stdout.log",
+        stderr_path=root / "success.stderr.log",
+    )
+    assert exit_code == 0
+    child_pids = json.loads(marker.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 3
+    while any(process_is_live(pid) for pid in child_pids) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not any(process_is_live(pid) for pid in child_pids), child_pids
+
+
 def run_role(
     root: Path, evidence: Path, role: str, *, mutation: str = "",
     smoke: str = "pass", omit_driver: bool = False,
@@ -278,6 +380,10 @@ def run_role(
     source_receipt = json.loads((evidence / "fixture-receipt.json").read_text())
     campaign = next(item for item in source_receipt["campaigns"] if item["role"] == role)
     identity = dict(campaign["identity"])
+    pulp_root = root / "pulp-root"
+    identity["pulp_revision"] = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=pulp_root, text=True,
+    ).strip()
     forge_root = root / "forge-root"
     if role == "forge":
         identity["forge_revision"] = subprocess.check_output(
@@ -335,18 +441,52 @@ def run_role(
         extra_executable.write_bytes(b"unrelated executable")
         extra_executable.chmod(0o755)
     driver = root / "role-driver.py"
-    smoke_bin = root / "reaper-smoke"
+    analyzer = root / "trace-analyzer"
+    health = json.loads((evidence / f"{role}-health.json").read_text(encoding="utf-8"))
+    gpu_evidence_id = health["startup"]["correlation"]["gpu_evidence_id"]
+    provenance = root / f"{role}-{case_name}-build-provenance.receipt"
+    provenance.write_text(
+        json.dumps({"identity": identity, "case": case_name}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    bundle_digest = (
+        producer_support.directory_digest(bundle, f"{role} fixture bundle")
+        if role in {"daw", "forge"} else None
+    )
+    attestation = {
+        "schema": "pulp.gpu-first-visible-product-build-attestation.v1",
+        "version": 1,
+        "product_identity": {
+            key: identity[key] for key in (
+                "pulp_revision", "forge_revision", "build_id", "product_id",
+                "product_name", "plugin_format",
+            )
+        },
+        "product_sha256": digest(product),
+        "bundle_tree_sha256": bundle_digest,
+        "trace_analyzer_sha256": digest(analyzer),
+        "provenance_kind": "local-clean-exact-head-build-receipt",
+        "provenance_receipt_sha256": digest(provenance),
+    }
+    if mutation == "build-attestation":
+        attestation["product_sha256"] = "0" * 64
+    attestation_path = root / f"{role}-{case_name}-build-attestation.json"
+    write_json(attestation_path, attestation)
     environment = dict(os.environ)
     environment.update({
         "PULP_A3_ROLE_PRODUCER_SUPPORT": str(
             SCRIPT_DIR / "gpu_first_visible_a3_role_producer.py"
         ),
-        "PULP_A3_PULP_ROOT": str(ROOT),
+        "PULP_A3_PULP_ROOT": str(pulp_root),
+        "PULP_A3_TRACE_ANALYZER": str(analyzer),
         "PULP_A3_TEST_ROLE_FIXTURE": str(evidence),
         "PULP_A3_TEST_ROLE_MUTATION": mutation,
+        "PULP_A3_TEST_GPU_EVIDENCE_ID": gpu_evidence_id,
         "PULP_A3_TEST_REAPER_SMOKE": smoke,
         f"{PREFIX[role]}_PRODUCT_BIN": str(product),
         f"{PREFIX[role]}_HOST_BIN": str(host),
+        f"{PREFIX[role]}_BUILD_ATTESTATION": str(attestation_path),
+        f"{PREFIX[role]}_BUILD_PROVENANCE": str(provenance),
     })
     if not omit_driver:
         environment[f"{PREFIX[role]}_DRIVER"] = str(driver)
@@ -354,19 +494,22 @@ def run_role(
         smoke_lua = (
             root / "unrelated.lua"
             if mutation == "reaper-lua-mismatch"
-            else root / "insert_and_float.lua"
+            else pulp_root / "tools/testing/daw-smoke/insert_and_float.lua"
         )
         if mutation == "reaper-lua-mismatch":
             smoke_lua.write_text("-- unrelated fixture\n", encoding="utf-8")
         environment.update({
             "PULP_A3_REAPER_PLUGIN_BUNDLE": str(bundle),
-            "PULP_A3_REAPER_SMOKE": str(smoke_bin),
+            "PULP_A3_REAPER_SMOKE": str(
+                pulp_root / "tools/testing/daw-smoke/reaper_smoke.py"
+            ),
             "PULP_A3_REAPER_SMOKE_LUA": str(smoke_lua),
         })
     if role == "forge":
         environment["PULP_A3_FORGE_ROOT"] = str(forge_root)
         environment["PULP_A3_FORGE_APP_BUNDLE"] = str(bundle)
     untracked_forge_source = forge_root / "untracked-runtime-input.txt"
+    untracked_pulp_source = pulp_root / "untracked-runtime-input.txt"
     if role == "forge" and mutation == "forge-untracked-source":
         untracked_forge_source.write_text("must not be ignored\n", encoding="utf-8")
     completed = subprocess.run(
@@ -375,6 +518,7 @@ def run_role(
         env=environment, text=True, capture_output=True, check=False,
     )
     untracked_forge_source.unlink(missing_ok=True)
+    untracked_pulp_source.unlink(missing_ok=True)
     receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {}
     return completed, receipt
 
@@ -388,8 +532,11 @@ def main() -> int:
         write_json(evidence / "fixture-receipt.json", source_receipt)
         write_driver(root / "role-driver.py")
         write_smoke(root / "reaper-smoke")
+        write_analyzer(root / "trace-analyzer")
+        make_pulp_root(root / "pulp-root", root / "reaper-smoke")
         make_git_root(root / "forge-root")
         assert_signal_cleanup(root)
+        assert_success_cleanup(root)
 
         for role in PRODUCERS:
             completed, receipt = run_role(root, evidence, role)
@@ -403,7 +550,11 @@ def main() -> int:
             ("standalone", "nine-cold", "pass", "20 lifecycle"),
             ("standalone", "visible-no-present", "pass", "native presentation"),
             ("headless-constrained", "headless-present", "pass", "cannot claim"),
-            ("standalone", "trace-id", "pass", "same product instance"),
+            ("standalone", "trace-id", "pass", "pinned trace replay"),
+            (
+                "standalone", "fresh-process-reuse", "pass",
+                "reuses an earlier process identity",
+            ),
             ("standalone", "lifecycle", "pass", "reopen predecessor"),
             ("standalone", "unknown-predecessor", "pass", "observed lifecycle"),
             (
@@ -412,6 +563,15 @@ def main() -> int:
             ),
             ("standalone", "lifecycle-raw-mismatch", "pass", "raw observation"),
             ("standalone", "product-mutation", "pass", "changed during"),
+            ("standalone", "snapshot-mutation", "pass", "changed during"),
+            (
+                "standalone", "build-attestation", "pass",
+                "does not bind the requested source/build identity",
+            ),
+            (
+                "standalone", "pulp-source-mutation", "pass",
+                "tracked or untracked changes",
+            ),
             ("standalone", "driver-exit", "pass", "exit code disagrees"),
             ("standalone", "single-executable-host", "pass", "same executable"),
             ("daw", "daw-product-outside-bundle", "pass", "sole executable"),
@@ -456,7 +616,7 @@ def main() -> int:
 
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=4 planted_negatives=21 cleanup_controls=1"
+            "positive=4 planted_negatives=25 cleanup_controls=2"
         )
     return 0
 

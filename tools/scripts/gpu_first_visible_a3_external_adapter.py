@@ -52,6 +52,12 @@ PRODUCER_KEYS = {
     "schema", "version", "attempt_nonce", "role", "outcome", "reason",
     "dependencies", "identity", "measurement_endpoint", "artifacts",
 }
+ROLE_PRODUCER_NAMES = {
+    "standalone": "gpu_first_visible_a3_standalone_producer.py",
+    "headless-constrained": "gpu_first_visible_a3_headless_producer.py",
+    "daw": "gpu_first_visible_a3_reaper_producer.py",
+    "forge": "gpu_first_visible_a3_forge_producer.py",
+}
 
 
 class AdapterError(ValueError):
@@ -193,6 +199,18 @@ def configured_executable(name: str, dependency: str) -> Path:
         )
     if not os.access(path, os.X_OK):
         raise AdapterBlocked(f"{name} is not executable", dependency)
+    return path.resolve()
+
+
+def configured_directory(name: str, dependency: str) -> Path:
+    value = os.environ.get(name)
+    if not value:
+        raise AdapterBlocked(f"{name} is not configured", dependency)
+    path = Path(value)
+    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+        raise AdapterBlocked(
+            f"{name} must name an absolute, non-symlink directory", dependency,
+        )
     return path.resolve()
 
 
@@ -422,15 +440,30 @@ def run(request_path: Path, receipt_path: Path) -> int:
     producer_receipt_path = artifact_directory / "producer-receipt.json"
     try:
         producer_environment = dict(os.environ)
-        checked_in_support = producer_source.parent / "gpu_first_visible_a3_role_producer.py"
-        if (
-            "PULP_A3_ROLE_PRODUCER_SUPPORT" not in producer_environment
-            and checked_in_support.is_file()
-            and not checked_in_support.is_symlink()
-        ):
-            producer_environment["PULP_A3_ROLE_PRODUCER_SUPPORT"] = str(
-                checked_in_support.resolve()
+        producer_environment.pop("PULP_A3_ROLE_PRODUCER_SUPPORT", None)
+        support: Path | None = None
+        support_digest: str | None = None
+        if "PULP_A3_PULP_ROOT" in producer_environment:
+            pulp_root = configured_directory("PULP_A3_PULP_ROOT", "source:pulp-root")
+            scripts = pulp_root / "tools" / "scripts"
+            expected_producer = (scripts / ROLE_PRODUCER_NAMES[request["role"]]).resolve()
+            if producer_source != expected_producer:
+                raise AdapterError(
+                    "configured measurement producer is not the checked-in role entry point"
+                )
+            checked_in_support = scripts / "gpu_first_visible_a3_role_producer.py"
+            if (
+                checked_in_support.is_symlink()
+                or not checked_in_support.is_file()
+                or not os.access(checked_in_support, os.X_OK)
+            ):
+                raise AdapterError("checked-in role-producer support is not executable")
+            support, support_digest = pin_executable(
+                checked_in_support.resolve(),
+                artifact_directory / "tooling" / "adapter-role-producer-support.py",
+                "checked-in role-producer support",
             )
+            producer_environment["PULP_A3_ROLE_PRODUCER_SUPPORT"] = str(support)
         producer_exit = run_bounded(
             [str(producer), "--request", str(request_path.resolve()),
              "--receipt", str(producer_receipt_path.resolve())],
@@ -440,6 +473,10 @@ def run(request_path: Path, receipt_path: Path) -> int:
         )
         if regular_file_sha256(producer, "measurement producer snapshot") != producer_digest:
             raise AdapterError("measurement producer snapshot changed while it ran")
+        if support is not None and regular_file_sha256(
+            support, "role-producer support snapshot",
+        ) != support_digest:
+            raise AdapterError("role-producer support snapshot changed while it ran")
         if not producer_receipt_path.is_file() or producer_receipt_path.is_symlink():
             raise AdapterError(
                 f"measurement producer exited {producer_exit} without its receipt"

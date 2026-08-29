@@ -106,6 +106,12 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "tools/testing/daw-smoke/insert_and_float.lua",
     "tools/testing/daw-smoke/reaper_smoke.py",
 }
+ROLE_PRODUCER_PATHS = {
+    "standalone": "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "headless-constrained": "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "daw": "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "forge": "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+}
 AUDIO_PROVIDER_ENTRY_POINTS = [
     "pulp::inspect::ControlGpuHealthProvider::begin_editor_open",
     "pulp::inspect::ControlGpuHealthProvider::record_presented_frame",
@@ -208,6 +214,11 @@ def load_json(path: Path) -> Any:
 
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def git_blob_oid(data: bytes) -> str:
+    prefix = f"blob {len(data)}\0".encode("ascii")
+    return hashlib.sha1(prefix + data).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -752,11 +763,25 @@ def validate_campaigns(
         )
         resolve_artifact(campaign["product_artifact"], evidence_root, f"{label}.product_artifact")
         resolve_artifact(campaign["host_artifact"], evidence_root, f"{label}.host_artifact")
-        resolve_artifact(campaign["adapter"], evidence_root, f"{label}.adapter")
-        resolve_artifact(
+        adapter_snapshot = resolve_artifact(
+            campaign["adapter"], evidence_root, f"{label}.adapter",
+        )
+        producer_snapshot = resolve_artifact(
             campaign["measurement_producer"], evidence_root,
             f"{label}.measurement_producer",
         )
+        source_blobs = receipt["source_blobs"]
+        if git_blob_oid(adapter_snapshot.data) != source_blobs[
+            "tools/scripts/gpu_first_visible_a3_external_adapter.py"
+        ]:
+            raise AcceptanceError(
+                f"{label}.adapter does not match the source-bound checked-in adapter"
+            )
+        producer_path = ROLE_PRODUCER_PATHS[role]
+        if git_blob_oid(producer_snapshot.data) != source_blobs[producer_path]:
+            raise AcceptanceError(
+                f"{label}.measurement_producer does not match its source-bound role entry point"
+            )
         validate_campaign_trace(campaign, health, evidence_root, label)
         results[role] = (campaign, health)
     return results

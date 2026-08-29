@@ -31,6 +31,7 @@ REQUEST_SCHEMA = "pulp.gpu-first-visible-campaign-request.v1"
 PRODUCER_SCHEMA = "pulp.gpu-first-visible-campaign-producer.v1"
 DRIVER_REQUEST_SCHEMA = "pulp.gpu-first-visible-role-driver-request.v1"
 DRIVER_RECEIPT_SCHEMA = "pulp.gpu-first-visible-role-driver-receipt.v1"
+BUILD_ATTESTATION_SCHEMA = "pulp.gpu-first-visible-product-build-attestation.v1"
 OUTCOME_EXIT = {"pass": 0, "fail": 1, "inconclusive": 2, "skip": 3}
 ENDPOINT_BY_ROLE = {
     "standalone": "native-compositor-presentation",
@@ -65,7 +66,7 @@ CORE_ARTIFACT_KEYS = {
     "host_artifact", "trace", "trace_analysis",
 }
 DRIVER_ARTIFACT_KEYS = {
-    "health_result", "raw_cold", "raw_warm", "trace", "trace_analysis",
+    "health_result", "raw_cold", "raw_warm", "trace",
 }
 DRIVER_RECEIPT_KEYS = {
     "schema", "version", "attempt_nonce", "role", "outcome", "reason",
@@ -78,6 +79,19 @@ GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
 GIT_REVISION = re.compile(r"^[0-9a-f]{40}$")
 OUTPUT_CAP_BYTES = 1024 * 1024
 _active_child: subprocess.Popen[bytes] | None = None
+BUILD_IDENTITY_KEYS = {
+    "pulp_revision", "forge_revision", "build_id", "product_id",
+    "product_name", "plugin_format",
+}
+BUILD_ATTESTATION_KEYS = {
+    "schema", "version", "product_identity", "product_sha256",
+    "bundle_tree_sha256", "trace_analyzer_sha256", "provenance_kind",
+    "provenance_receipt_sha256",
+}
+BUILD_PROVENANCE_KINDS = {
+    "github-artifact-attestation", "shipyard-exact-head-build-receipt",
+    "local-clean-exact-head-build-receipt",
+}
 
 
 class ProducerError(ValueError):
@@ -265,6 +279,30 @@ def git_output(root: Path, *arguments: str) -> str:
     return completed.stdout.strip()
 
 
+def git_file_bytes(root: Path, revision: str, relative: str, label: str) -> bytes:
+    completed = subprocess.run(
+        ["git", "-C", str(root), "show", f"{revision}:{relative}"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=20,
+    )
+    if completed.returncode != 0:
+        raise ProducerError(
+            f"cannot resolve source-bound {label}: {completed.stderr.decode(errors='replace').strip()}"
+        )
+    return completed.stdout
+
+
+def require_source_file(
+    runtime_path: Path, *, root: Path, revision: str, relative: str, label: str,
+) -> str:
+    expected = (root / relative).resolve()
+    if runtime_path != expected:
+        raise ProducerError(f"{label} is not the source-bound checked-in path")
+    expected_digest = sha256_bytes(git_file_bytes(root, revision, relative, label))
+    if file_sha256(runtime_path, label) != expected_digest:
+        raise ProducerError(f"{label} bytes differ from requested source revision")
+    return expected_digest
+
+
 def validate_source_root(root: Path, revision: str, label: str) -> dict[str, str]:
     head = git_output(root, "rev-parse", "HEAD")
     if head != revision:
@@ -276,17 +314,29 @@ def validate_source_root(root: Path, revision: str, label: str) -> dict[str, str
 
 
 def terminate_child(process: subprocess.Popen[bytes]) -> None:
+    process_group = process.pid
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(process_group, signal.SIGTERM)
     except ProcessLookupError:
         return
-    try:
-        process.wait(timeout=3)
-    except subprocess.TimeoutExpired:
+
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        process.poll()
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.02)
+    else:
+        try:
+            os.killpg(process_group, signal.SIGKILL)
         except ProcessLookupError:
             pass
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        process.kill()
         process.wait()
 
 
@@ -340,6 +390,10 @@ def bounded_run(
             timed_out = remaining <= 0
             terminate_child(process)
             break
+    # A successful driver may exit while host/helper descendants still own
+    # its isolated process group and output pipes. Reap that group before any
+    # evidence validation so background automation cannot mutate artifacts.
+    terminate_child(process)
     for thread in threads:
         thread.join(timeout=2)
     _active_child = None
@@ -440,10 +494,132 @@ def require_bundle_executable(bundle: Path, product_binary: Path) -> None:
         )
 
 
+def validate_build_attestation(
+    payload: dict[str, Any], *, request: dict[str, Any], product_digest: str,
+    bundle_digest: str | None, analyzer_digest: str, provenance_digest: str,
+) -> None:
+    exact_keys(payload, BUILD_ATTESTATION_KEYS, "product build attestation")
+    if (
+        payload["schema"] != BUILD_ATTESTATION_SCHEMA
+        or payload["version"] != 1
+        or payload["provenance_kind"] not in BUILD_PROVENANCE_KINDS
+    ):
+        raise ProducerError("product build attestation has invalid protocol identity")
+    product_identity = payload["product_identity"]
+    exact_keys(product_identity, BUILD_IDENTITY_KEYS, "build-attested product identity")
+    expected_identity = {
+        key: request["identity"][key] for key in BUILD_IDENTITY_KEYS
+    }
+    expected = {
+        "product_identity": expected_identity,
+        "product_sha256": product_digest,
+        "bundle_tree_sha256": bundle_digest,
+        "trace_analyzer_sha256": analyzer_digest,
+        "provenance_receipt_sha256": provenance_digest,
+    }
+    if any(payload[key] != value for key, value in expected.items()):
+        raise ProducerError(
+            "product build attestation does not bind the requested source/build identity"
+        )
+
+
+def analyzer_payload(path: Path, exit_code: int, label: str) -> dict[str, Any]:
+    payload = regular_json(path, label)
+    expected_exit = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
+    verdict = payload.get("verdict")
+    if (
+        payload.get("schema") != "pulp.trace-gpu-analysis.v1"
+        or payload.get("question") != "gpu-startup"
+        or verdict not in expected_exit
+        or exit_code != expected_exit[verdict]
+    ):
+        raise ProducerError(f"{label} has invalid protocol identity or exit status")
+    return payload
+
+
+def derive_trace_analysis(
+    *, analyzer: Path, request: dict[str, Any], trace_path: Path,
+    health_path: Path, health: dict[str, Any], artifact_directory: Path,
+) -> tuple[Path, list[Path]]:
+    invalid_trace = artifact_directory / "tooling" / "invalid-trace.pftrace"
+    invalid_trace.write_bytes(b"not-a-perfetto-trace")
+    invalid_stdout = artifact_directory / "logs" / "trace-analyzer-invalid.stdout.json"
+    invalid_stderr = artifact_directory / "logs" / "trace-analyzer-invalid.stderr.log"
+    invalid_exit = bounded_run(
+        [str(analyzer), "trace", "gpu-startup", "--trace", str(invalid_trace), "--json"],
+        cwd=artifact_directory, environment=dict(os.environ), timeout_seconds=60,
+        stdout_path=invalid_stdout, stderr_path=invalid_stderr,
+    )
+    invalid = analyzer_payload(invalid_stdout, invalid_exit, "invalid-trace analyzer control")
+    if (
+        invalid["verdict"] != "unavailable"
+        or invalid.get("capture_complete") is not False
+        or invalid.get("evidence_ids") not in ([], None)
+    ):
+        raise ProducerError("trace analyzer invalid-input control did not fail closed")
+
+    analyzer_stdout = artifact_directory / "logs" / "trace-analyzer.stdout.json"
+    analyzer_stderr = artifact_directory / "logs" / "trace-analyzer.stderr.log"
+    analyzer_exit = bounded_run(
+        [str(analyzer), "trace", "gpu-startup", "--trace", str(trace_path), "--json"],
+        cwd=artifact_directory, environment=dict(os.environ), timeout_seconds=60,
+        stdout_path=analyzer_stdout, stderr_path=analyzer_stderr,
+    )
+    derived = analyzer_payload(analyzer_stdout, analyzer_exit, "campaign trace replay")
+    startup = health["startup"]
+    correlation = startup["correlation"]
+    gpu_id = correlation["gpu_evidence_id"]
+    if (
+        derived["verdict"] == "unavailable"
+        or derived.get("capture_complete") is not True
+        or derived.get("evidence_ids") != [gpu_id]
+        or not isinstance(derived.get("category_scope"), dict)
+        or derived["category_scope"].get("evidence_id") != gpu_id
+    ):
+        raise ProducerError(
+            "pinned trace replay does not prove the campaign evidence cohort"
+        )
+    missing = startup["capture"]["missing_trace_categories"]
+    trace_digest = file_sha256(trace_path, "same-instance Perfetto trace")
+    analysis = {
+        "schema": "pulp.gpu-first-visible-campaign-trace.v1",
+        "version": 1,
+        "question": "gpu-startup",
+        "verdict": startup["verdict"],
+        "capture_complete": not missing,
+        "measurement_endpoint": request["measurement_endpoint"],
+        "capture_integrity": "lossless",
+        "instrumentation_coverage": "partial" if missing else "complete",
+        "missing_trace_categories": missing,
+        "campaign_id": request["identity"]["campaign_id"],
+        "instance_id": request["identity"]["instance_id"],
+        "build_id": request["identity"]["build_id"],
+        "gpu_evidence_id": gpu_id,
+        "trace_evidence_id": correlation["trace_evidence_id"],
+        "trace_sha256": trace_digest,
+        "health_result_sha256": file_sha256(health_path, "role health result"),
+        "evidence_ids": [gpu_id],
+    }
+    analysis_path = artifact_directory / "trace-analysis.json"
+    atomic_json(analysis_path, analysis)
+    return analysis_path, [
+        invalid_trace, invalid_stdout, invalid_stderr,
+        analyzer_stdout, analyzer_stderr,
+    ]
+
+
+def assert_immutable_files(
+    guards: list[tuple[Path, str, str]],
+) -> None:
+    for path, expected_digest, label in guards:
+        if file_sha256(path, label) != expected_digest:
+            raise ProducerError(f"{label} changed during the campaign")
+
+
 def run_reaper_preflight(
     *, request: dict[str, Any], product_bundle: Path, product_binary: Path,
-    host_binary: Path, artifact_directory: Path,
-) -> tuple[dict[str, Any], list[Path]]:
+    host_binary: Path, artifact_directory: Path, pulp_root: Path,
+) -> tuple[dict[str, Any], list[Path], list[tuple[Path, str, str]]]:
     smoke = configured_file(
         "PULP_A3_REAPER_SMOKE", "reaper:editor-open-smoke",
     )
@@ -455,6 +631,17 @@ def run_reaper_preflight(
         raise ProducerError(
             "configured REAPER Lua is not the helper used by the smoke harness"
         )
+    revision = request["identity"]["pulp_revision"]
+    smoke_source_digest = require_source_file(
+        smoke, root=pulp_root, revision=revision,
+        relative="tools/testing/daw-smoke/reaper_smoke.py",
+        label="REAPER smoke harness",
+    )
+    lua_source_digest = require_source_file(
+        smoke_lua, root=pulp_root, revision=revision,
+        relative="tools/testing/daw-smoke/insert_and_float.lua",
+        label="REAPER editor-open Lua",
+    )
     smoke_snapshot, smoke_digest = snapshot_file(
         smoke, artifact_directory / "tooling" / f"reaper-smoke{smoke.suffix}",
         "REAPER smoke harness",
@@ -501,7 +688,12 @@ def run_reaper_preflight(
         "smoke_sha256": smoke_digest,
         "smoke_lua_sha256": lua_digest,
         "exit_code": exit_code,
-    }, [smoke_snapshot, lua_snapshot, stdout_path, stderr_path])
+    }, [smoke_snapshot, lua_snapshot, stdout_path, stderr_path], [
+        (smoke, smoke_source_digest, "source-bound REAPER smoke harness"),
+        (smoke_lua, lua_source_digest, "source-bound REAPER editor-open Lua"),
+        (smoke_snapshot, smoke_digest, "REAPER smoke snapshot"),
+        (lua_snapshot, lua_digest, "REAPER editor-open Lua snapshot"),
+    ])
 
 
 def validate_artifact_ref(
@@ -546,7 +738,7 @@ def validate_raw(
     ):
         raise ProducerError(f"raw {cache_state} does not bind exactly 10 requested trials")
     lifecycles: set[str] = set()
-    fresh_processes: set[str] = set()
+    observed_processes: set[str] = set()
     for index, row in enumerate(payload["samples"]):
         exact_keys(row, {
             "sequence", "duration_ms", "hitch_ms", "lifecycle_id", "process_id",
@@ -569,9 +761,11 @@ def validate_raw(
             raise ProducerError(f"raw {cache_state} reuses a lifecycle identity")
         lifecycles.add(row["lifecycle_id"])
         if row["cache_provenance"] == "fresh-process":
-            if row["process_id"] in fresh_processes:
-                raise ProducerError("fresh-process cold trials reuse a process identity")
-            fresh_processes.add(row["process_id"])
+            if row["process_id"] in observed_processes:
+                raise ProducerError(
+                    "fresh-process cold trial reuses an earlier process identity"
+                )
+        observed_processes.add(row["process_id"])
     if len({row["sequence"] for row in payload["samples"]}) != 10:
         raise ProducerError(f"raw {cache_state} sample sequences are not unique")
     return payload["samples"]
@@ -579,9 +773,9 @@ def validate_raw(
 
 def validate_health_and_trace(
     *, request: dict[str, Any], health_path: Path, cold_path: Path,
-    warm_path: Path, trace_path: Path, analysis_path: Path,
+    warm_path: Path, trace_path: Path,
     lifecycle_provenance: list[dict[str, Any]],
-) -> None:
+) -> dict[str, Any]:
     cold = validate_raw(regular_json(cold_path, "raw cold"), request=request, cache_state="cold")
     warm = validate_raw(regular_json(warm_path, "raw warm"), request=request, cache_state="warm")
     if {row["lifecycle_id"] for row in cold} & {row["lifecycle_id"] for row in warm}:
@@ -646,33 +840,9 @@ def validate_health_and_trace(
         raise ProducerError("role health result lacks a GPU evidence ID")
     if not isinstance(trace_id, str) or not trace_id or trace_id == gpu_id:
         raise ProducerError("role health result lacks a distinct trace evidence ID")
-    trace_digest = file_sha256(trace_path, "same-instance Perfetto trace")
     if not regular_file_bytes(trace_path, "same-instance Perfetto trace"):
         raise ProducerError("same-instance Perfetto trace is empty")
-    analysis = regular_json(analysis_path, "campaign trace analysis")
-    required = {
-        "schema": "pulp.gpu-first-visible-campaign-trace.v1",
-        "version": 1,
-        "question": "gpu-startup",
-        "measurement_endpoint": request["measurement_endpoint"],
-        "capture_integrity": "lossless",
-        "campaign_id": request["identity"]["campaign_id"],
-        "instance_id": request["identity"]["instance_id"],
-        "build_id": request["identity"]["build_id"],
-        "gpu_evidence_id": gpu_id,
-        "trace_evidence_id": trace_id,
-        "trace_sha256": trace_digest,
-        "health_result_sha256": file_sha256(health_path, "role health result"),
-        "evidence_ids": [gpu_id],
-    }
-    if any(analysis.get(key) != value for key, value in required.items()):
-        raise ProducerError("campaign trace analysis does not bind the same product instance")
-    if request["role"] == "headless-constrained":
-        missing = analysis.get("missing_trace_categories")
-        if not isinstance(missing, list) or "native_present" not in missing:
-            raise ProducerError("headless analysis must explicitly exclude native presentation")
-    elif analysis.get("capture_complete") is not True:
-        raise ProducerError("visible role trace analysis is not capture-complete")
+    return health
 
 
 def deterministic_tar(path: Path, members: list[tuple[str, Path]]) -> None:
@@ -802,6 +972,9 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         pulp_source = validate_source_root(
             pulp_root, request["identity"]["pulp_revision"], "Pulp",
         )
+        source_guards = [(
+            pulp_root, request["identity"]["pulp_revision"], "Pulp",
+        )]
         product_binary = configured_file(
             f"{prefix}_PRODUCT_BIN", f"product:{role}",
         )
@@ -814,6 +987,9 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             )
         driver_source = configured_file(
             f"{prefix}_DRIVER", f"role-driver:{role}",
+        )
+        analyzer_source = configured_file(
+            "PULP_A3_TRACE_ANALYZER", "trace-analyzer:gpu-startup",
         )
         product_snapshot, product_digest = snapshot_file(
             product_binary, artifact_directory / "identity" / "product.bin",
@@ -828,8 +1004,31 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             artifact_directory / "tooling" / f"lifecycle-driver{driver_source.suffix}",
             f"{role} lifecycle driver",
         )
+        analyzer_snapshot, analyzer_digest = snapshot_file(
+            analyzer_source,
+            artifact_directory / "tooling" / f"trace-analyzer{analyzer_source.suffix}",
+            "gpu-startup trace analyzer",
+        )
         support_snapshot = Path(__file__).resolve()
         support_digest = file_sha256(support_snapshot, "pinned role-producer support")
+        support_source_digest = sha256_bytes(git_file_bytes(
+            pulp_root, request["identity"]["pulp_revision"],
+            "tools/scripts/gpu_first_visible_a3_role_producer.py",
+            "role-producer support",
+        ))
+        if support_digest != support_source_digest:
+            raise ProducerError(
+                "pinned role-producer support differs from requested Pulp source"
+            )
+        immutable_files: list[tuple[Path, str, str]] = [
+            (product_binary, product_digest, "configured product binary"),
+            (host_binary, host_digest, "configured host binary"),
+            (product_snapshot, product_digest, "product snapshot"),
+            (host_snapshot, host_digest, "host snapshot"),
+            (driver_snapshot, driver_digest, "lifecycle-driver snapshot"),
+            (analyzer_snapshot, analyzer_digest, "trace-analyzer snapshot"),
+            (support_snapshot, support_digest, "role-producer support snapshot"),
+        ]
         preflight: dict[str, Any] = {
             "kind": role,
             "pulp_source": pulp_source,
@@ -838,10 +1037,12 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             "host_runtime_path": str(host_binary),
             "host_sha256": host_digest,
             "driver_sha256": driver_digest,
+            "trace_analyzer_sha256": analyzer_digest,
             "producer_support_sha256": support_digest,
         }
         extra_members: list[Path] = []
         directory_guards: list[tuple[Path, str, str]] = []
+        bundle_tree_digest: str | None = None
         role_context: dict[str, Any] = {"preflight": role}
         if role == "daw":
             product_bundle = configured_directory(
@@ -855,27 +1056,35 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                     "DAW plugin bundle suffix differs from the requested format"
                 )
             require_bundle_executable(product_bundle, product_binary)
-            bundle_snapshot, bundle_digest = snapshot_directory(
+            bundle_snapshot, bundle_tree_digest = snapshot_directory(
                 product_bundle,
                 artifact_directory / "identity" / "plugin-bundle.tar",
                 "DAW plugin bundle",
             )
-            smoke, extra_members = run_reaper_preflight(
+            smoke, extra_members, reaper_guards = run_reaper_preflight(
                 request=request, product_bundle=product_bundle,
                 product_binary=product_binary, host_binary=host_binary,
-                artifact_directory=artifact_directory,
+                artifact_directory=artifact_directory, pulp_root=pulp_root,
             )
-            if directory_digest(product_bundle, "DAW plugin bundle") != bundle_digest:
+            if (
+                directory_digest(product_bundle, "DAW plugin bundle")
+                != bundle_tree_digest
+            ):
                 raise ProducerError("DAW plugin bundle changed while the smoke ran")
+            bundle_snapshot_digest = file_sha256(
+                bundle_snapshot, "DAW plugin bundle snapshot",
+            )
             smoke.update({
-                "plugin_bundle_tree_sha256": bundle_digest,
-                "plugin_bundle_snapshot_sha256": file_sha256(
-                    bundle_snapshot, "DAW plugin bundle snapshot",
-                ),
+                "plugin_bundle_tree_sha256": bundle_tree_digest,
+                "plugin_bundle_snapshot_sha256": bundle_snapshot_digest,
             })
             extra_members.append(bundle_snapshot)
             directory_guards.append((
-                product_bundle, bundle_digest, "DAW plugin bundle",
+                product_bundle, bundle_tree_digest, "DAW plugin bundle",
+            ))
+            immutable_files.extend(reaper_guards)
+            immutable_files.append((
+                bundle_snapshot, bundle_snapshot_digest, "DAW plugin bundle snapshot",
             ))
             preflight["reaper_smoke"] = smoke
             role_context.update({
@@ -897,24 +1106,31 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 raise ProducerError(
                     "Forge product/host must be the same executable inside the exact app bundle"
                 )
-            forge_snapshot, forge_bundle_digest = snapshot_directory(
+            forge_snapshot, bundle_tree_digest = snapshot_directory(
                 forge_bundle,
                 artifact_directory / "identity" / "forge-app-bundle.tar",
                 "Forge app bundle",
             )
             extra_members.append(forge_snapshot)
             directory_guards.append((
-                forge_bundle, forge_bundle_digest, "Forge app bundle",
+                forge_bundle, bundle_tree_digest, "Forge app bundle",
             ))
             forge_source = validate_source_root(
                 forge_root, request["identity"]["forge_revision"], "Forge",
             )
+            source_guards.append((
+                forge_root, request["identity"]["forge_revision"], "Forge",
+            ))
+            forge_snapshot_digest = file_sha256(
+                forge_snapshot, "Forge app bundle snapshot",
+            )
+            immutable_files.append((
+                forge_snapshot, forge_snapshot_digest, "Forge app bundle snapshot",
+            ))
             preflight.update({
                 "forge_source": forge_source,
-                "forge_app_bundle_tree_sha256": forge_bundle_digest,
-                "forge_app_bundle_snapshot_sha256": file_sha256(
-                    forge_snapshot, "Forge app bundle snapshot",
-                ),
+                "forge_app_bundle_tree_sha256": bundle_tree_digest,
+                "forge_app_bundle_snapshot_sha256": forge_snapshot_digest,
             })
             role_context.update({
                 "host_kind": "forge-standalone",
@@ -932,6 +1148,60 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 "host_kind": "pulp-standalone",
                 "presentation_source": "independent-native-compositor",
             })
+
+        build_attestation_source = configured_file(
+            f"{prefix}_BUILD_ATTESTATION", f"build-attestation:{role}",
+            executable=False,
+        )
+        build_provenance_source = configured_file(
+            f"{prefix}_BUILD_PROVENANCE", f"build-provenance:{role}",
+            executable=False,
+        )
+        build_attestation_snapshot, build_attestation_digest = snapshot_file(
+            build_attestation_source,
+            artifact_directory / "identity" / "product-build-attestation.json",
+            f"{role} product build attestation",
+        )
+        build_provenance_snapshot, build_provenance_digest = snapshot_file(
+            build_provenance_source,
+            artifact_directory / "identity" / "product-build-provenance.receipt",
+            f"{role} product build provenance receipt",
+        )
+        validate_build_attestation(
+            regular_json(build_attestation_snapshot, "product build attestation"),
+            request=request, product_digest=product_digest,
+            bundle_digest=bundle_tree_digest, analyzer_digest=analyzer_digest,
+            provenance_digest=build_provenance_digest,
+        )
+        immutable_files.extend([
+            (
+                build_attestation_source, build_attestation_digest,
+                "configured product build attestation",
+            ),
+            (
+                build_provenance_source, build_provenance_digest,
+                "configured product build provenance",
+            ),
+            (
+                build_attestation_snapshot, build_attestation_digest,
+                "product build attestation snapshot",
+            ),
+            (
+                build_provenance_snapshot, build_provenance_digest,
+                "product build provenance snapshot",
+            ),
+        ])
+        extra_members.extend([
+            build_attestation_snapshot, build_provenance_snapshot,
+        ])
+        preflight.update({
+            "product_build_attestation_sha256": build_attestation_digest,
+            "product_build_provenance_sha256": build_provenance_digest,
+        })
+        role_context.update({
+            "product_build_attestation_sha256": build_attestation_digest,
+            "trace_analyzer_sha256": analyzer_digest,
+        })
 
         driver_root = artifact_directory / "role-driver-artifacts"
         driver_root.mkdir()
@@ -959,6 +1229,12 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         driver_request_path = artifact_directory / "role-driver-request.json"
         driver_receipt_path = artifact_directory / "role-driver-receipt.json"
         atomic_json(driver_request_path, driver_request)
+        driver_request_digest = file_sha256(
+            driver_request_path, "closed role-driver request",
+        )
+        immutable_files.append((
+            driver_request_path, driver_request_digest, "closed role-driver request",
+        ))
         driver_exit = bounded_run(
             [str(driver_snapshot), "--request", str(driver_request_path),
              "--receipt", str(driver_receipt_path)],
@@ -966,8 +1242,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             stdout_path=artifact_directory / "logs" / "role-driver.stdout.log",
             stderr_path=artifact_directory / "logs" / "role-driver.stderr.log",
         )
-        if file_sha256(driver_snapshot, "pinned lifecycle driver") != driver_digest:
-            raise ProducerError("pinned lifecycle driver changed while it ran")
+        assert_immutable_files(immutable_files)
         if file_sha256(product_binary, "configured product binary") != product_digest:
             raise ProducerError("configured product binary changed during the campaign")
         if file_sha256(host_binary, "configured host binary") != host_digest:
@@ -975,9 +1250,14 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         for directory, expected_digest, label in directory_guards:
             if directory_digest(directory, label) != expected_digest:
                 raise ProducerError(f"{label} changed during the campaign")
+        for source_root, source_revision, source_label in source_guards:
+            validate_source_root(source_root, source_revision, source_label)
         if not driver_receipt_path.is_file() or driver_receipt_path.is_symlink():
             raise ProducerError(f"role driver exited {driver_exit} without its receipt")
         driver_receipt = regular_json(driver_receipt_path, "role-driver receipt")
+        driver_receipt_digest = file_sha256(
+            driver_receipt_path, "closed role-driver receipt",
+        )
         outcome, measured_paths, lifecycle_provenance = validate_driver_receipt(
             driver_receipt, request=request, driver_root=driver_root,
             product_digest=product_digest, host_digest=host_digest,
@@ -989,18 +1269,35 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 dependencies=driver_receipt["dependencies"], artifacts=artifacts,
             ))
             return OUTCOME_EXIT[outcome]
-        validate_health_and_trace(
+        health = validate_health_and_trace(
             request=request, health_path=measured_paths["health_result"],
             cold_path=measured_paths["raw_cold"], warm_path=measured_paths["raw_warm"],
-            trace_path=measured_paths["trace"], analysis_path=measured_paths["trace_analysis"],
+            trace_path=measured_paths["trace"],
             lifecycle_provenance=lifecycle_provenance,
         )
+        trace_analysis_path, analyzer_evidence = derive_trace_analysis(
+            analyzer=analyzer_snapshot, request=request,
+            trace_path=measured_paths["trace"],
+            health_path=measured_paths["health_result"], health=health,
+            artifact_directory=artifact_directory,
+        )
+        measured_paths["trace_analysis"] = trace_analysis_path
+        extra_members.extend(analyzer_evidence)
+        assert_immutable_files(immutable_files)
+        if file_sha256(driver_receipt_path, "closed role-driver receipt") != driver_receipt_digest:
+            raise ProducerError("closed role-driver receipt changed after validation")
+        for directory, expected_digest, label in directory_guards:
+            if directory_digest(directory, label) != expected_digest:
+                raise ProducerError(f"{label} changed during trace replay")
+        for source_root, source_revision, source_label in source_guards:
+            validate_source_root(source_root, source_revision, source_label)
         preflight_path = artifact_directory / "preflight.json"
         atomic_json(preflight_path, preflight)
         host_archive = artifact_directory / "identity" / "host-evidence.tar"
         members = [
             ("host-executable", host_snapshot),
             ("lifecycle-driver", driver_snapshot),
+            ("trace-analyzer", analyzer_snapshot),
             ("producer-support.py", support_snapshot),
             ("driver-request.json", driver_request_path),
             ("driver-receipt.json", driver_receipt_path),

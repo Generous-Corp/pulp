@@ -122,6 +122,7 @@ def run_case(
     blank: Path, audio: Path, label: str, *, controls: bool,
     producer_mutation: str = "", control_mutation: str = "",
     configure_producer: bool = True, configure_controls: bool = True,
+    pulp_root: Path | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
     output = root / f"run-{label}"
     command = [
@@ -139,13 +140,16 @@ def run_case(
     for name in (
         "PULP_A3_CAMPAIGN_PRODUCER", "PULP_A3_BLANK_CONTROL_BIN",
         "PULP_A3_AUDIO_CONTROL_BIN", "PULP_A3_TEST_PRODUCER_MUTATION",
-        "PULP_A3_TEST_CONTROL_MUTATION",
+        "PULP_A3_TEST_CONTROL_MUTATION", "PULP_A3_PULP_ROOT",
+        "PULP_A3_ROLE_PRODUCER_SUPPORT",
     ):
         environment.pop(name, None)
     if configure_producer:
         # Preserve a planted symlink spelling so the adapter, not this helper,
         # is the component that proves configured executables are non-symlinks.
         environment["PULP_A3_CAMPAIGN_PRODUCER"] = str(producer.absolute())
+    if pulp_root is not None:
+        environment["PULP_A3_PULP_ROOT"] = str(pulp_root.resolve())
     if controls and configure_controls:
         environment["PULP_A3_BLANK_CONTROL_BIN"] = str(blank.resolve())
         environment["PULP_A3_AUDIO_CONTROL_BIN"] = str(audio.resolve())
@@ -254,7 +258,17 @@ def main() -> int:
         assert result["status"] == "incomplete"
         assert "non-symlink" in result["reason"]
 
-    print("gpu-first-visible-a3-external-adapter: positive=2 planted_negatives=8")
+        fake_pulp_root = root / "pulp-root"
+        fake_pulp_root.mkdir()
+        completed, result = run_case(
+            root, evidence, identity_path, producer, blank, audio,
+            "off-source-producer", controls=False, pulp_root=fake_pulp_root,
+        )
+        assert completed.returncode == 1
+        assert result["status"] == "fail"
+        assert "checked-in role entry point" in result["reason"]
+
+    print("gpu-first-visible-a3-external-adapter: positive=2 planted_negatives=9")
     return 0
 
 
