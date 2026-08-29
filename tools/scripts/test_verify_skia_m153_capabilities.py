@@ -35,6 +35,14 @@ class SkiaM153CapabilityProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "requires chrome/m153"):
                 probe.verify(Path("/does/not/matter"), "darwin-arm64")
 
+    def test_source_fallback_fails_before_copy_on_commit_drift(self) -> None:
+        script = (probe.REPO_ROOT / "tools/build-skia.sh").read_text(encoding="utf-8")
+        self.assertIn('SKIA_EXPECTED_COMMIT="${SKIA_EXPECTED_COMMIT:-$(python3', script)
+        verification = script.index('actual_skia_commit="$(git -C')
+        copy_boundary = script.index('echo "Copying build output to $SKIA_BUILD_OUTPUT..."')
+        self.assertLess(verification, copy_boundary)
+        self.assertIn('actual_skia_commit" != "$SKIA_EXPECTED_COMMIT', script)
+
     def test_unverified_generation_is_rejected_before_compile(self) -> None:
         dependency = {
             "version": "chrome/m153",
