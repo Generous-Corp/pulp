@@ -1943,6 +1943,42 @@ TEST_CASE("standalone Settings menu routes the standard chord before host fallba
             chrome.tab_panel()->find_tab("Settings"));
 }
 
+TEST_CASE("standalone custom Settings route is projected without built-in chrome",
+          "[standalone][chrome][settings][commands]") {
+    int custom_settings_hits = 0;
+    auto editor_root = std::make_unique<View>();
+    editor_root->on_global_key = [&](const KeyEvent& event) {
+        if (event.key != kKeyComma
+            || event.modifiers != kOpenSettingsModifiers)
+            return false;
+        ++custom_settings_hits;
+        return true;
+    };
+    auto chrome = make_standalone_editor_chrome(
+        std::move(editor_root), StandaloneConfig{.show_settings_tab = false},
+        nullptr, nullptr, nullptr, {});
+    pulp::format::ViewSize hints;
+    auto options = make_standalone_window_options(hints, chrome, "Plug", false);
+    add_standalone_settings_menu_command(options, chrome);
+
+    REQUIRE(chrome.settings_panel() == nullptr);
+    REQUIRE(options.menu_commands.size() == 1);
+    options.menu_commands.front().action();
+    REQUIRE(custom_settings_hits == 1);
+}
+
+TEST_CASE("standalone without settings ownership omits Settings menu",
+          "[standalone][chrome][settings][commands]") {
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(), StandaloneConfig{.show_settings_tab = false},
+        nullptr, nullptr, nullptr, {});
+    pulp::format::ViewSize hints;
+    auto options = make_standalone_window_options(hints, chrome, "Plug", false);
+    add_standalone_settings_menu_command(options, chrome);
+
+    REQUIRE(options.menu_commands.empty());
+}
+
 TEST_CASE("standalone stop flushes an active environment trace",
           "[standalone][tracing][lifecycle]") {
 #if PULP_TRACING_ENABLED
