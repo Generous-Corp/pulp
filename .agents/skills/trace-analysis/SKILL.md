@@ -553,7 +553,9 @@ IDs. The checked-in external adapter snapshots that producer but does not run
 substitute SQL or create an evidence ID. Its role producer pins the exact
 final-head `pulp trace gpu-startup` analyzer, proves its invalid-trace negative,
 and derives the typed campaign analysis only when the named replay selects the
-health result's cohort. Final same-instance A2T replay and human Perfetto UI correlation
+health result's cohort and verdict. A failing analyzer result is terminal; the
+producer may not overwrite it with the health document's verdict. Final
+same-instance A2T replay and human Perfetto UI correlation
 are added only from the selected causal campaign after all role runs complete.
 Use one of the four checked-in role entry points, which also pins its lifecycle
 driver and rejects analyzer evidence IDs that differ from the exact health

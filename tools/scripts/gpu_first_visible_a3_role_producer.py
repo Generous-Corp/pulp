@@ -24,6 +24,7 @@ import tarfile
 import tempfile
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ PRODUCER_SCHEMA = "pulp.gpu-first-visible-campaign-producer.v1"
 DRIVER_REQUEST_SCHEMA = "pulp.gpu-first-visible-role-driver-request.v1"
 DRIVER_RECEIPT_SCHEMA = "pulp.gpu-first-visible-role-driver-receipt.v1"
 BUILD_ATTESTATION_SCHEMA = "pulp.gpu-first-visible-product-build-attestation.v1"
+BUILD_PROVENANCE_SCHEMA = "pulp.gpu-first-visible-local-build-provenance.v1"
 OUTCOME_EXIT = {"pass": 0, "fail": 1, "inconclusive": 2, "skip": 3}
 ENDPOINT_BY_ROLE = {
     "standalone": "native-compositor-presentation",
@@ -85,13 +87,17 @@ BUILD_IDENTITY_KEYS = {
 }
 BUILD_ATTESTATION_KEYS = {
     "schema", "version", "product_identity", "product_sha256",
-    "bundle_tree_sha256", "trace_analyzer_sha256", "provenance_kind",
-    "provenance_receipt_sha256",
+    "bundle_tree_sha256", "driver_sha256", "trace_analyzer_sha256",
+    "provenance_kind", "provenance_receipt_sha256",
 }
-BUILD_PROVENANCE_KINDS = {
-    "github-artifact-attestation", "shipyard-exact-head-build-receipt",
-    "local-clean-exact-head-build-receipt",
+BUILD_PROVENANCE_KEYS = {
+    "schema", "version", "provenance_kind", "product_identity",
+    "source_revisions", "source_worktree_status", "product_sha256",
+    "bundle_tree_sha256", "driver_sha256", "trace_analyzer_sha256",
+    "build_command", "builder_id", "build_started_utc", "build_finished_utc",
 }
+SOURCE_REVISION_KEYS = {"pulp", "forge"}
+LOCAL_PROVENANCE_KIND = "local-clean-exact-head-build-receipt"
 
 
 class ProducerError(ValueError):
@@ -184,6 +190,19 @@ def configured_directory(name: str, dependency: str) -> Path:
             f"{name} must name an absolute, non-symlink directory", dependency,
         )
     return path.resolve()
+
+
+def configured_source_path(name: str, dependency: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise ProducerBlocked(f"{name} is not configured", dependency)
+    path = Path(value)
+    if (
+        path.is_absolute() or not path.parts
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise ProducerError(f"{name} must name a safe repository-relative source path")
+    return path.as_posix()
 
 
 def snapshot_file(source: Path, destination: Path, label: str) -> tuple[Path, str]:
@@ -494,26 +513,94 @@ def require_bundle_executable(bundle: Path, product_binary: Path) -> None:
         )
 
 
+def parse_utc(value: Any, label: str) -> datetime:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise ProducerError(f"{label} must be an RFC3339 UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as error:
+        raise ProducerError(f"{label} must be an RFC3339 UTC timestamp") from error
+    return parsed
+
+
+def expected_build_identity(request: dict[str, Any]) -> dict[str, Any]:
+    return {key: request["identity"][key] for key in BUILD_IDENTITY_KEYS}
+
+
+def validate_build_provenance(
+    payload: dict[str, Any], *, request: dict[str, Any], product_digest: str,
+    bundle_digest: str | None, driver_digest: str, analyzer_digest: str,
+) -> None:
+    exact_keys(payload, BUILD_PROVENANCE_KEYS, "product build provenance")
+    if (
+        payload["schema"] != BUILD_PROVENANCE_SCHEMA
+        or payload["version"] != 1
+        or payload["provenance_kind"] != LOCAL_PROVENANCE_KIND
+    ):
+        raise ProducerError("product build provenance has invalid protocol identity")
+    exact_keys(
+        payload["product_identity"], BUILD_IDENTITY_KEYS,
+        "build-provenance product identity",
+    )
+    exact_keys(payload["source_revisions"], SOURCE_REVISION_KEYS, "source revisions")
+    exact_keys(
+        payload["source_worktree_status"], SOURCE_REVISION_KEYS,
+        "source worktree status",
+    )
+    expected_forge = request["identity"]["forge_revision"]
+    expected = {
+        "product_identity": expected_build_identity(request),
+        "source_revisions": {
+            "pulp": request["identity"]["pulp_revision"],
+            "forge": expected_forge,
+        },
+        "source_worktree_status": {
+            "pulp": "clean",
+            "forge": "clean" if expected_forge is not None else "not-applicable",
+        },
+        "product_sha256": product_digest,
+        "bundle_tree_sha256": bundle_digest,
+        "driver_sha256": driver_digest,
+        "trace_analyzer_sha256": analyzer_digest,
+    }
+    if any(payload[key] != value for key, value in expected.items()):
+        raise ProducerError(
+            "product build provenance does not bind the requested source, product, and driver"
+        )
+    command = payload["build_command"]
+    if (
+        not isinstance(command, list) or not 1 <= len(command) <= 64
+        or any(not isinstance(item, str) or not item or len(item) > 4096 for item in command)
+    ):
+        raise ProducerError("product build provenance has an invalid build command")
+    builder_id = payload["builder_id"]
+    if not isinstance(builder_id, str) or not builder_id or len(builder_id) > 256:
+        raise ProducerError("product build provenance has an invalid builder identity")
+    started = parse_utc(payload["build_started_utc"], "build_started_utc")
+    finished = parse_utc(payload["build_finished_utc"], "build_finished_utc")
+    if finished < started:
+        raise ProducerError("product build provenance finishes before it starts")
+
+
 def validate_build_attestation(
     payload: dict[str, Any], *, request: dict[str, Any], product_digest: str,
-    bundle_digest: str | None, analyzer_digest: str, provenance_digest: str,
+    bundle_digest: str | None, driver_digest: str, analyzer_digest: str,
+    provenance_digest: str,
 ) -> None:
     exact_keys(payload, BUILD_ATTESTATION_KEYS, "product build attestation")
     if (
         payload["schema"] != BUILD_ATTESTATION_SCHEMA
         or payload["version"] != 1
-        or payload["provenance_kind"] not in BUILD_PROVENANCE_KINDS
+        or payload["provenance_kind"] != LOCAL_PROVENANCE_KIND
     ):
         raise ProducerError("product build attestation has invalid protocol identity")
     product_identity = payload["product_identity"]
     exact_keys(product_identity, BUILD_IDENTITY_KEYS, "build-attested product identity")
-    expected_identity = {
-        key: request["identity"][key] for key in BUILD_IDENTITY_KEYS
-    }
     expected = {
-        "product_identity": expected_identity,
+        "product_identity": expected_build_identity(request),
         "product_sha256": product_digest,
         "bundle_tree_sha256": bundle_digest,
+        "driver_sha256": driver_digest,
         "trace_analyzer_sha256": analyzer_digest,
         "provenance_receipt_sha256": provenance_digest,
     }
@@ -570,7 +657,7 @@ def derive_trace_analysis(
     correlation = startup["correlation"]
     gpu_id = correlation["gpu_evidence_id"]
     if (
-        derived["verdict"] == "unavailable"
+        derived["verdict"] != startup["verdict"]
         or derived.get("capture_complete") is not True
         or derived.get("evidence_ids") != [gpu_id]
         or not isinstance(derived.get("category_scope"), dict)
@@ -585,7 +672,7 @@ def derive_trace_analysis(
         "schema": "pulp.gpu-first-visible-campaign-trace.v1",
         "version": 1,
         "question": "gpu-startup",
-        "verdict": startup["verdict"],
+        "verdict": derived["verdict"],
         "capture_complete": not missing,
         "measurement_endpoint": request["measurement_endpoint"],
         "capture_integrity": "lossless",
@@ -614,6 +701,30 @@ def assert_immutable_files(
     for path, expected_digest, label in guards:
         if file_sha256(path, label) != expected_digest:
             raise ProducerError(f"{label} changed during the campaign")
+
+
+def process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def assert_host_processes_stopped(
+    lifecycle_provenance: list[dict[str, Any]],
+) -> None:
+    live = sorted({
+        row["host_pid"] for row in lifecycle_provenance
+        if process_exists(row["host_pid"])
+    })
+    if live:
+        raise ProducerError(
+            "role driver returned while owned host process IDs remain live: "
+            + ",".join(str(pid) for pid in live)
+        )
 
 
 def run_reaper_preflight(
@@ -910,11 +1021,13 @@ def validate_driver_receipt(
         if not isinstance(lifecycle, list) or len(lifecycle) != 20:
             raise ProducerError("passing role driver lacks 20 lifecycle provenance rows")
         observed_lifecycles: dict[str, str] = {}
+        process_pids: dict[str, int] = {}
+        pid_processes: dict[int, str] = {}
         for index, row in enumerate(lifecycle):
             exact_keys(row, {
                 "sequence", "cache_state", "lifecycle_id", "process_id",
                 "cache_boundary", "prior_lifecycle_id", "prior_process_id",
-                "endpoint_observed", "native_presented",
+                "endpoint_observed", "native_presented", "host_pid",
             }, f"role-driver lifecycle {index}")
             expected_state = "cold" if index < 10 else "warm"
             expected_boundary = (
@@ -926,6 +1039,9 @@ def validate_driver_receipt(
                 or row["cache_boundary"] not in expected_boundary
                 or not isinstance(row["lifecycle_id"], str) or not row["lifecycle_id"]
                 or not isinstance(row["process_id"], str) or not row["process_id"]
+                or isinstance(row["host_pid"], bool)
+                or not isinstance(row["host_pid"], int)
+                or not 2 <= row["host_pid"] <= 2_147_483_647
                 or row["endpoint_observed"] is not True
             ):
                 raise ProducerError(f"role-driver lifecycle {index} lacks authentic provenance")
@@ -950,6 +1066,12 @@ def validate_driver_receipt(
             if row["lifecycle_id"] in observed_lifecycles:
                 raise ProducerError("role-driver lifecycle identity is not unique")
             observed_lifecycles[row["lifecycle_id"]] = row["process_id"]
+            prior_pid = process_pids.setdefault(row["process_id"], row["host_pid"])
+            if prior_pid != row["host_pid"]:
+                raise ProducerError("one host process identity maps to multiple OS process IDs")
+            prior_process = pid_processes.setdefault(row["host_pid"], row["process_id"])
+            if prior_process != row["process_id"]:
+                raise ProducerError("one OS process ID maps to multiple host process identities")
             if request["role"] == "headless-constrained":
                 if row["native_presented"] is not False:
                     raise ProducerError("headless lifecycle cannot claim native presentation")
@@ -975,6 +1097,9 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         source_guards = [(
             pulp_root, request["identity"]["pulp_revision"], "Pulp",
         )]
+        source_authorities = {"pulp": (
+            pulp_root, request["identity"]["pulp_revision"],
+        )}
         product_binary = configured_file(
             f"{prefix}_PRODUCT_BIN", f"product:{role}",
         )
@@ -1121,6 +1246,9 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             source_guards.append((
                 forge_root, request["identity"]["forge_revision"], "Forge",
             ))
+            source_authorities["forge"] = (
+                forge_root, request["identity"]["forge_revision"],
+            )
             forge_snapshot_digest = file_sha256(
                 forge_snapshot, "Forge app bundle snapshot",
             )
@@ -1149,6 +1277,28 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 "presentation_source": "independent-native-compositor",
             })
 
+        driver_source_owner = os.environ.get(f"{prefix}_DRIVER_SOURCE_OWNER", "pulp")
+        if driver_source_owner not in source_authorities:
+            raise ProducerError(
+                f"{prefix}_DRIVER_SOURCE_OWNER does not name an available source authority"
+            )
+        driver_relative = configured_source_path(
+            f"{prefix}_DRIVER_SOURCE_PATH", f"driver-source:{role}",
+        )
+        driver_root, driver_revision = source_authorities[driver_source_owner]
+        driver_source_digest = require_source_file(
+            driver_source, root=driver_root, revision=driver_revision,
+            relative=driver_relative, label=f"{role} lifecycle driver",
+        )
+        if driver_source_digest != driver_digest:
+            raise ProducerError("lifecycle driver snapshot differs from reviewed source")
+        preflight["driver_source"] = {
+            "authority": driver_source_owner,
+            "revision": driver_revision,
+            "path": driver_relative,
+            "sha256": driver_source_digest,
+        }
+
         build_attestation_source = configured_file(
             f"{prefix}_BUILD_ATTESTATION", f"build-attestation:{role}",
             executable=False,
@@ -1167,10 +1317,19 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             artifact_directory / "identity" / "product-build-provenance.receipt",
             f"{role} product build provenance receipt",
         )
+        build_provenance = regular_json(
+            build_provenance_snapshot, "product build provenance",
+        )
+        validate_build_provenance(
+            build_provenance, request=request, product_digest=product_digest,
+            bundle_digest=bundle_tree_digest, driver_digest=driver_digest,
+            analyzer_digest=analyzer_digest,
+        )
         validate_build_attestation(
             regular_json(build_attestation_snapshot, "product build attestation"),
             request=request, product_digest=product_digest,
-            bundle_digest=bundle_tree_digest, analyzer_digest=analyzer_digest,
+            bundle_digest=bundle_tree_digest, driver_digest=driver_digest,
+            analyzer_digest=analyzer_digest,
             provenance_digest=build_provenance_digest,
         )
         immutable_files.extend([
@@ -1263,12 +1422,18 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             product_digest=product_digest, host_digest=host_digest,
             driver_digest=driver_digest, exit_code=driver_exit,
         )
+        if outcome == "pass":
+            assert_host_processes_stopped(lifecycle_provenance)
         if outcome != "pass":
             atomic_json(receipt_path, producer_receipt(
                 request, outcome=outcome, reason=driver_receipt["reason"],
                 dependencies=driver_receipt["dependencies"], artifacts=artifacts,
             ))
             return OUTCOME_EXIT[outcome]
+        measured_guards = [(
+            path, driver_receipt["artifacts"][name]["sha256"],
+            f"role-driver {name}",
+        ) for name, path in measured_paths.items()]
         health = validate_health_and_trace(
             request=request, health_path=measured_paths["health_result"],
             cold_path=measured_paths["raw_cold"], warm_path=measured_paths["raw_warm"],
@@ -1284,6 +1449,8 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         measured_paths["trace_analysis"] = trace_analysis_path
         extra_members.extend(analyzer_evidence)
         assert_immutable_files(immutable_files)
+        assert_immutable_files(measured_guards)
+        assert_host_processes_stopped(lifecycle_provenance)
         if file_sha256(driver_receipt_path, "closed role-driver receipt") != driver_receipt_digest:
             raise ProducerError("closed role-driver receipt changed after validation")
         for directory, expected_digest, label in directory_guards:

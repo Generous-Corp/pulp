@@ -438,7 +438,8 @@ For the executable handoff, use
 and Forge roots, the exact app executable for both product and host identity,
 the product-specific lifecycle driver, final-head trace analyzer, and the
 digest-bound Forge build attestation/receipt. The producer pins and rehashes
-those inputs and requires 10+10 reopen/reset rows, independent native
-presentation, and named same-instance Perfetto replay. A missing driver,
+those inputs; the driver must resolve to reviewed source at the declared clean
+Pulp or Forge revision. It requires 10+10 reopen/reset rows, independent native
+presentation, terminated owned Forge PIDs, and named same-instance Perfetto replay. A missing driver,
 provenance, dirty/wrong source head, different Forge build, or Pulp demo stays
 nonterminal or fails closed.

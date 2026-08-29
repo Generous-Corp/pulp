@@ -71,20 +71,25 @@ A3_ADAPTER="$PWD/tools/scripts/gpu_first_visible_a3_external_adapter.py"
 A3_SUPPORT="$PWD/tools/scripts/gpu_first_visible_a3_role_producer.py"
 : "${STANDALONE_PRODUCT_BIN:?exact final-head Standalone executable}"
 : "${STANDALONE_DRIVER:?exact executable that automates the 20 Standalone lifecycles}"
+: "${STANDALONE_DRIVER_SOURCE_PATH:?reviewed Pulp-relative driver path}"
 : "${STANDALONE_BUILD_ATTESTATION:?closed Standalone build attestation JSON}"
 : "${STANDALONE_BUILD_PROVENANCE:?digest-bound Standalone build receipt}"
 : "${HEADLESS_PRODUCT_BIN:?exact final-head constrained-headless executable}"
 : "${HEADLESS_DRIVER:?exact executable that automates the 20 headless lifecycles}"
+: "${HEADLESS_DRIVER_SOURCE_PATH:?reviewed Pulp-relative driver path}"
 : "${HEADLESS_BUILD_ATTESTATION:?closed headless build attestation JSON}"
 : "${HEADLESS_BUILD_PROVENANCE:?digest-bound headless build receipt}"
 : "${DAW_PRODUCT_BIN:?exact final-head plugin Mach-O or DLL}"
 : "${DAW_PLUGIN_BUNDLE:?exact .vst3, .clap, or .component bundle}"
 : "${REAPER_DRIVER:?exact executable that automates the 20 REAPER lifecycles}"
+: "${REAPER_DRIVER_SOURCE_PATH:?reviewed Pulp-relative driver path}"
 : "${REAPER_BUILD_ATTESTATION:?closed DAW-product build attestation JSON}"
 : "${REAPER_BUILD_PROVENANCE:?digest-bound DAW-product build receipt}"
 : "${FORGE_APP_BIN:?exact final-head Forge app executable}"
 : "${FORGE_APP_BUNDLE:?exact final-head Forge .app bundle}"
 : "${FORGE_DRIVER:?exact executable that automates the 20 Forge lifecycles}"
+: "${FORGE_DRIVER_SOURCE_OWNER:?pulp or forge source authority for the driver}"
+: "${FORGE_DRIVER_SOURCE_PATH:?reviewed authority-relative driver path}"
 : "${FORGE_BUILD_ATTESTATION:?closed Forge build attestation JSON}"
 : "${FORGE_BUILD_PROVENANCE:?digest-bound Forge build receipt}"
 : "${FORGE_ROOT:?clean Forge source checkout at the identity revision}"
@@ -100,6 +105,8 @@ PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
 PULP_A3_STANDALONE_PRODUCT_BIN="$STANDALONE_PRODUCT_BIN" \
 PULP_A3_STANDALONE_HOST_BIN="$STANDALONE_PRODUCT_BIN" \
 PULP_A3_STANDALONE_DRIVER="$STANDALONE_DRIVER" \
+PULP_A3_STANDALONE_DRIVER_SOURCE_OWNER=pulp \
+PULP_A3_STANDALONE_DRIVER_SOURCE_PATH="$STANDALONE_DRIVER_SOURCE_PATH" \
 PULP_A3_STANDALONE_BUILD_ATTESTATION="$STANDALONE_BUILD_ATTESTATION" \
 PULP_A3_STANDALONE_BUILD_PROVENANCE="$STANDALONE_BUILD_PROVENANCE" \
 PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_standalone_producer.py" \
@@ -119,6 +126,8 @@ PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
 PULP_A3_HEADLESS_PRODUCT_BIN="$HEADLESS_PRODUCT_BIN" \
 PULP_A3_HEADLESS_HOST_BIN="$HEADLESS_PRODUCT_BIN" \
 PULP_A3_HEADLESS_DRIVER="$HEADLESS_DRIVER" \
+PULP_A3_HEADLESS_DRIVER_SOURCE_OWNER=pulp \
+PULP_A3_HEADLESS_DRIVER_SOURCE_PATH="$HEADLESS_DRIVER_SOURCE_PATH" \
 PULP_A3_HEADLESS_BUILD_ATTESTATION="$HEADLESS_BUILD_ATTESTATION" \
 PULP_A3_HEADLESS_BUILD_PROVENANCE="$HEADLESS_BUILD_PROVENANCE" \
 PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_headless_producer.py" \
@@ -137,6 +146,8 @@ PULP_A3_TRACE_ANALYZER="$TRACE_ANALYZER" \
 PULP_A3_REAPER_PRODUCT_BIN="$DAW_PRODUCT_BIN" \
 PULP_A3_REAPER_HOST_BIN=/Applications/REAPER.app/Contents/MacOS/REAPER \
 PULP_A3_REAPER_DRIVER="$REAPER_DRIVER" \
+PULP_A3_REAPER_DRIVER_SOURCE_OWNER=pulp \
+PULP_A3_REAPER_DRIVER_SOURCE_PATH="$REAPER_DRIVER_SOURCE_PATH" \
 PULP_A3_REAPER_PLUGIN_BUNDLE="$DAW_PLUGIN_BUNDLE" \
 PULP_A3_REAPER_SMOKE="$PWD/tools/testing/daw-smoke/reaper_smoke.py" \
 PULP_A3_REAPER_SMOKE_LUA="$PWD/tools/testing/daw-smoke/insert_and_float.lua" \
@@ -159,6 +170,8 @@ PULP_A3_FORGE_PRODUCT_BIN="$FORGE_APP_BIN" \
 PULP_A3_FORGE_HOST_BIN="$FORGE_APP_BIN" \
 PULP_A3_FORGE_APP_BUNDLE="$FORGE_APP_BUNDLE" \
 PULP_A3_FORGE_DRIVER="$FORGE_DRIVER" \
+PULP_A3_FORGE_DRIVER_SOURCE_OWNER="$FORGE_DRIVER_SOURCE_OWNER" \
+PULP_A3_FORGE_DRIVER_SOURCE_PATH="$FORGE_DRIVER_SOURCE_PATH" \
 PULP_A3_FORGE_BUILD_ATTESTATION="$FORGE_BUILD_ATTESTATION" \
 PULP_A3_FORGE_BUILD_PROVENANCE="$FORGE_BUILD_PROVENANCE" \
 PULP_A3_CAMPAIGN_PRODUCER="$PWD/tools/scripts/gpu_first_visible_a3_forge_producer.py" \
@@ -205,8 +218,13 @@ Before invoking the role driver, the producer also requires a
 `pulp.gpu-first-visible-product-build-attestation.v1` JSON document. Its exact
 fields bind the requested Pulp/Forge revisions, build ID, product ID/name and
 format to the product digest, complete bundle-tree digest when applicable,
-the pinned trace-analyzer digest, a supported provenance kind, and the digest
-of the separately retained build receipt. The configured binaries, build
+the lifecycle-driver and pinned trace-analyzer digests, the local-clean
+provenance kind, and the digest of the separately retained build receipt. That
+receipt must itself use `pulp.gpu-first-visible-local-build-provenance.v1` and
+repeat the exact product identity, clean Pulp/Forge source revisions, product,
+bundle, driver, and analyzer digests, bounded build command, builder identity,
+and ordered UTC build timestamps. Opaque bytes or an unverified GitHub/Shipyard
+claim are rejected. The configured binaries, build
 documents, pinned driver/analyzer/support, source-bound smoke helpers, closed
 driver request, and deterministic bundle snapshots are rehashed after the
 driver and again after trace replay. A claim without those external build
@@ -218,7 +236,8 @@ The role driver is the product/host automation seam. It accepts the closed
 `pulp.gpu-first-visible-role-driver-receipt.v1`. A pass requires 20 ordered
 lifecycle-provenance rows, including the observed cache boundary, unique
 lifecycle and process identities, both the lifecycle and process predecessor
-for every same-process warm reopen, and explicit endpoint/native-present truth.
+for every same-process warm reopen, the owned OS host PID, and explicit
+endpoint/native-present truth.
 The predecessor must be an earlier observed lifecycle in the same process. The
 producer cross-checks those rows against the raw cold/warm observations. It
 returns four measured artifacts beneath its issued directory: health, raw cold,
@@ -233,8 +252,14 @@ capture scope. The
 digest-bound `host_artifact` tar retains the exact host, driver, producer
 support, analyzer, build documents, closed driver request/receipt, and role
 preflight. The driver may be
-external because native AppKit/REAPER/Forge automation is product-specific;
-absence is a nonterminal dependency, never synthesized evidence.
+external because native AppKit/REAPER/Forge automation is product-specific, but
+its runtime path and bytes must exactly match the declared reviewed file at the
+requested clean Pulp or Forge Git revision, and its digest must also be bound by
+the validated build receipt. Every process identity maps to one OS PID, and all
+recorded host PIDs must be gone both before
+trace replay and before PASS; a detached LaunchServices/GUI process is a hard
+failure rather than a silent cache contaminant. Absence is a nonterminal
+dependency, never synthesized evidence.
 
 The producer therefore owns the facts only its product can observe: 10 real
 cold and 10 real warm lifecycles, the declared cache reset/reopen boundary,

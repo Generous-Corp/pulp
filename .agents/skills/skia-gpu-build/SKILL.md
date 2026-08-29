@@ -548,6 +548,8 @@ entry point and its checked-in support from the exact Pulp source root. Each
 role entry point pins the configured product, host, lifecycle driver, final-head
 trace analyzer, and digest-bound build attestation/receipt; it rehashes those
 inputs and validates 20 role-appropriate endpoint observations plus named trace
-replay. The driver remains an explicit
+replay. The driver must be the exact reviewed file at the requested clean
+Pulp/Forge Git revision, and every reported process identity carries an OS PID
+that must be gone before replay and PASS. The driver remains an explicit
 external prerequisite wherever the current Dawn/AppKit/host seam cannot expose
 native presentation without Vellum-owned work.
