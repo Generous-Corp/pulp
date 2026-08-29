@@ -24,10 +24,12 @@ import io
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).parent / "fetch_v8_for_release.py"
 
@@ -206,6 +208,54 @@ class EmbeddedPairManifest(unittest.TestCase):
                 fetch_v8.validate_embedded_manifest(
                     zf, manifest, manifest["dependencies"][1], "mac-arm64")
 
+    def test_full_fetch_closes_rejected_archive_before_cleanup(self):
+        with _in_tempdir() as td:
+            manifest, pair = _matched_pair_fixture()
+            embedded = {
+                "v8_version": "15.3.76.5", "platform": "mac",
+                "arch": "x86_64",  # Deliberately wrong for mac-arm64.
+                "lib": "lib/libv8.dylib", "shared": True, "sealed": True,
+                "i18n": True, "pair": pair,
+            }
+            zip_path = td / "v8-bad-pair.zip"
+            sha = _make_zip(zip_path, {
+                "include/v8.h": b"h", "lib/libv8.dylib": b"v8",
+                "manifest.json": json.dumps(embedded).encode("utf-8"),
+            })
+            asset = {"url": f"file://{zip_path.as_posix()}", "sha256": sha}
+            manifest["dependencies"][1]["determinism"]["release_assets"] = {
+                "mac-arm64": asset}
+            (td / "tools/deps").mkdir(parents=True)
+            (td / "tools/deps/manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), mock.patch.object(
+                    fetch_v8, "verify_release_metadata",
+                    return_value="2" * 64):
+                rc = fetch_v8.main(
+                    ["fetch_v8_for_release.py", "darwin-arm64"])
+            self.assertEqual(rc, 1)
+            self.assertIn("artifact arch", err.getvalue())
+            self.assertFalse(
+                (td / "v8-release-asset-mac-arm64.zip").exists(),
+                "rejected archive must be closed before Windows-compatible cleanup")
+
+    def test_builder_release_tag_must_resolve_to_pinned_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            ref_path = pathlib.Path(td) / "ref.json"
+            ref_path.write_text(json.dumps({
+                "object": {"type": "commit", "sha": "a" * 40}}),
+                encoding="utf-8")
+            fetch_v8.verify_builder_tag_ref({
+                "v8_builder_tag_ref_url": ref_path.as_uri(),
+                "v8_builder_ref": "a" * 40,
+            })
+            with self.assertRaisesRegex(ValueError, "release tag mismatch"):
+                fetch_v8.verify_builder_tag_ref({
+                    "v8_builder_tag_ref_url": ref_path.as_uri(),
+                    "v8_builder_ref": "b" * 40,
+                })
+
 
 class MatrixMap(unittest.TestCase):
     def test_all_release_platforms_wired(self):
@@ -298,6 +348,19 @@ class HappyPath(unittest.TestCase):
             self.assertTrue((td / "external/v8-build/win-x64/lib/v8.dll").is_file())
             self.assertTrue((td / "external/v8-build/win-x64/lib/v8.dll.lib").is_file())
 
+    def test_windows_full_fetch_is_cp1252_safe(self):
+        with _in_tempdir() as td:
+            zip_path = td / "v8-win.zip"
+            sha = _make_zip(zip_path, {
+                "include/v8.h": b"// v8 header", "lib/v8.dll": b"fake-dll",
+                "lib/v8.dll.lib": b"fake-implib"})
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "win-x64")
+            output = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(
+                    fetch_v8.main(["fetch_v8_for_release.py", "windows-x64"]), 0)
+            output.flush()
+
 
 class IosRuntimeDisabled(unittest.TestCase):
     def test_ios_simulator_no_library_succeeds(self):
@@ -373,6 +436,20 @@ class IdempotencyStamp(unittest.TestCase):
             self.assertEqual(lib.read_bytes(), b"v2-new",
                              "stale V8 must be replaced when the pin changes")
 
+    def test_mutated_materialized_bytes_force_refetch(self):
+        with _in_tempdir() as td:
+            zip_path = td / "v8.zip"
+            sha = _make_zip(zip_path, {
+                "include/v8.h": b"h", "lib/libv8.dylib": b"authentic"})
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+            self.assertEqual(
+                fetch_v8.main(["fetch_v8_for_release.py", "darwin-arm64"]), 0)
+            lib = td / "external/v8-build/mac-arm64/lib/libv8.dylib"
+            lib.write_bytes(b"corrupt")
+            self.assertEqual(
+                fetch_v8.main(["fetch_v8_for_release.py", "darwin-arm64"]), 0)
+            self.assertEqual(lib.read_bytes(), b"authentic")
+
 
 class BakedV8FastPath(unittest.TestCase):
     """PULP_USE_BAKED_V8 + V8_DIR short-circuit (golden-VM fast path).
@@ -408,6 +485,8 @@ class BakedV8FastPath(unittest.TestCase):
             (baked / "mac-arm64" / "include").mkdir(parents=True)
             (baked / "mac-arm64" / "lib" / "libv8.dylib").write_bytes(b"baked")
             (baked / "mac-arm64" / "include" / "v8.h").write_bytes(b"header")
+            fetch_v8.write_generation_receipt(
+                baked / "mac-arm64", "mac-arm64", sha, None)
             (baked / "mac-arm64" / ".v8-asset-sha256").write_text(sha + "\n")
             out = io.StringIO()
             with self._env(PULP_USE_BAKED_V8="1", V8_DIR=str(baked)), \
@@ -454,6 +533,66 @@ class BakedV8FastPath(unittest.TestCase):
             lib = td / "external/v8-build/mac-arm64/lib/libv8.dylib"
             self.assertTrue(lib.is_file())
             self.assertEqual(lib.read_bytes(), b"real")
+
+
+class FindV8ReceiptSelection(unittest.TestCase):
+    def _provider(self, root: pathlib.Path, asset_sha: str, metadata_sha: str) -> None:
+        (root / "include").mkdir(parents=True)
+        (root / "lib").mkdir(parents=True)
+        (root / "include/v8.h").write_bytes(b"header")
+        (root / "lib/libv8.dylib").write_bytes(b"provider")
+        (root / "manifest.json").write_text("{}", encoding="utf-8")
+        fetch_v8.write_generation_receipt(
+            root, "mac-arm64", asset_sha, metadata_sha)
+        (root / ".v8-asset-sha256").write_text(asset_sha + "\n", encoding="utf-8")
+        (root / ".v8-release-metadata-sha256").write_text(
+            metadata_sha + "\n", encoding="utf-8")
+
+    def _configure(self, root: pathlib.Path, baked: pathlib.Path,
+                   asset_sha: str, metadata_sha: str) -> pathlib.Path:
+        pulp_root = root / "pulp-root"
+        manifest = {"dependencies": [{"name": "V8", "determinism": {
+            "pair_kind": "chromium-milestone",
+            "release_metadata_sha256": metadata_sha,
+            "release_assets": {"mac-arm64": {"sha256": asset_sha}},
+        }}]}
+        (pulp_root / "tools/deps").mkdir(parents=True)
+        (pulp_root / "tools/deps/manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8")
+        module = SCRIPT.parent.parent / "cmake" / "FindV8.cmake"
+        consumer = root / "consumer"
+        consumer.mkdir()
+        (consumer / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.24)\n"
+            "project(find_v8_receipt NONE)\n"
+            f"set(PULP_ROOT_DIR \"{pulp_root.as_posix()}\")\n"
+            "set(APPLE TRUE)\nset(IOS FALSE)\nset(ANDROID FALSE)\n"
+            "set(CMAKE_SYSTEM_PROCESSOR arm64)\n"
+            "set(CMAKE_OSX_ARCHITECTURES arm64)\n"
+            f"include(\"{module.as_posix()}\")\n"
+            "if(NOT PULP_V8_FOUND)\nmessage(FATAL_ERROR \"no verified V8\")\nendif()\n"
+            "file(WRITE \"${CMAKE_BINARY_DIR}/selected.txt\" \"${V8_RUNTIME_LIBRARY}\")\n",
+            encoding="utf-8")
+        build = root / "build"
+        env = dict(os.environ)
+        env["V8_DIR"] = str(baked)
+        completed = subprocess.run(
+            ["cmake", "-S", str(consumer), "-B", str(build)], env=env,
+            text=True, capture_output=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        return pathlib.Path((build / "selected.txt").read_text(encoding="utf-8"))
+
+    def test_stale_baked_provider_cannot_outrank_verified_checkout(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            asset_sha, metadata_sha = "a" * 64, "b" * 64
+            checkout = root / "pulp-root/external/v8-build/mac-arm64"
+            baked = root / "baked"
+            self._provider(checkout, asset_sha, metadata_sha)
+            self._provider(baked / "mac-arm64", asset_sha, metadata_sha)
+            (baked / "mac-arm64/lib/libv8.dylib").write_bytes(b"mutated")
+            selected = self._configure(root, baked, asset_sha, metadata_sha)
+            self.assertEqual(selected, checkout / "lib/libv8.dylib")
 
 
 if __name__ == "__main__":

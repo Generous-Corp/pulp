@@ -60,6 +60,11 @@ MATRIX_TO_MANIFEST = {
 }
 
 DEST_ROOT = Path("external/v8-build")
+GENERATION_RECEIPT = ".v8-generation-manifest.json"
+GENERATION_SCHEMA = 1
+GENERATION_METADATA = {
+    GENERATION_RECEIPT, ".v8-asset-sha256", ".v8-release-metadata-sha256",
+}
 
 PAIR_FIELD_MAP = {
     "pair_kind": "pair_kind",
@@ -218,6 +223,74 @@ def required_materialized_paths(root: Path, manifest_key: str,
     return paths
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def generation_files(root: Path) -> list[dict[str, object]]:
+    files = []
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"V8 generation contains unsupported symlink: {path}")
+        if not path.is_file() or path.name in GENERATION_METADATA:
+            continue
+        files.append({
+            "path": path.relative_to(root).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": file_sha256(path),
+        })
+    return files
+
+
+def write_generation_receipt(root: Path, manifest_key: str, asset_sha: str,
+                             metadata_sha: str | None) -> None:
+    payload = {
+        "schema": GENERATION_SCHEMA,
+        "platform": manifest_key,
+        "asset_sha256": asset_sha,
+        "release_metadata_sha256": metadata_sha,
+        "files": generation_files(root),
+    }
+    path = root / GENERATION_RECEIPT
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                         encoding="utf-8")
+    temporary.replace(path)
+
+
+def validate_generation_receipt(root: Path, manifest_key: str, asset_sha: str,
+                                metadata_sha: str | None) -> None:
+    path = root / GENERATION_RECEIPT
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError("V8 generation has no extracted-file receipt") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError("V8 extracted-file receipt is invalid JSON") from exc
+    expected_header = {
+        "schema": GENERATION_SCHEMA,
+        "platform": manifest_key,
+        "asset_sha256": asset_sha,
+        "release_metadata_sha256": metadata_sha,
+    }
+    for field, expected in expected_header.items():
+        if receipt.get(field) != expected:
+            raise ValueError(
+                f"V8 generation receipt {field} mismatch: "
+                f"actual={receipt.get(field)!r}, expected={expected!r}"
+            )
+    recorded = receipt.get("files")
+    if not isinstance(recorded, list) or not recorded:
+        raise ValueError("V8 generation receipt has no extracted-file inventory")
+    actual = generation_files(root)
+    if actual != recorded:
+        raise ValueError("V8 generation extracted-file content/inventory mismatch")
+
+
 def verify_release_metadata(v8_entry: dict, asset_url: str) -> str | None:
     determinism = v8_entry.get("determinism", {})
     if determinism.get("pair_kind") != "chromium-milestone":
@@ -234,6 +307,7 @@ def verify_release_metadata(v8_entry: dict, asset_url: str) -> str | None:
             f"V8 release metadata SHA-256 mismatch: actual={actual_sha}, "
             f"pinned={expected_sha}"
         )
+    verify_builder_tag_ref(determinism)
     try:
         metadata = json.loads(payload)
     except json.JSONDecodeError as exc:
@@ -279,6 +353,33 @@ def verify_release_metadata(v8_entry: dict, asset_url: str) -> str | None:
     if any(row.get("pair") != metadata.get("pair") for row in manifests):
         raise ValueError("V8 release metadata manifest rows do not share one exact pair")
     return actual_sha
+
+
+def verify_builder_tag_ref(determinism: dict) -> None:
+    """Bind the release tag named by the asset URLs to the pinned builder SHA.
+
+    Release metadata binds the V8/Skia/Dawn tuple but does not contain the
+    v8-builder source revision. The Git ref check closes that otherwise-manual
+    provenance edge and fails if the lightweight release tag is moved.
+    """
+    url = determinism.get("v8_builder_tag_ref_url")
+    expected = determinism.get("v8_builder_ref")
+    if not isinstance(url, str) or not isinstance(expected, str):
+        raise ValueError("matched V8 pin has no builder tag-ref URL/SHA")
+    with urllib.request.urlopen(url) as response:
+        payload = response.read()
+    try:
+        ref = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError("V8 builder tag-ref response is invalid JSON") from exc
+    obj = ref.get("object") if isinstance(ref, dict) else None
+    actual = obj.get("sha") if isinstance(obj, dict) else None
+    kind = obj.get("type") if isinstance(obj, dict) else None
+    if kind != "commit" or actual != expected:
+        raise ValueError(
+            f"V8 builder release tag mismatch: type={kind!r}, sha={actual!r}, "
+            f"pinned={expected!r}"
+        )
 
 
 def expected_library_path(manifest_key: str) -> Path | None:
@@ -337,7 +438,7 @@ def main(argv: list[str]) -> int:
     if asset is None:
         print(
             f"INFO: no V8 release asset for matrix={matrix_platform} "
-            f"(manifest key {manifest_key!r}); skipping fetch — this "
+            f"(manifest key {manifest_key!r}); skipping fetch; this "
             f"platform will not have the sealed V8 provider."
         )
         return 0
@@ -386,6 +487,11 @@ def main(argv: list[str]) -> int:
         )
         if baked_ok:
             try:
+                validate_generation_receipt(
+                    baked_root, manifest_key, expected_sha,
+                    v8_entry.get("determinism", {}).get("release_metadata_sha256")
+                        if matched_milestone else None,
+                )
                 if matched_milestone:
                     validate_materialized_manifest(
                         baked_root, manifest, v8_entry, manifest_key)
@@ -400,7 +506,7 @@ def main(argv: list[str]) -> int:
                 return 0
         print(
             "PULP_USE_BAKED_V8 set but baked V8 is missing or stale "
-            "(receipt, provenance, header, or required binary mismatch) — "
+            "(receipt, provenance, header, or required binary mismatch); "
             "re-fetching the pinned asset."
         )
 
@@ -420,6 +526,11 @@ def main(argv: list[str]) -> int:
         if (stamp_path.read_text(encoding="utf-8").strip() == expected_sha
                 and metadata_stamp_ok):
             try:
+                validate_generation_receipt(
+                    dest, manifest_key, expected_sha,
+                    v8_entry.get("determinism", {}).get("release_metadata_sha256")
+                        if matched_milestone else None,
+                )
                 if matched_milestone:
                     validate_materialized_manifest(dest, manifest, v8_entry, manifest_key)
             except ValueError as error:
@@ -437,7 +548,7 @@ def main(argv: list[str]) -> int:
         )
 
     zip_path = Path(f"v8-release-asset-{manifest_key}.zip")
-    print(f"Downloading → {zip_path}")
+    print(f"Downloading -> {zip_path}")
     with urllib.request.urlopen(url) as resp, zip_path.open("wb") as fp:
         while True:
             chunk = resp.read(1024 * 1024)
@@ -473,16 +584,23 @@ def main(argv: list[str]) -> int:
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True, exist_ok=True)
-    print(f"Unpacking → {dest}")
+    print(f"Unpacking -> {dest}")
+    embedded_error = None
     with zipfile.ZipFile(zip_path) as zf:
         try:
             if matched_milestone:
                 validate_embedded_manifest(zf, manifest, v8_entry, manifest_key)
         except ValueError as error:
-            print(f"ERROR: {error}", file=sys.stderr)
-            zip_path.unlink(missing_ok=True)
-            return 1
-        zf.extractall(dest)
+            embedded_error = error
+        else:
+            zf.extractall(dest)
+    if embedded_error is not None:
+        print(f"ERROR: {embedded_error}", file=sys.stderr)
+        # On Windows an open ZipFile prevents deletion. Clean up only after the
+        # context manager has closed the archive so provenance failures remain
+        # deterministic instead of being masked by PermissionError.
+        zip_path.unlink(missing_ok=True)
+        return 1
     zip_path.unlink(missing_ok=True)
 
     # Sanity check: the expected library MUST be present except when the
@@ -500,6 +618,12 @@ def main(argv: list[str]) -> int:
     if missing_payload:
         print(f"ERROR: required V8 payload files missing after unpack: {missing_payload}",
               file=sys.stderr)
+        return 1
+
+    try:
+        write_generation_receipt(dest, manifest_key, expected_sha, metadata_sha)
+    except (OSError, ValueError) as error:
+        print(f"ERROR: could not seal V8 generation: {error}", file=sys.stderr)
         return 1
 
     stamp_path.write_text(expected_sha + "\n", encoding="utf-8")

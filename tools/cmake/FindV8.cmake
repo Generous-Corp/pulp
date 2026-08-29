@@ -28,6 +28,12 @@
 
 include_guard(GLOBAL)
 
+if(DEFINED PULP_ROOT_DIR AND PULP_ROOT_DIR)
+    set(_v8_pulp_root "${PULP_ROOT_DIR}")
+else()
+    get_filename_component(_v8_pulp_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+endif()
+
 # ── Determine the platform key (matches manifest determinism.release_assets) ──
 set(_v8_key "")
 if(ANDROID)
@@ -68,6 +74,119 @@ elseif(UNIX AND NOT APPLE)
     endif()
 endif()
 
+# Load the active asset and aggregate-metadata receipts structurally. Non-legacy
+# candidates (baked golden or checkout fetch) are accepted only when their
+# extracted-file generation receipt re-hashes successfully against these pins.
+set(_v8_expected_asset_sha "")
+set(_v8_expected_metadata_sha "")
+set(_v8_matched_milestone FALSE)
+set(_v8_manifest_path "${_v8_pulp_root}/tools/deps/manifest.json")
+if(_v8_key AND EXISTS "${_v8_manifest_path}")
+    file(READ "${_v8_manifest_path}" _v8_manifest_json)
+    string(JSON _v8_dep_count ERROR_VARIABLE _v8_json_error
+        LENGTH "${_v8_manifest_json}" dependencies)
+    if(_v8_json_error STREQUAL "NOTFOUND" AND _v8_dep_count GREATER 0)
+        math(EXPR _v8_dep_last "${_v8_dep_count} - 1")
+        foreach(_v8_dep_index RANGE 0 ${_v8_dep_last})
+            string(JSON _v8_dep_name ERROR_VARIABLE _v8_name_error
+                GET "${_v8_manifest_json}" dependencies ${_v8_dep_index} name)
+            if(_v8_name_error STREQUAL "NOTFOUND" AND _v8_dep_name STREQUAL "V8")
+                string(JSON _v8_expected_asset_sha ERROR_VARIABLE _v8_asset_error
+                    GET "${_v8_manifest_json}" dependencies ${_v8_dep_index}
+                    determinism release_assets "${_v8_key}" sha256)
+                string(JSON _v8_expected_metadata_sha ERROR_VARIABLE _v8_metadata_error
+                    GET "${_v8_manifest_json}" dependencies ${_v8_dep_index}
+                    determinism release_metadata_sha256)
+                string(JSON _v8_pair_kind ERROR_VARIABLE _v8_pair_kind_error
+                    GET "${_v8_manifest_json}" dependencies ${_v8_dep_index}
+                    determinism pair_kind)
+                if(NOT _v8_asset_error STREQUAL "NOTFOUND")
+                    set(_v8_expected_asset_sha "")
+                endif()
+                if(NOT _v8_metadata_error STREQUAL "NOTFOUND")
+                    set(_v8_expected_metadata_sha "")
+                endif()
+                if(_v8_pair_kind_error STREQUAL "NOTFOUND"
+                   AND _v8_pair_kind STREQUAL "chromium-milestone")
+                    set(_v8_matched_milestone TRUE)
+                endif()
+                break()
+            endif()
+        endforeach()
+    endif()
+endif()
+
+function(_pulp_v8_generation_valid root result)
+    set(_valid FALSE)
+    if(NOT _v8_expected_asset_sha
+       OR (_v8_matched_milestone AND NOT _v8_expected_metadata_sha))
+        set(${result} FALSE PARENT_SCOPE)
+        return()
+    endif()
+    set(_asset_stamp "${root}/.v8-asset-sha256")
+    set(_metadata_stamp "${root}/.v8-release-metadata-sha256")
+    set(_receipt_path "${root}/.v8-generation-manifest.json")
+    if(NOT EXISTS "${_asset_stamp}" OR NOT EXISTS "${_receipt_path}"
+       OR (_v8_matched_milestone AND NOT EXISTS "${_metadata_stamp}"))
+        set(${result} FALSE PARENT_SCOPE)
+        return()
+    endif()
+    file(READ "${_asset_stamp}" _asset_stamp_value)
+    string(STRIP "${_asset_stamp_value}" _asset_stamp_value)
+    if(_v8_matched_milestone)
+        file(READ "${_metadata_stamp}" _metadata_stamp_value)
+        string(STRIP "${_metadata_stamp_value}" _metadata_stamp_value)
+    endif()
+    if(NOT _asset_stamp_value STREQUAL _v8_expected_asset_sha
+       OR (_v8_matched_milestone
+           AND NOT _metadata_stamp_value STREQUAL _v8_expected_metadata_sha))
+        set(${result} FALSE PARENT_SCOPE)
+        return()
+    endif()
+    file(READ "${_receipt_path}" _receipt_json)
+    foreach(_field IN ITEMS schema platform asset_sha256 release_metadata_sha256)
+        string(JSON _receipt_${_field} ERROR_VARIABLE _receipt_error
+            GET "${_receipt_json}" ${_field})
+        if(NOT _receipt_error STREQUAL "NOTFOUND")
+            set(${result} FALSE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+    if(NOT _receipt_schema EQUAL 1 OR NOT _receipt_platform STREQUAL _v8_key
+       OR NOT _receipt_asset_sha256 STREQUAL _v8_expected_asset_sha
+       OR (_v8_matched_milestone
+           AND NOT _receipt_release_metadata_sha256 STREQUAL _v8_expected_metadata_sha))
+        set(${result} FALSE PARENT_SCOPE)
+        return()
+    endif()
+    string(JSON _file_count ERROR_VARIABLE _files_error LENGTH "${_receipt_json}" files)
+    if(NOT _files_error STREQUAL "NOTFOUND" OR _file_count LESS 1)
+        set(${result} FALSE PARENT_SCOPE)
+        return()
+    endif()
+    math(EXPR _file_last "${_file_count} - 1")
+    foreach(_file_index RANGE 0 ${_file_last})
+        string(JSON _relative ERROR_VARIABLE _path_error
+            GET "${_receipt_json}" files ${_file_index} path)
+        string(JSON _expected_size ERROR_VARIABLE _size_error
+            GET "${_receipt_json}" files ${_file_index} size)
+        string(JSON _expected_sha ERROR_VARIABLE _sha_error
+            GET "${_receipt_json}" files ${_file_index} sha256)
+        if(NOT _path_error STREQUAL "NOTFOUND" OR NOT _size_error STREQUAL "NOTFOUND"
+           OR NOT _sha_error STREQUAL "NOTFOUND" OR NOT EXISTS "${root}/${_relative}")
+            set(${result} FALSE PARENT_SCOPE)
+            return()
+        endif()
+        file(SIZE "${root}/${_relative}" _actual_size)
+        file(SHA256 "${root}/${_relative}" _actual_sha)
+        if(NOT _actual_size EQUAL _expected_size OR NOT _actual_sha STREQUAL _expected_sha)
+            set(${result} FALSE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+    set(${result} TRUE PARENT_SCOPE)
+endfunction()
+
 # ── Build the candidate root list ────────────────────────────────────────────
 set(_v8_candidate_roots "")
 
@@ -93,7 +212,7 @@ if(DEFINED V8_DIR AND V8_DIR)
     list(APPEND _v8_candidate_roots "${V8_DIR}")
 endif()
 if(_v8_key)
-    list(APPEND _v8_candidate_roots "${CMAKE_SOURCE_DIR}/external/v8-build/${_v8_key}")
+    list(APPEND _v8_candidate_roots "${_v8_pulp_root}/external/v8-build/${_v8_key}")
 endif()
 
 # ── Resolve include dir + library ────────────────────────────────────────────
@@ -128,6 +247,11 @@ if(_v8_legacy_override)
     endif()
 else()
     foreach(_root IN LISTS _v8_candidate_roots)
+        _pulp_v8_generation_valid("${_root}" _v8_candidate_valid)
+        if(NOT _v8_candidate_valid)
+            message(STATUS "FindV8: rejecting unverified or stale provider ${_root}")
+            continue()
+        endif()
         if(NOT EXISTS "${_root}/include/v8.h")
             continue()
         endif()

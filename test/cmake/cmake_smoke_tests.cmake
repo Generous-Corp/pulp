@@ -328,6 +328,12 @@ add_test(NAME cmake-pulp-minos-consumer-pin
 set_tests_properties(cmake-pulp-minos-consumer-pin PROPERTIES
     LABELS "cmake;min-os"
     TIMEOUT 60)
+add_test(NAME cmake-pulp-minos-linux-arch
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_minos_linux_arch.cmake)
+set_tests_properties(cmake-pulp-minos-linux-arch PROPERTIES
+    LABELS "cmake;min-os;linux"
+    TIMEOUT 60)
 if(APPLE)
     add_test(NAME cmake-pulp-macos-archive-floor
         COMMAND ${CMAKE_COMMAND}

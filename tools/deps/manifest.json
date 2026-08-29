@@ -1129,6 +1129,7 @@
       "determinism": {
         "v8_builder_fork": "https://github.com/danielraffel/v8-builder",
         "v8_builder_ref": "292bd8144a454afa246fc08c4e5416f2cdfe9f10",
+        "v8_builder_tag_ref_url": "https://api.github.com/repos/danielraffel/v8-builder/git/ref/tags/v8-m153-15.3.76.5-26cef0256b0e",
         "pair_kind": "chromium-milestone",
         "milestone": 153,
         "skia_release_tag": "chrome/m153",

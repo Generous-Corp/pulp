@@ -48,6 +48,9 @@ tools/cmake/FindSkia.cmake :: CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64
 # PulpMinOs takes the MAX min-OS floor across requested arches; this is a HOST
 # probe for the unset-CMAKE_OSX_ARCHITECTURES fallback.
 tools/cmake/PulpMinOs.cmake :: _host_machine MATCHES "arm64|aarch64"
+# Linux min-OS selection maps the resolved target/host architecture to either
+# linux-arm64 or linux-x64 and deliberately handles both branches.
+tools/cmake/PulpMinOs.cmake :: _linux_arch MATCHES "^(aarch64|arm64)$"
 
 # Rack publishes thin arm64 and x86_64 plugin packages. This branch maps the
 # target architecture selected above from CMAKE_OSX_ARCHITECTURES to its slug.
