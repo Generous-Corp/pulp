@@ -16,9 +16,9 @@ It does not claim that the saved fixture used this machine's GPU.
 python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --cli /installed/prefix/bin/pulp \
   --mcp /installed/prefix/bin/pulp-mcp \
-  --trace test/fixtures/perfetto-gpu/healthy.pftrace \
+  --trace test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace \
   --trace-processor "$HOME/.pulp/tools/trace-processor/v57.2/mac-arm64/trace_processor_shell" \
-  --question gpu-health \
+  --question gpu-startup \
   --source-revision "$(git rev-parse HEAD)" \
   --mcp-source-revision "$(git rev-parse HEAD)" \
   --a2t-implementation-revision "$A2T_REVISION" \
@@ -27,7 +27,8 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --plan-revision "$PLAN_REVISION" \
   --plan-sha256 "$PLAN_SHA256" \
   --planning-repository "$PWD/planning" \
-  --prior-human-review-receipt /tmp/prior-accepted-gpu-startup-a2t.json \
+  --prior-human-review-receipt \
+    docs/validation/gpu-trace-overhead/m3-a2t-offline-analysis-20260828.json \
   --output /tmp/gpu-trace-overhead.json
 ```
 
