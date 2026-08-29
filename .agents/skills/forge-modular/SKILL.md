@@ -366,6 +366,29 @@ Widen only with `test_idioms.py` watching: 54 idioms, 114 negative controls and
 the textbook fixtures. The corpus has already caught a "fix" that broke
 Fundamental's kick.
 
+### Bind physical feasibility before offering a module
+
+`intent_module_plan()` is a pre-model feasibility solver, so the application's
+module-source setting must reach it as data. Under `prefer_existing`, an
+installed port-complete library module outranks `ForgeModular`; an explicitly
+named maker still wins, and the generated module remains valid when it is the
+only exact jack-map fit. Do not implement "Library first" as prompt wording:
+the model can ignore prose, while filtering/ranking the concrete candidate set
+is deterministic and testable. Maker detection must also distinguish a
+positive request from local negation (`avoid Forge Modular`, `anything but
+ForgeModular`) and recognize compact Rack slugs such as `ForgeModular` when the
+user writes the display form `Forge Modular`.
+
+Topology presence alone does not prove that several edges meet at the same
+physical module. Use `same_role_instance_groups` when a technique requires one
+specific mixer, delay, filter, or other role instance to participate in all
+named requirements. The pre-plan must preserve repeated incoming lanes on a
+single bound instance because one Rack input accepts one cable; deduplicating
+two required `audio_in` lanes can advertise a one-input module for a two-input
+sum it cannot build. Every same-instance group needs a
+`split_role_instance` negative control, or the checker has never proved it can
+reject the look-alike graph where each edge is present on a different module.
+
 ## The module pack builds green and fails at load
 
 A Rack plugin is a shared **MODULE**, linked with `-undefined dynamic_lookup`.

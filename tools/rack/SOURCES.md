@@ -7,7 +7,7 @@ not anybody's property, and the descriptions here are our own words --
 nothing is transcribed from any of the works below. This page records
 what informed the work, and is honest about how much.
 
-Of **97** idioms: **14** were written from, or checked against, a text we hold and quote; **83** were written from general knowledge of the practice; **0** were reasoned out from adjacent technique. That first number is the only one under which a work can honestly be listed as a source, and it is the smaller number on purpose.
+Of **98** idioms: **14** were written from, or checked against, a text we hold and quote; **84** were written from general knowledge of the practice; **0** were reasoned out from adjacent technique. That first number is the only one under which a work can honestly be listed as a source, and it is the smaller number on purpose.
 
 ## Derived from
 
@@ -46,7 +46,7 @@ acknowledgement, not citation.
 - Todd Barton's Krell patch, after Louis and Bebe Barron — 1 idiom
 - Tom Whitwell / Music Thing Modular — the Turing Machine — 1 idiom
 
-A further **32** idioms record standard practice with
+A further **33** idioms record standard practice with
 no particular work behind them: the things every synthesist knows,
 which belong to nobody.
 

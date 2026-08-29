@@ -2846,9 +2846,121 @@ def render_inventory(
     return "\n".join(out)
 
 
+def _affirmatively_names_maker(prompt: str, maker: str) -> bool:
+    """Whether a maker spelling is requested rather than locally negated."""
+    display = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", maker)
+    words = [re.escape(word) for word in re.findall(r"[A-Za-z0-9]+", display)]
+    if not words:
+        return False
+    pattern = re.compile(r"\b" + r"[\s_-]*".join(words) + r"\b", re.I)
+    for match in pattern.finditer(prompt):
+        # Limit negation to the sourcing phrase that immediately governs the
+        # maker.  A broad word window made an unrelated request such as
+        # "no delay, use Forge Modular" negate the later explicit choice.
+        clause = re.split(r"[,.;!?]", prompt[:match.start()])[-1]
+        conjunction_exclusion = False
+        conjunction = re.split(r"\b(but|and)\b", clause, flags=re.I)
+        if len(conjunction) >= 3:
+            left = conjunction[-3].rstrip()
+            word = conjunction[-2].lower()
+            right = conjunction[-1]
+            # "anything but Maker" is one exclusion phrase; ordinary
+            # contrastive conjunctions start a new local sourcing phrase. A
+            # sourcing verb after "but" makes that contrast explicit even if
+            # the prior clause itself says "all modules".
+            sourcing_predicate = re.search(
+                r"\b(?:use|include|select|choose|prefer)\b", right, re.I)
+            # Distinguish a new finite/imperative sourcing clause from a
+            # sourcing verb embedded in the noun phrase excluded by "all
+            # but".  Do not enumerate subjects or adverbs: "the patch should
+            # use", "I want to use", and "definitely use" all start new
+            # clauses.  Relative clauses and *ungoverned* participial phrases
+            # stay attached to the excluded noun ("patches designed to use",
+            # "a setup allowing you to use", "modules that include").
+            source_prefix = (right[:sourcing_predicate.start()]
+                             if sourcing_predicate else "")
+            relative_prefix = re.search(
+                r"\b(?:that|which|who|whose|where)\b", source_prefix, re.I)
+            finite_auxiliary = re.search(
+                r"\b(?:am|is|are|was|were|be|been|being|do|does|did|has|"
+                r"have|had|can|could|may|might|must|shall|should|will|would)\b",
+                source_prefix, re.I)
+            participle = re.search(
+                r"\b(?:[A-Za-z]+(?:ing|ed)|made|built|meant)\b",
+                source_prefix, re.I)
+            # A later auxiliary starts the main sourcing predicate unless a
+            # subordinator between it and the participle keeps it nested. Thus
+            # "the generated patch should use" is a main clause, while
+            # "modules designed so they can use" remains an excluded phrase.
+            auxiliary_governs_source = bool(finite_auxiliary)
+            if participle and finite_auxiliary and \
+                    finite_auxiliary.start() > participle.start():
+                between = source_prefix[participle.end():
+                                        finite_auxiliary.start()]
+                auxiliary_governs_source = not re.search(
+                    r"\b(?:so|that|which|who|whose|where)\b", between, re.I)
+            ungoverned_participle = bool(
+                participle and not auxiliary_governs_source)
+            starts_sourcing = bool(
+                sourcing_predicate and not relative_prefix and
+                not ungoverned_participle)
+            all_but = re.search(
+                r"\b(?:anything|everything|all)(?:\W+\w+){0,4}\s*$",
+                left, re.I)
+            if word == "but" and all_but and not starts_sourcing:
+                conjunction_exclusion = True
+            else:
+                clause = right
+        negated = conjunction_exclusion or any(
+            re.search(expression, clause, re.I) for expression in (
+            r"\b(?:do\s+not|don't|never|not)\s+"
+            r"(?:(?:want|prefer)(?:\W+\w+){0,3}\W+)?"
+            r"(?:use|include|select|choose|prefer)?"
+            r"(?:\W+\w+){0,4}\W*$",
+            r"\binstead\W+of\W*$",
+            r"\bnot\W+from\W*$",
+            r"\b(?:with|using)\W+no(?:\W+\w+){0,4}\W+from\W*$",
+            r"\bprefer(?:\W+\w+){1,6}\W+over\W*$",
+            r"\bwithout(?:\W+(?:using|including|any|the|a|an|custom|"
+            r"generated|modules?)){0,4}\W*$",
+            r"\b(?:avoid|exclude|excluding)(?:\W+(?:using|including|the|a|"
+            r"an|custom|generated|modules?)){0,4}\W*$",
+            r"\bno(?:\W+(?:the|a|an|custom|generated|modules?)){0,3}\W*$",
+            r"\bnot\W*$",
+            r"\bexcept\W*$",
+            r"\b(?:anything|everything|all)(?:\W+\w+){0,4}"
+            r"\W+(?:but|except)\W*$",
+            r"\b(?:anything|everything|all)\W+other\W+than\W*$",
+        ))
+        if negated:
+            continue
+        suffix = prompt[match.end():]
+        post_negated = any(re.match(expression, suffix, re.I)
+                           for expression in (
+            r"\s*(?:is|are)\s+not\s+(?:allowed|permitted|used|included|"
+            r"selected|chosen)\b",
+            r"\s*(?:isn't|aren't)\s+(?:allowed|permitted|used|included|"
+            r"selected|chosen)\b",
+            r"\s*(?:should|must|may|can)\s+not\s+(?:be\s+)?(?:allowed|"
+            r"permitted|used|included|selected|chosen)\b",
+            r"\s*(?:cannot|can't)\s+(?:be\s+)?(?:allowed|permitted|used|"
+            r"included|selected|chosen)\b",
+            r"\s*(?:should|must|may)\s+be\s+(?:avoided|excluded|forbidden|"
+            r"disallowed)\b",
+            r"\s+(?:is\s+)?(?:forbidden|excluded|disallowed)\b",
+            r"\s*\?\s*(?:no|not\s+allowed)\b",
+            r"\s*[- ]free\b",
+        ))
+        if post_negated:
+            continue
+        return True
+    return False
+
+
 def intent_module_plan(prompt: str, inv: dict, idioms: dict | None = None,
                        selected: set[tuple[str, str]] | None = None,
-                       allowed: set[tuple[str, str]] | None = None) -> str:
+                       allowed: set[tuple[str, str]] | None = None,
+                       module_source: str = "balanced") -> str:
     """Port-complete installed choices for a deterministically claimed idiom.
 
     Tags answer what a module broadly is; they do not prove it has every jack
@@ -2875,12 +2987,30 @@ def intent_module_plan(prompt: str, inv: dict, idioms: dict | None = None,
         if target and target != "any":
             needs.setdefault(target, []).append(("in", req.get("to_port",
                                                                  "any_in")))
+    raw_needs = {role: list(required) for role, required in needs.items()}
     # Ordinary outputs may fan out, so repeating the same role in topology is
     # one required jack unless the idiom explicitly says the lanes are
     # distinct. Inputs may be spread across multiple instances of a role, and
     # this small pre-plan does not pretend to solve instance assignment.
     needs = {role: list(dict.fromkeys(required))
              for role, required in needs.items()}
+    # Rack inputs accept one cable. When the idiom binds a role to exactly one
+    # instance, repeated incoming topology edges therefore require distinct
+    # physical input jacks on that instance. Without this, a one-input mixer
+    # can be advertised for a dry-plus-feedback sum it cannot build.
+    exact_counts = idiom.get("exactly") or {}
+    bound_roles = {group.get("role")
+                   for group in idiom.get("same_role_instance_groups") or []}
+    for role, required in raw_needs.items():
+        if exact_counts.get(role) != 1 and role not in bound_roles:
+            continue
+        counts: dict[tuple[str, str], int] = {}
+        for side, port in required:
+            if side == "in":
+                counts[(side, port)] = counts.get((side, port), 0) + 1
+        for lane, count in counts.items():
+            present = needs.setdefault(role, []).count(lane)
+            needs[role].extend([lane] * max(0, count - present))
     for group in idiom.get("distinct_source_lanes") or []:
         counts: dict[tuple[str, str, str], int] = {}
         for requirement in group.get("requirements") or []:
@@ -3020,9 +3150,30 @@ def intent_module_plan(prompt: str, inv: dict, idioms: dict | None = None,
                         isinstance(param.get("max"), (int, float)) and
                         isinstance(param.get("default"), (int, float))
                         for param in (module.get("params") or []))
-                    named = plugin.lower() in prompt.lower()
+                    # Rack slugs omit separators that product display names
+                    # retain ("ForgeModular" versus "Forge Modular"). A
+                    # locally negated mention is not a sourcing preference.
+                    named = _affirmatively_names_maker(prompt, plugin)
                     choices.append((not named, -exact_params, plugin, model))
-        choices.sort()
+        # ForgeModular is the generated user pack.  The app's module-source
+        # setting is a product contract, not decorative prompt prose: under
+        # Library first, a port-complete installed library choice must keep a
+        # metadata-richer generated module out of this six-item shortlist.
+        # Explicitly naming ForgeModular still wins, and a generated module
+        # remains available when it is the only exact jack-map fit.
+        if module_source == "prefer_existing" and \
+                not any(not choice[0] and choice[2] == "ForgeModular"
+                        for choice in choices):
+            library_choices = [choice for choice in choices
+                               if choice[2] != "ForgeModular"]
+            if library_choices:
+                choices = library_choices
+        if module_source == "prefer_generated":
+            choices.sort(key=lambda choice: (
+                choice[0], choice[2] != "ForgeModular", choice[1],
+                choice[2], choice[3]))
+        else:
+            choices.sort()
         choices = choices[:6]
         if selected is not None and read.primary.slug != "acid-voice":
             selected.update((plugin, model)
@@ -7247,7 +7398,8 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
     if module_idiom_contract is None:
         module_plan = intent_module_plan(
             prompt, inv, idioms, selected,
-            allowed=allowed_modules)
+            allowed=allowed_modules,
+            module_source=settings().get("module_source", "prefer_existing"))
     else:
         module_plan = (
             "\n---\n\n## Verified module capability for this structure\n\n"

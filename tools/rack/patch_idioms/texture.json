@@ -179,6 +179,146 @@
       "provenance": "canon"
     },
     {
+      "slug": "dub-feedback-texture",
+      "names": [
+        "dub feedback texture",
+        "dub feedback delay",
+        "dub inspired feedback texture",
+        "dub-inspired feedback texture"
+      ],
+      "is": "A delay return darkened by a filter before it is mixed back into the delay input, producing controlled dub-style repeats rather than a plain delay or an unrelated feedback loop.",
+      "sounds_right_when": "successive repeats accumulate while losing brightness, with the dry source still intelligible beneath the return.",
+      "source": "The filtered auxiliary-send feedback topology used by dub mixers and tape-delay performance",
+      "at_least": {
+        "audio_oscillator": 1,
+        "delay": 1,
+        "filter": 1,
+        "output": 1
+      },
+      "topology": [
+        {
+          "id": "dub-source",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "a dry source has to enter the feedback sum beneath the returning repeats"
+        },
+        {
+          "id": "dub-send",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "delay",
+          "to_port": "audio_in",
+          "describe": "the source and filtered return have to feed the delay"
+        },
+        {
+          "id": "dub-darkening",
+          "from_module": "delay",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "the delay return has to pass through the darkening filter"
+        },
+        {
+          "id": "dub-return",
+          "from_module": "filter",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the darkened repeat has to return to the feedback sum"
+        },
+        {
+          "id": "dub-output",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "output",
+          "to_port": "audio_in",
+          "describe": "the feedback sum has to reach the audible output, so the listener hears the repeats rather than only a bypassed dry source"
+        }
+      ],
+      "distinct_source_lanes": [
+        {
+          "requirements": ["dub-source", "dub-return"],
+          "describe": "the dry source and the filtered feedback return must be distinct signals"
+        }
+      ],
+      "same_role_instance_groups": [
+        {
+          "role": "mixer",
+          "requirements": ["dub-source", "dub-send", "dub-return", "dub-output"],
+          "describe": "the dry source, filtered return, delay send, and audible output must meet at the same feedback mixer"
+        },
+        {
+          "role": "delay",
+          "requirements": ["dub-send", "dub-darkening"],
+          "describe": "the delay receiving the feedback send must be the delay whose return is darkened"
+        },
+        {
+          "role": "filter",
+          "requirements": ["dub-darkening", "dub-return"],
+          "describe": "the filter darkening the delay return must be the filter returned to the feedback sum"
+        }
+      ],
+      "behaviour": {
+        "sustained": true
+      },
+      "common_mistakes": [
+        {
+          "id": "dub-no-source",
+          "do": "cut",
+          "requirement": "dub-source",
+          "message": "nothing feeds the dub send"
+        },
+        {
+          "id": "dub-open-loop",
+          "do": "cut",
+          "requirement": "dub-send",
+          "message": "the filtered return is not sent back into the delay"
+        },
+        {
+          "id": "dub-filter-bypassed",
+          "do": "cut",
+          "requirement": "dub-darkening",
+          "message": "the delay return bypasses the filter"
+        },
+        {
+          "id": "dub-return-missing",
+          "do": "cut",
+          "requirement": "dub-return",
+          "message": "the darkened repeat never returns to the feedback sum"
+        },
+        {
+          "id": "dub-split-mixer",
+          "do": "split_role_instance",
+          "requirement": "dub-output",
+          "module": "mixer",
+          "message": "the audible output comes from a different mixer than the feedback sum"
+        },
+        {
+          "id": "dub-split-delay",
+          "do": "split_role_instance",
+          "requirement": "dub-darkening",
+          "module": "delay",
+          "message": "the darkened return comes from a different delay than the feedback send"
+        },
+        {
+          "id": "dub-split-filter",
+          "do": "split_role_instance",
+          "requirement": "dub-return",
+          "module": "filter",
+          "message": "the filter returned to the mixer is not the filter darkening the delay"
+        },
+        {
+          "id": "dub-output-bypassed",
+          "do": "cut",
+          "requirement": "dub-output",
+          "message": "the feedback sum never reaches the audible output"
+        }
+      ],
+      "provenance": "canon"
+    },
+    {
       "slug": "fixed-modulator-am",
       "family": "texture",
       "names": [
