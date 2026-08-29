@@ -158,3 +158,5 @@
         COMMAND $<TARGET_FILE:pulp-scene3d-bake-preflight>
             "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/scene3d/sidecars/native-gap.pulp3d.json")
     set_tests_properties(scene3d-bake-preflight-native-gap-warning PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "bake_readiness=native_gaps.*export_blocked=false.*native_runtime_has_gaps=true.*native_runtime_gap: TransformAnimation")
