@@ -192,7 +192,11 @@ inline view::WindowOptions make_standalone_window_options(
 
 inline void add_standalone_settings_menu_command(
     view::WindowOptions& options, StandaloneEditorChrome& chrome) {
-    if (!chrome.settings_panel()) return;
+    // The built-in panel is not the only settings owner. A standalone editor
+    // may deliberately omit Pulp's tab chrome and route the standard settings
+    // chord to its own in-editor panel. Project that route into the native app
+    // menu too; plugin hosts never call this standalone-only helper.
+    if (!chrome.settings_panel() && !chrome.window_root().on_global_key) return;
     options.menu_commands.push_back({
         .menu = {},
         .title = "Settings…",
