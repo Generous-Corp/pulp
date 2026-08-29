@@ -1275,12 +1275,12 @@ commands:
             required: false
             description: Exact broker-owned live instance ID; omission preserves fail-closed unambiguous selection
       - name: gpu-startup
-        summary: Rank startup GPU/render contributors with checked-in PerfettoSQL. Returns unverified until A3 defines a measured budget.
+        summary: Rank cold/setup separately from steady-state GPU/render contributors with checked-in PerfettoSQL, exposing scheduler-backed CPU versus non-running time when available and refusing to infer blocking otherwise. Returns unverified until A3 defines a measured budget.
         args:
           - name: --trace
             kind: option
             required: true
-            description: Analyze an already-flushed FILE.pftrace; missing or incomplete GPU categories return unavailable
+            description: Analyze an already-flushed FILE.pftrace; empty, lost, not-flushed, incomplete, or missing GPU evidence returns unavailable
       - name: gpu-health
         summary: Explain GPU health transitions and device loss with typed pass/fail/unavailable output.
         args:

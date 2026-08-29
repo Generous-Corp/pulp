@@ -10,6 +10,13 @@ views an expert can inspect in Perfetto and expose a bounded evidence ID for
 correlation. An `unavailable` result means the category/evidence is absent or
 incomplete; it is never evidence of a healthy GPU path.
 
+For `gpu-startup`, compare `cold_start_contributors` with
+`steady_state_contributors` rather than mixing initialization into recurring
+cost. A contributor's `cpu_running_ns`, `non_running_ns`, and
+`execution_state` are authoritative only when
+`scheduler_evidence_available:true`. If it is false, the trace proves wall time
+but not blocking; follow the emitted platform-harness action.
+
 ## CPU submit time vs real GPU time — the distinction that matters
 
 Most plugin frameworks only see **CPU submit time** — how long the CPU spent

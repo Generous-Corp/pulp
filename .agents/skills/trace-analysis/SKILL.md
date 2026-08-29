@@ -88,10 +88,14 @@ fails closed. When selecting an exact broker-owned live instance, pass the same
 `--instance ID` to both `start` and `stop`; omission retains fail-closed
 unambiguous selection.
 
-**Before trusting the capture**, confirm it is not silently empty/truncated
-(ring overflow → empty trace): `SELECT DISTINCT category FROM slice`. No rows,
-or missing the category you asked for, means re-capture with a larger
-`--ring-mb` or a shorter window — not "nothing was slow."
+**Before trusting the capture**, confirm it is not silently empty/truncated.
+The three named GPU questions inspect processor-reported truncation,
+whole-trace slice count, unfinished slices, and positive Perfetto
+data-loss/no-flush stats automatically. For
+free-form analysis, query both `SELECT DISTINCT category FROM slice` and
+`SELECT name,value FROM stats WHERE severity='data_loss' AND value>0`. No rows,
+or a missing requested category, means re-capture with a larger `--ring-mb` or
+a shorter window—not "nothing was slow."
 
 When you already have a flushed `.pftrace` and no live session (the common case
 for a trace a user handed you), run SQL against the file directly — no inspector
@@ -115,7 +119,11 @@ URL to paste; `--json` for agents).
 For the bounded GPU path, start with one named question. `gpu-startup` is
 deliberately `unverified` until A3 defines a measured budget; `gpu-health` and
 `gpu-probe` return pass/fail. Missing categories, unfinished slices, or invalid
-probe evidence return `unavailable` rather than a misleading pass.
+probe evidence return `unavailable` rather than a misleading pass. Read
+`cold_start_contributors` separately from `steady_state_contributors`. Treat
+`execution_state` as CPU/wait evidence only when
+`scheduler_evidence_available:true`; `unavailable` means the wall-clock span
+does not prove blocking, so use the emitted platform-harness action.
 
 ```bash
 pulp trace gpu-startup --trace /tmp/pulp.pftrace --json

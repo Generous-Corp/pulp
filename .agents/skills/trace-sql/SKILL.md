@@ -106,9 +106,12 @@ hand each time. Each `.sql` file carries a header comment explaining its shape.
 **Closed GPU cohort boundary.** The named GPU analyses do not currently accept
 an evidence-ID selector, so the SQL must not flatten unrelated runs. Startup
 selects the earliest valid render-frame lifecycle carrying `frame_index = 0`
-and returns only that lifecycle's unindexed setup plus frame-zero rows; the
-single-ID fallback exists only for legacy/incomplete traces with no indexed
-render frame. Health and probe inspect their full candidate set before the CLI's
+and returns that lifecycle's unindexed/frame-zero cold work separately from its
+later indexed steady-state rows; the single-ID fallback exists only for legacy
+traces with no indexed render frame. Startup joins `slice → thread_track` on
+the stable `utid` and intersects overlapping `thread_state` rows when scheduler
+evidence exists; absent scheduler rows remain NULL rather than becoming a
+blocking claim. Health and probe inspect their full candidate set before the CLI's
 bounded contributor query and return no rows unless every candidate carries
 the same valid 32-lowercase-hex evidence ID. The closed analyzer interprets an
 empty mixed-ID result as unavailable. A future multi-run UX should add an

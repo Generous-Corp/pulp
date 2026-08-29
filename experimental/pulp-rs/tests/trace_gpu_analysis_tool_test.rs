@@ -110,6 +110,10 @@ fn incomplete_and_wrong_category_fixtures_are_unavailable() {
     let incomplete = run("gpu-startup", "incomplete.pftrace", 2);
     assert_eq!(incomplete["verdict"], "unavailable");
     assert_eq!(incomplete["unavailable_reason"], "incomplete-capture");
+    assert_eq!(
+        incomplete["next_actions"][0]["code"],
+        "complete-and-flush-capture"
+    );
 
     let wrong = run("gpu-health", "wrong-category.pftrace", 2);
     assert_eq!(wrong["verdict"], "unavailable");
@@ -199,15 +203,18 @@ fn device_loss_names_the_recreation_fix() {
 }
 
 #[test]
-fn acquire_present_blocking_names_surface_blocking() {
-    let result = run("gpu-startup", "acquire-present-blocking.pftrace", 2);
+fn acquire_present_without_scheduler_data_refuses_to_infer_blocking() {
+    let result = run("gpu-startup", "acquire-present-wall-time-only.pftrace", 2);
     assert_eq!(result["verdict"], "unverified");
     assert_eq!(result["capture_complete"], true);
     assert_eq!(result["dominant_stage"], "acquire");
     assert_eq!(
         result["next_actions"][0]["code"],
-        "inspect-surface-blocking"
+        "capture-scheduler-evidence"
     );
+    assert_eq!(result["scheduler_evidence_available"], false);
+    assert_eq!(result["contributors"][0]["execution_state"], "unavailable");
+    assert!(result["contributors"][0].get("cpu_running_ns").is_none());
     assert_eq!(
         result["evidence_ids"][0],
         "33333333333333333333333333333333"
@@ -270,10 +277,58 @@ fn startup_uses_only_the_earliest_first_visible_lifecycle() {
     assert_eq!(result["dominant_stage"], "pipeline-prepare");
     assert_eq!(result["evidence_ids"], serde_json::json!([first_evidence]));
     let contributors = result["contributors"].as_array().unwrap();
-    assert_eq!(contributors.len(), 3);
+    assert_eq!(contributors.len(), 4);
     assert!(contributors
         .iter()
-        .all(|row| row["evidence_id"] == first_evidence && row["frame_index"] == 0));
+        .all(|row| row["evidence_id"] == first_evidence));
+    assert_eq!(
+        result["cold_start_contributors"].as_array().unwrap().len(),
+        3
+    );
+    assert_eq!(
+        result["steady_state_contributors"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        result["steady_state_contributors"][0]["timing_phase"],
+        "steady"
+    );
+}
+
+#[test]
+fn zero_byte_never_flushed_capture_is_typed_unavailable() {
+    let trace = tempfile::NamedTempFile::new().expect("empty capture");
+    let result = run_path("gpu-startup", trace.path(), 2);
+    assert_eq!(result["verdict"], "unavailable");
+    assert_eq!(result["capture_complete"], false);
+    assert_eq!(
+        result["unavailable_reason"],
+        "empty-or-never-flushed-capture"
+    );
+    assert_eq!(result["capture_integrity"]["slice_count"], 0);
+    assert_eq!(
+        result["next_actions"][0]["code"],
+        "record-and-flush-capture"
+    );
+}
+
+#[test]
+fn processor_reported_truncated_capture_is_typed_unavailable() {
+    let result = run("gpu-startup", "truncated-json.pftrace", 2);
+    assert_eq!(result["verdict"], "unavailable");
+    assert_eq!(result["capture_complete"], false);
+    assert_eq!(result["unavailable_reason"], "truncated-capture");
+    assert_eq!(
+        result["capture_integrity"]["processor_reported_truncated"],
+        true
+    );
+    assert_eq!(
+        result["next_actions"][0]["code"],
+        "recapture-complete-artifact"
+    );
 }
 
 #[test]

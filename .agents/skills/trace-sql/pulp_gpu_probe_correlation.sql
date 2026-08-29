@@ -1,7 +1,9 @@
 -- Correlate bounded numeric-probe work by its stable evidence identifier. The
 -- closed view returns rows only when every candidate has the same exact, valid
 -- evidence ID; mixed or uncorrelated traces fail closed as an empty result.
--- Filesystem paths, shader source, and adapter marketing strings are excluded.
+-- Incomplete rows are excluded here and detected across the whole trace by the
+-- CLI capture-integrity query. Filesystem paths, shader source, and adapter
+-- marketing strings are excluded.
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_probe_correlation AS
 WITH candidates AS (
   SELECT
@@ -28,7 +30,7 @@ SELECT
     WHEN name GLOB 'gpu_submit*' THEN 'submit'
     ELSE 'probe'
   END AS stage,
-  CASE WHEN dur = -1 THEN 0 ELSE dur END AS duration_ns,
+  dur AS duration_ns,
   evidence_id,
   COALESCE(
     CAST(EXTRACT_ARG(arg_set_id, 'debug.diagnostic_code') AS TEXT),
@@ -42,10 +44,14 @@ SELECT
   CAST(COALESCE(
     EXTRACT_ARG(arg_set_id, 'debug.frame_index'),
     EXTRACT_ARG(arg_set_id, 'args.debug.frame_index')) AS INT) AS frame_index,
-  dur = -1 AS is_incomplete,
+  'not-applicable' AS timing_phase,
+  NULL AS cpu_running_ns,
+  0 AS has_scheduler_evidence,
+  0 AS is_incomplete,
   COALESCE(
     CAST(EXTRACT_ARG(arg_set_id, 'debug.health_state') AS TEXT),
     CAST(EXTRACT_ARG(arg_set_id, 'args.debug.health_state') AS TEXT), '')
     IN ('failed', 'lost') AS is_failure
 FROM candidates
-JOIN selected_evidence USING (evidence_id);
+JOIN selected_evidence USING (evidence_id)
+WHERE dur >= 0;

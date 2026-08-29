@@ -1467,7 +1467,7 @@ Subcommands:
 | `start [--instance ID] [--categories LIST] [--ring-mb 1..512]` | canonical `dev.pulp.trace/session-control@1` | Begin a broker-authorized session recording selected span categories into a bounded in-process ring. The host owns the flushed trace destination. |
 | `stop [--instance ID]` | canonical `dev.pulp.trace/session-control@1` | Flush the broker-authorized session and print the `.pftrace` path. |
 | `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format table` is the only explicit format. |
-| `gpu-startup --trace FILE.pftrace` | checked-in `pulp_gpu_startup_breakdown` view | Rank startup contributors. The verdict is `unverified` until A3 defines a measured budget. |
+| `gpu-startup --trace FILE.pftrace` | checked-in `pulp_gpu_startup_breakdown` view | Rank cold/setup separately from steady-state contributors. Scheduler-backed captures distinguish CPU-running from non-running wall time; the verdict remains `unverified` until A3 defines a measured budget. |
 | `gpu-health --trace FILE.pftrace` | checked-in `pulp_gpu_health_transitions` view | Return typed pass/fail health and device-loss evidence. |
 | `gpu-probe --trace FILE.pftrace` | checked-in `pulp_gpu_probe_correlation` view | Correlate bounded probe/readback evidence and return typed pass/fail. |
 | `doctor` | client-side | Report offline `trace_processor` readiness. |
@@ -1476,11 +1476,18 @@ Subcommands:
 
 Named GPU analysis emits `pulp.trace-gpu-analysis.v1`: a verdict, capture
 completeness, ranked contributors, stable evidence IDs, concrete next actions,
-and a Perfetto UI open command/search terms. `observed_categories` is derived
+and a Perfetto UI open command/search terms. Startup exposes separate
+`cold_start_contributors` and `steady_state_contributors`; contributor CPU and
+non-running durations/classification appear only when the capture contains
+overlapping scheduler `thread_state` evidence. `capture_integrity` records
+whole-trace slice, unfinished-slice, data-loss, and no-flush counts.
+`observed_categories` is derived
 independently from the parsed trace, never supplied by a scenario adapter, so
 acceptance tools can reject a capture that omitted required categories.
-Missing categories, unfinished slices, and invalid probe correlation return
-`unavailable` with exit 2; they do not silently pass. `gpu-health` and
+Empty/never-flushed files, processor-reported truncation, positive data-loss/no-flush stats, missing
+categories, unfinished slices, and invalid probe correlation return
+`unavailable` with exit 2; they do not silently pass. Long acquire/present wall
+time without scheduler evidence is not labeled blocking. `gpu-health` and
 `gpu-probe` use exit 0/1 for pass/fail.
 
 The span category taxonomy is `dsp`, `dsp.node`, `render`, `layout`, `canvas`,

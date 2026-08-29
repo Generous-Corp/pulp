@@ -138,7 +138,15 @@ std::string handle_trace_analyze(const std::string& params_json) {
         !result.hasObjectMember("question") || !result["question"].isString() ||
         !result.hasObjectMember("verdict") || !result["verdict"].isString() ||
         !result.hasObjectMember("capture_complete") ||
-        !result["capture_complete"].isBool())
+        !result["capture_complete"].isBool() ||
+        !result.hasObjectMember("capture_integrity") ||
+        !result["capture_integrity"].isObject() ||
+        !result.hasObjectMember("scheduler_evidence_available") ||
+        !result["scheduler_evidence_available"].isBool() ||
+        !result.hasObjectMember("cold_start_contributors") ||
+        !result["cold_start_contributors"].isArray() ||
+        !result.hasObjectMember("steady_state_contributors") ||
+        !result["steady_state_contributors"].isArray())
         return local_error("malformed-cli-output",
                            "pulp trace returned incomplete typed JSON", diagnostic_output);
     const auto schema = std::string(result["schema"].getString());

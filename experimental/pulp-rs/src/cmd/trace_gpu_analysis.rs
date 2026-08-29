@@ -12,8 +12,10 @@ use crate::error::{CliError, Result};
 
 const ROW_MARKER: &str = "__PULP_GPU_ROW__";
 const CATEGORY_MARKER: &str = "__PULP_GPU_CATEGORY__";
-const ROW_QUERY: &str = "SELECT '__PULP_GPU_ROW__' || hex(stage) || '|' || duration_ns || '|' || hex(COALESCE(evidence_id,'')) || '|' || hex(COALESCE(diagnostic_code,'')) || '|' || hex(COALESCE(health_state,'')) || '|' || COALESCE(sequence,-1) || '|' || COALESCE(frame_index,-1) || '|' || is_incomplete || '|' || is_failure FROM (SELECT * FROM {view} ORDER BY is_incomplete DESC, is_failure DESC, CASE health_state WHEN 'failed' THEN 4 WHEN 'lost' THEN 4 WHEN 'unavailable' THEN 3 WHEN 'unverified' THEN 2 WHEN 'healthy' THEN 0 ELSE 1 END DESC, CASE WHEN evidence_id IS NULL OR length(evidence_id) != 32 OR lower(evidence_id) GLOB '*[^0-9a-f]*' THEN 1 ELSE 0 END DESC, duration_ns DESC LIMIT 16)";
+const INTEGRITY_MARKER: &str = "__PULP_GPU_INTEGRITY__";
+const ROW_QUERY: &str = "SELECT '__PULP_GPU_ROW__' || hex(stage) || '|' || duration_ns || '|' || hex(COALESCE(evidence_id,'')) || '|' || hex(COALESCE(diagnostic_code,'')) || '|' || hex(COALESCE(health_state,'')) || '|' || COALESCE(sequence,-1) || '|' || COALESCE(frame_index,-1) || '|' || hex(timing_phase) || '|' || COALESCE(cpu_running_ns,-1) || '|' || has_scheduler_evidence || '|' || is_incomplete || '|' || is_failure FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY timing_phase ORDER BY is_incomplete DESC, is_failure DESC, CASE health_state WHEN 'failed' THEN 4 WHEN 'lost' THEN 4 WHEN 'unavailable' THEN 3 WHEN 'unverified' THEN 2 WHEN 'healthy' THEN 0 ELSE 1 END DESC, CASE WHEN evidence_id IS NULL OR length(evidence_id) != 32 OR lower(evidence_id) GLOB '*[^0-9a-f]*' THEN 1 ELSE 0 END DESC, duration_ns DESC) AS phase_rank FROM {view}) WHERE phase_rank <= 16";
 const CATEGORY_QUERY: &str = "SELECT '__PULP_GPU_CATEGORY__' || hex(category) FROM (SELECT DISTINCT category FROM slice WHERE category IS NOT NULL AND category != '' ORDER BY category LIMIT 64)";
+const INTEGRITY_QUERY: &str = "SELECT '__PULP_GPU_INTEGRITY__' || (SELECT COUNT(*) FROM slice) || '|' || (SELECT COUNT(*) FROM slice WHERE dur = -1) || '|' || COALESCE((SELECT SUM(value) FROM stats WHERE severity = 'data_loss' AND value > 0),0) || '|' || COALESCE((SELECT SUM(value) FROM stats WHERE value > 0 AND (name GLOB '*no_flush*' OR name GLOB '*not_flushed*')),0)";
 
 const STARTUP_SQL: &str =
     include_str!("../../../../.agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql");
@@ -96,6 +98,12 @@ struct Contributor {
     sequence: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     frame_index: Option<i64>,
+    timing_phase: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cpu_running_ns: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    non_running_ns: Option<i64>,
+    execution_state: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,6 +116,15 @@ struct NextAction {
 struct UiCorrelation {
     open_command: String,
     search_terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+struct CaptureIntegrity {
+    slice_count: i64,
+    incomplete_slice_count: i64,
+    data_loss_count: i64,
+    no_flush_count: i64,
+    processor_reported_truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,12 +141,16 @@ struct GpuAnalysisResult {
     /// inferred from contributor stage names or supplied by an adapter.
     observed_categories: Vec<String>,
     contributors: Vec<Contributor>,
+    cold_start_contributors: Vec<Contributor>,
+    steady_state_contributors: Vec<Contributor>,
+    scheduler_evidence_available: bool,
+    capture_integrity: CaptureIntegrity,
     evidence_ids: Vec<String>,
     next_actions: Vec<NextAction>,
     ui_correlation: UiCorrelation,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct RawRow {
     stage: String,
     duration_ns: i64,
@@ -138,6 +159,9 @@ struct RawRow {
     health_state: Option<String>,
     sequence: Option<i64>,
     frame_index: Option<i64>,
+    timing_phase: String,
+    cpu_running_ns: Option<i64>,
+    scheduler_evidence: bool,
     incomplete: bool,
     failure: bool,
 }
@@ -213,10 +237,13 @@ fn parse_rows(output: &str) -> Result<Vec<RawRow>> {
             .take_while(|c| c.is_ascii_hexdigit() || matches!(c, '|' | '-'))
             .collect();
         let fields: Vec<&str> = encoded.split('|').collect();
-        if fields.len() != 9 {
+        if fields.len() != 12 {
             continue;
         }
         let Some(stage) = decode_hex(fields[0]) else {
+            continue;
+        };
+        let Some(timing_phase) = decode_hex(fields[7]) else {
             continue;
         };
         let row = RawRow {
@@ -238,12 +265,48 @@ fn parse_rows(output: &str) -> Result<Vec<RawRow>> {
             frame_index: optional_i64(fields[6]).ok_or_else(|| {
                 CliError::Other("pulp trace: malformed GPU frame index".to_owned())
             })?,
-            incomplete: fields[7] == "1",
-            failure: fields[8] == "1",
+            timing_phase,
+            cpu_running_ns: optional_i64(fields[8]).ok_or_else(|| {
+                CliError::Other("pulp trace: malformed GPU CPU-running duration".to_owned())
+            })?,
+            scheduler_evidence: fields[9] == "1",
+            incomplete: fields[10] == "1",
+            failure: fields[11] == "1",
         };
         rows.push(row);
     }
     Ok(rows)
+}
+
+fn parse_integrity(output: &str) -> Result<CaptureIntegrity> {
+    let Some(index) = output.find(INTEGRITY_MARKER) else {
+        return Err(CliError::Other(
+            "pulp trace: capture-integrity result missing".to_owned(),
+        ));
+    };
+    let encoded = &output[index + INTEGRITY_MARKER.len()..];
+    let encoded: String = encoded
+        .chars()
+        .take_while(|character| character.is_ascii_digit() || *character == '|')
+        .collect();
+    let fields = encoded.split('|').collect::<Vec<_>>();
+    if fields.len() != 4 {
+        return Err(CliError::Other(
+            "pulp trace: malformed capture-integrity result".to_owned(),
+        ));
+    }
+    let parse = |value: &str| {
+        value.parse::<i64>().map_err(|_| {
+            CliError::Other("pulp trace: malformed capture-integrity count".to_owned())
+        })
+    };
+    Ok(CaptureIntegrity {
+        slice_count: parse(fields[0])?,
+        incomplete_slice_count: parse(fields[1])?,
+        data_loss_count: parse(fields[2])?,
+        no_flush_count: parse(fields[3])?,
+        processor_reported_truncated: false,
+    })
 }
 
 fn parse_categories(output: &str) -> Vec<String> {
@@ -286,7 +349,29 @@ fn valid_evidence_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn action_for(stage: &str, diagnostic_code: Option<&str>) -> NextAction {
+fn execution_state_for(row: &RawRow) -> &'static str {
+    if !row.scheduler_evidence {
+        return "unavailable";
+    }
+    let cpu = row
+        .cpu_running_ns
+        .unwrap_or(0)
+        .clamp(0, row.duration_ns.max(0));
+    let wait = row.duration_ns.max(0) - cpu;
+    if cpu > wait {
+        "cpu-dominated"
+    } else if wait > cpu {
+        "wait-dominated"
+    } else {
+        "mixed"
+    }
+}
+
+fn action_for(
+    stage: &str,
+    diagnostic_code: Option<&str>,
+    execution_state: &'static str,
+) -> NextAction {
     if diagnostic_code == Some("shader-compile-failed") || stage == "shader-compile" {
         return NextAction {
             code: "fix-shader-compile".to_owned(),
@@ -302,9 +387,21 @@ fn action_for(stage: &str, diagnostic_code: Option<&str>) -> NextAction {
             "bound-startup-uploads",
             "Inspect the cited upload span and move or reduce only the measured startup resource work.",
         ),
-        "acquire" | "present" => (
+        "acquire" | "present" if execution_state == "wait-dominated" => (
             "inspect-surface-blocking",
-            "Open the trace and compare acquire/present wall time with CPU work on the same thread.",
+            "The scheduler evidence is wait-dominated. Correlate the cited acquire/present span with compositor and surface-lifecycle events, then prove causality in a platform event-order harness.",
+        ),
+        "acquire" | "present" if execution_state == "cpu-dominated" => (
+            "inspect-surface-cpu-work",
+            "The scheduler evidence is CPU-dominated. Drill into child slices and call stacks on the cited thread before changing frame pacing.",
+        ),
+        "acquire" | "present" if execution_state == "mixed" => (
+            "inspect-mixed-surface-cost",
+            "The span contains comparable CPU-running and non-running time. Inspect both child CPU work and compositor/surface waits before choosing a fix.",
+        ),
+        "acquire" | "present" => (
+            "capture-scheduler-evidence",
+            "This trace has wall-clock duration but no overlapping thread_state evidence, so it cannot prove blocking. Capture scheduler data where supported or use a platform event-order harness before changing presentation policy.",
         ),
         "readback" => (
             "inspect-readback-oracle",
@@ -327,7 +424,38 @@ fn action_for(stage: &str, diagnostic_code: Option<&str>) -> NextAction {
 
 #[cfg(test)]
 fn result_from_rows(question: GpuQuestion, trace: &Path, rows: Vec<RawRow>) -> GpuAnalysisResult {
-    result_from_rows_and_categories(question, trace, rows, Vec::new())
+    let integrity = CaptureIntegrity {
+        slice_count: rows.len() as i64,
+        incomplete_slice_count: rows.iter().filter(|row| row.incomplete).count() as i64,
+        data_loss_count: 0,
+        no_flush_count: 0,
+        processor_reported_truncated: false,
+    };
+    result_from_rows_and_categories(question, trace, rows, Vec::new(), integrity)
+}
+
+fn contributor_from_row(rank: usize, row: &RawRow) -> Contributor {
+    let cpu_running_ns = row.scheduler_evidence.then(|| {
+        row.cpu_running_ns
+            .unwrap_or(0)
+            .clamp(0, row.duration_ns.max(0))
+    });
+    let non_running_ns = cpu_running_ns.map(|cpu| row.duration_ns.max(0) - cpu);
+    let execution_state = execution_state_for(row);
+    Contributor {
+        rank,
+        stage: row.stage.clone(),
+        duration_ns: row.duration_ns,
+        evidence_id: row.evidence_id.clone(),
+        diagnostic_code: row.diagnostic_code.clone(),
+        health_state: row.health_state.clone(),
+        sequence: row.sequence,
+        frame_index: row.frame_index,
+        timing_phase: row.timing_phase.clone(),
+        cpu_running_ns,
+        non_running_ns,
+        execution_state,
+    }
 }
 
 fn result_from_rows_and_categories(
@@ -335,6 +463,7 @@ fn result_from_rows_and_categories(
     trace: &Path,
     mut rows: Vec<RawRow>,
     observed_categories: Vec<String>,
+    capture_integrity: CaptureIntegrity,
 ) -> GpuAnalysisResult {
     rows.sort_by(|a, b| b.duration_ns.max(0).cmp(&a.duration_ns.max(0)));
     let incomplete = rows.iter().any(|row| row.incomplete);
@@ -361,12 +490,20 @@ fn result_from_rows_and_categories(
     let reported_unverified = rows
         .iter()
         .any(|row| row.health_state.as_deref() == Some("unverified"));
-    let capture_unavailable_reason = if rows.is_empty() {
+    let capture_unavailable_reason = if capture_integrity.processor_reported_truncated {
+        Some("truncated-capture")
+    } else if capture_integrity.data_loss_count > 0 {
+        Some("trace-data-loss")
+    } else if capture_integrity.no_flush_count > 0 {
+        Some("capture-not-flushed")
+    } else if capture_integrity.incomplete_slice_count > 0 || incomplete {
+        Some("incomplete-capture")
+    } else if rows.is_empty() && capture_integrity.slice_count == 0 {
+        Some("empty-or-never-flushed-capture")
+    } else if rows.is_empty() {
         Some("missing-question-category")
     } else if missing_startup_gpu_stage {
         Some("missing-question-category")
-    } else if incomplete {
-        Some("incomplete-capture")
     } else if evidence_malformed || missing_probe_evidence {
         Some("invalid-evidence-correlation")
     } else if invalid_health_state {
@@ -397,23 +534,32 @@ fn result_from_rows_and_categories(
         }
     });
 
-    let dominant_stage = rows.first().map(|row| row.stage.clone());
+    let dominant_row = if question == GpuQuestion::GpuStartup {
+        rows.iter()
+            .filter(|row| row.timing_phase == "cold")
+            .max_by_key(|row| row.duration_ns.max(0))
+    } else {
+        rows.first()
+    };
+    let dominant_stage = dominant_row.map(|row| row.stage.clone());
     let contributors = rows
         .iter()
         .filter(|row| !row.incomplete)
         .take(8)
         .enumerate()
-        .map(|(index, row)| Contributor {
-            rank: index + 1,
-            stage: row.stage.clone(),
-            duration_ns: row.duration_ns,
-            evidence_id: row.evidence_id.clone(),
-            diagnostic_code: row.diagnostic_code.clone(),
-            health_state: row.health_state.clone(),
-            sequence: row.sequence,
-            frame_index: row.frame_index,
-        })
+        .map(|(index, row)| contributor_from_row(index + 1, row))
         .collect::<Vec<_>>();
+    let phase_contributors = |phase: &str| {
+        rows.iter()
+            .filter(|row| !row.incomplete && row.timing_phase == phase)
+            .take(8)
+            .enumerate()
+            .map(|(index, row)| contributor_from_row(index + 1, row))
+            .collect::<Vec<_>>()
+    };
+    let cold_start_contributors = phase_contributors("cold");
+    let steady_state_contributors = phase_contributors("steady");
+    let scheduler_evidence_available = rows.iter().any(|row| row.scheduler_evidence);
     let mut evidence_ids = Vec::new();
     for row in &rows {
         if let Some(value) = row
@@ -426,8 +572,43 @@ fn result_from_rows_and_categories(
             }
         }
     }
-    let next_actions = if let Some(row) = rows.first() {
-        vec![action_for(&row.stage, row.diagnostic_code.as_deref())]
+    let next_actions = if let Some(reason) = capture_unavailable_reason {
+        let (code, fix) = match reason {
+            "trace-data-loss" => (
+                "recapture-without-data-loss",
+                "The Perfetto stats table reports data loss. Shorten the capture or increase the bounded ring, then rerun the same question.",
+            ),
+            "truncated-capture" => (
+                "recapture-complete-artifact",
+                "The trace processor reports a truncated artifact. Reproduce and stop the exact session cleanly, then analyze the newly flushed file.",
+            ),
+            "capture-not-flushed" => (
+                "flush-capture-cleanly",
+                "The trace reports an unflushed write. Stop the exact trace session and let the host detach cleanly before analyzing the resulting artifact.",
+            ),
+            "incomplete-capture" => (
+                "complete-and-flush-capture",
+                "At least one slice was still open when captured. Reproduce, stop the exact session, and allow host teardown to finish before rerunning analysis.",
+            ),
+            "empty-or-never-flushed-capture" => (
+                "record-and-flush-capture",
+                "The artifact contains no slices. Start tracing on the exact instance, reproduce the issue, and stop or detach cleanly so the ring is flushed.",
+            ),
+            _ => (
+                "capture-required-gpu-category",
+                "Capture the exact instance with the required gpu/render categories and bounded evidence ID, then rerun the same question.",
+            ),
+        };
+        vec![NextAction {
+            code: code.to_owned(),
+            fix: fix.to_owned(),
+        }]
+    } else if let Some(row) = dominant_row {
+        vec![action_for(
+            &row.stage,
+            row.diagnostic_code.as_deref(),
+            execution_state_for(row),
+        )]
     } else {
         vec![NextAction {
             code: "capture-required-gpu-category".to_owned(),
@@ -452,6 +633,10 @@ fn result_from_rows_and_categories(
         dominant_stage,
         observed_categories,
         contributors,
+        cold_start_contributors,
+        steady_state_contributors,
+        scheduler_evidence_available,
+        capture_integrity,
         evidence_ids,
         next_actions,
         ui_correlation: UiCorrelation {
@@ -476,6 +661,12 @@ fn write_result(
     } else {
         writeln!(out, "{}: {}", result.question.as_str(), result.verdict).map_err(io_err)?;
         writeln!(out, "  capture complete: {}", result.capture_complete).map_err(io_err)?;
+        writeln!(
+            out,
+            "  scheduler evidence: {}",
+            result.scheduler_evidence_available
+        )
+        .map_err(io_err)?;
         if !result.observed_categories.is_empty() {
             writeln!(
                 out,
@@ -490,9 +681,11 @@ fn write_result(
         for contributor in &result.contributors {
             writeln!(
                 out,
-                "  {}. {} — {:.3} ms{}",
+                "  {}. {} [{}; {}] — {:.3} ms{}",
                 contributor.rank,
                 contributor.stage,
+                contributor.timing_phase,
+                contributor.execution_state,
                 contributor.duration_ns as f64 / 1_000_000.0,
                 contributor
                     .evidence_id
@@ -527,6 +720,23 @@ pub(crate) fn run_gpu_analysis_with_processor(
             args.trace.display()
         )));
     }
+    if std::fs::metadata(&args.trace)
+        .map_err(|error| CliError::io(&args.trace, error))?
+        .len()
+        == 0
+    {
+        return write_result(
+            &result_from_rows_and_categories(
+                args.question,
+                &args.trace,
+                Vec::new(),
+                Vec::new(),
+                CaptureIntegrity::default(),
+            ),
+            json,
+            out,
+        );
+    }
     let tp_path = tp.path.as_ref().ok_or_else(|| {
         CliError::Other(
             "pulp trace: trace_processor not found — run `pulp trace doctor` or `pulp trace fetch`"
@@ -534,9 +744,10 @@ pub(crate) fn run_gpu_analysis_with_processor(
         )
     })?;
     let sql = format!(
-        "{}\n{}\nUNION ALL\n{};\n",
+        "{}\n{}\nUNION ALL\n{}\nUNION ALL\n{};\n",
         args.question.sql(),
         CATEGORY_QUERY,
+        INTEGRITY_QUERY,
         ROW_QUERY.replace("{view}", args.question.view())
     );
     let sql_path = write_sql_temp(&sql)
@@ -556,249 +767,46 @@ pub(crate) fn run_gpu_analysis_with_processor(
         ))
     })?;
     if !output.status.success() {
+        let diagnostic = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        if diagnostic
+            .to_ascii_lowercase()
+            .contains("trace file is incomplete")
+        {
+            return write_result(
+                &result_from_rows_and_categories(
+                    args.question,
+                    &args.trace,
+                    Vec::new(),
+                    Vec::new(),
+                    CaptureIntegrity {
+                        processor_reported_truncated: true,
+                        ..CaptureIntegrity::default()
+                    },
+                ),
+                json,
+                out,
+            );
+        }
         return Err(CliError::Other(format!(
             "pulp trace: trace_processor exited with {} — {}",
             output
                 .status
                 .code()
                 .map_or_else(|| "signal".to_owned(), |code| code.to_string()),
-            String::from_utf8_lossy(&output.stderr).trim()
+            diagnostic
         )));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let rows = parse_rows(&stdout)?;
     let categories = parse_categories(&stdout);
+    let integrity = parse_integrity(&stdout)?;
     write_result(
-        &result_from_rows_and_categories(args.question, &args.trace, rows, categories),
+        &result_from_rows_and_categories(args.question, &args.trace, rows, categories, integrity),
         json,
         out,
     )
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cmd::trace::{TraceProcessorSource, TraceProcessorStatus};
-
-    #[test]
-    fn parses_ranked_rows_and_preserves_evidence() {
-        let output = "\"__PULP_GPU_ROW__706970656C696E652D70726570617265|800000|3031323334353637383961626364656630313233343536373839616263646566||6865616C746879|1|0|0|0\"\n";
-        let rows = parse_rows(output).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].stage, "pipeline-prepare");
-        assert_eq!(
-            rows[0].evidence_id.as_deref(),
-            Some("0123456789abcdef0123456789abcdef")
-        );
-    }
-
-    #[test]
-    fn parses_bounded_trace_categories_without_trusting_stage_names() {
-        let output = "__PULP_GPU_CATEGORY__677075\n__PULP_GPU_CATEGORY__72656E6465722C74657874\n__PULP_GPU_CATEGORY__2E2E2F756E73616665\n";
-        assert_eq!(parse_categories(output), vec!["gpu", "render", "text"]);
-    }
-
-    #[test]
-    fn empty_and_incomplete_captures_fail_closed() {
-        let empty = result_from_rows(GpuQuestion::GpuHealth, Path::new("/tmp/a.pftrace"), vec![]);
-        assert_eq!(empty.verdict, "unavailable");
-        assert_eq!(empty.unavailable_reason, Some("missing-question-category"));
-
-        let incomplete = RawRow {
-            stage: "pipeline-prepare".to_owned(),
-            duration_ns: -1,
-            evidence_id: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()),
-            diagnostic_code: None,
-            health_state: Some("healthy".to_owned()),
-            sequence: Some(1),
-            frame_index: None,
-            incomplete: true,
-            failure: false,
-        };
-        let result = result_from_rows(
-            GpuQuestion::GpuStartup,
-            Path::new("/tmp/a.pftrace"),
-            vec![incomplete],
-        );
-        assert_eq!(result.unavailable_reason, Some("incomplete-capture"));
-        assert!(!result.capture_complete);
-    }
-
-    #[test]
-    fn startup_is_unverified_until_a_versioned_budget_exists() {
-        let row = RawRow {
-            stage: "pipeline-prepare".to_owned(),
-            duration_ns: 800_000,
-            evidence_id: Some("0123456789abcdef0123456789abcdef".to_owned()),
-            diagnostic_code: None,
-            health_state: Some("healthy".to_owned()),
-            sequence: Some(1),
-            frame_index: Some(0),
-            incomplete: false,
-            failure: false,
-        };
-        let result = result_from_rows(
-            GpuQuestion::GpuStartup,
-            Path::new("/tmp/a.pftrace"),
-            vec![row],
-        );
-        assert_eq!(result.verdict, "unverified");
-        assert!(result.capture_complete);
-    }
-
-    #[test]
-    fn render_only_startup_capture_fails_closed() {
-        let row = RawRow {
-            stage: "frame".to_owned(),
-            duration_ns: 300_000,
-            evidence_id: Some("55555555555555555555555555555555".to_owned()),
-            diagnostic_code: None,
-            health_state: Some("healthy".to_owned()),
-            sequence: Some(1),
-            frame_index: Some(0),
-            incomplete: false,
-            failure: false,
-        };
-        let result = result_from_rows(
-            GpuQuestion::GpuStartup,
-            Path::new("/tmp/render-only.pftrace"),
-            vec![row],
-        );
-        assert_eq!(result.verdict, "unavailable");
-        assert_eq!(result.unavailable_reason, Some("missing-question-category"));
-        assert!(!result.capture_complete);
-    }
-
-    #[test]
-    fn perfetto_open_command_shell_quotes_untrusted_paths() {
-        let result = result_from_rows(
-            GpuQuestion::GpuHealth,
-            Path::new("/tmp/a; touch PWNED ' $(false).pftrace"),
-            vec![],
-        );
-        assert_eq!(
-            result.ui_correlation.open_command,
-            "pulp trace open -- '/tmp/a; touch PWNED '\"'\"' $(false).pftrace'"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn exclusive_sql_creation_does_not_follow_symlinks() {
-        use std::os::unix::fs::symlink;
-
-        let root = std::env::temp_dir().join(format!(
-            "pulp-gpu-analysis-exclusive-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir(&root);
-        std::fs::create_dir(&root).unwrap();
-        let victim = root.join("victim.txt");
-        let candidate = root.join("candidate.sql");
-        std::fs::write(&victim, b"preserve-me").unwrap();
-        symlink(&victim, &candidate).unwrap();
-
-        let error = create_exclusive_sql(&candidate, "SELECT 1;").unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
-        assert_eq!(std::fs::read(&victim).unwrap(), b"preserve-me");
-
-        std::fs::remove_file(candidate).unwrap();
-        std::fs::remove_file(victim).unwrap();
-        std::fs::remove_dir(root).unwrap();
-    }
-
-    #[test]
-    fn probe_rejects_malformed_evidence_correlation() {
-        let row = RawRow {
-            stage: "readback".to_owned(),
-            duration_ns: 42,
-            evidence_id: Some("not-a-bounded-evidence-id".to_owned()),
-            diagnostic_code: None,
-            health_state: Some("healthy".to_owned()),
-            sequence: Some(1),
-            frame_index: Some(0),
-            incomplete: false,
-            failure: false,
-        };
-        let result = result_from_rows(
-            GpuQuestion::GpuProbe,
-            Path::new("/tmp/a.pftrace"),
-            vec![row],
-        );
-        assert_eq!(result.verdict, "unavailable");
-        assert_eq!(
-            result.unavailable_reason,
-            Some("invalid-evidence-correlation")
-        );
-    }
-
-    #[test]
-    fn health_and_probe_never_launder_non_pass_states() {
-        for question in [GpuQuestion::GpuHealth, GpuQuestion::GpuProbe] {
-            for (state, verdict, reason) in [
-                (
-                    Some("unavailable"),
-                    "unavailable",
-                    Some("reported-unavailable"),
-                ),
-                (Some("unverified"), "unverified", None),
-                (None, "unavailable", Some("invalid-health-state")),
-            ] {
-                let row = RawRow {
-                    stage: "probe".to_owned(),
-                    duration_ns: 42,
-                    evidence_id: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()),
-                    diagnostic_code: None,
-                    health_state: state.map(str::to_owned),
-                    sequence: Some(1),
-                    frame_index: Some(0),
-                    incomplete: false,
-                    failure: false,
-                };
-                let result = result_from_rows(question, Path::new("/tmp/a.pftrace"), vec![row]);
-                assert_eq!(result.verdict, verdict);
-                assert_eq!(result.unavailable_reason, reason);
-                assert_ne!(result.verdict, "pass");
-                if state.is_some() {
-                    assert!(result.capture_complete);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn checked_in_gpu_views_keep_the_safe_sql_contract() {
-        for sql in [STARTUP_SQL, HEALTH_SQL, PROBE_SQL] {
-            assert!(sql.contains("CREATE OR REPLACE PERFETTO VIEW"));
-            assert!(sql.contains(" GLOB "));
-            assert!(sql.contains("EXTRACT_ARG"));
-            assert!(!sql.contains(" LIKE "));
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn processor_failure_remains_an_error() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!("pulp-gpu-analysis-{}", std::process::id()));
-        let trace = root.with_extension("pftrace");
-        let processor = root.with_extension("sh");
-        std::fs::write(&trace, b"trace").unwrap();
-        std::fs::write(&processor, b"#!/bin/sh\necho broken 1>&2\nexit 7\n").unwrap();
-        let mut permissions = std::fs::metadata(&processor).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&processor, permissions).unwrap();
-        let args = GpuAnalysisArgs {
-            question: GpuQuestion::GpuHealth,
-            trace: trace.clone(),
-        };
-        let tp = TraceProcessorStatus {
-            path: Some(processor.clone()),
-            source: TraceProcessorSource::Env,
-        };
-        let error = run_gpu_analysis_with_processor(&args, &tp, true, &mut Vec::new()).unwrap_err();
-        let _ = std::fs::remove_file(trace);
-        let _ = std::fs::remove_file(processor);
-        assert!(format!("{error}").contains("exited with 7"));
-    }
-}
+#[path = "trace_gpu_analysis_tests.rs"]
+mod tests;

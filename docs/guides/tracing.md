@@ -33,8 +33,14 @@ GPU analysis is the first shipped L0 slice. Its three names map one-to-one to
 `pulp_gpu_startup_breakdown`, `pulp_gpu_health_transitions`, and
 `pulp_gpu_probe_correlation`. The CLI and `pulp_trace_analyze` MCP tool return
 the same `pulp.trace-gpu-analysis.v1` result and accept no raw SQL. Startup is
-`unverified` until A3 supplies a measured budget; missing categories,
-unfinished slices, and invalid evidence correlation are `unavailable`.
+`unverified` until A3 supplies a measured budget. Its cold/setup and indexed
+steady-state contributors are separate. When the capture contains scheduler
+`thread_state` evidence, each contributor reports CPU-running and non-running
+time plus a `cpu-dominated|wait-dominated|mixed` classification; without that
+evidence it says `unavailable` and never infers blocking from wall duration.
+Zero-byte/never-flushed captures, processor-reported truncation, positive Perfetto data-loss/no-flush stats,
+unfinished slices, missing categories, and invalid evidence correlation are
+typed `unavailable` outcomes with `capture_complete:false`.
 
 For repeatable installed CLI/MCP timing and artifact-binding evidence, use
 `tools/scripts/gpu_trace_overhead_acceptance.py`; its receipt keeps five

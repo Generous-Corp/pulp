@@ -1,41 +1,48 @@
 -- GPU startup attribution over backend-neutral trace events. The closed view
--- selects the earliest render-frame lifecycle carrying frame_index = 0 and
--- excludes later frames and lifecycles. Selection is accepted only when every
--- startup candidate has one exact, valid evidence ID; otherwise an uncorrelated
--- long stage could be silently omitted from the ranking. The
--- definition remains idempotent: the CLI and an expert Perfetto session may
--- load it repeatedly against the same flushed trace.
+-- selects the earliest render-frame lifecycle carrying frame_index = 0 (or the
+-- single identified legacy lifecycle) and keeps both its cold/setup work and
+-- later indexed steady-state work separate. Selection is accepted only when
+-- every startup candidate has one exact, valid evidence ID.
+--
+-- `duration_ns` is wall-clock time. `cpu_running_ns` is populated only when
+-- Perfetto has overlapping thread_state rows for the slice's stable utid; a
+-- NULL value means the capture cannot distinguish blocking from CPU work.
+-- Incomplete slices are excluded here and detected across the whole trace by
+-- the CLI's capture-integrity query, so they fail closed instead of ranking as
+-- zero-duration work.
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_startup_breakdown AS
 WITH candidates AS (
   SELECT
-    ts,
-    name,
-    dur,
-    arg_set_id,
+    s.ts,
+    s.name,
+    s.dur,
+    s.arg_set_id,
+    s.track_id,
     CASE
-      WHEN name GLOB 'gpu_shader_compile*' THEN 'shader-compile'
-      WHEN name GLOB 'gpu_pipeline_prepare*' THEN 'pipeline-prepare'
-      WHEN name GLOB 'gpu_resource_upload*' THEN 'resource-upload'
-      WHEN name GLOB 'gpu_acquire*' THEN 'acquire'
-      WHEN name GLOB 'gpu_submit*' THEN 'submit'
-      WHEN name GLOB 'gpu_present*' THEN 'present'
+      WHEN s.name GLOB 'gpu_shader_compile*' THEN 'shader-compile'
+      WHEN s.name GLOB 'gpu_pipeline_prepare*' THEN 'pipeline-prepare'
+      WHEN s.name GLOB 'gpu_resource_upload*' THEN 'resource-upload'
+      WHEN s.name GLOB 'gpu_acquire*' THEN 'acquire'
+      WHEN s.name GLOB 'gpu_submit*' THEN 'submit'
+      WHEN s.name GLOB 'gpu_present*' THEN 'present'
       ELSE 'frame'
     END AS stage,
     COALESCE(
-      CAST(EXTRACT_ARG(arg_set_id, 'debug.gpu_evidence_id') AS TEXT),
-      CAST(EXTRACT_ARG(arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id,
+      CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_evidence_id') AS TEXT),
+      CAST(EXTRACT_ARG(s.arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id,
     CAST(COALESCE(
-      EXTRACT_ARG(arg_set_id, 'debug.frame_index'),
-      EXTRACT_ARG(arg_set_id, 'args.debug.frame_index')) AS INT) AS frame_index
-  FROM slice
-  WHERE (category GLOB 'gpu*'
-      AND (name GLOB 'gpu_shader_compile*'
-        OR name GLOB 'gpu_pipeline_prepare*'
-        OR name GLOB 'gpu_resource_upload*'
-        OR name GLOB 'gpu_acquire*'
-        OR name GLOB 'gpu_submit*'
-        OR name GLOB 'gpu_present*'))
-    OR (category GLOB 'render*' AND name GLOB 'frame*')
+      EXTRACT_ARG(s.arg_set_id, 'debug.frame_index'),
+      EXTRACT_ARG(s.arg_set_id, 'args.debug.frame_index')) AS INT) AS frame_index
+  FROM slice AS s
+  WHERE s.dur >= 0
+    AND ((s.category GLOB 'gpu*'
+      AND (s.name GLOB 'gpu_shader_compile*'
+        OR s.name GLOB 'gpu_pipeline_prepare*'
+        OR s.name GLOB 'gpu_resource_upload*'
+        OR s.name GLOB 'gpu_acquire*'
+        OR s.name GLOB 'gpu_submit*'
+        OR s.name GLOB 'gpu_present*'))
+      OR (s.category GLOB 'render*' AND s.name GLOB 'frame*'))
 ), first_indexed_anchor AS (
   SELECT evidence_id
   FROM candidates
@@ -73,10 +80,38 @@ WITH candidates AS (
   FROM singleton_unindexed_lifecycle
   JOIN all_candidates_identified
   WHERE NOT EXISTS (SELECT 1 FROM first_indexed_anchor)
+), selected_rows AS (
+  SELECT c.*, tt.utid
+  FROM candidates AS c
+  JOIN selected_lifecycle USING (evidence_id)
+  LEFT JOIN thread_track AS tt ON c.track_id = tt.id
+), attributed AS (
+  SELECT
+    selected_rows.*,
+    EXISTS (
+      SELECT 1
+      FROM thread_state AS state
+      WHERE state.utid = selected_rows.utid
+        AND state.dur >= 0
+        AND state.ts < selected_rows.ts + selected_rows.dur
+        AND state.ts + state.dur > selected_rows.ts
+    ) AS has_scheduler_evidence,
+    (
+      SELECT SUM(
+        MIN(state.ts + state.dur, selected_rows.ts + selected_rows.dur)
+        - MAX(state.ts, selected_rows.ts))
+      FROM thread_state AS state
+      WHERE state.utid = selected_rows.utid
+        AND state.state = 'Running'
+        AND state.dur >= 0
+        AND state.ts < selected_rows.ts + selected_rows.dur
+        AND state.ts + state.dur > selected_rows.ts
+    ) AS measured_cpu_running_ns
+  FROM selected_rows
 )
 SELECT
   stage,
-  CASE WHEN dur = -1 THEN 0 ELSE dur END AS duration_ns,
+  dur AS duration_ns,
   evidence_id,
   COALESCE(
     CAST(EXTRACT_ARG(arg_set_id, 'debug.diagnostic_code') AS TEXT),
@@ -88,11 +123,18 @@ SELECT
     EXTRACT_ARG(arg_set_id, 'debug.sequence'),
     EXTRACT_ARG(arg_set_id, 'args.debug.sequence')) AS INT) AS sequence,
   frame_index,
-  dur = -1 AS is_incomplete,
+  CASE
+    WHEN frame_index IS NULL OR frame_index = 0 THEN 'cold'
+    ELSE 'steady'
+  END AS timing_phase,
+  CASE
+    WHEN has_scheduler_evidence THEN COALESCE(measured_cpu_running_ns, 0)
+    ELSE NULL
+  END AS cpu_running_ns,
+  has_scheduler_evidence AS has_scheduler_evidence,
+  0 AS is_incomplete,
   COALESCE(
     CAST(EXTRACT_ARG(arg_set_id, 'debug.health_state') AS TEXT),
     CAST(EXTRACT_ARG(arg_set_id, 'args.debug.health_state') AS TEXT), '')
     IN ('failed', 'lost') AS is_failure
-FROM candidates
-JOIN selected_lifecycle USING (evidence_id)
-WHERE frame_index IS NULL OR frame_index = 0;
+FROM attributed;

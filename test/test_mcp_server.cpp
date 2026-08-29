@@ -1090,7 +1090,10 @@ TEST_CASE("MCP trace analyzer preserves typed verdicts and closed questions",
         std::ofstream(result_path, std::ios::trunc)
             << "{\"schema\":\"pulp.trace-gpu-analysis.v1\",\"question\":\"" << question
             << "\",\"verdict\":\"" << verdict
-            << "\",\"capture_complete\":true,\"contributors\":[],"
+            << "\",\"capture_complete\":true,\"capture_integrity\":{},"
+               "\"scheduler_evidence_available\":false,"
+               "\"cold_start_contributors\":[],\"steady_state_contributors\":[],"
+               "\"contributors\":[],"
                "\"evidence_ids\":[],\"next_actions\":[],\"ui_correlation\":{}}\n";
     };
 
