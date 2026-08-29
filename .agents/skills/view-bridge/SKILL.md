@@ -2153,8 +2153,10 @@ present timing null. Missing compile/upload/hidden/present/source/shader
 instrumentation is coverage, not event loss. Preserve exact nullable fields and
 named categories so the closed A3 verifier can select only a passing
 `no-change` or failing `queue-B4-investigation`; never invent Vellum events or
-identities in the ViewBridge. Use `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` for the
-blank-frame negative control.
+identities in the ViewBridge. Produce the blank-frame and audio-thread control
+receipts with the focused harness commands in
+`docs/validation/gpu-first-visible-a3-acceptance.md`; the raw seed environment
+variable by itself is not a receipt.
 
 The provider now keeps a distinct GPU evidence ID and trace evidence ID and can
 retain multiple lifecycle trials, but a product adapter must call

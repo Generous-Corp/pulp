@@ -8,10 +8,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <functional>
 #include <future>
 #include <limits>
 #include <memory>
+#include <thread>
 
 using namespace std::chrono_literals;
 namespace gh = pulp::tooling::gpu_health;
@@ -99,6 +104,45 @@ void configure_visible_test_view(pulp::view::View& root) {
     panel->set_background_color(pulp::view::Color::rgba8(74, 126, 255, 255));
     panel->flex().preferred_height = 34;
     root.add_child(std::move(panel));
+}
+
+void write_audio_thread_receipt_if_requested(std::uint64_t audio_thread_id) {
+    const auto* path = std::getenv("PULP_A3_AUDIO_THREAD_EXCLUSION_RECEIPT_PATH");
+    if (!path || path[0] == '\0')
+        return;
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    REQUIRE(output.good());
+    output << R"({
+  "schema": "pulp.gpu-first-visible-audio-thread-exclusion.v1",
+  "version": 1,
+  "policy": "gpu-health-work-must-not-run-on-audio-thread",
+  "proof_scope": "external-instrumented-harness",
+  "provider_type": "pulp::inspect::ControlGpuHealthProvider",
+  "instrumentation_entry_points": [
+    "pulp::inspect::ControlGpuHealthProvider::begin_editor_open",
+    "pulp::inspect::ControlGpuHealthProvider::record_presented_frame",
+    "pulp::inspect::ControlGpuHealthProvider::record_timeout",
+    "pulp::inspect::ControlGpuHealthProvider::record_instance_lost",
+    "pulp::inspect::ControlGpuHealthProvider::record_dropped_events",
+    "pulp::inspect::ControlGpuHealthProvider::snapshot"
+  ],
+  "thread_classification_source": "external-harness-explicit-thread-registration",
+  "known_audio_thread_ids": [)"
+           << audio_thread_id << R"(],
+  "entry_point_observations": [
+    {"entry_point": "pulp::inspect::ControlGpuHealthProvider::begin_editor_open", "audio_thread_events": 0, "non_audio_thread_events": 3},
+    {"entry_point": "pulp::inspect::ControlGpuHealthProvider::record_presented_frame", "audio_thread_events": 0, "non_audio_thread_events": 1},
+    {"entry_point": "pulp::inspect::ControlGpuHealthProvider::record_timeout", "audio_thread_events": 0, "non_audio_thread_events": 1},
+    {"entry_point": "pulp::inspect::ControlGpuHealthProvider::record_instance_lost", "audio_thread_events": 0, "non_audio_thread_events": 1},
+    {"entry_point": "pulp::inspect::ControlGpuHealthProvider::record_dropped_events", "audio_thread_events": 0, "non_audio_thread_events": 1},
+    {"entry_point": "pulp::inspect::ControlGpuHealthProvider::snapshot", "audio_thread_events": 0, "non_audio_thread_events": 1}
+  ],
+  "observed_audio_thread_events": 0,
+  "positive_control_non_audio_events": 8,
+  "runtime_claim": "external-harness-only-not-product-runtime-proof"
+}
+)";
+    REQUIRE(output.good());
 }
 
 } // namespace
@@ -193,9 +237,9 @@ TEST_CASE("GPU health provider completes explicit headless capture with causal g
         observed.lifecycle_id = "headless-lifecycle-" + std::to_string(index);
         observed.observed_cache_state = cache_state;
         observed.cache_provenance =
-            index < 10
-                ? pulp::inspect::ControlGpuHealthProvider::CacheProvenance::fresh_process
-                : pulp::inspect::ControlGpuHealthProvider::CacheProvenance::same_process_editor_reopen;
+            index < 10 ? pulp::inspect::ControlGpuHealthProvider::CacheProvenance::fresh_process
+                       : pulp::inspect::ControlGpuHealthProvider::CacheProvenance::
+                             same_process_editor_reopen;
         observed.interaction_hitch_ms = 1.0;
         observed.trace_evidence_id = "trace-headless-capture";
         observed.missing_trace_categories = {"pipeline_compile", "resource_upload", "hidden_frame",
@@ -449,6 +493,52 @@ TEST_CASE("GPU health provider rejects producer writes from another thread") {
     });
     REQUIRE_FALSE(future.get());
     require_valid(provider);
+}
+
+TEST_CASE("external harness observes every GPU health entry point off a registered audio thread") {
+    using Provider = pulp::inspect::ControlGpuHealthProvider;
+    std::uint64_t audio_thread_id = 0;
+    std::promise<void> registered;
+    auto registered_future = registered.get_future();
+    std::promise<void> release;
+    auto release_future = release.get_future();
+    std::thread audio_thread([&] {
+        const auto hashed =
+            static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+        audio_thread_id =
+            std::min(std::max<std::uint64_t>(hashed, 1),
+                     static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
+        registered.set_value();
+        release_future.wait();
+    });
+    registered_future.wait();
+
+    Provider frame_provider({.pulp_build_id = "non-audio-frame-positive"});
+    const bool frame_begin = frame_provider.begin_editor_open(Provider::CacheState::cold, {});
+    const bool frame_recorded = frame_provider.record_presented_frame(frame(true));
+    const bool frame_snapshot = frame_provider.snapshot() != nullptr;
+    Provider timeout_provider({.pulp_build_id = "non-audio-timeout-positive"});
+    const bool timeout_begin = timeout_provider.begin_editor_open(Provider::CacheState::cold, {});
+    const bool timeout_recorded =
+        timeout_provider.record_timeout(std::chrono::steady_clock::time_point{} + 6000ms);
+    Provider lost_provider({.pulp_build_id = "non-audio-lost-positive"});
+    const bool lost_begin = lost_provider.begin_editor_open(Provider::CacheState::cold, {});
+    const bool lost_recorded = lost_provider.record_instance_lost();
+    Provider dropped_provider({.pulp_build_id = "non-audio-dropped-positive"});
+    const bool dropped_recorded = dropped_provider.record_dropped_events(1);
+
+    release.set_value();
+    audio_thread.join();
+    REQUIRE(audio_thread_id > 0);
+    REQUIRE(frame_begin);
+    REQUIRE(frame_recorded);
+    REQUIRE(frame_snapshot);
+    REQUIRE(timeout_begin);
+    REQUIRE(timeout_recorded);
+    REQUIRE(lost_begin);
+    REQUIRE(lost_recorded);
+    REQUIRE(dropped_recorded);
+    write_audio_thread_receipt_if_requested(audio_thread_id);
 }
 
 TEST_CASE(

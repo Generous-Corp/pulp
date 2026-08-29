@@ -64,67 +64,63 @@
       "id": "standalone-build-audit",
       "status": "confirmed",
       "detail": "The installed standalone artifact audit passed and generated-root canonicalization corrected the default macOS temporary-directory path. This build evidence does not substitute for a validated GPU startup campaign.",
-      "artifact_sha256": [
-        "475c53934715f1c928f2ae4daad9fac30499d8393e70823b6894f8096eae55df",
-        "7cf5ed370c0dca039a6163e916ee72fd374511c94babaf0342df405f92056b20"
-      ]
+      "artifacts": []
     },
     {
       "id": "headless-adapter-accumulation",
       "status": "partial",
       "detail": "A Release CoreGraphics fixture reused one view, provider, and adapter for 20 observations. All passed the content floor, but the run does not prove independent editor lifecycles or cold/warm cache boundaries and is not a startup campaign.",
-      "artifact_sha256": []
+      "artifacts": []
     },
     {
       "id": "standalone-back-buffer-capture",
       "status": "invalidated",
       "detail": "The installed standalone host could not capture the canonical back buffer. Responses previously classified as blank were corrected to unavailable and cannot satisfy either the positive content gate or the blank negative.",
-      "artifact_sha256": [
-        "7cb00f64046e6434454e3c57f06cd6988aee77295a822d6498a151ab3573dbd7",
-        "821b63400db05a7d5ecaa9910b867539b9fa500380fbc05e700d8153b8cb7ad4"
-      ]
+      "artifacts": []
     },
     {
       "id": "forge-au-lifecycle",
       "status": "partial",
       "detail": "AU validation and REAPER editor opening reached a presentable Metal and Skia Graphite surface, but the durable proof stopped before a final acceptance receipt and captured no GPU health-read response.",
-      "artifact_sha256": [
-        "ac8e916bdfde0eacabd2c57759887b3c82a1b0bdc79c77f8110f5ec55bafa38b",
-        "b22489b3419867434df745064d9f26bc9636f6c24c9722ee8987fa0221981f30",
-        "b732c54b3927678c516a8b20d0e9670bb51623fddc1ae2c996543d3e81ab97b6"
-      ]
+      "artifacts": []
     },
     {
       "id": "installed-host-publication-window",
       "status": "confirmed",
       "detail": "The broker can publish after accepting host-ready but before the installed host observes the ready response; an immediate dispatch can still be rejected by local or transport readiness gates.",
-      "artifact_sha256": []
+      "artifacts": []
     },
     {
       "id": "standalone-first-call-consent-latency",
       "status": "observed",
       "detail": "The first inspect-readonly call in fresh broker state timed out or required consent before a later call completed. No causal attribution is made without a focused trace.",
-      "artifact_sha256": []
+      "artifacts": []
     },
     {
       "id": "gpu-health-consent-ux",
       "status": "confirmed",
       "detail": "The one-shot GPU health consent prompt names the operation and target product while deriving caller, target, instance, build, artifact, selector, and process-local revocation scope from broker state. This UX proof does not satisfy a performance or capture gate.",
-      "artifact_sha256": []
+      "artifacts": []
     },
     {
       "id": "single-shot-adapter-negative",
       "status": "confirmed",
       "detail": "A planted old single-shot adapter behavior was caught by the focused adapter test. This control proves the adapter test can fail but does not prove a real product campaign.",
-      "artifact_sha256": []
+      "artifacts": []
     },
     {
       "id": "standalone-exact-product-health-read",
       "status": "partial",
       "detail": "The exact standalone product, selected through the canonical broker client by installed instance, registration, and publication, produced an authentic Metal/Dawn adapter plus completed nonblank back-buffer capture. GPU submission, startup, budget, frame lifecycle, and A2T correlation remain unverified or missing, so this is not a campaign or acceptance pass. The response and binding artifacts are gpu-first-visible-a3-standalone-product-response.json and gpu-first-visible-a3-standalone-product-binding.json.",
-      "artifact_sha256": [
-        "f6ef5145ada178fd078e4affd7e91203e5afd3f9fa8f3497958ee4815cd71192",
-        "2e94731d587e332be1b80b4f1cea2ea4e8dd984010ffe4e14560276de2f7ff3e"
+      "artifacts": [
+        {
+          "path": "gpu-first-visible-a3-standalone-product-response.json",
+          "sha256": "f6ef5145ada178fd078e4affd7e91203e5afd3f9fa8f3497958ee4815cd71192"
+        },
+        {
+          "path": "gpu-first-visible-a3-standalone-product-binding.json",
+          "sha256": "2e94731d587e332be1b80b4f1cea2ea4e8dd984010ffe4e14560276de2f7ff3e"
+        }
       ]
     }
   ],

@@ -114,6 +114,28 @@ preflight but remains one observation; it is not a role adapter until a real
 lifecycle harness supplies all 20 trials and role-appropriate presentation
 evidence.
 
+The standalone adapter selected for `--require-controls` can produce both
+closed control receipts with the focused, built harness binaries. Set each
+output path beneath the `artifact_directory` from the issued campaign request:
+
+```bash
+PULP_A3_BLANK_NEGATIVE_RECEIPT_PATH="$ARTIFACT_DIRECTORY/blank-negative.json" \
+  build-a3-release/test/a3-product/pulp-test-control-gpu-health-standalone-product \
+  "exact Standalone product catches the seeded transparent first frame"
+
+PULP_A3_AUDIO_THREAD_EXCLUSION_RECEIPT_PATH="$ARTIFACT_DIRECTORY/audio-thread.json" \
+  build-a3-release/test/pulp-test-control-gpu-health-provider \
+  "external harness observes every GPU health entry point off a registered audio thread"
+```
+
+The first command launches the real standalone product with the transparent
+first-frame seed and writes a receipt only after observing
+`gpu.startup.blank`. The second explicitly registers a live harness thread as
+audio while exercising every provider entry point on non-audio threads, with a
+separate wrong-thread rejection test protecting the writer guard. Its receipt intentionally says
+`external-harness-only-not-product-runtime-proof`; the role adapter must not
+upgrade that bounded claim.
+
 Copy each passing `run.json` campaign fragment and the requested control refs
 into the final template, add the same-instance A2T bundle, and run the closed
 generator above. It independently derives exactly one B4 disposition from the

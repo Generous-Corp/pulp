@@ -27,6 +27,11 @@ catch_discover_tests(pulp-test-hot-reload
         RESOURCE_LOCK hot-reload-file-watcher
         LABELS slow)
 
+# The model/provider registrations in this owner file are intentionally visible
+# when the optional Inspector component is disabled. Inspector-only fixtures in
+# the file retain their own PULP_ENABLE_INSPECTOR guard.
+include(${CMAKE_CURRENT_LIST_DIR}/gpu_health_tests.cmake)
+
 # Inspector component tests exist only when the optional SDK component is
 # present. A gate-off build must not compile inspector implementation sources
 # back into its test artifacts.
@@ -526,7 +531,6 @@ target_link_libraries(pulp-test-control-state-write-executor PRIVATE
 catch_discover_tests(pulp-test-control-state-write-executor
     PROPERTIES LABELS "inspect;control;main-thread;mutation;t1;t2a")
 
-include(${CMAKE_CURRENT_LIST_DIR}/gpu_health_tests.cmake)
 add_executable(pulp-test-control-trace-session-executor
     test_control_trace_session_executor.cpp)
 target_link_libraries(pulp-test-control-trace-session-executor PRIVATE

@@ -410,8 +410,9 @@ correlated trace. Forge is a visible role: declare
 capture completion is only an upper bound. Missing causal instrumentation stays
 nullable and named rather than becoming fabricated Vellum evidence. Leave an
 unratified startup budget unverified; never substitute a Pulp example
-for the requested Forge product. Exercise the seeded blank control before
-accepting a real-machine result.
+for the requested Forge product. Exercise the receipt-producing seeded blank
+control documented in `docs/validation/gpu-first-visible-a3-acceptance.md`
+before accepting a real-machine result.
 
 For the A3 terminal campaign, invoke the exact Forge-shell adapter through
 `gpu_first_visible_a3_campaign.py run-role --role forge`. Its identity JSON must

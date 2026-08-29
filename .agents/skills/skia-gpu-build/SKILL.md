@@ -518,4 +518,7 @@ ratified budget, validates product/host/health/trace artifacts, and preserves
 timeout, SKIP, or INCONCLUSIVE as nonterminal. Use `--require-controls` on one
 real role to bind the blank negative and external audio-thread exclusion. The
 existing Standalone product test remains a one-observation wiring preflight,
-not a 20-trial campaign.
+not a 20-trial campaign. When the adapter owns the controls, use the two
+receipt-producing focused test invocations in
+`docs/validation/gpu-first-visible-a3-acceptance.md`; setting a seed alone is
+not durable evidence.

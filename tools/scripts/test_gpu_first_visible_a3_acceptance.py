@@ -447,7 +447,12 @@ raise SystemExit(code)
             "disposition": "no-change", "status": "closed-no-change",
             "reason": b4_reason, "evidence": auto("b4.json"),
         },
-        "observations": [],
+        "observations": [{
+            "id": "fixture-product",
+            "status": "confirmed",
+            "detail": "Fixture observation is bound to its exact product bytes.",
+            "artifacts": [auto("standalone-product.bin")],
+        }],
         "missing_evidence": [],
     }
 
@@ -1011,6 +1016,10 @@ def main() -> int:
         expect_failure(mutated, root, "digest mismatch")
 
         mutated = copy.deepcopy(receipt)
+        mutated["observations"][0]["artifacts"][0]["sha256"] = "0" * 64
+        expect_failure(mutated, root, "digest mismatch")
+
+        mutated = copy.deepcopy(receipt)
         link = root / "product-link.bin"
         link.symlink_to("standalone-product.bin")
         mutated["campaigns"][0]["product_artifact"] = {
@@ -1081,7 +1090,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         assert a3.validate_receipt(current_receipt, current_root) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=43 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=44 "
             "checked_in_nonterminal=verified"
         )
     return 0

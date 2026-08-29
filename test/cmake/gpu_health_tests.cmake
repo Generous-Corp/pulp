@@ -19,6 +19,7 @@ if(TARGET pulp-test-gpu-health-provider)
     endif()
 endif()
 
+if(PULP_ENABLE_INSPECTOR)
 add_executable(pulp-test-control-gpu-health-read-executor
     test_control_gpu_health_read_executor.cpp)
 target_link_libraries(pulp-test-control-gpu-health-read-executor PRIVATE
@@ -93,4 +94,5 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
     endif()
     catch_discover_tests(pulp-test-control-gpu-health-standalone-product
         PROPERTIES LABELS "inspect;control;gpu;standalone;product")
+endif()
 endif()

@@ -22,8 +22,8 @@
         { "type": "null" },
         {
           "type": "object",
-          "minProperties": 12,
-          "maxProperties": 12,
+          "minProperties": 16,
+          "maxProperties": 16,
           "propertyNames": { "type": "string", "minLength": 1, "maxLength": 512 },
           "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
         }
@@ -161,17 +161,26 @@
       "maxItems": 64,
       "items": {
         "type": "object",
-        "required": ["id", "status", "detail", "artifact_sha256"],
+        "required": ["id", "status", "detail", "artifacts"],
         "additionalProperties": false,
         "properties": {
           "id": { "type": "string", "minLength": 1, "maxLength": 128 },
           "status": { "enum": ["observed", "partial", "invalidated", "confirmed"] },
           "detail": { "type": "string", "minLength": 1, "maxLength": 2048 },
-          "artifact_sha256": {
+          "artifacts": {
             "type": "array",
             "maxItems": 16,
             "uniqueItems": true,
-            "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            "items": {
+              "$comment": "artifact-ref",
+              "type": "object",
+              "required": ["path", "sha256"],
+              "additionalProperties": false,
+              "properties": {
+                "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+                "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            }
           }
         }
       }

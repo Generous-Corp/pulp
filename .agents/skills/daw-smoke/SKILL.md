@@ -234,8 +234,10 @@ not automatically a passing startup trial. A visible DAW campaign must declare
 capture completion cannot substitute. Missing source/shader or stage timings
 are instrumentation coverage rather than event loss and remain nullable only
 under the closed A3 verifier's passing no-change or failing investigation rules.
-Preserve the correlated A2T trace and run the seeded blank control separately with
-`PULP_GPU_HEALTH_SEED_BLANK_FRAME=1`; a pass there is a harness failure. Keep
+Preserve the correlated A2T trace. Produce the seeded blank receipt with the
+focused real-Standalone test command in
+`docs/validation/gpu-first-visible-a3-acceptance.md`; merely setting
+`PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` does not bind a control artifact. Keep
 SKIP/INCONCLUSIVE and absent format scans as pending, never PASS.
 
 Use `reaper_smoke.py --mode editor-open` as the exact-format prerequisite for a

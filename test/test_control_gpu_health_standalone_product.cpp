@@ -94,7 +94,7 @@ struct ProductResponse {
     std::string detail_json;
 };
 
-ProductResponse run_campaign(bool use_gpu) {
+ProductResponse run_campaign(bool use_gpu, bool seed_blank = false) {
     TemporaryRoot root;
     const auto broker_executable = current_executable();
     const std::filesystem::path host{PULP_CONTROL_GPU_HEALTH_STANDALONE_PRODUCT_FIXTURE};
@@ -105,6 +105,9 @@ ProductResponse run_campaign(bool use_gpu) {
                                  (root.path / "product.png").string()};
     ScopedEnvironment disable_gpu{"PULP_A3_PRODUCT_DISABLE_GPU",
                                   use_gpu ? std::nullopt : std::optional<std::string>{"1"}};
+    ScopedEnvironment blank_first_frame{"PULP_GPU_HEALTH_SEED_BLANK_FRAME",
+                                        seed_blank ? std::optional<std::string>{"1"}
+                                                   : std::nullopt};
 
     const ControlTrustedHostLaunchIntent host_intent{
         .executable = host,
@@ -264,14 +267,12 @@ TEST_CASE("exact Standalone product instance publishes capture-only GPU health")
     REQUIRE(startup["trials"][0]["editor_open_to_first_nonblank_ms"].isFloat());
     REQUIRE(startup["trials"][0]["content_floor_passed"].getBool());
     REQUIRE(startup["trials"][0]["verdict"].getString() == "unverified");
-    const auto gpu_evidence_id =
-        std::string(startup["correlation"]["gpu_evidence_id"].getString());
+    const auto gpu_evidence_id = std::string(startup["correlation"]["gpu_evidence_id"].getString());
     const auto trace_evidence_id =
         std::string(startup["correlation"]["trace_evidence_id"].getString());
     REQUIRE(gpu_evidence_id.size() == 32);
     REQUIRE(std::ranges::all_of(gpu_evidence_id, [](unsigned char character) {
-        return (character >= '0' && character <= '9') ||
-               (character >= 'a' && character <= 'f');
+        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
     }));
     REQUIRE(trace_evidence_id.starts_with("trace-"));
     REQUIRE(trace_evidence_id != gpu_evidence_id);
@@ -331,4 +332,32 @@ TEST_CASE("CPU Standalone product cannot satisfy the authentic GPU capture gate"
         return;
     const auto product = run_campaign(false);
     REQUIRE_FALSE(authentic_capture(choc::json::parse(product.detail_json)));
+}
+
+TEST_CASE("exact Standalone product catches the seeded transparent first frame") {
+    if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
+        return;
+    const auto product = run_campaign(true, true);
+    INFO(product.detail_json);
+    const auto detail = choc::json::parse(product.detail_json);
+    REQUIRE(detail["health"]["verdict"].getString() == "fail");
+    REQUIRE(detail["startup"]["trials"].size() == 1);
+    REQUIRE(detail["startup"]["trials"][0]["diagnostic_code"].getString() == "gpu.startup.blank");
+    REQUIRE_FALSE(detail["startup"]["trials"][0]["content_floor_passed"].getBool());
+
+    const auto* receipt_path = std::getenv("PULP_A3_BLANK_NEGATIVE_RECEIPT_PATH");
+    if (!receipt_path || receipt_path[0] == '\0')
+        return;
+    auto receipt = choc::value::createObject("");
+    receipt.addMember("schema",
+                      choc::value::createString("pulp.gpu-first-visible-blank-negative.v1"));
+    receipt.addMember("version", choc::value::createInt64(1));
+    receipt.addMember("injection", choc::value::createString("transparent-first-frame"));
+    receipt.addMember("expected_diagnostic_code", choc::value::createString("gpu.startup.blank"));
+    receipt.addMember("observed_diagnostic_code", choc::value::createString("gpu.startup.blank"));
+    receipt.addMember("caught", choc::value::createBool(true));
+    std::ofstream output(receipt_path, std::ios::binary | std::ios::trunc);
+    REQUIRE(output.good());
+    output << choc::json::toString(receipt, true) << '\n';
+    REQUIRE(output.good());
 }
