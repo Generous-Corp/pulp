@@ -144,10 +144,9 @@ def _verify_producer_disposition(
     ) or {
         row.get("owner_package") for row in external if isinstance(row, dict)
     } != {
-        "input-to-present-latency-tracing",
         "A3-first-visible-product-evidence",
     }:
-        errors.append("producer evidence does not expose every later non-A2T product producer")
+        errors.append("producer evidence does not expose every post-base non-A2T product producer")
 
 
 def _verify_installed_build_provenance(
