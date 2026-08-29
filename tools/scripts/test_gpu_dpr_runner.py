@@ -6,8 +6,10 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import struct
 import subprocess
 import tempfile
+import zlib
 from pathlib import Path
 
 import gpu_dpr_experiment as experiment
@@ -23,6 +25,7 @@ from gpu_dpr_test_support import (
 
 SHA_A = "3" * 40
 SHA_C = "2" * 40
+PNG_CACHE: dict[tuple[int, int, bool], bytes] = {}
 
 
 def plan(manifest: dict) -> dict:
@@ -43,11 +46,51 @@ def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
+def fixture_png(width: int, height: int, *, flat: bool = False) -> bytes:
+    """Make a valid, highly compressible RGBA fixture at the claimed dimensions."""
+    key = (width, height, flat)
+    if key in PNG_CACHE:
+        return PNG_CACHE[key]
+    palette = (
+        (18, 24, 34, 255), (235, 239, 246, 255), (47, 111, 237, 255),
+        (241, 160, 45, 255), (72, 189, 121, 255), (201, 70, 92, 255),
+        (134, 94, 214, 255), (55, 181, 190, 255),
+        (252, 205, 71, 255), (84, 94, 112, 255), (111, 207, 151, 255),
+        (226, 106, 156, 255), (102, 146, 245, 255), (238, 127, 78, 255),
+        (168, 211, 68, 255), (179, 130, 226, 255),
+    )
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)
+        if flat:
+            rows.extend(bytes(palette[0]) * width)
+        else:
+            rows.extend(b"".join(
+                bytes(palette[((x // 4) + (y // 4)) % len(palette)])
+                for x in range(width)
+            ))
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload)) + kind + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff)
+        )
+
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
+        + chunk(b"IEND", b"")
+    )
+    PNG_CACHE[key] = png
+    return png
+
+
 def raw_samples(
     *,
     logical_input_ok: bool = True,
     fidelity_ok: bool = True,
-    capture_similarity: float = 0.99,
+    capture_similarity: float = 1.0,
 ) -> dict:
     expected = [320, 180]
     observed_physical = expected if logical_input_ok else [160, 90]
@@ -116,7 +159,7 @@ def make_receipt(
     outcome: str = "pass",
     logical_input_ok: bool = True,
     fidelity_ok: bool = True,
-    capture_similarity: float = 0.99,
+    capture_similarity: float | None = None,
     attempt_nonce: str | None = None,
     measurement_producer: Path | None = None,
 ) -> Path:
@@ -145,7 +188,7 @@ def make_receipt(
     raw = raw_samples(
         logical_input_ok=logical_input_ok,
         fidelity_ok=fidelity_ok,
-        capture_similarity=capture_similarity,
+        capture_similarity=capture_similarity if capture_similarity is not None else 1.0,
     )
     requested = float(cell["requested_dpr"])
     observed = (
@@ -210,9 +253,18 @@ def make_receipt(
     browser_trace = json.dumps({"traceEvents": [{
         "name": f"pulp.dpr.{nonce}.{category}", "ph": "X", "pid": 77, "dur": 1,
     } for category in manifest["trial_contract"]["required_trace_categories"]]}).encode()
+    logical = scenario["logical_size"]
+    physical_width = round(logical["width"] * observed)
+    physical_height = round(logical["height"] * observed)
+    reference_png = fixture_png(
+        physical_width, physical_height, flat=not fidelity_ok,
+    )
+    capture_png = fixture_png(
+        physical_width, physical_height, flat=not fidelity_ok,
+    )
     files = {
-        "capture": ("capture.png", b"real-capture-bytes"),
-        "reference_capture": ("reference.png", b"real-reference-bytes"),
+        "capture": ("capture.png", capture_png),
+        "reference_capture": ("reference.png", reference_png),
         "trace": ("trace.pftrace", browser_trace if is_web else b"real-trace-bytes:" + nonce.encode("ascii")),
         "raw_samples": ("raw-samples.json", None),
         "input_receipt": ("input-receipt.json", b'{"logical":true}\n'),
@@ -233,7 +285,23 @@ def make_receipt(
             path.write_bytes(content)
         artifacts.append({"kind": kind, "path": name, "sha256": runner.sha256_file(path)})
 
-    logical = scenario["logical_size"]
+    (_, _, measured_floor, measured_similarity,
+     measured_text, measured_strokes) = evidence.recompute_fidelity(
+        cell_dir / "capture.png", cell_dir / "reference.png", scenario, observed,
+    )
+    raw["fidelity"].update({
+        "content_floor_passed": measured_floor,
+        "capture_similarity": (
+            measured_similarity if capture_similarity is None else capture_similarity
+        ),
+        "small_text_luminance_stddev": measured_text,
+        "thin_stroke_coverage": measured_strokes,
+    })
+    write_json(cell_dir / "raw-samples.json", raw)
+    next(item for item in artifacts if item["kind"] == "raw_samples")["sha256"] = (
+        runner.sha256_file(cell_dir / "raw-samples.json")
+    )
+
     adapter = {
         "class": "hardware",
         "name": "Selftest GPU",
@@ -598,6 +666,41 @@ def main() -> int:
             lambda raw: raw["fidelity"]["oracle_regions"]["small_text_roi"].update(
                 x=25
             ),
+        )
+        planted += 1
+        reject_raw_mutation(
+            "producer-authored fidelity metric forgery",
+            lambda raw: raw["fidelity"].update(
+                small_text_luminance_stddev=(
+                    raw["fidelity"]["small_text_luminance_stddev"] + 1.0
+                )
+            ),
+        )
+        planted += 1
+
+        mutated_capture_receipt = make_receipt(
+            run_dir, state, manifest, dense, analyzer=analyzer, binary=binary,
+        )
+        mutated_capture_path = runner.cell_directory(run_dir, dense) / "capture.png"
+        mutated_capture_path.write_bytes(fixture_png(900, 600, flat=True))
+        mutated_document = runner.load_json(mutated_capture_receipt)
+        mutated_digest = runner.sha256_file(mutated_capture_path)
+        next(
+            item for item in mutated_document["artifacts"]
+            if item["kind"] == "capture"
+        )["sha256"] = mutated_digest
+        mutated_raw_path = runner.cell_directory(run_dir, dense) / "raw-samples.json"
+        mutated_raw = runner.load_json(mutated_raw_path)
+        mutated_raw["fidelity"]["comparison"]["capture_sha256"] = mutated_digest
+        write_json(mutated_raw_path, mutated_raw)
+        next(
+            item for item in mutated_document["artifacts"]
+            if item["kind"] == "raw_samples"
+        )["sha256"] = runner.sha256_file(mutated_raw_path)
+        write_json(mutated_capture_receipt, mutated_document)
+        expect_rejected(
+            mutated_capture_receipt, state, manifest, run_dir,
+            "committed capture mutation with refreshed digests",
         )
         planted += 1
 

@@ -10,9 +10,11 @@ import os
 import re
 import stat
 import statistics
+import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,241 @@ ALL_OUTCOMES = COMPLETE_OUTCOMES | INCOMPLETE_OUTCOMES
 ARTIFACT_KINDS = {
     "capture", "reference_capture", "trace", "raw_samples", "input_receipt"
 }
+FIDELITY_CACHE: dict[
+    tuple[str, str, str, float, str],
+    tuple[int, int, bool, float, float, float],
+] = {}
+
+
+def decode_png_rgba(path: Path) -> tuple[int, int, bytes]:
+    data = regular_file_bytes(path, "PNG fidelity artifact")
+    if len(data) > 128 * 1024 * 1024:
+        raise EvidenceError("PNG fidelity artifact exceeds the 128 MiB cap")
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise EvidenceError("fidelity artifact is not PNG")
+    try:
+        from PIL import Image, UnidentifiedImageError
+        import io
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                if image.mode not in {"RGB", "RGBA"}:
+                    raise EvidenceError("PNG fidelity format is unsupported")
+                image.load()
+                rgba_image = image.convert("RGBA")
+                width, height = rgba_image.size
+                if (
+                    width <= 0 or height <= 0 or width > 16_384 or height > 16_384
+                    or width * height > 40_000_000
+                ):
+                    raise EvidenceError("PNG fidelity dimensions are unsupported")
+                return width, height, rgba_image.tobytes()
+        except (UnidentifiedImageError, OSError, ValueError) as error:
+            raise EvidenceError("PNG fidelity data is corrupt") from error
+    except ImportError:
+        pass
+    offset = 8
+    width = height = color = depth = interlace = None
+    packed = bytearray()
+    saw_iend = False
+    while offset + 12 <= len(data):
+        length = struct.unpack(">I", data[offset:offset + 4])[0]
+        if offset + 12 + length > len(data):
+            raise EvidenceError("PNG chunk escapes artifact")
+        kind = data[offset + 4:offset + 8]
+        payload = data[offset + 8:offset + 8 + length]
+        expected_crc = struct.unpack(">I", data[offset + 8 + length:offset + 12 + length])[0]
+        if zlib.crc32(kind + payload) & 0xffffffff != expected_crc:
+            raise EvidenceError("PNG chunk checksum is invalid")
+        if kind == b"IHDR":
+            if width is not None or length != 13:
+                raise EvidenceError("PNG IHDR is malformed")
+            width, height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", payload)
+        elif kind == b"IDAT":
+            packed.extend(payload)
+            if len(packed) > 128 * 1024 * 1024:
+                raise EvidenceError("PNG compressed pixels exceed the 128 MiB cap")
+        elif kind == b"IEND":
+            saw_iend = True
+            break
+        offset += 12 + length
+    if (
+        not saw_iend or not packed or not width or not height
+        or width > 16_384 or height > 16_384 or width * height > 40_000_000
+        or depth != 8 or color not in {2, 6} or interlace != 0
+    ):
+        raise EvidenceError("PNG fidelity format is unsupported")
+    channels = 4 if color == 6 else 3
+    stride = width * channels
+    expected_size = (stride + 1) * height
+    try:
+        decompressor = zlib.decompressobj()
+        raw = decompressor.decompress(bytes(packed), expected_size + 1)
+        raw += decompressor.flush()
+    except zlib.error as error:
+        raise EvidenceError("PNG fidelity data is corrupt") from error
+    if len(raw) != expected_size or not decompressor.eof or decompressor.unused_data:
+        raise EvidenceError("PNG fidelity data has unexpected size")
+    rows: list[bytearray] = []
+    cursor = 0
+    for _ in range(height):
+        filter_type = raw[cursor]; cursor += 1
+        encoded = raw[cursor:cursor + stride]; cursor += stride
+        if filter_type == 0:
+            rows.append(bytearray(encoded))
+            continue
+        row = bytearray(stride); prior = rows[-1] if rows else bytearray(stride)
+        for index, value in enumerate(encoded):
+            left = row[index - channels] if index >= channels else 0
+            up = prior[index]
+            upper_left = prior[index - channels] if index >= channels else 0
+            if filter_type == 0: predictor = 0
+            elif filter_type == 1: predictor = left
+            elif filter_type == 2: predictor = up
+            elif filter_type == 3: predictor = (left + up) // 2
+            elif filter_type == 4:
+                p = left + up - upper_left; pa=abs(p-left); pb=abs(p-up); pc=abs(p-upper_left)
+                predictor = left if pa <= pb and pa <= pc else up if pb <= pc else upper_left
+            else: raise EvidenceError("PNG fidelity filter is unsupported")
+            row[index] = (value + predictor) & 0xff
+        rows.append(row)
+    rgba = bytearray(width * height * 4)
+    out = 0
+    for row in rows:
+        for index in range(0, stride, channels):
+            rgba[out:out + 3] = row[index:index + 3]
+            rgba[out + 3] = row[index + 3] if channels == 4 else 255
+            out += 4
+    return width, height, bytes(rgba)
+
+
+def recompute_fidelity(
+    capture_path: Path, reference_path: Path, scenario: dict[str, Any], dpr: float,
+) -> tuple[int, int, bool, float, float, float]:
+    width, height, capture = decode_png_rgba(capture_path)
+    rw, rh, reference = decode_png_rgba(reference_path)
+    if (width, height) != (rw, rh):
+        raise EvidenceError("fidelity images differ in size")
+    cache_key = (
+        hashlib.sha256(capture).hexdigest(), hashlib.sha256(reference).hexdigest(),
+        json.dumps(scenario.get("fidelity_oracle") or {}, sort_keys=True), dpr,
+        str(scenario.get("kind", "")),
+    )
+    if cache_key in FIDELITY_CACHE:
+        return FIDELITY_CACHE[cache_key]
+    pixels = width * height
+    regions = scenario.get("fidelity_oracle") or {}
+    def samples(region_name: str) -> list[tuple[int, int, int]]:
+        region = regions.get(region_name)
+        if not isinstance(region, dict):
+            return []
+        x0 = round(region["x"] * dpr)
+        y0 = round(region["y"] * dpr)
+        x1 = round((region["x"] + region["width"]) * dpr)
+        y1 = round((region["y"] + region["height"]) * dpr)
+        if not (0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height):
+            raise EvidenceError(f"{region_name} escapes the committed capture")
+        return [
+            tuple(capture[(y * width + x) * 4:(y * width + x) * 4 + 3])
+            for y in range(y0, y1) for x in range(x0, x1)
+        ]
+    try:
+        import numpy as np
+        capture_pixels = np.frombuffer(capture, dtype=np.uint8).reshape((-1, 4))
+        reference_pixels = np.frombuffer(reference, dtype=np.uint8).reshape((-1, 4))
+        similarity = float(np.all(capture_pixels == reference_pixels, axis=1).mean())
+        packed_rgb = (
+            capture_pixels[:, 0].astype(np.uint32) << 16
+            | capture_pixels[:, 1].astype(np.uint32) << 8
+            | capture_pixels[:, 2].astype(np.uint32)
+        )
+        _, full_counts = np.unique(packed_rgb, return_counts=True)
+        non_background = (pixels - int(full_counts.max())) / pixels
+        if scenario.get("kind") == "maintained_web_canary":
+            content_floor = len(full_counts) > 4 and non_background >= 0.001
+        else:
+            full_luminance = (
+                0.2126 * capture_pixels[:, 0] + 0.7152 * capture_pixels[:, 1]
+                + 0.0722 * capture_pixels[:, 2]
+            )
+            content_floor = (
+                len(np.unique(capture_pixels.view(np.uint32).reshape(-1))) >= 16
+                and float(full_luminance.std()) >= 1.0
+                and non_background >= 0.05
+                and float((capture_pixels[:, 3] >= 250).mean()) >= 0.95
+            )
+        def roi_array(region_name: str) -> Any:
+            region = regions.get(region_name)
+            if not isinstance(region, dict):
+                return np.empty((0, 3), dtype=np.uint8)
+            x0 = round(region["x"] * dpr)
+            y0 = round(region["y"] * dpr)
+            x1 = round((region["x"] + region["width"]) * dpr)
+            y1 = round((region["y"] + region["height"]) * dpr)
+            if not (0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height):
+                raise EvidenceError(f"{region_name} escapes the committed capture")
+            return capture_pixels.reshape((height, width, 4))[y0:y1, x0:x1, :3].reshape((-1, 3))
+        text_pixels = roi_array("small_text_roi")
+        stroke_pixels = roi_array("thin_stroke_roi")
+        if len(text_pixels):
+            luminance = (
+                0.2126 * text_pixels[:, 0] + 0.7152 * text_pixels[:, 1]
+                + 0.0722 * text_pixels[:, 2]
+            )
+            text_stddev = float(luminance.std())
+        else:
+            text_stddev = 0.0
+        if len(stroke_pixels):
+            packed_strokes = (
+                stroke_pixels[:, 0].astype(np.uint32) << 16
+                | stroke_pixels[:, 1].astype(np.uint32) << 8
+                | stroke_pixels[:, 2].astype(np.uint32)
+            )
+            _, stroke_counts = np.unique(packed_strokes, return_counts=True)
+            stroke_coverage = (
+                len(stroke_pixels) - int(stroke_counts.max())
+            ) / len(stroke_pixels)
+        else:
+            stroke_coverage = 0.0
+    except ImportError:
+        capture_words = memoryview(capture).cast("I")
+        reference_words = memoryview(reference).cast("I")
+        similarity = sum(a == b for a, b in zip(capture_words, reference_words)) / pixels
+        rgb_histogram: dict[int, int] = {}
+        rgba_histogram: dict[int, int] = {}
+        full_luminance: list[float] = []
+        opaque = 0
+        for index, value in enumerate(capture_words):
+            rgb = int(value) & 0x00ffffff
+            rgb_histogram[rgb] = rgb_histogram.get(rgb, 0) + 1
+            rgba_histogram[int(value)] = rgba_histogram.get(int(value), 0) + 1
+            offset = index * 4
+            r, g, b, a = capture[offset:offset + 4]
+            full_luminance.append(0.2126*r + 0.7152*g + 0.0722*b)
+            opaque += a >= 250
+        non_background = (pixels - max(rgb_histogram.values())) / pixels
+        if scenario.get("kind") == "maintained_web_canary":
+            content_floor = len(rgb_histogram) > 4 and non_background >= 0.001
+        else:
+            content_floor = (
+                len(rgba_histogram) >= 16
+                and statistics.pstdev(full_luminance) >= 1.0
+                and non_background >= 0.05 and opaque / pixels >= 0.95
+            )
+        text = samples("small_text_roi")
+        strokes = samples("thin_stroke_roi")
+        luminance = [0.2126*r + 0.7152*g + 0.0722*b for r, g, b in text]
+        text_stddev = statistics.pstdev(luminance) if luminance else 0.0
+        stroke_coverage = 0.0
+        if strokes:
+            counts: dict[tuple[int, int, int], int] = {}
+            for value in strokes:
+                counts[value] = counts.get(value, 0) + 1
+            stroke_coverage = (len(strokes) - max(counts.values())) / len(strokes)
+    result = width, height, content_floor, similarity, text_stddev, stroke_coverage
+    if len(FIDELITY_CACHE) >= 256:
+        FIDELITY_CACHE.pop(next(iter(FIDELITY_CACHE)))
+    FIDELITY_CACHE[cache_key] = result
+    return result
 TRACE_QUESTIONS = {"gpu-startup", "gpu-health", "gpu-probe"}
 TRACE_ANALYSIS_SCHEMA = "pulp.trace-gpu-analysis.v1"
 A2T_RECEIPT_SCHEMA = "pulp.gpu-trace-overhead-acceptance.v1"
@@ -853,6 +1090,7 @@ def receipt_observation(
     if not isinstance(artifacts, list):
         raise EvidenceError("receipt artifact list is missing")
     by_kind: dict[str, dict[str, Any]] = {}
+    artifact_paths: dict[str, Path] = {}
     artifact_payloads: dict[str, bytes] = {}
     for artifact in artifacts:
         if not isinstance(artifact, dict):
@@ -872,6 +1110,7 @@ def receipt_observation(
             "path": str(path.relative_to(run_dir.resolve())),
             "sha256": digest,
         }
+        artifact_paths[kind] = path
         artifact_payloads[kind] = artifact_bytes
     if set(by_kind) != ARTIFACT_KINDS:
         raise EvidenceError(
@@ -941,18 +1180,48 @@ def receipt_observation(
         or not math.isfinite(float(stroke_coverage)) or not 0 <= stroke_coverage <= 1
     ):
         raise EvidenceError("fidelity text/stroke measurements are malformed")
+    (
+        capture_width, capture_height, recomputed_content_floor,
+        recomputed_similarity, recomputed_text_contrast,
+        recomputed_stroke_coverage,
+    ) = recompute_fidelity(
+        artifact_paths["capture"], artifact_paths["reference_capture"],
+        scenario, float(observed_dpr),
+    )
+    physical = receipt.get("physical_size")
+    if physical != {"width": capture_width, "height": capture_height}:
+        raise EvidenceError("committed capture dimensions differ from the receipt")
+    reported_similarity = fidelity_raw.get("capture_similarity")
+    if (
+        fidelity_raw.get("content_floor_passed") is not recomputed_content_floor
+        or isinstance(reported_similarity, bool)
+        or not isinstance(reported_similarity, (int, float))
+        or not math.isclose(
+            float(reported_similarity), recomputed_similarity,
+            rel_tol=0.0, abs_tol=1e-6,
+        )
+        or not math.isclose(
+            float(text_contrast), recomputed_text_contrast,
+            rel_tol=0.0, abs_tol=1e-6,
+        )
+        or not math.isclose(
+            float(stroke_coverage), recomputed_stroke_coverage,
+            rel_tol=0.0, abs_tol=1e-9,
+        )
+    ):
+        raise EvidenceError("producer fidelity metrics differ from committed PNG artifacts")
     fidelity = {
-        "content_floor_passed": fidelity_raw.get("content_floor_passed") is True,
-        "capture_similarity": fidelity_raw.get("capture_similarity"),
+        "content_floor_passed": recomputed_content_floor,
+        "capture_similarity": recomputed_similarity,
         "small_text_legible": (
             "small_text" not in required_oracles
-            or text_contrast >= manifest["trial_contract"][
+            or recomputed_text_contrast >= manifest["trial_contract"][
                 "small_text_luminance_stddev_minimum"
             ]
         ),
         "thin_strokes_preserved": (
             "thin_strokes" not in required_oracles
-            or stroke_coverage >= manifest["trial_contract"][
+            or recomputed_stroke_coverage >= manifest["trial_contract"][
                 "thin_stroke_coverage_minimum"
             ]
         ),
