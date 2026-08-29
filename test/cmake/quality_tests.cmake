@@ -393,6 +393,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_external_adapter.py")
     add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_trace_overhead_acceptance.py")
+    add_test(NAME gpu-trace-overhead-verifier-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_trace_overhead_acceptance.py")
     # Typed, GPU-free negative controls for the DPR experiment evidence
     # envelope. Real trials remain separately gated on A2T trace coverage and
     # A3 budget receipts; this test proves only the portable contract.

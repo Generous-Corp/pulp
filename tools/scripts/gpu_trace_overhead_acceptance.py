@@ -15,12 +15,18 @@ import math
 import os
 import platform
 import random
+import re
 import statistics
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+import sdk_provenance
 
 
 EXPECTED_EXIT = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
@@ -31,9 +37,68 @@ A2T_ANALYZER_SOURCE_PATHS = {
     "experimental/pulp-rs/src/cmd/trace.rs",
     "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
     "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/src/cmd/trace_fetch.rs",
+    "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
+    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+    "tools/deps/manifest.json",
     "tools/mcp/mcp_trace_tools.cpp",
     "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
 }
+
+PINNED_PROCESSOR_VERSION = "v57.2"
+PROCESSOR_PLATFORM = {
+    ("Darwin", "arm64"): "mac-arm64",
+    ("Darwin", "aarch64"): "mac-arm64",
+    ("Darwin", "x86_64"): "mac-amd64",
+    ("Linux", "x86_64"): "linux-amd64",
+    ("Linux", "amd64"): "linux-amd64",
+    ("Linux", "aarch64"): "linux-arm64",
+    ("Linux", "arm64"): "linux-arm64",
+    ("Windows", "AMD64"): "windows-amd64",
+    ("Windows", "x86_64"): "windows-amd64",
+}
+PROCESSOR_SHA256 = {
+    "mac-arm64": "98a41b80e9f60da0373d64aff6455681f8c26b7c391ae5736324a5b11e3dacc2",
+    "mac-amd64": "c0f61397901da47cbe1bb9a0843624f7c2038ac92176ce15e3736ce9aa0afef0",
+    "linux-amd64": "55ba613fc6d4f71df81eee2dbfc293020063655c241b3e314bff75345b802684",
+    "linux-arm64": "1dcc1d9aaff2eb92e8bc58f1957e4e445600294bd61dbc09345c1018c5ff0868",
+    "windows-amd64": "100334b6091596fbc97f872556849a5747bf47a7f7190c485ba8cea8d2409c7b",
+}
+SEMANTIC_FIELDS = (
+    "schema",
+    "question",
+    "verdict",
+    "capture_complete",
+    "unavailable_reason",
+    "dominant_stage",
+    "observed_categories",
+    "category_scope",
+    "contributors",
+    "cold_start_contributors",
+    "steady_state_contributors",
+    "scheduler_evidence_available",
+    "capture_integrity",
+    "evidence_ids",
+    "next_actions",
+    "ui_correlation",
+)
+FIXTURE_REPLAY = (
+    ("healthy-health", "healthy.pftrace", "gpu-health", "pass", "health-transition", None),
+    ("compile-failure", "compile-failure.pftrace", "gpu-health", "fail", "shader-compile", "fix-shader-compile"),
+    ("blank-readback", "blank-readback-failure.pftrace", "gpu-probe", "fail", "readback", "inspect-readback-oracle"),
+    ("device-loss", "device-loss.pftrace", "gpu-health", "fail", "device-loss", "recreate-lost-device"),
+    ("acquire-present", "acquire-present-wall-time-only.pftrace", "gpu-startup", "unverified", "acquire", "capture-scheduler-evidence"),
+    ("first-frame", "first-frame-pipeline-upload-stall.pftrace", "gpu-startup", "unverified", "pipeline-prepare", "inspect-pipeline-signature"),
+    ("incomplete", "incomplete.pftrace", "gpu-startup", "unavailable", None, "complete-and-flush-capture"),
+    ("wrong-category", "wrong-category.pftrace", "gpu-health", "unavailable", None, "capture-required-gpu-category"),
+)
+FIXTURE_SOURCE_PATHS = {
+    f"test/fixtures/perfetto-gpu/{filename}"
+    for _case, filename, _question, _verdict, _dominant, _action in FIXTURE_REPLAY
+}
+PLAN_PATH = "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md"
 
 
 def sha256(path: Path) -> str:
@@ -109,18 +174,7 @@ def parse_analysis(payload: Any, *, surface: str) -> dict[str, Any]:
 def semantic_projection(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         key: payload.get(key)
-        for key in (
-            "schema",
-            "question",
-            "verdict",
-            "capture_complete",
-            "dominant_stage",
-            "contributors",
-            "evidence_ids",
-            "next_actions",
-            "ui_correlation",
-            "unavailable_reason",
-        )
+        for key in SEMANTIC_FIELDS
         if key in payload
     }
 
@@ -186,8 +240,18 @@ class McpSession:
         start = time.perf_counter_ns()
         response = self._request("tools/call", params)
         elapsed = time.perf_counter_ns() - start
-        structured = response["result"].get("structuredContent")
-        return elapsed, parse_analysis(structured, surface="MCP")
+        result = response["result"]
+        structured = parse_analysis(result.get("structuredContent"), surface="MCP")
+        should_error = EXPECTED_EXIT[structured["verdict"]] != 0
+        if bool(result.get("isError", False)) != should_error:
+            raise RuntimeError("MCP isError did not preserve the typed verdict status")
+        try:
+            text_payload = json.loads(result["content"][0]["text"])
+        except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
+            raise RuntimeError("MCP text evidence is missing or malformed") from error
+        if text_payload != structured:
+            raise RuntimeError("MCP text and structured trace evidence disagree")
+        return elapsed, structured
 
     def close(self) -> None:
         if self.process.stdin:
@@ -261,12 +325,230 @@ def system_profiler_identity() -> dict[str, Any]:
 
 def validate_paths(cli: Path, mcp: Path, trace: Path, processor: Path) -> None:
     for label, path in (("CLI", cli), ("MCP", mcp), ("trace", trace), ("processor", processor)):
-        if not path.is_file():
+        if not path.is_file() or path.is_symlink():
             raise ValueError(f"{label} path is not a file: {path}")
     if cli.parent.resolve() != mcp.parent.resolve():
         raise ValueError("CLI and MCP must be installed as siblings in one prefix/bin")
     if cli.name != "pulp" or mcp.name != "pulp-mcp":
         raise ValueError("installed sibling names must be pulp and pulp-mcp")
+    if not os.access(cli, os.X_OK) or not os.access(mcp, os.X_OK) or not os.access(processor, os.X_OK):
+        raise ValueError("CLI, MCP, and trace processor must be executable regular files")
+
+
+def _git_text(repository: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(repository), *arguments],
+        check=False, capture_output=True, text=True,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise ValueError(f"git {' '.join(arguments)} failed: {detail}")
+    return completed.stdout.strip()
+
+
+def clean_source_identity(repository: Path, revision: str) -> dict[str, Any]:
+    """Bind a recording to the exact clean checkout that built both fronts."""
+    repository = repository.resolve()
+    top = Path(_git_text(repository, "rev-parse", "--show-toplevel")).resolve()
+    if top != repository:
+        raise ValueError("repository must be its exact Git worktree root")
+    head = _git_text(repository, "rev-parse", "HEAD")
+    if head != revision:
+        raise ValueError("source-revision must equal the exact recording checkout HEAD")
+    status = _git_text(
+        repository,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--ignore-submodules=untracked",
+    )
+    if status:
+        raise ValueError("A2T recording checkout must be completely clean")
+    origin = _git_text(repository, "config", "--get", "remote.origin.url")
+    if not re.fullmatch(
+        r"(?:git@github\.com:|https://github\.com/)Generous-Corp/pulp(?:\.git)?", origin
+    ):
+        raise ValueError("A2T source checkout must use the canonical Generous-Corp/pulp origin")
+    return {
+        "repository": "Generous-Corp/pulp",
+        "revision": head,
+        "clean": True,
+        "status_sha256": hashlib.sha256(status.encode()).hexdigest(),
+    }
+
+
+def plan_identity(
+    planning_repository: Path, revision: str, expected_sha256: str
+) -> dict[str, Any]:
+    """Resolve the accepted plan from immutable Git object bytes."""
+    planning_repository = planning_repository.resolve()
+    origin = _git_text(planning_repository, "config", "--get", "remote.origin.url")
+    if not re.fullmatch(
+        r"(?:git@github\.com:|https://github\.com/)danielraffel/pulp-planning(?:\.git)?",
+        origin,
+    ):
+        raise ValueError("planning repository does not use the canonical pulp-planning origin")
+    if not valid_lower_hex(revision, 40) or not valid_lower_hex(expected_sha256, 64):
+        raise ValueError("plan revision and SHA-256 must be exact lowercase digests")
+    completed = subprocess.run(
+        ["git", "-C", str(planning_repository), "show", f"{revision}:{PLAN_PATH}"],
+        check=False,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise ValueError("accepted plan cannot be resolved at the declared revision")
+    digest = hashlib.sha256(completed.stdout).hexdigest()
+    if digest != expected_sha256:
+        raise ValueError("accepted plan bytes do not match the declared SHA-256")
+    blob = _git_text(planning_repository, "rev-parse", f"{revision}:{PLAN_PATH}")
+    if not valid_lower_hex(blob, 40):
+        raise ValueError("accepted plan does not resolve to an exact Git blob")
+    return {
+        "repository": "danielraffel/pulp-planning",
+        "revision": revision,
+        "path": PLAN_PATH,
+        "blob": blob,
+        "sha256": digest,
+    }
+
+
+def _project_version(repository: Path) -> str:
+    payload = (repository / "CMakeLists.txt").read_text(encoding="utf-8")
+    match = re.search(
+        r"(?s)\bproject\s*\(\s*Pulp\b.*?\bVERSION\s+([0-9]+\.[0-9]+\.[0-9]+)",
+        payload,
+    )
+    if match is None:
+        raise ValueError("source CMakeLists.txt has no canonical Pulp version")
+    return match.group(1)
+
+
+def installed_source_identity(
+    repository: Path, revision: str, cli: Path, mcp: Path
+) -> dict[str, Any]:
+    """Verify the installed siblings carry the clean Release source stamp."""
+    prefix = cli.parent.parent.resolve()
+    if mcp.parent.parent.resolve() != prefix:
+        raise ValueError("installed CLI and MCP do not share one prefix")
+    build_info_path = prefix / "include/pulp/runtime/build_info.hpp"
+    try:
+        build_info = sdk_provenance.verify_installed_build_info(
+            prefix,
+            expected_version=_project_version(repository),
+            expected_source_sha=revision,
+        )
+    except sdk_provenance.ProvenanceError as error:
+        raise ValueError(f"installed build provenance is invalid: {error}") from error
+    return {
+        "prefix_role": "isolated-clean-release-install",
+        "build_info_role": "installed-prefix/include/pulp/runtime/build_info.hpp",
+        "build_info_sha256": sha256(build_info_path),
+        "build_info": build_info,
+        "source_revision": revision,
+    }
+
+
+def _processor_source_contract(repository: Path) -> tuple[str, dict[str, str]]:
+    source = (
+        repository / "experimental/pulp-rs/src/cmd/trace_fetch.rs"
+    ).read_text(encoding="utf-8")
+    version_match = re.search(
+        r'pub const PINNED_VERSION: &str = "([^"]+)";', source
+    )
+    pins = dict(re.findall(
+        r'platform:\s*"([^"]+)"[\s\S]*?sha256:\s*"([0-9a-f]{64})"', source
+    ))
+    if version_match is None or version_match.group(1) != PINNED_PROCESSOR_VERSION:
+        raise ValueError("Rust trace fetcher Perfetto version differs from the acceptance pin")
+    if pins != PROCESSOR_SHA256:
+        raise ValueError("Rust trace fetcher platform digests differ from the acceptance pins")
+    manifest = json.loads((repository / "tools/deps/manifest.json").read_text(encoding="utf-8"))
+    perfetto = [row for row in manifest.get("dependencies", []) if row.get("name") == "Perfetto"]
+    if len(perfetto) != 1 or perfetto[0].get("version") != PINNED_PROCESSOR_VERSION:
+        raise ValueError("Perfetto SDK manifest and trace processor version are not matched")
+    return version_match.group(1), pins
+
+
+def trace_processor_identity(
+    repository: Path,
+    processor: Path,
+    *,
+    system: str | None = None,
+    machine: str | None = None,
+) -> dict[str, Any]:
+    """Prove the executable is Pulp's SDK-matched immutable processor."""
+    version, pins = _processor_source_contract(repository)
+    host = (system or platform.system(), machine or platform.machine())
+    platform_key = PROCESSOR_PLATFORM.get(host)
+    if platform_key is None:
+        raise ValueError(f"no SDK-matched trace processor pin for host {host[0]}/{host[1]}")
+    filename = "trace_processor_shell.exe" if platform_key == "windows-amd64" else "trace_processor_shell"
+    if tuple(processor.parts[-5:]) != (
+        "tools", "trace-processor", version, platform_key, filename
+    ):
+        raise ValueError("trace processor is not at the canonical Pulp pinned-cache path")
+    digest = sha256(processor)
+    if digest != pins[platform_key]:
+        raise ValueError("trace processor bytes do not match the SDK-matched platform pin")
+    completed = subprocess.run(
+        [str(processor), "--version"], check=False, capture_output=True, text=True, timeout=10,
+    )
+    version_output = (completed.stdout + completed.stderr).strip()
+    if completed.returncode != 0 or not version_output.startswith(f"Perfetto {version}-"):
+        raise ValueError("trace processor did not report the SDK-matched Perfetto version")
+    return {
+        "role": f"pulp-home pinned {version} trace_processor_shell",
+        "version": version,
+        "platform": platform_key,
+        "sha256": digest,
+        "bytes": processor.stat().st_size,
+        "version_output": version_output,
+        "pin_source": "experimental/pulp-rs/src/cmd/trace_fetch.rs",
+        "sdk_source": "tools/deps/manifest.json",
+    }
+
+
+def run_fixture_replay(
+    cli: Path, mcp: Path, repository: Path, environment: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Replay the required A2T fixture matrix through both installed fronts."""
+    fixture_root = repository / "test/fixtures/perfetto-gpu"
+    session = McpSession(mcp, environment)
+    session.initialize()
+    rows: list[dict[str, Any]] = []
+    try:
+        for case, filename, question, verdict, dominant, action in FIXTURE_REPLAY:
+            trace = fixture_root / filename
+            _, cli_first = run_cli(cli, question, trace, environment)
+            _, cli_second = run_cli(cli, question, trace, environment)
+            _, mcp_result = session.call(question, trace)
+            label = f"test/fixtures/perfetto-gpu/{filename}"
+            projections = [
+                normalized_semantic_projection(value, label)
+                for value in (cli_first, cli_second, mcp_result)
+            ]
+            if projections[0] != projections[1]:
+                raise RuntimeError(f"{case}: checked SQL view was not rerunnable")
+            if projections[0] != projections[2]:
+                raise RuntimeError(f"{case}: installed CLI/MCP semantic parity failed")
+            result = projections[0]
+            if result.get("verdict") != verdict or result.get("dominant_stage") != dominant:
+                raise RuntimeError(f"{case}: fixture no longer produces its intended verdict/stage")
+            actions = result.get("next_actions")
+            first_action = actions[0].get("code") if isinstance(actions, list) and actions else None
+            if action is not None and first_action != action:
+                raise RuntimeError(f"{case}: fixture no longer produces its intended next action")
+            rows.append({
+                "case": case,
+                "question": question,
+                "trace": {"role": f"repository/{label}", "sha256": sha256(trace), "bytes": trace.stat().st_size},
+                "cli_rerun": "pass",
+                "cli_mcp_parity": "pass",
+                "semantic_result": result,
+            })
+    finally:
+        session.close()
+    return rows
 
 
 def commit_inventory(repository: Path, revision: str) -> dict[str, Any]:
@@ -358,7 +640,9 @@ def measured_source_paths(repository: Path, trace: Path) -> set[str]:
         raise ValueError("A2T trace must live in the measured source repository") from error
     if not relative_trace.startswith("test/fixtures/perfetto-gpu/"):
         raise ValueError("A2T trace must be a checked-in Perfetto GPU fixture")
-    return A2T_ANALYZER_SOURCE_PATHS | {relative_trace}
+    if relative_trace not in FIXTURE_SOURCE_PATHS:
+        raise ValueError("A2T trace must be one of the required checked-in replay fixtures")
+    return A2T_ANALYZER_SOURCE_PATHS | FIXTURE_SOURCE_PATHS
 
 
 def source_binding(repository: Path, revision: str, trace: Path) -> dict[str, Any]:
@@ -391,7 +675,9 @@ def source_binding_errors(receipt: Any, repository: Path) -> list[str]:
         errors.append("trace role does not identify a repository fixture")
         return errors
     trace_path = role.removeprefix("repository/")
-    expected = A2T_ANALYZER_SOURCE_PATHS | {trace_path}
+    if trace_path not in FIXTURE_SOURCE_PATHS:
+        errors.append("trace role does not identify a required replay fixture")
+    expected = A2T_ANALYZER_SOURCE_PATHS | FIXTURE_SOURCE_PATHS
     declared = receipt.get("source_blobs")
     if not isinstance(declared, dict) or set(declared) != expected:
         errors.append("source_blobs does not bind the exact A2T analyzer/SQL/fixture set")
@@ -422,7 +708,11 @@ def source_revisions_match(source_revision: str, mcp_source_revision: str) -> bo
 
 
 def preserve_human_perfetto_ui_correlation(
-    prior_receipt: Any, *, question: str, trace_sha256: str
+    prior_receipt: Any,
+    *,
+    question: str,
+    trace_sha256: str,
+    semantic_result: dict[str, Any],
 ) -> dict[str, Any]:
     """Carry an already accepted visual review across an exact-trace rerun."""
     if question != "gpu-startup":
@@ -456,6 +746,38 @@ def preserve_human_perfetto_ui_correlation(
             raise ValueError(f"prior human-review receipt lacks nonempty {field}")
     if not isinstance(human.get("observed_spans"), list) or not human["observed_spans"]:
         raise ValueError("prior human-review receipt lacks observed span details")
+    contributors = semantic_result.get("contributors")
+    if not isinstance(contributors, list) or len(contributors) < 2:
+        raise ValueError("current semantic result lacks two ranked contributors")
+    observed_by_stage: dict[str, dict[str, Any]] = {}
+    for observed in human["observed_spans"]:
+        if not isinstance(observed, dict):
+            raise ValueError("prior human-review observed span must be an object")
+        name = observed.get("name")
+        if not isinstance(name, str) or not name.startswith("gpu_"):
+            raise ValueError("prior human-review observed span has no canonical GPU name")
+        observed_by_stage[name.removeprefix("gpu_").replace("_", "-")] = observed
+    for contributor in contributors[:2]:
+        if not isinstance(contributor, dict) or not isinstance(contributor.get("stage"), str):
+            raise ValueError("current semantic contributor is malformed")
+        observed = observed_by_stage.get(contributor["stage"])
+        if observed is None:
+            raise ValueError(
+                f"prior human review did not observe current contributor {contributor['stage']}"
+            )
+        compared = {
+            "duration_ns": "duration_ns",
+            "evidence_id": "gpu_evidence_id",
+            "frame_index": "frame_index",
+            "sequence": "sequence",
+            "health_state": "health_state",
+        }
+        for semantic_field, observed_field in compared.items():
+            if observed.get(observed_field) != contributor.get(semantic_field):
+                raise ValueError(
+                    f"prior human review disagrees with current {contributor['stage']} "
+                    f"{semantic_field}"
+                )
     return human
 
 
@@ -481,6 +803,7 @@ def main() -> int:
     parser.add_argument("--equivalent-a2t-revision", action="append", default=[])
     parser.add_argument("--plan-revision", required=True)
     parser.add_argument("--plan-sha256", required=True)
+    parser.add_argument("--planning-repository", type=Path, required=True)
     parser.add_argument("--routing-inventory", type=Path)
     parser.add_argument(
         "--prior-human-review-receipt", type=Path,
@@ -513,30 +836,36 @@ def main() -> int:
             "MCP must come from one source checkout"
         )
 
+    repository = args.repository.resolve()
     try:
-        binding = source_binding(
-            args.repository.resolve(), args.source_revision, trace
+        source_identity = clean_source_identity(repository, args.source_revision)
+        installed_identity = installed_source_identity(
+            repository, args.source_revision, cli, mcp
+        )
+        binding = source_binding(repository, args.source_revision, trace)
+        processor_identity = trace_processor_identity(repository, processor)
+        accepted_plan = plan_identity(
+            args.planning_repository, args.plan_revision, args.plan_sha256
         )
     except ValueError as error:
         parser.error(str(error))
 
     trace_sha256 = sha256(trace)
-    human_perfetto_ui_correlation = None
+    prior_receipt = None
     if args.prior_human_review_receipt:
         try:
             prior_receipt = json.loads(
                 args.prior_human_review_receipt.read_text(encoding="utf-8")
             )
-            human_perfetto_ui_correlation = preserve_human_perfetto_ui_correlation(
-                prior_receipt, question=args.question, trace_sha256=trace_sha256
-            )
-        except (OSError, json.JSONDecodeError, ValueError) as error:
+        except (OSError, json.JSONDecodeError) as error:
             parser.error(f"invalid prior-human-review-receipt: {error}")
 
     environment = os.environ.copy()
     environment["PULP_TRACE_PROCESSOR"] = str(processor)
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     load_average_start = list(os.getloadavg()) if hasattr(os, "getloadavg") else None
+
+    fixture_replay = run_fixture_replay(cli, mcp, repository, environment)
 
     persistent = McpSession(mcp, environment)
     persistent.initialize()
@@ -657,13 +986,42 @@ def main() -> int:
         else:
             routing_inventory = routing_document
 
+    if reference_projection is None:
+        raise RuntimeError("measured trials produced no reference semantic result")
+    human_perfetto_ui_correlation = None
+    if prior_receipt is not None:
+        try:
+            human_perfetto_ui_correlation = preserve_human_perfetto_ui_correlation(
+                prior_receipt,
+                question=args.question,
+                trace_sha256=trace_sha256,
+                semantic_result=reference_projection,
+            )
+        except ValueError as error:
+            parser.error(f"invalid prior-human-review-receipt: {error}")
+
+    try:
+        if clean_source_identity(repository, args.source_revision) != source_identity:
+            raise ValueError("source identity changed during A2T recording")
+        if source_binding(repository, args.source_revision, trace) != binding:
+            raise ValueError("source binding changed during A2T recording")
+        if installed_source_identity(repository, args.source_revision, cli, mcp) != installed_identity:
+            raise ValueError("installed CLI/MCP provenance changed during A2T recording")
+        if trace_processor_identity(repository, processor) != processor_identity:
+            raise ValueError("trace processor identity changed during A2T recording")
+    except ValueError as error:
+        parser.error(str(error))
+
     evidence = {
-        "schema": "pulp.gpu-trace-overhead-acceptance.v1",
+        "schema": "pulp.gpu-trace-overhead-acceptance.v2",
         "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_revision": args.source_revision,
         "mcp_source_revision": args.mcp_source_revision,
         "integration_head": binding["integration_head"],
         "source_blobs": binding["source_blobs"],
+        "source_identity": source_identity,
+        "installed_source_identity": installed_identity,
+        "accepted_plan": accepted_plan,
         "scope": "offline-installed-cli-mcp-analysis",
         "producer_overhead_disposition": {
             "status": "not-applicable-no-added-producer-cost",
@@ -688,9 +1046,7 @@ def main() -> int:
             "mcp": {"role": "installed-prefix/bin/pulp-mcp", "sha256": sha256(mcp), "bytes": mcp.stat().st_size},
             "trace": {"role": "repository/test/fixtures/perfetto-gpu/" + trace.name,
                       "sha256": trace_sha256, "bytes": trace.stat().st_size},
-            "trace_processor": {"role": "pulp-home pinned v57.2 trace_processor_shell",
-                                "sha256": sha256(processor),
-                                "bytes": processor.stat().st_size},
+            "trace_processor": processor_identity,
         },
         "protocol": {
             "question": args.question, "warmups": args.warmups,
@@ -706,6 +1062,7 @@ def main() -> int:
             "interpretation": "shared-host contention is retained in raw samples; no latency budget is inferred",
         },
         "semantic_result": reference_projection,
+        "fixture_replay": fixture_replay,
         "human_perfetto_ui_correlation": human_perfetto_ui_correlation,
         "measured": {
             "cli": cli_summary, "persistent_mcp_request": mcp_summary,
@@ -717,6 +1074,11 @@ def main() -> int:
             "raw_samples": fresh_rows,
         },
         "acceptance": {
+            "terminal_status": (
+                "pass"
+                if human_perfetto_ui_correlation is not None
+                else "nonterminal-missing-human-perfetto-correlation"
+            ),
             "semantic_parity": "pass", "same_installed_prefix": "pass",
             "human_perfetto_ui_correlation": (
                 "pass" if human_perfetto_ui_correlation is not None

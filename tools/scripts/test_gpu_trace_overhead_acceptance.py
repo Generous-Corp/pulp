@@ -45,14 +45,43 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 "reviewed_utc": "2026-08-28T05:34:54Z",
                 "ui_revision": "v58.3-11fbaed8",
                 "delivery": "official localhost embedding protocol",
-                "observed_spans": [{"name": "gpu_pipeline_prepare"}],
+                "observed_spans": [
+                    {
+                        "name": "gpu_pipeline_prepare", "duration_ns": 1_800_000,
+                        "gpu_evidence_id": "44444444444444444444444444444444",
+                        "frame_index": 0, "sequence": 1, "health_state": "healthy",
+                    },
+                    {
+                        "name": "gpu_resource_upload", "duration_ns": 900_000,
+                        "gpu_evidence_id": "44444444444444444444444444444444",
+                        "frame_index": 0, "sequence": 2, "health_state": "healthy",
+                    },
+                ],
             },
+        }
+
+    @staticmethod
+    def semantic_result():
+        return {
+            "contributors": [
+                {
+                    "stage": "pipeline-prepare", "duration_ns": 1_800_000,
+                    "evidence_id": "44444444444444444444444444444444",
+                    "frame_index": 0, "sequence": 1, "health_state": "healthy",
+                },
+                {
+                    "stage": "resource-upload", "duration_ns": 900_000,
+                    "evidence_id": "44444444444444444444444444444444",
+                    "frame_index": 0, "sequence": 2, "health_state": "healthy",
+                },
+            ]
         }
 
     def test_preserves_exact_passing_human_review_for_same_startup_trace(self):
         receipt = self.human_review_receipt()
         result = MODULE.preserve_human_perfetto_ui_correlation(
-            receipt, question="gpu-startup", trace_sha256="1" * 64
+            receipt, question="gpu-startup", trace_sha256="1" * 64,
+            semantic_result=self.semantic_result(),
         )
         self.assertEqual(result, receipt["human_perfetto_ui_correlation"])
 
@@ -61,6 +90,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             MODULE.preserve_human_perfetto_ui_correlation(
                 self.human_review_receipt(),
                 question="gpu-startup", trace_sha256="2" * 64,
+                semantic_result=self.semantic_result(),
             )
 
     def test_human_review_rejects_mismatched_prior_trace_artifact(self):
@@ -68,7 +98,8 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         receipt["artifacts"]["trace"]["sha256"] = "2" * 64
         with self.assertRaisesRegex(ValueError, "not bound to its receipt trace"):
             MODULE.preserve_human_perfetto_ui_correlation(
-                receipt, question="gpu-startup", trace_sha256="1" * 64
+                receipt, question="gpu-startup", trace_sha256="1" * 64,
+                semantic_result=self.semantic_result(),
             )
 
     def test_human_review_rejects_non_startup_question(self):
@@ -76,6 +107,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             MODULE.preserve_human_perfetto_ui_correlation(
                 self.human_review_receipt(),
                 question="gpu-health", trace_sha256="1" * 64,
+                semantic_result=self.semantic_result(),
             )
 
     def test_human_review_rejects_missing_acceptance_or_root_object(self):
@@ -83,13 +115,15 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         del missing_acceptance["acceptance"]
         with self.assertRaisesRegex(ValueError, "lacks passing"):
             MODULE.preserve_human_perfetto_ui_correlation(
-                missing_acceptance, question="gpu-startup", trace_sha256="1" * 64
+                missing_acceptance, question="gpu-startup", trace_sha256="1" * 64,
+                semantic_result=self.semantic_result(),
             )
         missing_root = self.human_review_receipt()
         del missing_root["human_perfetto_ui_correlation"]
         with self.assertRaisesRegex(ValueError, "lacks the root correlation object"):
             MODULE.preserve_human_perfetto_ui_correlation(
-                missing_root, question="gpu-startup", trace_sha256="1" * 64
+                missing_root, question="gpu-startup", trace_sha256="1" * 64,
+                semantic_result=self.semantic_result(),
             )
 
     def test_human_review_rejects_non_passing_prior_acceptance(self):
@@ -97,7 +131,8 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         receipt["acceptance"]["human_perfetto_ui_correlation"] = "unverified"
         with self.assertRaisesRegex(ValueError, "lacks passing"):
             MODULE.preserve_human_perfetto_ui_correlation(
-                receipt, question="gpu-startup", trace_sha256="1" * 64
+                receipt, question="gpu-startup", trace_sha256="1" * 64,
+                semantic_result=self.semantic_result(),
             )
 
     def test_human_review_rejects_stripped_visual_review_fields(self):
@@ -107,13 +142,15 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 del receipt["human_perfetto_ui_correlation"][field]
                 with self.assertRaisesRegex(ValueError, f"lacks nonempty {field}"):
                     MODULE.preserve_human_perfetto_ui_correlation(
-                        receipt, question="gpu-startup", trace_sha256="1" * 64
+                        receipt, question="gpu-startup", trace_sha256="1" * 64,
+                        semantic_result=self.semantic_result(),
                     )
         receipt = self.human_review_receipt()
         receipt["human_perfetto_ui_correlation"]["observed_spans"] = []
         with self.assertRaisesRegex(ValueError, "lacks observed span details"):
             MODULE.preserve_human_perfetto_ui_correlation(
-                receipt, question="gpu-startup", trace_sha256="1" * 64
+                receipt, question="gpu-startup", trace_sha256="1" * 64,
+                semantic_result=self.semantic_result(),
             )
 
     def test_human_review_rejects_prior_non_startup_receipt(self):
@@ -121,7 +158,8 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         receipt["protocol"]["question"] = "gpu-health"
         with self.assertRaisesRegex(ValueError, "must be for gpu-startup"):
             MODULE.preserve_human_perfetto_ui_correlation(
-                receipt, question="gpu-startup", trace_sha256="1" * 64
+                receipt, question="gpu-startup", trace_sha256="1" * 64,
+                semantic_result=self.semantic_result(),
             )
 
     def test_plan_binding_requires_exact_lowercase_hex(self):
@@ -210,6 +248,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         correlation = MODULE.preserve_human_perfetto_ui_correlation(
             receipt, question=receipt["protocol"]["question"],
             trace_sha256=trace_digest,
+            semantic_result=receipt["semantic_result"],
         )
         self.assertEqual(receipt["protocol"]["question"], "gpu-startup")
         self.assertEqual(

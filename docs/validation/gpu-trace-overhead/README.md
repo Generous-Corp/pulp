@@ -26,26 +26,29 @@ python3 tools/scripts/gpu_trace_overhead_acceptance.py \
   --equivalent-a2t-revision "$A2T_ORIGINAL_REVISION" \
   --plan-revision "$PLAN_REVISION" \
   --plan-sha256 "$PLAN_SHA256" \
+  --planning-repository "$PWD/planning" \
   --prior-human-review-receipt /tmp/prior-accepted-gpu-startup-a2t.json \
   --output /tmp/gpu-trace-overhead.json
 ```
 
-The script requires `pulp` and `pulp-mcp` to be regular sibling files. During
+The recorder requires an exact clean canonical Pulp worktree at
+`--source-revision`, plus a clean Release installed prefix whose generated
+`include/pulp/runtime/build_info.hpp` identifies that revision. `pulp` and
+`pulp-mcp` must be executable regular sibling files. During
 measurement `PATH` excludes their prefix and all checkout build directories;
 MCP therefore succeeds only through its installed absolute-sibling binding.
 Semantic parity is checked on every warm-up and measured trial. Both binaries
 must be built from the same source revision; a distinct
 `--mcp-source-revision` is required and accepted only when it exactly matches
-the lowercase 40-hex `--source-revision`. These fields are explicit build
-provenance declarations, not revisions extracted from the executable bytes;
-therefore generate the receipt only after rebuilding both siblings from one
-clean checkout at that revision. The receipt's independent binary digests and
-same-prefix proof make that rerun auditable, while A3 rejects unequal declared
-revisions.
+the lowercase 40-hex `--source-revision`. The installed build stamp is parsed
+and checked rather than trusting those declarations alone. The accepted plan
+is likewise read from its immutable Git object and checked against its Git blob
+and SHA-256 identities.
 
-New receipts also bind `integration_head` plus the exact Git blobs for the Rust
-analyzer, all three closed PerfettoSQL views, the CLI/MCP dispatch surfaces,
-and the measured checked-in trace fixture. Validation resolves those blobs at
+New v2 receipts also bind `integration_head` plus the exact Git blobs for the
+Rust analyzer, all three closed PerfettoSQL views, CLI/MCP dispatch surfaces,
+processor pin sources, recorder/verifier, and every checked-in trace in the
+required replay matrix. Validation resolves those blobs at
 the historical integration head, current `HEAD`, and the current checkout, so
 an analyzer, SQL, MCP projection, or fixture edit makes the receipt stale even
 when its saved timing JSON is unchanged. The committed
@@ -53,12 +56,22 @@ when its saved timing JSON is unchanged. The committed
 stale after the current analyzer hardening; regenerate it only with the final
 installed CLI/MCP and pinned trace-processor replay.
 
-The Rust unit contract is always registered when the experimental Rust CLI is
-enabled. The real fixture integration CTest is registered only when
-`PULP_TRACE_PROCESSOR` names an existing pinned executable at configure time;
-this keeps a clean runner without Perfetto tooling from hard-failing while
-making the exercised processor identity explicit. The M3 acceptance run uses
-Pulp's pinned v57.2 binary.
+The Rust unit contract and real fixture integration wrapper are always
+registered when the experimental Rust CLI is enabled. The wrapper resolves an
+explicit `PULP_TRACE_PROCESSOR` first, then Pulp's canonical pinned cache, and
+returns visible CTest skip code 77 when neither exists. A configured test is
+therefore never silently absent. The acceptance recorder additionally rejects
+a processor outside the canonical cache, with the wrong platform/version/hash,
+or whose `--version` output does not match Pulp's v57.2 SDK dependency.
+
+Before timing, the recorder replays the healthy, shader-compile failure,
+blank-readback failure, device-loss, acquire/present wall-time-only,
+first-frame pipeline/upload stall, incomplete-capture, and wrong-category
+fixtures twice through the installed CLI and once through the installed MCP.
+It requires deterministic checked-view replay, typed exit/`isError` behavior,
+text/structured MCP identity, all semantic fields, and the intended
+verdict/stage/action. The terminal verifier correlates the timed result to that
+same replay row and checked-in artifact digest.
 
 Every Horizon-A A2T implementation/hardening revision is inventoried before
 measurement, and a stable patch ID binds the original pre-rebase and replayed
@@ -105,8 +118,23 @@ receipt with `--prior-human-review-receipt`. The generator carries its
 also a `gpu-startup` receipt with passing human acceptance and its trace
 artifact SHA-256 exactly matches the trace being measured. A missing object,
 different question, non-passing acceptance, or changed artifact fails closed.
+The current top two typed contributors must also match the human-observed span
+name, duration, evidence ID, frame index, sequence, and health state exactly.
 Do not pass this option for `gpu-health` or `gpu-probe`; those runs cannot
 inherit a startup UI review.
+
+After recording, verify terminal status from the exact integration checkout:
+
+```bash
+python3 tools/scripts/verify_gpu_trace_overhead_acceptance.py \
+  /tmp/gpu-trace-overhead.json --repository "$PWD"
+```
+
+`--allow-nonterminal` exists only for inspecting an intentionally incomplete
+draft. It must not be used by a checked-in final acceptance gate. The existing
+`m3-a2t-offline-analysis-20260828.json` is historical: it predates v2 installed
+provenance, complete fixture replay, expanded semantic parity, and exact
+same-artifact contributor correlation, so it is not terminal evidence.
 
 Perfetto is a localization tool, not an oracle for every platform state
 machine. A real resize investigation demonstrated the correct evidence chain:
