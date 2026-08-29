@@ -315,6 +315,43 @@ TEST_CASE("View simulate_hover sets hovered state", "[view][widget_animation]") 
     REQUIRE_FALSE(knob_ptr->is_hovered());
 }
 
+TEST_CASE("View simulate_hover preserves hover through the hit ancestry",
+          "[view][widget_animation][hover]") {
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+
+    auto option = std::make_unique<View>();
+    option->set_bounds({10, 10, 100, 40});
+    auto* option_ptr = option.get();
+    auto label = std::make_unique<View>();
+    label->set_bounds({10, 5, 80, 30});
+    auto* label_ptr = label.get();
+    option->add_child(std::move(label));
+    root.add_child(std::move(option));
+
+    int option_enters = 0;
+    int option_leaves = 0;
+    option_ptr->on_hover_enter = [&] { ++option_enters; };
+    option_ptr->on_hover_leave = [&] { ++option_leaves; };
+
+    root.simulate_hover({30, 30});
+    REQUIRE(root.is_hovered());
+    REQUIRE(option_ptr->is_hovered());
+    REQUIRE(label_ptr->is_hovered());
+    REQUIRE(option_enters == 1);
+
+    root.simulate_hover({40, 30});
+    REQUIRE(option_ptr->is_hovered());
+    REQUIRE(option_enters == 1);
+    REQUIRE(option_leaves == 0);
+
+    root.simulate_hover({150, 50});
+    REQUIRE(root.is_hovered());
+    REQUIRE_FALSE(option_ptr->is_hovered());
+    REQUIRE_FALSE(label_ptr->is_hovered());
+    REQUIRE(option_leaves == 1);
+}
+
 // ── FrameClock integration test ─────────────────────────────────────────────
 
 TEST_CASE("View frame_clock walks parent chain", "[view][frame_clock]") {
