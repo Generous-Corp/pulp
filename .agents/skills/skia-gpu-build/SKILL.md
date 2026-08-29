@@ -565,6 +565,14 @@ states use identical executable bytes; every state requires zero xruns and
 audio-thread trace events. A passing role campaign or offline A2T no-producer
 classification does not waive this control.
 
+Use the acceptance guide's `collect-state` command for every row. It wraps the
+source-bound product driver with 55 independent live-process challenges, keeps
+compiled-in idle and active executable bytes identical, and replays active
+binary Perfetto traces with the exact pinned processor. Acceptance binds both
+the health-first-visible producer and the `b4ba22…` macOS
+input/acquire/submit/present package; raw driver JSON or Chrome trace cannot
+stand in for the collector receipt.
+
 If a validated B4 disposition routes follow-up to Vellum, test a bounded
 Graphite `PipelineManager` `SkExecutor` supplied through `ContextOptions` before
 designing custom prewarm. Trace pipeline queued/start/end, cache hit/miss,

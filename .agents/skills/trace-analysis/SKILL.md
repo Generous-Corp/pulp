@@ -573,6 +573,14 @@ four-state pre-change/compile-out/compiled-in-idle/active control documented in
 and derived median/p95 ceilings. The offline A2T no-producer disposition does
 not waive this product control.
 
+Collect every state with `gpu_first_visible_a3_trace_producer_overhead.py
+collect-state`, never by invoking the product driver directly. The collector
+owns 55 live challenge/ack handshakes per state and binds exact executable/start
+identity. Active replay must prove both immutable packages: health-first-visible
+at `8175bd…` and the `b4ba22…` input-to-present package containing
+`gpu_acquire`, `gpu_submit`, and `gpu_present`. Use the exact v57.2
+`trace_processor_shell`; production Chrome JSON is forbidden.
+
 ## Correlate a catalog recipe with Perfetto
 
 Begin with `pulp gpu recipes list --symptom <exact-token> --json`, run the

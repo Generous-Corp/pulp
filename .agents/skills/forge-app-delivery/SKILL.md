@@ -457,3 +457,11 @@ overhead receipt with zero xruns and audio-thread trace events. Keep the
 analyzer's structural `unverified` result distinct from the campaign budget
 verdict; neither an offline A2T classification nor a passing Forge role waives
 the overhead control.
+
+Run that control through `gpu_first_visible_a3_trace_producer_overhead.py
+collect-state` with the exact Forge executable and reviewed Forge lifecycle
+driver. Each state requires 55 live challenges; the source-built `.app` and
+measured executable identities remain exact, and idle/active reuse identical
+bytes. Active binary Perfetto replay covers both the health producer and the
+`b4ba22…` acquire/submit/present package with zero xruns/audio-thread producer
+events. A direct driver result or Pulp example is nonterminal.

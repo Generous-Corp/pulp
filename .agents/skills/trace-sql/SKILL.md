@@ -136,6 +136,14 @@ from its session metadata and real producer span with exact process-start,
 binary, session-config, xrun, and audio-thread facts. Arbitrary trace bytes are
 rejected, and the final active binary must equal one measured role product.
 
+The four-state collector accepts production binary Perfetto only and replays it
+through Pulp's exact v57.2 platform SHA pin. Chrome JSON is planted-fixture-only.
+Reject unfinished slices, loss/no-flush stats, foreign UPIDs, reused session
+challenges, mismatched host PIDs, xruns, or producer spans on declared audio
+TIDs. Active queries must find both `gpu_health_transition_first_visible` and
+the `gpu_acquire` → `gpu_submit` → `gpu_present` package; absence is missing
+evidence, never zero.
+
 **Closed GPU cohort boundary.** The named GPU analyses do not currently accept
 an evidence-ID selector, so the SQL must not flatten unrelated runs. Startup
 selects the earliest valid render-frame lifecycle carrying `frame_index = 0`

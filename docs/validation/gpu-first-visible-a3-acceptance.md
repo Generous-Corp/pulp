@@ -414,6 +414,80 @@ states must identify the same executable bytes, while the compile-out build is
 distinct. The driver is a reviewed relative path in the candidate revision and
 must remain byte-identical at final verification.
 
+This is the exact execution matrix. Do not substitute a synthetic executable,
+change the workload between rows, or infer an inactive session from a missing
+trace:
+
+| State | Source/build | Runtime session | Required trace evidence |
+|---|---|---|---|
+| `pre-change-baseline` | exact `5048ce72dd28d87974550a3feb526de0f44af32c` product | tracing absent | none |
+| `candidate-compile-out` | final candidate, `PULP_TRACING=OFF` | tracing absent | none |
+| `candidate-compiled-in-idle` | final candidate, `PULP_TRACING=ON` | no session | none; binary digest must equal active |
+| `candidate-active` | same compiled-in binary bytes | active 128 MiB ring | one lossless binary Perfetto trace per sample |
+
+Each collection request is a
+`pulp.gpu-first-visible-trace-producer-collection-request.v1` JSON object. It
+must bind the state, the two revisions, selected passing role/campaign/product,
+machine and plugin format, exact product binary SHA, and one identical
+workload/build-family identity across all four files. It must also bind both
+immutable producer packages exactly:
+
+- `8175bd483f5e4ca66989c9ad91a4d9ed5a864bb0` for
+  `gpu_health_transition_first_visible`;
+- `b4ba22f1d700621366afdbc72bb8615336964cd1` for the five macOS
+  input-to-present paths and `gpu_acquire`, `gpu_submit`, `gpu_present`.
+
+`measurement_driver` and `workload.adapter_*` name the same reviewed,
+candidate-relative executable path, revision, and digest. The driver receives
+the product binary only through the collector's closed request; it owns the
+real lifecycle, timing, xrun, audio-thread-TID, and trace artifacts. The
+collector independently challenges the live executable 55 times per state
+(5 warmup + 30 measured + 20 fresh), records 110 challenge/ack artifacts plus
+the transcript, verifies exact executable/start identity, and refuses leftover
+processes. `evidence_id` is derived from the challenge/attempt/logical process,
+never from a reusable PID.
+
+Create a pinned session-config artifact under the evidence root with schema
+`pulp.gpu-first-visible-trace-session-config.v1`, categories
+`dsp,gpu,metadata,render`, `fill_policy=ring-buffer`, and `ring_bytes=134217728`.
+All requests reference its digest; only the active row declares that ring
+active. Then collect the four states through the collector—never by invoking
+the measurement driver directly:
+
+```bash
+: "${A3_EVIDENCE:?fresh absolute evidence root}"
+: "${A3_CANDIDATE_ROOT:?clean exact final-candidate checkout}"
+: "${A3_OVERHEAD_DRIVER:?candidate-relative reviewed measurement driver}"
+: "${A3_PRECHANGE_BIN:?exact baseline product executable}"
+: "${A3_COMPILE_OUT_BIN:?exact final-head compile-out executable}"
+: "${A3_COMPILED_IN_BIN:?exact final-head compiled-in executable used idle and active}"
+: "${TRACE_PROCESSOR:?pinned Perfetto v57.2 trace_processor_shell}"
+
+for STATE in pre-change-baseline candidate-compile-out candidate-compiled-in-idle candidate-active; do
+  case "$STATE" in
+    pre-change-baseline) BIN="$A3_PRECHANGE_BIN" ;;
+    candidate-compile-out) BIN="$A3_COMPILE_OUT_BIN" ;;
+    *) BIN="$A3_COMPILED_IN_BIN" ;;
+  esac
+  python3 tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py collect-state \
+    --request "$A3_EVIDENCE/overhead/requests/$STATE.json" \
+    --evidence-root "$A3_EVIDENCE" \
+    --source-root "$A3_CANDIDATE_ROOT" \
+    --binary "$BIN" \
+    --driver "$A3_CANDIDATE_ROOT/$A3_OVERHEAD_DRIVER" \
+    --trace-processor "$TRACE_PROCESSOR" \
+    --output "$A3_EVIDENCE/overhead/$STATE.json"
+done
+```
+
+Production active traces must be binary Perfetto and replay only through the
+exact Pulp v57.2 platform SHA pin. Chrome trace JSON is accepted solely by
+planted fixture tests; the production CLI has no bypass. Replay requires
+finished slices, zero loss/no-flush stats, one stable UPID/session challenge,
+the challenged host PID, the expected producer spans, and zero xrun or
+audio-thread producer events. The four-state receipt reports both aggregate
+input-to-first-visible overhead and the explicit audio/xrun disposition.
+
 After the source-bound product driver has written the four raw documents under
 the evidence root, derive the only accepted receipt with:
 

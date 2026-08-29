@@ -2192,3 +2192,13 @@ observations per state. All must report zero xruns and audio-thread trace events
 The active role campaigns include the spans but do not replace this differential
 control. Keep all producer work and Perfetto session management off the audio
 thread.
+
+The terminal overhead workflow enters through
+`gpu_first_visible_a3_trace_producer_overhead.py collect-state`. That collector,
+not ViewBridge or the product driver, owns the 55 per-state liveness challenges
+and binds process start plus executable identity. Active binary traces must
+contain the health-first-visible package and the `b4ba22…` macOS
+`gpu_acquire`/`gpu_submit`/`gpu_present` package on the challenged host process,
+with zero producer events on declared audio TIDs. Do not add evidence IDs,
+session control, or synthesized compositor timestamps to ViewBridge to satisfy
+the receipt.

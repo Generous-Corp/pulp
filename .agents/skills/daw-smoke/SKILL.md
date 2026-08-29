@@ -279,3 +279,11 @@ from the campaign budget verdict. Before terminal A3, also run the four-state
 product trace-producer overhead protocol in the acceptance guide. Its exact
 pre-change, compile-out, compiled-in idle, and active measurements require zero
 xruns/audio-thread trace events; the DAW role campaign alone does not waive it.
+
+For the DAW-selected overhead row, run the same reviewed REAPER lifecycle
+driver through `gpu_first_visible_a3_trace_producer_overhead.py collect-state`;
+do not time the smoke wrapper or relabel its editor-open result. Every one of
+the 55 samples/state must answer the collector while the challenged REAPER PID
+and exact plug-in executable are alive, then terminate cleanly. Active replay
+must find the health and `gpu_acquire`/`gpu_submit`/`gpu_present` packages with
+zero xruns and zero producer events on the audio TIDs.
