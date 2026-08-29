@@ -231,20 +231,57 @@ def _verify_installed_build_provenance(
     providers = _object(
         provider_claim.get("providers"), "installed render providers", errors
     )
+    disposition = provider_claim.get("skia_source_disposition")
+    expected_roles = {"skia_dawn", "v8"}
+    if disposition == "retained-complete-adjacent-source-tree":
+        expected_roles.add("skia_source")
+    elif disposition != "not-present-at-configured-or-resolved-sibling":
+        errors.append("installed build provenance lacks a Skia source disposition")
     if (
         provider_claim.get("method")
-        != "retained-resolved-render-provider-trees-v1"
-        or set(providers) != {"skia_dawn", "v8"}
+        != "retained-resolved-render-provider-trees-v2"
+        or set(providers) != expected_roles
         or not contract.valid_lower_hex(
             str(provider_claim.get("manifest_sha256", "")), 64
         )
         or provider_claim.get("manifest_sha256") != hashlib.sha256(
-            json.dumps(providers, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(
+                {
+                    "providers": providers,
+                    "skia_source_disposition": disposition,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
         ).hexdigest()
     ):
         errors.append("installed build provenance lacks exact sealed render providers")
+    expected_metadata = {
+        "skia_dawn": (
+            "resolved-skia-dawn-provider-root",
+            "CMake SKIA_DIR or exact generated Ninja archive path",
+        ),
+        "v8": (
+            "resolved-v8-provider-root",
+            "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root",
+        ),
+        "skia_source": (
+            "resolved-skia-source-provider-root",
+            "FindSkia adjacent SKIA_DIR/../skia-src include root",
+        ),
+    }
     for role, row_value in providers.items():
         row = _object(row_value, f"installed render provider {role}", errors)
+        if role not in expected_metadata:
+            continue
+        expected_role, expected_resolution = expected_metadata[role]
+        if (
+            row.get("root_role") != expected_role
+            or row.get("resolution") != expected_resolution
+        ):
+            errors.append(
+                f"installed render provider {role} lacks exact root provenance"
+            )
         tree = _object(
             row.get("tree_claim"), f"installed render provider {role} tree", errors
         )
@@ -285,6 +322,12 @@ def _verify_installed_build_provenance(
             and names & {"libv8.dylib", "libv8.so", "v8.dll"}
         ):
             errors.append("installed V8 provider lacks its consumed headers/runtime")
+        if role == "skia_source" and not any(
+            member["path"].startswith("src/core/") for member in members
+        ):
+            errors.append(
+                "installed Skia source provider lacks a consumed src/core input"
+            )
     binaries = provenance.get("binaries")
     expected_roles = {
         "pulp": ("installed-prefix/bin/pulp", "external-build/pulp", "cli"),

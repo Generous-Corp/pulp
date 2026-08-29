@@ -107,6 +107,21 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             session.close()
             self.assertIsNotNone(session.process.returncode)
 
+    def test_mcp_rejects_non_object_and_boolean_id_responses(self):
+        for response in ([], {"jsonrpc": "2.0", "id": True, "result": {}}):
+            with self.subTest(response=response):
+                session = MODULE.McpSession(Path("/bin/cat"), {})
+                try:
+                    with mock.patch.object(
+                        MODULE,
+                        "read_bounded_process_line",
+                        return_value=json.dumps(response) + "\n",
+                    ):
+                        with self.assertRaisesRegex(RuntimeError, "invalid pulp-mcp"):
+                            session._request("initialize")
+                finally:
+                    session.close()
+
     def test_local_source_loader_ignores_planted_unchecked_bytecode(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -542,13 +557,16 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             root = Path(temporary)
             build = root / "build"
             skia = root / "skia"
+            skia_source = root / "skia-src"
             v8 = root / "v8"
             (build / "CMakeFiles").mkdir(parents=True)
             (skia / "build/include/include/core").mkdir(parents=True)
             (skia / "build/mac-gpu/lib/Release").mkdir(parents=True)
+            (skia_source / "src/core").mkdir(parents=True)
             (v8 / "include").mkdir(parents=True)
             (v8 / "lib").mkdir(parents=True)
             (skia / "build/include/include/core/SkCanvas.h").write_text("skia")
+            (skia_source / "src/core/SkCanvas.cpp").write_text("source")
             skia_library = skia / "build/mac-gpu/lib/Release/libskia.a"
             skia_library.write_bytes(b"skia archive")
             (skia / "build/mac-gpu/lib/Release/libdawn_combined.a").write_bytes(
@@ -569,13 +587,41 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 build, "test providers"
             )
             try:
-                self.assertEqual(set(evidence["providers"]), {"skia_dawn", "v8"})
+                self.assertEqual(
+                    set(evidence["providers"]),
+                    {"skia_dawn", "skia_source", "v8"},
+                )
+                self.assertEqual(
+                    evidence["skia_source_disposition"],
+                    "retained-complete-adjacent-source-tree",
+                )
+                self.assertEqual(
+                    evidence["providers"]["skia_source"]["required_members"][0][
+                        "path"
+                    ],
+                    "src/core/SkCanvas.cpp",
+                )
                 skia_library.write_bytes(b"substituted")
                 skia_library.write_bytes(b"skia archive")
                 with self.assertRaisesRegex(ValueError, "mutation event"):
                     claim.assert_full()
             finally:
                 claim.close()
+
+    def test_complete_tree_rejects_provider_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            provider = root / "provider"
+            outside = root / "outside"
+            provider.mkdir()
+            outside.write_text("outside")
+            (provider / "escape").symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, "absolute symlink|symlink escape"):
+                MODULE.retain_current_regular_tree(provider, "test provider")
+
+    def test_provider_root_guard_rejects_broad_inventory_roots(self):
+        self.assertFalse(MODULE._provider_root_is_bounded(Path("/")))
+        self.assertFalse(MODULE._provider_root_is_bounded(Path.home()))
 
     def test_claimed_install_prefix_rejects_path_substitution(self):
         with tempfile.TemporaryDirectory() as temporary:

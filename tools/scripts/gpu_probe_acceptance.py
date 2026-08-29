@@ -864,7 +864,12 @@ class McpSession:
         except json.JSONDecodeError as error:
             raise AcceptanceError("installed MCP returned malformed JSON") from error
         self.directory_claim.assert_current()
-        if response.get("id") != request_id or not isinstance(response.get("result"), dict):
+        if (
+            not isinstance(response, dict)
+            or type(response.get("id")) is not int
+            or response["id"] != request_id
+            or not isinstance(response.get("result"), dict)
+        ):
             raise AcceptanceError("installed MCP returned an incoherent response")
         self.transcript.append(response)
         return response

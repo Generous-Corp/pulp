@@ -116,11 +116,20 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 ],
             },
         }
+        source_disposition = "not-present-at-configured-or-resolved-sibling"
         provider_claim = {
-            "method": "retained-resolved-render-provider-trees-v1",
+            "method": "retained-resolved-render-provider-trees-v2",
+            "skia_source_disposition": source_disposition,
             "providers": providers,
             "manifest_sha256": CONTRACT.hashlib.sha256(
-                json.dumps(providers, sort_keys=True, separators=(",", ":")).encode()
+                json.dumps(
+                    {
+                        "providers": providers,
+                        "skia_source_disposition": source_disposition,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
             ).hexdigest(),
         }
         return {
@@ -371,6 +380,29 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         ]["providers"]["v8"]["required_members"].pop()
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("V8 provider" in error for error in errors))
+
+    def test_consumed_adjacent_skia_source_provider_cannot_be_omitted(self):
+        receipt = self.terminal_receipt()
+        claim = receipt["installed_source_identity"]["build_provenance"][
+            "render_provider_input_claim"
+        ]
+        claim["skia_source_disposition"] = (
+            "retained-complete-adjacent-source-tree"
+        )
+        claim["manifest_sha256"] = CONTRACT.hashlib.sha256(
+            json.dumps(
+                {
+                    "providers": claim["providers"],
+                    "skia_source_disposition": claim[
+                        "skia_source_disposition"
+                    ],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        errors = MODULE.verify(receipt, ROOT)
+        self.assertTrue(any("sealed render providers" in error for error in errors))
 
     def test_no_producer_disposition_is_recomputed_from_git(self):
         receipt = self.terminal_receipt()

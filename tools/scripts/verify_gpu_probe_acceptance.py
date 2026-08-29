@@ -287,18 +287,51 @@ def _verify_complete_tree_claim(value: Any, label: str, errors: list[str]) -> No
 def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
     claim = _mapping(value, "render_provider_input_claim", errors)
     providers = _mapping(claim.get("providers"), "render providers", errors)
+    disposition = claim.get("skia_source_disposition")
+    expected_roles = {"skia_dawn", "v8"}
+    if disposition == "retained-complete-adjacent-source-tree":
+        expected_roles.add("skia_source")
+    elif disposition != "not-present-at-configured-or-resolved-sibling":
+        errors.append("Pulp render providers lack an exact Skia source disposition")
     if (
-        claim.get("method") != "retained-resolved-render-provider-trees-v1"
-        or set(providers) != {"skia_dawn", "v8"}
+        claim.get("method") != "retained-resolved-render-provider-trees-v2"
+        or set(providers) != expected_roles
         or SHA256.fullmatch(str(claim.get("manifest_sha256", ""))) is None
         or claim.get("manifest_sha256") != hashlib.sha256(
-            json.dumps(providers, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(
+                {
+                    "providers": providers,
+                    "skia_source_disposition": disposition,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
         ).hexdigest()
     ):
         errors.append("Pulp render providers lack one exact sealed provider manifest")
         return
+    expected_metadata = {
+        "skia_dawn": (
+            "resolved-skia-dawn-provider-root",
+            "CMake SKIA_DIR or exact generated Ninja archive path",
+        ),
+        "v8": (
+            "resolved-v8-provider-root",
+            "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root",
+        ),
+        "skia_source": (
+            "resolved-skia-source-provider-root",
+            "FindSkia adjacent SKIA_DIR/../skia-src include root",
+        ),
+    }
     for role, row_value in providers.items():
         row = _mapping(row_value, f"render provider {role}", errors)
+        expected_role, expected_resolution = expected_metadata[role]
+        if (
+            row.get("root_role") != expected_role
+            or row.get("resolution") != expected_resolution
+        ):
+            errors.append(f"render provider {role} lacks exact root provenance")
         _verify_complete_tree_claim(row.get("tree_claim"), f"render provider {role}", errors)
         members = row.get("required_members")
         if not isinstance(members, list) or not members or any(
@@ -323,6 +356,10 @@ def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
             and names & {"libv8.dylib", "libv8.so", "v8.dll"}
         ):
             errors.append("render provider v8 lacks its consumed headers/runtime")
+        if role == "skia_source" and not any(
+            member["path"].startswith("src/core/") for member in members
+        ):
+            errors.append("render provider skia_source lacks a consumed src/core input")
 
 
 def _png_metrics(path: Path) -> dict[str, int]:

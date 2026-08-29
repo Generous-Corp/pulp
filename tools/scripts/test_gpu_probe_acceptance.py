@@ -77,6 +77,29 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             session.close()
             self.assertIsNotNone(session.process.returncode)
 
+    def test_mcp_rejects_non_object_and_boolean_id_responses(self):
+        class Claim:
+            @staticmethod
+            def assert_current():
+                return None
+
+        for response in ([], {"jsonrpc": "2.0", "id": True, "result": {}}):
+            with self.subTest(response=response), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                session = RECORDER.McpSession(Path("/bin/cat"), root, {}, Claim())
+                try:
+                    with mock.patch.object(
+                        RECORDER.provenance,
+                        "read_bounded_process_line",
+                        return_value=json.dumps(response) + "\n",
+                    ):
+                        with self.assertRaisesRegex(
+                            RECORDER.AcceptanceError, "incoherent response"
+                        ):
+                            session.request("initialize")
+                finally:
+                    session.close()
+
     def v2_fixture(self, directory: Path) -> dict:
         for group in RECORDER.RECIPES:
             for suffix in ("run1", "run2", "negative"):
@@ -138,11 +161,20 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 ],
             },
         }
+        source_disposition = "not-present-at-configured-or-resolved-sibling"
         render_provider_claim = {
-            "method": "retained-resolved-render-provider-trees-v1",
+            "method": "retained-resolved-render-provider-trees-v2",
+            "skia_source_disposition": source_disposition,
             "providers": providers,
             "manifest_sha256": hashlib.sha256(
-                json.dumps(providers, sort_keys=True, separators=(",", ":")).encode()
+                json.dumps(
+                    {
+                        "providers": providers,
+                        "skia_source_disposition": source_disposition,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
             ).hexdigest(),
         }
         receipt = {
@@ -428,6 +460,30 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 (root / "receipt.json").write_text(json.dumps(receipt))
                 errors = VERIFIER.verify(root)
                 self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_v2_rejects_omitted_consumed_adjacent_skia_source_provider(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt = self.v2_fixture(root)
+            claim = receipt["install_provenance"]["render_provider_input_claim"]
+            claim["skia_source_disposition"] = (
+                "retained-complete-adjacent-source-tree"
+            )
+            claim["manifest_sha256"] = hashlib.sha256(
+                json.dumps(
+                    {
+                        "providers": claim["providers"],
+                        "skia_source_disposition": claim[
+                            "skia_source_disposition"
+                        ],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            (root / "receipt.json").write_text(json.dumps(receipt))
+            errors = VERIFIER.verify(root)
+            self.assertTrue(any("sealed provider" in error for error in errors), errors)
 
     def test_png_content_cap_rejects_blank_even_when_digest_rebound(self):
         with tempfile.TemporaryDirectory() as temporary:

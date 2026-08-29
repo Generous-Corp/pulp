@@ -44,8 +44,11 @@ measured outputs to be absent before rebuilding them. The source and generated
 input descriptors remain live across clean, build, install, replay, timing,
 and publication. It also resolves and retains the complete selected Skia/Dawn
 and V8 provider trees (including the exact Skia/Dawn archives, V8 headers, and
-V8 runtime) before the clean build, and keeps those provider descriptors live
-through every measured launch. Immediately after the build it retains all three exact
+V8 runtime) before the clean build. If FindSkia consumes the adjacent
+`SKIA_DIR/../skia-src` layout, the recorder retains that complete source tree as
+a third provider; broad provider roots and escaping symlinks fail closed. Those
+provider descriptors stay live through every measured launch. Immediately
+after the build it retains all three exact
 build-output inodes before installation, then retains the installed build
 stamp, CLI, delegate, MCP, trace, and trace-processor inodes through final
 publication. Every claim is rehashed and sealed with macOS vnode mutation

@@ -31,7 +31,10 @@ not create or promote a receipt during an implementation turn.
   expected Git blob. It then reconfigures the external build, retains the
   regenerated CMake/Ninja/configure-time graph, resolves and retains the
   complete selected Skia/Dawn and V8 provider trees (including both GPU
-  archives, V8 headers, and the V8 runtime), forces a CMake clean, removes
+  archives, V8 headers, and the V8 runtime). When FindSkia activates the
+  adjacent `SKIA_DIR/../skia-src` include layout, that complete source-provider
+  tree is retained too; broad roots and escaping provider symlinks fail closed.
+  The recorder then forces a CMake clean, removes
   the Rust Cargo target cache, and requires all three measured outputs absent
   before rebuilding. Those exact source and build-input descriptors remain
   live through install, all CLI/MCP recipes, Forge proof, self-verification,

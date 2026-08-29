@@ -454,7 +454,12 @@ class McpSession:
             raise RuntimeError("pulp-mcp returned malformed JSON") from error
         if self.directory_claim is not None:
             self.directory_claim.assert_current()
-        if response.get("id") != request_id or "result" not in response:
+        if (
+            not isinstance(response, dict)
+            or type(response.get("id")) is not int
+            or response["id"] != request_id
+            or not isinstance(response.get("result"), dict)
+        ):
             raise RuntimeError(f"invalid pulp-mcp response: {response}")
         return response
 
@@ -1406,6 +1411,7 @@ def retain_current_regular_tree(
     maximum_bytes: int = 256 * 1024 * 1024,
 ) -> tuple[RetainedTreeClaim, dict[str, Any]]:
     expected: dict[str, tuple[str, str]] = {}
+    symlink_targets: dict[str, str] = {}
     total_bytes = 0
     for path in root.rglob("*"):
         metadata = path.lstat()
@@ -1414,17 +1420,52 @@ def retain_current_regular_tree(
         relative = path.relative_to(root).as_posix()
         if stat_module.S_ISLNK(metadata.st_mode):
             mode = "120000"
-            total_bytes += len(os.fsencode(os.readlink(path)))
+            target = os.readlink(path)
+            symlink_targets[relative] = target
+            expected_blob = _git_blob_digest_bytes(os.fsencode(target))
+            total_bytes += len(os.fsencode(target))
         elif stat_module.S_ISREG(metadata.st_mode):
             mode = "100755" if metadata.st_mode & 0o111 else "100644"
+            expected_blob = ""
             total_bytes += metadata.st_size
         else:
             raise ValueError(f"{label} contains a non-regular filesystem entry")
         if len(expected) >= maximum_files or total_bytes > maximum_bytes:
             raise ValueError(f"{label} inventory is unsafe or unbounded")
-        expected[relative] = (mode, "")
+        expected[relative] = (mode, expected_blob)
     if not expected:
         raise ValueError(f"{label} contains no retained files")
+    try:
+        resolved_root = root.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ValueError(f"{label} root cannot be resolved safely") from error
+    for relative, target in symlink_targets.items():
+        target_path = Path(target)
+        if target_path.is_absolute():
+            raise ValueError(f"{label} contains an absolute symlink: {relative}")
+        try:
+            resolved_target = (
+                root / Path(relative).parent / target_path
+            ).resolve(strict=True)
+            target_relative = resolved_target.relative_to(resolved_root).as_posix()
+        except (OSError, RuntimeError, ValueError) as error:
+            raise ValueError(f"{label} contains a symlink escape: {relative}") from error
+        if resolved_target == resolved_root:
+            raise ValueError(f"{label} contains a root-cycle symlink: {relative}")
+        if resolved_target.is_file():
+            target_row = expected.get(target_relative)
+            if target_row is None or target_row[0] == "120000":
+                raise ValueError(
+                    f"{label} symlink target is not retained: {relative}"
+                )
+        elif resolved_target.is_dir():
+            prefix = target_relative.rstrip("/") + "/"
+            if not any(path.startswith(prefix) for path in expected):
+                raise ValueError(
+                    f"{label} symlink directory is not retained: {relative}"
+                )
+        else:
+            raise ValueError(f"{label} has an unsupported symlink target: {relative}")
     claim = RetainedTreeClaim(root, label, expected)
     manifest = [
         {"path": row["relative"], "blob": row["blob"], "mode": row["mode"]}
@@ -1459,6 +1500,19 @@ class RetainedClaimSet:
             claim.close()
 
 
+def _provider_root_is_bounded(path: Path) -> bool:
+    """Reject filesystem-, volume-, and account-wide provider inventories."""
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    return resolved.is_dir() and len(resolved.parts) >= 4
+
+
+def _absolute_lexical_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
 def _resolved_skia_root(build_dir: Path, cache: dict[str, str]) -> Path:
     candidates: list[Path] = []
     configured = cache.get("SKIA_DIR", "")
@@ -1481,30 +1535,39 @@ def _resolved_skia_root(build_dir: Path, cache: dict[str, str]) -> Path:
             candidates.extend(library.parents)
     seen: set[Path] = set()
     for candidate in candidates:
+        lexical_root = _absolute_lexical_path(candidate)
         try:
-            root = candidate.resolve()
+            resolved_root = lexical_root.resolve(strict=True)
         except OSError:
             continue
-        if root in seen or not root.is_dir() or root.is_symlink():
+        if (
+            resolved_root in seen
+            or lexical_root.is_symlink()
+            or not _provider_root_is_bounded(lexical_root)
+        ):
             continue
-        seen.add(root)
+        seen.add(resolved_root)
         headers = (
-            root / "build/include/include/core/SkCanvas.h",
-            root / "include/include/core/SkCanvas.h",
-            root / "include/core/SkCanvas.h",
+            lexical_root / "build/include/include/core/SkCanvas.h",
+            lexical_root / "include/include/core/SkCanvas.h",
+            lexical_root / "include/core/SkCanvas.h",
         )
-        skia = tuple(root.glob("build/*-gpu/lib/Release/libskia.a")) + tuple(
-            root.glob("*-gpu/lib/Release/libskia.a")
-        ) + tuple(root.glob("*/lib/libskia.a")) + (root / "lib/libskia.a",)
-        dawn = tuple(root.glob("build/*-gpu/lib/Release/libdawn_combined.a")) + tuple(
-            root.glob("*-gpu/lib/Release/libdawn_combined.a")
-        ) + tuple(root.glob("*/lib/libdawn_combined.a")) + (
-            root / "lib/libdawn_combined.a",
+        skia = tuple(lexical_root.glob("build/*-gpu/lib/Release/libskia.a")) + tuple(
+            lexical_root.glob("*-gpu/lib/Release/libskia.a")
+        ) + tuple(lexical_root.glob("*/lib/libskia.a")) + (
+            lexical_root / "lib/libskia.a",
         )
-        if any(path.is_file() for path in headers) and any(
-            path.is_file() for path in skia
+        dawn = tuple(
+            lexical_root.glob("build/*-gpu/lib/Release/libdawn_combined.a")
+        ) + tuple(
+            lexical_root.glob("*-gpu/lib/Release/libdawn_combined.a")
+        ) + tuple(lexical_root.glob("*/lib/libdawn_combined.a")) + (
+            lexical_root / "lib/libdawn_combined.a",
+        )
+        if any(path.is_file() and not path.is_symlink() for path in headers) and any(
+            path.is_file() and not path.is_symlink() for path in skia
         ) and any(path.is_file() for path in dawn):
-            return root
+            return lexical_root
     raise ValueError(
         "cannot resolve one self-contained Skia/Dawn provider root from CMake/Ninja"
     )
@@ -1512,13 +1575,46 @@ def _resolved_skia_root(build_dir: Path, cache: dict[str, str]) -> Path:
 
 def _resolved_v8_root(cache: dict[str, str]) -> tuple[Path, Path]:
     runtime_value = cache.get("V8_RUNTIME_LIBRARY", "")
-    runtime = Path(runtime_value)
+    runtime = _absolute_lexical_path(Path(runtime_value))
     if not runtime.is_absolute() or not runtime.is_file() or runtime.is_symlink():
         raise ValueError("CMake cache lacks one resolved regular V8 runtime library")
     for root in runtime.parents:
-        if (root / "include/v8.h").is_file():
-            return root.resolve(), runtime.resolve()
+        if (
+            _provider_root_is_bounded(root)
+            and not root.is_symlink()
+            and (root / "include/v8.h").is_file()
+            and not (root / "include/v8.h").is_symlink()
+        ):
+            return root, runtime
     raise ValueError("resolved V8 provider is not a self-contained header/library root")
+
+
+def _resolved_skia_source_root(cache: dict[str, str], skia_root: Path) -> Path | None:
+    candidates: list[Path] = []
+    configured = cache.get("SKIA_DIR", "")
+    if configured and Path(configured).is_absolute():
+        candidates.append(_absolute_lexical_path(Path(configured)).parent / "skia-src")
+    candidates.append(skia_root.parent / "skia-src")
+    seen: set[Path] = set()
+    for candidate in candidates:
+        lexical_root = _absolute_lexical_path(candidate)
+        if not (lexical_root / "src/core").is_dir():
+            continue
+        try:
+            resolved_root = lexical_root.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise ValueError("adjacent Skia source provider cannot be resolved") from error
+        if (
+            resolved_root in seen
+            or lexical_root.is_symlink()
+            or not _provider_root_is_bounded(lexical_root)
+        ):
+            if resolved_root in seen:
+                continue
+            raise ValueError("adjacent Skia source provider root is unsafe or too broad")
+        seen.add(resolved_root)
+        return lexical_root
+    return None
 
 
 def retain_resolved_render_provider_inputs(
@@ -1530,20 +1626,37 @@ def retain_resolved_render_provider_inputs(
         raise ValueError("render provider sealing requires the exact GPU + V8 build")
     skia_root = _resolved_skia_root(build_dir, cache)
     v8_root, v8_runtime = _resolved_v8_root(cache)
-    if skia_root == v8_root or skia_root in v8_root.parents or v8_root in skia_root.parents:
-        raise ValueError("resolved Skia/Dawn and V8 provider roots must not overlap")
-    _raise_descriptor_limit(131072)
+    skia_source_root = _resolved_skia_source_root(cache, skia_root)
+    provider_specs: list[tuple[str, Path, int, int]] = [
+        ("skia_dawn", skia_root, 32768, 8 * 1024 * 1024 * 1024),
+        ("v8", v8_root, 32768, 2 * 1024 * 1024 * 1024),
+    ]
+    if skia_source_root is not None:
+        provider_specs.append(
+            ("skia_source", skia_source_root, 65536, 16 * 1024 * 1024 * 1024)
+        )
+    resolved_roots = {
+        role: root.resolve(strict=True) for role, root, _, _ in provider_specs
+    }
+    for index, (left_role, left_root) in enumerate(resolved_roots.items()):
+        for right_role, right_root in list(resolved_roots.items())[index + 1:]:
+            if (
+                left_root == right_root
+                or left_root in right_root.parents
+                or right_root in left_root.parents
+            ):
+                raise ValueError(
+                    f"resolved {left_role} and {right_role} provider roots overlap"
+                )
+    _raise_descriptor_limit(196608)
     claims: dict[str, RetainedTreeClaim] = {}
     rows: dict[str, Any] = {}
     try:
-        for role, root, maximum_bytes in (
-            ("skia_dawn", skia_root, 8 * 1024 * 1024 * 1024),
-            ("v8", v8_root, 2 * 1024 * 1024 * 1024),
-        ):
+        for role, root, maximum_files, maximum_bytes in provider_specs:
             claim, tree_evidence = retain_current_regular_tree(
                 root,
                 f"{label} {role}",
-                maximum_files=32768,
+                maximum_files=maximum_files,
                 maximum_bytes=maximum_bytes,
             )
             claims[role] = claim
@@ -1551,7 +1664,8 @@ def retain_resolved_render_provider_inputs(
             if role == "skia_dawn":
                 required_paths = sorted(
                     relative for relative in by_relative
-                    if Path(relative).name in {
+                    if by_relative[relative]["mode"] != "120000"
+                    and Path(relative).name in {
                         "libskia.a", "skia.lib",
                         "libdawn_combined.a", "dawn_combined.lib",
                     }
@@ -1564,12 +1678,27 @@ def retain_resolved_render_provider_inputs(
                 ):
                     raise ValueError("retained Skia/Dawn provider lacks the Dawn archive")
                 resolution = "CMake SKIA_DIR or exact generated Ninja archive path"
-            else:
+            elif role == "v8":
                 runtime_relative = v8_runtime.relative_to(v8_root).as_posix()
                 required_paths = ["include/v8.h", runtime_relative]
-                if any(path not in by_relative for path in required_paths):
+                if any(
+                    path not in by_relative
+                    or by_relative[path]["mode"] == "120000"
+                    for path in required_paths
+                ):
                     raise ValueError("retained V8 provider lacks its resolved headers/runtime")
                 resolution = "CMake V8_RUNTIME_LIBRARY and enclosing include/v8.h root"
+            else:
+                required_paths = sorted(
+                    relative for relative, member in by_relative.items()
+                    if member["mode"] != "120000"
+                    and relative.startswith("src/core/")
+                )[:1]
+                if not required_paths:
+                    raise ValueError(
+                        "retained adjacent Skia source provider lacks src/core inputs"
+                    )
+                resolution = "FindSkia adjacent SKIA_DIR/../skia-src include root"
             rows[role] = {
                 "root_role": f"resolved-{role.replace('_', '-')}-provider-root",
                 "resolution": resolution,
@@ -1584,11 +1713,23 @@ def retain_resolved_render_provider_inputs(
                 ],
             }
         evidence = {
-            "method": "retained-resolved-render-provider-trees-v1",
+            "method": "retained-resolved-render-provider-trees-v2",
+            "skia_source_disposition": (
+                "retained-complete-adjacent-source-tree"
+                if skia_source_root is not None
+                else "not-present-at-configured-or-resolved-sibling"
+            ),
             "providers": rows,
         }
         evidence["manifest_sha256"] = hashlib.sha256(
-            json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(
+                {
+                    "providers": rows,
+                    "skia_source_disposition": evidence["skia_source_disposition"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
         ).hexdigest()
         retained = RetainedClaimSet(claims)
         retained.assert_full()
