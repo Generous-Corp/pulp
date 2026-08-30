@@ -2266,6 +2266,13 @@ use GitHub-hosted runners by default. macOS routes through the self-hosted
 `pulp-build` pool (`pulp-m1-01`, `pulp-m1-02`) via
 `PULP_LOCAL_MACOS_RUNS_ON_JSON`; repository variables control any overflow.
 
+Advisory macOS supervisors that share a host with the event-class-v2 gate must
+yield to both required Build and Test classes. Their
+`TARTCI_YIELD_TO_LABELS` selector includes the base gate labels plus both
+`pulp-build-merge-group` and `pulp-build-pr-head`: the idle gate is
+admission-only and cannot evict a sanitizer that started during PR validation
+when a merge group arrives later. Base labels alone match neither v2 class.
+
 The authoritative Windows x64 functional matrix is pinned to `windows-2022`
 (Visual Studio 2022) by `.github/workflows/build.yml`. Shipyard's current ship
 path does not send a `windows_runner_selector_json`, so the workflow fallback
