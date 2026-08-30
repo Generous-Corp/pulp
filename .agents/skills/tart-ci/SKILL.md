@@ -262,6 +262,23 @@ main, reddening every PR's macOS gate.)
    ```
 
 ## Gotchas (hard-won)
+- **Dynamic event classes require dynamic registration authority, not just
+  dynamic labels.** The 2026-08-30 M1/M5 incident produced exact-label
+  `pulp-build-pr-head` runners that were online and idle in the organization
+  inventory but invisible to Pulp's repository runner endpoint, so GitHub could
+  never assign the queued PR jobs. The fleet-wide contract is
+  `pulp-build-merge-group|3` (protected organization group) and
+  `pulp-build-pr-head|1` (repository scope), rendered through
+  `TARTCI_RUNNER_WORKFLOW_TIER_GROUPS` for M1, M3, and M5. Do not infer usable
+  capacity from an organization row. A PR-head proof requires the runner in the
+  repository endpoint, `online` then `busy`, an exact job-to-runner binding, job
+  completion, and ephemeral reclamation. TartCI must fail closed before JIT
+  minting when an organization group's repository access cannot be proven; a
+  401/403/404 records a contract-keyed denial so the loop does not keep booting
+  VMs. Roll profiles out only through `tartci pool off` ->
+  `tartci fleet-macos install ... --apply` -> receipt verification ->
+  `tartci pool on`, one idle host at a time. Preserve active jobs and the M1
+  delayed-fallback policy.
 - **A held lease must keep beating, and the refresher is harder to write than it looks.** tartci stamps a heartbeat at `leases acquire` and marks the lease stale once it ages past `TARTCI_LEASE_STALE_SECS` (default **300s**). Any build longer than that reads as `stale_heartbeat_live_owner` in `tartci status` while its owner PID and whole descendant tree are healthy — telemetry that invites a controller or an operator to preempt a working build. `tools/ci/governed-build.sh` refreshes every 60s via `tartci leases heartbeat --id`, stops refreshing *before* releasing, and watches the parent PID so a SIGKILLed build cannot leave a keepalive refreshing a lease nobody owns. Two bash traps bit this in review, and both are invisible until you run it:
   1. `while sleep N; do …` **cannot be stopped promptly** — bash defers a trapped signal until the current *foreground* command returns, so the refresher ignores its own SIGTERM until the interval elapses and adds up to a full interval to every build's exit. Background the `sleep` and `wait` on it; `wait` is signal-interruptible.
   2. A background child **inherits the caller's stdout**, and a caller that runs the wrapper inside a command substitution blocks until every holder of that pipe closes it. An un-redirected refresher makes `out="$(governed-build.sh …)"` hang for a full interval after the build finished. Detach the refresher's fds at spawn.
