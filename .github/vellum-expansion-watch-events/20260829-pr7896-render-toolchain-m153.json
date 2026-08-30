@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260829-pr7896-render-toolchain-m153",
+  "created_at": "2026-08-29T09:32:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record Pulp-owned dependency selection, immutable cache provenance, release verification, and mixed-provider compatibility proof for the Skia/Dawn chrome/m153 update while the last verified V8 m152 provider remains active. The capability probe confirms that published provider bytes expose future integration surfaces but installs no generic logging or Graphite executor policy in Pulp. Generic rendering policy remains Vellum-owned; this change neither moves source authority nor widens a transferred implementation boundary.",
+  "tests": [
+    "python3 tools/scripts/test_fetch_skia_for_release.py",
+    "python3 tools/scripts/test_verify_skia_m153_capabilities.py",
+    "python3 tools/scripts/test_release_workflow_test_step.py",
+    "python3 tools/scripts/vellum_freeze_check.py --base \"$(git rev-parse origin/main)\" --head \"$(git rev-parse HEAD)\" --source-head \"$(git rev-parse HEAD)\" --output /tmp/pr7896-vellum-freeze.json",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base \"$(git rev-parse origin/main)\" --head \"$(git rev-parse HEAD)\" --output /tmp/pr7896-vellum-watch.json",
+    "python3 tools/scripts/test_vellum_expansion_watch_check.py",
+    "release-path mixed Skia/Dawn m153 plus V8 m152 provider-identity and headless Three.js cube proof"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

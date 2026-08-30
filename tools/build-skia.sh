@@ -19,19 +19,21 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PULP_ROOT="$(dirname "$SCRIPT_DIR")"
 SKIA_BUILDER_DIR="$PULP_ROOT/external/skia-builder"
 SKIA_BUILD_OUTPUT="$PULP_ROOT/external/skia-build"
-# Default to the fork's chrome/m152 branch HEAD. Override with SKIA_BUILDER_REF
-# to pin to a specific commit (omit to track the fork branch head).
+# Reproducible fallbacks default to the immutable revisions recorded beside the
+# release assets. Explicit overrides remain available for builder development.
 SKIA_BUILDER_URL="${SKIA_BUILDER_URL:-https://github.com/danielraffel/skia-builder.git}"
-SKIA_BUILDER_REF="${SKIA_BUILDER_REF:-}"
-SKIA_BRANCH="${SKIA_BRANCH:-chrome/m152}"
+SKIA_BUILDER_REF="${SKIA_BUILDER_REF:-$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x for x in d["dependencies"] if x["name"] == "Skia")["determinism"]["skia_builder_ref"])' "$PULP_ROOT/tools/deps/manifest.json")}"
+SKIA_BRANCH="${SKIA_BRANCH:-$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x for x in d["dependencies"] if x["name"] == "Skia")["determinism"]["skia_branch"])' "$PULP_ROOT/tools/deps/manifest.json")}"
+SKIA_EXPECTED_COMMIT="${SKIA_EXPECTED_COMMIT:-$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x for x in d["dependencies"] if x["name"] == "Skia")["determinism"]["skia_commit"])' "$PULP_ROOT/tools/deps/manifest.json")}"
 
 PLATFORM="${1:-mac}"
 
 echo "=== Pulp Skia Builder ==="
 echo "Platform: $PLATFORM"
 echo "Builder URL: $SKIA_BUILDER_URL"
-echo "Builder ref: ${SKIA_BUILDER_REF:-(branch HEAD)}"
-echo "Branch: $SKIA_BRANCH"
+echo "Builder ref: $SKIA_BUILDER_REF"
+echo "Skia branch: $SKIA_BRANCH"
+echo "Expected Skia commit: $SKIA_EXPECTED_COMMIT"
 echo "Output: $SKIA_BUILD_OUTPUT"
 echo ""
 
@@ -52,14 +54,19 @@ if [ "$current_origin" != "$SKIA_BUILDER_URL" ]; then
     git -C "$SKIA_BUILDER_DIR" remote set-url origin "$SKIA_BUILDER_URL"
 fi
 
-if [ -n "$SKIA_BUILDER_REF" ]; then
-    echo "Syncing skia-builder to $SKIA_BUILDER_REF..."
-    git -C "$SKIA_BUILDER_DIR" fetch --depth 1 origin "$SKIA_BUILDER_REF"
-    git -C "$SKIA_BUILDER_DIR" checkout --detach "$SKIA_BUILDER_REF"
-else
-    echo "Syncing skia-builder to $SKIA_BRANCH HEAD..."
-    git -C "$SKIA_BUILDER_DIR" fetch --depth 1 origin "$SKIA_BRANCH"
-    git -C "$SKIA_BUILDER_DIR" checkout FETCH_HEAD
+echo "Syncing skia-builder to $SKIA_BUILDER_REF..."
+git -C "$SKIA_BUILDER_DIR" fetch --depth 1 origin "$SKIA_BUILDER_REF"
+git -C "$SKIA_BUILDER_DIR" checkout --detach FETCH_HEAD
+
+# Fail before the expensive build when the mutable Chromium milestone branch
+# no longer resolves to the immutable Skia revision recorded in the manifest.
+# The post-build checkout check below remains authoritative against a race or a
+# builder that consumes different source than the advertised branch.
+SKIA_SOURCE_URL="${SKIA_SOURCE_URL:-https://skia.googlesource.com/skia.git}"
+resolved_skia_commit="$(git ls-remote "$SKIA_SOURCE_URL" "refs/heads/$SKIA_BRANCH" | awk 'NR == 1 {print $1}')"
+if [ -z "$resolved_skia_commit" ] || [ "$resolved_skia_commit" != "$SKIA_EXPECTED_COMMIT" ]; then
+    echo "ERROR: Skia branch $SKIA_BRANCH resolves to ${resolved_skia_commit:-<missing>}, expected $SKIA_EXPECTED_COMMIT" >&2
+    exit 1
 fi
 
 # Increase file limit on macOS
@@ -77,6 +84,16 @@ if [ "$PLATFORM" = "all" ]; then
     # python3 build-skia.py win -branch "$SKIA_BRANCH" --shallow
 else
     python3 build-skia.py "$PLATFORM" -branch "$SKIA_BRANCH" --shallow
+fi
+
+# skia-builder currently accepts a branch name, not an arbitrary commit. Never
+# publish local fallback output merely because that mutable branch resolved:
+# the built checkout must still equal the immutable manifest revision.
+actual_skia_commit="$(git -C "$SKIA_BUILDER_DIR/src/skia" rev-parse HEAD)"
+if [ "$actual_skia_commit" != "$SKIA_EXPECTED_COMMIT" ]; then
+    echo "ERROR: built Skia commit $actual_skia_commit does not match pinned $SKIA_EXPECTED_COMMIT" >&2
+    echo "Use the verified release asset, or explicitly override SKIA_EXPECTED_COMMIT for a development-only build." >&2
+    exit 1
 fi
 
 # Copy output to Pulp's expected location

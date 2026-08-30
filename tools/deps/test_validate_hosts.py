@@ -71,6 +71,36 @@ class SubprocessWrapperTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["cwd"], validate_hosts.ROOT)
         self.assertTrue(run.call_args.kwargs["check"])
 
+    def test_current_sha_requires_exact_lowercase_commit(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["git"], returncode=0, stdout="a" * 40 + "\n", stderr=""
+        )
+        with mock.patch.object(
+            validate_hosts.subprocess, "run", return_value=completed
+        ):
+            self.assertEqual(validate_hosts.current_sha(), "a" * 40)
+
+        invalid = subprocess.CompletedProcess(
+            args=["git"], returncode=0, stdout="not-a-sha\n", stderr=""
+        )
+        with mock.patch.object(
+            validate_hosts.subprocess, "run", return_value=invalid
+        ), self.assertRaisesRegex(RuntimeError, "exact source SHA"):
+            validate_hosts.current_sha()
+
+    def test_resolve_ref_sha_resolves_the_requested_commit(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["git"], returncode=0, stdout="b" * 40 + "\n", stderr=""
+        )
+        with mock.patch.object(
+            validate_hosts.subprocess, "run", return_value=completed
+        ) as run:
+            self.assertEqual(validate_hosts.resolve_ref_sha("feature/render"), "b" * 40)
+        self.assertEqual(
+            run.call_args.args[0],
+            ["git", "rev-parse", "--verify", "feature/render^{commit}"],
+        )
+
     def test_run_reports_success_and_failure(self) -> None:
         stdout = io.StringIO()
         with mock.patch.object(
@@ -105,12 +135,31 @@ class RemoteCommandTests(unittest.TestCase):
 
         self.assertIn("cd '/tmp/repo path'", cmd)
         self.assertIn("'feature/quote'\"'\"'test'", cmd)
-        self.assertIn("./validate-build.sh --quiet --no-tests", cmd)
+        self.assertIn("./validate-build.sh --quiet --ref HEAD", cmd)
+        self.assertIn("--no-tests", cmd)
         self.assertIn("git fetch origin", cmd)
 
         with_tests = validate_hosts.unix_remote_command("/repo", "main", skip_tests=False)
-        self.assertIn("./validate-build.sh --quiet", with_tests)
+        self.assertIn("./validate-build.sh --quiet --ref HEAD", with_tests)
         self.assertNotIn("--no-tests", with_tests)
+
+        render = validate_hosts.unix_remote_command(
+            "/repo", "main", skip_tests=False, render_toolchain=True,
+            expected_sha="a" * 40,
+        )
+        self.assertIn('actual_sha="$(git rev-parse HEAD)"', render)
+        self.assertIn('if [ "$actual_sha" != ' + "a" * 40 + " ]; then", render)
+        self.assertIn(
+            "python3 tools/deps/validate_render_update.py --cache-only", render
+        )
+        self.assertLess(
+            render.index('actual_sha="$(git rev-parse HEAD)"'),
+            render.index("./validate-build.sh --quiet --ref " + "a" * 40),
+        )
+        with self.assertRaisesRegex(ValueError, "exact source SHA"):
+            validate_hosts.unix_remote_command(
+                "/repo", "main", skip_tests=False, render_toolchain=True
+            )
 
     def test_windows_remote_command_escapes_quotes_and_toggles_tests(self) -> None:
         cmd = validate_hosts.windows_remote_command(
@@ -178,6 +227,51 @@ class MainTests(unittest.TestCase):
             run.call_args.args[1],
             ["bash", "./validate-build.sh", "--quiet", "--ref", "current"],
         )
+
+    def test_render_toolchain_mode_runs_full_local_and_cache_only_remote(self) -> None:
+        config = {"unix_targets": [{"host": "m5", "path": "/repo"}]}
+        with mock.patch.object(sys, "argv", [
+            "validate_hosts.py", "--branch", "feature/render", "--render-toolchain"
+        ]), mock.patch.object(
+            validate_hosts, "load_config", return_value=config
+        ), mock.patch.object(
+            validate_hosts, "resolve_ref_sha", return_value="b" * 40
+        ), mock.patch.object(
+            validate_hosts, "current_sha", return_value="b" * 40
+        ), mock.patch.object(
+            validate_hosts, "run", return_value=True
+        ) as run:
+            self.assertEqual(validate_hosts.main(), 0)
+
+        self.assertEqual(
+            run.call_args_list[0].args[1],
+            ["bash", "./validate-build.sh", "--quiet", "--ref", "b" * 40],
+        )
+        self.assertEqual(
+            run.call_args_list[1].args,
+            (
+                "local render toolchain",
+                [sys.executable, "tools/deps/validate_render_update.py"],
+            ),
+        )
+        self.assertIn(
+            "python3 tools/deps/validate_render_update.py --cache-only",
+            run.call_args_list[2].args[1][-1],
+        )
+        self.assertIn("b" * 40, run.call_args_list[2].args[1][-1])
+
+    def test_render_toolchain_rejects_branch_not_at_local_checkout(self) -> None:
+        with mock.patch.object(sys, "argv", [
+            "validate_hosts.py", "--branch", "feature/render", "--render-toolchain"
+        ]), mock.patch.object(
+            validate_hosts, "load_config", return_value={}
+        ), mock.patch.object(
+            validate_hosts, "resolve_ref_sha", return_value="b" * 40
+        ), mock.patch.object(
+            validate_hosts, "current_sha", return_value="c" * 40
+        ), mock.patch.object(validate_hosts, "run") as run:
+            self.assertEqual(validate_hosts.main(), 1)
+        run.assert_not_called()
 
     def test_script_entrypoint_exits_with_main_status(self) -> None:
         script = ROOT / "tools" / "deps" / "validate_hosts.py"

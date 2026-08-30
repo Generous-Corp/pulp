@@ -74,12 +74,26 @@ unset(_pulp_ubsan_enabled)
 # with PULP_JS_ENGINE=v8 — `auto` never silently pulls in V8.
 list(APPEND PULP_JS_ENGINE_SOURCES src/js_v8_engine.cpp)
 if(PULP_JS_ENGINE STREQUAL "v8")
-    # iOS cannot JIT — V8 is forbidden in iOS apps / AUv3 extensions. Hard error,
-    # not a silent fallback, so a misconfigured iOS build fails loudly.
+    # The pinned iOS artifact is a jitless simulator framework used for provider
+    # provenance/header validation only. Pulp has no device/AUv3 V8 runtime
+    # acceptance or packaging contract, so selection fails loudly.
     if(IOS OR PULP_IOS)
         message(FATAL_ERROR
-            "PULP_JS_ENGINE=v8 is not supported on iOS: V8 requires JIT, which iOS "
-            "apps and AUv3 extensions forbid. Use QuickJS (the default) or JSC.")
+            "PULP_JS_ENGINE=v8 is not supported on iOS: the pinned m153 V8 "
+            "artifact is a jitless simulator framework validated only for "
+            "provider provenance/header consumption; Pulp has no device/AUv3 "
+            "runtime acceptance or packaging contract. Use QuickJS (the default) "
+            "or JSC.")
+    endif()
+    # The sealed m153 Android provider was built with NDK API 29. Refuse a
+    # lower-minSdk consumer instead of allowing a library that may load only on
+    # newer devices than the application advertises.
+    if(ANDROID AND ANDROID_NATIVE_API_LEVEL LESS 29)
+        message(FATAL_ERROR
+            "PULP_JS_ENGINE=v8 on Android requires API 29+ for the pinned m153 "
+            "provider (configured API ${ANDROID_NATIVE_API_LEVEL}). Raise "
+            "ANDROID_NATIVE_API_LEVEL/minSdk, use QuickJS, or rebuild V8 for the "
+            "lower API and update the provider receipt.")
     endif()
     include(${PULP_ROOT_DIR}/tools/cmake/FindV8.cmake)
     if(NOT PULP_V8_FOUND)
@@ -112,7 +126,7 @@ if(PULP_JS_ENGINE STREQUAL "v8")
         # regardless of sibling-field order within the entry (a name→version text
         # bridge breaks when a braces-delimited field like "upstream": { ... } is
         # reordered ahead of "version"). The tag may carry an LKGR suffix (e.g.
-        # "v8-m152-15.2.124.7-<sha>", "v8-15.2.24-lkgr-<sha>", or the older
+        # "v8-m153-15.3.76.5-<sha>", "v8-15.2.24-lkgr-<sha>", or the older
         # bare "v8-15.1.27"); discard an optional milestone prefix and reduce
         # it to the dotted-numeric run so the gate compares the runtime version
         # rather than the full release tag.

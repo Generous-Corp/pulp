@@ -69,4 +69,9 @@ _expect_engine_failure(
     "set(APPLE FALSE)\nset(PULP_ENABLE_JS OFF)\nset(PULP_JS_ENGINE jsc CACHE STRING \"\" FORCE)"
     "PULP_JS_ENGINE=jsc is only supported on Apple platforms")
 
+_expect_engine_failure(
+    android-v8-below-provider-floor
+    "set(ANDROID TRUE)\nset(ANDROID_NATIVE_API_LEVEL 28)\nset(IOS FALSE)\nset(PULP_IOS FALSE)\nset(PULP_JS_ENGINE v8 CACHE STRING \"\" FORCE)"
+    "PULP_JS_ENGINE=v8 on Android requires API 29")
+
 file(REMOVE_RECURSE "${_probe_dir}")
