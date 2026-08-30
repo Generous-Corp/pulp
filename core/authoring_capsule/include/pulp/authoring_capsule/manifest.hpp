@@ -8,6 +8,7 @@
 /// `authoring_kind`, `topology`, and `required_capabilities` — nothing else.
 
 #include <pulp/authoring_capsule/component.hpp>
+#include <pulp/authoring_capsule/limits.hpp>
 #include <pulp/authoring_capsule/status.hpp>
 #include <pulp/runtime/result.hpp>
 
@@ -20,9 +21,6 @@ namespace pulp::authoring_capsule {
 /// The vendor-neutral format identifier. Constant for format version 1.
 inline constexpr std::string_view kFormatId = "org.pulp.audio-authoring-capsule";
 inline constexpr std::uint32_t kFormatVersion = 1;
-
-/// Fixed path of the manifest, which must also be the archive's first member.
-inline constexpr std::string_view kManifestPath = "capsule.json";
 
 enum class Reproducibility : std::uint8_t {
     /// Declared inputs plus pinned dependencies regenerate the result, and

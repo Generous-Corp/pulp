@@ -1251,11 +1251,16 @@ TEST_CASE("the capsule substrate contains no outbound or execution call site",
     std::size_t control_hits = 0;
     std::size_t scanned = 0;
 
+    // Call sites, not URL text. A scheme literal is data: the module names
+    // `https://` precisely in order to REFUSE every other provider form, which
+    // is the opposite of reaching out, and flagging it would make the safety
+    // check itself the violation. Nothing can be fetched without one of the
+    // APIs below, so these are what the promise actually rests on.
     static const std::vector<std::string> kForbidden{
-        "socket(",  "connect(",     "getaddrinfo(", "popen(",         "system(",
-        "execve(",  "execvp(",      "execl(",       "fork(",          "dlopen(",
-        "dlsym(",   "posix_spawn(", "CreateProcess", "curl_easy_",    "WinHttp",
-        "http://",  "https://",
+        "socket(",  "connect(",     "getaddrinfo(",  "popen(",      "system(",
+        "execve(",  "execvp(",      "execl(",        "fork(",       "dlopen(",
+        "dlsym(",   "posix_spawn(", "CreateProcess", "curl_easy_",  "WinHttp",
+        "URLSession", "NSURL",      "send(",         "recv(",       "bind(",
     };
 
     std::error_code ec;

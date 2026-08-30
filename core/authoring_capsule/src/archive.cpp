@@ -947,6 +947,19 @@ write_archive_no_replace(const std::vector<WriteMember>& members, const fs::path
         normalized_paths.push_back(std::move(*normalized));
     }
 
+    // The writer holds itself to the reader's rule. Without this a caller could
+    // mint an archive that this module's own reader then rejects with
+    // manifest_not_first — a producer and consumer in the same library
+    // disagreeing about the format, which is the kind of asymmetry that only
+    // surfaces on someone else's machine.
+    if (normalized_paths.empty() || normalized_paths.front() != kManifestPath)
+        return fail<std::uint64_t>(CapsuleStatus::manifest_not_first,
+                                   normalized_paths.empty() ? std::string{}
+                                                            : normalized_paths.front(),
+                                   std::string(kManifestPath),
+                                   normalized_paths.empty() ? std::string{}
+                                                            : normalized_paths.front());
+
     if (auto collision = check_collisions(normalized_paths); !collision)
         return runtime::Err(std::move(collision).error());
 

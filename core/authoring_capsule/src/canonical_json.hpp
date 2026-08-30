@@ -189,12 +189,11 @@ Json subtree(const JsonView& object, std::span<const std::string_view> keys);
 runtime::Result<void, CapsuleError> sort_array_by_string_member(Json& array, std::string_view key,
                                                                 std::string_view pointer_root = {});
 
-/// Lowercase hex SHA-256 over the canonical bytes of `value`.
-runtime::Result<std::string, CapsuleError> canonical_sha256_hex(const JsonView& value);
-
-/// `canonical_sha256_hex` in the `sha256:<hex>` form the envelope writes for
-/// `revision_id` and `parent_revision`. The algorithm travels with the digest
-/// so a future second hash is a new prefix, not an ambiguous 64 hex characters.
-runtime::Result<std::string, CapsuleError> canonical_sha256_uri(const JsonView& value);
+// There is deliberately no digest helper here. `revision_digest()` in
+// manifest.cpp is the one place that turns canonical bytes into an identity,
+// and a second implementation of the same spelling in this file would be free
+// to drift from it — silently, since both would keep producing plausible
+// 64-character strings. Canonicalize with `to_canonical_text` and hash at the
+// single call site that owns the meaning.
 
 }  // namespace pulp::authoring_capsule::detail

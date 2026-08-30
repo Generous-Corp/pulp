@@ -892,18 +892,5 @@ runtime::Result<void, CapsuleError> sort_array_by_string_member(Json& array,
     return {};
 }
 
-runtime::Result<std::string, CapsuleError> canonical_sha256_hex(const JsonView& value) {
-    using R = runtime::Result<std::string, CapsuleError>;
-    auto text = to_canonical_text(value);
-    if (text.is_err()) return text;
-    return R(Ok(runtime::sha256_hex(std::string_view(text.value()))));
-}
-
-runtime::Result<std::string, CapsuleError> canonical_sha256_uri(const JsonView& value) {
-    using R = runtime::Result<std::string, CapsuleError>;
-    auto hex = canonical_sha256_hex(value);
-    if (hex.is_err()) return hex;
-    return R(Ok("sha256:" + std::move(hex).value()));
-}
 
 }  // namespace pulp::authoring_capsule::detail

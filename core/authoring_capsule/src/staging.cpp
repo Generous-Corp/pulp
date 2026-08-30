@@ -1,5 +1,7 @@
 #include <pulp/authoring_capsule/staging.hpp>
 
+#include <pulp/authoring_capsule/safe_path.hpp>
+
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
@@ -90,11 +92,12 @@ bool digest_equal(std::string_view declared, std::string_view computed) noexcept
 /// Split an already-normalized member path into components, refusing anything
 /// that could resolve outside the staging root.
 ///
-/// `admit_member_path` is the authority for the full path grammar — NFC,
-/// byte and depth budgets, confusables. This repeats only the containment
-/// subset, because extraction is the last point before an untrusted string is
-/// joined to a real directory: a caller that arrives here with an unadmitted
-/// manifest must still be unable to write outside the staging area.
+/// `admit_member_path` runs first and is the authority for the full path
+/// grammar — NFC, byte and depth budgets, confusables, reserved names. This
+/// repeats only the containment subset, deliberately: extraction is the last
+/// point before an untrusted string is joined to a real directory, and a
+/// containment bug there writes outside the staging area. Two independent
+/// checks of the property that matters most is worth the duplication.
 bool split_contained_path(std::string_view path, std::vector<std::string>& components) {
     components.clear();
     if (path.empty() || path.front() == '/' || path.back() == '/')
@@ -775,6 +778,13 @@ runtime::Result<void, CapsuleError> extract_declared(const CapsuleArchive& archi
         if (progress && !progress(index, count))
             return fail(CapsuleStatus::cancelled, entry.path);
 
+        // The full grammar, not just containment. This is a public entry point
+        // taking an arbitrary Manifest, so it cannot assume a caller ran
+        // preview first: a path that never faced the byte, depth, NFC, or
+        // reserved-name rules would otherwise reach the filesystem through a
+        // caller that skipped admission.
+        auto admitted = admit_member_path(entry.path);
+        if (!admitted) return runtime::Err(std::move(admitted).error());
         if (!split_contained_path(entry.path, components))
             return fail(CapsuleStatus::path_rejected, entry.path);
         if (!std::binary_search(member_paths.begin(), member_paths.end(),

@@ -228,8 +228,14 @@ never required for playback on the receiving machine.
 ## External dependencies
 
 An external dependency row pins a hash identity, media type, byte count,
-license and attribution facts, and either an allowlisted HTTPS provider or a
-content-addressed library locator. Preview shows every provider and license
+license and attribution facts, and either an `https://` provider or a
+`capsule-library:` locator. Any other provider — `http://`, `file://`, an
+absolute path, a bare hostname — is refused at parse time with
+`dependency_provider_denied`, because each either leaks the exporting machine's
+filesystem into a shared capsule or invites a retrieval nobody can
+authenticate. Which *host* is acceptable remains a consumer policy; the shape
+is structural. A dependency may also declare no provider at all, in which case
+it is simply not resolvable. Preview shows every provider and license
 before any retrieval. With consent, retrieval writes to private staging and
 verifies size and digest before decode; no version or mirror substitution is
 permitted. Offline, denied, missing, hash-mismatched, and revoked dependencies
@@ -239,13 +245,15 @@ and partial downloads cannot modify the project or the shared library.
 ## Import state machine
 
 1. Read the bounded root manifest only. Execute nothing.
-2. Validate versions, closure, paths, sizes, digests, collisions, budgets,
-   capabilities, and compatibility.
+2. Validate versions, the closure in both directions, paths, collisions,
+   budgets, declared sizes against the container's own, the manifest's own
+   revision digest, required roles, capabilities, and compatibility.
 3. Verify the optional trust envelope: signature, publisher policy, revocation,
    version floor.
 4. Produce a preview. Preview performs zero execution and zero network access.
 5. Obtain explicit consent.
-6. Extract only declared members into owner-private staging.
+6. Extract only declared members into owner-private staging, verifying each
+   member's digest as it lands.
 7. Run profile semantic validation without executing source.
 8. Publish atomically as a **new** local identity. A matching incoming
    `project_id` never replaces an existing project.
@@ -253,6 +261,24 @@ and partial downloads cannot modify the project or the shared library.
    sandbox. Last-good state survives every failure.
 
 A signature establishes identity, not permission to escape the sandbox.
+
+### Where member digests are checked, and why not earlier
+
+Step 2 does not verify every member's content digest. Doing so would mean
+inflating the whole archive, which is exactly what preview exists to avoid: a
+capsule is a file a stranger can send, and the point of a bounded manifest read
+is that inspecting one costs a manifest, not a gigabyte.
+
+What step 2 does check is that each row's declared `bytes` matches what the
+container says that member expands to — free from the central directory, and
+enough to make the preview's size figures trustworthy. Content digests are
+verified in step 6, as each member lands in private staging, and a mismatch
+aborts before anything is published. So no unverified byte ever reaches a live
+project; it simply is not verified at the moment the preview is drawn.
+
+A consumer that wants full verification before consent can extract to a staging
+area it then discards. The substrate does not do that by default because it
+would make previewing a large capsule as expensive as importing one.
 
 ## Error taxonomy
 

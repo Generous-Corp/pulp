@@ -5,8 +5,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace pulp::authoring_capsule {
+
+/// Fixed path of the manifest, which must also be the archive's first member.
+/// It lives beside the budgets because it is a container fact: the reader
+/// requires it and the writer holds itself to the same rule, so neither may
+/// learn it from the envelope layer above.
+inline constexpr std::string_view kManifestPath = "capsule.json";
 
 struct CapsuleLimits {
     std::size_t max_members = 20000;

@@ -446,7 +446,13 @@ runtime::Result<CapsulePreview, CapsuleError> preview_capsule(const CapsuleArchi
         preview.dependencies.push_back(std::move(summary));
 
         accumulate_rights(dependency.policy, preview.rights);
-        if (dependency.required && blocks_self_contained(dependency.policy))
+        // Not gated on `dependency.required`. That flag is a coarse hint the
+        // capsule sets about itself, and `derive_completeness` already treats
+        // it as non-authoritative — so gating on it here would let a
+        // dependency that gates play be omitted from the list a person reads
+        // while the completeness verdict still counts it. The two derived
+        // facts have to agree, and they agree by both ignoring the hint.
+        if (blocks_self_contained(dependency.policy))
             preview.rights.blocking_component_paths.push_back(dependency.id);
     }
 

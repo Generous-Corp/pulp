@@ -82,12 +82,19 @@ std::optional<Enum> enum_from_token(const std::array<std::pair<std::string_view,
     return std::nullopt;
 }
 
+/// The tables are exhaustive over their enums, so a miss is a programming error
+/// — a new enumerator added without its token. It still must not fall back to
+/// `table.front()`: the first token is the permissive one for both
+/// `Redistribution` ("allowed") and `SourceAvailability` ("included"), so that
+/// fallback would silently upgrade an unmapped value into a grant nobody made.
+/// An empty token is the honest answer, and it round-trips as a rejected enum
+/// rather than as permission.
 template <typename Enum, std::size_t N>
 std::string_view enum_to_token(const std::array<std::pair<std::string_view, Enum>, N>& table,
                                Enum value) {
     for (const auto& entry : table)
         if (entry.second == value) return entry.first;
-    return table.front().first;
+    return {};
 }
 
 // ── Top-level key vocabulary ────────────────────────────────────────────
@@ -332,6 +339,25 @@ std::optional<CapsuleError> read_files(const cv::ValueView& root, std::vector<Fi
     return std::nullopt;
 }
 
+/// The two admissible provider forms. An `https://` origin is authenticated in
+/// transport and names somewhere a recipient can actually reach; a
+/// `capsule-library:` locator names content a recipient may already hold,
+/// without naming a machine at all. Everything else — `http://`, `file://`,
+/// an absolute path, a bare hostname — is refused rather than carried, because
+/// each either leaks the exporter's filesystem or invites an unauthenticated
+/// fetch.
+bool is_admissible_provider(std::string_view provider) {
+    constexpr std::string_view kHttps = "https://";
+    constexpr std::string_view kLibrary = "capsule-library:";
+    const bool https = provider.size() > kHttps.size() && provider.substr(0, kHttps.size()) == kHttps;
+    const bool library =
+        provider.size() > kLibrary.size() && provider.substr(0, kLibrary.size()) == kLibrary;
+    if (!https && !library) return false;
+    // A control character in a URL is never meaningful and is how a log line or
+    // a terminal gets forged, so it is refused here rather than sanitized later.
+    return std::none_of(provider.begin(), provider.end(), [](unsigned char c) { return c < 0x20; });
+}
+
 std::optional<CapsuleError> read_dependencies(const cv::ValueView& root,
                                               std::vector<DependencyEntry>& out) {
     auto value = root["dependencies"];
@@ -350,10 +376,22 @@ std::optional<CapsuleError> read_dependencies(const cv::ValueView& root,
         if (auto e = read_string(row, "sha256", self, true, false, entry.sha256)) return e;
         if (auto e = read_u64(row, "bytes", self, true, entry.bytes)) return e;
         if (auto e = read_string(row, "media_type", self, true, false, entry.media_type)) return e;
-        // An empty provider parses: whether a provider is acceptable is a
-        // rights and retrieval question, not a structural one, and the
-        // dependency layer answers it with `dependency_provider_denied`.
+        // An empty provider parses: a dependency may legitimately declare no
+        // resolver, and it is then simply not resolvable. A provider that IS
+        // declared must be one of the two admissible forms, because the string
+        // is otherwise an unbounded channel — `file:///Users/someone/...` in a
+        // shared capsule leaks the exporting machine, and `http://` invites a
+        // retrieval nobody can authenticate. Which *host* is acceptable stays
+        // a consumer policy; the shape is structural and belongs here.
         if (auto e = read_string(row, "provider", self, false, true, entry.provider)) return e;
+        if (!entry.provider.empty() && !is_admissible_provider(entry.provider)) {
+            CapsuleError error;
+            error.status = CapsuleStatus::dependency_provider_denied;
+            error.subject = ptr(self, "provider");
+            error.required = "https:// or capsule-library:";
+            error.found = entry.provider;
+            return error;
+        }
         if (auto e = read_bool(row, "required", self, entry.required)) return e;
         if (auto e = read_policy(row, self, entry.policy)) return e;
         out.push_back(std::move(entry));
