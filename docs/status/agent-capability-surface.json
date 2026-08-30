@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 61,
+  "inventory_version": 62,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 445,
-    "reviewed_headers": 153,
+    "public_headers": 446,
+    "reviewed_headers": 154,
     "legacy_unreviewed_headers": 292,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 100,
+      "capability_entrypoint": 101,
       "capability_support": 39,
       "infrastructure": 12,
       "legacy_unreviewed": 292,
@@ -50,8 +50,8 @@
     },
     "by_domain": {
       "audio": {
-        "public_headers": 112,
-        "reviewed_headers": 8,
+        "public_headers": 113,
+        "reviewed_headers": 9,
         "legacy_unreviewed_headers": 104,
         "unsupported_headers": 0
       },
@@ -1022,6 +1022,17 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
+      "fingerprint": "sha256:b5c08f132df70323065b1d7c1d9109ddfc95ed8baeacb0c595fd5eb21771dbe8",
+      "include": "pulp/audio/voice_modulation_sources.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.voice-modulation-sources"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "audio",
