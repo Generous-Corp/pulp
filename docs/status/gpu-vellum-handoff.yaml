@@ -734,8 +734,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "test/test_control_gpu_health_provider.cpp",
           "state": "pulp-owned-retained",
-          "revision": "f3c21381bbce5ba2a84726d12ffa96d03065c97b",
-          "object_id": "8eb91b0209f577483883ef004251066c657aac6a",
+          "revision": "cf9990cc445e10a8de43732342e32cec0a4da78a",
+          "object_id": "37a52a586e2c3c7c180446f0dcc1fd808a75aa2f",
           "object_type": "blob"
         },
         {
