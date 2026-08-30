@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 60,
+  "inventory_version": 61,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -38,14 +38,14 @@
   ],
   "counts": {
     "public_headers": 445,
-    "reviewed_headers": 152,
-    "legacy_unreviewed_headers": 293,
+    "reviewed_headers": 153,
+    "legacy_unreviewed_headers": 292,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 100,
       "capability_support": 39,
-      "infrastructure": 11,
-      "legacy_unreviewed": 293,
+      "infrastructure": 12,
+      "legacy_unreviewed": 292,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -75,8 +75,8 @@
       },
       "signal": {
         "public_headers": 265,
-        "reviewed_headers": 109,
-        "legacy_unreviewed_headers": 156,
+        "reviewed_headers": 110,
+        "legacy_unreviewed_headers": 155,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -1901,11 +1901,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/character_delay/reverse.hpp",
-      "fingerprint": "sha256:c1c53d21dcb25833f48f3901e6770318a01d84399045014d3cc0d96a0d68aa48",
+      "fingerprint": "sha256:8ffe9c4341a734e18aeae9900554cb042acfc3dd0982b243cde8705067140c91",
       "include": "pulp/signal/character_delay/reverse.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Character Delay's internal reverse segmenter, specialized for continuously slewed window lengths and modulated fractional reads. docs/reference/reverse-buffer.md records the decision to keep it internal and to expose ReverseBufferT as the public reverse primitive, so it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -3565,7 +3565,7 @@
       "include": "pulp/signal/reverse_buffer.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Prepared fixed-capacity streaming window reversal with explicit boundary shaping and a finite tail; it is a bounded buffering surface reused by effects rather than an advertised generator DSP claim."
+      "rationale": "Prepared fixed-capacity streaming window reversal with explicit boundary shaping and a finite tail; it is a bounded buffering primitive intended for composition inside effects rather than an advertised generator DSP claim. It has no in-tree consumer today beyond the signal umbrella header."
     },
     {
       "domain": "signal",
@@ -3974,7 +3974,7 @@
       "include": "pulp/signal/tempo_delay.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo range; it is a bounded conversion surface reused by delay kernels rather than an advertised generator DSP claim."
+      "rationale": "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo range; it is a bounded conversion primitive intended for composition inside delay kernels rather than an advertised generator DSP claim. It has no in-tree consumer today beyond the signal umbrella header."
     },
     {
       "domain": "signal",
