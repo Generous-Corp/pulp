@@ -44,7 +44,7 @@ class ControlGpuHealthProvider final {
         MeasurementEndpoint measurement_endpoint =
             MeasurementEndpoint::native_compositor_presentation;
         /// Exact 32-lowercase-hex identifier also emitted by the correlated
-        /// A2T trace. Required before a startup trial can claim pass/fail.
+        /// trace. Required before a startup trial can claim pass/fail.
         std::optional<std::string> gpu_evidence_id;
         /// Bounded same-instance trace identity emitted beside gpu_evidence_id.
         /// It is deliberately distinct from the GPU evidence identifier and
@@ -128,9 +128,8 @@ class ControlGpuHealthProvider final {
     bool begin_editor_open(CacheState cache_state,
                            std::chrono::steady_clock::time_point requested_at) noexcept;
     /// Records bounded raw product evidence. A positive live snapshot is not
-    /// by itself an A3 acceptance receipt; the closed A3 verifier independently
-    /// binds budget, raw samples, product artifacts, trace, and audio-thread
-    /// exclusion evidence.
+    /// establish end-to-end startup readiness; validation also binds the
+    /// budget, raw samples, product artifacts, trace, and audio-thread exclusion.
     bool record_presented_frame(const FrameObservation& frame) noexcept;
     bool record_timeout(std::chrono::steady_clock::time_point observed_at) noexcept;
     bool record_instance_lost() noexcept;
