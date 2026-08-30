@@ -467,6 +467,168 @@ TEST_CASE("WidgetBridge setFaderSkin applies derived colors to the fader",
     REQUIRE(f->thumb_shape() == Fader::ThumbShape::rectangle);
 }
 
+TEST_CASE("scripted indicator provenance keeps live theme precedence",
+          "[view][bridge][indicator-precedence]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    const auto black = pulp::canvas::Color::rgba8(0, 0, 0);
+    const auto blue = pulp::canvas::Color::rgba8(0, 64, 255);
+    const auto white = pulp::canvas::Color::rgba8(255, 255, 255);
+    root.set_color("knob.thumb", black);
+    root.set_color("control.thumb", black);
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(
+        "createKnob('dial', '');"
+        "setKnobCapturedIndicator('dial', 0.55, 0.9, 0.04, '#ff0000', 0, false);"
+        "createFader('level', 'vertical', '');"
+        "setFaderSkin('level', '', '', '#ff0000', '', 0, 0, 0, false);");
+
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("dial"));
+    auto* fader = dynamic_cast<Fader*>(bridge.widget("level"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(fader != nullptr);
+    CHECK_FALSE(knob->captured_indicator_color_authored());
+    CHECK_FALSE(fader->has_skin_thumb_color());
+    CHECK(fader->has_skin_thumb_fallback_color());
+    CHECK_FALSE(fader->has_skin());
+    knob->set_bounds({0, 0, 100, 100});
+    fader->set_bounds({0, 0, 24, 120});
+
+    const auto last_line_color = [](Knob& control) {
+        pulp::canvas::RecordingCanvas canvas;
+        control.paint(canvas);
+        pulp::canvas::Color current{};
+        pulp::canvas::Color painted{};
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_stroke_color)
+                current = command.color;
+            if (command.type == pulp::canvas::DrawCommand::Type::stroke_line)
+                painted = current;
+        }
+        return painted;
+    };
+    const auto last_thumb_color = [](Fader& control) {
+        pulp::canvas::RecordingCanvas canvas;
+        control.paint(canvas);
+        pulp::canvas::Color current{};
+        pulp::canvas::Color painted{};
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_fill_color)
+                current = command.color;
+            if (command.type == pulp::canvas::DrawCommand::Type::fill_rounded_rect)
+                painted = current;
+        }
+        return painted;
+    };
+
+    // The red panel fallback never freezes either control; the current host
+    // theme wins and remains live after the bridge call has returned.
+    CHECK(last_line_color(*knob) == black);
+    CHECK(last_thumb_color(*fader) == black);
+    root.set_color("knob.thumb", blue);
+    CHECK(last_line_color(*knob) == blue);
+    CHECK(last_thumb_color(*fader) == black);
+    root.set_color("control.thumb", blue);
+    CHECK(last_line_color(*knob) == blue);
+    CHECK(last_thumb_color(*fader) == blue);
+
+    bridge.load_script(
+        "setKnobCapturedIndicator('dial', 0.55, 0.9, 0.04, '#ffffff', 0, true);"
+        "setFaderSkin('level', '', '', '#ffffff', '', 0, 0, 0, true);");
+    CHECK(knob->captured_indicator_color_authored());
+    CHECK(fader->has_skin_thumb_color());
+    CHECK(last_line_color(*knob) == white);
+    CHECK(last_thumb_color(*fader) == white);
+
+    // Modern space-separated and percentage RGB forms accepted as authored
+    // evidence must parse to the same color instead of being confidently
+    // accepted and then misread by the shared CSS parser.
+    bridge.load_script(
+        "setKnobCapturedIndicator('dial', 0.55, 0.9, 0.04, 'rgb(0 255 0)', 0, true);"
+        "setFaderSkin('level', '', '', 'rgb(0% 100% 0%)', '', 0, 0, 0, true);");
+    const auto green = pulp::canvas::Color::rgba8(0, 255, 0);
+    CHECK(last_line_color(*knob) == green);
+    CHECK(last_thumb_color(*fader) == green);
+
+    // Replaying a panel fallback must retire the stale authored thumb rather
+    // than leaving white frozen over the current live theme.
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ff0000', '', 0, 0, 0, false);");
+    CHECK_FALSE(fader->has_skin_thumb_color());
+    CHECK(fader->has_skin_thumb_fallback_color());
+    CHECK(last_thumb_color(*fader) == blue);
+    root.set_color("control.thumb", black);
+    CHECK(last_thumb_color(*fader) == black);
+
+    // An explicit unauthored call with no fallback colour returns authority
+    // fully to the theme instead of reviving stale authored state later.
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '', '', 0, 0, 0, false);");
+    CHECK_FALSE(fader->has_skin_thumb_color());
+    CHECK_FALSE(fader->has_skin_thumb_fallback_color());
+    CHECK(last_thumb_color(*fader) == black);
+
+    // The inverse provenance transition remains authoritative.
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ffffff', '', 0, 0, 0, true);");
+    CHECK(fader->has_skin_thumb_color());
+    CHECK(last_thumb_color(*fader) == white);
+}
+
+TEST_CASE("setFaderSkin track-only styling preserves authored thumb geometry",
+          "[view][bridge][indicator-precedence]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createFader('level', 'vertical', '');");
+    auto* fader = dynamic_cast<Fader*>(bridge.widget("level"));
+    REQUIRE(fader != nullptr);
+    fader->set_thumb_shape(Fader::ThumbShape::circle);
+
+    bridge.load_script("setFaderSkin('level', '#112233', '#334455', '', '');");
+    CHECK(fader->thumb_shape() == Fader::ThumbShape::circle);
+
+    // A panel-wide fallback is palette data, not per-thumb geometry.
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ff0000', '', 0, 0, 0, false);");
+    CHECK(fader->thumb_shape() == Fader::ThumbShape::circle);
+}
+
+TEST_CASE("setFaderSkin fallback retires stale authored thumb styling",
+          "[view][bridge][indicator-precedence]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createFader('level', 'vertical', '');");
+    auto* fader = dynamic_cast<Fader*>(bridge.widget("level"));
+    REQUIRE(fader != nullptr);
+    fader->set_thumb_shape(Fader::ThumbShape::circle);
+
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ffffff', '#222222', 12, 18, 3, true);");
+    CHECK(fader->has_skin_thumb_color());
+    CHECK(fader->has_skin_thumb_border_color());
+    CHECK(fader->thumb_shape() == Fader::ThumbShape::rectangle);
+    CHECK(fader->thumb_width() == 12.0f);
+    CHECK(fader->thumb_height() == 18.0f);
+    CHECK(fader->thumb_corner_radius() == 3.0f);
+
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ff0000', '', 0, 0, 0, false);");
+    CHECK_FALSE(fader->has_skin_thumb_color());
+    CHECK(fader->has_skin_thumb_fallback_color());
+    CHECK_FALSE(fader->has_skin_thumb_border_color());
+    CHECK(fader->thumb_shape() == Fader::ThumbShape::circle);
+    CHECK(fader->thumb_width() == 0.0f);
+    CHECK(fader->thumb_height() == 0.0f);
+    CHECK(fader->thumb_corner_radius() == 0.0f);
+}
+
 TEST_CASE("a scripted skin colour resolves every form the shared CSS parser does",
           "[view][bridge][color]") {
     // The scripted bridge and the native materializer read the same colour
