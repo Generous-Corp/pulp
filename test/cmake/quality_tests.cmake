@@ -420,7 +420,8 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-dpr-runner-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_runner.py")
     set_tests_properties(gpu-dpr-runner-selftest PROPERTIES
-        PROCESSORS 8)
+        PROCESSORS 8
+        TIMEOUT 300)
     add_test(NAME gpu-dpr-v2-evidence-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_v2_evidence.py")
     add_test(NAME gpu-dpr-pulp-native-adapter-selftest COMMAND ${Python3_EXECUTABLE}
