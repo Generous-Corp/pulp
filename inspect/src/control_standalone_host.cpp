@@ -456,9 +456,26 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                         if (!surface)
                             return frame;
                         const auto adapter = surface->adapter_info();
+                        using SurfaceAdapterType = render::GpuSurface::AdapterType;
+                        using ControlAdapterType =
+                            ControlGpuHealthProvider::AdapterIdentity::Type;
+                        const auto adapter_type = [type = adapter.adapter_type] {
+                            switch (type) {
+                                case SurfaceAdapterType::integrated_gpu:
+                                    return ControlAdapterType::integrated_gpu;
+                                case SurfaceAdapterType::discrete_gpu:
+                                    return ControlAdapterType::discrete_gpu;
+                                case SurfaceAdapterType::cpu:
+                                    return ControlAdapterType::cpu;
+                                case SurfaceAdapterType::unknown:
+                                    return ControlAdapterType::unknown;
+                            }
+                            return ControlAdapterType::unknown;
+                        }();
                         frame.adapter = ControlGpuHealthProvider::AdapterIdentity{
                             .available = adapter.available,
                             .native_bridge = adapter.native_bridge,
+                            .type = adapter_type,
                             .backend = adapter.backend,
                             .name = adapter.name,
                             .vendor = adapter.vendor,

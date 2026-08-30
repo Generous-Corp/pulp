@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <cmath>
 #include <limits>
 #include <set>
@@ -26,15 +25,17 @@ bool bounded_string(std::string_view value, std::size_t maximum) {
 gh::AdapterClass classify(const ControlGpuHealthProvider::AdapterIdentity& adapter) {
     if (!adapter.available || !adapter.native_bridge)
         return gh::AdapterClass::unknown;
-    auto text = adapter.backend + " " + adapter.name + " " + adapter.vendor;
-    std::ranges::transform(text, text.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (text.find("null") != std::string::npos)
-        return gh::AdapterClass::null_adapter;
-    if (text.find("software") != std::string::npos ||
-        text.find("swiftshader") != std::string::npos || text.find("llvmpipe") != std::string::npos)
-        return gh::AdapterClass::software;
-    return gh::AdapterClass::hardware;
+    using Type = ControlGpuHealthProvider::AdapterIdentity::Type;
+    switch (adapter.type) {
+        case Type::integrated_gpu:
+        case Type::discrete_gpu:
+            return gh::AdapterClass::hardware;
+        case Type::cpu:
+            return gh::AdapterClass::software;
+        case Type::unknown:
+            return gh::AdapterClass::unknown;
+    }
+    return gh::AdapterClass::unknown;
 }
 
 gh::AdapterIdentity identity(const ControlGpuHealthProvider::AdapterIdentity& value) {

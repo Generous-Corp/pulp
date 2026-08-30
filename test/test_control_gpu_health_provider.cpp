@@ -39,6 +39,8 @@ pulp::inspect::ControlGpuHealthProvider::FrameObservation frame(bool content) {
     return {
         .adapter = {.available = true,
                     .native_bridge = true,
+                    .type = pulp::inspect::ControlGpuHealthProvider::AdapterIdentity::Type::
+                        integrated_gpu,
                     .backend = "Metal",
                     .name = "Apple GPU",
                     .vendor = "Apple",
@@ -524,6 +526,38 @@ TEST_CASE("GPU health provider keeps available non-native adapter identity unver
     REQUIRE(snapshot->health.verdict == gh::Verdict::unavailable);
     REQUIRE(snapshot->health.probes.front().adapter.status == gh::IdentityStatus::unverified);
     REQUIRE(snapshot->health.probes.front().adapter.classification == gh::AdapterClass::unknown);
+}
+
+TEST_CASE("GPU health provider trusts native adapter type rather than backend labels") {
+    using AdapterType =
+        pulp::inspect::ControlGpuHealthProvider::AdapterIdentity::Type;
+
+    const auto classification_for = [](AdapterType type, std::string backend,
+                                       std::string name, std::string vendor) {
+        pulp::inspect::ControlGpuHealthProvider provider({.pulp_build_id = "test-build"});
+        REQUIRE(provider.begin_editor_open(
+            pulp::inspect::ControlGpuHealthProvider::CacheState::cold,
+            std::chrono::steady_clock::time_point{}));
+        auto observed = frame(true);
+        observed.adapter.type = type;
+        observed.adapter.backend = std::move(backend);
+        observed.adapter.name = std::move(name);
+        observed.adapter.vendor = std::move(vendor);
+        REQUIRE(provider.record_presented_frame(observed));
+        require_valid(provider);
+        return provider.snapshot()->health.probes.front().adapter.classification;
+    };
+
+    CHECK(classification_for(AdapterType::integrated_gpu, "Metal", "Apple GPU", "Apple") ==
+          gh::AdapterClass::hardware);
+    CHECK(classification_for(AdapterType::discrete_gpu, "D3D12", "AMD Radeon", "AMD") ==
+          gh::AdapterClass::hardware);
+    // This label deliberately lacks the old string classifier's software
+    // keywords. Only Dawn's CPU adapter type proves that WARP is software.
+    CHECK(classification_for(AdapterType::cpu, "D3D12", "Microsoft Basic Render Driver",
+                             "Microsoft") == gh::AdapterClass::software);
+    CHECK(classification_for(AdapterType::unknown, "Metal", "Apple GPU", "Apple") ==
+          gh::AdapterClass::unknown);
 }
 
 TEST_CASE("GPU health provider fails closed for malformed producer measurements") {

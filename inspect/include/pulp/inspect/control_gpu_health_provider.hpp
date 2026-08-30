@@ -69,8 +69,16 @@ class ControlGpuHealthProvider final {
     };
 
     struct AdapterIdentity {
+        enum class Type {
+            unknown,
+            integrated_gpu,
+            discrete_gpu,
+            cpu,
+        };
+
         bool available = false;
         bool native_bridge = false;
+        Type type = Type::unknown;
         std::string backend;
         std::string name;
         std::string vendor;

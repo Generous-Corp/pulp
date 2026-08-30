@@ -22,6 +22,16 @@ namespace pulp::render {
 ///   gpu.end_frame()     → presents to native surface
 class GpuSurface {
 public:
+    /// Native adapter type reported by Dawn/WebGPU. This is independent of the
+    /// backend API: Metal, D3D12, or Vulkan can each expose hardware, fallback,
+    /// or CPU adapters.
+    enum class AdapterType {
+        unknown,
+        integrated_gpu,
+        discrete_gpu,
+        cpu,
+    };
+
     enum class AdapterBackendPreference {
         default_backend,
         null_backend,
@@ -30,6 +40,7 @@ public:
     struct AdapterInfo {
         bool available = false;
         bool native_bridge = false;
+        AdapterType adapter_type = AdapterType::unknown;
         std::string backend = "unavailable";
         std::string backend_type = "Unknown";
         std::string name = "Mock Dawn Adapter";
