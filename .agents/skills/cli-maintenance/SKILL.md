@@ -47,6 +47,46 @@ Equally, do not fix it by configuring the secret on more hosts — that makes th
 test pass without making the behaviour correct, and spreads a release credential
 to machines with no use for it.
 
+### Doctor's environment checks live in C++, not in the Rust CLI
+
+There are two `doctor` implementations and only one of them runs checks. The
+Rust `cmd::doctor::run` (`experimental/pulp-rs/src/cmd/doctor.rs`) is native
+only for `--versions --json`; **every other lane — the default check list
+included — falls through to `pulp-cpp`**. The checks themselves are in
+`tools/cli/cli_doctor_helpers.cpp` (`run_doctor_checks`), not in
+`tools/cli/cmd_doctor.cpp`, which owns argument parsing and rendering.
+
+So a new environment check goes in `cli_doctor_helpers.cpp`, and adding one to
+the Rust crate would ship a check nobody reaches. Verify the split rather than
+assuming it: run the built `./build/pulp doctor` and confirm the C++ check names
+appear in its output.
+
+### A doctor check that cannot be wrong is worse than no check
+
+`pulp doctor`'s value rests on people believing a failing row. A check that
+fires on a healthy machine trains them to skim past every row, so a probe that
+cannot answer its question must stay silent rather than guess.
+
+The `git locks` row is built to that rule. A leftover `*.lock` makes every
+index- and ref-writing git command fail while reads keep working, so a checkout
+can be write-dead for days while looking healthy — but a *live* lock is the
+normal state during a commit. It therefore reports only when all three hold:
+the lock exists, **no live process holds it** (`lsof`, in
+`tools/cli/git_lock_health.cpp`), and it is older than an hour
+(`PULP_DOCTOR_STALE_LOCK_MINUTES`). The holder probe is tri-state — a host that
+cannot answer, including Windows and any host without `lsof`, yields `unknown`
+and produces no report.
+
+Two consequences worth keeping:
+
+- **Remediation stays manual.** The `fix` string is deliberately prose, not an
+  argv, so `--fix` prints it and refuses to run it. Deleting a lock a live
+  process is about to use is worse than the stale lock it removes.
+- **Cover the negative in the test, not just the positive.** The load-bearing
+  case in `test/test_cli_git_lock_health.cpp` is the *held* lock that must NOT
+  be reported, exercised against the real `lsof` probe — without it, a probe
+  that always answered "nobody holds this" would pass every other assertion.
+
 ### `pulp doctor gpu` is a typed diagnostic subcommand
 
 `pulp doctor gpu [--no-render] [--json]` performs bounded render/readback and
