@@ -47,7 +47,10 @@ Observed categories are accepted only from the same evidence ID and stable
 Perfetto process instance as the question rows; an unrelated process cannot
 complete that category set. The closed probe view also treats the producer's
 `cpu_oracle_mismatch` and `magnitude_dispatch_failed` diagnostics as failures,
-even alongside an inconsistent `healthy` state.
+even alongside an inconsistent `healthy` state. Every tooling-owned
+`gpu_probe*`/`gpu_readback*` candidate must carry the cohort evidence ID; one
+untagged tooling span makes correlation unavailable even when another tagged
+row is healthy. Generic untagged backend spans remain allowed.
 
 The named GPU analyzer has explicit resource limits: traces larger than
 512 MiB are rejected before `trace_processor` launches; processing has one

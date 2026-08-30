@@ -30,6 +30,12 @@ WITH candidates AS (
     AND COUNT(DISTINCT evidence_id) = 1
     AND MIN(length(evidence_id)) = 32
     AND MIN(evidence_id) NOT GLOB '*[^0-9a-f]*'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM candidates AS unbound_tooling
+      WHERE unbound_tooling.evidence_id IS NULL
+        AND (unbound_tooling.name GLOB 'gpu_probe*'
+             OR unbound_tooling.name GLOB 'gpu_readback*'))
 )
 SELECT
   CASE

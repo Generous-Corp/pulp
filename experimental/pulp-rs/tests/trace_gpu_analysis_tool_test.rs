@@ -254,6 +254,27 @@ fn generic_untagged_backend_spans_cannot_poison_or_supply_a_probe_cohort() {
 }
 
 #[test]
+fn untagged_tooling_failure_cannot_hide_behind_a_tagged_healthy_probe() {
+    let evidence = "bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc";
+    let trace = tempfile::NamedTempFile::new().expect("untagged tooling failure trace");
+    let fixture = serde_json::json!({"traceEvents": [
+        {"name":"gpu_probe_scoped","cat":"gpu","ph":"X","ts":1000,
+         "dur":20,"pid":91,"tid":91,"args":{"debug.gpu_evidence_id":evidence,
+         "debug.health_state":"healthy","debug.sequence":1}},
+        {"name":"gpu_readback_failed","cat":"gpu","ph":"X","ts":1030,
+         "dur":20,"pid":91,"tid":91,"args":{"debug.health_state":"failed",
+         "debug.diagnostic_code":"cpu_oracle_mismatch","debug.sequence":2}}
+    ]});
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let result = run_path("gpu-probe", trace.path(), 2);
+    assert_eq!(result["verdict"], "unavailable");
+    assert_eq!(result["capture_complete"], false);
+    assert_eq!(result["unavailable_reason"], "invalid-evidence-correlation");
+    assert!(result["evidence_ids"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn compile_failure_is_ranked_with_a_concrete_fix() {
     for question in ["gpu-health", "gpu-probe"] {
         let result = run(question, "compile-failure.pftrace", 1);

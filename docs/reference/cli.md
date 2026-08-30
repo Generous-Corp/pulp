@@ -1514,6 +1514,9 @@ OS PID) selected by the named question; categories from another process or
 evidence cohort cannot satisfy an acceptance requirement. Probe diagnostics
 `cpu_oracle_mismatch` and `magnitude_dispatch_failed` are closed causal
 failures even if an inconsistent producer also labels adapter health healthy.
+Every tooling-owned `gpu_probe*`/`gpu_readback*` candidate must carry an
+evidence ID; an untagged tooling candidate invalidates the cohort while generic
+untagged backend spans remain allowed.
 Empty/never-flushed files, processor-reported truncation, positive data-loss/no-flush stats, missing
 categories, unfinished slices, and invalid probe correlation return
 `unavailable` with exit 2; they do not silently pass. Long acquire/present wall

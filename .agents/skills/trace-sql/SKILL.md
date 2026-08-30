@@ -184,8 +184,12 @@ when the question rows and category rows resolve to one evidence ID and one
 UPID/PID process instance. Never union global trace categories into a scoped
 answer. Probe verdict SQL also owns a closed causal-failure diagnostic set;
 `cpu_oracle_mismatch` and `magnitude_dispatch_failed` remain failures even if
-the same row inconsistently reports `health_state=healthy`. Do not generalize
-that rule to every nonempty diagnostic because healthy diagnostics are valid.
+the same row inconsistently reports `health_state=healthy`. Any tooling-owned
+`gpu_probe*` or `gpu_readback*` candidate without an evidence ID invalidates the
+whole probe cohort; a healthy tagged row cannot hide it. Generic untagged
+backend work such as `gpu_submit*` remains allowed but cannot supply the cohort.
+Do not generalize the diagnostic rule to every nonempty diagnostic because
+healthy diagnostics are valid.
 
 **One definition, three surfaces.** The L0 CLI preset names map **1:1** onto
 these views: `slowest-frames → pulp_slowest_frames`, `xruns → pulp_xruns`,

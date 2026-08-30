@@ -336,6 +336,10 @@ fn checked_in_gpu_views_keep_the_safe_sql_contract() {
     assert!(STARTUP_SQL.contains("'cold'"));
     assert!(STARTUP_SQL.contains("'steady'"));
     assert!(STARTUP_SQL.contains("'unknown'"));
+    assert!(PROBE_SQL.contains("FROM candidates AS unbound_tooling"));
+    assert!(PROBE_SQL.contains("unbound_tooling.evidence_id IS NULL"));
+    assert!(PROBE_SQL.contains("unbound_tooling.name GLOB 'gpu_probe*'"));
+    assert!(PROBE_SQL.contains("unbound_tooling.name GLOB 'gpu_readback*'"));
 }
 
 #[cfg(unix)]
