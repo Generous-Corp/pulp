@@ -183,7 +183,7 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
     def test_replaced_source_blob_or_integration_head_fails_closed(self) -> None:
         mutations = [
             ("source_blob", "0" * 40, "source blob mismatch"),
-            ("integration_head", "0" * 40, "cannot resolve"),
+            ("integration_head", "0" * 40, "changed its recorded integration_head"),
         ]
         for name, replacement, expected in mutations:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:

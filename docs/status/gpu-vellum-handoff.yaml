@@ -92,8 +92,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-probes",
           "state": "pulp-owned-retained",
-          "revision": "c078a09c6b1b4121653b65a6df87d15721f8efe6",
-          "object_id": "a2347beb363f86efd60173b39d8501d670db4fd8",
+          "revision": "0be329b8dcee7fecf25420c0b263eba25d425b5e",
+          "object_id": "1a91bb9d37a01843eff263c83ada1fce52a0808f",
           "object_type": "tree"
         },
         {
@@ -140,8 +140,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/verify_gpu_probe_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "a307756bf399686da67b24c998b9448755d859f0",
-          "object_id": "64e56fdc75ced99121d58f61e86101be12473184",
+          "revision": "0be329b8dcee7fecf25420c0b263eba25d425b5e",
+          "object_id": "aa083a6a3c6b2fcc4269104a4d058815e42a85e2",
           "object_type": "blob"
         }
       ],
@@ -718,8 +718,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "test/cmake/gpu_health_tests.cmake",
           "state": "pulp-owned-retained",
-          "revision": "da0fc0eaf40948c7f02b9de708550b7fd84ad377",
-          "object_id": "ed13a71d6b8fbef18e7af61fea89a025b61f1113",
+          "revision": "0be329b8dcee7fecf25420c0b263eba25d425b5e",
+          "object_id": "f83bcc41e0d1ada95d4c1e9314cba888664368dd",
           "object_type": "blob"
         },
         {
@@ -886,8 +886,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_first_visible_a3_external_adapter.py",
           "state": "pulp-owned-retained",
-          "revision": "eb8f7d4906215a282c4491b4b75c6c865d5f56fd",
-          "object_id": "d2737c665e437ede32b3d3b3324ea0e9391be4f6",
+          "revision": "0be329b8dcee7fecf25420c0b263eba25d425b5e",
+          "object_id": "5cc72d65e708e1472d841529125c017fc2686b46",
           "object_type": "blob"
         },
         {
@@ -1835,16 +1835,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-probes",
           "state": "pulp-owned-retained",
-          "revision": "c078a09c6b1b4121653b65a6df87d15721f8efe6",
-          "object_id": "a2347beb363f86efd60173b39d8501d670db4fd8",
+          "revision": "0be329b8dcee7fecf25420c0b263eba25d425b5e",
+          "object_id": "1a91bb9d37a01843eff263c83ada1fce52a0808f",
           "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/verify_gpu_probe_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "a307756bf399686da67b24c998b9448755d859f0",
-          "object_id": "64e56fdc75ced99121d58f61e86101be12473184",
+          "revision": "0be329b8dcee7fecf25420c0b263eba25d425b5e",
+          "object_id": "aa083a6a3c6b2fcc4269104a4d058815e42a85e2",
           "object_type": "blob"
         }
       ],
