@@ -22,6 +22,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
@@ -63,7 +64,7 @@ def _resolver_source() -> str:
 
 
 def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
-                   event: str = "pull_request") -> str | None:
+                   event: str = "pull_request") -> Any | None:
     """Run the real resolver and return the macOS leg's runs-on, if any."""
     env = dict(os.environ)
     env.update(
@@ -93,7 +94,7 @@ def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
             raise AssertionError("resolver emitted no matrix_json")
         for entry in json.loads(match.group(1)).get("include", []):
             if entry.get("key") == "macos":
-                return json.dumps(entry["runs_on_json"])
+                return json.loads(entry["runs_on_json"])
     return None
 
 
@@ -113,7 +114,9 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
         # Blanking the selector rather than skipping the job is deliberate: the
         # contributor gets a real signal on a clean throwaway runner instead of
         # a required check that never posts.
-        self.assertIn("macos", _macos_runs_on("someone-else/pulp").lower())
+        got = _macos_runs_on("someone-else/pulp")
+        self.assertIsInstance(got, str)
+        self.assertIn("macos", got.lower())
 
     def test_same_repo_pr_still_uses_the_self_hosted_macs(self):
         # The control. Without it, a resolver that routed *everything* to
@@ -126,10 +129,11 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
 
     def test_merge_group_uses_the_higher_priority_event_class(self):
         got = _macos_runs_on(None, event="merge_group")
-        self.assertIn("self-hosted", got)
-        self.assertIn(MERGE_GROUP_LABEL, got)
-        self.assertNotIn(PR_HEAD_LABEL, got)
-        self.assertNotIn(LEGACY_SHARED_LABEL, got)
+        self.assertEqual(got["group"], "pulp-trusted-build")
+        self.assertIn("self-hosted", got["labels"])
+        self.assertIn(MERGE_GROUP_LABEL, got["labels"])
+        self.assertNotIn(PR_HEAD_LABEL, got["labels"])
+        self.assertNotIn(LEGACY_SHARED_LABEL, got["labels"])
 
     def test_non_pull_request_events_are_untouched(self):
         got = _macos_runs_on(None, event="workflow_dispatch")
