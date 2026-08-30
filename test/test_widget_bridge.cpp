@@ -6640,6 +6640,35 @@ TEST_CASE("host paint reuses a layout completed by the bridge",
     CHECK(View::layout_pass_count() - before == 1);
 }
 
+TEST_CASE("live text in an explicitly sized label does not relayout the root",
+          "[view][bridge][layout][perf][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('status', '');
+        setFlex('status', 'width', 240);
+        setFlex('status', 'height', 26);
+        createLabel('status-text', 'BAND 1/64', 'status');
+        setFlex('status-text', 'width', '100%');
+        setFlex('status-text', 'height', '100%');
+        layout();
+    )");
+
+    engine.evaluate("getLayoutBoxMetrics('status-text').offsetWidth");
+    const auto before = View::layout_pass_count();
+    engine.evaluate("setText('status-text', 'BAND 2/64')");
+    root.layout_children_if_needed();
+
+    CHECK(View::layout_pass_count() - before == 0);
+    auto* label = dynamic_cast<Label*>(bridge.widget("status-text"));
+    REQUIRE(label != nullptr);
+    CHECK(label->text() == "BAND 2/64");
+}
+
 TEST_CASE("replaying an identical flex value does not dirty geometry",
           "[view][bridge][layout][perf]") {
     ScriptEngine engine;
