@@ -428,7 +428,7 @@ EXPORTS = [
             include="pulp/midi/chord_memory.hpp",
             qualified_name="pulp::midi::ChordMemory<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:c4a16dd5ed9038b56ae43f22e1ba3f5f2bdcd784823868304a6eaed118123ebf",
+            header_fingerprint="sha256:3bce0cc159d68496cf145ad1fb8cd26415f0c7ba18446d5d3618d6cd7bede81b",
         )],
         _link_probes=[{
             "role": "entrypoint",
