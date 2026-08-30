@@ -280,6 +280,15 @@ a suite that measures nothing goes green. It caught one on its first run.
 
 ## What the model knows about a module
 
+An explicit `#Tag` and a claimed idiom are two independent constraints. The
+idiom compiler narrows the model inventory to port-complete structural choices;
+before that subset is rendered, `intent_context.add_required_candidates()` must
+add fresh-generation-safe choices for every explicit tag. Otherwise the prompt
+can say both "required" and "no installed module carries this tag", while final
+lint still rejects the missing tag. That contradiction spends a provider call
+on a patch that cannot pass. An impossible combination fails before the call;
+never weaken the final tag check to make a narrowed prompt agree with itself.
+
 ### Installed does not mean authorable from a fresh patch
 
 An exact qualified module identity in a request is an output contract, not
