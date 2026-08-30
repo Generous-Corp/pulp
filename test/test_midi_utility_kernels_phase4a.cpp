@@ -1027,3 +1027,240 @@ TEST_CASE("every Phase 4A kernel refuses an aliased output block", "[midi][rt-sa
     midi::ChordMemory<> memory{};
     REQUIRE_FALSE(memory.process(shared, shared).complete);
 }
+
+// ---------------------------------------------------------------------------
+// Contract surfaces the dispositions name but the cases above do not reach
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::vector<std::uint8_t> strum_order(midi::StrumDirection direction, std::uint64_t seed,
+                                      int clusters) {
+    std::vector<AbsoluteMidiEvent> input;
+    for (int cluster = 0; cluster < clusters; ++cluster) {
+        const auto at = static_cast<std::int64_t>(cluster) * 20'000;
+        for (std::uint8_t note : {64, 60, 67, 72}) {
+            input.push_back(on(at, note, 100));
+            input.push_back(off(at + 15'000, note));
+        }
+    }
+    std::stable_sort(input.begin(), input.end(),
+                     [](const auto& a, const auto& b) { return a.sample < b.sample; });
+    midi::StrumSpec spec{};
+    spec.direction = direction;
+    spec.sync = midi::StrumSpacingSync::Milliseconds;
+    spec.spacing_milliseconds = 10;
+    spec.window_samples = 64;
+    spec.seed = seed;
+    midi::Strum<> strum{spec};
+    return attack_notes(render(
+        [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
+            strum.process(in, o, constant_block(start, count));
+        },
+        static_cast<std::int64_t>(clusters) * 20'000 + 20'000, kRaggedBlocks, input));
+}
+
+} // namespace
+
+TEST_CASE("strum alternate flips direction between clusters", "[midi][strum]") {
+    const auto notes = strum_order(midi::StrumDirection::Alternate, 0, 2);
+    REQUIRE(notes.size() == 8);
+    const std::vector<std::uint8_t> first(notes.begin(), notes.begin() + 4);
+    const std::vector<std::uint8_t> second(notes.begin() + 4, notes.end());
+    REQUIRE(first == std::vector<std::uint8_t>{60, 64, 67, 72});
+    REQUIRE(second == std::vector<std::uint8_t>{72, 67, 64, 60});
+}
+
+TEST_CASE("strum random is a stable seeded permutation", "[midi][strum]") {
+    const auto a = strum_order(midi::StrumDirection::Random, 12'345, 1);
+    const auto b = strum_order(midi::StrumDirection::Random, 12'345, 1);
+    REQUIRE(a.size() == 4);
+    REQUIRE(a == b); // same seed, same order
+
+    // It really is a permutation of the cluster, not a dropped or invented note.
+    auto sorted = a;
+    std::sort(sorted.begin(), sorted.end());
+    REQUIRE(sorted == std::vector<std::uint8_t>{60, 64, 67, 72});
+
+    // Sensitivity control: some seed must order differently from ascending,
+    // otherwise "random" could be silently returning the Up order and every
+    // assertion above would still pass.
+    bool saw_non_ascending = false;
+    for (std::uint64_t seed = 1; seed < 40 && !saw_non_ascending; ++seed)
+        saw_non_ascending = strum_order(midi::StrumDirection::Random, seed, 1) !=
+                            std::vector<std::uint8_t>{60, 64, 67, 72};
+    REQUIRE(saw_non_ascending);
+}
+
+TEST_CASE("strum jitter moves notes and stays inside its bound", "[midi][strum]") {
+    constexpr std::int64_t kJitter = 512;
+    constexpr std::uint8_t kVelocityJitter = 10;
+    const std::array input{on(0, 60, 100), on(0, 64, 100), on(0, 67, 100), on(0, 72, 100),
+                           off(30'000, 60), off(30'000, 64), off(30'000, 67), off(30'000, 72)};
+    auto run = [&](std::int64_t timing, std::uint8_t velocity) {
+        midi::StrumSpec spec{};
+        spec.sync = midi::StrumSpacingSync::Milliseconds;
+        spec.spacing_milliseconds = 20;
+        spec.window_samples = 64;
+        spec.timing_jitter_samples = timing;
+        spec.velocity_jitter = velocity;
+        spec.seed = 99;
+        midi::Strum<> strum{spec};
+        return render(
+            [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
+                strum.process(in, o, constant_block(start, count));
+            },
+            48'000, kRaggedBlocks, input);
+    };
+    const auto plain = run(0, 0);
+    const auto jittered = run(kJitter, kVelocityJitter);
+    REQUIRE(count_attacks(plain) == 4);
+    REQUIRE(count_attacks(jittered) == 4);
+    // Jitter must actually change the stream — otherwise the bound assertions
+    // below would pass on a kernel that ignores the setting entirely.
+    REQUIRE_FALSE(identical(plain, jittered));
+
+    for (std::size_t index = 0; index < plain.size(); ++index) {
+        if (!plain[index].attack())
+            continue;
+        const auto shift = jittered[index].sample - plain[index].sample;
+        REQUIRE(shift >= 0);
+        REQUIRE(shift <= kJitter);
+        const auto velocity = static_cast<int>(jittered[index].event.velocity());
+        REQUIRE(velocity >= 100 - static_cast<int>(kVelocityJitter));
+        REQUIRE(velocity <= 100 + static_cast<int>(kVelocityJitter));
+    }
+}
+
+TEST_CASE("strum flush emits every buffered note", "[midi][strum]") {
+    // Notes admitted but never released: flush must not strand them in the
+    // cluster buffer.
+    const std::array input{on(0, 60, 100), on(0, 64, 100)};
+    midi::StrumSpec spec{};
+    spec.sync = midi::StrumSpacingSync::Milliseconds;
+    spec.spacing_milliseconds = 500;
+    spec.window_samples = 48'000;
+    midi::Strum<> strum{spec};
+    auto out = render(
+        [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
+            strum.process(in, o, constant_block(start, count));
+        },
+        64, kWholeBlock, input);
+    REQUIRE(out.empty()); // still inside the cluster window
+    REQUIRE_FALSE(strum.empty());
+
+    auto flushed = prepared_buffer();
+    strum.flush(flushed, constant_block(64, 64));
+    REQUIRE(flushed.size() == 2);
+    REQUIRE(strum.empty());
+}
+
+TEST_CASE("latch replace_spec releases what it owns before switching",
+          "[midi][latch]") {
+    midi::Latch latch{{midi::LatchMode::Hold}};
+    auto input = prepared_buffer();
+    auto output = prepared_buffer();
+    REQUIRE(input.add(midi::MidiEvent::note_on(0, 60, 100)));
+    latch.process(input, output);
+    REQUIRE(latch.owned_depth(0, 60) == 1);
+
+    auto swap_out = prepared_buffer();
+    const auto report = latch.replace_spec({midi::LatchMode::Toggle}, swap_out);
+    REQUIRE(report.complete);
+    REQUIRE(swap_out.size() == 1);
+    REQUIRE(swap_out[0].is_note_off());
+    REQUIRE(latch.empty());
+    REQUIRE(latch.spec().mode == midi::LatchMode::Toggle);
+}
+
+TEST_CASE("note repeat and note delay release owned notes on flush", "[midi][rt-safety]") {
+    // Both kernels own notes that outlive a block, so a transport stop must not
+    // leave anything sounding.
+    {
+        const std::array input{on(0, 60, 100)};
+        midi::NoteRepeat<> repeat{{{kSixteenthTicks}, 4, 50, 100, 100, 0}};
+        auto out = render(
+            [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
+                repeat.process(in, o, constant_block(start, count));
+            },
+            3'000, kWholeBlock, input);
+        EventLedger ledger;
+        for (const auto& event : out)
+            ledger.feed(event);
+        REQUIRE_FALSE(ledger.balanced()); // a note is deliberately still sounding
+        auto flushed = prepared_buffer();
+        repeat.flush(flushed, constant_block(3'000, 512));
+        for (const auto& event : flushed)
+            ledger.feed({3'000, event});
+        REQUIRE(ledger.balanced());
+        REQUIRE(repeat.empty());
+    }
+    {
+        // note_delay is a send: the dry note stays the player's, so the input
+        // carries its authored release and only the echoes are the kernel's to
+        // balance. Feeding an unreleased dry note here would assert the kernel
+        // owns something it deliberately does not.
+        const std::array input{on(0, 60, 100), off(7'000, 60)};
+        midi::NoteDelaySpec spec{};
+        spec.interval = {kSixteenthTicks};
+        spec.repeats = 3;
+        midi::NoteDelay<> delay{spec};
+        auto out = render(
+            [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
+                delay.process(in, o, constant_block(start, count));
+            },
+            9'000, kWholeBlock, input);
+        EventLedger ledger;
+        for (const auto& event : out)
+            ledger.feed(event);
+        auto flushed = prepared_buffer();
+        delay.flush(flushed, constant_block(9'000, 512));
+        for (const auto& event : flushed)
+            ledger.feed({9'000, event});
+        REQUIRE(ledger.balanced());
+        REQUIRE(delay.empty());
+    }
+}
+
+TEST_CASE("every Phase 4A kernel rejects a spec it cannot honour", "[midi][parity]") {
+    REQUIRE_FALSE(midi::NoteRepeat<>::valid_spec({{0}, 4, 50, 100, 100, 0}));      // no interval
+    REQUIRE_FALSE(midi::NoteRepeat<>::valid_spec({{100}, 4, 0, 100, 100, 0}));     // zero gate
+    REQUIRE_FALSE(midi::NoteRepeat<>::valid_spec({{100}, 4, 50, 200, 100, 0}));    // probability > 100
+    REQUIRE_FALSE(midi::Humanize<>::valid_spec({-1, 0, 0}));                       // negative jitter
+
+    midi::NoteDelaySpec delay{};
+    delay.sync = midi::NoteDelaySync::Milliseconds;
+    delay.milliseconds = 0;
+    REQUIRE_FALSE(midi::NoteDelay<>::valid_spec(delay));
+
+    midi::StrumSpec strum{};
+    strum.window_samples = -1;
+    REQUIRE_FALSE(midi::Strum<>::valid_spec(strum));
+
+    // An invalid spec must leave the kernel refusing to run rather than
+    // silently substituting a default.
+    midi::NoteRepeat<> invalid{{{0}, 4, 50, 100, 100, 0}};
+    REQUIRE_FALSE(invalid.valid());
+    auto in = prepared_buffer();
+    auto out = prepared_buffer();
+    REQUIRE(in.add(midi::MidiEvent::note_on(0, 60, 100)));
+    REQUIRE_FALSE(invalid.process(in, out, constant_block(0, 512)).complete);
+}
+
+TEST_CASE("chord memory returns to passthrough when its memory is cleared",
+          "[midi][chord-memory][parity]") {
+    const std::array<std::uint8_t, 3> captured{60, 64, 67};
+    midi::ChordMemory<> memory{};
+    REQUIRE(memory.learn(captured));
+    REQUIRE_FALSE(memory.memory_empty());
+    memory.clear_memory();
+    REQUIRE(memory.memory_empty());
+
+    const std::array input{on(0, 55, 100), off(500, 55)};
+    auto out = render(
+        [&](const auto& in, auto& o, std::int64_t, std::int32_t) { memory.process(in, o); }, 1'000,
+        kWholeBlock, input);
+    REQUIRE(out.size() == 2);
+    for (std::size_t index = 0; index < out.size(); ++index)
+        REQUIRE(out[index].identity() == input[index].identity());
+}
