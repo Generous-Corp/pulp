@@ -194,6 +194,8 @@
     "cli-maintenance": {
       "paths": [
         "tools/cli/**",
+        "experimental/pulp-rs/src/cmd/trace*.rs",
+        "experimental/pulp-rs/tests/trace*.rs",
         "tools/mcp/pulp_mcp.cpp",
         "tools/mcp/mcp_gpu*",
         "docs/status/gpu-recipes.yaml",
@@ -742,7 +744,8 @@
         ".agents/skills/trace-analysis/**",
         "core/runtime/**/*trace*",
         "tools/cmake/PulpTracing.cmake",
-        "experimental/pulp-rs/src/cmd/trace.rs",
+        "experimental/pulp-rs/src/cmd/trace*.rs",
+        "experimental/pulp-rs/tests/trace*.rs",
         "docs/guides/tracing.md",
         "tools/scripts/gpu_first_visible_a3_acceptance.py",
         "tools/scripts/gpu_first_visible_a3_acceptance_v2.py",
@@ -779,7 +782,8 @@
         ".agents/skills/trace-sql/**",
         "core/runtime/**/*trace*",
         "tools/cmake/PulpTracing.cmake",
-        "experimental/pulp-rs/src/cmd/trace.rs",
+        "experimental/pulp-rs/src/cmd/trace*.rs",
+        "experimental/pulp-rs/tests/trace*.rs",
         "docs/guides/tracing.md",
         "tools/scripts/gpu_first_visible_a3_acceptance.py",
         "tools/scripts/gpu_first_visible_a3_acceptance_v2.py",

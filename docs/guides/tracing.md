@@ -49,6 +49,16 @@ complete that category set. The closed probe view also treats the producer's
 `cpu_oracle_mismatch` and `magnitude_dispatch_failed` diagnostics as failures,
 even alongside an inconsistent `healthy` state.
 
+The named GPU analyzer has explicit resource limits: traces larger than
+512 MiB are rejected before `trace_processor` launches; processing has one
+120-second wall-clock deadline; and retained stdout plus stderr is capped at
+4 MiB. Deadline, output-overflow, and pipe-read failures terminate the complete
+processor tree on both Unix and Windows. If a legitimate capture hits a limit,
+shorten or narrow the capture, or divide the investigation into focused L2
+queries. Do not interpret a resource-limit error as a rendering bottleneck.
+Free-form `pulp trace query` is a separate, pre-existing runner and does not yet
+carry the named analyzer's bounds.
+
 For repeatable installed CLI/MCP timing and artifact-binding evidence, use
 `tools/scripts/gpu_trace_overhead_acceptance.py`; its receipt keeps five
 warm-ups, 30 paired samples, 20 fresh-process samples, host identity, raw

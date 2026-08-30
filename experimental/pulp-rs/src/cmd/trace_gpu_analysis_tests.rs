@@ -363,3 +363,121 @@ fn processor_failure_remains_an_error() {
     let _ = std::fs::remove_file(processor);
     assert!(format!("{error}").contains("exited with 7"));
 }
+
+#[test]
+fn oversized_trace_is_rejected_before_processor_launch() {
+    let trace = tempfile::NamedTempFile::new().unwrap();
+    trace.as_file().set_len(MAX_TRACE_BYTES + 1).unwrap();
+    let args = GpuAnalysisArgs {
+        question: GpuQuestion::GpuHealth,
+        trace: trace.path().to_path_buf(),
+    };
+    let tp = TraceProcessorStatus {
+        path: None,
+        source: TraceProcessorSource::None,
+    };
+    let error = run_gpu_analysis_with_processor(&args, &tp, true, &mut Vec::new()).unwrap_err();
+    let message = format!("{error}");
+    assert!(message.contains("maximum supported analysis input"));
+    assert!(message.contains(&(MAX_TRACE_BYTES + 1).to_string()));
+    assert!(message.contains(&MAX_TRACE_BYTES.to_string()));
+}
+
+#[test]
+fn production_processor_limits_are_explicit() {
+    assert_eq!(MAX_TRACE_BYTES, 512 * 1024 * 1024);
+    assert_eq!(MAX_PROCESSOR_OUTPUT_BYTES, 4 * 1024 * 1024);
+    assert_eq!(PROCESSOR_DEADLINE, Duration::from_secs(120));
+}
+
+#[cfg(unix)]
+fn executable_script(root: &Path, name: &str, body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = root.join(name);
+    std::fs::write(&path, body).unwrap();
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    path
+}
+
+#[cfg(unix)]
+#[test]
+fn hanging_processor_hits_deadline_and_terminates_descendants() {
+    let root = tempfile::tempdir().unwrap();
+    let heartbeat = root.path().join("descendant-heartbeat");
+    let ready = root.path().join("descendant-ready");
+    let processor = executable_script(
+        root.path(),
+        "hanging-processor.sh",
+        &format!(
+            "#!/bin/sh\n(printf x >> {0}; touch {1}; while :; do printf x >> {0}; sleep 0.01; done) &\nwhile [ ! -f {1} ]; do sleep 0.01; done\nwait\n",
+            shell_quote(&heartbeat.to_string_lossy()),
+            shell_quote(&ready.to_string_lossy()),
+        ),
+    );
+    let sql = root.path().join("query.sql");
+    let trace = root.path().join("trace.pftrace");
+    std::fs::write(&heartbeat, b"p").unwrap();
+    std::fs::write(&sql, b"SELECT 1;").unwrap();
+    std::fs::write(&trace, b"trace").unwrap();
+
+    let error = run_processor_bounded(
+        &processor,
+        &sql,
+        &trace,
+        ProcessorLimits {
+            deadline: Duration::from_secs(1),
+            max_output_bytes: 16 * 1024,
+        },
+    )
+    .unwrap_err();
+    assert!(format!("{error}").contains("analysis deadline"));
+    let stopped_at = std::fs::metadata(&heartbeat).unwrap().len();
+    assert!(stopped_at > 1, "the descendant heartbeat never ran");
+    thread::sleep(Duration::from_millis(150));
+    assert_eq!(
+        std::fs::metadata(&heartbeat).unwrap().len(),
+        stopped_at,
+        "a descendant survived process-group termination"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn flooding_processor_hits_output_cap_and_terminates_descendants() {
+    let root = tempfile::tempdir().unwrap();
+    let heartbeat = root.path().join("flood-heartbeat");
+    let processor = executable_script(
+        root.path(),
+        "flooding-processor.sh",
+        &format!(
+            "#!/bin/sh\n(while :; do printf '0123456789abcdef'; printf x >> {}; done) &\nwait\n",
+            shell_quote(&heartbeat.to_string_lossy())
+        ),
+    );
+    let sql = root.path().join("query.sql");
+    let trace = root.path().join("trace.pftrace");
+    std::fs::write(&sql, b"SELECT 1;").unwrap();
+    std::fs::write(&trace, b"trace").unwrap();
+
+    let error = run_processor_bounded(
+        &processor,
+        &sql,
+        &trace,
+        ProcessorLimits {
+            deadline: Duration::from_secs(2),
+            max_output_bytes: 16 * 1024,
+        },
+    )
+    .unwrap_err();
+    assert!(format!("{error}").contains("output exceeded the 16384 byte limit"));
+    let stopped_at = std::fs::metadata(&heartbeat).unwrap().len();
+    thread::sleep(Duration::from_millis(150));
+    assert_eq!(
+        std::fs::metadata(&heartbeat).unwrap().len(),
+        stopped_at,
+        "a flooding descendant survived process-group termination"
+    );
+}

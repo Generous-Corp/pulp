@@ -141,6 +141,20 @@ SOFTWARE.
 
 ---
 
+## command-group
+
+Copyrights are retained by the command-group contributors.
+
+Licensed to Pulp under the Apache License, Version 2.0. The complete Apache
+License, Version 2.0 is reproduced in the appendix to this file.
+
+The Windows job-object implementation includes code adapted from watchexec,
+Copyright Matt Green, licensed under Apache License, Version 2.0. Other adapted
+code retains the Rust Contributors' copyright and is available under Apache
+License, Version 2.0.
+
+---
+
 ## cpp-httplib
 
 Copyright (c) 2017 yhirose
@@ -1682,7 +1696,8 @@ SOFTWARE.
 
 Reproduced once here, in full, to satisfy Apache-2.0 section 4(a) for every
 Apache-2.0 component listed above that Pulp redistributes — AudioUnitSDK,
-Highway, Mbed TLS, and SheenBidi all ship inside the installed SDK tree.
+command-group, Highway, Mbed TLS, and SheenBidi all ship inside Pulp's
+redistributed products.
 Section 4(a) requires giving recipients a copy of the License itself; the
 per-entry headers above carry each component's copyright and standard notice
 but only link to the License, and a link is not a copy. The License is one

@@ -17,6 +17,7 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **Brotli** | MIT | Decompression backend for native WOFF2 font registration used by Chromium-materialized imports | [github.com/google/brotli](https://github.com/google/brotli) |
 | **Catch2** | BSL-1.0 | Unit testing framework | [github.com/catchorg/Catch2](https://github.com/catchorg/Catch2) |
 | **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
+| **command-group** | Apache-2.0 | Cross-platform process-tree containment for bounded Rust CLI trace analysis | [github.com/watchexec/command-group](https://github.com/watchexec/command-group) |
 | **cpp-httplib** | MIT | HTTP client (GET/POST/download) used by `pulp-runtime` | [github.com/yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) |
 | **dr_libs** | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (`dr_flac`, `dr_mp3`, `dr_wav`) | [github.com/mackron/dr_libs](https://github.com/mackron/dr_libs) |
 | **Highway** | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | [github.com/google/highway](https://github.com/google/highway) |

@@ -142,6 +142,16 @@ pulp trace gpu-health  --trace /tmp/pulp.pftrace --json
 pulp trace gpu-probe   --trace /tmp/pulp.pftrace --json
 ```
 
+Named GPU analysis is deliberately bounded at the external-tool boundary: the
+trace must be at most 512 MiB, `trace_processor` gets one 120-second wall-clock
+deadline, and stdout plus stderr may retain at most 4 MiB. A deadline, output
+overflow, or pipe-read failure terminates the entire Unix process group or
+Windows Job Object, including descendants. Do not replace this runner with
+`Command::output`, child-only termination, or an unbounded wait. If a valid
+trace hits a limit, narrow or shorten the capture first; use L2 offline queries
+to split a genuinely large investigation. Treat repeated limit failures as an
+actionable processor/query problem, not as evidence that rendering is slow.
+
 ---
 
 ## The investigation protocol

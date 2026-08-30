@@ -1,10 +1,14 @@
 //! Closed GPU questions over checked-in PerfettoSQL definitions.
 
 use std::fs::OpenOptions;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
+use command_group::CommandGroup;
 use serde::Serialize;
 
 use crate::cmd::trace::{io_err, TraceCommandStatus, TraceProcessorStatus};
@@ -13,6 +17,11 @@ use crate::error::{CliError, Result};
 const ROW_MARKER: &str = "__PULP_GPU_ROW__";
 const CATEGORY_MARKER: &str = "__PULP_GPU_CATEGORY__";
 const INTEGRITY_MARKER: &str = "__PULP_GPU_INTEGRITY__";
+const MAX_TRACE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_PROCESSOR_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const PROCESSOR_DEADLINE: Duration = Duration::from_secs(120);
+const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const PROCESS_TERMINATION_GRACE: Duration = Duration::from_secs(2);
 const ROW_QUERY: &str = "SELECT '__PULP_GPU_ROW__' || hex(stage) || '|' || duration_ns || '|' || hex(COALESCE(evidence_id,'')) || '|' || hex(COALESCE(diagnostic_code,'')) || '|' || hex(COALESCE(health_state,'')) || '|' || COALESCE(sequence,-1) || '|' || COALESCE(frame_index,-1) || '|' || hex(timing_phase) || '|' || COALESCE(cpu_running_ns,-1) || '|' || has_scheduler_evidence || '|' || is_incomplete || '|' || is_failure FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY timing_phase ORDER BY is_incomplete DESC, is_failure DESC, CASE health_state WHEN 'failed' THEN 4 WHEN 'lost' THEN 4 WHEN 'unavailable' THEN 3 WHEN 'unverified' THEN 2 WHEN 'healthy' THEN 0 ELSE 1 END DESC, CASE WHEN evidence_id IS NULL OR length(evidence_id) != 32 OR lower(evidence_id) GLOB '*[^0-9a-f]*' THEN 1 ELSE 0 END DESC, duration_ns DESC) AS phase_rank FROM {view}) WHERE phase_rank <= 16";
 const CATEGORY_QUERY: &str = "SELECT '__PULP_GPU_CATEGORY__' || hex(category) || '|' || hex(evidence_id) || '|' || upid || '|' || pid FROM (SELECT categories.category, categories.evidence_id, categories.upid, categories.pid FROM (SELECT DISTINCT s.category AS category, COALESCE(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_evidence_id') AS TEXT), CAST(EXTRACT_ARG(s.arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id, th.upid AS upid, p.pid AS pid FROM slice AS s JOIN thread_track AS tt ON s.track_id = tt.id JOIN thread AS th ON tt.utid = th.utid JOIN process AS p ON th.upid = p.upid WHERE s.category IS NOT NULL AND s.category != '') AS categories JOIN (SELECT DISTINCT evidence_id, process_upid, process_pid FROM {view}) AS question_scope ON categories.evidence_id = question_scope.evidence_id AND categories.upid = question_scope.process_upid AND categories.pid = question_scope.process_pid WHERE length(categories.evidence_id) = 32 AND categories.evidence_id NOT GLOB '*[^0-9a-f]*' ORDER BY categories.evidence_id, categories.upid, categories.category LIMIT 256)";
 const INTEGRITY_QUERY: &str = "SELECT '__PULP_GPU_INTEGRITY__' || (SELECT COUNT(*) FROM slice) || '|' || (SELECT COUNT(*) FROM slice WHERE dur = -1) || '|' || COALESCE((SELECT SUM(value) FROM stats WHERE severity = 'data_loss' AND value > 0),0) || '|' || COALESCE((SELECT SUM(value) FROM stats WHERE value > 0 AND (name GLOB '*no_flush*' OR name GLOB '*not_flushed*')),0)";
@@ -182,6 +191,224 @@ struct RawCategoryScope {
     evidence_id: String,
     process_upid: i64,
     process_pid: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ProcessorLimits {
+    deadline: Duration,
+    max_output_bytes: usize,
+}
+
+#[derive(Debug)]
+struct BoundedOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ProcessorStream {
+    Stdout,
+    Stderr,
+}
+
+enum ProcessorEvent {
+    Data(ProcessorStream, Vec<u8>),
+    Done,
+    ReadError(ProcessorStream, io::Error),
+}
+
+fn read_processor_stream(
+    mut stream: impl Read + Send + 'static,
+    kind: ProcessorStream,
+    sender: mpsc::SyncSender<ProcessorEvent>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = sender.send(ProcessorEvent::Done);
+                    return;
+                }
+                Ok(count) => {
+                    if sender
+                        .send(ProcessorEvent::Data(kind, buffer[..count].to_vec()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => {
+                    let _ = sender.send(ProcessorEvent::ReadError(kind, error));
+                    return;
+                }
+            }
+        }
+    })
+}
+
+fn terminate_processor_group(child: &mut command_group::GroupChild, tp_path: &Path) -> Result<()> {
+    if let Err(kill_error) = child.kill() {
+        return Err(CliError::Other(format!(
+            "pulp trace: failed to terminate {} process tree: {kill_error}",
+            tp_path.display()
+        )));
+    }
+
+    let reap_deadline = Instant::now() + PROCESS_TERMINATION_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) if Instant::now() < reap_deadline => {
+                thread::sleep(PROCESS_POLL_INTERVAL);
+            }
+            Ok(None) => {
+                return Err(CliError::Other(format!(
+                    "pulp trace: {} process tree did not exit within {} seconds after termination",
+                    tp_path.display(),
+                    PROCESS_TERMINATION_GRACE.as_secs_f64()
+                )))
+            }
+            Err(error) => {
+                return Err(CliError::Other(format!(
+                    "pulp trace: failed to reap {} after termination: {error}",
+                    tp_path.display()
+                )))
+            }
+        }
+    }
+}
+
+fn run_processor_bounded(
+    tp_path: &Path,
+    sql_path: &Path,
+    trace_path: &Path,
+    limits: ProcessorLimits,
+) -> Result<BoundedOutput> {
+    let mut command = Command::new(tp_path);
+    command
+        .args([
+            "-q",
+            &sql_path.to_string_lossy(),
+            &trace_path.to_string_lossy(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.group_spawn().map_err(|error| {
+        CliError::Other(format!(
+            "pulp trace: failed to run {}: {error}",
+            tp_path.display()
+        ))
+    })?;
+    let stdout = child
+        .inner()
+        .stdout
+        .take()
+        .expect("trace_processor stdout was configured as piped");
+    let stderr = child
+        .inner()
+        .stderr
+        .take()
+        .expect("trace_processor stderr was configured as piped");
+
+    // A synchronous channel also bounds bytes waiting between the pipe readers
+    // and the collector. The collector terminates the whole process group (a
+    // Windows Job Object on Windows) on deadline, read failure, or output cap.
+    let (sender, receiver) = mpsc::sync_channel(16);
+    let stdout_reader = read_processor_stream(stdout, ProcessorStream::Stdout, sender.clone());
+    let stderr_reader = read_processor_stream(stderr, ProcessorStream::Stderr, sender);
+    let started = Instant::now();
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
+    let mut completed_streams = 0;
+    let mut status = None;
+    let mut failure = None;
+
+    while status.is_none() || completed_streams < 2 {
+        let elapsed = started.elapsed();
+        if elapsed >= limits.deadline {
+            failure = Some(CliError::Other(format!(
+                "pulp trace: trace_processor exceeded the {} second analysis deadline",
+                limits.deadline.as_secs_f64()
+            )));
+            break;
+        }
+        let wait = PROCESS_POLL_INTERVAL.min(limits.deadline - elapsed);
+        match receiver.recv_timeout(wait) {
+            Ok(ProcessorEvent::Data(kind, bytes)) => {
+                let retained = stdout_bytes.len().saturating_add(stderr_bytes.len());
+                if bytes.len() > limits.max_output_bytes.saturating_sub(retained) {
+                    failure = Some(CliError::Other(format!(
+                        "pulp trace: trace_processor output exceeded the {} byte limit",
+                        limits.max_output_bytes
+                    )));
+                    break;
+                }
+                match kind {
+                    ProcessorStream::Stdout => stdout_bytes.extend_from_slice(&bytes),
+                    ProcessorStream::Stderr => stderr_bytes.extend_from_slice(&bytes),
+                }
+            }
+            Ok(ProcessorEvent::Done) => completed_streams += 1,
+            Ok(ProcessorEvent::ReadError(kind, error)) => {
+                failure = Some(CliError::Other(format!(
+                    "pulp trace: failed reading trace_processor {}: {error}",
+                    match kind {
+                        ProcessorStream::Stdout => "stdout",
+                        ProcessorStream::Stderr => "stderr",
+                    }
+                )));
+                break;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                if completed_streams < 2 {
+                    failure = Some(CliError::Other(
+                        "pulp trace: trace_processor output readers disconnected".to_owned(),
+                    ));
+                    break;
+                }
+            }
+        }
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(result) => status = result,
+                Err(error) => {
+                    failure = Some(CliError::Other(format!(
+                        "pulp trace: failed waiting for {}: {error}",
+                        tp_path.display()
+                    )));
+                    break;
+                }
+            }
+        }
+    }
+
+    if let Some(error) = failure {
+        let termination = terminate_processor_group(&mut child, tp_path);
+        drop(receiver);
+        // Never join pipe readers on a failure path: even after a successful
+        // tree kill, an OS-level stuck process could retain a pipe. Dropping
+        // these handles detaches bounded readers; closing pipes makes them exit.
+        drop(stdout_reader);
+        drop(stderr_reader);
+        return match termination {
+            Ok(()) => Err(error),
+            Err(termination_error) => Err(CliError::Other(format!("{error}; {termination_error}"))),
+        };
+    }
+
+    drop(receiver);
+    let _ = stdout_reader.join();
+    let _ = stderr_reader.join();
+    Ok(BoundedOutput {
+        status: status.expect("processor status is present after bounded wait"),
+        stdout: stdout_bytes,
+        stderr: stderr_bytes,
+    })
 }
 
 fn create_exclusive_sql(path: &Path, sql: &str) -> io::Result<()> {
@@ -834,11 +1061,18 @@ pub(crate) fn run_gpu_analysis_with_processor(
             args.trace.display()
         )));
     }
-    if std::fs::metadata(&args.trace)
+    let trace_bytes = std::fs::metadata(&args.trace)
         .map_err(|error| CliError::io(&args.trace, error))?
-        .len()
-        == 0
-    {
+        .len();
+    if trace_bytes > MAX_TRACE_BYTES {
+        return Err(CliError::BadUsage(format!(
+            "pulp trace {}: trace is {} bytes; maximum supported analysis input is {} bytes",
+            args.question.as_str(),
+            trace_bytes,
+            MAX_TRACE_BYTES
+        )));
+    }
+    if trace_bytes == 0 {
         return write_result(
             &result_from_rows_and_categories(
                 args.question,
@@ -866,20 +1100,17 @@ pub(crate) fn run_gpu_analysis_with_processor(
     );
     let sql_path = write_sql_temp(&sql)
         .map_err(|error| CliError::io(Path::new("<exclusive GPU-analysis SQL>"), error))?;
-    let output = Command::new(tp_path)
-        .args([
-            "-q",
-            &sql_path.to_string_lossy(),
-            &args.trace.to_string_lossy(),
-        ])
-        .output();
+    let output = run_processor_bounded(
+        tp_path,
+        &sql_path,
+        &args.trace,
+        ProcessorLimits {
+            deadline: PROCESSOR_DEADLINE,
+            max_output_bytes: MAX_PROCESSOR_OUTPUT_BYTES,
+        },
+    );
     let _ = std::fs::remove_file(&sql_path);
-    let output = output.map_err(|error| {
-        CliError::Other(format!(
-            "pulp trace: failed to run {}: {error}",
-            tp_path.display()
-        ))
-    })?;
+    let output = output?;
     if !output.status.success() {
         let diagnostic = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         if diagnostic

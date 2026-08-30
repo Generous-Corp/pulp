@@ -110,6 +110,23 @@
       ]
     },
     {
+      "name": "command-group",
+      "category": "cli-runtime",
+      "license": "Apache-2.0",
+      "version": "5.0.1",
+      "source_kind": "cargo",
+      "repository": "https://github.com/watchexec/command-group",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Statically linked into the Rust CLI to contain trace_processor in a Unix process group or Windows Job Object and terminate the full child tree when named GPU analysis exceeds its deadline or output cap. Pulp redistributes under Apache-2.0 because command-group's Windows job-object implementation contains Apache-2.0-only adapted code.",
+      "source_files": [
+        "experimental/pulp-rs/Cargo.toml",
+        "experimental/pulp-rs/Cargo.lock",
+        "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs"
+      ]
+    },
+    {
       "name": "cpp-httplib",
       "category": "runtime",
       "license": "MIT",

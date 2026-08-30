@@ -719,6 +719,15 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
 
 ### Rust CLI cutover path convention
 
+Rust CLI commands that spawn an external analyzer over caller-supplied
+artifacts must bound the complete resource boundary: reject oversized input
+before launch, cap combined stdout/stderr, enforce one monotonic deadline, and
+terminate the complete descendant tree (Unix process group or Windows Job
+Object) without an unbounded reap or pipe-reader join. The named GPU analyzer
+in `trace_gpu_analysis.rs` is the reference implementation: 512 MiB input,
+4 MiB combined output, and 120 seconds. Preserve its oversize, hanging-child,
+flooding-child, and planted-negative controls when changing subprocess code.
+
 `pulp control` is the canonical capability-control namespace. It is a C++
 delegate listed in Rust help and reached through the single installed sibling
 fallthrough. It accepts exact `--instance` IDs and typed registry operations;

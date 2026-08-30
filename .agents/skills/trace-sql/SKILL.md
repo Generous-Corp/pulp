@@ -83,6 +83,15 @@ default; `--format table` is the only accepted explicit format. The global
 `--json` flag wraps that table as an escaped `output` string for agents;
 `--format json|csv` is rejected rather than mislabeling native output.
 
+The three named GPU analyses add a bounded subprocess boundary around this
+tool: at most 512 MiB of trace input, 120 seconds of wall time, and 4 MiB of
+combined stdout/stderr, with full process-tree termination on failure. Keep
+named-view output selective and bounded. If a query approaches those limits,
+reduce its columns/rows or shorten the capture; never weaken the runner to make
+an accidentally unbounded query appear successful. Free-form `trace query`
+does not yet inherit these same bounds and must be treated as a follow-up
+hardening surface rather than proof of the named analyzer's safety contract.
+
 ---
 
 ## The Pulp trace-stdlib (query named primitives, not re-derived SQL)
