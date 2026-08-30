@@ -27,6 +27,7 @@ from typing import Any
 
 RUN_STATE_SCHEMA = "pulp.gpu-dpr-run-state.v2"
 RUN_INTEGRITY_SCHEMA = "pulp.gpu-dpr-run-state-integrity.v1"
+RUN_ENVELOPE_SCHEMA = "pulp.gpu-dpr-run-state-envelope.v1"
 CELL_RECEIPT_SCHEMA = "pulp.gpu-dpr-cell-receipt.v2"
 ARTIFACT_KINDS = frozenset({
     "raw_trials",
@@ -45,6 +46,7 @@ ARTIFACT_FIELDS = {"kind", "path", "sha256", "bytes", "binding_sha256"}
 RUN_KEY = ".a4-v2-run-key"
 RUN_STATE = "run-state-v2.json"
 RUN_INTEGRITY = "run-state-v2.integrity.json"
+RUN_ENVELOPE = "run-state-v2.envelope.json"
 TRACE_ANALYZER_DESCRIPTOR = "trace-analyzer-v2.json"
 MAX_JSON_BYTES = 64 * 1024 * 1024
 MAX_CAPTURE_BYTES = 256 * 1024 * 1024
@@ -1080,11 +1082,25 @@ def _atomic_bytes(path: Path, payload: bytes, mode: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_symlink() or (path.exists() and not path.is_file()):
         raise V2EvidenceError(f"runner state target is not a regular file: {path}")
-    with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
-        handle.write(payload)
-        temporary = Path(handle.name)
-    temporary.chmod(mode)
-    os.replace(temporary, path)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(mode)
+        os.replace(temporary, path)
+        temporary = None
+        if os.name != "nt":
+            directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def initialize_run_key(run_dir: Path) -> None:
@@ -1127,7 +1143,6 @@ def write_integrity_state(run_dir: Path, state: dict[str, Any]) -> str:
     if state.get("schema") != RUN_STATE_SCHEMA or state.get("version") != 2:
         raise V2EvidenceError("refusing to integrity-seal an unsupported runner state")
     key = _run_key(run_dir)
-    state_payload = json.dumps(state, sort_keys=True, indent=2).encode("utf-8") + b"\n"
     state_digest = canonical_sha256(state)
     tag = hmac.new(key, canonical_bytes(state), hashlib.sha256).hexdigest()
     integrity = {
@@ -1136,10 +1151,15 @@ def write_integrity_state(run_dir: Path, state: dict[str, Any]) -> str:
         "state_sha256": state_digest,
         "hmac_sha256": tag,
     }
-    _atomic_bytes(run_dir / RUN_STATE, state_payload, 0o400)
+    envelope = {
+        "schema": RUN_ENVELOPE_SCHEMA,
+        "version": 1,
+        "state": state,
+        "integrity": integrity,
+    }
     _atomic_bytes(
-        run_dir / RUN_INTEGRITY,
-        json.dumps(integrity, sort_keys=True, indent=2).encode("utf-8") + b"\n",
+        run_dir / RUN_ENVELOPE,
+        json.dumps(envelope, sort_keys=True, indent=2).encode("utf-8") + b"\n",
         0o400,
     )
     return state_digest
@@ -1147,10 +1167,30 @@ def write_integrity_state(run_dir: Path, state: dict[str, Any]) -> str:
 
 def read_integrity_state(run_dir: Path) -> tuple[dict[str, Any], str]:
     """Read integrity-checked state, which finalize must still fully rederive."""
-    state, _, _ = regular_json(run_dir, RUN_STATE, "A4 v2 runner state")
-    integrity, _, _ = regular_json(
-        run_dir, RUN_INTEGRITY, "A4 v2 runner state integrity receipt"
-    )
+    envelope_path = run_dir / RUN_ENVELOPE
+    if envelope_path.exists() or envelope_path.is_symlink():
+        envelope, _, _ = regular_json(
+            run_dir, RUN_ENVELOPE, "A4 v2 runner state envelope"
+        )
+        if (
+            not isinstance(envelope, dict)
+            or set(envelope) != {"schema", "version", "state", "integrity"}
+            or envelope.get("schema") != RUN_ENVELOPE_SCHEMA
+            or envelope.get("version") != 1
+            or not isinstance(envelope.get("state"), dict)
+            or not isinstance(envelope.get("integrity"), dict)
+        ):
+            raise V2EvidenceError("runner state envelope is malformed")
+        state = envelope["state"]
+        integrity = envelope["integrity"]
+    else:
+        # Read-only compatibility for runs created before envelope publication.
+        # All new writes use RUN_ENVELOPE, so no current writer can expose a
+        # mixed state/integrity pair through this migration path.
+        state, _, _ = regular_json(run_dir, RUN_STATE, "legacy A4 v2 runner state")
+        integrity, _, _ = regular_json(
+            run_dir, RUN_INTEGRITY, "legacy A4 v2 runner state integrity receipt"
+        )
     if state.get("schema") != RUN_STATE_SCHEMA or state.get("version") != 2:
         raise V2EvidenceError("unsupported A4 v2 runner state")
     if (

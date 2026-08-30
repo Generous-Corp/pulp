@@ -1048,6 +1048,71 @@ def main() -> int:
         loaded, _ = runner.load_state(run_dir)
         assert loaded["cells"][output_key]["issued"] is None
 
+        # State and its HMAC receipt publish as one atomic envelope. An
+        # interruption before replace must preserve the previous complete
+        # generation; a first-publication interruption must remain unreadable
+        # until a clean retry publishes the complete envelope.
+        stable_state = copy.deepcopy(loaded)
+        interrupted_state = copy.deepcopy(stable_state)
+        interrupted_state["experiment_id"] = "interrupted-generation"
+        entries_before_interruption = {path.name for path in run_dir.iterdir()}
+        with mock.patch.object(evidence.os, "replace", side_effect=OSError("planted")):
+            try:
+                evidence.write_integrity_state(run_dir, interrupted_state)
+            except OSError:
+                pass
+            else:
+                raise AssertionError("planted state publication interruption succeeded")
+        recovered, recovered_digest = evidence.read_integrity_state(run_dir)
+        assert recovered == stable_state
+        assert recovered_digest == evidence.canonical_sha256(stable_state)
+        assert {path.name for path in run_dir.iterdir()} == entries_before_interruption
+
+        # Once replace has happened, even a planted parent-directory fsync
+        # failure leaves the new envelope complete and recoverable rather than
+        # exposing a half-new state/integrity pair.
+        real_fsync = evidence.os.fsync
+        fsync_calls = 0
+
+        def interrupt_directory_fsync(descriptor: int) -> None:
+            nonlocal fsync_calls
+            fsync_calls += 1
+            if fsync_calls == 2:
+                raise OSError("planted post-replace interruption")
+            real_fsync(descriptor)
+
+        with mock.patch.object(evidence.os, "fsync", side_effect=interrupt_directory_fsync):
+            try:
+                evidence.write_integrity_state(run_dir, interrupted_state)
+            except OSError:
+                pass
+            else:
+                raise AssertionError("planted post-replace interruption succeeded")
+        post_replace, post_replace_digest = evidence.read_integrity_state(run_dir)
+        assert post_replace == interrupted_state
+        assert post_replace_digest == evidence.canonical_sha256(interrupted_state)
+
+        first_publish = workspace / "first-publish-interruption"
+        first_publish.mkdir(mode=0o700)
+        evidence.initialize_run_key(first_publish)
+        with mock.patch.object(evidence.os, "replace", side_effect=OSError("planted")):
+            try:
+                evidence.write_integrity_state(first_publish, stable_state)
+            except OSError:
+                pass
+            else:
+                raise AssertionError("planted first state publication interruption succeeded")
+        try:
+            evidence.read_integrity_state(first_publish)
+        except evidence.V2EvidenceError:
+            pass
+        else:
+            raise AssertionError("interrupted first publication became readable")
+        evidence.write_integrity_state(first_publish, interrupted_state)
+        retried, retried_digest = evidence.read_integrity_state(first_publish)
+        assert retried == interrupted_state
+        assert retried_digest == evidence.canonical_sha256(interrupted_state)
+
         # A same-user attacker can replace the local integrity key and reseal
         # projected state.  That is not terminal authority: missing nonce-bound
         # accepted receipts still fail rederivation.
@@ -1132,7 +1197,7 @@ def main() -> int:
         "cross_cell=pass runner_process=pass producer_pid=pass retry=pass "
         "output_bound=pass bounded_termination=pass windows_job_spawn=pass "
         "windows_job_quiescence=pass "
-        "forged_state_key=pass "
+        "forged_state_key=pass crash_consistent_state=pass "
         "frame_rederive=pass gpu_calibration=pass runtime_input=pass "
         "fixed_a3_daw_identity=pass caller_draft=pass "
         "git_blob_type_head=pass live_receipt=pass"
