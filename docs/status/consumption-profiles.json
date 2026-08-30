@@ -38,212 +38,202 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 65,
+        "installed_target_count": 66,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 87,
+            "closure_node_count": 88,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::host",
-            "closure_node_count": 83,
+            "closure_node_count": 84,
             "public_header_count": 205
           },
           {
             "exported_as": "Pulp::inspect-offline-runtime",
-            "closure_node_count": 81,
+            "closure_node_count": 82,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::sequence",
-            "closure_node_count": 81,
+            "closure_node_count": 82,
             "public_header_count": 2
           },
           {
             "exported_as": "Pulp::standalone",
-            "closure_node_count": 80,
+            "closure_node_count": 81,
             "public_header_count": 133
           },
           {
             "exported_as": "Pulp::standalone-native",
-            "closure_node_count": 80,
+            "closure_node_count": 81,
             "public_header_count": 133
           },
           {
             "exported_as": "Pulp::dsl",
-            "closure_node_count": 79,
+            "closure_node_count": 80,
             "public_header_count": 3
           },
           {
             "exported_as": "Pulp::format",
-            "closure_node_count": 78,
+            "closure_node_count": 79,
             "public_header_count": 133
           },
           {
             "exported_as": "Pulp::inspect",
-            "closure_node_count": 78,
+            "closure_node_count": 79,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 76,
+            "closure_node_count": 77,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
-            "closure_node_count": 73,
+            "closure_node_count": 74,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::inspect-telemetry",
-            "closure_node_count": 72,
+            "closure_node_count": 73,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::view",
-            "closure_node_count": 72,
+            "closure_node_count": 73,
             "public_header_count": 208
           },
           {
             "exported_as": "Pulp::view-native",
-            "closure_node_count": 72,
+            "closure_node_count": 73,
             "public_header_count": 208
           },
           {
             "exported_as": "Pulp::view-script",
-            "closure_node_count": 71,
+            "closure_node_count": 72,
             "public_header_count": 208
           },
           {
             "exported_as": "Pulp::view-core",
-            "closure_node_count": 70,
+            "closure_node_count": 71,
             "public_header_count": 208
           },
           {
             "exported_as": "Pulp::gpu-audio",
-            "closure_node_count": 69,
+            "closure_node_count": 70,
             "public_header_count": 29
           },
           {
             "exported_as": "Pulp::render",
-            "closure_node_count": 55,
+            "closure_node_count": 56,
             "public_header_count": 17
           },
           {
             "exported_as": "Pulp::canvas",
-            "closure_node_count": 41,
+            "closure_node_count": 42,
             "public_header_count": 46
           },
           {
             "exported_as": "Pulp::dawproject-import",
-            "closure_node_count": 34,
+            "closure_node_count": 35,
             "public_header_count": 0
           },
           {
             "exported_as": "Pulp::playback",
-            "closure_node_count": 33,
+            "closure_node_count": 34,
             "public_header_count": 33
           },
           {
             "exported_as": "Pulp::audio-analysis",
-            "closure_node_count": 32,
+            "closure_node_count": 33,
             "public_header_count": 8
           },
           {
             "exported_as": "Pulp::audio",
-            "closure_node_count": 31,
+            "closure_node_count": 32,
             "public_header_count": 112
           },
           {
             "exported_as": "Pulp::inspect-runtime",
-            "closure_node_count": 24,
+            "closure_node_count": 25,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::inspect-client",
-            "closure_node_count": 22,
+            "closure_node_count": 23,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::osc",
-            "closure_node_count": 22,
+            "closure_node_count": 23,
             "public_header_count": 4
           },
           {
             "exported_as": "Pulp::graph",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 5
           },
           {
             "exported_as": "Pulp::inspect-control",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::smf-interchange",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 1
           },
           {
             "exported_as": "Pulp::state",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 24
           },
           {
             "exported_as": "Pulp::dawproject-export",
-            "closure_node_count": 20,
+            "closure_node_count": 21,
             "public_header_count": 1
           },
           {
             "exported_as": "Pulp::midi",
-            "closure_node_count": 20,
+            "closure_node_count": 21,
             "public_header_count": 42
           },
           {
-            "exported_as": "Pulp::signal-fft-backend",
-            "closure_node_count": 20,
-            "public_header_count": 265
-          },
-          {
-            "exported_as": "Pulp::signal-modal-spec",
-            "closure_node_count": 20,
-            "public_header_count": 265
-          },
-          {
             "exported_as": "Pulp::events",
-            "closure_node_count": 19,
+            "closure_node_count": 20,
             "public_header_count": 13
           },
           {
             "exported_as": "Pulp::interchange",
-            "closure_node_count": 19,
+            "closure_node_count": 20,
             "public_header_count": 7
           },
           {
             "exported_as": "Pulp::project-package",
-            "closure_node_count": 19,
+            "closure_node_count": 20,
             "public_header_count": 2
           },
           {
-            "exported_as": "Pulp::signal",
-            "closure_node_count": 19,
-            "public_header_count": 265
-          },
-          {
             "exported_as": "Pulp::smf-interop",
-            "closure_node_count": 19,
+            "closure_node_count": 20,
             "public_header_count": 0
           },
           {
             "exported_as": "Pulp::timeline-agent-view",
-            "closure_node_count": 19,
+            "closure_node_count": 20,
             "public_header_count": 1
           },
           {
             "exported_as": "Pulp::timeline-editor",
-            "closure_node_count": 19,
+            "closure_node_count": 20,
             "public_header_count": 13
+          },
+          {
+            "exported_as": "Pulp::timeline",
+            "closure_node_count": 19,
+            "public_header_count": 33
           },
           {
             "exported_as": "Pulp::sdl3-static",
@@ -251,44 +241,44 @@
             "public_header_count": 0
           },
           {
-            "exported_as": "Pulp::timeline",
-            "closure_node_count": 18,
-            "public_header_count": 33
-          },
-          {
-            "exported_as": "Pulp::music",
-            "closure_node_count": 17,
-            "public_header_count": 11
-          },
-          {
             "exported_as": "Pulp::inspect-authoring",
-            "closure_node_count": 16,
+            "closure_node_count": 17,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::inspect-protocol",
-            "closure_node_count": 16,
+            "closure_node_count": 17,
             "public_header_count": 68
           },
           {
             "exported_as": "Pulp::sample-bank-manifest",
-            "closure_node_count": 16,
+            "closure_node_count": 17,
             "public_header_count": 112
           },
           {
-            "exported_as": "Pulp::timebase",
+            "exported_as": "Pulp::runtime",
             "closure_node_count": 16,
-            "public_header_count": 12
+            "public_header_count": 61
           },
           {
-            "exported_as": "Pulp::runtime",
-            "closure_node_count": 15,
-            "public_header_count": 61
+            "exported_as": "Pulp::signal-fft-backend",
+            "closure_node_count": 6,
+            "public_header_count": 265
+          },
+          {
+            "exported_as": "Pulp::signal-modal-spec",
+            "closure_node_count": 6,
+            "public_header_count": 265
           },
           {
             "exported_as": "Pulp::mbedtls",
             "closure_node_count": 5,
             "public_header_count": 0
+          },
+          {
+            "exported_as": "Pulp::signal",
+            "closure_node_count": 5,
+            "public_header_count": 265
           },
           {
             "exported_as": "Pulp::ausdk",
@@ -306,9 +296,19 @@
             "public_header_count": 0
           },
           {
+            "exported_as": "Pulp::music",
+            "closure_node_count": 3,
+            "public_header_count": 11
+          },
+          {
             "exported_as": "Pulp::platform",
             "closure_node_count": 3,
             "public_header_count": 16
+          },
+          {
+            "exported_as": "Pulp::timebase",
+            "closure_node_count": 2,
+            "public_header_count": 12
           },
           {
             "exported_as": "Pulp::bundled-fonts",
@@ -324,6 +324,11 @@
             "exported_as": "Pulp::everest",
             "closure_node_count": 1,
             "public_header_count": 0
+          },
+          {
+            "exported_as": "Pulp::foundation",
+            "closure_node_count": 1,
+            "public_header_count": 61
           },
           {
             "exported_as": "Pulp::hwy",
@@ -374,10 +379,11 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/audio",
           "closure": {
-            "node_count": 31,
+            "node_count": 32,
             "pulp_targets": [
               "pulp-audio",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -454,11 +460,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "tools/audio/analysis",
           "closure": {
-            "node_count": 32,
+            "node_count": 33,
             "pulp_targets": [
               "pulp-audio",
               "pulp-audio-analysis",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -595,10 +602,11 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/canvas",
           "closure": {
-            "node_count": 41,
+            "node_count": 42,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime"
             ],
@@ -718,9 +726,10 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/dawproject",
           "closure": {
-            "node_count": 20,
+            "node_count": 21,
             "pulp_targets": [
               "pulp-dawproject-export",
+              "pulp-foundation",
               "pulp-interchange",
               "pulp-music",
               "pulp-platform",
@@ -782,11 +791,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/dawproject",
           "closure": {
-            "node_count": 34,
+            "node_count": 35,
             "pulp_targets": [
               "pulp-audio",
               "pulp-dawproject-import",
               "pulp-events",
+              "pulp-foundation",
               "pulp-interchange",
               "pulp-midi",
               "pulp-music",
@@ -859,7 +869,7 @@
           "type": "INTERFACE_LIBRARY",
           "source_dir": "core/dsl",
           "closure": {
-            "node_count": 79,
+            "node_count": 80,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -867,6 +877,7 @@
               "pulp-dsl",
               "pulp-events",
               "pulp-format",
+              "pulp-foundation",
               "pulp-graph",
               "pulp-midi",
               "pulp-music",
@@ -992,9 +1003,10 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/events",
           "closure": {
-            "node_count": 19,
+            "node_count": 20,
             "pulp_targets": [
               "pulp-events",
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime"
             ],
@@ -1086,13 +1098,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 78,
+            "node_count": 79,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
               "pulp-format",
+              "pulp-foundation",
               "pulp-graph",
               "pulp-midi",
               "pulp-music",
@@ -1227,18 +1240,48 @@
             "vst3-sdk"
           ]
         },
+        "foundation": {
+          "target": "pulp-foundation",
+          "exported_as": "Pulp::foundation",
+          "type": "INTERFACE_LIBRARY",
+          "source_dir": "core/runtime",
+          "closure": {
+            "node_count": 1,
+            "pulp_targets": [
+              "pulp-foundation"
+            ],
+            "third_party_targets": []
+          },
+          "external_dependencies": {
+            "count": 0,
+            "third_party_targets": [],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [],
+            "system_libraries": []
+          },
+          "public_headers": {
+            "count": 61,
+            "roots": [
+              "core/runtime/include"
+            ],
+            "generated_include_roots": 1
+          },
+          "direct_dependencies": []
+        },
         "gpu-audio": {
           "target": "pulp-gpu-audio",
           "exported_as": "Pulp::gpu-audio",
           "type": "STATIC_LIBRARY",
           "source_dir": "core/gpu_audio",
           "closure": {
-            "node_count": 69,
+            "node_count": 70,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
+              "pulp-foundation",
               "pulp-gpu-audio",
               "pulp-midi",
               "pulp-music",
@@ -1355,8 +1398,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/graph",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-graph",
               "pulp-midi",
               "pulp-music",
@@ -1419,13 +1463,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/host",
           "closure": {
-            "node_count": 83,
+            "node_count": 84,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
               "pulp-format",
+              "pulp-foundation",
               "pulp-graph",
               "pulp-host",
               "pulp-midi",
@@ -1603,12 +1648,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 78,
+            "node_count": 79,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -1744,8 +1790,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 16,
+            "node_count": 17,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime"
             ],
@@ -1803,9 +1850,10 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 22,
+            "node_count": 23,
             "pulp_targets": [
               "pulp-events",
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime"
             ],
@@ -1870,9 +1918,10 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-events",
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime"
             ],
@@ -1939,13 +1988,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 81,
+            "node_count": 82,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
               "pulp-format",
+              "pulp-foundation",
               "pulp-graph",
               "pulp-midi",
               "pulp-music",
@@ -2078,8 +2128,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 16,
+            "node_count": 17,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime"
             ],
@@ -2137,9 +2188,10 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 24,
+            "node_count": 25,
             "pulp_targets": [
               "pulp-events",
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
@@ -2209,12 +2261,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 73,
+            "node_count": 74,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -2333,13 +2386,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 87,
+            "node_count": 88,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
               "pulp-format",
+              "pulp-foundation",
               "pulp-graph",
               "pulp-midi",
               "pulp-music",
@@ -2485,12 +2539,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 72,
+            "node_count": 73,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -2610,12 +2665,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 76,
+            "node_count": 77,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -2741,8 +2797,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/interchange",
           "closure": {
-            "node_count": 19,
+            "node_count": 20,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-interchange",
               "pulp-music",
               "pulp-platform",
@@ -2945,8 +3002,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/midi",
           "closure": {
-            "node_count": 20,
+            "node_count": 21,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -3012,47 +3070,21 @@
           "type": "INTERFACE_LIBRARY",
           "source_dir": "core/music",
           "closure": {
-            "node_count": 17,
+            "node_count": 3,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-music",
-              "pulp-platform",
-              "pulp-runtime",
               "pulp-timebase"
             ],
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ]
+            "third_party_targets": []
           },
           "external_dependencies": {
-            "count": 13,
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ],
+            "count": 0,
+            "third_party_targets": [],
             "prebuilt_archives": [],
             "imported_targets": [],
-            "frameworks": [
-              "Cocoa",
-              "CoreFoundation",
-              "Security",
-              "UniformTypeIdentifiers"
-            ],
-            "system_libraries": [
-              "bsm"
-            ]
+            "frameworks": [],
+            "system_libraries": []
           },
           "public_headers": {
             "count": 11,
@@ -3100,9 +3132,10 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/osc",
           "closure": {
-            "node_count": 22,
+            "node_count": 23,
             "pulp_targets": [
               "pulp-events",
+              "pulp-foundation",
               "pulp-osc",
               "pulp-platform",
               "pulp-runtime",
@@ -3229,10 +3262,11 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/playback",
           "closure": {
-            "node_count": 33,
+            "node_count": 34,
             "pulp_targets": [
               "pulp-audio",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -3308,8 +3342,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/project_package",
           "closure": {
-            "node_count": 19,
+            "node_count": 20,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-music",
               "pulp-platform",
               "pulp-project-package",
@@ -3371,10 +3406,11 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/render",
           "closure": {
-            "node_count": 55,
+            "node_count": 56,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
+              "pulp-foundation",
               "pulp-platform",
               "pulp-render",
               "pulp-runtime"
@@ -3482,8 +3518,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/runtime",
           "closure": {
-            "node_count": 15,
+            "node_count": 16,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime"
             ],
@@ -3537,6 +3574,7 @@
             "mbedtls",
             "mbedx509",
             "pulp-cpp-httplib",
+            "pulp-foundation",
             "pulp-platform",
             "pulp-tracing",
             "system:bsm"
@@ -3548,8 +3586,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/sample_bank_manifest",
           "closure": {
-            "node_count": 16,
+            "node_count": 17,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime",
               "pulp-sample-bank-manifest"
@@ -3702,13 +3741,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/sequence",
           "closure": {
-            "node_count": 81,
+            "node_count": 82,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
               "pulp-format",
+              "pulp-foundation",
               "pulp-graph",
               "pulp-midi",
               "pulp-music",
@@ -3843,49 +3883,24 @@
           "type": "INTERFACE_LIBRARY",
           "source_dir": "core/signal",
           "closure": {
-            "node_count": 19,
+            "node_count": 5,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-music",
-              "pulp-platform",
-              "pulp-runtime",
               "pulp-signal",
               "pulp-timebase"
             ],
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ]
+            "third_party_targets": []
           },
           "external_dependencies": {
-            "count": 14,
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ],
+            "count": 1,
+            "third_party_targets": [],
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
-              "Accelerate",
-              "Cocoa",
-              "CoreFoundation",
-              "Security",
-              "UniformTypeIdentifiers"
+              "Accelerate"
             ],
-            "system_libraries": [
-              "bsm"
-            ]
+            "system_libraries": []
           },
           "public_headers": {
             "count": 265,
@@ -3896,8 +3911,8 @@
           },
           "direct_dependencies": [
             "framework:Accelerate",
+            "pulp-foundation",
             "pulp-music",
-            "pulp-runtime",
             "pulp-timebase"
           ]
         },
@@ -3907,50 +3922,25 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/signal",
           "closure": {
-            "node_count": 20,
+            "node_count": 6,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-music",
-              "pulp-platform",
-              "pulp-runtime",
               "pulp-signal",
               "pulp-signal-fft-backend",
               "pulp-timebase"
             ],
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ]
+            "third_party_targets": []
           },
           "external_dependencies": {
-            "count": 14,
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ],
+            "count": 1,
+            "third_party_targets": [],
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
-              "Accelerate",
-              "Cocoa",
-              "CoreFoundation",
-              "Security",
-              "UniformTypeIdentifiers"
+              "Accelerate"
             ],
-            "system_libraries": [
-              "bsm"
-            ]
+            "system_libraries": []
           },
           "public_headers": {
             "count": 265,
@@ -3970,50 +3960,25 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/signal",
           "closure": {
-            "node_count": 20,
+            "node_count": 6,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-music",
-              "pulp-platform",
-              "pulp-runtime",
               "pulp-signal",
               "pulp-signal-modal-spec",
               "pulp-timebase"
             ],
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ]
+            "third_party_targets": []
           },
           "external_dependencies": {
-            "count": 14,
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ],
+            "count": 1,
+            "third_party_targets": [],
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
-              "Accelerate",
-              "Cocoa",
-              "CoreFoundation",
-              "Security",
-              "UniformTypeIdentifiers"
+              "Accelerate"
             ],
-            "system_libraries": [
-              "bsm"
-            ]
+            "system_libraries": []
           },
           "public_headers": {
             "count": 265,
@@ -4032,8 +3997,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/smf",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-interchange",
               "pulp-music",
               "pulp-platform",
@@ -4097,8 +4063,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/smf",
           "closure": {
-            "node_count": 19,
+            "node_count": 20,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-music",
               "pulp-platform",
               "pulp-runtime",
@@ -4157,13 +4124,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 80,
+            "node_count": 81,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
               "pulp-format",
+              "pulp-foundation",
               "pulp-graph",
               "pulp-midi",
               "pulp-music",
@@ -4295,13 +4263,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 80,
+            "node_count": 81,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
               "pulp-format",
+              "pulp-foundation",
               "pulp-graph",
               "pulp-midi",
               "pulp-music",
@@ -4433,9 +4402,10 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/state",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-events",
+              "pulp-foundation",
               "pulp-platform",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
@@ -4498,46 +4468,20 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timebase",
           "closure": {
-            "node_count": 16,
+            "node_count": 2,
             "pulp_targets": [
-              "pulp-platform",
-              "pulp-runtime",
+              "pulp-foundation",
               "pulp-timebase"
             ],
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ]
+            "third_party_targets": []
           },
           "external_dependencies": {
-            "count": 13,
-            "third_party_targets": [
-              "everest",
-              "hwy",
-              "mbedcrypto",
-              "mbedtls",
-              "mbedx509",
-              "p256m",
-              "pulp-cpp-httplib",
-              "pulp-tracing"
-            ],
+            "count": 0,
+            "third_party_targets": [],
             "prebuilt_archives": [],
             "imported_targets": [],
-            "frameworks": [
-              "Cocoa",
-              "CoreFoundation",
-              "Security",
-              "UniformTypeIdentifiers"
-            ],
-            "system_libraries": [
-              "bsm"
-            ]
+            "frameworks": [],
+            "system_libraries": []
           },
           "public_headers": {
             "count": 12,
@@ -4547,7 +4491,7 @@
             "generated_include_roots": 0
           },
           "direct_dependencies": [
-            "pulp-runtime"
+            "pulp-foundation"
           ]
         },
         "timeline": {
@@ -4556,8 +4500,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timeline",
           "closure": {
-            "node_count": 18,
+            "node_count": 19,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-music",
               "pulp-platform",
               "pulp-runtime",
@@ -4618,8 +4563,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timeline_agent_view",
           "closure": {
-            "node_count": 19,
+            "node_count": 20,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-music",
               "pulp-platform",
               "pulp-runtime",
@@ -4680,8 +4626,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timeline_editor",
           "closure": {
-            "node_count": 19,
+            "node_count": 20,
             "pulp_targets": [
+              "pulp-foundation",
               "pulp-music",
               "pulp-platform",
               "pulp-runtime",
@@ -4742,12 +4689,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 72,
+            "node_count": 73,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -4864,12 +4812,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 70,
+            "node_count": 71,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -5001,12 +4950,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 72,
+            "node_count": 73,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
@@ -5123,12 +5073,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 71,
+            "node_count": 72,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-events",
+              "pulp-foundation",
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
