@@ -188,6 +188,8 @@ std::string_view to_string(ArtifactKind value);
 
 /// Find a borrowed process-lifetime definition, or return null for an unknown ID.
 const RecipeDefinition* find_recipe(std::string_view id);
+/// Return whether this build can execute the named registered recipe.
+bool is_recipe_callable(std::string_view id);
 /// Return a borrowed span over the immutable process-lifetime recipe registry.
 std::span<const RecipeDefinition> recipes();
 

@@ -133,6 +133,14 @@ const RecipeDefinition* find_recipe(std::string_view id) {
     return found == registry.end() ? nullptr : &*found;
 }
 
+bool is_recipe_callable(std::string_view id) {
+    if (find_recipe(id) == nullptr)
+        return false;
+    if (id == kRecipeIds[3])
+        return PULP_GPU_PROBE_THREEJS_CALLABLE != 0;
+    return true;
+}
+
 std::span<const RecipeDefinition> recipes() { return registry; }
 
 bool validate(const ProbeResult& result, std::string* error) {

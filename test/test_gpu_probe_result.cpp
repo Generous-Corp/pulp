@@ -72,6 +72,12 @@ TEST_CASE("GPU probe registry exposes all versioned recipes independent of capab
         CHECK(recipes[i].dimensions.work_items <= gp::kMaxWorkItems);
     }
     CHECK(gp::find_recipe("threejs.multi-pass.v1") != nullptr);
+    CHECK(gp::is_recipe_callable("renderer3d.hardcoded-cube.v1"));
+    CHECK(gp::is_recipe_callable("gpu-compute.magnitude.v1"));
+    CHECK(gp::is_recipe_callable("gpu-audio.stft.v1"));
+    CHECK(gp::is_recipe_callable("threejs.multi-pass.v1") ==
+          (PULP_GPU_PROBE_THREEJS_CALLABLE != 0));
+    CHECK_FALSE(gp::is_recipe_callable("unknown.recipe"));
 }
 
 TEST_CASE("GPU probe result binds execution identity and correctness to its recipe",

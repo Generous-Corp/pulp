@@ -94,7 +94,7 @@ void validate_recipe_discovery(const choc::value::Value& result, const std::stri
             !indexes.insert(native_index).second)
             throw std::runtime_error("recipe identifiers or registry indexes are incoherent");
         const auto* native = pulp::tooling::gpu_probe::find_recipe(id);
-        if (row["callable"].getBool() != (native != nullptr))
+        if (row["callable"].getBool() != pulp::tooling::gpu_probe::is_recipe_callable(id))
             throw std::runtime_error("recipe callable value disagrees with the native registry");
         if (native) {
             const auto position = static_cast<int64_t>(native - native_recipes.data());

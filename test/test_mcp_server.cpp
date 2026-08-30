@@ -956,7 +956,9 @@ TEST_CASE("MCP GPU probe preserves argv and typed status evidence", "[mcp][tools
         if (index != 0)
             unfiltered_discovery << ',';
         unfiltered_discovery
-            << R"JSON({"callable":true,"recipe":{"id":)JSON"
+            << R"JSON({"callable":)JSON"
+            << (gp::is_recipe_callable(native_recipes_for_discovery[index].id) ? "true" : "false")
+            << R"JSON(,"recipe":{"id":)JSON"
             << json_string(std::string(native_recipes_for_discovery[index].id))
             << R"JSON(,"title":"Native recipe","summary":"Native recipe","native_registry_index":)JSON"
             << index
@@ -969,6 +971,11 @@ TEST_CASE("MCP GPU probe preserves argv and typed status evidence", "[mcp][tools
         const auto response = handle_request(
             tool_call("56", "pulp_gpu_recipes", R"JSON({"action":"list"})JSON"));
         require_contains(response, R"JSON("schema":"pulp.gpu-recipes-discovery.v1")JSON");
+#if !PULP_GPU_PROBE_THREEJS_CALLABLE
+        require_contains(
+            response,
+            R"JSON("callable":false,"recipe":{"id":"threejs.multi-pass.v1")JSON");
+#endif
         REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
     }
 
