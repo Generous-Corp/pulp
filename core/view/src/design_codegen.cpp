@@ -120,6 +120,15 @@ static bool fader_is_horizontal(const IRNode& node) {
            node.style.height.value_or(0.0f);
 }
 
+static bool is_collapsed_selector(const IRNode& node) {
+    return node.audio_widget == AudioWidgetType::selector &&
+           node.type.size() == 6 &&
+           std::equal(node.type.begin(), node.type.end(), "select",
+                      [](unsigned char lhs, unsigned char rhs) {
+                          return std::tolower(lhs) == std::tolower(rhs);
+                      });
+}
+
 static bool captured_line_decision_usable(const IRNode& node) {
     // Validate only source-owned structure here. Generated bundles register
     // their packaged fonts at runtime before constructing labels, so the
@@ -343,7 +352,8 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
 
     // Audio widgets get special treatment
     if (node.audio_widget != AudioWidgetType::none) {
-        const char* tag_name = audio_widget_web_tag(node.audio_widget);
+        const char* tag_name = is_collapsed_selector(node)
+            ? "combo" : audio_widget_web_tag(node.audio_widget);
         if (tag_name) {
             if (opts.include_comments && !node.audio_label.empty()) {
                 // A comment is only a comment until the text ends the line. An
@@ -439,7 +449,8 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setMin(" << var << "._id, " << node.audio_min << ");\n";
             ss << ind << "setMax(" << var << "._id, " << node.audio_max << ");\n";
             if (const auto labels = selector_segments(node); !labels.empty()) {
-                ss << ind << "setSegments(" << var << "._id, [";
+                ss << ind << (is_collapsed_selector(node) ? "setItems(" : "setSegments(")
+                   << var << "._id, [";
                 for (std::size_t i = 0; i < labels.size(); ++i)
                     ss << (i ? ", " : "") << "'" << js_single_quote_escape(labels[i]) << "'";
                 ss << "]);\n";
@@ -451,6 +462,12 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                    << stepper_plain_value(normalized_audio_default(node),
                                           node.audio_min,
                                           node.audio_max, step)
+                   << ");\n";
+            } else if (is_collapsed_selector(node)) {
+                ss << ind << "setSelected(" << var << "._id, "
+                   << selector_segment_index(
+                          normalized_audio_value(node),
+                          static_cast<int>(selector_segments(node).size()))
                    << ");\n";
             } else {
                 const auto initial = node.audio_widget == AudioWidgetType::selector
@@ -1804,17 +1821,26 @@ static void emit_js_audio_widget(const NativeEmit& e) {
         const float h = std::max(node.style.height.value_or(28.0f), 20.0f);
         ss << ind << "setFlex('" << col_id << "', 'height', " << (h + 20) << ");\n";
         fid_w = w; fid_h = h;  // emitted widget dims (fidelity)
-        ss << ind << "createSegmented('" << id << "', '" << col_id << "');\n";
+        ss << ind << (is_collapsed_selector(node) ? "createCombo('" : "createSegmented('")
+           << id << "', '" << col_id << "');\n";
         ss << ind << "setFlex('" << id << "', 'width', " << w << ");\n";
         ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
         if (!labels.empty()) {
-            ss << ind << "setSegments('" << id << "', [";
+            ss << ind << (is_collapsed_selector(node) ? "setItems('" : "setSegments('")
+               << id << "', [";
             for (std::size_t i = 0; i < labels.size(); ++i)
                 ss << (i ? ", " : "") << "'" << js_single_quote_escape(labels[i]) << "'";
             ss << "]);\n";
         }
-        ss << ind << "setValue('" << id << "', "
-           << normalized_audio_default(node) << ");\n";
+        if (is_collapsed_selector(node)) {
+            ss << ind << "setSelected('" << id << "', "
+               << selector_segment_index(normalized_audio_value(node),
+                                         static_cast<int>(labels.size()))
+               << ");\n";
+        } else {
+            ss << ind << "setValue('" << id << "', "
+               << normalized_audio_default(node) << ");\n";
+        }
         if (!label_text.empty()) {
             const std::string lbl_id = id + "_lbl";
             ss << ind << "createLabel('" << lbl_id << "', '"

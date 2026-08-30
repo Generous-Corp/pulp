@@ -2638,6 +2638,7 @@ TEST_CASE("a bound selector lowers with the segments its author declared",
     // stays part of the backdrop rather than arriving as an empty track.
     REQUIRE(selectors.size() == 1);
     const auto& direction = *selectors.front();
+    REQUIRE(direction.type == "select");
     REQUIRE(direction.attributes.at("pulpChoices") == "Up|Down|Converge|Random");
     REQUIRE(direction.attributes.at("binding") == "shape");
     REQUIRE(direction.attributes.at("pulpParamKey") == "shape");
