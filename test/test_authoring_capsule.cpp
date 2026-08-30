@@ -1373,3 +1373,41 @@ TEST_CASE("an attestation naming a different digest is refused",
     CHECK(preview.error().status == CapsuleStatus::signature_invalid);
     CHECK(preview.error().subject == "someone");
 }
+
+TEST_CASE("reserved device names are rejected in every documented form",
+          "[authoring-capsule][safe-path]") {
+    // Windows resolves these as devices wherever they appear, so a member named
+    // CON opens a device rather than a file. They are refused on every platform:
+    // a capsule that cannot be extracted on one is a capsule that does not
+    // travel, and the recipient's machine is the wrong place to discover that.
+    for (const char* name : {"CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9",
+                             "con", "Com1", "CON.txt", "com1.pcm"}) {
+        auto rejected = admit_member_path(name);
+        REQUIRE_FALSE(rejected.has_value());
+        CHECK(rejected.error().status == CapsuleStatus::path_rejected);
+        CHECK(rejected.error().required == "no-reserved-device-name");
+    }
+
+    // Longer than the four characters a naive length check allows, which is
+    // exactly why these are the ones that get missed.
+    for (const char* name : {"CLOCK$", "CONIN$", "CONOUT$", "conout$"}) {
+        auto rejected = admit_member_path(name);
+        REQUIRE_FALSE(rejected.has_value());
+        CHECK(rejected.error().required == "no-reserved-device-name");
+    }
+
+    // Windows also accepts the SUPERSCRIPT digits as COM1/COM2/COM3. Three
+    // UTF-8 bytes wide, so a byte-oriented check sees an ordinary name. These
+    // are refused today by the NFC allowlist, which runs first — assert only
+    // that they are refused, not which rule caught them, because the point is
+    // that both layers cover it and neither may be the only one.
+    for (const char* name : {"COM\xC2\xB9", "COM\xC2\xB2", "LPT\xC2\xB3"}) {
+        CHECK_FALSE(admit_member_path(name).has_value());
+    }
+
+    // Names that merely start like a device are ordinary files.
+    for (const char* name : {"console.json", "com0", "com10", "auxiliary.wav", "nulled"}) {
+        INFO(name);
+        CHECK(admit_member_path(name).has_value());
+    }
+}

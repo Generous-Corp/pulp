@@ -251,21 +251,46 @@ char32_t fold_confusable(char32_t cp) noexcept {
 /// Windows resolves these names to devices regardless of directory or
 /// extension, so `aux.wav` is not a file there. Rejecting them keeps a capsule
 /// extractable on every supported platform.
+/// Windows resolves these names as devices no matter which directory they
+/// appear in, so a member called `CON` or `COM1` is a path that opens a device
+/// rather than a file. They are rejected everywhere, not only on Windows: a
+/// capsule that cannot be extracted on one platform is a capsule that does not
+/// travel, and finding that out on the recipient's machine is the wrong time.
+///
+/// Two forms are easy to miss. `CLOCK$`, `CONIN$` and `CONOUT$` are longer than
+/// the four characters a naive length check allows. And Windows accepts the
+/// SUPERSCRIPT digits — `COM¹`, `COM²`, `COM³` (U+00B9, U+00B2, U+00B3) — as
+/// COM1, COM2 and COM3, which is three UTF-8 bytes wide and looks like an
+/// ordinary name to a byte-oriented check. The NFC allowlist happens to reject
+/// those code points today, but relying on that would make this protection
+/// depend on a list maintained for an unrelated reason: widen the allowlist and
+/// the device name walks through. So this owns it directly.
 bool is_reserved_device_name(std::string_view component) noexcept {
     const std::size_t stem_end = component.find('.');
-    std::string_view  stem     = component.substr(0, stem_end == std::string_view::npos ? component.size() : stem_end);
-    if (stem.size() < 3 || stem.size() > 4) return false;
+    std::string_view stem =
+        component.substr(0, stem_end == std::string_view::npos ? component.size() : stem_end);
+    if (stem.empty()) return false;
 
+    // Fold the superscript digits down to their ASCII equivalents first, so the
+    // comparisons below see one spelling of a device name rather than four.
     std::string lowered;
     lowered.reserve(stem.size());
-    for (char c : stem) {
-        lowered.push_back((c >= 'A' && c <= 'Z') ? static_cast<char>(c + 0x20) : c);
+    for (std::size_t i = 0; i < stem.size(); ++i) {
+        const auto byte = static_cast<unsigned char>(stem[i]);
+        if (byte == 0xC2 && i + 1 < stem.size()) {
+            const auto next = static_cast<unsigned char>(stem[i + 1]);
+            if (next == 0xB9) { lowered.push_back('1'); ++i; continue; }
+            if (next == 0xB2) { lowered.push_back('2'); ++i; continue; }
+            if (next == 0xB3) { lowered.push_back('3'); ++i; continue; }
+        }
+        lowered.push_back((byte >= 'A' && byte <= 'Z') ? static_cast<char>(byte + 0x20)
+                                                       : static_cast<char>(byte));
     }
 
     if (lowered == "con" || lowered == "prn" || lowered == "aux" || lowered == "nul") return true;
-    if (lowered.size() == 4 && (lowered.compare(0, 3, "com") == 0 || lowered.compare(0, 3, "lpt") == 0)) {
+    if (lowered == "clock$" || lowered == "conin$" || lowered == "conout$") return true;
+    if (lowered.size() == 4 && (lowered.compare(0, 3, "com") == 0 || lowered.compare(0, 3, "lpt") == 0))
         return lowered[3] >= '1' && lowered[3] <= '9';
-    }
     return false;
 }
 
