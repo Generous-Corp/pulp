@@ -543,16 +543,19 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    must keep `gh api --paginate --slurp`, `filter=latest`, and `per_page=100`:
    bare `--paginate` concatenates page documents and breaks its single-document
    JSON decoding past 100 check runs.
-3. **Only THEN consider capacity — and verify, don't assume.** The required
-   `macos` gate runs on the M1/M3/M5 local JIT VM pool, selected by the mutually
-   exclusive `pulp-build-merge-group` and `pulp-build-pr-head` event classes.
+3. **Only THEN consider capacity — and verify, don't assume.** Same-repository
+   self-hosted PR and merge-group `macos` gates run on the M1/M3/M5 local JIT VM
+   pool, selected by the mutually exclusive `pulp-build-pr-head` and
+   `pulp-build-merge-group` event classes. Fork, hosted, workflow-dispatch, and
+   operator selectors retain their separately resolved shapes.
    Confirm currently registered runners with:
    ```bash
    ghapp api repos/Generous-Corp/pulp/actions/runners \
      | python3 -c "import sys,json;[print(r['name'],r['status'],'busy='+str(r['busy'])) for r in json.load(sys.stdin)['runners']]"
    ```
-   A zero-runner result is healthy-idle and is not proof of a dead lane; use
-   queue age plus host-side supervisor/lease/VM evidence. What DOES
+   A zero-runner result is consistent with healthy idle but proves neither
+   health nor failure; use queue age plus host-side supervisor/lease/VM
+   evidence. What DOES
    queue independently is the **GitHub-hosted advisory lanes** (Linux, Windows,
    sanitizers, coverage, android) on GitHub's shared pool; those are advisory, not
    the required gate, so a long queue there does not block merge.

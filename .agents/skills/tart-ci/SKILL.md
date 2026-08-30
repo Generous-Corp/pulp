@@ -259,6 +259,8 @@ main, reddening every PR's macOS gate.)
    mutually exclusive event-class label per job. Merge groups receive priority
    `110`; PR heads receive priority `100`. This keeps merge-queue work ahead
    without reserving a permanently static VM slot.
+   The following June runs prove the underlying ephemeral base pool; they
+   predate event-class V2 and are not V2 assignment receipts:
    - run `27251134234`: default dispatch, no selector override, `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success; hosted leftovers canceled after `macos` went green.
    - run `27251378268`: real PR, secondary-host `pulp-vm-m5-pilot-01`, `macOS (ARM64) [local]` success, `macos` alias success.
    - run `27251442228`: real PR, controller `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success.
