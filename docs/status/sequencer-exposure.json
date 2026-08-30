@@ -1942,6 +1942,68 @@
      ]
     }
    }
+  },
+  {
+   "id": "audio-voice-modulation-sources",
+   "title": "Per-voice modulation source bank",
+   "classification": "public_sdk",
+   "delivery_state": "pending",
+   "claim_id": "audio-voice-modulation-sources-20260830",
+   "owned_paths": [
+    "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
+    "test/cmake/late_core_tests.cmake",
+    "test/test_voice_modulation_sources.cpp",
+    "docs/status/agent-capabilities.json"
+   ],
+   "evidence": [
+    {
+     "path": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
+     "needles": [
+      "class VoiceModulationSources",
+      "VoiceModulationResult append_lfo_lane("
+     ]
+    }
+   ],
+   "surfaces": {
+    "installed_sdk": {
+     "disposition": "exposed",
+     "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio.",
+     "evidence": [
+      {
+       "kind": "sdk_header",
+       "path": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
+       "needles": [
+        "class VoiceModulationSources"
+       ]
+      }
+     ]
+    },
+    "offline_timeline_cli": {
+     "disposition": "not_applicable",
+     "rationale": "The source bank is an audio-thread composition primitive and adds no offline Timeline command."
+    },
+    "offline_timeline_mcp": {
+     "disposition": "not_applicable",
+     "rationale": "The source bank is an audio-thread composition primitive and adds no MCP operation."
+    },
+    "live_product_control": {
+     "disposition": "not_applicable",
+     "rationale": "The source bank carries no Product A live control capability, grant, or policy projection."
+    },
+    "design_time_agent_manifest": {
+     "disposition": "exposed",
+     "rationale": "The capability manifest publishes audio.voice-modulation-sources with a typed Pulp::audio binding.",
+     "evidence": [
+      {
+       "kind": "capability_definition",
+       "path": "docs/status/agent-capabilities.json",
+       "needles": [
+        "audio.voice-modulation-sources"
+       ]
+      }
+     ]
+    }
+   }
   }
  ],
  "tombstones": []

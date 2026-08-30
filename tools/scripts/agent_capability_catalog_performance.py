@@ -199,6 +199,56 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="audio.voice-modulation-sources",
+        domain="audio",
+        summary=(
+            "Prepared fixed-memory bank of per-voice LFO and AHDSR envelope sources with "
+            "free-running or retriggered phase policy and per-voice unison phase spread, "
+            "feeding constant or audio-rate voice modulation lanes."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "none",
+            "prepare": "control: fixed scratch and per-voice sources",
+            "process": "audio",
+            "reset": "audio: every voice to a fresh start",
+            "release": "control",
+        },
+        state_model=(
+            "The bank owns per-voice LFO phase/lifecycle and envelope stage state; reset() is "
+            "the only reseeding point. Lane publication is delegated to the caller's "
+            "VoiceModulationBuffer; constant-rate lanes publish the first sample of the block."
+        ),
+        seed_model="public uint32 base seed; voice i derives seed + i",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "fixed_partition_only",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="voice lifecycle events, source configuration, and lane target/rate selection",
+        output_domain="constant or audio-rate voice modulation lanes",
+        units=["hertz", "frames", "voice index"],
+        latency="zero",
+        tail="envelope release tail owned by the caller's lane consumer",
+        scheduling="per voice per audio block",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/audio/voice_modulation_sources.hpp",
+            qualified_name="pulp::audio::VoiceModulationSources<4>",
+            target="Pulp::audio",
+            header_fingerprint="sha256:b5c08f132df70323065b1d7c1d9109ddfc95ed8baeacb0c595fd5eb21771dbe8",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::audio::VoiceModulationSources<4>",
+            "operation": "member_call",
+            "member": "prepared",
+            "arguments": "",
+        }],
+    ),
+    capability(
         key="audio.voice-runtime-facade",
         domain="audio",
         summary=(

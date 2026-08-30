@@ -158,7 +158,7 @@
           {
             "exported_as": "Pulp::audio",
             "closure_node_count": 31,
-            "public_header_count": 112
+            "public_header_count": 113
           },
           {
             "exported_as": "Pulp::inspect-runtime",
@@ -278,7 +278,7 @@
           {
             "exported_as": "Pulp::sample-bank-manifest",
             "closure_node_count": 16,
-            "public_header_count": 112
+            "public_header_count": 113
           },
           {
             "exported_as": "Pulp::timebase",
@@ -436,7 +436,7 @@
             ]
           },
           "public_headers": {
-            "count": 112,
+            "count": 113,
             "roots": [
               "core/audio/include"
             ],
@@ -3670,7 +3670,7 @@
             ]
           },
           "public_headers": {
-            "count": 112,
+            "count": 113,
             "roots": [
               "core/sample_bank_manifest/../audio/include"
             ],

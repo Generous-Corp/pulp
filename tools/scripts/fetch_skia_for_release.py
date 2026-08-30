@@ -273,7 +273,18 @@ def _generation_payload(
             })
         else:
             raise ValueError(f"Skia generation archive root is missing: {entry}")
-    return entries
+    # ``Path`` ordering follows the host filesystem flavour. In particular,
+    # Windows compares paths case-insensitively, while the authenticated ZIP
+    # payload below is ordered by case-sensitive POSIX member names. Canonicalize
+    # the serialized path strings so identical trees seal identically on every
+    # host.
+    return _canonical_generation_payload(entries)
+
+
+def _canonical_generation_payload(
+    entries: list[dict[str, str | int]],
+) -> list[dict[str, str | int]]:
+    return sorted(entries, key=lambda item: str(item["path"]))
 
 
 def write_generation_receipt(dest: Path, matrix_platform: str, asset_sha: str) -> None:
@@ -338,7 +349,7 @@ def _archive_generation_payload(
             if key in entries:
                 raise ValueError(f"archive normalizes multiple files to {key}")
             entries[key] = {"path": key, "sha256": digest.hexdigest(), "size": size}
-    return [entries[key] for key in sorted(entries)]
+    return _canonical_generation_payload(list(entries.values()))
 
 
 def generation_receipt_valid(dest: Path, matrix_platform: str, asset_sha: str) -> bool:
