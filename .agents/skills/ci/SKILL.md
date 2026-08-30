@@ -6578,6 +6578,16 @@ PY
    push usually points to a local pre-push gate or write/auth path, not GitHub
    read availability.
 
+   A cancelled pre-push must not leave its diff-coverage build under PID 1.
+   The gate supervisor isolates the build group, but remains in the hook's
+   process group; external process managers may escalate TERM to KILL in about
+   one second. Its signal path therefore forwards immediately and bounds grace
+   below that escalation window before killing the isolated group. Preserve
+   `test_signal_cleanup_beats_external_hook_group_escalation`: a longer grace
+   can kill the supervisor first and strand Bash/CMake/compiler descendants on
+   `/Volumes/Workshop`, causing load and removable-volume prompt churn after
+   the push was supposedly cancelled.
+
    If the configured SSH agent itself stalls, retry the bounded 443 probe with
    the host's explicit approved key and `IdentitiesOnly=yes`, for example:
 

@@ -109,6 +109,23 @@ time.sleep(60)
 """
 
 
+STUBBORN_GATE_PROGRAM = r"""
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+pid_file = Path(sys.argv[1])
+ignore = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+child = subprocess.Popen([sys.executable, "-c", ignore])
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pid_file.write_text(f"{os.getpid()} {child.pid}", encoding="utf-8")
+time.sleep(60)
+"""
+
+
 def hook_command(temp: Path, pid_file: Path, signal_file: Path | None = None) -> list[str]:
     hook = temp / "hook.sh"
     hook.write_text(
@@ -383,12 +400,49 @@ run_gate_captured "$3" -c 'raise SystemExit(0)'
                     hook.wait()
                 force_cleanup(gate_pid, descendant_pid)
 
+    def test_signal_cleanup_beats_external_hook_group_escalation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="prepush-supervisor-fast-signal-") as raw:
+            temp = Path(raw)
+            pid_file = temp / "pids"
+            supervisor = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(SUPERVISOR),
+                    "--log",
+                    str(temp / "gate.log"),
+                    "--",
+                    sys.executable,
+                    "-c",
+                    STUBBORN_GATE_PROGRAM,
+                    str(pid_file),
+                ]
+            )
+            gate_pid = descendant_pid = None
+            try:
+                wait_for_file(pid_file)
+                gate_pid, descendant_pid = map(
+                    int, pid_file.read_text(encoding="utf-8").split()
+                )
+                started = time.monotonic()
+                os.kill(supervisor.pid, signal.SIGTERM)
+                self.assertEqual(
+                    supervisor.wait(timeout=0.9), 128 + signal.SIGTERM
+                )
+                self.assertLess(time.monotonic() - started, 0.9)
+                wait_until_dead(gate_pid, descendant_pid, timeout=0.5)
+            finally:
+                if supervisor.poll() is None:
+                    supervisor.kill()
+                    supervisor.wait()
+                force_cleanup(gate_pid, descendant_pid)
+
     def test_load_bearing_supervision_primitives_remain_present(self) -> None:
         source = SUPERVISOR.read_text(encoding="utf-8")
         self.assertIn("start_new_session=True", source)
         self.assertIn("os.killpg(process_group, first_signal)", source)
         self.assertIn("os.getppid() != owner_pid", source)
         self.assertIn("parent_pid(owner_pid) != caller_pid", source)
+        self.assertIn("SIGNAL_TERMINATION_GRACE_SECONDS", source)
 
 
 if __name__ == "__main__":
