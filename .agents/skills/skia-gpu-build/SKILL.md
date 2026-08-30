@@ -338,6 +338,10 @@ choosing a probe. The catalog always explains all four canonical workflows,
 while `callable` is derived from the matched native registry. In particular,
 Three.js metadata can be visible in a QuickJS release without claiming that
 the V8-only recipe can run. `pulp_gpu_recipes` is the read-only MCP equivalent;
+it projects the linked CPU-only model directly, so GPU-disabled installations
+do not need a sibling `pulp-cpp` merely to discover the catalog. GPU-disabled
+builds report every execution recipe non-callable, and Renderer3D stays
+non-callable until Scene3D is compiled.
 use CLI `recipes scaffold` only when an explicit local evidence workspace is
 wanted. Run two baselines and the seeded negative control before treating a
 pass as useful localization evidence.

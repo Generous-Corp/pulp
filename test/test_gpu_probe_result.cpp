@@ -72,12 +72,40 @@ TEST_CASE("GPU probe registry exposes all versioned recipes independent of capab
         CHECK(recipes[i].dimensions.work_items <= gp::kMaxWorkItems);
     }
     CHECK(gp::find_recipe("threejs.multi-pass.v1") != nullptr);
-    CHECK(gp::is_recipe_callable("renderer3d.hardcoded-cube.v1"));
-    CHECK(gp::is_recipe_callable("gpu-compute.magnitude.v1"));
-    CHECK(gp::is_recipe_callable("gpu-audio.stft.v1"));
+    CHECK(gp::is_recipe_callable("renderer3d.hardcoded-cube.v1") ==
+          (PULP_GPU_PROBE_RENDERER3D_CALLABLE != 0));
+    CHECK(gp::is_recipe_callable("gpu-compute.magnitude.v1") ==
+          (PULP_GPU_PROBE_GPU_CALLABLE != 0));
+    CHECK(gp::is_recipe_callable("gpu-audio.stft.v1") ==
+          (PULP_GPU_PROBE_GPU_CALLABLE != 0));
     CHECK(gp::is_recipe_callable("threejs.multi-pass.v1") ==
           (PULP_GPU_PROBE_THREEJS_CALLABLE != 0));
     CHECK_FALSE(gp::is_recipe_callable("unknown.recipe"));
+}
+
+TEST_CASE("GPU recipe discovery projects the authoritative catalog and build capabilities",
+          "[gpu][probe][catalog]") {
+    const auto all = gp::recipe_discovery_json();
+    REQUIRE(all);
+    CHECK(all->find(R"JSON("schema":"pulp.gpu-recipes-discovery.v1")JSON") !=
+          std::string::npos);
+    for (const auto id : gp::kRecipeIds)
+        CHECK(all->find(std::string(id)) != std::string::npos);
+
+    const auto renderer = gp::recipe_discovery_json(gp::kRecipeIds[0]);
+    REQUIRE(renderer);
+    CHECK(renderer->find(PULP_GPU_PROBE_RENDERER3D_CALLABLE
+                             ? R"JSON("callable":true)JSON"
+                             : R"JSON("callable":false)JSON") != std::string::npos);
+    CHECK_FALSE(gp::recipe_discovery_json("unknown.recipe"));
+
+    const auto symptom = gp::recipe_discovery_json(
+        std::nullopt, std::string_view{"compute-readback-mismatch"});
+    REQUIRE(symptom);
+    CHECK(symptom->find("gpu-compute.magnitude.v1") != std::string::npos);
+    CHECK(symptom->find("renderer3d.hardcoded-cube.v1") == std::string::npos);
+    CHECK_FALSE(gp::recipe_discovery_json(
+        std::nullopt, std::string_view{"unknown-symptom"}));
 }
 
 TEST_CASE("GPU probe result binds execution identity and correctness to its recipe",

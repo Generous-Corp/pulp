@@ -161,6 +161,11 @@ surfaces synchronized:
 
 The top-level `gpu` command intentionally has no slash command: its agentic
 surface is the typed `pulp_gpu_recipes` discovery tool plus `pulp_gpu_probe`.
+`pulp_gpu_recipes` links the CPU-only catalog model directly and must remain
+usable without a sibling `pulp-cpp`, including in `PULP_ENABLE_GPU=OFF` builds.
+Those builds keep every canonical ID visible but report execution recipes as
+not callable; Renderer3D is callable only when both GPU and Scene3D were
+compiled into the matched build.
 An unfiltered `pulp gpu recipes list` projects all four canonical rows from the
 exact configure-time embedded `docs/status/gpu-recipes.yaml` bytes; filtered
 lists and `show` project their matched subset. Every row derives

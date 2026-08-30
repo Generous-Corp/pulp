@@ -1,3 +1,13 @@
+file(READ "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
+    PULP_GPU_RECIPE_CATALOG_JSON)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml")
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/tools/cli/gpu_recipe_catalog_data.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/gpu_probe_recipe_catalog_data.h"
+    @ONLY)
+
 add_library(pulp-tool-gpu-probe-model STATIC
     src/probe_result.cpp
     src/probe_result_json.cpp)
@@ -5,7 +15,23 @@ add_library(pulp::tool-gpu-probe-model ALIAS pulp-tool-gpu-probe-model)
 target_compile_features(pulp-tool-gpu-probe-model PUBLIC cxx_std_20)
 target_include_directories(pulp-tool-gpu-probe-model
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE $<BUILD_INTERFACE:${choc_SOURCE_DIR}>)
+    PRIVATE
+        $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+        "${CMAKE_CURRENT_BINARY_DIR}/generated")
+if(PULP_ENABLE_GPU)
+    target_compile_definitions(pulp-tool-gpu-probe-model PUBLIC
+        PULP_GPU_PROBE_GPU_CALLABLE=1)
+else()
+    target_compile_definitions(pulp-tool-gpu-probe-model PUBLIC
+        PULP_GPU_PROBE_GPU_CALLABLE=0)
+endif()
+if(PULP_ENABLE_GPU AND PULP_ENABLE_SCENE3D)
+    target_compile_definitions(pulp-tool-gpu-probe-model PUBLIC
+        PULP_GPU_PROBE_RENDERER3D_CALLABLE=1)
+else()
+    target_compile_definitions(pulp-tool-gpu-probe-model PUBLIC
+        PULP_GPU_PROBE_RENDERER3D_CALLABLE=0)
+endif()
 if(PULP_ENABLE_GPU AND PULP_ENABLE_JS AND PULP_HAS_THREEJS
         AND PULP_JS_ENGINE STREQUAL "v8")
     target_compile_definitions(pulp-tool-gpu-probe-model PUBLIC

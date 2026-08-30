@@ -1,6 +1,5 @@
 #include "atomic_text_file.hpp"
 #include "cli_common.hpp"
-#include "gpu_recipe_catalog_data.h"
 #include "json_parser.hpp"
 #include "json_writer.hpp"
 
@@ -78,7 +77,7 @@ std::string serialize_json(const JsonValue& value) {
 
 const JsonValue& recipe_catalog() {
     static const JsonValue catalog = [] {
-        std::string text{pulp::cli::gpu_recipes::kCatalogJson};
+        std::string text{pulp::tooling::gpu_probe::recipe_catalog_json()};
         pulp::cli::pkg::JsonParser parser{text};
         auto parsed = parser.parse();
         const auto* schema = parsed.get("schema");

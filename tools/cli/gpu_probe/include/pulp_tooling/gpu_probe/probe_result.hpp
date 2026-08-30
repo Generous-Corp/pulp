@@ -192,6 +192,18 @@ const RecipeDefinition* find_recipe(std::string_view id);
 bool is_recipe_callable(std::string_view id);
 /// Return a borrowed span over the immutable process-lifetime recipe registry.
 std::span<const RecipeDefinition> recipes();
+/// Return the configure-time embedded canonical catalog bytes.
+std::string_view recipe_catalog_json();
+/// Project the canonical catalog as a discovery envelope for an optional filter.
+///
+/// `recipe_id` selects one exact recipe (the `show` shape); `symptom` selects
+/// every matching recipe (the filtered `list` shape). With neither filter, all
+/// canonical rows remain visible. The filters are mutually exclusive and an
+/// unknown value returns nullopt. Each row's `callable` bit reflects this
+/// model's configured GPU, Scene3D, and Three.js execution capabilities.
+std::optional<std::string> recipe_discovery_json(
+    std::optional<std::string_view> recipe_id = std::nullopt,
+    std::optional<std::string_view> symptom = std::nullopt);
 
 /// Validate bounds, recipe identity, ordered pass aggregation, and artifacts.
 ///

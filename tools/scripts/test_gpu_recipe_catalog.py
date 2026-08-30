@@ -168,8 +168,10 @@ class CatalogContract(unittest.TestCase):
                 ).read_text(encoding="utf-8")
                 self.assertIn(recipe_id, skill_text)
 
-    def test_release_cli_embedding_reads_authoritative_bytes_without_copied_ids(self) -> None:
-        cmake = (catalog.ROOT / "tools/cli/CMakeLists.txt").read_text(encoding="utf-8")
+    def test_cpu_only_model_embedding_reads_authoritative_bytes_without_copied_ids(self) -> None:
+        cmake = (
+            catalog.ROOT / "tools/cli/gpu_probe/CMakeLists.txt"
+        ).read_text(encoding="utf-8")
         template = (
             catalog.ROOT / "tools/cli/gpu_recipe_catalog_data.h.in"
         ).read_text(encoding="utf-8")

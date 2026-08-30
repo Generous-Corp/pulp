@@ -1,10 +1,15 @@
 #include <pulp_tooling/gpu_probe/probe_result.hpp>
 
+#include "gpu_probe_recipe_catalog_data.h"
+
+#include <choc/text/choc_JSON.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
 #include <limits>
+#include <stdexcept>
 #include <unordered_set>
 
 namespace pulp::tooling::gpu_probe {
@@ -77,6 +82,50 @@ bool fail(std::string* error, std::string message) {
     return false;
 }
 
+const choc::value::Value& recipe_catalog() {
+    static const auto catalog = [] {
+        auto parsed = choc::json::parse(detail::kCatalogJson);
+        if (!parsed.isObject() || !parsed.hasObjectMember("schema") ||
+            !parsed["schema"].isString() ||
+            parsed["schema"].getString() != "pulp.gpu-recipes.v1" ||
+            !parsed.hasObjectMember("catalog_revision") ||
+            parsed["catalog_revision"].getInt64() != 1 ||
+            !parsed.hasObjectMember("recipes") || !parsed["recipes"].isArray())
+            throw std::runtime_error("embedded GPU recipe catalog is malformed");
+
+        const auto rows = parsed["recipes"];
+        if (rows.size() != registry.size())
+            throw std::runtime_error("embedded GPU recipe catalog omits native recipes");
+        std::array<bool, registry.size()> seen{};
+        for (uint32_t index = 0; index < rows.size(); ++index) {
+            const auto row = rows[index];
+            if (!row.isObject() || !row.hasObjectMember("id") || !row["id"].isString() ||
+                !row.hasObjectMember("native_registry_index") ||
+                !(row["native_registry_index"].isInt32() ||
+                  row["native_registry_index"].isInt64()))
+                throw std::runtime_error("embedded GPU recipe row is malformed");
+            const auto native_index = row["native_registry_index"].getInt64();
+            if (native_index < 0 || static_cast<std::size_t>(native_index) >= registry.size() ||
+                seen[static_cast<std::size_t>(native_index)] ||
+                row["id"].getString() != registry[static_cast<std::size_t>(native_index)].id)
+                throw std::runtime_error("embedded GPU recipe catalog disagrees with registry");
+            seen[static_cast<std::size_t>(native_index)] = true;
+        }
+        return parsed;
+    }();
+    return catalog;
+}
+
+bool row_matches_symptom(const choc::value::ValueView& row, std::string_view symptom) {
+    if (!row.hasObjectMember("symptoms") || !row["symptoms"].isArray())
+        return false;
+    const auto symptoms = row["symptoms"];
+    for (uint32_t index = 0; index < symptoms.size(); ++index)
+        if (symptoms[index].isString() && symptoms[index].getString() == symptom)
+            return true;
+    return false;
+}
+
 } // namespace
 
 std::string_view to_string(Verdict value) {
@@ -136,12 +185,47 @@ const RecipeDefinition* find_recipe(std::string_view id) {
 bool is_recipe_callable(std::string_view id) {
     if (find_recipe(id) == nullptr)
         return false;
+    if (id == kRecipeIds[0])
+        return PULP_GPU_PROBE_RENDERER3D_CALLABLE != 0;
+    if (id == kRecipeIds[1] || id == kRecipeIds[2])
+        return PULP_GPU_PROBE_GPU_CALLABLE != 0;
     if (id == kRecipeIds[3])
         return PULP_GPU_PROBE_THREEJS_CALLABLE != 0;
-    return true;
+    return false;
 }
 
 std::span<const RecipeDefinition> recipes() { return registry; }
+
+std::string_view recipe_catalog_json() { return detail::kCatalogJson; }
+
+std::optional<std::string> recipe_discovery_json(
+    std::optional<std::string_view> recipe_id,
+    std::optional<std::string_view> symptom) {
+    if (recipe_id && symptom)
+        return std::nullopt;
+
+    const auto& catalog = recipe_catalog();
+    const auto rows = catalog["recipes"];
+    std::string output =
+        "{\"schema\":\"pulp.gpu-recipes-discovery.v1\",\"catalog_revision\":1,\"recipes\":[";
+    bool matched = false;
+    for (uint32_t index = 0; index < rows.size(); ++index) {
+        const auto row = rows[index];
+        const std::string_view id = row["id"].getString();
+        if ((recipe_id && id != *recipe_id) ||
+            (symptom && !row_matches_symptom(row, *symptom)))
+            continue;
+        if (matched)
+            output += ',';
+        output += "{\"callable\":";
+        output += is_recipe_callable(id) ? "true" : "false";
+        output += ",\"recipe\":" + choc::json::toString(row, false) + '}';
+        matched = true;
+    }
+    if ((recipe_id || symptom) && !matched)
+        return std::nullopt;
+    return output + "]}";
+}
 
 bool validate(const ProbeResult& result, std::string* error) {
     if (error) error->clear();

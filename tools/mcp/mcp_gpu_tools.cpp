@@ -362,52 +362,22 @@ std::string handle_gpu_recipes(const std::string& params_json) {
     if (action == "list" && recipe)
         return local_error(-1, "invalid-arguments", "recipe is valid only for show");
 
-    std::filesystem::path executable;
-    {
-        std::lock_guard lock(g_executable_mutex);
-        executable = g_mcp_executable;
-    }
-    if (executable.empty())
-        return local_error(-1, "cli-unavailable", "pulp-mcp executable identity is unavailable");
-    const auto cli = sibling_pulp_cpp_path(executable);
-    if (!std::filesystem::is_regular_file(cli))
-        return local_error(-1, "cli-unavailable",
-                           "the sibling installed pulp-cpp executable was not found");
-
-    std::vector<std::string> arguments{"gpu", "recipes", action};
-    if (recipe)
-        arguments.emplace_back(*recipe);
-    if (symptom) {
-        arguments.emplace_back("--symptom");
-        arguments.emplace_back(*symptom);
-    }
-    arguments.emplace_back("--json");
-    pulp::platform::ProcessOptions options;
-    options.timeout_ms = 30 * 1000;
-    options.max_output_bytes = 1 << 20;
-    const auto process = pulp::platform::ChildProcess::run(cli.string(), arguments, options);
-    if (process.timed_out)
-        return local_error(-1, "cli-timeout",
-                           "pulp-cpp GPU recipe discovery exceeded its bounded timeout",
-                           process.stderr_output);
-    if (process.was_cancelled)
-        return local_error(-1, "cli-output-limit",
-                           "pulp-cpp GPU recipe discovery exceeded its bounded output limit",
-                           process.stdout_output.empty() ? process.stderr_output
-                                                         : process.stdout_output);
-    const int status = process.exit_code;
-    if (status != 0)
-        return local_error(status, status == 2 ? "not-found" : "cli-failed",
-                           "pulp-cpp GPU recipe discovery failed", process.stderr_output);
     try {
-        const auto result = choc::json::parse(process.stdout_output);
+        const auto result_json = pulp::tooling::gpu_probe::recipe_discovery_json(
+            recipe ? std::optional<std::string_view>{*recipe} : std::nullopt,
+            symptom ? std::optional<std::string_view>{*symptom} : std::nullopt);
+        if (!result_json)
+            return local_error(2, "not-found",
+                               recipe ? "GPU recipe was not found"
+                                      : "GPU recipe symptom was not found");
+        const auto result = choc::json::parse(*result_json);
         validate_recipe_discovery(result, action, recipe, symptom);
-    } catch (...) {
-        return local_error(status, "malformed-cli-output",
-                           "pulp-cpp GPU recipe discovery returned invalid or incoherent data",
-                           process.stdout_output);
+        return discovery_result(*result_json);
+    } catch (const std::exception& error) {
+        return local_error(-1, "catalog-unavailable",
+                           "the linked GPU recipe catalog is invalid: " +
+                               std::string(error.what()));
     }
-    return discovery_result(process.stdout_output);
 }
 
 } // namespace pulp_mcp

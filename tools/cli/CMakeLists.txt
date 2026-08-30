@@ -7,17 +7,6 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/pulp_version_gen.h"
     @ONLY)
 
-# Embed the closed GPU recipe catalog in the release CLI. The same authoritative
-# bytes are installed as share/pulp/gpu-recipes.yaml for direct inspection.
-file(READ "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
-    PULP_GPU_RECIPE_CATALOG_JSON)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml")
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/gpu_recipe_catalog_data.h.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/gpu_recipe_catalog_data.h"
-    @ONLY)
-
 # ── Migration index codegen ─────────────────────────────────────────────────
 #
 # Scan docs/migrations/*.md at configure time, parse the TOML

@@ -134,15 +134,16 @@ declared mutation; arbitrary child-process mutation labels are rejected. The
 `threejs.multi-pass.v1` enters the closed catalog only in a V8-backed build with
 the hash-verified pinned Three.js runtime and authentic hardware identity; its
 independent color-region oracle and seeded material mutation preserve the same
-typed exit contract. Default QuickJS standalone releases omit the ID. Their
-eventual exposure also requires sealed V8 delivery and Rust self-upgrades that
-preserve the nested runtime.
+typed exit contract. Default QuickJS standalone releases retain the canonical
+ID for discovery but report it non-callable. Execution requires sealed V8
+delivery and Rust self-upgrades that preserve the nested runtime.
 
-`pulp_gpu_recipes` uses that same matched sibling with an argv API. Its `list`
-action optionally filters one exact symptom token; `show` requires a canonical
-recipe id. A QuickJS install still returns the Three.js metadata row with
-`callable:false`, while `pulp_gpu_probe` continues to omit that ID from its
-callable enum. Use CLI `pulp gpu recipes scaffold` for the explicit local
+`pulp_gpu_recipes` projects the linked CPU-only catalog model directly, so it
+does not require a sibling `pulp-cpp`. Its `list` action optionally filters one
+exact symptom token; `show` requires a canonical recipe id. Every canonical ID
+remains discoverable when GPU or an optional provider is absent, with
+`callable:false`; Renderer3D becomes callable only in a GPU build that also
+compiled Scene3D. Use CLI `pulp gpu recipes scaffold` for the explicit local
 workspace mutation; MCP discovery is read-only.
 
 Use `pulp_audio_probe_json` as the quick live-health check for a standalone
