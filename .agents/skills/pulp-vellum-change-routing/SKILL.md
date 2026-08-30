@@ -77,3 +77,8 @@ emits the digest-bound `pulp-vellum-routing-contract-execution` artifact. Pull
 requests and manual dispatches validate the contract without publishing release
 evidence. That receipt is evidence for Vellum's release verifier; do not
 hand-author or replay it.
+
+The trusted PR gate validates a deterministic synthetic merge tree, but event
+time and emergency-expiry checks are bound to the real PR source head supplied
+with `--source-head`. A synthetic merge intentionally carries a fixed historical
+timestamp and must never become the provenance clock for a newly added event.

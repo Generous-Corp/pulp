@@ -7,6 +7,7 @@ import base64
 import datetime as dt
 import importlib.util
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -943,6 +944,44 @@ class FreezeGitIntegrationTests(unittest.TestCase):
             ".github/vellum-change-events/20260722-design-fix.json",
         )
         self.assertRegex(outbox["event_refs"][0]["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_synthetic_merge_uses_source_head_for_event_time(self):
+        self._write("core/view/src/design_ir_json.cpp", "after\n")
+        self._write(
+            ".github/vellum-change-events/20260722-design-fix.json",
+            change_event(),
+        )
+        source_head = self._commit("classified source change")
+        tree = self._git("rev-parse", f"{source_head}^{{tree}}").strip()
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Trusted Merge Test",
+            "GIT_AUTHOR_EMAIL": "trusted@example.invalid",
+            "GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z",
+            "GIT_COMMITTER_NAME": "Trusted Merge Test",
+            "GIT_COMMITTER_EMAIL": "trusted@example.invalid",
+            "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z",
+        }
+        synthetic_head = subprocess.check_output(
+            [
+                "git", "-C", str(self.repo), "commit-tree", tree,
+                "-p", self.base, "-p", source_head,
+            ],
+            input="trusted merge candidate\n",
+            text=True,
+            env=env,
+        ).strip()
+
+        self.assertEqual(
+            freeze.main([
+                "--repo", str(self.repo),
+                "--base", self.base,
+                "--head", synthetic_head,
+                "--source-head", source_head,
+                "--output", str(self.repo / "outbox.json"),
+            ]),
+            0,
+        )
 
     def test_existing_event_is_append_only(self):
         path = ".github/vellum-change-events/20260722-existing.json"
