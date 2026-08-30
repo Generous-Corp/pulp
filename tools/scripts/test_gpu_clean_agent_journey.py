@@ -243,7 +243,7 @@ class CleanAgentHarnessTests(unittest.TestCase):
             (
                 2,
                 "UNAVAILABLE: reference recipe evidence is unavailable or unverified",
-                "hardware-nonterminal",
+                "failure",
             ),
             (
                 1,

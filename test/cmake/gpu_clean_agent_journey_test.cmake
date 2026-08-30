@@ -26,12 +26,9 @@ function(pulp_gpu_clean_agent_prepare_outcome output result stderr)
     string(STRIP "${stderr}" normalized_stderr)
     if(result EQUAL 0)
         set(outcome prepared)
-    elseif((result EQUAL 2 AND
+    elseif(result EQUAL 1 AND
             normalized_stderr STREQUAL
-                "UNAVAILABLE: reference recipe evidence is unavailable or unverified") OR
-           (result EQUAL 1 AND
-            normalized_stderr STREQUAL
-                "FAIL: acceptance requires authentic hardware adapter evidence"))
+                "FAIL: acceptance requires authentic hardware adapter evidence")
         set(outcome hardware-nonterminal)
     else()
         set(outcome failure)
