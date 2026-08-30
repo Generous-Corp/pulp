@@ -108,8 +108,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "69d5cf5966fef38df905e138af8b3f5d8934c3fd",
-          "object_id": "56e1e89734d997472cad7aeadf8f2a27d6d740e4",
+          "revision": "1bc322794f6630cbbf5c6159d6ca3242ccb70b96",
+          "object_id": "505d3186c4468ceeff6962c36761de85ced55e78",
           "object_type": "tree"
         },
         {
@@ -140,8 +140,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/verify_gpu_probe_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "0be329b8dcee7fecf25420c0b263eba25d425b5e",
-          "object_id": "aa083a6a3c6b2fcc4269104a4d058815e42a85e2",
+          "revision": "9c96337e700a745da895ae8ee370b5505922db8e",
+          "object_id": "ca45232c04b9bcc6c230801c71f905f9e5e0d366",
           "object_type": "blob"
         }
       ],
@@ -1145,8 +1145,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_v2_evidence.py",
           "state": "pulp-owned-retained",
-          "revision": "2241ea8fd07dab9434275f2e363ac3d7867469a8",
-          "object_id": "4044228244db66eb57d1eeb02d1c9707bc4cef7d",
+          "revision": "6886b385d57735a9c4534091d7886db730cca11a",
+          "object_id": "98152d615b511bcfbbd2581232207f07f81a144d",
           "object_type": "blob"
         },
         {
@@ -1658,8 +1658,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "69d5cf5966fef38df905e138af8b3f5d8934c3fd",
-          "object_id": "56e1e89734d997472cad7aeadf8f2a27d6d740e4",
+          "revision": "1bc322794f6630cbbf5c6159d6ca3242ccb70b96",
+          "object_id": "505d3186c4468ceeff6962c36761de85ced55e78",
           "object_type": "tree"
         },
         {
@@ -1843,8 +1843,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/verify_gpu_probe_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "0be329b8dcee7fecf25420c0b263eba25d425b5e",
-          "object_id": "aa083a6a3c6b2fcc4269104a4d058815e42a85e2",
+          "revision": "9c96337e700a745da895ae8ee370b5505922db8e",
+          "object_id": "ca45232c04b9bcc6c230801c71f905f9e5e0d366",
           "object_type": "blob"
         }
       ],
