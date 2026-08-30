@@ -57,7 +57,9 @@ class CrossProcessSkiaCacheTests(unittest.TestCase):
         setup_dest = self.setup_process_destination()
         configure_dest, fetch_args = self.configure_process()
         self.assertEqual(configure_dest, setup_dest)
-        self.assertRegex(configure_dest, r"darwin-arm64-[0-9a-f]{64}$")
+        self.assertRegex(
+            configure_dest, r"darwin-arm64-[0-9a-f]{64}-receipt-v3$"
+        )
         self.assertIn(f"--cache-root;{self.cache_root}", fetch_args)
         self.assertNotIn("skia-build", configure_dest)
 

@@ -48,6 +48,11 @@ _VERSION_ROW_RE = re.compile(
     r"\|\s*`skia-build-(?P<platform>[a-z0-9_\-]+)-gpu-release\.zip`\s*\|"
     r"\s*`(?P<sha>[0-9a-f]{64})`\s*\|"
 )
+_VERSION_ALIAS_ROW_RE = re.compile(
+    r"\|\s*`manifest-key-(?P<platform>[a-z0-9_\-]+)--"
+    r"skia-build-(?P<asset>[a-z0-9_\-]+)-gpu-release\.zip`\s*\|"
+    r"\s*`(?P<sha>[0-9a-f]{64})`\s*\|"
+)
 # DEPENDENCIES.md table rows: | <name> | <version> | ...
 _DEPS_ROW_RE = re.compile(r"^\|\s*(?P<name>[^|]+?)\s*\|\s*(?P<version>[^|]+?)\s*\|")
 
@@ -93,7 +98,10 @@ def version_md_asset_shas(path: Path = SKIA_VERSION_MD) -> Dict[str, str]:
     if not path.is_file():
         raise CheckError(f"VERSION.md not found: {path}")
     out: Dict[str, str] = {}
-    for m in _VERSION_ROW_RE.finditer(path.read_text(encoding="utf-8")):
+    text = path.read_text(encoding="utf-8")
+    for m in _VERSION_ROW_RE.finditer(text):
+        out[m.group("platform")] = m.group("sha")
+    for m in _VERSION_ALIAS_ROW_RE.finditer(text):
         out[m.group("platform")] = m.group("sha")
     if not out:
         raise CheckError(f"{path} has no parseable 'Release Asset Digests' table")

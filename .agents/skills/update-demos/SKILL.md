@@ -134,6 +134,11 @@ pulp minos publish-runbook --to 0.640.0
   `std::to_chars` overloads reached by `std::format` unavailable below 13.4.
   Do not lower a consumer to 13.3 just because a newer SDK happens to compile
   the same source there; `tools/deps/min_os.json` is authoritative.
+- **Linux floors are architecture-specific.** The m153 `linux-x64` provider is
+  measured at GLIBC 2.34. The m153 ARM64 V8 provider alone measures GLIBC 2.39
+  / GLIBCXX 3.4.32, while the combined ARM64 Skia/Dawn/V8 floor remains unknown.
+  An ARM64 sweep must measure each final binary and must not reuse the x64
+  `--max 2.34` ceiling or claim Ubuntu 22.04 portability.
 - **Measuring one binary's floor** (no registry needed) is the primitive under
   all of this: `pulp minos measure <path/to/binary>` — also exposed over MCP as
   `pulp_minos`. See `docs/guides/minimum-os-support.md`.

@@ -34,6 +34,17 @@ IMPORT_DESIGN_RUNTIME_MANIFEST = (
 )
 
 
+class SkiaSdkInstallBoundary(unittest.TestCase):
+    def test_source_receipt_archive_is_not_installed(self) -> None:
+        text = INSTALL_RULES.read_text(encoding="utf-8")
+        self.assertEqual(
+            text.count('PATTERN ".skia-source-archive.zip" EXCLUDE'),
+            2,
+            "both resolved and checkout Skia install paths must exclude the "
+            "large validation-only source archive",
+        )
+
+
 def installed_sdk_targets(text: str | None = None) -> set[str]:
     if text is None:
         text = INSTALL_RULES.read_text(encoding="utf-8")

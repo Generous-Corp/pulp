@@ -9,6 +9,7 @@ if(PULP_ENABLE_GPU AND PULP_HAS_THREEJS)
     )
     target_compile_definitions(pulp-threejs-native-demo PRIVATE
         PULP_THREEJS_SOURCE_DIR="${threejs_SOURCE_DIR}"
+        PULP_THREEJS_DEMO_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     )
 
     if(APPLE)

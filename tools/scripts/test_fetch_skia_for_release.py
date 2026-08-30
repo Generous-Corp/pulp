@@ -206,6 +206,7 @@ class ImmutableKeyedCache(unittest.TestCase):
             source, {
                 "build/mac-gpu/lib/Release/libskia.a": payload,
                 "build/mac-gpu/lib/Release/libdawn_combined.a": b"dawn-" + payload,
+                "build/include/include/core/SkTypes.h": b"header-" + payload,
             }
         )
         _write_manifest(root, f"file://{source.as_posix()}", sha, "mac-arm64")
@@ -217,6 +218,23 @@ class ImmutableKeyedCache(unittest.TestCase):
         c = fetch_skia.keyed_cache_dest("/cache", "linux-x64", "a" * 64)
         self.assertNotEqual(a, b)
         self.assertNotEqual(a, c)
+        self.assertTrue(a.name.endswith("-receipt-v3"))
+        self.assertTrue(
+            a.name.endswith(f"-receipt-v{fetch_skia.RECEIPT_SCHEMA_VERSION}")
+        )
+
+    def test_valid_warm_generation_does_not_take_publication_lock(self):
+        with mock.patch.object(
+            fetch_skia, "cache_generation_valid", return_value=True
+        ), mock.patch.object(
+            fetch_skia, "cache_lock", side_effect=AssertionError("lock acquired")
+        ):
+            self.assertEqual(
+                fetch_skia.publish_keyed_cache(
+                    "darwin-arm64", "/cache", 1.0, "a" * 64
+                ),
+                0,
+            )
 
     def test_private_stage_is_atomically_published_and_removed(self):
         with _in_tempdir() as td:
@@ -228,6 +246,27 @@ class ImmutableKeyedCache(unittest.TestCase):
             dest = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha)
             self.assertTrue(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
             self.assertEqual(list(root.glob(".*.staging-*")), [])
+
+    def test_stronger_receipt_generation_publishes_beside_legacy_v2(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"format-v2")
+            root = td / "cache"
+            legacy = root / f"darwin-arm64-{sha}-receipt-v2"
+            legacy.mkdir(parents=True)
+            sentinel = legacy / "legacy-generation"
+            sentinel.write_text("retained", encoding="utf-8")
+
+            self.assertEqual(
+                fetch_skia.main([
+                    "fetch", "darwin-arm64", "--cache-root", str(root),
+                    "--cache-lock-timeout", "1",
+                ]),
+                0,
+            )
+
+            current = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha)
+            self.assertTrue(fetch_skia.cache_generation_valid(current, "darwin-arm64", sha))
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "retained")
 
     def test_pin_rotation_retains_old_generation_and_publishes_new(self):
         with _in_tempdir() as td:
@@ -275,10 +314,64 @@ class ImmutableKeyedCache(unittest.TestCase):
             dest.mkdir(parents=True)
             sentinel = dest / "do-not-mutate"
             sentinel.write_text("retained")
-            rc = fetch_skia.main(["fetch", "darwin-arm64", "--cache-root", str(root),
-                                  "--cache-lock-timeout", "1"])
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors):
+                rc = fetch_skia.main([
+                    "fetch", "darwin-arm64", "--cache-root", str(root),
+                    "--cache-lock-timeout", "1",
+                ])
             self.assertEqual(rc, 1)
             self.assertEqual(sentinel.read_text(), "retained")
+            self.assertIn("Move that exact generation aside", errors.getvalue())
+
+    def test_checkout_build_symlink_seals_resolved_provider_bytes(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"linked")
+            shared_build = td / "shared-build"
+            shared_build.mkdir()
+            dest = td / "checkout-provider"
+            dest.mkdir()
+            (dest / "build").symlink_to(shared_build, target_is_directory=True)
+
+            self.assertEqual(
+                fetch_skia.main(["fetch", "darwin-arm64", "--dest", str(dest)]),
+                0,
+            )
+            self.assertTrue(
+                fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha)
+            )
+            receipt = json.loads(
+                (dest / fetch_skia.GENERATION_RECEIPT).read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                "build/mac-gpu/lib/Release/libskia.a",
+                {entry["path"] for entry in receipt["files"]},
+            )
+
+    def test_stale_receipt_temporary_is_excluded_from_next_seal(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"interrupted")
+            dest = td / "provider"
+            self.assertEqual(
+                fetch_skia.main(["fetch", "darwin-arm64", "--dest", str(dest)]),
+                0,
+            )
+            receipt = dest / fetch_skia.GENERATION_RECEIPT
+            receipt.unlink()
+            temporary = dest / (fetch_skia.GENERATION_RECEIPT + ".tmp")
+            temporary.write_text("stale partial receipt", encoding="utf-8")
+
+            fetch_skia.write_generation_receipt(dest, "darwin-arm64", sha)
+
+            self.assertFalse(temporary.exists())
+            self.assertTrue(
+                fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha)
+            )
+            payload = json.loads(receipt.read_text(encoding="utf-8"))["files"]
+            self.assertNotIn(
+                fetch_skia.GENERATION_RECEIPT + ".tmp",
+                {entry["path"] for entry in payload},
+            )
 
     def test_generation_rejects_missing_dawn_archive(self):
         with _in_tempdir() as td:
@@ -289,6 +382,43 @@ class ImmutableKeyedCache(unittest.TestCase):
             lib.write_bytes(b"skia")
             (dest / ".skia-asset-sha256").write_text(sha)
             self.assertFalse(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+
+    def test_generation_rejects_nonempty_library_or_header_mutation(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"sealed")
+            root = td / "cache"
+            argv = ["fetch", "darwin-arm64", "--cache-root", str(root),
+                    "--cache-lock-timeout", "1"]
+            self.assertEqual(fetch_skia.main(argv), 0)
+            dest = fetch_skia.keyed_cache_dest(str(root), "darwin-arm64", sha)
+
+            library = fetch_skia.expected_library_path("darwin-arm64", str(dest))
+            original_library = library.read_bytes()
+            library.write_bytes(b"X" * len(original_library))
+            self.assertFalse(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+            library.write_bytes(original_library)
+
+            header = dest / "build/include/include/core/SkTypes.h"
+            original_header = header.read_bytes()
+            header.write_bytes(b"Y" * len(original_header))
+            self.assertFalse(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+            self.assertEqual(fetch_skia.main(argv), 1)
+
+    def test_rewritten_receipt_cannot_bless_mutated_provider(self):
+        with _in_tempdir() as td:
+            _, sha = self._asset(td, b"archive-anchored")
+            dest = td / "provider"
+            self.assertEqual(
+                fetch_skia.main(["fetch", "darwin-arm64", "--dest", str(dest)]), 0
+            )
+            library = fetch_skia.expected_library_path("darwin-arm64", str(dest))
+            library.write_bytes(b"attacker-replacement")
+            # Simulate a cache writer regenerating the adjacent mutable receipt.
+            with self.assertRaisesRegex(ValueError, "differs from authenticated"):
+                fetch_skia.write_generation_receipt(dest, "darwin-arm64", sha)
+            self.assertFalse(
+                fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha)
+            )
 
     def test_direct_warm_hit_rejects_missing_dawn_and_repairs(self):
         with _in_tempdir() as td:
@@ -646,6 +776,26 @@ class ArchSubdirLayoutFlattens(unittest.TestCase):
             )
             self.assertTrue((release_dir / "arm64" / "libdawn_combined.a").is_file())
 
+    def test_flat_expected_library_disables_all_arch_flattening(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-mac.zip"
+            payload = {
+                "build/mac-gpu/lib/Release/libskia.a": b"flat-skia",
+                "build/mac-gpu/lib/Release/libdawn_combined.a": b"flat-dawn",
+                "build/mac-gpu/lib/Release/arm64/libskparagraph.a": b"arch-paragraph",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+
+            self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+            dest = td / "external/skia-build"
+            release_dir = dest / "build/mac-gpu/lib/Release"
+            self.assertEqual((release_dir / "libskia.a").read_bytes(), b"flat-skia")
+            self.assertEqual(
+                (release_dir / "arm64/libskparagraph.a").read_bytes(), b"arch-paragraph"
+            )
+            self.assertTrue(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+
     def test_arch_subdir_with_only_duplicate_flat_file_leaves_subdir(self):
         with _in_tempdir() as td:
             zip_path = td / "skia-mac.zip"
@@ -898,6 +1048,67 @@ class IdempotencyStamp(unittest.TestCase):
             stamp = td / "external/skia-build/.skia-asset-sha256"
             self.assertEqual(stamp.read_text(encoding="utf-8").strip(), sha_v2)
 
+    def test_pin_change_replaces_flat_library_with_new_arch_library(self):
+        with _in_tempdir() as td:
+            zip_v1 = td / "skia-v1.zip"
+            sha_v1 = _make_zip(
+                zip_v1,
+                {
+                    "build/mac-gpu/lib/Release/libskia.a": b"old-flat",
+                    "build/mac-gpu/lib/Release/libdawn_combined.a": b"old-dawn",
+                },
+            )
+            _write_manifest(td, f"file://{zip_v1.as_posix()}", sha_v1, "mac-arm64")
+            self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+
+            zip_v2 = td / "skia-v2.zip"
+            sha_v2 = _make_zip(
+                zip_v2,
+                {
+                    "build/mac-gpu/lib/Release/arm64/libskia.a": b"new-arch",
+                    "build/mac-gpu/lib/Release/arm64/libdawn_combined.a": b"new-dawn",
+                },
+            )
+            _write_manifest(td, f"file://{zip_v2.as_posix()}", sha_v2, "mac-arm64")
+            self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+
+            release = td / "external/skia-build/build/mac-gpu/lib/Release"
+            self.assertEqual((release / "libskia.a").read_bytes(), b"new-arch")
+            self.assertEqual((release / "libdawn_combined.a").read_bytes(), b"new-dawn")
+            self.assertFalse((release / "arm64").exists())
+
+    def test_direct_refetch_preserves_checkout_metadata_outside_archive_roots(self):
+        with _in_tempdir() as td:
+            dest = td / "external/skia-build"
+            tracked_version = dest / "VERSION.md"
+            tracked_header = dest / "include/core/SkTypes.h"
+            tracked_version.parent.mkdir(parents=True)
+            tracked_header.parent.mkdir(parents=True)
+            tracked_version.write_text("tracked version\n", encoding="utf-8")
+            tracked_header.write_text("tracked header\n", encoding="utf-8")
+            stale = dest / "build/old-gpu/lib/Release/libstale.a"
+            stale.parent.mkdir(parents=True)
+            stale.write_bytes(b"stale")
+
+            zip_path = td / "skia.zip"
+            sha = _make_zip(
+                zip_path,
+                {"build/mac-gpu/lib/Release/libskia.a": b"fresh"},
+            )
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+
+            self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+            self.assertEqual(tracked_version.read_text(encoding="utf-8"), "tracked version\n")
+            self.assertEqual(tracked_header.read_text(encoding="utf-8"), "tracked header\n")
+            self.assertFalse(stale.exists(), "the archive-owned build tree must be replaced")
+            self.assertTrue(fetch_skia.cache_generation_valid(dest, "darwin-arm64", sha))
+
+            zip_path.unlink()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(fetch_skia.main(["fetch", "darwin-arm64"]), 0)
+            self.assertIn("skipping download", out.getvalue())
+
     def test_missing_lib_with_stamp_refetches(self):
         with _in_tempdir() as td:
             zip_path = td / "skia.zip"
@@ -921,14 +1132,17 @@ class IdempotencyStamp(unittest.TestCase):
                 "a missing library must re-fetch even when the stamp exists",
             )
 
-    def test_missing_stamp_uses_matching_version_doc(self):
+    def test_missing_stamp_refetches_despite_matching_version_doc(self):
         with _in_tempdir() as td:
-            sha = "a" * 64
-            asset_url = (
-                "https://github.com/danielraffel/skia-builder/releases/download/"
-                "chrome/m149/skia-build-mac-arm64-gpu-release.zip"
+            zip_path = td / "skia-build-mac-arm64-gpu-release.zip"
+            sha = _make_zip(
+                zip_path,
+                {
+                    "build/mac-gpu/lib/Release/libskia.a": b"fresh-skia",
+                    "build/mac-gpu/lib/Release/libdawn_combined.a": b"fresh-dawn",
+                },
             )
-            _write_manifest(td, asset_url, sha, "mac-arm64")
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
 
             lib = td / fetch_skia.expected_library_path("darwin-arm64")
             lib.parent.mkdir(parents=True)
@@ -948,13 +1162,8 @@ class IdempotencyStamp(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            def _boom(*args, **kwargs):
-                raise AssertionError("matching VERSION.md must skip download")
-
             out = io.StringIO()
-            with mock.patch.object(
-                fetch_skia.urllib.request, "urlopen", side_effect=_boom
-            ), contextlib.redirect_stdout(out):
+            with contextlib.redirect_stdout(out):
                 rc = fetch_skia.main(
                     ["fetch_skia_for_release.py", "darwin-arm64"]
                 )
@@ -962,7 +1171,9 @@ class IdempotencyStamp(unittest.TestCase):
             self.assertEqual(rc, 0)
             stamp = td / "external/skia-build/.skia-asset-sha256"
             self.assertEqual(stamp.read_text(encoding="utf-8").strip(), sha)
-            self.assertIn("VERSION.md records", out.getvalue())
+            self.assertEqual(lib.read_bytes(), b"fresh-skia")
+            self.assertEqual(dawn.read_bytes(), b"fresh-dawn")
+            self.assertIn("without a verified asset stamp", out.getvalue())
 
     def test_version_doc_digest_mismatch_refetches(self):
         with _in_tempdir() as td:

@@ -431,12 +431,10 @@ std::string make_threejs_demo_module(int width, int height, DemoMode mode,
                                       const std::string& gltf_box_url = "") {
     // Load JS module from template file to avoid MSVC 16KB string literal limit
     namespace fs = std::filesystem;
-    fs::path template_path = fs::path(__FILE__).parent_path() / "demo.js.template";
-    if (!fs::exists(template_path)) {
-        // Fallback: try relative to the source tree
-        template_path = fs::path(PULP_THREEJS_SOURCE_DIR).parent_path().parent_path()
-                      / "examples" / "threejs-native-demo" / "demo.js.template";
-    }
+    // __FILE__ may be prefix-mapped by ccache, so bind this runtime fixture to
+    // the configure-time source directory instead of a diagnostic file path.
+    const fs::path template_path = fs::path(PULP_THREEJS_DEMO_SOURCE_DIR)
+                                 / "demo.js.template";
     std::string js = read_text_file(template_path);
     if (js.empty()) {
         return "console.error('demo.js.template not found'); export default false;";

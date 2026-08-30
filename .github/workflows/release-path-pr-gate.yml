@@ -28,6 +28,11 @@ on:
   pull_request:
     paths:
       - 'tools/scripts/fetch_skia_for_release.py'
+      - 'tools/scripts/fetch_v8_for_release.py'
+      - 'tools/scripts/verify_skia_m153_capabilities.py'
+      - 'tools/scripts/test_verify_skia_m153_capabilities.py'
+      - 'tools/deps/validate_render_update.py'
+      - 'tools/deps/test_validate_render_update.py'
       - 'tools/deps/manifest.json'
       - 'tools/cmake/Find*.cmake'
       - 'tools/cmake/Pulp*.cmake'
@@ -36,6 +41,7 @@ on:
       - 'core/canvas/CMakeLists.txt'
       - 'core/render/CMakeLists.txt'
       - 'core/view/CMakeLists.txt'
+      - 'examples/threejs-native-demo/**'
       - 'CMakeLists.txt'
       - '.github/workflows/release-cli.yml'
       - '.github/workflows/release-path-pr-gate.yml'
@@ -132,7 +138,15 @@ jobs:
       # exactly why fontconfig + skunicode breakage went undetected
       # at PR time (#1962).
       - name: Fetch Skia binaries (release path)
-        run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
+        run: env -u PULP_USE_BAKED_SKIA -u SKIA_DIR python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
+        shell: bash
+
+      - name: Verify m153+ provider capabilities and extracted receipt
+        if: matrix.platform == 'darwin-arm64' || matrix.platform == 'linux-x64'
+        run: |
+          python3 tools/scripts/verify_skia_m153_capabilities.py \
+            --platform "${{ matrix.platform }}" \
+            --skia-dir external/skia-build
         shell: bash
 
       # Mirror release-cli.yml's CLI configure exactly so this gate
@@ -154,6 +168,7 @@ jobs:
           # trims configure work rather than compile time.
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DSKIA_DIR="$PWD/external/skia-build" \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
@@ -180,4 +195,43 @@ jobs:
       - name: Smoke pulp-cpp --version
         run: |
           ./build/tools/cli/pulp-cpp --version || ./build/tools/cli/pulp-cpp version
+        shell: bash
+
+      # The render milestone may advance independently of V8. On macOS, prove
+      # the exact pinned providers still coexist in one real Metal process and
+      # render a headless Three.js frame before accepting a release-path change.
+      - name: Fetch sealed V8 provider (mixed-provider gate)
+        if: matrix.platform == 'darwin-arm64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/scripts/fetch_v8_for_release.py darwin-arm64
+        shell: bash
+
+      - name: Build mixed Skia/Dawn/V8 provider probe
+        if: matrix.platform == 'darwin-arm64'
+        run: |
+          set -euo pipefail
+          cmake -S . -B build \
+            -DSKIA_DIR="$PWD/external/skia-build" \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=ON \
+            -DPULP_ENABLE_DESIGN_IMPORT=OFF \
+            -DPULP_BUILD_RUST_CLI=OFF \
+            -DPULP_JS_ENGINE=v8 \
+            -DPULP_VALIDATE_V8_PROVIDER_STRICT=ON
+          tools/ci/governed-build.sh cmake --build build --config Release \
+            --target pulp-threejs-native-demo
+        shell: bash
+
+      - name: Verify mixed provider identity and headless cube
+        if: matrix.platform == 'darwin-arm64'
+        run: |
+          set -euo pipefail
+          expected_version="$(python3 -c 'import json; d=json.load(open("tools/deps/manifest.json")); print(next(x for x in d["dependencies"] if x["name"] == "V8")["version"].split("-", 3)[2])')"
+          cmake \
+            -DDEMO_BIN="$PWD/build/examples/threejs-native-demo/pulp-threejs-native-demo" \
+            -DCAPTURE_PATH="$PWD/build/pulp-threejs-provider-identity.png" \
+            -DEXPECTED_KIND=v8builder \
+            -DEXPECTED_VERSION="$expected_version" \
+            -P examples/threejs-native-demo/provider_identity_test.cmake
         shell: bash

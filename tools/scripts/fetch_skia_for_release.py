@@ -19,7 +19,7 @@ Usage:
         --cache-root ~/.cache/pulp/skia --cache-lock-timeout 300
 
 `--cache-root` is the host/worktree mode: it resolves an immutable
-`<platform>-<asset-sha256>` generation, downloads into private sibling staging,
+`<platform>-<asset-sha256>-receipt-v3` generation, downloads into private sibling staging,
 and atomically renames the validated generation into place. Release workflows
 continue to use the default or explicit `--dest` mode for isolated matrix trees.
 
@@ -75,7 +75,6 @@ import socket
 import sys
 import tempfile
 import time
-import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -190,18 +189,187 @@ def manifest_asset(matrix_platform: str) -> tuple[str, dict[str, str] | None]:
     return manifest_key, skia_entry.get("determinism", {}).get("release_assets", {}).get(manifest_key)
 
 
+RECEIPT_SCHEMA_VERSION = 3
+
+
 def keyed_cache_dest(cache_root: str, matrix_platform: str, asset_sha: str) -> Path:
     """Immutable cache generation selected by platform and exact asset identity."""
     if not re.fullmatch(r"[0-9a-fA-F]{64}", asset_sha):
         raise ValueError("cache asset SHA-256 must contain exactly 64 hexadecimal characters")
-    return Path(cache_root).absolute() / f"{matrix_platform}-{asset_sha.lower()}"
+    # Receipt format is part of the immutable generation identity. Adding a
+    # stronger validator must publish beside old generations, never mutate one
+    # that an active compiler may still have open.
+    return Path(cache_root).absolute() / (
+        f"{matrix_platform}-{asset_sha.lower()}-receipt-v{RECEIPT_SCHEMA_VERSION}"
+    )
+
+
+_ASSET_STAMP = ".skia-asset-sha256"
+GENERATION_RECEIPT = ".skia-generation-manifest.json"
+_GENERATION_RECEIPT_TMP = GENERATION_RECEIPT + ".tmp"
+SOURCE_ARCHIVE = ".skia-source-archive.zip"
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _generation_payload(
+    dest: Path, archive_roots: set[str] | None = None
+) -> list[dict[str, str | int]]:
+    """Describe every extracted provider file, rejecting symlink substitution.
+
+    Legacy checkout materializations may make only ``build`` a symlink to the
+    machine-local shared provider tree. Seal the resolved tree under the logical
+    ``build/`` prefix, while immutable keyed generations still reject every
+    symlink (including nested links in the shared tree).
+    """
+    entries: list[dict[str, str | int]] = []
+
+    def append_tree(root: Path, logical_prefix: Path | None = None) -> None:
+        for path in sorted(root.rglob("*")):
+            if path.is_symlink():
+                raise ValueError(f"Skia generation contains symlink: {path}")
+            if not path.is_file() or path.name in {
+                _ASSET_STAMP, GENERATION_RECEIPT, _GENERATION_RECEIPT_TMP,
+                SOURCE_ARCHIVE,
+            }:
+                continue
+            relative = path.relative_to(root)
+            logical = relative if logical_prefix is None else logical_prefix / relative
+            entries.append({
+                "path": logical.as_posix(),
+                "sha256": _file_sha256(path),
+                "size": path.stat().st_size,
+            })
+
+    excluded = {_ASSET_STAMP, GENERATION_RECEIPT, _GENERATION_RECEIPT_TMP,
+                SOURCE_ARCHIVE}
+    selected_roots = archive_roots or {
+        child.name for child in dest.iterdir() if child.name not in excluded
+    }
+    for name in sorted(selected_roots):
+        entry = dest / name
+        if entry.is_symlink():
+            if name != "build":
+                raise ValueError(f"Skia generation contains symlink: {entry}")
+            resolved = entry.resolve(strict=True)
+            if not resolved.is_dir():
+                raise ValueError(
+                    f"Skia build symlink does not resolve to a directory: {entry}"
+                )
+            append_tree(resolved, Path(name))
+        elif entry.is_dir():
+            append_tree(entry, Path(name))
+        elif entry.is_file():
+            entries.append({
+                "path": name,
+                "sha256": _file_sha256(entry),
+                "size": entry.stat().st_size,
+            })
+        else:
+            raise ValueError(f"Skia generation archive root is missing: {entry}")
+    return entries
+
+
+def write_generation_receipt(dest: Path, matrix_platform: str, asset_sha: str) -> None:
+    """Seal the extracted provider tree before it becomes a reusable warm hit."""
+    archive_payload = _archive_generation_payload(dest / SOURCE_ARCHIVE, matrix_platform)
+    archive_roots = sorted({PurePosixPath(str(item["path"])).parts[0]
+                            for item in archive_payload})
+    disk_payload = _generation_payload(dest, set(archive_roots))
+    if disk_payload != archive_payload:
+        raise ValueError("extracted Skia payload differs from authenticated source archive")
+    receipt = {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "platform": matrix_platform,
+        "asset_sha256": asset_sha,
+        "archive_roots": archive_roots,
+        "files": disk_payload,
+    }
+    path = dest / GENERATION_RECEIPT
+    temporary = dest / _GENERATION_RECEIPT_TMP
+    temporary.unlink(missing_ok=True)
+    temporary.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _archive_generation_payload(
+    archive_path: Path, matrix_platform: str
+) -> list[dict[str, str | int]]:
+    """Derive the normalized provider payload from the trusted source archive."""
+    release_dir = expected_library_path(matrix_platform, ".").parent.as_posix().removeprefix("./")
+    entries: dict[str, dict[str, str | int]] = {}
+    with zipfile.ZipFile(archive_path) as archive:
+        file_names = {
+            PurePosixPath(info.filename.replace("\\", "/")).as_posix()
+            for info in archive.infolist()
+            if not info.is_dir()
+        }
+        expected_library = expected_library_path(
+            matrix_platform, "."
+        ).as_posix().removeprefix("./")
+        flatten_arch_subdirs = expected_library not in file_names
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            raw_path = PurePosixPath(info.filename.replace("\\", "/"))
+            parts = raw_path.parts
+            release_parts = PurePosixPath(release_dir).parts
+            logical = raw_path
+            if (matrix_platform not in _IOS_PRESERVE_ARCH_SUBDIR
+                    and flatten_arch_subdirs):
+                tail = parts[len(release_parts):] if parts[:len(release_parts)] == release_parts else ()
+                if len(tail) == 2:
+                    flat = PurePosixPath(*release_parts, tail[1])
+                    if flat.as_posix() not in file_names:
+                        logical = flat
+            digest = hashlib.sha256()
+            size = 0
+            with archive.open(info) as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    size += len(chunk)
+            key = logical.as_posix()
+            if key in entries:
+                raise ValueError(f"archive normalizes multiple files to {key}")
+            entries[key] = {"path": key, "sha256": digest.hexdigest(), "size": size}
+    return [entries[key] for key in sorted(entries)]
+
+
+def generation_receipt_valid(dest: Path, matrix_platform: str, asset_sha: str) -> bool:
+    path = dest / GENERATION_RECEIPT
+    archive_path = dest / SOURCE_ARCHIVE
+    try:
+        if _file_sha256(archive_path) != asset_sha:
+            return False
+        archive_payload = _archive_generation_payload(archive_path, matrix_platform)
+        archive_roots = sorted({PurePosixPath(str(item["path"])).parts[0]
+                                for item in archive_payload})
+        disk_payload = _generation_payload(dest, set(archive_roots))
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        return (
+            receipt.get("schema_version") == RECEIPT_SCHEMA_VERSION
+            and receipt.get("platform") == matrix_platform
+            and receipt.get("asset_sha256") == asset_sha
+            and receipt.get("archive_roots") == archive_roots
+            and receipt.get("files") == disk_payload
+            and disk_payload == archive_payload
+        )
+    except (OSError, ValueError, zipfile.BadZipFile, json.JSONDecodeError):
+        return False
 
 
 def cache_generation_valid(dest: Path, matrix_platform: str, expected_sha: str) -> bool:
-    stamp = dest / ".skia-asset-sha256"
+    stamp = dest / _ASSET_STAMP
     try:
         return (cache_generation_materialized(dest, matrix_platform) and stamp.is_file()
-                and stamp.read_text(encoding="utf-8").strip() == expected_sha)
+                and stamp.read_text(encoding="utf-8").strip() == expected_sha
+                and generation_receipt_valid(dest, matrix_platform, expected_sha))
     except OSError:
         return False
 
@@ -231,10 +399,10 @@ def _archive_member_target(dest: Path, member_name: str) -> Path:
             or PureWindowsPath(member_name).is_absolute()):
         raise ValueError(f"unsafe archive member path: {member_name!r}")
     target = dest.joinpath(*relative.parts)
-    dest_resolved = dest.resolve()
     target_resolved = target.resolve(strict=False)
+    allowed_root = dest.resolve()
     try:
-        target_resolved.relative_to(dest_resolved)
+        target_resolved.relative_to(allowed_root)
     except ValueError as error:
         raise ValueError(f"archive member escapes destination: {member_name!r}") from error
     return target
@@ -244,6 +412,12 @@ def publish_keyed_cache(matrix_platform: str, cache_root: str,
                         timeout_secs: float, expected_sha: str) -> int:
     """Build privately, validate, then atomically publish one immutable generation."""
     dest = keyed_cache_dest(cache_root, matrix_platform, expected_sha)
+    # Immutable warm generations can be deep-verified concurrently. Only a
+    # missing/invalid generation needs the publication lock; the lock owner
+    # rechecks before creating anything.
+    if cache_generation_valid(dest, matrix_platform, expected_sha):
+        print(f"OK: immutable Skia cache generation ready at {dest}")
+        return 0
     try:
         with cache_lock(str(dest), timeout_secs):
             if cache_generation_valid(dest, matrix_platform, expected_sha):
@@ -252,7 +426,8 @@ def publish_keyed_cache(matrix_platform: str, cache_root: str,
             if dest.exists():
                 print(
                     f"ERROR: immutable Skia cache generation exists but is invalid: {dest}; "
-                    "refusing in-place mutation while consumers may be bound to it",
+                    "refusing in-place mutation while consumers may be bound to it. "
+                    "Move that exact generation aside, then rerun the fetcher to republish it",
                     file=sys.stderr,
                 )
                 return 1
@@ -344,19 +519,6 @@ def expected_dawn_library_path(
     skia = expected_library_path(matrix_platform, dest_root)
     dawn_name = "dawn_combined.lib" if matrix_platform.startswith("windows") else "libdawn_combined.a"
     return skia.with_name(dawn_name)
-
-
-def _version_doc_has_asset_digest(
-    version_path: Path, asset_name: str, expected_sha: str
-) -> bool:
-    if not asset_name or not version_path.is_file():
-        return False
-    expected_sha = expected_sha.lower()
-    try:
-        lines = version_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return False
-    return any(asset_name in line and expected_sha in line.lower() for line in lines)
 
 
 def _main(argv: list[str]) -> int:
@@ -527,7 +689,7 @@ def _main(argv: list[str]) -> int:
     # actually unpacked here, so the download is skipped only when that
     # sha matches the current pin — a pin bump changes expected_sha, the
     # stamp no longer matches, and the asset is re-fetched.
-    stamp_path = Path(dest_root) / ".skia-asset-sha256"
+    stamp_path = Path(dest_root) / _ASSET_STAMP
     if expected_lib.is_file():
         if cache_generation_valid(Path(dest_root), matrix_platform, expected_sha):
             print(
@@ -541,17 +703,11 @@ def _main(argv: list[str]) -> int:
                 "pin changed since the last fetch; re-downloading."
             )
         else:
-            asset_name = Path(urllib.parse.urlparse(url).path).name
-            version_path = Path(dest_root) / "VERSION.md"
-            if (cache_generation_materialized(Path(dest_root), matrix_platform)
-                    and _version_doc_has_asset_digest(version_path, asset_name, expected_sha)):
-                stamp_path.write_text(expected_sha + "\n", encoding="utf-8")
-                print(
-                    "OK: Skia already present and VERSION.md records the "
-                    f"pinned asset digest (sha256 {expected_sha}); seeded "
-                    "asset stamp and skipping download"
-                )
-                return 0
+            print(
+                "Skia libraries are present without a verified asset stamp; "
+                "re-downloading the pinned archive instead of trusting "
+                "checkout metadata."
+            )
 
     zip_fd, zip_name = tempfile.mkstemp(prefix=".skia-release-asset-", suffix=".zip", dir=".")
     os.close(zip_fd)
@@ -584,7 +740,47 @@ def _main(argv: list[str]) -> int:
     print(f"sha256 verified: {actual_sha}")
 
     dest = Path(dest_root)
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            validation_root = dest.parent / f".{dest.name}.archive-validation-root"
+            for member in archive.infolist():
+                _archive_member_target(validation_root, member.filename)
+    except ValueError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
+    # A direct refetch replaces every top-level tree supplied by the provider
+    # archive. Otherwise files from the prior pin can survive and shadow the
+    # new arch-subdir libraries. Preserve checkout-owned siblings such as
+    # VERSION.md and the tracked source headers: current release assets contain
+    # only build/, and deleting the entire default external/skia-build directory
+    # would dirty the checkout without those files being restored by the ZIP.
+    absolute_dest = dest.absolute()
+    forbidden = {Path("/").absolute(), Path.cwd().absolute(), Path.home().absolute()}
+    if absolute_dest in forbidden:
+        print(f"ERROR: refusing to replace unsafe Skia destination {absolute_dest}", file=sys.stderr)
+        return 1
+    if dest.is_symlink():
+        dest.unlink()
     dest.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as archive:
+        archive_roots = {
+            PurePosixPath(member.filename.replace("\\", "/")).parts[0]
+            for member in archive.infolist()
+            if PurePosixPath(member.filename.replace("\\", "/")).parts
+        }
+    for name in sorted(archive_roots):
+        child = dest / name
+        # A verified symlink-backed generation returned above. A refetch must
+        # never unpack through an unverified/stale symlink and mutate a shared
+        # cache in place; detach the checkout entry and materialize privately.
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.exists():
+            shutil.rmtree(child)
+    for generated_name in (_ASSET_STAMP, GENERATION_RECEIPT,
+                           _GENERATION_RECEIPT_TMP, SOURCE_ARCHIVE):
+        (dest / generated_name).unlink(missing_ok=True)
     # Self-heal a corrupted warm cache: a dangling `build` symlink (its target
     # gone) makes mkdir see the path as both present (the link exists) and
     # unusable (a child cannot be created because the target is missing), which
@@ -599,14 +795,10 @@ def _main(argv: list[str]) -> int:
     # member whose target already exists. Create directories with exist_ok and
     # overwrite files so unpacking over a warm/cached checkout succeeds.
     with zipfile.ZipFile(zip_path) as zf:
-        try:
-            validated_members = [
-                (member, _archive_member_target(dest, member.filename))
-                for member in zf.infolist()
-            ]
-        except ValueError as error:
-            print(f"ERROR: {error}", file=sys.stderr)
-            return 1
+        validated_members = [
+            (member, _archive_member_target(dest, member.filename))
+            for member in zf.infolist()
+        ]
         for member, target in validated_members:
             if member.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
@@ -682,9 +874,23 @@ def _main(argv: list[str]) -> int:
             print(f"  {p}", file=sys.stderr)
         return 1
 
-    # Record the asset identity so the next run on a `clean: false` runner
-    # can skip the download — and so a future manifest pin bump forces a
-    # re-fetch (the stamp will no longer match the new expected_sha).
+    # Retain the exact SHA-verified archive as the independent trust anchor.
+    # Warm validation intentionally pays one bounded deep verification so
+    # rewriting the adjacent receipt cannot bless a same-size poisoned shared
+    # cache. The archive is excluded from installed SDKs but retained in host
+    # and Tart cache generations where that integrity property is required.
+    shutil.copyfile(zip_path, dest / SOURCE_ARCHIVE)
+
+    # Seal the complete extracted tree as well as the archive identity. A
+    # matching archive stamp alone cannot detect a later library/header swap.
+    try:
+        write_generation_receipt(dest, matrix_platform, expected_sha)
+    except (OSError, ValueError) as error:
+        print(f"ERROR: could not seal extracted Skia generation: {error}", file=sys.stderr)
+        return 1
+
+    # Record the asset identity last: readers never accept a generation before
+    # both its extracted-file receipt and archive identity are durable.
     stamp_path.write_text(expected_sha + "\n", encoding="utf-8")
 
     print(f"OK: {expected_lib} present ({expected_lib.stat().st_size:,} bytes)")

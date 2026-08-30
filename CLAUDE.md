@@ -215,14 +215,14 @@ Use the normal incremental `build/` loop for most work, but periodically run a c
 - Treat dependency changes as non-trivial work. Do them on a branch, never directly on `main`.
 - `tools/deps/manifest.json` is the machine-readable dependency inventory and should be updated alongside any pin/version change.
 - `python3 tools/deps/audit.py --strict --check-upstream` is the first check before and after a dependency bump.
-- `python3 tools/deps/validate_hosts.py` is the local multi-host validation lane. It always validates locally and can also validate over SSH via `tools/deps/hosts.local.json`.
+- `python3 tools/deps/validate_hosts.py` is the local multi-host validation lane. It always validates locally and can also validate over SSH via `tools/deps/hosts.local.json`. For Skia/Dawn/V8 pin work, pass `--render-toolchain`: the local leg emits a structured provider/cache/capability/mixed-provider result, while Unix remotes prove their own immutable cache receipt and second-fetch no-download hit.
 - Keep `DEPENDENCIES.md` and `NOTICE.md` in sync with the manifest whenever dependency inventory changes.
 - For FetchContent dependencies, prefer exact tags or commits over floating branches on stable lanes. If a dependency is intentionally floating, call that out explicitly in the manifest and docs.
 
 When asked to "check for dependency updates" or "update pinned binaries", use this sequence:
 1. Run `python3 tools/deps/audit.py --strict --check-upstream --format markdown` to identify drift.
 2. Bump only the chosen dependency pins on a branch, and update `tools/deps/manifest.json` plus any affected docs/notices in the same change.
-3. Run `python3 tools/deps/validate_hosts.py` and any risk-appropriate local tests before proposing a merge to `main`.
+3. Run `python3 tools/deps/validate_hosts.py` (with `--render-toolchain` for Skia/Dawn/V8 updates) and any risk-appropriate local tests before proposing a merge to `main`.
 4. Merge only after the updated pins and validation results are explicitly summarized.
 
 ---
@@ -1802,7 +1802,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `prove-before-showing` | Prove a UI or generation feature works before a human sees it: A/B against the source design, drive every control headlessly, prove the generator spawns, launch the real host, negative-control every gate |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
 | `pulp-vellum-change-routing` | Route repository-qualified design-import, visual-harness, Chromium, DesignIR, and rendering changes through Pulp's exact Vellum ownership projection |
-| `render-toolchain-update` | Update milestone-matched Skia, built-Dawn, and V8 releases together while preserving the separate weekly V8 lane |
+| `render-toolchain-update` | Update Skia/built-Dawn/V8 provenance, including an explicit temporary Skia-first lane when matched V8 assets are incomplete |
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |

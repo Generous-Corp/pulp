@@ -32,7 +32,7 @@ _SHAS = {
     "linux-arm64": "a" * 64,
     "ios-simulator-arm64-x86_64": "b" * 64,  # underscore-bearing platform token
 }
-_VERSIONS = {"Skia": "chrome/m152", "Dawn": "chrome/m152 deps",
+_VERSIONS = {"Skia": "chrome/m153", "Dawn": "chrome/m153 deps",
              "V8": "v8-15.2.24-lkgr-97440bd4f523"}
 
 
@@ -69,18 +69,31 @@ class ManifestMirrorTests(unittest.TestCase):
         with self.assertRaises(cmm.CheckError):
             cmm.version_md_asset_shas(md)
 
+    def test_version_md_parses_explicit_manifest_alias_without_false_filename(self) -> None:
+        md = self.root / "VERSION.md"
+        md.write_text(
+            "| Asset | SHA-256 |\n|--|--|\n"
+            "| `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `%s` |\n"
+            "| `skia-build-mac-universal-gpu-release.zip` | `%s` |\n"
+            % ("a" * 64, "a" * 64),
+            encoding="utf-8",
+        )
+        got = cmm.version_md_asset_shas(md)
+        self.assertEqual(got["mac-arm64"], "a" * 64)
+        self.assertEqual(got["mac-universal"], "a" * 64)
+
     # --- DEPENDENCIES.md parser --------------------------------------------
 
     def test_dependencies_md_versions(self) -> None:
         dep = self.root / "DEPENDENCIES.md"
         dep.write_text(
             "| Name | Version | License |\n|--|--|--|\n"
-            "| Skia | chrome/m152 | BSD-3-Clause |\n"
+            "| Skia | chrome/m153 | BSD-3-Clause |\n"
             "| V8 | v8-15.2.24-lkgr-97440bd4f523 | BSD-3-Clause |\n",
             encoding="utf-8",
         )
         got = cmm.dependencies_md_versions(dep)
-        self.assertEqual(got["Skia"], "chrome/m152")
+        self.assertEqual(got["Skia"], "chrome/m153")
         self.assertEqual(got["V8"], "v8-15.2.24-lkgr-97440bd4f523")
 
     # --- compare(): in-sync and each drift class ---------------------------
