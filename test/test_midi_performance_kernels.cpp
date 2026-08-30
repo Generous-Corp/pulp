@@ -1323,3 +1323,42 @@ TEST_CASE("note delay retrigger still ends the first attack's echoes",
     }
     REQUIRE(lengths == std::vector<std::int64_t>{3'000, 500});
 }
+
+TEST_CASE("chord memory retrigger reuses its own slot at capacity",
+          "[midi][chord-memory][rt-safety]") {
+    // Fill every trigger slot, then retrigger a key that already holds one. That
+    // press frees a slot before it needs one, so it must sound. Taking the slot
+    // before releasing the old chord makes the kernel drop a chord it had room
+    // for, and only shows up once the table is actually full.
+    constexpr std::size_t kSlots = 4;
+    const std::array<std::uint8_t, 3> captured{60, 64, 67};
+    midi::ChordMemory<kSlots> memory{};
+    REQUIRE(memory.learn(captured));
+
+    std::vector<AbsoluteMidiEvent> input;
+    for (std::size_t index = 0; index < kSlots; ++index)
+        input.push_back(on(static_cast<std::int64_t>(index) * 10,
+                           static_cast<std::uint8_t>(50 + index * 2), 100));
+    // Retrigger the first key while all four slots are occupied.
+    input.push_back(on(500, 50, 100));
+
+    auto out = render(
+        [&](const auto& in, auto& o, std::int64_t, std::int32_t) { memory.process(in, o); }, 1'000,
+        kWholeBlock, input);
+
+    std::size_t retrigger_attacks = 0;
+    for (const auto& event : out)
+        if (event.attack() && event.sample == 500)
+            ++retrigger_attacks;
+    REQUIRE(retrigger_attacks == 3); // the retriggered chord sounded
+
+    EventLedger ledger;
+    for (const auto& event : out)
+        ledger.feed(event);
+    REQUIRE(ledger.no_orphans());
+    auto flushed = prepared_buffer();
+    memory.flush(flushed);
+    for (const auto& event : flushed)
+        ledger.feed({500, event});
+    REQUIRE(ledger.balanced());
+}

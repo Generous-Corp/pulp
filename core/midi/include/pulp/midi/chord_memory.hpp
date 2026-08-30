@@ -328,6 +328,11 @@ template <std::size_t MaximumActiveTriggers = 16> class ChordMemory {
         }
         if (const auto* formula = formula_for(event.note()); formula != nullptr)
             count = revoiced(*formula, event.note(), notes, count);
+        // Release first: a retrigger of the same key gives up the chord it
+        // already owns, so a key can never own two chords at once AND the slot
+        // it frees is available to the press that freed it. Claiming a slot
+        // before this ran would drop a retrigger at capacity that had room.
+        close_key(event.channel(), event.note(), event.sample_offset, output, report);
         Trigger* slot = free_trigger();
         if (slot == nullptr) {
             // DropUnstarted: with no slot to record ownership the chord would
@@ -336,9 +341,6 @@ template <std::size_t MaximumActiveTriggers = 16> class ChordMemory {
             report.complete = false;
             return;
         }
-        // A retrigger of the same key releases the chord it already owns, so a
-        // key can never own two chords at once.
-        close_key(event.channel(), event.note(), event.sample_offset, output, report);
         std::uint8_t emitted = 0;
         for (std::size_t index = 0; index < count; ++index) {
             auto on = MidiEvent::note_on(event.channel(), notes[index], event.velocity());
