@@ -1933,7 +1933,7 @@ shipyard wait pr <PR> --state green       # REST fallback as of v0.56.2
 ### Off-fleet queue-age watchdog (`runner-health-check.yml`)
 
 `.github/workflows/runner-health-check.yml` sweeps every 30 minutes and opens a
-tracking issue when a lane has stopped serving work. It runs on `ubuntu-latest`
+tracking issue when dispatch or a runner lane has stopped serving work. It runs on `ubuntu-latest`
 **on purpose**: a guard that lives on the fleet dies with the fleet, so the one
 outage it exists to report would be the outage that silences it. It is the
 symptom-level backstop under the recovery tooling above — `shipyard rescue` and
@@ -1968,10 +1968,29 @@ has nothing queued and so says nothing. Only "work piling up with nothing
 serving it" alarms. Findings between 30 and 45 minutes appear in the run summary
 only, never on the issue.
 
+**Before job expansion.** A pull-request `Build and Test` run from
+`.github/workflows/build.yml` can remain `pending` or `queued` with an empty
+jobs array. At that point GitHub has not emitted a job or requested labels, so
+runner-liveness evidence cannot see it. The watchdog records the run only when
+the jobs API reports both `total_count: 0` and `jobs: []`, then an exact-run
+reread confirms the same status, head, event, and workflow. It applies the same
+age thresholds. Push, merge-group, workflow-dispatch, and unrelated workflow
+runs are excluded: they have separate concurrency/merge-stall semantics. A
+zero-job finding points first to an older non-terminal run on the same ref
+holding the workflow concurrency group, not to Tart capacity. The merge steward
+independently cancels bounded superseded-head runs; this alert remains the
+off-fleet backstop when a current-head run is stranded or that cleanup has not
+converged.
+
+Any failed API read or truncated run listing makes the sweep degraded. A
+degraded sweep suppresses alarms and cannot create, update, reopen, or close the
+tracking issue; absence is not evidence of recovery until a complete sweep.
+
 The issue is edited in place each sweep and closes automatically on recovery —
 the same open/update/auto-close contract as the release watchdogs (see
-[release-watchdog.md](release-watchdog.md)). The report names the labels the
-stalled jobs asked for, so a human sees *which* lane is sick.
+[release-watchdog.md](release-watchdog.md)). A runner-lane report names the
+labels the stalled jobs asked for; a pre-expansion report names the workflow
+run, ref, and status instead.
 
 Thresholds and analysis live in `tools/scripts/queue_age_watchdog.py`, tested by
 `tools/scripts/test_queue_age_watchdog.py` — which pins the measured baseline

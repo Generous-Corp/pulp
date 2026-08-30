@@ -2504,18 +2504,25 @@ group, and every later run on that ref sits at `pending` with **zero jobs**.
 Pushing again does not clear it — the new run just queues behind the same held
 group.
 
-The tell, and it is unambiguous: the run's `status` is `pending` **and** its
-`jobs` array is EMPTY, while sibling workflows from the same trigger dispatched
-normally.
+The tell is an aged `pending` or `queued` run whose jobs API remains exactly
+`total_count: 0` and `jobs: []` across two reads around an exact-run identity
+check, while sibling workflows from the same trigger dispatched normally. A
+single empty response is not sufficient evidence, and a `pending` ↔ `queued`
+transition is an ambiguous sweep rather than recovery.
 
 ```bash
 ghapp api "repos/Generous-Corp/pulp/actions/runs/<run_id>" --jq '[.status,.conclusion]|@tsv'
-ghapp api "repos/Generous-Corp/pulp/actions/runs/<run_id>/jobs" --jq '.jobs|length'   # 0 == wedged
-# clear it by cancelling the OLDER, non-terminal run on the same ref:
+ghapp api "repos/Generous-Corp/pulp/actions/runs/<run_id>/jobs" --jq '[.total_count, (.jobs|length)]'
+# Re-read the run and jobs before acting. Clear only an exact superseded-head
+# holder selected and revalidated by the merge steward:
 ghapp api -X POST "repos/Generous-Corp/pulp/actions/runs/<old_run_id>/cancel"
 ```
 
-The new run dispatches within seconds of the old one going terminal.
+Do not cancel a current-head run, rerun the obsolete head, or use `shipyard
+rescue` on the stale run: rescue redispatches work, while this recovery is
+cancel-only. The off-fleet `runner-health-check.yml` watchdog detects this
+pre-expansion shape without mutating it; degraded API evidence cannot close or
+maintain its tracker.
 
 All three aliases now resolve their runner through `PULP_PREAMBLE_RUNS_ON_JSON`
 (self-hosted) rather than a bare `ubuntu-latest`, which removes the mechanism:

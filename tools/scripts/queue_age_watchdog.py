@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Detect CI lanes that have stopped serving jobs, using queue age as the signal.
+"""Detect CI dispatch or runner lanes that have stopped advancing work.
 
 Why queue age and not runner labels
 -----------------------------------
@@ -16,8 +16,19 @@ token, a label typo, a LaunchAgent that never came back after reboot, a cause
 nobody has thought of yet. Nothing queues on an idle night, so an idle fleet is
 silent by construction.
 
-Two independent conditions, both required to alarm
---------------------------------------------------
+Two stall shapes
+----------------
+The watchdog covers both layers where work can stop:
+
+* A queued job whose requested lane shows no sign of life.
+* A pull-request ``Build and Test`` run from ``.github/workflows/build.yml``
+  that stays ``pending`` or ``queued`` and never expands into jobs. This
+  happens before runner labels exist, so lane liveness cannot detect it; a
+  stable exact-run reread and successful empty jobs-API response are the
+  evidence.
+
+For a queued job, two independent conditions are required to alarm
+-------------------------------------------------------------------
 A deep queue on a healthy pool is normal and must stay quiet. Measured baseline
 on this repo under normal healthy load: median queue age 5 min, oldest 31 min,
 3 runs over 30 min. A naive "age > 30 min" rule fires on that distribution
@@ -69,6 +80,10 @@ ALARM_MINUTES = 45
 # when something upstream floods the queue.
 MAX_RUNS_PER_STATUS = 60
 COMPLETED_LOOKBACK_HOURS = 3
+UNEXPANDED_WORKFLOW = "Build and Test"
+UNEXPANDED_WORKFLOW_PATH = ".github/workflows/build.yml"
+UNEXPANDED_EVENT = "pull_request"
+UNEXPANDED_STATUSES = {"pending", "queued"}
 
 
 def parse_ts(value: str) -> dt.datetime:
@@ -98,25 +113,42 @@ def lanes_are_comparable(a: set[str], b: set[str]) -> bool:
     return a <= b or b <= a
 
 
+def evidence_gaps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return collection gaps that make an absence claim unsafe."""
+    gaps = list(snapshot.get("errors") or [])
+    for status in snapshot.get("truncated") or []:
+        gaps.append({"status": status, "error": "run listing truncated"})
+    return gaps
+
+
+def is_target_unexpanded_run(run: dict[str, Any]) -> bool:
+    """Whether a recorded run belongs to the one pre-expansion alert surface."""
+    return (
+        run.get("workflow") == UNEXPANDED_WORKFLOW
+        and run.get("workflow_path") == UNEXPANDED_WORKFLOW_PATH
+        and run.get("event") == UNEXPANDED_EVENT
+        and run.get("status") in UNEXPANDED_STATUSES
+    )
+
+
 def analyze(
     snapshot: dict[str, Any],
     now: dt.datetime,
     warn_minutes: float = WARN_MINUTES,
     alarm_minutes: float = ALARM_MINUTES,
 ) -> list[dict[str, Any]]:
-    """Return findings for queued jobs at or past the warn threshold.
+    """Return findings for queued jobs/runs at or past the warn threshold.
 
     Each finding carries ``level`` ("warn" or "alarm"). Only "alarm" findings
     are issue-worthy; "warn" exists so a human reading the run summary can see
     the queue getting deep before it is judged sick.
 
-    A snapshot that failed to collect part of its evidence never alarms. The
-    alarm means "no runner is alive here", and an unobserved lane is not an
-    absent one -- claiming otherwise on partial data is how a monitor earns a
-    reputation for lying. We sweep every 30 min, so the cost of waiting for
-    complete evidence is one cycle.
+    A snapshot that failed to collect part of its evidence never alarms. An
+    unobserved lane or workflow run is not an absent one -- claiming otherwise
+    on partial data is how a monitor earns a reputation for lying. We sweep
+    every 30 min, so the cost of waiting for complete evidence is one cycle.
     """
-    degraded = bool(snapshot.get("errors"))
+    degraded = bool(evidence_gaps(snapshot))
 
     live = []
     for entry in snapshot.get("live_jobs", []):
@@ -133,6 +165,44 @@ def analyze(
         )
 
     findings: list[dict[str, Any]] = []
+    for run in snapshot.get("unexpanded_runs", []):
+        if not is_target_unexpanded_run(run):
+            continue
+        queued_at = parse_ts(run["queued_at"])
+        age = _minutes_between(now, queued_at)
+        if age < warn_minutes:
+            continue
+        if age >= alarm_minutes and not degraded:
+            level = "alarm"
+            evidence = "workflow run has zero jobs"
+        else:
+            level = "warn"
+            evidence = (
+                "evidence incomplete this sweep"
+                if degraded
+                else "workflow run has zero jobs"
+            )
+        findings.append(
+            {
+                "kind": "unexpanded_workflow_run",
+                "level": level,
+                "age_minutes": round(age, 1),
+                "labels": [],
+                "lane": "workflow dispatch",
+                "workflow": run["workflow"],
+                "job": "(zero jobs)",
+                "run_id": run.get("run_id"),
+                "run_url": run.get("run_url", ""),
+                "queued_at": run["queued_at"],
+                "run_status": run["status"],
+                "event": run["event"],
+                "workflow_path": run["workflow_path"],
+                "head_sha": run.get("head_sha", ""),
+                "head_branch": run.get("head_branch", ""),
+                "lane_evidence": evidence,
+            }
+        )
+
     for job in snapshot.get("queued_jobs", []):
         queued_at = parse_ts(job["queued_at"])
         age = _minutes_between(now, queued_at)
@@ -163,6 +233,7 @@ def analyze(
 
         findings.append(
             {
+                "kind": "queued_job",
                 "level": level,
                 "age_minutes": round(age, 1),
                 "labels": sorted(labels),
@@ -186,6 +257,8 @@ def group_by_lane(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Collapse findings into one row per lane, worst-first."""
     lanes: dict[str, dict[str, Any]] = {}
     for f in findings:
+        if f.get("kind") == "unexpanded_workflow_run":
+            continue
         lane = lanes.setdefault(
             f["lane"],
             {"lane": f["lane"], "count": 0, "oldest": 0.0, "workflows": set()},
@@ -233,6 +306,7 @@ def collect_snapshot(repo: str, now: dt.datetime) -> dict[str, Any]:
         "repo": repo,
         "queued_jobs": [],
         "live_jobs": [],
+        "unexpanded_runs": [],
         "truncated": [],
         "errors": [],
     }
@@ -247,25 +321,53 @@ def collect_snapshot(repo: str, now: dt.datetime) -> dict[str, Any]:
         return found[:limit]
 
     completed_cutoff = now - dt.timedelta(hours=COMPLETED_LOOKBACK_HOURS)
+    seen_run_statuses: dict[int, str] = {}
 
     # `queued` and `in_progress` runs both matter: a run reports as in_progress
     # while some of its jobs are still queued, so the waiting job for a dead
     # lane is just as likely to sit under an in_progress run as a queued one.
-    for status in ("queued", "in_progress", "completed"):
+    for status in ("pending", "queued", "in_progress", "completed"):
         # Uniform cap across statuses. Truncating the liveness evidence
         # (in_progress/completed) makes a live lane look dead, which is the one
         # direction of error a monitor cannot afford, so this window is not
         # shallower than the queued one.
         for run in runs(status, MAX_RUNS_PER_STATUS):
+            if run.get("status") != status:
+                continue
+            run_id = run.get("id")
+            if not isinstance(run_id, int) or isinstance(run_id, bool):
+                snapshot["errors"].append(
+                    {"run_id": run_id, "status": status, "error": "invalid run id"}
+                )
+                continue
+            if run_id in seen_run_statuses:
+                if seen_run_statuses[run_id] != status:
+                    snapshot["errors"].append(
+                        {
+                            "run_id": run_id,
+                            "status": status,
+                            "error": "run appeared in multiple status listings",
+                        }
+                    )
+                continue
+            seen_run_statuses[run_id] = status
             if status == "completed":
                 updated = run.get("updated_at")
                 if updated and parse_ts(updated) < completed_cutoff:
                     continue
             try:
-                jobs = _gh_api(
-                    f"/repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100"
-                ).get("jobs", [])
-            except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+                jobs_payload = _gh_api(
+                    f"/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"
+                )
+                jobs = jobs_payload["jobs"]
+                if not isinstance(jobs, list):
+                    raise TypeError("jobs response field is not a list")
+            except (
+                KeyError,
+                TypeError,
+                subprocess.CalledProcessError,
+                json.JSONDecodeError,
+            ) as exc:
                 # One flaky call must not take the sweep down — a watchdog that
                 # reddens its own run gets ignored. But record it: a missed
                 # jobs fetch can hide the liveness evidence that keeps a live
@@ -274,6 +376,111 @@ def collect_snapshot(repo: str, now: dt.datetime) -> dict[str, Any]:
                     {"run_id": run["id"], "status": status, "error": str(exc)[:200]}
                 )
                 continue
+            if (
+                status in UNEXPANDED_STATUSES
+                and run.get("name") == UNEXPANDED_WORKFLOW
+                and run.get("path") == UNEXPANDED_WORKFLOW_PATH
+                and run.get("event") == UNEXPANDED_EVENT
+                and not jobs
+            ):
+                total_count = jobs_payload.get("total_count")
+                if not (type(total_count) is int and total_count == 0):
+                    snapshot["errors"].append(
+                        {
+                            "run_id": run_id,
+                            "status": status,
+                            "error": "empty jobs response lacks exact total_count=0",
+                        }
+                    )
+                    continue
+                try:
+                    exact = _gh_api(f"/repos/{repo}/actions/runs/{run_id}")
+                except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+                    snapshot["errors"].append(
+                        {"run_id": run_id, "status": status, "error": str(exc)[:200]}
+                    )
+                    continue
+                head_sha = run.get("head_sha")
+                if not isinstance(exact, dict):
+                    snapshot["errors"].append(
+                        {"run_id": run_id, "status": status, "error": "invalid exact-run response"}
+                    )
+                    continue
+                exact_status = exact.get("status")
+                if exact_status != status:
+                    if exact_status in UNEXPANDED_STATUSES:
+                        snapshot["errors"].append(
+                            {
+                                "run_id": run_id,
+                                "status": status,
+                                "error": "run changed between target statuses during observation",
+                            }
+                        )
+                    # A run that reached a non-target status has advanced. A
+                    # pending/queued transition remains ambiguous for this
+                    # sweep and therefore degrades all absence claims.
+                    continue
+                if (
+                    not head_sha
+                    or exact.get("id") != run_id
+                    or exact.get("head_sha") != head_sha
+                    or exact.get("event") != UNEXPANDED_EVENT
+                    or exact.get("path") != UNEXPANDED_WORKFLOW_PATH
+                    or exact.get("name") != UNEXPANDED_WORKFLOW
+                ):
+                    snapshot["errors"].append(
+                        {
+                            "run_id": run_id,
+                            "status": status,
+                            "error": "exact-run identity differs from list evidence",
+                        }
+                    )
+                    continue
+                try:
+                    control_payload = _gh_api(
+                        f"/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"
+                    )
+                    control_jobs = control_payload["jobs"]
+                    control_count = control_payload.get("total_count")
+                    if not isinstance(control_jobs, list):
+                        raise TypeError("control jobs response field is not a list")
+                except (
+                    KeyError,
+                    TypeError,
+                    subprocess.CalledProcessError,
+                    json.JSONDecodeError,
+                ) as exc:
+                    snapshot["errors"].append(
+                        {"run_id": run_id, "status": status, "error": str(exc)[:200]}
+                    )
+                    continue
+                if control_jobs or control_count != 0:
+                    # Job expansion began after the first read, so this run is
+                    # advancing and is not zero-job evidence for this sweep.
+                    continue
+                queued_at = run.get("created_at") or run.get("run_started_at")
+                if not queued_at:
+                    snapshot["errors"].append(
+                        {
+                            "run_id": run_id,
+                            "status": status,
+                            "error": "unexpanded run lacks a queue timestamp",
+                        }
+                    )
+                    continue
+                snapshot["unexpanded_runs"].append(
+                    {
+                        "run_id": run_id,
+                        "run_url": run.get("html_url", ""),
+                        "workflow": run.get("name", ""),
+                        "workflow_path": run.get("path", ""),
+                        "event": run.get("event", ""),
+                        "status": status,
+                        "head_sha": head_sha,
+                        "head_branch": run.get("head_branch", ""),
+                        "queued_at": queued_at,
+                    }
+                )
             for job in jobs:
                 labels = job.get("labels") or []
                 if job.get("status") == "queued":
@@ -317,6 +524,8 @@ def render_body(
     now: dt.datetime,
 ) -> str:
     alarms = [f for f in findings if f["level"] == "alarm"]
+    lane_alarms = [f for f in alarms if f.get("kind") != "unexpanded_workflow_run"]
+    run_alarms = [f for f in alarms if f.get("kind") == "unexpanded_workflow_run"]
     lines: list[str] = []
     lines.append(
         "_Auto-generated by `.github/workflows/runner-health-check.yml` on "
@@ -324,39 +533,52 @@ def render_body(
     )
     lines.append("")
     lines.append(
-        f"**{len(alarms)} job(s) have been queued for more than {alarm_minutes:g} "
-        "minutes with no sign of life on their lane** — nothing with comparable "
-        "labels is running, and nothing with comparable labels has started since "
-        "they queued. A saturated-but-healthy pool does not look like this: its "
-        "runners are visibly busy. This looks like a lane that cannot pick work up."
+        f"**{len(alarms)} job(s) or workflow run(s) have been stalled for more than "
+        f"{alarm_minutes:g} minutes.** A queued job alarms only when its lane shows "
+        "no sign of life. A workflow run with zero jobs alarms from its own "
+        "successful jobs-API response because it has not reached runner routing."
     )
-    lines.append("")
-    lines.append("### Sick lanes")
-    lines.append("")
-    for row in group_by_lane(alarms):
-        workflows = ", ".join(row["workflows"]) or "—"
-        lines.append(
-            f"- **`{row['lane']}`** — {row['count']} job(s) stalled, oldest "
-            f"{row['oldest']:g} min. Workflows: {workflows}"
-        )
-    lines.append("")
-    lines.append("### Stalled jobs")
-    lines.append("")
-    for f in alarms:
-        lines.append(
-            f"- `{f['workflow']}` / `{f['job']}` — {f['age_minutes']:g} min "
-            f"(queued {f['queued_at']})"
-        )
-        lines.append(f"  - wants labels: `{', '.join(f['labels']) or '(none)'}`")
-        if f["run_url"]:
-            lines.append(f"  - run: {f['run_url']}")
+    if run_alarms:
+        lines.append("")
+        lines.append("### Workflow runs with zero jobs")
+        lines.append("")
+        for f in run_alarms:
+            branch = f" on `{f['head_branch']}`" if f["head_branch"] else ""
+            lines.append(
+                f"- `{f['workflow']}` run `{f['run_id']}`{branch} — "
+                f"{f['age_minutes']:g} min in `{f['run_status']}` with zero jobs "
+                f"(created {f['queued_at']})"
+            )
+            if f["run_url"]:
+                lines.append(f"  - run: {f['run_url']}")
+    if lane_alarms:
+        lines.append("")
+        lines.append("### Sick lanes")
+        lines.append("")
+        for row in group_by_lane(lane_alarms):
+            workflows = ", ".join(row["workflows"]) or "—"
+            lines.append(
+                f"- **`{row['lane']}`** — {row['count']} job(s) stalled, oldest "
+                f"{row['oldest']:g} min. Workflows: {workflows}"
+            )
+        lines.append("")
+        lines.append("### Stalled jobs")
+        lines.append("")
+        for f in lane_alarms:
+            lines.append(
+                f"- `{f['workflow']}` / `{f['job']}` — {f['age_minutes']:g} min "
+                f"(queued {f['queued_at']})"
+            )
+            lines.append(f"  - wants labels: `{', '.join(f['labels']) or '(none)'}`")
+            if f["run_url"]:
+                lines.append(f"  - run: {f['run_url']}")
     lines.append("")
     lines.append("### Where to look")
     lines.append("")
     lines.append(
-        "The labels above name the lane. This check is deliberately "
-        "cause-agnostic — it reports the symptom, not the diagnosis. Usual "
-        "suspects, cheapest first:"
+        "The sections above distinguish runner-lane stalls from workflow runs "
+        "that never reached runner routing. This check deliberately reports the "
+        "symptom, not a guessed diagnosis. Usual suspects, cheapest first:"
     )
     lines.append("")
     lines.append("- A wedged `Runner.Worker` holding a lane hostage (`shipyard runner kill`).")
@@ -364,10 +586,14 @@ def render_body(
     lines.append("- A `runs-on` label edit that no live runner satisfies.")
     lines.append("- Registration token / GitHub App credential expiry on the host.")
     lines.append("- The host is offline, asleep, or out of disk.")
+    lines.append(
+        "- For a zero-job run, inspect older non-terminal `Build and Test` runs "
+        "on the same ref that may still hold its concurrency group."
+    )
     lines.append("")
     lines.append(
         "_This tracker updates in place each sweep and closes automatically "
-        "once no lane is stalled._"
+        "once neither dispatch nor a runner lane is stalled._"
     )
     return "\n".join(lines)
 
@@ -375,14 +601,14 @@ def render_body(
 def render_summary(
     findings: list[dict[str, Any]],
     alarm_minutes: float,
-    errors: list[dict[str, Any]] | None = None,
+    gaps: list[dict[str, Any]] | None = None,
 ) -> str:
     alarms = [f for f in findings if f["level"] == "alarm"]
     warns = [f for f in findings if f["level"] == "warn"]
     lines = ["## Queue-age watchdog", ""]
-    if errors:
+    if gaps:
         lines.append(
-            f"> **Degraded sweep** — {len(errors)} API call(s) failed, so the "
+            f"> **Degraded sweep** — {len(gaps)} collection gap(s), so the "
             "lane-liveness evidence is incomplete and alarms are suppressed for "
             "this cycle. An unobserved lane is not a dead one. Next sweep in 30 min."
         )
@@ -393,18 +619,21 @@ def render_summary(
         lines.append(
             "No findings — but this sweep's evidence was incomplete, so this is "
             "not a clean bill of health."
-            if errors
-            else "No job has been queued past the warn threshold. Fleet looks healthy."
+            if gaps
+            else "No job or Build and Test run is past the warn threshold. Fleet looks healthy."
         )
         return "\n".join(lines)
-    lines.append(f"- **{len(alarms)}** alarm (>= {alarm_minutes:g} min, no live runner)")
-    lines.append(f"- **{len(warns)}** warn (deep queue, lane still serving — not alarmed)")
+    lines.append(
+        f"- **{len(alarms)}** alarm (>= {alarm_minutes:g} min, stalled before or at job pickup)"
+    )
+    lines.append(f"- **{len(warns)}** warn (aged but below the alarm contract)")
     lines.append("")
-    lines.append("| level | lane | age (min) | workflow / job | lane evidence |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    lines.append("| level | kind | lane | age (min) | workflow / job | evidence |")
+    lines.append("| --- | --- | --- | --- | --- | --- |")
     for f in findings:
         lines.append(
-            f"| {f['level']} | `{f['lane']}` | {f['age_minutes']:g} | "
+            f"| {f['level']} | {f.get('kind', 'queued_job')} | `{f['lane']}` | "
+            f"{f['age_minutes']:g} | "
             f"{f['workflow']} / {f['job']} | {f['lane_evidence']} |"
         )
     return "\n".join(lines)
@@ -452,7 +681,8 @@ def main(argv: list[str] | None = None) -> int:
         with open(args.body_out, "w", encoding="utf-8") as fh:
             fh.write(render_body(findings, args.alarm_minutes, now))
 
-    summary = render_summary(findings, args.alarm_minutes, snapshot.get("errors"))
+    gaps = evidence_gaps(snapshot)
+    summary = render_summary(findings, args.alarm_minutes, gaps)
     print(summary)
     if args.summary_out:
         with open(args.summary_out, "a", encoding="utf-8") as fh:
@@ -474,6 +704,7 @@ def main(argv: list[str] | None = None) -> int:
     # Exit 0 regardless of findings: the workflow decides what to do with them.
     # A watchdog that fails its own run is a watchdog nobody keeps green.
     print(f"alarm_count={len(alarms)}")
+    print(f"degraded={'true' if gaps else 'false'}")
     return 0
 
 
