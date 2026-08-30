@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import zlib
 from pathlib import Path
@@ -17,6 +19,10 @@ import gpu_first_visible_a3_acceptance as a3_acceptance
 import gpu_dpr_experiment as experiment
 import gpu_dpr_evidence as evidence
 import gpu_dpr_runner as runner
+import gpu_dpr_v2_evidence as v2_evidence
+import gpu_dpr_v2_runner as v2_runner
+import gpu_dpr_v2_terminal as v2_terminal
+import test_gpu_dpr_v2_evidence as v2_fixture
 import test_gpu_first_visible_a3_acceptance as a3_fixture
 from gpu_dpr_test_support import (
     exact_binary, forged_minimal_dependencies, malformed_adapter_script,
@@ -456,12 +462,171 @@ def ingest_receipt(run_dir: Path, receipt: Path) -> str:
     return runner.ingest_receipt(run_dir, receipt, nonce)
 
 
+def v2_nested_producer(arguments: list[str]) -> int:
+    request_path = Path(arguments[arguments.index("--request") + 1])
+    output = Path(arguments[arguments.index("--output") + 1])
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (request_path.parents[3] / v2_runner.AUTHORIZED_MANIFEST).read_text(
+            encoding="utf-8"
+        )
+    )
+    expected = request["expected_cell"]
+    scenario = next(
+        item for item in manifest["scenarios"]
+        if item["id"] == expected["scenario_id"]
+    )
+    cell = v2_fixture.cell_skeleton(
+        scenario, manifest, expected["campaign"], 1701,
+        mode=expected["mode"], requested_dpr=expected["requested_dpr"],
+        adapter_sha256=request["adapter"]["sha256"],
+        build_sha=request["installed_revisions"]["forge"],
+    )
+    cell["identity"]["producer_process_id"] = os.getpid()
+    cell["attempt_nonce"] = request["attempt_nonce"]
+    cell["daw_subreceipts"] = [{
+        "format": item["format"], "host": item["host"], "a3_role": item["a3_role"],
+        "outcome": "pass", "gates_passed": True,
+        "identity_sha256": "0" * 64, "receipt_sha256": "0" * 64,
+    } for item in scenario["required_daw_subreceipts"]]
+    v2_fixture.retain_cell(output, cell, scenario, manifest, "artifacts")
+    write_json(output / "receipt.json", {
+        "schema": v2_runner.PRODUCER_RECEIPT_SCHEMA, "version": 2,
+        "run_id": request["run_id"], "cell_key": request["cell_key"],
+        "attempt_nonce": request["attempt_nonce"],
+        "request_sha256": hashlib.sha256(request_path.read_bytes()).hexdigest(),
+        "cell": cell,
+    })
+    return 0
+
+
+def v2_nested_snapshot_test(root: Path) -> None:
+    workspace = root / "v2-nested-runner"
+    workspace.mkdir()
+    analyzer = workspace / "analyzer.sh"
+    analyzer.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+    analyzer.chmod(0o755)
+    manifest = experiment.load_json(experiment.DEFAULT_MANIFEST)
+    manifest["v2_protocol"]["status"] = "authorized"
+    manifest["v2_protocol"]["product_policy"] = {
+        "id": "test", "path": "policy.json", "blob": SHA_A,
+        "a3_receipt_sha256": v2_evidence.canonical_sha256(v2_fixture.A3_DOCUMENT),
+    }
+    manifest["trial_contract"]["timer_noise_p95_ns"] = 1
+    manifest["trial_contract"]["memory_sampler_resolution_bytes"] = 1
+    for scenario in manifest["scenarios"]:
+        scenario["frame_budget_ns"] = 16_666_667
+    run_dir = workspace / "run"
+    state = v2_fixture.local_runner_state(run_dir, manifest, analyzer)
+    key = v2_runner.run_cell_key("original", "forge-modular-daw", "exact", 1)
+    adapter = workspace / "nested-adapter.sh"
+    adapter.write_text(
+        "#!/bin/sh\n"
+        f"exec {sys.executable} {Path(__file__).resolve()} --v2-nested-producer \"$@\"\n",
+        encoding="utf-8",
+    )
+    adapter.chmod(0o755)
+    trace_validation = mock.patch.object(
+        evidence, "validate_trace", side_effect=lambda *args, **_kwargs: [args[4]]
+    )
+    trace_validation.start()
+    accepted = v2_runner.run_one(run_dir, key, adapter, 30)
+    identity_artifact = next(
+        item for item in accepted["cell"]["artifacts"]
+        if item["kind"] == "identity_receipt"
+    )
+    identity, _, _ = v2_evidence.regular_json(
+        run_dir, identity_artifact["path"], "retained nested identity"
+    )
+    snapshot_prefix = (
+        Path("snapshots") / key / accepted["attempt_nonce"]
+    ).as_posix() + "/"
+    nested_paths = [
+        document[field]["path"]
+        for document in identity["daw_receipt_documents"]
+        for field in ("a3_evidence", "product", "host_product", "lifecycle")
+    ]
+    if not all(path.startswith(snapshot_prefix) for path in nested_paths):
+        raise AssertionError("accepted DAW evidence still references producer output")
+    producer_root = (
+        run_dir / accepted["request"]["path"]
+    ).parent / "producer-output"
+    producer_receipt = json.loads(
+        (producer_root / "receipt.json").read_text(encoding="utf-8")
+    )
+    producer_identity_descriptor = next(
+        item for item in producer_receipt["cell"]["artifacts"]
+        if item["kind"] == "identity_receipt"
+    )
+    producer_identity = json.loads(
+        (producer_root / producer_identity_descriptor["path"]).read_text(encoding="utf-8")
+    )
+    producer_paths = {
+        producer_root / document[field]["path"]
+        for document in producer_identity["daw_receipt_documents"]
+        for field in ("a3_evidence", "product", "host_product", "lifecycle")
+    }
+    for path in producer_paths:
+        path.chmod(0o755)
+        path.write_bytes(path.read_bytes() + b"\npost-ingest mutation\n")
+    loaded, _ = v2_runner.load_state(run_dir)
+    mutated_rederived, _ = v2_runner.rederive_cell(run_dir, loaded, key, manifest)
+    if mutated_rederived != accepted["cell"]:
+        raise AssertionError("post-ingest producer mutation changed the accepted cell")
+    shutil.rmtree(producer_root)
+    loaded, _ = v2_runner.load_state(run_dir)
+    rederived, _ = v2_runner.rederive_cell(run_dir, loaded, key, manifest)
+    if rederived != accepted["cell"]:
+        raise AssertionError("post-ingest producer deletion changed the accepted cell")
+
+    loaded["cells"] = {key: loaded["cells"][key]}
+    dependency_documents: dict[str, dict] = {}
+    projection: dict[str, dict] = {}
+    loaded["dependencies"] = {}
+    for index, receipt_id in enumerate(
+        (v2_terminal.A2T_ID, v2_terminal.PRODUCT_POLICY_ID, v2_terminal.A3_ID)
+    ):
+        document = {"receipt_id": receipt_id, "index": index}
+        dependency_documents[receipt_id] = document
+        path = run_dir / "finalize-dependencies" / f"{index}.json"
+        write_json(path, document)
+        file_sha, byte_count, _ = v2_evidence.file_identity(
+            path, "finalize dependency", max_bytes=v2_evidence.MAX_JSON_BYTES
+        )
+        projection[receipt_id] = {
+            "path": f"protected/{index}.json", "sha256": v2_evidence.canonical_sha256(document),
+            "blob": hashlib.sha1(f"blob:{index}".encode()).hexdigest(),
+        }
+        loaded["dependencies"][receipt_id] = {
+            **projection[receipt_id], "snapshot_path": path.relative_to(run_dir).as_posix(),
+            "file_sha256": file_sha, "bytes": byte_count,
+        }
+    v2_runner.save_state(run_dir, loaded)
+    analysis = {"disposition": "no-change"}
+    with (
+        mock.patch.object(
+            v2_runner, "_live_authority",
+            return_value=("f" * 40, dependency_documents, {}),
+        ),
+        mock.patch.object(v2_terminal, "dependency_projection", return_value=projection),
+        mock.patch.object(v2_terminal, "derive_manifest", return_value=manifest),
+        mock.patch.object(experiment, "compute_v2_analysis", return_value=analysis),
+        mock.patch.object(experiment.json_schema_lite, "validate", return_value=[]),
+        mock.patch.object(experiment, "v2_semantic_errors", return_value=[]),
+    ):
+        finalized = v2_runner.finalize(run_dir)
+    trace_validation.stop()
+    if finalized["cells"] != [accepted["cell"]]:
+        raise AssertionError("finalize did not survive producer-output deletion")
+
+
 def main() -> int:
     # The matrix projection uses generated executable fixtures, not an installed
     # browser. Product-signature rejection has its own focused adapter test.
     evidence.validate_browser_product = lambda _path, _product: None
     with tempfile.TemporaryDirectory(prefix="pulp-dpr-runner-") as temporary:
         root = Path(temporary)
+        v2_nested_snapshot_test(root)
         manifest_path = root / "manifest.json"
         manifest = runner.load_json(experiment.DEFAULT_MANIFEST)
         write_json(manifest_path, manifest)
@@ -1671,10 +1836,13 @@ def main() -> int:
         "gpu_dpr_runner_selftest=true matrix_cells=84 "
         f"planted_bad_evidence={planted} adapter_protocol=pass "
         "skip_inconclusive_incomplete=pass timeout_incomplete=pass "
-        "malformed_receipt_incomplete=pass b5_gate=pass"
+        "malformed_receipt_incomplete=pass nested_v2_snapshot_finalize=pass "
+        "b5_gate=pass"
     )
     return 0
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--v2-nested-producer":
+        raise SystemExit(v2_nested_producer(sys.argv[2:]))
     raise SystemExit(main())

@@ -301,6 +301,116 @@ def _artifact_suffix(kind: str) -> str:
     return ".bin" if kind == "product" else ".json"
 
 
+def _nested_daw_destination(snapshot_root: Path, index: int, field: str) -> Path:
+    names = {
+        "a3_evidence": "a3-evidence.json",
+        "host_product": "host-product.bin",
+        "lifecycle": "lifecycle.json",
+    }
+    if field not in names:
+        raise V2RunnerError(f"unsupported nested DAW evidence field: {field}")
+    return snapshot_root / "daw" / str(index) / names[field]
+
+
+def _nested_reference(
+    run_dir: Path, path: Path, label: str, *, max_bytes: int,
+    executable: bool = False,
+) -> dict[str, Any]:
+    digest, byte_count, _ = evidence.file_identity(path, label, max_bytes=max_bytes)
+    if executable and not os.lstat(path).st_mode & 0o111:
+        raise V2RunnerError(f"{label} snapshot is not executable")
+    return {
+        "path": path.relative_to(run_dir).as_posix(),
+        "sha256": digest,
+        "bytes": byte_count,
+    }
+
+
+def _snapshot_nested_daw_evidence(
+    run_dir: Path, producer_root: Path, snapshot_root: Path,
+    identity_document: dict[str, Any], source_product: dict[str, Any],
+    retained_product: dict[str, Any],
+) -> dict[str, Any]:
+    rewritten = json.loads(json.dumps(identity_document))
+    documents = rewritten.get("daw_receipt_documents")
+    projections = rewritten.get("daw_subreceipts")
+    if (
+        not isinstance(documents, list) or not isinstance(projections, list)
+        or len(documents) != len(projections)
+    ):
+        raise V2RunnerError("producer identity receipt lacks DAW receipt documents")
+    retained_product_reference = {
+        "path": retained_product["path"], "sha256": retained_product["sha256"],
+        "bytes": retained_product["bytes"],
+    }
+    source_product_reference = {
+        "path": source_product["path"], "sha256": source_product["sha256"],
+        "bytes": source_product["bytes"],
+    }
+    for index, document in enumerate(documents):
+        if not isinstance(document, dict):
+            raise V2RunnerError("producer DAW receipt document is malformed")
+        for field, max_bytes, executable in (
+            ("a3_evidence", evidence.MAX_JSON_BYTES, False),
+            ("host_product", evidence.MAX_PRODUCT_BYTES, True),
+            ("lifecycle", evidence.MAX_JSON_BYTES, False),
+        ):
+            reference = document.get(field)
+            if not isinstance(reference, dict) or set(reference) != {
+                "path", "sha256", "bytes"
+            }:
+                raise V2RunnerError(f"producer DAW {field} reference is malformed")
+            destination = _nested_daw_destination(snapshot_root, index, field)
+            evidence.snapshot_regular(
+                producer_root, reference["path"], destination,
+                f"producer DAW {field} {index}", max_bytes=max_bytes,
+                expected_sha256=reference["sha256"], expected_bytes=reference["bytes"],
+                executable=executable,
+            )
+            document[field] = _nested_reference(
+                run_dir, destination, f"retained DAW {field} {index}",
+                max_bytes=max_bytes, executable=executable,
+            )
+        if document.get("product") != source_product_reference:
+            raise V2RunnerError("producer DAW product reference differs from cell product")
+        document["product"] = retained_product_reference
+        projections[index]["receipt_sha256"] = evidence.canonical_sha256(document)
+    return rewritten
+
+
+def _expected_nested_daw_evidence(
+    run_dir: Path, snapshot_root: Path, source: dict[str, Any],
+    retained_product: dict[str, Any],
+) -> dict[str, Any]:
+    rewritten = json.loads(json.dumps(source))
+    documents = rewritten.get("daw_receipt_documents")
+    projections = rewritten.get("daw_subreceipts")
+    if (
+        not isinstance(documents, list) or not isinstance(projections, list)
+        or len(documents) != len(projections)
+    ):
+        raise V2RunnerError("retained producer identity lacks DAW receipt documents")
+    for index, document in enumerate(documents):
+        if not isinstance(document, dict):
+            raise V2RunnerError("retained producer DAW receipt is malformed")
+        for field, max_bytes, executable in (
+            ("a3_evidence", evidence.MAX_JSON_BYTES, False),
+            ("host_product", evidence.MAX_PRODUCT_BYTES, True),
+            ("lifecycle", evidence.MAX_JSON_BYTES, False),
+        ):
+            destination = _nested_daw_destination(snapshot_root, index, field)
+            document[field] = _nested_reference(
+                run_dir, destination, f"retained DAW {field} {index}",
+                max_bytes=max_bytes, executable=executable,
+            )
+        document["product"] = {
+            "path": retained_product["path"], "sha256": retained_product["sha256"],
+            "bytes": retained_product["bytes"],
+        }
+        projections[index]["receipt_sha256"] = evidence.canonical_sha256(document)
+    return rewritten
+
+
 def reject_issued_attempt(
     run_dir: Path, key: str, nonce: str, reason: str,
 ) -> None:
@@ -439,14 +549,14 @@ def ingest_completed_attempt(
     declared_artifacts = cell.get("artifacts")
     if not isinstance(declared_artifacts, list):
         raise V2RunnerError("producer cell lacks artifact inventory")
+    source_artifacts = evidence._artifact_map(cell)
+    cell = json.loads(json.dumps(cell))
     snapshot_root = run_dir / "snapshots" / key / nonce
-    rewritten: list[dict[str, Any]] = []
-    for artifact in declared_artifacts:
-        if not isinstance(artifact, dict) or set(artifact) != evidence.ARTIFACT_FIELDS:
-            raise V2RunnerError("producer artifact differs from the closed descriptor")
-        kind = artifact.get("kind")
-        if kind not in evidence.ARTIFACT_KINDS:
-            raise V2RunnerError("producer artifact kind is unsupported")
+    retained_artifacts: dict[str, dict[str, Any]] = {}
+    for kind in sorted(
+        evidence.ARTIFACT_KINDS - {"identity_receipt", "raw_trials"}
+    ):
+        artifact = source_artifacts[kind]
         destination = snapshot_root / f"{kind}{_artifact_suffix(kind)}"
         max_bytes = (
             evidence.MAX_CAPTURE_BYTES if kind in {"capture", "reference_capture"}
@@ -459,12 +569,67 @@ def ingest_completed_attempt(
             max_bytes=max_bytes, expected_sha256=artifact["sha256"],
             expected_bytes=artifact["bytes"], executable=kind == "product",
         )
-        rewritten.append({
+        retained_artifacts[kind] = {
             **artifact,
             "path": destination.relative_to(run_dir).as_posix(),
-        })
-    cell = json.loads(json.dumps(cell))
-    cell["artifacts"] = rewritten
+        }
+    source_identity = source_artifacts["identity_receipt"]
+    source_identity_path = snapshot_root / "identity_receipt.source.json"
+    evidence.snapshot_regular(
+        producer_root, source_identity["path"], source_identity_path,
+        "producer identity_receipt", max_bytes=evidence.MAX_JSON_BYTES,
+        expected_sha256=source_identity["sha256"], expected_bytes=source_identity["bytes"],
+    )
+    identity_document, source_identity_sha, source_identity_bytes = evidence.regular_json(
+        run_dir, source_identity_path.relative_to(run_dir).as_posix(),
+        "producer identity_receipt snapshot",
+    )
+    if (
+        source_identity_sha != source_identity["sha256"]
+        or source_identity_bytes != source_identity["bytes"]
+    ):
+        raise V2RunnerError("producer identity_receipt snapshot changed")
+    rewritten_identity = _snapshot_nested_daw_evidence(
+        run_dir, producer_root, snapshot_root, identity_document,
+        source_artifacts["product"], retained_artifacts["product"],
+    )
+    cell["daw_subreceipts"] = rewritten_identity["daw_subreceipts"]
+    retained_identity_path = snapshot_root / "identity_receipt.json"
+    _write_new_json(retained_identity_path, rewritten_identity)
+    identity_sha, identity_bytes, _ = evidence.file_identity(
+        retained_identity_path, "retained identity_receipt",
+        max_bytes=evidence.MAX_JSON_BYTES,
+    )
+    retained_artifacts["identity_receipt"] = {
+        **source_identity, "path": retained_identity_path.relative_to(run_dir).as_posix(),
+        "sha256": identity_sha, "bytes": identity_bytes,
+    }
+    source_raw = source_artifacts["raw_trials"]
+    source_raw_path = snapshot_root / "raw_trials.source.json"
+    evidence.snapshot_regular(
+        producer_root, source_raw["path"], source_raw_path, "producer raw_trials",
+        max_bytes=evidence.MAX_JSON_BYTES, expected_sha256=source_raw["sha256"],
+        expected_bytes=source_raw["bytes"],
+    )
+    raw_document, raw_source_sha, raw_source_bytes = evidence.regular_json(
+        run_dir, source_raw_path.relative_to(run_dir).as_posix(),
+        "producer raw_trials snapshot",
+    )
+    if raw_source_sha != source_raw["sha256"] or raw_source_bytes != source_raw["bytes"]:
+        raise V2RunnerError("producer raw_trials snapshot changed")
+    raw_document["cell"] = evidence.cell_payload(cell)
+    retained_raw_path = snapshot_root / "raw_trials.json"
+    _write_new_json(retained_raw_path, raw_document)
+    raw_sha, raw_bytes, _ = evidence.file_identity(
+        retained_raw_path, "retained raw_trials", max_bytes=evidence.MAX_JSON_BYTES,
+    )
+    retained_artifacts["raw_trials"] = {
+        **source_raw, "path": retained_raw_path.relative_to(run_dir).as_posix(),
+        "sha256": raw_sha, "bytes": raw_bytes,
+    }
+    cell["artifacts"] = [
+        retained_artifacts[kind] for kind in sorted(evidence.ARTIFACT_KINDS)
+    ]
     manifest = load_manifest(run_dir, state)
     analyzer = evidence.trace_analyzer_identity(
         run_dir, state["trace_analyzer"]["sha256"]
@@ -689,20 +854,72 @@ def rederive_cell(
     if set(source_artifacts) != evidence.ARTIFACT_KINDS or set(accepted_artifacts) != evidence.ARTIFACT_KINDS:
         raise V2RunnerError(f"accepted artifact inventory differs: {key}")
     rewritten = []
+    snapshot_root = Path("snapshots") / key / accepted["attempt_nonce"]
     for kind in sorted(evidence.ARTIFACT_KINDS):
         source = source_artifacts[kind]
         retained = accepted_artifacts[kind]
-        if {field: source[field] for field in evidence.ARTIFACT_FIELDS - {"path"}} != {
-            field: retained[field] for field in evidence.ARTIFACT_FIELDS - {"path"}
+        stable_fields = evidence.ARTIFACT_FIELDS - {"path", "sha256", "bytes"}
+        compared_fields = (
+            stable_fields if kind in {"identity_receipt", "raw_trials"}
+            else evidence.ARTIFACT_FIELDS - {"path"}
+        )
+        if {field: source[field] for field in compared_fields} != {
+            field: retained[field] for field in compared_fields
         }:
             raise V2RunnerError(f"accepted {kind} metadata differs from producer: {key}")
         expected_path = (
-            Path("snapshots") / key / accepted["attempt_nonce"]
-            / f"{kind}{_artifact_suffix(kind)}"
+            snapshot_root / f"{kind}{_artifact_suffix(kind)}"
         ).as_posix()
         if retained["path"] != expected_path:
             raise V2RunnerError(f"accepted {kind} path is substituted: {key}")
         rewritten.append(retained)
+    source_identity_path = snapshot_root / "identity_receipt.source.json"
+    source_identity, source_identity_sha, source_identity_bytes = evidence.regular_json(
+        run_dir, source_identity_path.as_posix(), f"producer identity receipt {key}",
+    )
+    source_identity_artifact = source_artifacts["identity_receipt"]
+    if (
+        source_identity_sha != source_identity_artifact["sha256"]
+        or source_identity_bytes != source_identity_artifact["bytes"]
+    ):
+        raise V2RunnerError(f"producer identity receipt snapshot changed: {key}")
+    retained_identity_artifact = accepted_artifacts["identity_receipt"]
+    retained_identity, retained_identity_sha, retained_identity_bytes = evidence.regular_json(
+        run_dir, retained_identity_artifact["path"], f"retained identity receipt {key}",
+    )
+    expected_identity = _expected_nested_daw_evidence(
+        run_dir, run_dir / snapshot_root, source_identity,
+        accepted_artifacts["product"],
+    )
+    if (
+        retained_identity_sha != retained_identity_artifact["sha256"]
+        or retained_identity_bytes != retained_identity_artifact["bytes"]
+        or retained_identity != expected_identity
+    ):
+        raise V2RunnerError(f"retained nested DAW evidence changed: {key}")
+    derived_cell["daw_subreceipts"] = expected_identity["daw_subreceipts"]
+    source_raw_path = snapshot_root / "raw_trials.source.json"
+    source_raw, source_raw_sha, source_raw_bytes = evidence.regular_json(
+        run_dir, source_raw_path.as_posix(), f"producer raw trials {key}",
+    )
+    source_raw_artifact = source_artifacts["raw_trials"]
+    if (
+        source_raw_sha != source_raw_artifact["sha256"]
+        or source_raw_bytes != source_raw_artifact["bytes"]
+    ):
+        raise V2RunnerError(f"producer raw-trials snapshot changed: {key}")
+    expected_raw = json.loads(json.dumps(source_raw))
+    expected_raw["cell"] = evidence.cell_payload(derived_cell)
+    retained_raw_artifact = accepted_artifacts["raw_trials"]
+    retained_raw, retained_raw_sha, retained_raw_bytes = evidence.regular_json(
+        run_dir, retained_raw_artifact["path"], f"retained raw trials {key}",
+    )
+    if (
+        retained_raw_sha != retained_raw_artifact["sha256"]
+        or retained_raw_bytes != retained_raw_artifact["bytes"]
+        or retained_raw != expected_raw
+    ):
+        raise V2RunnerError(f"retained raw-trials rewrite changed: {key}")
     derived_cell["artifacts"] = rewritten
     if derived_cell != accepted_cell:
         raise V2RunnerError(f"accepted cell differs from producer receipt: {key}")
