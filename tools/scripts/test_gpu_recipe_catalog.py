@@ -278,21 +278,25 @@ class CatalogContract(unittest.TestCase):
         self.assertIn("b4-vellum-signature-prewarm", handoff["required_package_ids"])
         self.assertEqual(
             handoff["authorities"]["plan"]["revision"],
-            "25e574d7f229bf50948b0b8ddbbdff9e89543c05",
+            "bec7fb85c6f8886d32fac0a34be491eb6821a741",
         )
-        self.assertEqual(handoff["upstream"]["current_comment_id"], 5462803929)
+        self.assertEqual(handoff["upstream"]["current_comment_id"], 5464003821)
         comments = {
             comment["id"]: comment
             for comment in handoff["upstream"]["comments"]
         }
-        self.assertEqual(comments[5462803929]["status"], "current")
+        self.assertEqual(comments[5464003821]["status"], "current")
         self.assertEqual(
-            comments[5462803929]["supersedes"],
-            [5461645539, 5462069172],
+            comments[5464003821]["supersedes"],
+            [5461645539, 5462069172, 5462803929],
         )
-        for superseded in (5461645539, 5462069172):
+        for superseded in (5461645539, 5462069172, 5462803929):
             self.assertEqual(comments[superseded]["status"], "superseded")
-            self.assertEqual(comments[superseded]["superseded_by"], 5462803929)
+            self.assertEqual(comments[superseded]["superseded_by"], 5464003821)
+        self.assertIn(
+            "foundational Vellum cutover is merged on protected Pulp main",
+            handoff["cutover_trigger"],
+        )
         host = next(
             entry
             for entry in handoff["entries"]
@@ -306,6 +310,15 @@ class CatalogContract(unittest.TestCase):
         )
         self.assertEqual(tuple(b0["depends_on"]), catalog.HANDOFF_B0_DEPENDENCIES)
         self.assertEqual(b0["delete_paths"], [])
+        b4 = next(
+            entry
+            for entry in handoff["entries"]
+            if entry["id"] == "b4-vellum-observability-executor"
+        )
+        self.assertEqual(b4["accepted_dispositions"], ["pass"])
+        self.assertIn(
+            "regardless of the A3 optimization disposition", b4["trigger"]
+        )
         a4 = next(
             entry for entry in handoff["entries"]
             if entry["id"] == "a4-pulp-dpr-experiment"
