@@ -26,6 +26,8 @@
 #include <fcntl.h>
 #include <optional>
 #include <limits>
+#include <poll.h>
+#include <signal.h>
 #include <spawn.h>
 #include <string>
 #include <thread>
@@ -446,11 +448,54 @@ bool normalize_handshake_fd(int& descriptor) {
     return true;
 }
 
+enum class ReapResult { reaped, timed_out, failed };
+
+ReapResult reap_child_until(pid_t pid, Clock::time_point deadline, int& status) {
+    for (;;) {
+        const auto waited = waitpid(pid, &status, WNOHANG);
+        if (waited == pid) return ReapResult::reaped;
+        if (waited < 0 && errno != EINTR) return ReapResult::failed;
+        const auto now = Clock::now();
+        if (now >= deadline) return ReapResult::timed_out;
+        const auto remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - now).count();
+        (void)poll(nullptr, 0, static_cast<int>(std::clamp<std::int64_t>(
+            remaining_ms, 1, 10)));
+    }
+}
+
+bool terminate_and_reap_child(pid_t pid, int& status, std::string& error) {
+    if (kill(-pid, SIGTERM) != 0 && errno != ESRCH) {
+        error = "fresh-process trial process group could not be terminated";
+        return false;
+    }
+    auto reaped = reap_child_until(pid, Clock::now() + std::chrono::milliseconds(250), status);
+    if (reaped == ReapResult::reaped) return true;
+    if (reaped == ReapResult::failed) {
+        error = "fresh-process trial could not be reaped after termination";
+        return false;
+    }
+    if (kill(-pid, SIGKILL) != 0 && errno != ESRCH) {
+        error = "fresh-process trial process group could not be killed";
+        return false;
+    }
+    reaped = reap_child_until(pid, Clock::now() + std::chrono::seconds(2), status);
+    if (reaped != ReapResult::reaped) {
+        error = "fresh-process trial could not be reaped after forced termination";
+        return false;
+    }
+    return true;
+}
+
+[[maybe_unused]] constexpr auto kFreshProcessTrialTimeout = std::chrono::seconds(120);
+[[maybe_unused]] constexpr auto kParentReleaseTimeout = std::chrono::seconds(5);
+
 [[maybe_unused]] std::optional<choc::value::Value> run_first_frame_child(
     const DprMeasurementRequest& request,
     const std::filesystem::path& request_path,
     const std::filesystem::path& producer_path,
     const std::filesystem::path& output_path,
+    std::chrono::milliseconds timeout,
     std::string& error) {
     int acknowledgement_pipe[2]{-1, -1};
     int release_pipe[2]{-1, -1};
@@ -483,6 +528,20 @@ bool normalize_handshake_fd(int& descriptor) {
     posix_spawn_file_actions_addclose(&actions, release_pipe[0]);
     posix_spawn_file_actions_addclose(&actions, release_pipe[1]);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawnattr_t attributes;
+    const bool attributes_initialized = posix_spawnattr_init(&attributes) == 0;
+    if (!attributes_initialized ||
+        posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP) != 0 ||
+        posix_spawnattr_setpgroup(&attributes, 0) != 0) {
+        close(acknowledgement_pipe[0]);
+        close(acknowledgement_pipe[1]);
+        close(release_pipe[0]);
+        close(release_pipe[1]);
+        posix_spawn_file_actions_destroy(&actions);
+        if (attributes_initialized) posix_spawnattr_destroy(&attributes);
+        error = "could not isolate the fresh-process trial process group";
+        return std::nullopt;
+    }
     std::vector<std::string> storage{
         producer_path.string(), "--request", request_path.string(),
         "--first-frame-trial", output_path.string(),
@@ -498,14 +557,16 @@ bool normalize_handshake_fd(int& descriptor) {
         close(release_pipe[0]);
         close(release_pipe[1]);
         posix_spawn_file_actions_destroy(&actions);
+        posix_spawnattr_destroy(&attributes);
         error = "could not clear the fresh-process trial ledger path";
         return std::nullopt;
     }
     pid_t pid = 0;
     const auto launched_at = Clock::now();
-    const int spawned = posix_spawn(&pid, producer_path.c_str(), &actions, nullptr,
+    const int spawned = posix_spawn(&pid, producer_path.c_str(), &actions, &attributes,
                                     arguments.data(), environ);
     posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attributes);
     close(acknowledgement_pipe[1]);
     close(release_pipe[0]);
     if (spawned != 0) {
@@ -514,28 +575,77 @@ bool normalize_handshake_fd(int& descriptor) {
         error = "could not launch a fresh-process first-frame trial";
         return std::nullopt;
     }
+    const auto deadline = launched_at + timeout;
     char acknowledgement = 0;
-    ssize_t acknowledgement_bytes = -1;
-    do {
-        acknowledgement_bytes = read(
-            acknowledgement_pipe[0], &acknowledgement, sizeof(acknowledgement));
-    } while (acknowledgement_bytes < 0 && errno == EINTR);
+    bool acknowledged = false;
+    bool child_reaped = false;
+    bool wait_failed = false;
+    int status = 0;
+    for (;;) {
+        const auto waited = waitpid(pid, &status, WNOHANG);
+        if (waited == pid) {
+            child_reaped = true;
+            break;
+        }
+        if (waited < 0 && errno != EINTR) {
+            wait_failed = true;
+            break;
+        }
+        const auto now = Clock::now();
+        if (now >= deadline) break;
+        const auto remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - now).count();
+        pollfd descriptor{acknowledgement_pipe[0], POLLIN, 0};
+        const auto polled = poll(&descriptor, 1, static_cast<int>(std::clamp<std::int64_t>(
+            remaining_ms, 1, 50)));
+        if (polled < 0 && errno != EINTR) {
+            wait_failed = true;
+            break;
+        }
+        if (polled <= 0 || (descriptor.revents & (POLLIN | POLLHUP)) == 0) continue;
+        ssize_t bytes = -1;
+        do {
+            bytes = read(acknowledgement_pipe[0], &acknowledgement,
+                         sizeof(acknowledgement));
+        } while (bytes < 0 && errno == EINTR);
+        if (bytes == 1) acknowledged = acknowledgement == 'R';
+        if (bytes >= 0) break;
+        wait_failed = true;
+        break;
+    }
     const auto acknowledged_at = Clock::now();
     close(acknowledgement_pipe[0]);
     // The child cannot begin ledger serialization or teardown until the
     // parent has captured the acknowledgement timestamp.
     close(release_pipe[1]);
-    int status = 0;
-    if (waitpid(pid, &status, 0) != pid) {
-        error = "fresh-process first-frame trial could not be reaped";
+    if (wait_failed) {
+        if (!child_reaped) (void)terminate_and_reap_child(pid, status, error);
+        if (error.empty())
+            error = "fresh-process first-frame trial could not be monitored";
         return std::nullopt;
+    }
+    if (!acknowledged) {
+        if (!child_reaped && !terminate_and_reap_child(pid, status, error))
+            return std::nullopt;
+        error = Clock::now() >= deadline
+            ? "fresh-process frame/readback acknowledgement timed out"
+            : "fresh-process frame/readback acknowledgement is missing";
+        return std::nullopt;
+    }
+    if (!child_reaped) {
+        const auto reaped = reap_child_until(pid, deadline, status);
+        if (reaped != ReapResult::reaped) {
+            if (reaped == ReapResult::failed) {
+                error = "fresh-process first-frame trial could not be reaped";
+                return std::nullopt;
+            }
+            if (!terminate_and_reap_child(pid, status, error)) return std::nullopt;
+            error = "fresh-process first-frame trial timed out during teardown";
+            return std::nullopt;
+        }
     }
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         error = "fresh-process first-frame trial failed";
-        return std::nullopt;
-    }
-    if (acknowledgement_bytes != 1 || acknowledgement != 'R') {
-        error = "fresh-process frame/readback acknowledgement is missing";
         return std::nullopt;
     }
     const auto text = read_text(output_path);
@@ -580,10 +690,11 @@ std::optional<double> run_first_frame_child_time_for_test(
     const std::filesystem::path& request_path,
     const std::filesystem::path& producer_path,
     const std::filesystem::path& output_path,
-    std::string* error) {
+    std::string* error,
+    std::chrono::milliseconds timeout) {
     std::string message;
     const auto entry = run_first_frame_child(
-        request, request_path, producer_path, output_path, message);
+        request, request_path, producer_path, output_path, timeout, message);
     if (!entry) {
         if (error) *error = std::move(message);
         return std::nullopt;
@@ -630,12 +741,25 @@ int run_dpr_first_frame_trial(const DprMeasurementRequest& request,
         return 3;
     }
     char release = 0;
-    ssize_t release_bytes = -1;
+    pollfd release_descriptor{STDIN_FILENO, POLLIN, 0};
+    int release_ready = -1;
     do {
-        release_bytes = read(STDIN_FILENO, &release, sizeof(release));
-    } while (release_bytes < 0 && errno == EINTR);
+        release_ready = poll(
+            &release_descriptor, 1,
+            static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                kParentReleaseTimeout).count()));
+    } while (release_ready < 0 && errno == EINTR);
+    ssize_t release_bytes = -1;
+    if (release_ready > 0 &&
+        (release_descriptor.revents & (POLLIN | POLLHUP)) != 0) {
+        do {
+            release_bytes = read(STDIN_FILENO, &release, sizeof(release));
+        } while (release_bytes < 0 && errno == EINTR);
+    }
     if (release_bytes != 0) {
-        if (error) *error = "first GPU frame/readback acknowledgement was not released";
+        if (error) *error = release_ready == 0
+            ? "first GPU frame/readback acknowledgement release timed out"
+            : "first GPU frame/readback acknowledgement was not released";
         return 3;
     }
     auto root = choc::value::createObject("");
@@ -700,7 +824,7 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
         const auto trial_path = cell / ("first-frame-" + request.attempt_nonce +
                                         "-" + std::to_string(trial) + ".json");
         auto entry = run_first_frame_child(request, request_path, producer_path,
-                                           trial_path, message);
+                                           trial_path, kFreshProcessTrialTimeout, message);
         if (!entry || (*entry)["producer_sha256"].getString() != *producer_digest ||
             (*entry)["content_digest"].getString() != request.expected_content_digest ||
             (*entry)["pulp_sha"].getString() != request.pulp_sha) {

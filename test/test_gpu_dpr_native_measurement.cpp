@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <signal.h>
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -16,7 +17,8 @@ std::optional<double> run_first_frame_child_time_for_test(
     const std::filesystem::path& request_path,
     const std::filesystem::path& producer_path,
     const std::filesystem::path& output_path,
-    std::string* error);
+    std::string* error,
+    std::chrono::milliseconds timeout = std::chrono::seconds(5));
 
 } // namespace pulp::tooling::gpu_probe::testing
 
@@ -201,4 +203,51 @@ TEST_CASE("fresh-process handshake survives closed parent stdio",
     CHECK(outcome == 'P');
     CHECK(WIFEXITED(status));
     CHECK(WEXITSTATUS(status) == 0);
+}
+
+TEST_CASE("fresh-process handshake bounds a wedged producer without acknowledgement",
+          "[gpu][dpr][measurement]") {
+    const auto root = std::filesystem::temp_directory_path() /
+        ("pulp-dpr-wedged-child-" + std::to_string(getpid()));
+    std::filesystem::create_directories(root);
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{root};
+
+    const auto producer = root / "wedged-first-frame.sh";
+    const auto output = root / "first-frame.json";
+    const auto pid_path = root / "producer.pid";
+    const auto request_path = root / "request.json";
+    std::ofstream(producer, std::ios::trunc)
+        << "#!/bin/sh\n"
+           "trap '' TERM\n"
+           "printf '%s\\n' \"$$\" > '" << pid_path.string() << "'\n"
+           "while :; do sleep 1; done\n";
+    std::filesystem::permissions(
+        producer,
+        std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write |
+            std::filesystem::perms::owner_exec,
+        std::filesystem::perm_options::replace);
+
+    const auto parsed = probe::parse_dpr_measurement_request(request());
+    REQUIRE(parsed);
+    std::string error;
+    const auto wall_started = std::chrono::steady_clock::now();
+    const auto measured = probe::testing::run_first_frame_child_time_for_test(
+        *parsed, request_path, producer, output, &error,
+        std::chrono::milliseconds(500));
+    const auto wall_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - wall_started).count();
+    CHECK_FALSE(measured);
+    CHECK(error.find("acknowledgement timed out") != std::string::npos);
+    CHECK(wall_ms >= 400.0);
+    CHECK(wall_ms < 2000.0);
+    std::ifstream pid_input(pid_path);
+    pid_t producer_pid = 0;
+    REQUIRE(pid_input >> producer_pid);
+    errno = 0;
+    CHECK(kill(producer_pid, 0) == -1);
+    CHECK(errno == ESRCH);
 }
