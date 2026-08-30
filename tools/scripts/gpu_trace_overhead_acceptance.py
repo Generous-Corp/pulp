@@ -69,7 +69,6 @@ NON_HUMAN_IDENTITY_PHRASES = frozenset({
     "artificialintelligence", "reasoningsystem",
 })
 A2T_EXECUTING_SOURCE_PATHS = frozenset({
-    "docs/contracts/gpu-trace-human-review-v1.schema.json",
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
     "tools/scripts/json_schema_lite.py",
