@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -363,12 +364,17 @@ class AdjudicationTests(unittest.TestCase):
         plugin.mkdir(parents=True)
         binary = plugin / "plugin.dylib"
         binary.write_bytes(b"fixture plugin binary")
+        original_stat = binary.stat()
         context = self.fixture.context()
         with mock.patch.dict("os.environ", {"RACK_PLUGIN_DIR": str(plugin_root)}):
             A.adjudicate_scene(
                 context, context.scenes[0], self.fixture.rack_app,
                 runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
-            binary.write_bytes(b"changed fixture plugin binary")
+            binary.write_bytes(b"tampered plugin bytes")
+            os.utime(binary, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+            self.assertEqual(binary.stat().st_ino, original_stat.st_ino)
+            self.assertEqual(binary.stat().st_size, original_stat.st_size)
+            self.assertEqual(binary.stat().st_mtime_ns, original_stat.st_mtime_ns)
             runner = FakeRunner()
             with self.assertRaisesRegex(A.AdjudicationError, "evidence changed"):
                 A.adjudicate_scene(
@@ -429,6 +435,23 @@ class AdjudicationTests(unittest.TestCase):
                 "dsp_and_audio classification does not match its evidence"):
             A.write_summary(
                 self.fixture.context(), self.fixture.rack_app)
+
+    def test_summary_refuses_failed_command_evidence_edited_to_pass(self) -> None:
+        self.assertEqual(A.adjudicate_campaign(
+            catalogue=self.fixture.catalogue, run_root=self.fixture.run_root,
+            rack_app=self.fixture.rack_app, runner=FakeRunner(fidelity_code=1),
+            idiom_loader=lambda _root: FakeChecker()), 1)
+        (self.fixture.run_root / "qualification-summary.json").unlink()
+        for scene_id in Q.SCENE_IDS:
+            path = self.fixture.run_root / scene_id / "adjudication.json"
+            receipt = json.loads(path.read_text())
+            receipt["checks"]["dsp_and_audio"]["exit_code"] = 0
+            receipt["checks"]["dsp_and_audio"]["status"] = "PASS"
+            receipt["status"] = "PASS"
+            path.write_text(json.dumps(receipt) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(
+                A.AdjudicationError, "recorded check evidence changed"):
+            A.write_summary(self.fixture.context(), self.fixture.rack_app)
 
     def test_interrupted_receipt_publication_can_rerun_fidelity(self) -> None:
         context = self.fixture.context()

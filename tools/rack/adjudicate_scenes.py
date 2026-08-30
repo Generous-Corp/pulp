@@ -27,16 +27,13 @@ from typing import Callable
 import qualify_scenes as Q
 
 
-ADJUDICATION_SCHEMA = "forge.modular.scene_adjudication.v1"
+ADJUDICATION_SCHEMA = "forge.modular.scene_adjudication.v2"
 SUMMARY_SCHEMA = "forge.modular.qualification_summary.v1"
 CHECK_NAMES = (
     "module_availability", "rack_load", "idiom_contract",
     "causal_witness", "negative_control", "dsp_and_audio",
 )
 STATUSES = {"PASS", "FAIL", "WITHHOLD"}
-_FILE_DIGEST_CACHE: dict[tuple[str, int, int, int], str] = {}
-
-
 class AdjudicationError(RuntimeError):
     """A fail-closed provenance, execution, or receipt error."""
 
@@ -70,6 +67,14 @@ def _status(checks: dict) -> str:
     if any(status == "FAIL" for status in statuses):
         return "FAIL"
     return "PASS"
+
+
+def _check_evidence_digest(checks: dict) -> str:
+    evidence = {
+        name: {key: value for key, value in checks[name].items() if key != "status"}
+        for name in CHECK_NAMES
+    }
+    return Q._digest(evidence)
 
 
 def _command_result(command: list[str], completed: subprocess.CompletedProcess) -> dict:
@@ -136,22 +141,12 @@ def _load_idiom_checker(toolchain: Path) -> ModuleType:
     return module
 
 
-def _cached_file_digest(path: Path) -> str:
-    stat = path.stat()
-    key = (str(path.resolve()), stat.st_ino, stat.st_size, stat.st_mtime_ns)
-    digest = _FILE_DIGEST_CACHE.get(key)
-    if digest is None:
-        digest = Q._file_digest(path)
-        _FILE_DIGEST_CACHE[key] = digest
-    return digest
-
-
 def _tree_identity(path: Path) -> dict | None:
     if not path.exists():
         return None
     resolved = path.resolve()
     if resolved.is_file():
-        return {"root": str(resolved), "files": {".": _cached_file_digest(resolved)}}
+        return {"root": str(resolved), "files": {".": Q._file_digest(resolved)}}
     files: dict[str, str] = {}
     links: dict[str, str] = {}
     for root, directories, names in os.walk(resolved, followlinks=False):
@@ -162,7 +157,7 @@ def _tree_identity(path: Path) -> dict | None:
             if entry.is_symlink():
                 links[relative] = os.readlink(entry)
             elif entry.is_file():
-                files[relative] = _cached_file_digest(entry)
+                files[relative] = Q._file_digest(entry)
     return {"root": str(resolved), "files": files, "links": links}
 
 
@@ -527,6 +522,8 @@ def _validate_existing(path: Path, scene_id: str, bindings: dict) -> dict:
     if any(not isinstance(checks[name], dict) or
            checks[name].get("status") not in STATUSES for name in CHECK_NAMES):
         raise AdjudicationError(f"{scene_id} adjudication has an invalid check status")
+    if receipt.get("check_evidence_sha256") != _check_evidence_digest(checks):
+        raise AdjudicationError(f"{scene_id} recorded check evidence changed")
     has_audio = isinstance(receipt.get("audio"), dict)
     for name in CHECK_NAMES:
         if checks[name]["status"] != _recorded_check_status(
@@ -654,6 +651,7 @@ def adjudicate_scene(context: CampaignContext, scene: dict, rack_app: Path,
             "status": _status(checks),
             "bindings": bindings,
             "checks": checks,
+            "check_evidence_sha256": _check_evidence_digest(checks),
         }
         if audio is not None:
             receipt["audio"] = audio
