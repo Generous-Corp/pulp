@@ -750,7 +750,7 @@
           "role": "entrypoint",
           "kind": "cpp_type",
           "include": "pulp/midi/humanize.hpp",
-          "qualified_name": "pulp::midi::Humanize",
+          "qualified_name": "pulp::midi::Humanize<>",
           "target": "Pulp::midi",
           "availability": {
             "state": "available",
@@ -773,7 +773,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:7acb6ea0d7d06114f0e9a15bd414912a8cba5f20a4ada27ef1d5f2f2fef859cd"
+      "contract_digest": "sha256:5eef4cdc9af21ef52ef177965ec0d00435b91650620de7e5add882fd03ffa396"
     },
     {
       "key": "midi.keyboard-split",

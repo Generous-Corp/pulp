@@ -168,8 +168,8 @@ int main() {
     }
     {
         // midi.humanize
-        static_assert(sizeof(pulp::midi::Humanize) > 0);
-        pulp::midi::Humanize probe_value_0{}; (void)probe_value_0.valid();
+        static_assert(sizeof(pulp::midi::Humanize<>) > 0);
+        pulp::midi::Humanize<> probe_value_0{}; (void)probe_value_0.valid();
     }
     {
         // midi.keyboard-split
