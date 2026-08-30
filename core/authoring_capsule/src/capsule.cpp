@@ -101,9 +101,9 @@ bool is_trust_status(CapsuleStatus status) {
 /// they travel as raw canonical JSON rather than as parsed fields. A row counts
 /// as a signature when it carries a signer, an algorithm, and decodable base64
 /// signature bytes; every other row is some other kind of attestation and is
-/// skipped. `signed_payload` is carried through untouched: the verifier is the
-/// authority on what it means, and it is handed the digest computed here
-/// regardless.
+/// skipped. `signed_payload_digest` is parsed so the caller can check that an
+/// envelope naming a digest names the one computed from these bytes; the
+/// verifier is handed that computed digest regardless.
 std::optional<SignatureEnvelope> first_signature_envelope(std::string_view attestations_json) {
     choc::value::Value parsed;
     try {
@@ -130,7 +130,7 @@ std::optional<SignatureEnvelope> first_signature_envelope(std::string_view attes
         SignatureEnvelope envelope;
         envelope.signer_id = text("signer_id");
         envelope.algorithm = text("algorithm");
-        envelope.signed_payload = text("signed_payload");
+        envelope.signed_payload_digest = text("signed_payload_digest");
         if (envelope.signer_id.empty() || envelope.algorithm.empty() || signature_b64.empty())
             continue;
 
@@ -315,6 +315,30 @@ runtime::Result<CapsulePreview, CapsuleError> preview_capsule(const CapsuleArchi
         }
     }
 
+    // Step 4b — the roles the profile requires must actually be present. The
+    // profile publishes a role vocabulary precisely so this layer can check it
+    // without understanding what any role means; leaving `required_roles()`
+    // uncalled would make "an unknown required role fails closed" a promise
+    // with no implementation behind it, and a capsule missing its graph or its
+    // parameter map would reach `validate_staged` before anything noticed.
+    //
+    // Only the missing direction is checked here. A role the profile does not
+    // list is not rejected: unknown *optional* metadata must round-trip, and
+    // deciding which unknown roles matter is the profile's job, in
+    // `validate_staged`.
+    if (validator != nullptr) {
+        std::unordered_set<std::string> present_roles;
+        present_roles.reserve(manifest.files.size() + manifest.dependencies.size());
+        for (const auto& entry : manifest.files) present_roles.insert(entry.role);
+        for (const auto& entry : manifest.dependencies) present_roles.insert(entry.role);
+
+        for (const auto& role : validator->required_roles()) {
+            if (present_roles.find(role) == present_roles.end())
+                note(CompatibilityVerdict::unsupported,
+                     make_error(CapsuleStatus::missing_required_role, role, role, {}));
+        }
+    }
+
     // Step 5 — capabilities. Every requirement is reported, available or not,
     // so a caller never has to re-run the checks to explain a refusal.
     preview.capabilities.reserve(manifest.required_capabilities.size());
@@ -342,6 +366,15 @@ runtime::Result<CapsulePreview, CapsuleError> preview_capsule(const CapsuleArchi
     // widens what the steps above concluded.
     if (const auto envelope = first_signature_envelope(manifest.attestations_json)) {
         preview.signer_id = envelope->signer_id;
+
+        // An envelope that names a digest must name THIS one. Checked here as
+        // well as inside the verifier, because a consumer's adapter is free to
+        // ignore the field, and an envelope lifted wholesale from a different
+        // capsule would otherwise reach that adapter looking ordinary.
+        if (!envelope->signed_payload_digest.empty() &&
+            digest_body(envelope->signed_payload_digest) != digest_body(computed_digest))
+            return Err(make_error(CapsuleStatus::signature_invalid, envelope->signer_id,
+                                  computed_digest, envelope->signed_payload_digest));
 
         if (options.verifier == nullptr) {
             // No verifier means no verification. A capsule that carries a
@@ -441,6 +474,27 @@ runtime::Result<void, CapsuleError> admit_to_staging(const CapsuleArchive& archi
                                                      const StagingArea& staging,
                                                      const ExtractionProgress& progress) {
     const Manifest& manifest = preview.manifest;
+
+    // A preview that could not be satisfied is a refusal, not advice. The
+    // preview itself returns Ok for an unsupported capsule so a product can
+    // explain what is missing; this is where that verdict has to bite. Leaving
+    // it to the caller would mean the only thing between a capsule demanding a
+    // capability this runtime lacks and a full extraction was somebody
+    // remembering to read a field.
+    //
+    // `other_product` is deliberately not a refusal: it is understood, just not
+    // ours, and the caller's whole job at that point is to hand it to the
+    // product that owns it.
+    if (preview.compatibility != CompatibilityVerdict::supported &&
+        preview.compatibility != CompatibilityVerdict::other_product) {
+        CapsuleError unmet = preview.unmet;
+        // A preview built by hand could carry a non-verdict here; refuse with
+        // something accurate rather than a status that reads like a stale
+        // rejection.
+        if (unmet.status == CapsuleStatus::ok)
+            unmet = make_error(CapsuleStatus::unsupported_capability, manifest.profile);
+        return Err(std::move(unmet));
+    }
 
     const ProfileValidator* validator = registry.find(manifest.profile);
     if (validator == nullptr)

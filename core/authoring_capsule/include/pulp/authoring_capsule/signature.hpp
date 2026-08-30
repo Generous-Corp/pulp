@@ -25,11 +25,12 @@ struct SignatureEnvelope {
     std::string signer_id;
     std::string algorithm;
     std::vector<std::uint8_t> signature;
-    /// Canonical JSON of what was signed: the manifest's semantic subtree plus
-    /// the revision digest. Signing descriptive metadata would let a title
-    /// change invalidate a signature, or worse, let outer metadata be swapped
-    /// under a valid one.
-    std::string signed_payload;
+    /// The digest this envelope claims to sign, as the capsule spells it
+    /// (`"sha256:…"`). It is compared against the digest the reader
+    /// *computed*, never used in place of it — verifying against a value the
+    /// capsule asserts about itself would accept anything that lies
+    /// consistently.
+    std::string signed_payload_digest;
 };
 
 /// Minimum version the signer will let this capsule be admitted at. Present so

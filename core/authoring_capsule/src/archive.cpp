@@ -954,13 +954,13 @@ write_archive_no_replace(const std::vector<WriteMember>& members, const fs::path
     if (!central_reserve)
         return fail<std::uint64_t>(CapsuleStatus::archive_budget_exceeded, destination.string());
 
-    // symlink_status, not status: a dangling symlink at the destination is
-    // still something already occupying that name.
+    // There is deliberately no early "does the destination exist" check here.
+    // One would be cheaper on the failure path, but it would also be the check
+    // that appears to work: a test can only observe the pre-check, so the
+    // exclusive rename below — the only guard that actually holds when the
+    // destination appears mid-write — would pass its tests while broken. One
+    // guard, and it is the one that is exercised.
     std::error_code ec;
-    const auto existing = fs::symlink_status(destination, ec);
-    if (!ec && fs::exists(existing))
-        return fail<std::uint64_t>(CapsuleStatus::publication_conflict, destination.string());
-
     auto parent = destination.parent_path();
     if (parent.empty())
         parent = fs::path(".");

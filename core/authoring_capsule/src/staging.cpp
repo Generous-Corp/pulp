@@ -661,12 +661,12 @@ runtime::Result<void, CapsuleError> StagingArea::publish_no_replace(const fs::pa
     if (destination_parent.empty() || !fs::is_directory(destination_parent, error) || error)
         return fail(CapsuleStatus::staging_failed, path_to_utf8(destination_parent));
 
-    // A cheap pre-check so an obviously taken name is reported before the tree
-    // is fenced. The rename below remains the authority: only it decides a race.
+    // There is deliberately no early "is the name taken" check. It would be
+    // cheaper on the failure path, but it is also the check a test can observe:
+    // with one in place, breaking the exclusive rename below leaves every test
+    // passing, so the guard that actually decides a race would be the untested
+    // one. The rename is the only authority, and it is the one exercised.
     error.clear();
-    const auto existing = fs::symlink_status(absolute_destination, error);
-    if (!error && existing.type() != fs::file_type::not_found)
-        return fail(CapsuleStatus::publication_conflict, path_to_utf8(absolute_destination));
 
     if (!impl_->handle.still_named_by(impl_->root))
         return fail(CapsuleStatus::staging_failed, path_to_utf8(impl_->root));

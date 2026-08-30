@@ -13,6 +13,7 @@ std::string_view status_token(CapsuleStatus status) noexcept {
         case CapsuleStatus::unsupported_profile_version: return "unsupported_profile_version";
         case CapsuleStatus::unsupported_product: return "unsupported_product";
         case CapsuleStatus::unsupported_capability: return "unsupported_capability";
+        case CapsuleStatus::missing_required_role: return "missing_required_role";
         case CapsuleStatus::runtime_floor_too_old: return "runtime_floor_too_old";
         case CapsuleStatus::schema_migration_refused: return "schema_migration_refused";
         case CapsuleStatus::closure_violation: return "closure_violation";

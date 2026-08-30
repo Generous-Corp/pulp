@@ -25,6 +25,9 @@ enum class CapsuleStatus : std::uint8_t {
     unsupported_profile_version,
     unsupported_product,
     unsupported_capability,
+    /// The profile requires a semantic role this capsule does not carry, so
+    /// the payload cannot satisfy the profile it claims.
+    missing_required_role,
     runtime_floor_too_old,
     schema_migration_refused,
 
