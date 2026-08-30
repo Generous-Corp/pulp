@@ -33,7 +33,7 @@ of Pulp's three first-class plugin formats alongside CLAP and AU v3.
 | Entry-point generator macro | `core/format/include/pulp/format/vst3_entry.hpp` |
 | Editor `IPlugView` implementation | `core/format/src/vst3_plug_view.cpp`, `core/format/include/pulp/format/vst3_plug_view.hpp` |
 | Info.plist template (macOS bundle) | `tools/cmake/PulpInfoPlist.vst3.in` |
-| VST3 SDK fetch | `external/vst3sdk` — `git clone --depth 1 --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk.git` (MIT) |
+| VST3 SDK fetch | `external/vst3sdk` — `git clone --depth 1 --branch v3.8.1_build_84 https://github.com/steinbergmedia/vst3sdk.git` (MIT) |
 | CLI validator invocation | `tools/cli/cmd_validate.cpp` (`pluginval --strictness-level 5 --timeout-ms 30000 --validate …`) |
 
 There is no hand-written `PulpVst3.cmake` helper — the VST3 target is
@@ -809,7 +809,7 @@ until the descriptor gains a richer topology contract.
 
 ### VST3 SDK is MIT, fetched via `git clone` in setup.sh
 
-`external/vst3sdk` is not checked in. `setup.sh` clones v3.8.0_build_66 by
+`external/vst3sdk` is not checked in. `setup.sh` clones v3.8.1_build_84 by
 default. If you bump the SDK version, also update the note in
 `docs/guides/formats.md` and verify `public.sdk/source/...` ABI didn't
 shift.

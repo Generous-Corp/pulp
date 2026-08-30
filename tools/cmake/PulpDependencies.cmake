@@ -467,11 +467,11 @@ if(PULP_ENABLE_SCENE3D)
     set(SIMDJSON_BUILD_STATIC_LIB OFF CACHE BOOL "" FORCE)
     set(SIMDJSON_ENABLE_THREADS OFF CACHE BOOL "" FORCE)
     set(SIMDJSON_SINGLEHEADER OFF CACHE BOOL "" FORCE)
-    pulp_register_fetchcontent_source(simdjson REF v3.12.3)
+    pulp_register_fetchcontent_source(simdjson REF v4.6.9)
     FetchContent_Declare(
         simdjson
         GIT_REPOSITORY https://github.com/simdjson/simdjson.git
-        GIT_TAG v3.12.3
+        GIT_TAG v4.6.9
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(simdjson)
@@ -556,11 +556,11 @@ else()
 endif()
 
 # CLAP (MIT license) — header-only plugin format
-pulp_register_fetchcontent_source(clap REF 1.2.9)
+pulp_register_fetchcontent_source(clap REF 1.2.10)
 FetchContent_Declare(
     clap
     GIT_REPOSITORY https://github.com/free-audio/clap.git
-    GIT_TAG 1.2.9
+    GIT_TAG 1.2.10
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(clap)
@@ -662,10 +662,10 @@ if(TARGET yogacore AND NOT MSVC)
 endif()
 
 # Google Highway (Apache 2.0) — portable SIMD abstraction (SSE/NEON/AVX)
-# Pinned to the exact SHA of the 1.2.0 release (verified via
-# `git ls-remote https://github.com/google/highway.git refs/tags/1.2.0`).
+# Pinned to the exact SHA of the 1.4.0 release (verified via
+# `git ls-remote https://github.com/google/highway.git refs/tags/1.4.0`).
 # Pinning the SHA instead of the tag avoids intermittent
-# `fatal: invalid reference: 1.2.0` failures when GIT_SHALLOW combines
+# `fatal: invalid reference: 1.4.0` failures when GIT_SHALLOW combines
 # with tag-name resolution under load. SHA pins are also
 # more cache-friendly: FetchContent's UPDATE_DISCONNECTED check sees a
 # stable ref and skips the re-fetch on every reconfigure.
@@ -674,12 +674,12 @@ set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-pulp_register_fetchcontent_source(highway REF 1.2.0)
+pulp_register_fetchcontent_source(highway REF 1.4.0)
 FetchContent_Declare(
     highway
     GIT_REPOSITORY https://github.com/google/highway.git
-    # 1.2.0 release commit
-    GIT_TAG 457c891775a7397bdb0376bb1031e6e027af1c48
+    # 1.4.0 release commit
+    GIT_TAG 2607d3b5b0113992fe84d3848859eae13b3b52c1
 )
 FetchContent_MakeAvailable(highway)
 set(PULP_HAS_HIGHWAY TRUE)

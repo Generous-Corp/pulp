@@ -1007,7 +1007,7 @@ ensure_shared_git_source_with_retry "SDL3" "https://github.com/libsdl-org/SDL.gi
     "release-3.2.12" "$(fetchcontent_cache_dir_name "sdl3" "release-3.2.12")"
 
 ensure_shared_git_source_with_retry "CLAP" "https://github.com/free-audio/clap.git" \
-    "1.2.9" "$(fetchcontent_cache_dir_name "clap" "1.2.9")"
+    "1.2.10" "$(fetchcontent_cache_dir_name "clap" "1.2.10")"
 
 ensure_shared_git_source_with_retry "LV2" "https://github.com/lv2/lv2.git" \
     "v1.18.10" "$(fetchcontent_cache_dir_name "lv2" "v1.18.10")"
@@ -1035,7 +1035,7 @@ ensure_shared_git_source_with_retry "three.js" "https://github.com/mrdoob/three.
 # pluginterfaces under "Steinberg VST3 License OR GPLv3", which Pulp may not
 # redistribute in its MIT-licensed SDK artifacts. Do not move this pin below
 # v3.8.0; assert_vst3_license_is_mit below fails the setup if it drifts.
-VST3_SDK_REF="v3.8.0_build_66"
+VST3_SDK_REF="v3.8.1_build_84"
 VST3_SHARED_DIR="$FETCHCONTENT_CACHE_ROOT/$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"
 ensure_shared_git_source_with_retry "VST3 SDK" "https://github.com/steinbergmedia/vst3sdk.git" \
     "$VST3_SDK_REF" "$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"

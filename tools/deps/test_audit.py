@@ -510,8 +510,8 @@ class LicenseVerificationTests(unittest.TestCase):
             d for d in audit.load_manifest() if d["name"] == "VST3 SDK"
         )
         self.assertEqual(dep["license"], "MIT")
-        self.assertEqual(dep["version"], "v3.8.0_build_66")
-        self.assertEqual(dep["upstream"]["ref"], "v3.8.0_build_66")
+        self.assertEqual(dep["version"], "v3.8.1_build_84")
+        self.assertEqual(dep["upstream"]["ref"], "v3.8.1_build_84")
 
     def test_license_files_deduplicated_on_case_insensitive_filesystems(self) -> None:
         """macOS resolves LICENSE.txt and license.txt to one file, which

@@ -1062,7 +1062,7 @@ https://github.com/google/perfetto
 
 ## pugixml
 
-Copyright (c) 2006-2024 Arseny Kapoulkine
+Copyright (c) 2006-2026 Arseny Kapoulkine
 
 MIT License
 
@@ -1506,7 +1506,7 @@ https://www.apache.org/licenses/LICENSE-2.0
 
 ## VST3 SDK
 
-Copyright (c) 2025, Steinberg Media Technologies GmbH
+Copyright (c) 2026, Steinberg Media Technologies GmbH
 
 MIT License
 
