@@ -225,7 +225,7 @@ TEST_CASE("GPU health provider can complete a ratified native lifecycle campaign
 }
 
 TEST_CASE("GPU health provider requires the emitted trace identity on every frame") {
-    for (const auto configured_trace_id :
+    for (const auto& configured_trace_id :
          {std::optional<std::string>{}, std::optional<std::string>{"trace-configured"}}) {
         CAPTURE(configured_trace_id);
         auto config = ratified_campaign_config();
