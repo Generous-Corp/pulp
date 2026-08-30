@@ -23,8 +23,8 @@
                 PASS_REGULAR_EXPRESSION
                     "scene=boxtextured.*success=true.*scene_data_consumed=true.*readback_completed=true.*rgba_fingerprint=5845745157752120258.*final_software_golden_eligible=false")
 
-    if(Python3_Interpreter_FOUND)
-        include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_route_tests.cmake")
-        include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_contract_tests.cmake")
-    endif()
-endif()
+            if(Python3_Interpreter_FOUND)
+                include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_route_tests.cmake")
+                include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_contract_tests.cmake")
+            endif()
+        endif()

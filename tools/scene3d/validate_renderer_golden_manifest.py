@@ -338,7 +338,7 @@ def validate_pixel_software_adapter(manifest):
         return ["software_adapter must be an object"]
 
     require(software.get("pixel_producing") is True,
-            "final Phase 7 goldens require a pixel-producing software adapter",
+            "final renderer goldens require a pixel-producing software adapter",
             errors)
     backend_type = software.get("backend_type")
     require(isinstance(backend_type, str) and backend_type,
