@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -44,6 +45,26 @@ def live(minutes: float, labels=None, status="in_progress"):
         "labels": list(labels if labels is not None else MAC),
         "status": status,
         "started_at": ago(minutes),
+    }
+
+
+def unexpanded(
+    minutes: float,
+    status="pending",
+    workflow="Build and Test",
+    event="pull_request",
+    workflow_path=".github/workflows/build.yml",
+):
+    return {
+        "run_id": 99,
+        "run_url": "https://example.invalid/run/99",
+        "workflow": workflow,
+        "workflow_path": workflow_path,
+        "event": event,
+        "status": status,
+        "head_sha": "a" * 40,
+        "head_branch": "feature/example",
+        "queued_at": ago(minutes),
     }
 
 
@@ -185,6 +206,42 @@ class TestAlarmCases(unittest.TestCase):
             ["alarm"],
         )
 
+    def test_aged_build_and_test_run_with_zero_jobs_alarms(self):
+        snap = {
+            "unexpanded_runs": [unexpanded(46)],
+            "queued_jobs": [],
+            "live_jobs": [live(1)],
+        }
+        findings = qaw.analyze(snap, NOW)
+        self.assertEqual(levels(findings), ["alarm"])
+        self.assertEqual(findings[0]["kind"], "unexpanded_workflow_run")
+        self.assertEqual(findings[0]["lane_evidence"], "workflow run has zero jobs")
+
+    def test_unexpanded_run_at_exactly_the_threshold_alarms(self):
+        snap = {"unexpanded_runs": [unexpanded(45)]}
+        self.assertEqual(levels(qaw.analyze(snap, NOW)), ["alarm"])
+
+    def test_unexpanded_run_below_warn_threshold_is_silent(self):
+        snap = {"unexpanded_runs": [unexpanded(29.9)]}
+        self.assertEqual(qaw.analyze(snap, NOW), [])
+
+    def test_unexpanded_run_between_thresholds_warns(self):
+        snap = {"unexpanded_runs": [unexpanded(44)]}
+        self.assertEqual(levels(qaw.analyze(snap, NOW)), ["warn"])
+
+    def test_unexpanded_detection_is_narrow_to_pull_request_build_workflow(self):
+        snap = {
+            "unexpanded_runs": [
+                unexpanded(90, workflow="Docs"),
+                unexpanded(90, status="in_progress"),
+                unexpanded(90, event="push"),
+                unexpanded(90, event="merge_group"),
+                unexpanded(90, event="workflow_dispatch"),
+                unexpanded(90, workflow_path=".github/workflows/other.yml"),
+            ]
+        }
+        self.assertEqual(qaw.analyze(snap, NOW), [])
+
 
 class TestDegradedSweep(unittest.TestCase):
     """Incomplete evidence must never alarm — an unobserved lane isn't a dead one."""
@@ -219,6 +276,347 @@ class TestDegradedSweep(unittest.TestCase):
         summary = qaw.render_summary([], qaw.ALARM_MINUTES, [{"error": "boom"}])
         self.assertNotIn("healthy", summary)
         self.assertIn("not a clean bill of health", summary)
+
+    def test_collection_errors_suppress_unexpanded_run_alarm(self):
+        snap = {
+            "unexpanded_runs": [unexpanded(90)],
+            "errors": [{"run_id": 7, "status": "in_progress", "error": "HTTP 502"}],
+        }
+        findings = qaw.analyze(snap, NOW)
+        self.assertEqual(levels(findings), ["warn"])
+        self.assertEqual(findings[0]["lane_evidence"], "evidence incomplete this sweep")
+
+    def test_truncated_collection_suppresses_unexpanded_run_alarm(self):
+        snap = {
+            "unexpanded_runs": [unexpanded(90)],
+            "truncated": ["pending"],
+        }
+        findings = qaw.analyze(snap, NOW)
+        self.assertEqual(levels(findings), ["warn"])
+        self.assertEqual(findings[0]["lane_evidence"], "evidence incomplete this sweep")
+
+
+class TestCollection(unittest.TestCase):
+    def test_collects_pending_build_and_test_run_only_after_empty_jobs_response(self):
+        pending_runs = {
+            "workflow_runs": [
+                {
+                    "id": 99,
+                    "name": "Build and Test",
+                    "status": "pending",
+                    "event": "pull_request",
+                    "path": ".github/workflows/build.yml",
+                    "head_sha": "a" * 40,
+                    "created_at": ago(60),
+                    "html_url": "https://example.invalid/run/99",
+                    "head_branch": "feature/example",
+                },
+                {
+                    "id": 100,
+                    "name": "Docs",
+                    "status": "pending",
+                    "event": "pull_request",
+                    "path": ".github/workflows/docs.yml",
+                    "head_sha": "b" * 40,
+                    "created_at": ago(60),
+                },
+            ]
+        }
+
+        def api(path):
+            if "status=pending" in path:
+                return pending_runs
+            if path.endswith("/runs/99/jobs?per_page=100"):
+                return {"total_count": 0, "jobs": []}
+            if path.endswith("/runs/100/jobs?per_page=100"):
+                return {"total_count": 0, "jobs": []}
+            if path.endswith("/runs/99"):
+                return pending_runs["workflow_runs"][0]
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(snapshot["errors"], [])
+        self.assertEqual(len(snapshot["unexpanded_runs"]), 1)
+        self.assertEqual(snapshot["unexpanded_runs"][0]["run_id"], 99)
+
+    def test_collects_queued_build_and_test_run_with_empty_jobs(self):
+        run = {
+            "id": 102,
+            "name": "Build and Test",
+            "status": "queued",
+            "event": "pull_request",
+            "path": ".github/workflows/build.yml",
+            "head_sha": "a" * 40,
+            "created_at": ago(60),
+        }
+
+        def api(path):
+            if "status=queued" in path:
+                return {"workflow_runs": [run]}
+            if path.endswith("/runs/102/jobs?per_page=100"):
+                return {"total_count": 0, "jobs": []}
+            if path.endswith("/runs/102"):
+                return run
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(len(snapshot["unexpanded_runs"]), 1)
+        self.assertEqual(snapshot["unexpanded_runs"][0]["status"], "queued")
+
+    def test_missing_jobs_field_is_degraded_not_zero_job_evidence(self):
+        run = {
+            "id": 103,
+            "name": "Build and Test",
+            "status": "pending",
+            "event": "pull_request",
+            "path": ".github/workflows/build.yml",
+            "head_sha": "a" * 40,
+            "created_at": ago(60),
+        }
+
+        def api(path):
+            if "status=pending" in path:
+                return {"workflow_runs": [run]}
+            if path.endswith("/runs/103/jobs?per_page=100"):
+                return {}
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(snapshot["unexpanded_runs"], [])
+        self.assertEqual(len(snapshot["errors"]), 1)
+
+    def test_empty_jobs_requires_total_count_zero(self):
+        run = {
+            "id": 105,
+            "name": "Build and Test",
+            "status": "pending",
+            "event": "pull_request",
+            "path": ".github/workflows/build.yml",
+            "head_sha": "a" * 40,
+            "created_at": ago(60),
+        }
+
+        def api(path):
+            if "status=pending" in path:
+                return {"workflow_runs": [run]}
+            if path.endswith("/runs/105/jobs?per_page=100"):
+                return {"total_count": 1, "jobs": []}
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(snapshot["unexpanded_runs"], [])
+        self.assertEqual(len(snapshot["errors"]), 1)
+
+    def test_exact_run_reread_must_match_list_evidence(self):
+        run = {
+            "id": 106,
+            "name": "Build and Test",
+            "status": "pending",
+            "event": "pull_request",
+            "path": ".github/workflows/build.yml",
+            "head_sha": "a" * 40,
+            "created_at": ago(60),
+        }
+
+        def api(path):
+            if "status=pending" in path:
+                return {"workflow_runs": [run]}
+            if path.endswith("/runs/106/jobs?per_page=100"):
+                return {"total_count": 0, "jobs": []}
+            if path.endswith("/runs/106"):
+                return {**run, "status": "in_progress"}
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(snapshot["unexpanded_runs"], [])
+        self.assertEqual(snapshot["errors"], [])
+
+    def test_target_status_transition_degrades_instead_of_proving_recovery(self):
+        run = {
+            "id": 112,
+            "name": "Build and Test",
+            "status": "pending",
+            "event": "pull_request",
+            "path": ".github/workflows/build.yml",
+            "head_sha": "a" * 40,
+            "created_at": ago(60),
+        }
+
+        def api(path):
+            if "status=pending" in path:
+                return {"workflow_runs": [run]}
+            if path.endswith("/runs/112/jobs?per_page=100"):
+                return {"total_count": 0, "jobs": []}
+            if path.endswith("/runs/112"):
+                return {**run, "status": "queued"}
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(snapshot["unexpanded_runs"], [])
+        self.assertEqual(len(snapshot["errors"]), 1)
+
+    def test_second_jobs_read_must_remain_empty(self):
+        run = {
+            "id": 113,
+            "name": "Build and Test",
+            "status": "pending",
+            "event": "pull_request",
+            "path": ".github/workflows/build.yml",
+            "head_sha": "a" * 40,
+            "created_at": ago(60),
+        }
+        jobs_calls = 0
+
+        def api(path):
+            nonlocal jobs_calls
+            if "status=pending" in path:
+                return {"workflow_runs": [run]}
+            if path.endswith("/runs/113/jobs?per_page=100"):
+                jobs_calls += 1
+                if jobs_calls == 1:
+                    return {"total_count": 0, "jobs": []}
+                return {"total_count": 1, "jobs": [{"status": "queued"}]}
+            if path.endswith("/runs/113"):
+                return run
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(jobs_calls, 2)
+        self.assertEqual(snapshot["unexpanded_runs"], [])
+        self.assertEqual(snapshot["errors"], [])
+
+    def test_exact_run_identity_mismatch_degrades_the_sweep(self):
+        run = {
+            "id": 111,
+            "name": "Build and Test",
+            "status": "pending",
+            "event": "pull_request",
+            "path": ".github/workflows/build.yml",
+            "head_sha": "a" * 40,
+            "created_at": ago(60),
+        }
+
+        def api(path):
+            if "status=pending" in path:
+                return {"workflow_runs": [run]}
+            if path.endswith("/runs/111/jobs?per_page=100"):
+                return {"total_count": 0, "jobs": []}
+            if path.endswith("/runs/111"):
+                return {**run, "head_sha": "b" * 40}
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(snapshot["unexpanded_runs"], [])
+        self.assertEqual(len(snapshot["errors"]), 1)
+
+    def test_non_pull_request_events_are_excluded_before_exact_reread(self):
+        for index, event in enumerate(("push", "merge_group", "workflow_dispatch"), 107):
+            with self.subTest(event=event):
+                run = {
+                    "id": index,
+                    "name": "Build and Test",
+                    "status": "pending",
+                    "event": event,
+                    "path": ".github/workflows/build.yml",
+                    "head_sha": "a" * 40,
+                    "created_at": ago(60),
+                }
+
+                def api(path):
+                    if "status=pending" in path:
+                        return {"workflow_runs": [run]}
+                    if path.endswith(f"/runs/{index}/jobs?per_page=100"):
+                        return {"total_count": 0, "jobs": []}
+                    if path.endswith(f"/runs/{index}"):
+                        self.fail("excluded event reached exact-run reread")
+                    return {"workflow_runs": []}
+
+                with mock.patch.object(qaw, "_gh_api", side_effect=api):
+                    snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+                self.assertEqual(snapshot["unexpanded_runs"], [])
+
+    def test_build_and_test_run_with_a_job_is_not_unexpanded(self):
+        run = {
+            "id": 101,
+            "name": "Build and Test",
+            "status": "queued",
+            "event": "pull_request",
+            "path": ".github/workflows/build.yml",
+            "head_sha": "a" * 40,
+            "created_at": ago(60),
+        }
+
+        def api(path):
+            if "status=queued" in path:
+                return {"workflow_runs": [run]}
+            if path.endswith("/runs/101/jobs?per_page=100"):
+                return {
+                    "total_count": 1,
+                    "jobs": [
+                        {
+                            "status": "queued",
+                            "name": "macos",
+                            "labels": MAC,
+                            "created_at": ago(60),
+                        }
+                    ]
+                }
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(snapshot["unexpanded_runs"], [])
+        self.assertEqual(len(snapshot["queued_jobs"]), 1)
+
+    def test_deduplicates_run_ids_across_status_pages(self):
+        run = {
+            "id": 104,
+            "name": "Build and Test",
+            "status": "pending",
+            "event": "pull_request",
+            "path": ".github/workflows/build.yml",
+            "head_sha": "a" * 40,
+            "created_at": ago(60),
+        }
+        jobs_calls = 0
+
+        def api(path):
+            nonlocal jobs_calls
+            if "status=pending" in path:
+                return {"workflow_runs": [run]}
+            if "status=queued" in path:
+                return {"workflow_runs": [{**run, "status": "queued"}]}
+            if path.endswith("/runs/104/jobs?per_page=100"):
+                jobs_calls += 1
+                return {"total_count": 0, "jobs": []}
+            if path.endswith("/runs/104"):
+                return run
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=api):
+            snapshot = qaw.collect_snapshot("Generous-Corp/pulp", NOW)
+
+        self.assertEqual(len(snapshot["unexpanded_runs"]), 1)
+        self.assertEqual(jobs_calls, 2)
+        self.assertEqual(len(snapshot["errors"]), 1)
 
 
 class TestGrouping(unittest.TestCase):
@@ -281,6 +679,28 @@ class TestRendering(unittest.TestCase):
         summary = qaw.render_summary([], qaw.ALARM_MINUTES)
         self.assertIn("healthy", summary)
 
+    def test_body_names_unexpanded_run_and_does_not_call_it_a_runner_failure(self):
+        findings = qaw.analyze({"unexpanded_runs": [unexpanded(61)]}, NOW)
+        body = qaw.render_body(findings, qaw.ALARM_MINUTES, NOW)
+        self.assertIn("Workflow runs with zero jobs", body)
+        self.assertIn("run `99`", body)
+        self.assertIn("`pending` with zero jobs", body)
+        self.assertNotIn("wants labels", body)
+
+
+class TestWorkflowWiring(unittest.TestCase):
+    def test_degraded_sweep_cannot_maintain_or_close_tracker(self):
+        workflow = (
+            Path(__file__).resolve().parents[2]
+            / ".github/workflows/runner-health-check.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("echo \"degraded=${degraded}\" >> \"$GITHUB_OUTPUT\"", workflow)
+        self.assertIn(
+            "if: env.DRY_RUN != 'true' && steps.scan.outputs.degraded != 'true'",
+            workflow,
+        )
+        self.assertIn("s.get('errors') or s.get('truncated')", workflow)
+
 
 class TestCli(unittest.TestCase):
     """Shell out to the real script — exit codes and files are the contract."""
@@ -329,6 +749,27 @@ class TestCli(unittest.TestCase):
         self.assertIn("pulp-studio", (tmp / "body.md").read_text(encoding="utf-8"))
         findings = json.loads((tmp / "findings.json").read_text(encoding="utf-8"))
         self.assertEqual(findings[0]["level"], "alarm")
+
+    def test_unexpanded_run_snapshot_writes_actionable_body(self):
+        snap = {
+            "generated_at": NOW.isoformat(),
+            "unexpanded_runs": [unexpanded(75)],
+        }
+        proc, tmp = self._run(snap)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("alarm_count=1", proc.stdout)
+        body = (tmp / "body.md").read_text(encoding="utf-8")
+        self.assertIn("run `99`", body)
+        self.assertIn("same ref", body)
+
+    def test_degraded_snapshot_exposes_machine_readable_output(self):
+        snap = {
+            "generated_at": NOW.isoformat(),
+            "errors": [{"error": "boom"}],
+        }
+        proc, _ = self._run(snap)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("degraded=true", proc.stdout)
 
     def test_generated_at_pins_now_so_snapshots_are_replayable(self):
         # Replaying a recorded incident must reproduce its verdict rather than

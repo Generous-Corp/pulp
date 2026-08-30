@@ -41,6 +41,8 @@ on:
       - 'tools/scripts/test_sdk_provenance.py'
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
+      - 'tools/scripts/queue_age_watchdog.py'
+      - 'tools/scripts/test_queue_age_watchdog.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/test_coverage_surface_contract.py'
@@ -136,6 +138,8 @@ on:
       - 'tools/scripts/test_sdk_provenance.py'
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
+      - 'tools/scripts/queue_age_watchdog.py'
+      - 'tools/scripts/test_queue_age_watchdog.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/test_coverage_surface_contract.py'
@@ -297,6 +301,7 @@ jobs:
           python3 tools/scripts/test_workflow_lint.py
           python3 tools/scripts/test_ios_gate_skip_contract.py
           python3 tools/scripts/test_api_contracts_workflow.py
+          python3 tools/scripts/test_queue_age_watchdog.py
           python3 tools/scripts/test_shipyard_merge_steward_workflow.py
           python3 tools/scripts/test_shipyard_provenance_label_plan.py
           python3 tools/scripts/test_shipyard_pull_request_run_cleanup.py
