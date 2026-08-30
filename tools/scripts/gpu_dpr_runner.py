@@ -19,6 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import gpu_dpr_experiment as experiment  # noqa: E402
+import gpu_dpr_v2_runner as runner_v2  # noqa: E402
 from gpu_dpr_evidence import (  # noqa: E402
     A2T_RECEIPT_SCHEMA, A3_RECEIPT_SCHEMA, ALL_OUTCOMES, ARTIFACT_KINDS,
     COMPLETE_OUTCOMES, EvidenceError, INCOMPLETE_OUTCOMES, METRIC_UNITS,
@@ -620,46 +621,9 @@ def finalize(
     return b5
 
 
-def finalize_v2(
-    draft_path: Path, manifest_path: Path, output_path: Path,
-) -> dict[str, Any]:
-    """Derive v2 analysis and B5 state; no caller may select a disposition."""
-    manifest = load_json(manifest_path)
-    manifest_problems = experiment.manifest_errors(manifest, manifest_path)
-    if manifest_problems:
-        raise EvidenceError("; ".join(manifest_problems))
-    if manifest.get("v2_protocol", {}).get("status") != "authorized":
-        raise EvidenceError("v2 finalization is blocked until protected A3 product policy exists")
-    document = regular_json(draft_path, "A4 v2 draft result")
-    if document.get("schema") != "pulp.gpu-dpr-experiment.v2":
-        raise EvidenceError("v2 finalization requires a pulp.gpu-dpr-experiment.v2 draft")
-    if document.get("status") != "complete" or document.get("evidence_kind") != "measured":
-        raise EvidenceError("v2 finalization requires a complete measured draft")
-    manifest_digest = experiment.canonical_sha256(manifest)
-    document["analysis"] = experiment.compute_v2_analysis(
-        document.get("cells", []), document.get("repeat_cells", []),
-        manifest, manifest_digest,
-    )
-    disposition = document["analysis"]["disposition"]
-    document["b5_gate"] = {
-        "status": (
-            "cancelled-no-change" if disposition == "no-change" else "waiting-trigger"
-        ),
-        "requires": (
-            [] if disposition == "no-change" else ["B0-adopted-vellum-api-refresh"]
-        ),
-        "authorizes_policy_change": False,
-    }
-    schema = experiment.schema_for_lite(experiment.load_json(experiment.DEFAULT_SCHEMA))
-    problems = experiment.json_schema_lite.validate(document, schema)
-    if not problems:
-        problems = experiment.v2_semantic_errors(
-            document, manifest, manifest_digest, verify_live_publication=False,
-        )
-    if problems:
-        raise EvidenceError("; ".join(problems))
-    atomic_json(output_path, document)
-    return document["b5_gate"]
+def finalize_v2(run_dir: Path) -> dict[str, Any]:
+    """Compatibility wrapper around receipt-derived v2 finalization."""
+    return runner_v2.finalize(run_dir)
 
 
 def main() -> int:
@@ -692,10 +656,21 @@ def main() -> int:
     finish.add_argument("--a2t-receipt", required=True)
     finish.add_argument("--a3-budget-id", required=True)
     finish.add_argument("--a3-receipt", required=True)
+    init_v2 = sub.add_parser("init-v2")
+    init_v2.add_argument("--run-dir", type=Path, required=True)
+    init_v2.add_argument("--experiment-id", required=True)
+    init_v2.add_argument("--trace-analyzer", type=Path, required=True)
+    run_v2 = sub.add_parser("run-v2")
+    run_v2.add_argument("--run-dir", type=Path, required=True)
+    run_v2.add_argument("--cell", required=True)
+    run_v2.add_argument("--adapter", type=Path, required=True)
+    run_v2.add_argument("--timeout-seconds", type=float, default=900)
+    status_v2 = sub.add_parser("status-v2")
+    status_v2.add_argument("--run-dir", type=Path, required=True)
     finish_v2 = sub.add_parser("finalize-v2")
-    finish_v2.add_argument("--draft", type=Path, required=True)
-    finish_v2.add_argument("--manifest", type=Path, default=experiment.DEFAULT_MANIFEST)
-    finish_v2.add_argument("--output", type=Path, default=experiment.DEFAULT_RESULT)
+    finish_v2.add_argument("--run-dir", type=Path, required=True)
+    verify_v2 = sub.add_parser("verify-live-v2")
+    verify_v2.add_argument("--evidence-root", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "init":
@@ -748,10 +723,33 @@ def main() -> int:
                 args.a3_budget_id, args.a3_receipt
             )
             print(json.dumps(b5, sort_keys=True))
+        elif args.command == "init-v2":
+            state = runner_v2.initialize(
+                args.run_dir, args.experiment_id, args.trace_analyzer
+            )
+            print(
+                f"gpu_dpr_v2_run_initialized=true cells={len(state['cells'])}"
+            )
+        elif args.command == "run-v2":
+            accepted = runner_v2.run_one(
+                args.run_dir, args.cell, args.adapter, args.timeout_seconds
+            )
+            print(json.dumps({
+                "gpu_dpr_v2_cell_ingested": True,
+                "cell": accepted["cell_key"],
+            }, sort_keys=True))
+        elif args.command == "status-v2":
+            print(json.dumps(runner_v2.status(args.run_dir), sort_keys=True, indent=2))
+        elif args.command == "finalize-v2":
+            result = finalize_v2(args.run_dir)
+            print(json.dumps(result["b5_gate"], sort_keys=True))
         else:
-            b5 = finalize_v2(args.draft, args.manifest, args.output)
-            print(json.dumps(b5, sort_keys=True))
-    except (EvidenceError, OSError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
+            receipt = experiment.emit_live_verification(args.evidence_root)
+            print(json.dumps(receipt, sort_keys=True))
+    except (
+        EvidenceError, runner_v2.V2RunnerError, OSError, ValueError,
+        json.JSONDecodeError, subprocess.TimeoutExpired,
+    ) as error:
         print(f"gpu-dpr-runner: {error}", file=sys.stderr)
         return 1
     return 0

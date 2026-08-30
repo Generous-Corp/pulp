@@ -16,6 +16,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import gpu_dpr_experiment as contract  # noqa: E402
+import gpu_dpr_v2_evidence as v2_evidence  # noqa: E402
 import json_schema_lite  # noqa: E402
 
 SHA_A = "a" * 40
@@ -185,32 +186,52 @@ def v2_cell(
                 f"receipt:{campaign}:{mode}:{requested_dpr}:{fmt}:{host}".encode()
             ).hexdigest(),
         } for fmt, host, role in contract.DAW_SUBRECEIPTS]
-    artifacts = [{
-        "kind": kind, "path": f"evidence/{campaign}/{scenario['id']}/{mode}/{requested_dpr}/{kind}",
-        "sha256": hashlib.sha256(
-            f"{campaign}:{scenario['id']}:{mode}:{requested_dpr}:{kind}".encode()
-        ).hexdigest(),
-    } for kind in (
-        "raw_trials", "frame_sequences", "capture", "trace", "input_receipt",
-        "identity_receipt",
-    )]
-    return {
+    attempt_nonce = hashlib.sha256(
+        f"attempt:{campaign}:{scenario['id']}:{mode}:{requested_dpr}".encode()
+    ).hexdigest()[:32]
+    observed_dpr = (
+        requested_dpr if mode != "configured_max"
+        else min(requested_dpr, manifest["configured_max_dpr"])
+    )
+    product_digest = hashlib.sha256(
+        f"product:{scenario['id']}".encode()
+    ).hexdigest()
+    cell = {
         "campaign": campaign,
         "scenario_id": scenario["id"],
         "policy_class": scenario["policy_class"],
         "mode": mode,
         "requested_dpr": requested_dpr,
+        "observed_dpr": observed_dpr,
+        "attempt_nonce": attempt_nonce,
         "outcome": "pass",
         "identity": {
             "machine_id": "m5-reference",
             "provider": scenario["required_provider"],
             "adapter": "apple-m5-hardware",
+            "adapter_sha256": DIGEST_B,
             "build_sha": SHA_B,
             "host": scenario["required_host"],
             "format": "aggregate" if scenario["id"] == "forge-modular-daw" else "standalone",
+            "app": scenario["id"],
+            "process_id": pid_base + 1_000_000,
+            "instance_id": f"{campaign}:{scenario['id']}:{mode}:{requested_dpr}",
+            "product_sha256": product_digest,
         },
         "logical_size": scenario["logical_size"],
+        "physical_size": {
+            "width": round(scenario["logical_size"]["width"] * observed_dpr),
+            "height": round(scenario["logical_size"]["height"] * observed_dpr),
+        },
         "physical_dimensions_verified": True,
+        "trace": (
+            {
+                "complete": True, "kind": "browser-devtools",
+                "process_pid": pid_base + 1_000_000,
+            }
+            if scenario["kind"] == "maintained_web_canary"
+            else {"complete": True}
+        ),
         "warmup_count": 5,
         "measured_trials": trials,
         "fresh_process_trials": fresh,
@@ -235,8 +256,19 @@ def v2_cell(
             "identity": True,
         },
         "daw_subreceipts": daw,
-        "artifacts": artifacts,
+        "artifacts": [],
     }
+    binding = v2_evidence.binding_sha256(cell)
+    cell["artifacts"] = [{
+        "kind": kind,
+        "path": f"evidence/{campaign}/{scenario['id']}/{mode}/{requested_dpr}/{kind}",
+        "sha256": hashlib.sha256(
+            f"{campaign}:{scenario['id']}:{mode}:{requested_dpr}:{kind}".encode()
+        ).hexdigest(),
+        "bytes": 1,
+        "binding_sha256": binding,
+    } for kind in sorted(v2_evidence.ARTIFACT_KINDS)]
+    return cell
 
 
 def complete_v2_fixture(manifest: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -259,6 +291,13 @@ def complete_v2_fixture(manifest: dict[str, Any]) -> tuple[dict[str, Any], dict[
     repeats = copy.deepcopy(cells)
     for cell in repeats:
         cell["campaign"] = "repeat"
+        cell["attempt_nonce"] = hashlib.sha256(
+            f"repeat-attempt:{cell['scenario_id']}:{cell['mode']}:{cell['requested_dpr']}".encode()
+        ).hexdigest()[:32]
+        cell["identity"]["process_id"] += 10_000_000
+        cell["identity"]["instance_id"] = "repeat:" + cell["identity"]["instance_id"]
+        if cell["scenario_id"] == "super-convolver-web":
+            cell["trace"]["process_pid"] = cell["identity"]["process_id"]
         for index, trial in enumerate(cell["measured_trials"]):
             trial["sequence_sha256"] = hashlib.sha256(
                 f"repeat:{cell['scenario_id']}:{cell['mode']}:{cell['requested_dpr']}:{index}".encode()
@@ -270,6 +309,7 @@ def complete_v2_fixture(manifest: dict[str, Any]) -> tuple[dict[str, Any], dict[
             ).hexdigest()
         for artifact in cell["artifacts"]:
             artifact["path"] = artifact["path"].replace("/original/", "/repeat/")
+            artifact["binding_sha256"] = v2_evidence.binding_sha256(cell)
     document = {
         "schema": "pulp.gpu-dpr-experiment.v2", "version": 2,
         "status": "complete", "evidence_kind": "measured",
@@ -278,6 +318,10 @@ def complete_v2_fixture(manifest: dict[str, Any]) -> tuple[dict[str, Any], dict[
         "authority": {
             "manifest_sha256": digest, "product_policy_id": "synthetic-policy",
             "product_policy_blob": SHA_A, "a3_receipt_sha256": DIGEST_A,
+            "a2t_receipt_sha256": DIGEST_B,
+            "a3_runtime_receipt_sha256": hashlib.sha256(b"a3-runtime").hexdigest(),
+            "runner_receipts_sha256": hashlib.sha256(b"runner-receipts").hexdigest(),
+            "trace_analyzer_sha256": hashlib.sha256(b"trace-analyzer").hexdigest(),
             "timer_noise_p95_ns": 1_000, "memory_sampler_resolution_bytes": 1,
             "collection_authorized": True,
         },
@@ -311,6 +355,24 @@ def expect_semantic_failure(
     )
     if not problems:
         raise AssertionError(f"semantic mutation unexpectedly passed: {label}")
+
+
+def v2_structural_errors(
+    document: dict[str, Any], manifest: dict[str, Any], digest: str,
+) -> list[str]:
+    """Keep contract math tests separate from real retained-byte tests."""
+    with (
+        mock.patch.object(
+            contract.v2_evidence, "trace_analyzer_identity",
+            return_value={"path": "/fixture/analyzer", "sha256": DIGEST_A},
+        ),
+        mock.patch.object(
+            contract.v2_evidence, "result_artifact_errors", return_value=[]
+        ),
+    ):
+        return contract.v2_semantic_errors(
+            document, manifest, digest, evidence_root=ROOT
+        )
 
 
 def main() -> int:
@@ -456,21 +518,11 @@ def main() -> int:
     schema_errors = json_schema_lite.validate(v2, v2_schema)
     if schema_errors:
         raise AssertionError(f"valid v2 fixture failed schema: {schema_errors[:3]}")
-    semantic_errors = contract.v2_semantic_errors(v2, authorized, authorized_digest)
+    semantic_errors = v2_structural_errors(v2, authorized, authorized_digest)
     if semantic_errors:
         raise AssertionError(f"valid v2 fixture failed semantics: {semantic_errors[:3]}")
     assert v2["analysis"]["disposition"] == "adaptive-candidate"
-    with mock.patch.object(contract, "live_protected_main_errors", return_value=[]):
-        assert not contract.v2_semantic_errors(
-            v2, authorized, authorized_digest, verify_live_publication=True
-        )
-    with mock.patch.object(
-        contract, "live_protected_main_errors",
-        return_value=["checkout HEAD is not exact live protected main"],
-    ):
-        assert contract.v2_semantic_errors(
-            v2, authorized, authorized_digest, verify_live_publication=True
-        )
+    assert contract.v2_semantic_errors(v2, authorized, authorized_digest)
     rules_only = [{
         "type": "required_status_checks",
         "parameters": {"required_status_checks": [{
@@ -565,7 +617,7 @@ def main() -> int:
     v2_mutations.append(("caller self-attested protected main", caller_attested))
     for label, mutated in v2_mutations:
         schema_failure = json_schema_lite.validate(mutated, v2_schema)
-        semantic_failure = contract.v2_semantic_errors(
+        semantic_failure = v2_structural_errors(
             mutated, authorized, authorized_digest
         ) if not schema_failure else schema_failure
         if not semantic_failure:

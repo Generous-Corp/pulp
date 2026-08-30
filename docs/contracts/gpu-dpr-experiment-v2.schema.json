@@ -31,7 +31,8 @@
       "type": "object", "additionalProperties": false,
       "required": [
         "manifest_sha256", "product_policy_id", "product_policy_blob",
-        "a3_receipt_sha256", "timer_noise_p95_ns",
+        "a3_receipt_sha256", "a2t_receipt_sha256",
+        "a3_runtime_receipt_sha256", "runner_receipts_sha256", "trace_analyzer_sha256", "timer_noise_p95_ns",
         "memory_sampler_resolution_bytes", "collection_authorized"
       ],
       "properties": {
@@ -39,6 +40,10 @@
         "product_policy_id": {"type": ["string", "null"], "minLength": 1},
         "product_policy_blob": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
         "a3_receipt_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "a2t_receipt_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "a3_runtime_receipt_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "runner_receipts_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "trace_analyzer_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
         "timer_noise_p95_ns": {"type": ["integer", "null"], "minimum": 1},
         "memory_sampler_resolution_bytes": {"type": ["integer", "null"], "minimum": 1},
         "collection_authorized": {"type": "boolean"}
@@ -57,14 +62,19 @@
     },
     "identity": {
       "type": "object", "additionalProperties": false,
-      "required": ["machine_id", "provider", "adapter", "build_sha", "host", "format"],
+      "required": ["machine_id", "provider", "adapter", "adapter_sha256", "build_sha", "host", "format", "app", "process_id", "instance_id", "product_sha256"],
       "properties": {
         "machine_id": {"type": "string", "minLength": 1},
         "provider": {"type": "string", "minLength": 1},
         "adapter": {"type": "string", "minLength": 1},
+        "adapter_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "build_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
         "host": {"type": "string", "minLength": 1},
-        "format": {"type": "string", "minLength": 1}
+        "format": {"type": "string", "minLength": 1},
+        "app": {"type": "string", "minLength": 1},
+        "process_id": {"type": "integer", "minimum": 1},
+        "instance_id": {"type": "string", "minLength": 1},
+        "product_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
     "trial": {
@@ -136,18 +146,20 @@
     },
     "artifact": {
       "type": "object", "additionalProperties": false,
-      "required": ["kind", "path", "sha256"],
+      "required": ["kind", "path", "sha256", "bytes", "binding_sha256"],
       "properties": {
-        "kind": {"enum": ["raw_trials", "frame_sequences", "capture", "trace", "input_receipt", "identity_receipt"]},
+        "kind": {"enum": ["raw_trials", "frame_sequences", "capture", "reference_capture", "trace", "input_receipt", "identity_receipt", "product"]},
         "path": {"type": "string", "minLength": 1},
-        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "binding_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
     "cell": {
       "type": "object", "additionalProperties": false,
       "required": [
-        "campaign", "scenario_id", "policy_class", "mode", "requested_dpr",
-        "outcome", "identity", "logical_size", "physical_dimensions_verified",
+        "campaign", "scenario_id", "policy_class", "mode", "requested_dpr", "observed_dpr",
+        "attempt_nonce", "outcome", "identity", "logical_size", "physical_size", "physical_dimensions_verified", "trace",
         "warmup_count", "measured_trials", "adaptive_summary",
         "fresh_process_trials", "fidelity", "daw_subreceipts", "artifacts"
       ],
@@ -157,17 +169,21 @@
         "policy_class": {"enum": ["Pulp-native", "Forge-native/DAW", "web"]},
         "mode": {"enum": ["exact", "configured_max", "adaptive_simulation"]},
         "requested_dpr": {"enum": [1, 1.5, 2, 3]},
+        "observed_dpr": {"enum": [1, 1.5, 2, 3]},
+        "attempt_nonce": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
         "outcome": {"enum": ["pass", "fail"]},
         "identity": {"$ref": "#/$defs/identity"},
         "logical_size": {"$ref": "#/$defs/size"},
+        "physical_size": {"$ref": "#/$defs/size"},
         "physical_dimensions_verified": {"const": true},
+        "trace": {"type": "object"},
         "warmup_count": {"const": 5},
         "measured_trials": {"type": "array", "minItems": 30, "maxItems": 30, "items": {"$ref": "#/$defs/trial"}},
         "fresh_process_trials": {"type": "array", "minItems": 20, "maxItems": 20, "items": {"$ref": "#/$defs/freshTrial"}},
         "adaptive_summary": {"type": ["object", "null"], "additionalProperties": false, "required": ["initial_rung", "counters_zero", "min_applied_dpr", "max_applied_dpr", "all_transitions_one_rung", "no_state_leakage"], "properties": {"initial_rung": {"enum": [1, 1.5, 2, 3]}, "counters_zero": {"const": true}, "min_applied_dpr": {"enum": [1, 1.5, 2, 3]}, "max_applied_dpr": {"enum": [1, 1.5, 2, 3]}, "all_transitions_one_rung": {"const": true}, "no_state_leakage": {"const": true}}},
         "fidelity": {"$ref": "#/$defs/fidelity"},
         "daw_subreceipts": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/dawReceipt"}},
-        "artifacts": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"$ref": "#/$defs/artifact"}}
+        "artifacts": {"type": "array", "minItems": 8, "maxItems": 8, "items": {"$ref": "#/$defs/artifact"}}
       }
     },
     "size": {
