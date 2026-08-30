@@ -513,7 +513,6 @@ def main() -> int:
                 {"evidence_id": evidence_id, "process_upid": 7, "process_pid": 42},
             )
 
-        evidence.analyze_trace = analyze_selftest_trace
         binary = exact_binary(root)
         run_dir = root / "run"
         planned = plan(manifest)
@@ -966,6 +965,11 @@ def main() -> int:
             "required categories missing from the correlated evidence/process scope",
         )
         planted += 1
+
+        # The real analyzer and its cross-question scope/category negatives are
+        # now proven. Keep all remaining receipt tests on the equivalent
+        # in-process correlation check to preserve the enclosing 120s budget.
+        evidence.analyze_trace = analyze_selftest_trace
 
         analyzer_receipt = make_receipt(
             run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
