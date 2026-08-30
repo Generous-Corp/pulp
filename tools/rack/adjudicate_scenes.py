@@ -464,13 +464,18 @@ def _strict_idiom_and_control(checker: ModuleType, patch: dict, inventory: dict,
                 "error": f"mutated idiom check crashed: {exc}",
             }
         else:
+            negative_status = (
+                "PASS" if mutated_findings else
+                "WITHHOLD" if mutated_unchecked else "FAIL")
             negative = {
-                "status": "PASS" if mutated_findings else "FAIL",
+                "status": negative_status,
                 "mistake_id": mistake.get("id"),
                 "findings": mutated_findings,
                 "unchecked": mutated_unchecked,
             }
-            if not mutated_findings:
+            if mutated_unchecked:
+                negative["error"] = "negative control has unchecked evidence"
+            elif not mutated_findings:
                 negative["error"] = "idiom still holds after its negative control"
         return {
             "idiom_contract": contract,
@@ -509,13 +514,20 @@ def _recorded_check_status(name: str, check: dict, has_audio: bool) -> str:
     if name == "module_availability":
         return _recorded_command_status(check, {0: "PASS", 1: "FAIL"})
     if name == "rack_load":
-        return _recorded_command_status(check, {0: "PASS", 1: "FAIL"})
+        status = _recorded_command_status(check, {0: "PASS"})
+        if (status == "PASS" and check.get("error") ==
+                "Rack user inputs changed while the load check was executing"):
+            return "WITHHOLD"
+        return status
     if name == "dsp_and_audio":
         status = _recorded_command_status(
             check, {0: "PASS", 1: "FAIL", 2: "WITHHOLD"})
         if (status in {"PASS", "FAIL"} and check.get("probe") is None and
                 check.get("error") ==
                 "fidelity returned a verdict without preserved probe evidence"):
+            return "WITHHOLD"
+        if (status in {"PASS", "FAIL"} and check.get("error") ==
+                "Rack user inputs changed while fidelity was executing"):
             return "WITHHOLD"
         if (status in {"PASS", "FAIL"} and not has_audio and
                 check.get("error") ==
@@ -534,8 +546,9 @@ def _recorded_check_status(name: str, check: dict, has_audio: bool) -> str:
             return "PASS" if original != mutated else "WITHHOLD"
     elif name == "negative_control":
         findings = check.get("findings")
-        if isinstance(findings, list):
-            return "PASS" if findings else "FAIL"
+        unchecked = check.get("unchecked")
+        if isinstance(findings, list) and isinstance(unchecked, list):
+            return "PASS" if findings else "WITHHOLD" if unchecked else "FAIL"
     if isinstance(check.get("error"), str):
         return "WITHHOLD"
     raise AdjudicationError(f"recorded {name} verdict evidence is malformed")
@@ -631,8 +644,14 @@ def adjudicate_scene(context: CampaignContext, scene: dict, rack_app: Path,
             }
         else:
             rack_user_inputs = _rack_user_inputs()
-            checks["rack_load"] = _run(rack_command, runner, {0: "PASS", 1: "FAIL"})
-            checks["rack_load"]["user_inputs"] = rack_user_inputs
+            checks["rack_load"] = _run(rack_command, runner, {0: "PASS"})
+            rack_user_inputs_after = _rack_user_inputs()
+            checks["rack_load"]["user_inputs_before"] = rack_user_inputs
+            checks["rack_load"]["user_inputs_after"] = rack_user_inputs_after
+            if rack_user_inputs_after != rack_user_inputs:
+                checks["rack_load"]["status"] = "WITHHOLD"
+                checks["rack_load"]["error"] = (
+                    "Rack user inputs changed while the load check was executing")
 
         try:
             patch = _read_object(artifact, "generated Rack patch")
@@ -665,7 +684,13 @@ def adjudicate_scene(context: CampaignContext, scene: dict, rack_app: Path,
                 fidelity_command, runner,
                 {0: "PASS", 1: "FAIL", 2: "WITHHOLD"},
                 fidelity_environment)
-            checks["dsp_and_audio"]["user_inputs"] = fidelity_user_inputs
+            fidelity_user_inputs_after = _rack_user_inputs()
+            checks["dsp_and_audio"]["user_inputs_before"] = fidelity_user_inputs
+            checks["dsp_and_audio"]["user_inputs_after"] = fidelity_user_inputs_after
+            if fidelity_user_inputs_after != fidelity_user_inputs:
+                checks["dsp_and_audio"]["status"] = "WITHHOLD"
+                checks["dsp_and_audio"]["error"] = (
+                    "Rack user inputs changed while fidelity was executing")
             checks["dsp_and_audio"]["probe"] = _tree_identity(
                 probe_root / "ForgeProbe")
             if (checks["dsp_and_audio"]["status"] in {"PASS", "FAIL"} and

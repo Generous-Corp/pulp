@@ -131,9 +131,11 @@ class Fixture:
 
 
 class FakeChecker:
-    def __init__(self, *, unchecked: bool = False, mutation: str = "flip") -> None:
+    def __init__(self, *, unchecked: bool = False, mutation: str = "flip",
+                 mutated_unchecked: bool = False) -> None:
         self.unchecked = unchecked
         self.mutation = mutation
+        self.mutated_unchecked = mutated_unchecked
 
     def load_idioms(self) -> dict:
         return {
@@ -151,6 +153,8 @@ class FakeChecker:
     def check(self, patch, _inventory, _idiom, _roles, unchecked) -> list[str]:
         if self.unchecked and not patch.get("broken"):
             unchecked.append("audible-path: fixture port map is unavailable")
+        if self.mutated_unchecked and patch.get("broken"):
+            unchecked.append("negative control: fixture port map is unavailable")
         if patch.get("broken") and self.mutation != "no-flip":
             return ["audible path was cut"]
         return []
@@ -167,9 +171,11 @@ class FakeChecker:
 
 class FakeRunner:
     def __init__(self, *, fidelity_code: int = 0,
+                 rack_code: int = 0,
                  crash_name: str | None = None,
                  write_audio: bool = True) -> None:
         self.fidelity_code = fidelity_code
+        self.rack_code = rack_code
         self.crash_name = crash_name
         self.write_audio = write_audio
         self.commands: list[list[str]] = []
@@ -183,6 +189,8 @@ class FakeRunner:
         if name == self.crash_name:
             raise subprocess.SubprocessError("fixture checker crash")
         code = 0
+        if name == "rack_open.py":
+            code = self.rack_code
         if name == "fidelity.py":
             code = self.fidelity_code
             probe = (Path(command[command.index("--preserve-probe") + 1]) /
@@ -337,6 +345,17 @@ class AdjudicationTests(unittest.TestCase):
         self.assertEqual(receipt["checks"]["negative_control"]["status"], "FAIL")
         self.assertIn("still holds", receipt["checks"]["negative_control"]["error"])
 
+    def test_unchecked_negative_control_is_withheld(self) -> None:
+        receipt = self._one(FakeChecker(
+            mutation="no-flip", mutated_unchecked=True))
+        negative = receipt["checks"]["negative_control"]
+        self.assertEqual(negative["status"], "WITHHOLD")
+        self.assertTrue(negative["unchecked"])
+
+    def test_rack_open_infrastructure_exit_is_withheld(self) -> None:
+        receipt = self._one(FakeChecker(), FakeRunner(rack_code=1))
+        self.assertEqual(receipt["checks"]["rack_load"]["status"], "WITHHOLD")
+
     def test_mutation_proof_records_distinct_hashes_and_finding(self) -> None:
         receipt = self._one(FakeChecker())
         causal = receipt["checks"]["causal_witness"]
@@ -465,8 +484,12 @@ class AdjudicationTests(unittest.TestCase):
                 context, context.scenes[0], self.fixture.rack_app,
                 runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
             expected = A._tree_identity(settings)
-            self.assertEqual(receipt["checks"]["rack_load"]["user_inputs"]["settings.json"], expected)
-            self.assertEqual(receipt["checks"]["dsp_and_audio"]["user_inputs"]["settings.json"], expected)
+            self.assertEqual(
+                receipt["checks"]["rack_load"]["user_inputs_before"]["settings.json"],
+                expected)
+            self.assertEqual(
+                receipt["checks"]["dsp_and_audio"]["user_inputs_before"]["settings.json"],
+                expected)
             settings.write_bytes(b'{"token":"two"}')
             os.utime(settings, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
             self.assertEqual(settings.stat().st_size, original_stat.st_size)
@@ -478,6 +501,29 @@ class AdjudicationTests(unittest.TestCase):
                     runner=runner, idiom_loader=lambda _root: FakeChecker()),
                 receipt)
             self.assertEqual(runner.commands, [])
+
+    def test_fidelity_withholds_if_live_inputs_change_during_execution(self) -> None:
+        home = self.fixture.root / "racing-home"
+        rack_root = home / "Library/Application Support/Rack2"
+        rack_root.mkdir(parents=True)
+        portmap = rack_root / "forge-portmap.json"
+        portmap.write_text('{"version":1}\n', encoding="utf-8")
+
+        class MutatingRunner(FakeRunner):
+            def __call__(self, command, **kwargs):
+                result = super().__call__(command, **kwargs)
+                if Path(command[1]).name == "fidelity.py":
+                    portmap.write_text('{"version":2}\n', encoding="utf-8")
+                return result
+
+        with mock.patch.object(Path, "home", return_value=home):
+            receipt = A.adjudicate_scene(
+                self.fixture.context(), self.fixture.context().scenes[0],
+                self.fixture.rack_app, runner=MutatingRunner(),
+                idiom_loader=lambda _root: FakeChecker())
+        dsp = receipt["checks"]["dsp_and_audio"]
+        self.assertEqual(dsp["status"], "WITHHOLD")
+        self.assertNotEqual(dsp["user_inputs_before"], dsp["user_inputs_after"])
 
     def test_non_list_modules_defer_to_patch_verifier(self) -> None:
         artifact = self.fixture.run_root / "P05-S01/artifact.vcv"
