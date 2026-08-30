@@ -13,6 +13,7 @@ afterEach(() => {
     delete host.__pulpApplyMaterializedImportMetadata__;
     delete host.__pulpRefreshMaterializedState__;
     delete host.getRootSize;
+    delete host.layout;
 });
 
 // Drive the real host-config mutation methods rather than reaching for a
@@ -75,7 +76,9 @@ describe('host-config materialized metadata', () => {
     it('does not re-apply after a commit that mutated no host node', () => {
         const host = globalThis as unknown as Record<string, unknown>;
         let applications = 0;
+        let layouts = 0;
         host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+        host.layout = () => ++layouts;
 
         mutate();
         resetAfterCommit?.({});   // structural commit: applies
@@ -83,12 +86,15 @@ describe('host-config materialized metadata', () => {
         resetAfterCommit?.({});   // still nothing mutated
 
         expect(applications).toBe(1);
+        expect(layouts).toBe(1);
     });
 
     it('does not re-apply metadata for fixed single-line text-only updates', () => {
         const host = globalThis as unknown as Record<string, unknown>;
         let applications = 0;
+        let layouts = 0;
         host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+        host.layout = () => ++layouts;
 
         mutate();
         resetAfterCommit?.({});
@@ -99,12 +105,15 @@ describe('host-config materialized metadata', () => {
         resetAfterCommit?.({});
 
         expect(applications).toBe(1);
+        expect(layouts).toBe(1);
     });
 
     it('re-applies metadata when changed text can affect geometry', () => {
         const host = globalThis as unknown as Record<string, unknown>;
         let applications = 0;
+        let layouts = 0;
         host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+        host.layout = () => ++layouts;
 
         mutate();
         resetAfterCommit?.({});
@@ -112,6 +121,7 @@ describe('host-config materialized metadata', () => {
         resetAfterCommit?.({});
 
         expect(applications).toBe(2);
+        expect(layouts).toBe(2);
     });
 
     it('re-applies metadata when fixed text changes with another host prop', () => {

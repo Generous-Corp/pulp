@@ -815,12 +815,16 @@ export const PulpHostConfig: HostConfig<
         // animation frame while the editor is idle.
         const stateHook = g.__pulpRefreshMaterializedState__;
         if (typeof stateHook === 'function') stateHook();
-        // Own commit-time layout/repaint flush. The bridge's individual
-        // setX calls don't all self-flush layout, so we trigger one
-        // explicit pass per React commit. Mirrors Ink's resetAfterCommit.
-        requestLayoutFlush(() => {
-            if (typeof g.layout === 'function') call('layout');
-        });
+        // Own commit-time layout/repaint flush. A state-only React commit has
+        // not changed native geometry, so forcing `layout()` here would walk
+        // the entire tree despite the generation still being current. A real
+        // host mutation or root resize sets `shouldReapply`; those commits keep
+        // the explicit synchronous pass that bridge setters require.
+        if (shouldReapply) {
+            requestLayoutFlush(() => {
+                if (typeof g.layout === 'function') call('layout');
+            });
+        }
     },
 
     // ── Misc required no-ops / passthroughs ────────────────────────
