@@ -231,6 +231,12 @@ function(pulp_add_app target)
     message(STATUS "Pulp app: ${target}")
 endfunction()
 
+# pulp_declare_standalone_document_type() lives in PulpDocumentTypes.cmake —
+# it is a post-hoc overlay on an existing app target, not part of creating one,
+# and keeping it separate lets it be included and tested without pulling in the
+# rest of the app-target machinery.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpDocumentTypes.cmake")
+
 # pulp_add_binary_data() lives in PulpEmbedData.cmake so callers (e.g.
 # core/canvas — bundled-font registration, #932) can include it before the
 # Pulp targets exist. The function definition is unchanged; this PulpUtils

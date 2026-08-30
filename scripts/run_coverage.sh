@@ -193,8 +193,12 @@ CTEST_RC=0
 # even the macOS leg past the workflow's internal budget (a killed run drops the
 # Cobertura report and reddens main). `-j` matches the parallelism the primary
 # build.yml/build-macos.yml lanes already use; source-based instrumentation is
-# parallel-safe because each test process writes its own merge-enabled profile
-# via LLVM_PROFILE_FILE's %m pattern. Cap at 8 like the primary lanes so a
+# parallel-safe because `%p-%m` gives each test PROCESS its own merge-enabled
+# profile. This comment used to claim that of the `%Nm` pool, which was not
+# true: an N-file pool is shared across binaries, profiles with different
+# counter layouts cannot merge, and most were discarded — so this lane was
+# reporting a number well below the coverage it actually had. Cap at 8 like the
+# primary lanes so a
 # high-core self-hosted runner doesn't oversubscribe memory with instrumented
 # Debug test processes. `--timeout` bounds a single wedged test so it can't eat
 # the whole budget; it is generous (instrumented Debug tests run slower than the
@@ -203,7 +207,7 @@ CTEST_RC=0
 CTEST_JOBS="${TEST_JOBS}"
 if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${CTEST_JOBS}m.profraw"
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 if [[ -n "${TESTS_REGEX}" ]]; then
     ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
 else
