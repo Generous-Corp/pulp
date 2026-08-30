@@ -177,6 +177,7 @@ void collect_resolved_binding_plan(ResolvedBindingPlan& plan,
          resolved.kind == NativeWidgetKind::checkbox ||
          resolved.kind == NativeWidgetKind::toggle_button ||
          resolved.kind == NativeWidgetKind::segmented ||
+         resolved.kind == NativeWidgetKind::combo_box ||
          resolved.kind == NativeWidgetKind::stepper) &&
         has_single_param;
     const bool has_choice_param = resolved.kind == NativeWidgetKind::toggle_button &&
@@ -329,7 +330,10 @@ std::vector<BindingHelperRoute> build_binding_helper_routes(const ResolvedBindin
             .payload_contract = md.payload_contract.value_or(std::string{}),
             .event_contract = md.event_contract.value_or(std::string{}),
             .gesture_contract = md.gesture_contract.value_or(std::string{}),
-            .segment_count = static_cast<int>(semantics.segments.size()),
+            .segment_count = static_cast<int>(
+                route.resolved->kind == NativeWidgetKind::combo_box
+                    ? semantics.combo_items.size()
+                    : semantics.segments.size()),
             .stepper_min = route.ir_node->audio_min,
             .stepper_max = route.ir_node->audio_max,
             .stepper_step = semantics.stepper_step,
@@ -471,6 +475,7 @@ void emit_binding_context_helpers(std::ostringstream& out,
             route.kind != NativeWidgetKind::checkbox &&
             route.kind != NativeWidgetKind::toggle_button &&
             route.kind != NativeWidgetKind::segmented &&
+            route.kind != NativeWidgetKind::combo_box &&
             route.kind != NativeWidgetKind::stepper &&
             route.kind != NativeWidgetKind::xy_pad &&
             route.kind != NativeWidgetKind::waveform &&
@@ -498,6 +503,18 @@ void emit_binding_context_helpers(std::ostringstream& out,
                           "if (auto* segmented = dynamic_cast<pulp::view::SegmentedControl*>(view)) {");
                 emit_line(out, 3, opts.indent_spaces, "ctx.bind_segmented(*segmented,");
                 emit_segmented_descriptor(route, 3);
+                emit_line(out, 2, opts.indent_spaces, "}");
+                emit_line(out, 1, opts.indent_spaces, "}");
+                continue;
+            }
+            if (route.kind == NativeWidgetKind::combo_box) {
+                emit_line(out, 2, opts.indent_spaces,
+                          "if (auto* combo = dynamic_cast<pulp::view::ComboBox*>(view); combo != nullptr) {");
+                emit_line(out, 3, opts.indent_spaces,
+                          "if (auto* combo_ctx = dynamic_cast<pulp::view::NativeImportComboBoxBindingContext*>(&ctx)) {");
+                emit_line(out, 4, opts.indent_spaces, "combo_ctx->bind_combo_box(*combo,");
+                emit_segmented_descriptor(route, 4);
+                emit_line(out, 3, opts.indent_spaces, "}");
                 emit_line(out, 2, opts.indent_spaces, "}");
                 emit_line(out, 1, opts.indent_spaces, "}");
                 continue;

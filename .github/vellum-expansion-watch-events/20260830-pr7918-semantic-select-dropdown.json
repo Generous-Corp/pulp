@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260830-pr7918-semantic-select-dropdown",
+  "created_at": "2026-08-30T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record semantic browser select preservation as a collapsed, live ComboBox across native materialization, baked C++, and both generated JavaScript paths. The change keeps initial selection, host automation, UI writeback, and balanced gestures consistent without transferring implementation authority.",
+  "tests": [
+    "pulp-test-browser-capture-import",
+    "pulp-test-design-import",
+    "pulp-test-design-import-toggle-binding",
+    "pulp-test-design-import-native-materializer",
+    "pulp-test-widget-bridge",
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

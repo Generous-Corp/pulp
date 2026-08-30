@@ -112,10 +112,16 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 - **Local-first policy:** Pulp's automatic macOS overflow is disabled with `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not point full-local saturation at GitHub-hosted `macos-15`; let jobs queue for the next local Mac slot. Hosted macOS is an explicit operator fallback for a local fleet outage/unhealthy fleet or a workflow that intentionally wants hosted coverage. Rollback for the old behavior: `gh variable set -R Generous-Corp/pulp PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'`.
 - **Production required macOS routing is event-class-aware.** `build.yml` adds
   `pulp-build-merge-group` for merge-queue work and `pulp-build-pr-head` for PR
-  validation. M1, M3, and M5 can serve both classes through their checked-in
-  TartCI profiles; M1 deliberately waits 10 minutes before taking Pulp work.
-  Healthy idle JIT capacity has no registered runner, so prove service from
-  queue age and exact job-to-runner assignment rather than a static runner row.
+  validation. M1, M3, and M5 have checked-in profiles compatible with both
+  classes; that configured topology is not proof that a host currently serves
+  either class. Only enabled, healthy Pulp gate supervisors provide live
+  capacity, and M1 deliberately waits 10 minutes before taking Pulp work.
+  Healthy idle JIT capacity has no registered runner, so prove participation
+  from supervisor state, queue age, and exact job-to-runner assignment rather
+  than a profile or static runner row. At the 2026-08-30 incident boundary M1
+  and M5 participate while M3's two compatible profiles remain intentionally
+  disabled pending the admission-fix canary; re-check instead of treating that
+  snapshot as durable topology.
 
 ## Linux + Windows pool runners (join the Actions pool like macOS)
 
@@ -254,11 +260,14 @@ main, reddening every PR's macOS gate.)
 ## Rollout: pilot → graduate
 1. **Additive pilot (safe):** run `tartci serve macos --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
 2. **Required-label prevalidation (safe):** run a one-shot VM with `pulp-build` **plus a unique proof label**, then dispatch `Build and Test` with `macos_runner_selector_json` requiring both labels. This proves a VM can satisfy the required label while bare-metal `pulp-build` remains online. Verified 2026-06-10: run `27250564395`, runner `tartci-phase6-pulp-build-proof-r2-20260610`, `macOS (ARM64) [operator]` success, `macos` alias success, VM/JIT runner cleaned up. Cancel unrelated Linux/Windows legs after `macos` is green.
-3. **Graduated production default route:** M1/M3/M5 VM supervisors share the
-   base `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm` labels and select one
+3. **Graduated production default route:** the configured M1/M3/M5 VM
+   supervisor profiles share the base
+   `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm` labels and select one
    mutually exclusive event-class label per job. Merge groups receive priority
    `110`; PR heads receive priority `100`. This keeps merge-queue work ahead
-   without reserving a permanently static VM slot.
+   without reserving a permanently static VM slot. Treat a host as live only
+   after its matching supervisors and a current assignment or service receipt
+   prove participation.
    The following June runs prove the underlying ephemeral base pool; they
    predate event-class V2 and are not V2 assignment receipts:
    - run `27251134234`: default dispatch, no selector override, `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success; hosted leftovers canceled after `macos` went green.

@@ -349,6 +349,9 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w,
     } else if (auto* seg = dynamic_cast<SegmentedControl*>(w)) {
         seg->set_selected_silent(selector_segment_index(
             target, static_cast<int>(seg->segments().size())));
+    } else if (auto* combo = dynamic_cast<ComboBox*>(w)) {
+        combo->set_selected_silent(selector_segment_index(
+            target, static_cast<int>(combo->items().size())));
     } else if (auto* st = dynamic_cast<Stepper*>(w)) {
         st->set_value_silent(stepper_plain_value(
             target, st->minimum(), st->maximum(), st->step()));
@@ -531,6 +534,7 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
                       dynamic_cast<RangeSlider*>(view) != nullptr ||
                       dynamic_cast<Toggle*>(view) != nullptr ||
                       dynamic_cast<SegmentedControl*>(view) != nullptr ||
+                      dynamic_cast<ComboBox*>(view) != nullptr ||
                       dynamic_cast<Stepper*>(view) != nullptr ||
                       dynamic_cast<ProgressBar*>(view) != nullptr;
         if (!supported) return fail(BindingOutcome::incompatible_widget);

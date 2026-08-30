@@ -994,6 +994,9 @@
       "paths": [
         ".agents/skills/forge-app-delivery/**",
         "examples/forge-modular/package.sh",
+        "examples/forge-modular/release-package.sh",
+        "examples/forge-modular/release_inputs.py",
+        "examples/forge-modular/test_release_package.py",
         "examples/forge-modular/uninstall.sh",
         "examples/forge-modular/LICENSE-INSTALLER.txt",
         "forge-seam/populate.sh",

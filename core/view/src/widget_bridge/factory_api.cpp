@@ -310,12 +310,7 @@ void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self)
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto c = std::make_unique<ComboBox>(); c->set_id(id);
         auto* ptr = c.get(); self.widgets_[id] = ptr;
-        auto alive = self.callback_alive_;
-        auto* engine = &self.engine_;
-        c->on_change = [alive, engine, id](int idx) {
-            BridgeCallbackScope scope(alive);
-            dispatch_event(alive, engine, id, "select", std::to_string(idx));
-        };
+        self.wire_callbacks(id, ptr);
         self.resolve_parent(pid)->add_child(std::move(c));
         return choc::value::createString(id);
     });
