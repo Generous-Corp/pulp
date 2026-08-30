@@ -231,6 +231,57 @@ class CleanAgentHarnessTests(unittest.TestCase):
             expected="journey",
         )
 
+    def test_cmake_preparer_outcome_only_accepts_exact_hardware_stops(self) -> None:
+        cmake = shutil.which("cmake")
+        self.assertIsNotNone(cmake)
+        script = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "test/cmake/gpu_clean_agent_journey_test.cmake"
+        )
+        cases = (
+            (0, "", "prepared"),
+            (
+                2,
+                "UNAVAILABLE: reference recipe evidence is unavailable or unverified",
+                "hardware-nonterminal",
+            ),
+            (
+                1,
+                "FAIL: acceptance requires authentic hardware adapter evidence",
+                "hardware-nonterminal",
+            ),
+            (1, "FAIL: unrelated preparer failure", "failure"),
+            (
+                1,
+                "FAIL: acceptance requires authentic hardware adapter evidence\n"
+                "FAIL: unrelated preparer failure",
+                "failure",
+            ),
+        )
+        for result, stderr, expected in cases:
+            with self.subTest(result=result, stderr=stderr, expected=expected):
+                completed = subprocess.run(
+                    [
+                        str(cmake),
+                        "-DPREPARE_OUTCOME_POLICY_ONLY=ON",
+                        f"-DPREPARE_RESULT={result}",
+                        f"-DPREPARE_STDERR={stderr}",
+                        f"-DEXPECTED_PREPARE_OUTCOME={expected}",
+                        "-DBUILD_CONFIGURATION=Release",
+                        "-DSELECTED_BUILD_CONFIGURATION=Release",
+                        "-DGENERATOR_IS_MULTI_CONFIG=FALSE",
+                        "-P",
+                        str(script),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertIn(
+                    f"gpu_clean_agent_prepare_outcome={expected}",
+                    completed.stdout + completed.stderr,
+                )
+
     def test_bounded_trust_command_kills_stream_at_cap(self) -> None:
         started = time.monotonic()
         with self.assertRaisesRegex(trust.isolation.IsolationError, "stdout cap"):
