@@ -1339,16 +1339,25 @@ def main() -> int:
         else:
             raise AssertionError("synthetic terminal-shaped A3 receipt was accepted")
 
-        real_a3_validate = a3_acceptance.validate_receipt
+        def validate_structural_a3_fixture(
+            receipt: dict[str, object], evidence_root: Path,
+        ) -> bool:
+            # A4 still needs a terminal-shaped dependency to exercise its own
+            # digest, machine, budget, and plan bindings.  Validate the full
+            # historical shape explicitly, then override only its deliberately
+            # retired terminal verdict.  Production validation above continues
+            # to prove that the same v1 receipt is nonterminal under A3 v2.
+            a3_acceptance._validate_v1_receipt(
+                receipt, evidence_root, allow_fixture_overhead=True,
+            )
+            return True
 
         def finalize_structural(
             disposition: str, a2t: str, budget: str, a3: str,
         ) -> dict[str, object]:
             with mock.patch.object(
                 a3_acceptance, "validate_receipt",
-                side_effect=lambda receipt, evidence_root: real_a3_validate(
-                    receipt, evidence_root, allow_fixture_overhead=True,
-                ),
+                side_effect=validate_structural_a3_fixture,
             ):
                 return runner.finalize(
                     complete_run, disposition, a2t, budget, a3,
