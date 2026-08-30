@@ -198,7 +198,7 @@
           {
             "exported_as": "Pulp::midi",
             "closure_node_count": 20,
-            "public_header_count": 43
+            "public_header_count": 50
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -2991,7 +2991,7 @@
             ]
           },
           "public_headers": {
-            "count": 43,
+            "count": 50,
             "roots": [
               "core/midi/include"
             ],
