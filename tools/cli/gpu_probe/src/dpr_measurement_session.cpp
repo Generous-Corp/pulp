@@ -451,6 +451,7 @@ struct Session {
     for (auto& item : storage) arguments.push_back(item.data());
     arguments.push_back(nullptr);
     pid_t pid = 0;
+    const auto launched_at = Clock::now();
     const int spawned = posix_spawn(&pid, producer_path.c_str(), &actions, nullptr,
                                     arguments.data(), environ);
     posix_spawn_file_actions_destroy(&actions);
@@ -464,6 +465,7 @@ struct Session {
         error = "fresh-process first-frame trial failed";
         return std::nullopt;
     }
+    const auto acknowledged_at = Clock::now();
     const auto text = read_text(output_path);
     if (!text) {
         error = "fresh-process trial ledger entry is missing";
@@ -477,6 +479,12 @@ struct Session {
             error = "fresh-process trial pid or attempt nonce is unbound";
             return std::nullopt;
         }
+        // The child ledger acknowledges that frame zero reached readback. The
+        // metric itself belongs to the parent so process launch cannot vanish
+        // behind a child-local clock origin or a child-supplied value.
+        value.setMember(
+            "first_frame_time_ms",
+            std::chrono::duration<double, std::milli>(acknowledged_at - launched_at).count());
         return value;
     } catch (const std::exception&) {
         error = "fresh-process trial ledger entry is malformed";
@@ -494,6 +502,22 @@ std::string incomplete_json(const DprMeasurementRequest& request,
 
 } // namespace
 
+namespace testing {
+
+std::optional<double> run_first_frame_child_time_for_test(
+    const DprMeasurementRequest& request,
+    const std::filesystem::path& request_path,
+    const std::filesystem::path& producer_path,
+    const std::filesystem::path& output_path) {
+    std::string error;
+    const auto entry = run_first_frame_child(
+        request, request_path, producer_path, output_path, error);
+    if (!entry) return std::nullopt;
+    return (*entry)["first_frame_time_ms"].getFloat64();
+}
+
+} // namespace testing
+
 int run_dpr_first_frame_trial(const DprMeasurementRequest& request,
                               const std::filesystem::path& output_path,
                               const std::filesystem::path& producer_path,
@@ -510,7 +534,6 @@ int run_dpr_first_frame_trial(const DprMeasurementRequest& request,
         if (error) *error = message.empty() ? "producer digest unavailable" : message;
         return 3;
     }
-    const auto started = Clock::now();
     Session session;
     if (!session.initialize(request, source, message)) {
         if (error) *error = message;
@@ -530,7 +553,6 @@ int run_dpr_first_frame_trial(const DprMeasurementRequest& request,
     root.setMember("producer_sha256", *producer_digest);
     root.setMember("content_digest", request.expected_content_digest);
     root.setMember("pulp_sha", request.pulp_sha);
-    root.setMember("first_frame_time_ms", elapsed_ms(started));
     root.setMember("adapter", adapter_json(session.adapter));
     if (!write_text(output_path, choc::json::toString(root, true) + "\n")) {
         if (error) *error = "could not write first-frame trial";

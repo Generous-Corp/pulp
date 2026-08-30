@@ -2,7 +2,20 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <unistd.h>
+
+namespace pulp::tooling::gpu_probe::testing {
+
+std::optional<double> run_first_frame_child_time_for_test(
+    const DprMeasurementRequest& request,
+    const std::filesystem::path& request_path,
+    const std::filesystem::path& producer_path,
+    const std::filesystem::path& output_path);
+
+} // namespace pulp::tooling::gpu_probe::testing
 
 namespace probe = pulp::tooling::gpu_probe;
 
@@ -82,4 +95,39 @@ TEST_CASE("native DPR measurement rejects forged requests",
     invalid_dpr.replace(invalid_dpr.find("1.0"), 3, "0.0");
     CHECK_FALSE(probe::parse_dpr_measurement_request(invalid_dpr, &error));
     CHECK(error.find("(0, 4]") != std::string::npos);
+}
+
+TEST_CASE("fresh-process timing starts in the parent before launch",
+          "[gpu][dpr][measurement]") {
+    const auto root = std::filesystem::temp_directory_path() /
+        ("pulp-dpr-parent-timing-" + std::to_string(getpid()));
+    std::filesystem::create_directories(root);
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{root};
+
+    const auto producer = root / "delayed-first-frame.sh";
+    const auto output = root / "first-frame.json";
+    const auto request_path = root / "request.json";
+    std::ofstream(producer, std::ios::trunc)
+        << "#!/bin/sh\n"
+           "sleep 0.12\n"
+           "printf '%s\\n' "
+           "'{\"attempt_nonce\":\"11111111111111111111111111111111\","
+           "\"attempt_number\":1,\"pid\":'\"$$\"',"
+           "\"first_frame_time_ms\":0.001}' > \"$4\"\n";
+    std::filesystem::permissions(
+        producer,
+        std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write |
+            std::filesystem::perms::owner_exec,
+        std::filesystem::perm_options::replace);
+
+    const auto parsed = probe::parse_dpr_measurement_request(request());
+    REQUIRE(parsed);
+    const auto measured = probe::testing::run_first_frame_child_time_for_test(
+        *parsed, request_path, producer, output);
+    REQUIRE(measured);
+    CHECK(*measured >= 100.0);
 }
