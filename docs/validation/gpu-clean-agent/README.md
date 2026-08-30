@@ -1,15 +1,19 @@
-# GPU clean-agent acceptance
+# GPU clean-agent structural evidence
 
-Horizon-A A5 is a two-party acceptance gate. A deterministic driver, a replay,
+Horizon-A A5 uses a two-party usability harness. A deterministic driver, a replay,
 an implementing agent correcting its own option, or an unsigned handcrafted
 session does not satisfy it.
 
 The checked-in `m3-a5-clean-agent-20260828.json` remains the unchanged
 `superseded-nonterminal` disposition for the former self-run receipt. Its
 historical replacement field names the earlier v2 design; it cannot satisfy
-A5. The hardened terminal pair uses a new filename, a
-`pulp.gpu-clean-agent-verification.v3` receipt, and a
-`pulp.gpu-clean-agent-audit-bundle.v1` bundle.
+A5. Historical v3 case/session/verification documents remain readable only as
+nonterminal migration input. The current harness emits a
+`pulp.gpu-clean-agent-case.v4` case, a
+`pulp.gpu-clean-agent-session.v4` session, a structural
+`pulp.gpu-clean-agent-verification.v4` receipt, and a
+`pulp.gpu-clean-agent-audit-bundle.v2` bundle. None grants acceptance; the
+separate protected planning artifact is the only terminal authority.
 
 ## State and trust boundary
 
@@ -22,7 +26,8 @@ A5. The hardened terminal pair uses a new filename, a
    installed `pulp`/`pulp-cpp` bytes, and Git-blob-identical installed catalog
    and documentation. Caller-supplied revision labels are not accepted. It
    creates the planted workspace, private reference, fresh nonce, and one-use
-   record-signing key. Its state is `awaiting-independent-agent`.
+   record-signing key. Its state is `prepared-structural-nonterminal` and it
+   freezes the 15-minute, 256-event, 64-descendant, and per-root resource caps.
 2. `record` accepts only the native hardened-runtime `codex` signed by OpenAI
    team `2DC432GLL2`. It launches one non-ephemeral session with a disposable
    HOME/CODEX_HOME, closed JSON output schema, and sanitized environment. One
@@ -48,23 +53,25 @@ A5. The hardened terminal pair uses a new filename, a
    records host/byte outcomes without TLS payloads. `record` joins the stdout
    thread UUID to Codex's persisted session JSONL, signs both the complete
    private session core and its deterministic placeholder-redacted form,
-   destroys the one-use private key, and remains nonterminal.
+   destroys the one-use private key, and emits
+   `recorded-structural-nonterminal`.
 3. `verify` re-derives every provenance and byte identity, verifies the record
    signature, official Codex identity, saved-session join, nonce, Seatbelt
    profile/controls, installed catalog/docs reads, exact negative/edit/repaired
-   sequence, evidence IDs, adapter, tree, and artifact digests. It writes the
-   terminal receipt and a bounded redacted audit bundle transaction in this
-   directory. The receipt is the commit marker: an exact bundle left staged by
+   sequence, evidence IDs, adapter, tree, and artifact digests. It writes a
+   structural verification receipt and bounded redacted audit bundle transaction
+   in this directory. The receipt is the transaction commit marker: an exact bundle left staged by
    interruption can be resumed, a mismatched bundle is rejected, and an
    ordinary receipt-write failure rolls back a newly staged bundle. Absolute source, plan, build, private-case, workspace, install,
    runtime, and Codex paths are replaced with stable placeholders.
 
 `record` and `verify` additionally require both source and plan HEADs to carry
-Daniel's valid authorized SSH commit-signing fingerprint. The nonterminal CTest
-plan fixture deliberately cannot cross that terminal authority gate.
+Daniel's valid authorized SSH commit-signing fingerprint. The CTest plan fixture
+exercises only the structural boundary and cannot grant protected acceptance.
 
-The durable bundle is deliberately nonterminal until the terminal receipt
-binds its digest. It contains the bounded stdout JSONL events, structured final
+The durable bundle and verification receipt are deliberately nonterminal. The
+receipt binds the bundle digest transactionally; protected acceptance remains
+external. The bundle contains the bounded stdout JSONL events, structured final
 message, redacted case/session records, public Codex rollout metadata, command
 records, exact tree/diff, and evidence summaries. It intentionally excludes
 authentication and private-key bytes. The local prepare/record orchestrator is
@@ -90,12 +97,13 @@ symlink, special-file, hard-link, path escape, dirty Git state, altered install
 bytes, unavailable evidence, replay, undocumented discovery, network-doc use,
 extra edits, or cap breaches fail closed.
 
-## Terminal independent run
+## Structural independent run
 
 Run this only after the harness commit is the shared source HEAD and the
 canonical plan is committed. The person orchestrating the proof prepares and
-verifies it; `record` launches the fresh no-context agent. This hardening change
-does not run or self-certify that terminal proof.
+verifies it; `record` launches the fresh no-context agent. The resulting pair is
+retained input to the separate protected planning acceptance and cannot
+self-certify A5.
 
 ```sh
 SOURCE_ROOT=/absolute/path/to/the-shared-clean-pulp-worktree
@@ -137,12 +145,14 @@ python3 "$HARNESS" record \
 python3 "$HARNESS" verify \
   --case "$PROOF_ROOT/private-case/case.json" \
   --session "$PROOF_ROOT/private-case/agent-session.json" \
-  --receipt "$SOURCE_ROOT/docs/validation/gpu-clean-agent/m3-a5-clean-agent-independent-20260829.json" \
-  --bundle "$SOURCE_ROOT/docs/validation/gpu-clean-agent/m3-a5-clean-agent-independent-20260829.bundle.json"
+  --receipt "$SOURCE_ROOT/docs/validation/gpu-clean-agent/m3-a5-clean-agent-v4-20260829.json" \
+  --bundle "$SOURCE_ROOT/docs/validation/gpu-clean-agent/m3-a5-clean-agent-v4-20260829.bundle.json"
 ```
 
-Review and commit both new durable artifacts. Preserve the private case and
+Review and commit both new durable structural artifacts. Preserve the private case and
 workspace only as a local forensic source until the redacted pair is reviewed;
 they are not required for checked-in replay. CTest exercises the nonterminal
-`prepare` process contract and planted trust primitives only. It cannot claim
-A5 acceptance.
+`prepare` process contract and planted trust primitives only. After the Pulp
+commit reaches protected main, a different authorized human reviews the exact
+planning-only A5 protected-acceptance artifact and the shared live validator
+must pass; neither this harness nor its output can claim A5 acceptance.

@@ -235,7 +235,7 @@ class CleanAgentHarnessTests(unittest.TestCase):
             self.assertTrue(record["creator_access_removed"])
             self.assertFalse((codex_home / "auth.json").exists())
 
-    def test_terminal_pair_rolls_back_and_recovers_exact_staged_bundle(self) -> None:
+    def test_structural_pair_rolls_back_and_recovers_exact_staged_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw).resolve()
             bundle, receipt = root / "bundle.json", root / "receipt.json"
@@ -248,25 +248,25 @@ class CleanAgentHarnessTests(unittest.TestCase):
 
             with mock.patch.object(journey, "_write_bytes", side_effect=fail_receipt):
                 with self.assertRaisesRegex(journey.JourneyError, "planted receipt"):
-                    journey._publish_terminal_pair(
+                    journey._publish_structural_pair(
                         bundle_path=bundle, bundle_payload=b"bundle",
                         receipt_path=receipt, receipt_payload=b"receipt",
                     )
             self.assertEqual(bundle.read_bytes(), b"bundle")
             self.assertFalse(receipt.exists())
-            journey._publish_terminal_pair(
+            journey._publish_structural_pair(
                 bundle_path=bundle, bundle_payload=b"bundle",
                 receipt_path=receipt, receipt_payload=b"receipt",
             )
             self.assertEqual(receipt.read_bytes(), b"receipt")
             receipt.unlink()
             with self.assertRaisesRegex(journey.JourneyError, "not this exact"):
-                journey._publish_terminal_pair(
+                journey._publish_structural_pair(
                     bundle_path=bundle, bundle_payload=b"different",
                     receipt_path=receipt, receipt_payload=b"receipt",
                 )
 
-    def test_terminal_pair_recovers_receipt_parent_fsync_failure(self) -> None:
+    def test_structural_pair_recovers_receipt_parent_fsync_failure(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw).resolve()
             bundle, receipt = root / "bundle.json", root / "receipt.json"
@@ -283,7 +283,7 @@ class CleanAgentHarnessTests(unittest.TestCase):
             with mock.patch.object(
                 journey, "_fsync_directory", side_effect=fail_receipt_fsync_once,
             ):
-                journey._publish_terminal_pair(
+                journey._publish_structural_pair(
                     bundle_path=bundle, bundle_payload=b"bundle",
                     receipt_path=receipt, receipt_payload=b"receipt",
                 )
@@ -360,6 +360,17 @@ class CleanAgentHarnessTests(unittest.TestCase):
             journey._parse_transcript(
                 b'{"type":"thread.started","thread_id":"thread-synthetic"}\n'
                 b'{"type":"turn.completed"}\n'
+            )
+        oversized = [
+            {"type": "thread.started", "thread_id": THREAD_ID},
+            {"type": "turn.started"},
+            *({"type": "item.completed", "item": {"type": "reasoning"}}
+              for _ in range(journey.MAX_BUNDLE_EVENTS - 2)),
+            {"type": "turn.completed"},
+        ]
+        with self.assertRaisesRegex(journey.JourneyError, "event-count cap"):
+            journey._parse_transcript(
+                b"".join(json.dumps(item).encode() + b"\n" for item in oversized)
             )
 
     def test_codex_rollout_binds_origin_thread_model_nonce_and_completion(self) -> None:
@@ -809,6 +820,13 @@ class CleanAgentHarnessTests(unittest.TestCase):
                 journey._run([sys.executable, "-c", parent], 0.1)
             time.sleep(0.7)
             self.assertFalse(marker.exists())
+        with mock.patch.object(
+            journey,
+            "_descendant_process_count",
+            return_value=journey.MAX_DESCENDANT_PROCESSES + 1,
+        ):
+            with self.assertRaisesRegex(journey.JourneyError, "descendant process bound"):
+                journey._run([sys.executable, "-c", "import time; time.sleep(10)"], 5.0)
         with self.assertRaisesRegex(journey.JourneyError, "invalid bounded"):
             journey._run([sys.executable, "-c", "pass"], math.nan)
         with self.assertRaisesRegex(journey.JourneyError, "oversized string"):
@@ -838,6 +856,42 @@ class CleanAgentHarnessTests(unittest.TestCase):
             "pulp.gpu-clean-agent-verification.v2",
         )
         self.assertIs(disposition["acceptance_gate_satisfied"], False)
+
+    def test_v4_outputs_forbid_in_process_acceptance_authority(self) -> None:
+        self.assertEqual(journey.CASE_SCHEMA, "pulp.gpu-clean-agent-case.v4")
+        self.assertEqual(journey.SESSION_SCHEMA, "pulp.gpu-clean-agent-session.v4")
+        self.assertEqual(
+            journey.VERIFICATION_SCHEMA,
+            "pulp.gpu-clean-agent-verification.v4",
+        )
+        journey._require_v4_structural_nonterminal(
+            {"schema": journey.VERIFICATION_SCHEMA, "status": "structural-verification-passed"},
+            "valid v4",
+        )
+        for planted in (
+            {"terminal": True},
+            {"terminal_status": "pass"},
+            {"accepted": True},
+            {"acceptance_gate_satisfied": False},
+            {"status": "independent-agent-accepted"},
+        ):
+            with self.subTest(planted=planted), self.assertRaises(journey.JourneyError):
+                journey._require_v4_structural_nonterminal(planted, "planted v4")
+
+    def test_v3_documents_are_readable_only_as_nonterminal_migration_input(self) -> None:
+        for schema in sorted(journey.LEGACY_V3_SCHEMAS):
+            with self.subTest(schema=schema):
+                classified = journey.classify_legacy_v3_document(
+                    {
+                        "schema": schema,
+                        "status": "independent-agent-accepted",
+                        "acceptance_gate_satisfied": True,
+                    }
+                )
+                self.assertEqual(classified["status"], "historical-v3-nonterminal")
+                self.assertEqual(classified["migration_use"], "retained-input-only")
+                self.assertNotIn("accepted", json.dumps(classified))
+                self.assertNotIn("acceptance_gate", json.dumps(classified))
 
 
 if __name__ == "__main__":

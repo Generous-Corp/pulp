@@ -235,14 +235,16 @@ the requested evidence was unavailable or unverified and must not be counted as
 a pass. Correlate the emitted `gpu_evidence_id` with the `gpu-probe` Perfetto
 question when the wrong value is downstream of scheduling or frame work.
 
-The A5 clean-agent gate exercises that flow rather than merely checking a
+The A5 clean-agent harness exercises that flow rather than merely checking a
 catalog lookup. Starting only from `compute-readback-mismatch`, it selects the
 live CLI's unique callable recipe, scaffolds a workspace, executes the real
 seeded failure, diagnoses its completed typed pass, removes only the documented
 `--negative-control` seed, and proves the repaired rerun with stable
 input/oracle hashes. See
 [`docs/validation/gpu-clean-agent/README.md`](../validation/gpu-clean-agent/README.md)
-for the standalone invocation and receipt contract.
+for the standalone invocation and structural v4 evidence contract. Its
+verification receipt is nonterminal; protected planning acceptance remains a
+separate human-reviewed artifact after the exact Pulp head lands.
 
 For a live product, query the exact instance separately with
 `dev.pulp.gpu/health.read@1` under `inspect-readonly`. That cheap snapshot is a

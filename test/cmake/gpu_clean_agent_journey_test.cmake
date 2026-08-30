@@ -102,10 +102,11 @@ endif()
 
 string(JSON prepare_schema ERROR_VARIABLE prepare_json_error GET "${prepare_json}" schema)
 string(JSON prepare_status GET "${prepare_json}" status)
-string(JSON prepare_gate GET "${prepare_json}" acceptance_gate_satisfied)
-if(prepare_json_error OR NOT prepare_schema STREQUAL "pulp.gpu-clean-agent-case.v3" OR
-   NOT prepare_status STREQUAL "awaiting-independent-agent" OR prepare_gate)
-    message(FATAL_ERROR "preparer incorrectly emitted terminal acceptance")
+string(FIND "${prepare_json}" "\"acceptance_gate_satisfied\"" prepare_gate_position)
+if(prepare_json_error OR NOT prepare_schema STREQUAL "pulp.gpu-clean-agent-case.v4" OR
+   NOT prepare_status STREQUAL "prepared-structural-nonterminal" OR
+   NOT prepare_gate_position EQUAL -1)
+    message(FATAL_ERROR "preparer did not emit the closed structural v4 boundary")
 endif()
 if(NOT EXISTS "${workspace}/run-probe.sh" OR
    NOT EXISTS "${private_case}/case.json" OR

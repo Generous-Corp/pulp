@@ -5,7 +5,8 @@ The subcommands deliberately run in separate processes. ``prepare`` creates an
 agent-visible workspace and a private reference case. ``record`` starts one
 fresh Codex session with only the installed CLI, symptom, workspace, and public
 documentation in its prompt. ``verify`` checks the transcript and filesystem
-against the private reference. Only ``verify`` can emit an acceptance receipt.
+against the private reference and emits structural, nonterminal evidence for
+the separate protected planning acceptance process.
 """
 
 from __future__ import annotations
@@ -37,9 +38,14 @@ import gpu_clean_agent_trust as trust
 RESULT_SCHEMA = "pulp.gpu-probe-result.v1"
 DISCOVERY_SCHEMA = "pulp.gpu-recipes-discovery.v1"
 CATALOG_SCHEMA = "pulp.gpu-recipes.v1"
-CASE_SCHEMA = "pulp.gpu-clean-agent-case.v3"
-SESSION_SCHEMA = "pulp.gpu-clean-agent-session.v3"
-VERIFICATION_SCHEMA = "pulp.gpu-clean-agent-verification.v3"
+CASE_SCHEMA = "pulp.gpu-clean-agent-case.v4"
+SESSION_SCHEMA = "pulp.gpu-clean-agent-session.v4"
+VERIFICATION_SCHEMA = "pulp.gpu-clean-agent-verification.v4"
+LEGACY_V3_SCHEMAS = frozenset({
+    "pulp.gpu-clean-agent-case.v3",
+    "pulp.gpu-clean-agent-session.v3",
+    "pulp.gpu-clean-agent-verification.v3",
+})
 SUPERSEDED_SCHEMA = "pulp.gpu-clean-agent-disposition.v1"
 
 MAX_ARTIFACTS = 16
@@ -51,9 +57,11 @@ MAX_STDERR_BYTES = 4 * 1024 * 1024
 MAX_METADATA_BYTES = 16 * 1024 * 1024
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 MAX_BUNDLE_BYTES = 8 * 1024 * 1024
-MAX_BUNDLE_EVENTS = 512
+MAX_BUNDLE_EVENTS = 256
 MAX_BUNDLE_STRING_BYTES = 512 * 1024
 MAX_BUNDLE_DEPTH = 32
+MAX_AGENT_WALL_CLOCK_SECONDS = 900.0
+MAX_DESCENDANT_PROCESSES = 64
 MONITOR_INTERVAL_SECONDS = 0.01
 PROCESS_GROUP_GRACE_SECONDS = 0.5
 ARTIFACT_KINDS = {"json", "image", "numeric-samples", "trace"}
@@ -79,6 +87,39 @@ class JourneyError(RuntimeError):
     """A contract violation that means the acceptance is not proven."""
 
 
+def _require_v4_structural_nonterminal(value: Any, label: str) -> None:
+    """Reject the superseded in-process authority vocabulary from v4 outputs."""
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = str(key).replace("-", "_").casefold()
+            if (
+                normalized == "terminal"
+                or normalized.startswith("terminal_")
+                or "accepted" in normalized
+                or "acceptance_gate" in normalized
+            ):
+                raise JourneyError(
+                    f"{label} contains forbidden in-process authority field: {key}"
+                )
+            _require_v4_structural_nonterminal(child, label)
+    elif isinstance(value, list):
+        for child in value:
+            _require_v4_structural_nonterminal(child, label)
+    elif isinstance(value, str) and value == "independent-agent-accepted":
+        raise JourneyError(f"{label} contains a superseded acceptance value")
+
+
+def classify_legacy_v3_document(value: Any) -> dict[str, str]:
+    """Read a historical v3 document only as retained nonterminal input."""
+    if not isinstance(value, dict) or value.get("schema") not in LEGACY_V3_SCHEMAS:
+        raise JourneyError("legacy clean-agent document is not a recognized v3 schema")
+    return {
+        "schema": str(value["schema"]),
+        "status": "historical-v3-nonterminal",
+        "migration_use": "retained-input-only",
+    }
+
+
 class JourneyUnavailable(JourneyError):
     """The requested recipe evidence is unavailable or unverified."""
 
@@ -96,6 +137,26 @@ class ResourceRoot:
     total_bytes: int = MAX_WORKSPACE_BYTES
     file_bytes: int = MAX_TOTAL_ARTIFACT_BYTES
     entries: int = MAX_WORKSPACE_ENTRIES
+
+
+def _v4_limits() -> dict[str, Any]:
+    return {
+        "wall_clock_seconds": int(MAX_AGENT_WALL_CLOCK_SECONDS),
+        "max_descendant_processes": MAX_DESCENDANT_PROCESSES,
+        "max_transcript_events": MAX_BUNDLE_EVENTS,
+        "roots": {
+            "workspace": {
+                "total_bytes": MAX_WORKSPACE_BYTES,
+                "file_bytes": MAX_TOTAL_ARTIFACT_BYTES,
+                "entries": MAX_WORKSPACE_ENTRIES,
+            },
+            "runtime": {
+                "total_bytes": MAX_WORKSPACE_BYTES,
+                "file_bytes": MAX_TOTAL_ARTIFACT_BYTES,
+                "entries": MAX_WORKSPACE_ENTRIES,
+            },
+        },
+    }
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -193,14 +254,14 @@ def _fsync_directory(path: pathlib.Path) -> None:
         os.close(descriptor)
 
 
-def _publish_terminal_pair(
+def _publish_structural_pair(
     *, bundle_path: pathlib.Path, bundle_payload: bytes,
     receipt_path: pathlib.Path, receipt_payload: bytes,
 ) -> None:
     """Publish bundle then receipt, recovering either exact staged state after a crash."""
 
     if receipt_path.exists() or receipt_path.is_symlink():
-        raise JourneyError("terminal acceptance receipt already exists")
+        raise JourneyError("structural verification receipt already exists")
     if bundle_path.exists() or bundle_path.is_symlink():
         if bundle_path.is_symlink() or _read_regular_bytes(bundle_path) != bundle_payload:
             raise JourneyError("pre-existing audit bundle is not this exact staged transaction")
@@ -340,6 +401,37 @@ def _process_group_exists(process: subprocess.Popen[bytes]) -> bool:
         return False
 
 
+def _descendant_process_count(process_group: int) -> int | None:
+    """Return descendants in the isolated POSIX process group, excluding leader."""
+    if os.name != "posix":
+        return None
+    try:
+        completed = subprocess.run(
+            ["/bin/ps", "-axo", "pgid=,pid="],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2.0,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise JourneyError("cannot enforce descendant-process bound") from error
+    if completed.returncode != 0:
+        raise JourneyError("cannot enforce descendant-process bound")
+    members = 0
+    for line in completed.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        try:
+            pgid, pid = (int(field) for field in fields)
+        except ValueError:
+            continue
+        if pgid == process_group and pid != process_group:
+            members += 1
+    return members
+
+
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
     if os.name == "posix":
         try:
@@ -434,6 +526,7 @@ def _run(
     deadline = time.monotonic() + timeout_seconds
     violation: str | None = None
     roots = tuple(monitor_roots)
+    next_process_count = 0.0
     try:
         while process.poll() is None:
             try:
@@ -446,10 +539,26 @@ def _run(
                         _resource_usage(root)
                 except (JourneyError, OSError) as exc:
                     violation = str(exc)
+            now = time.monotonic()
+            if violation is None and now >= next_process_count:
+                try:
+                    descendants = _descendant_process_count(process.pid)
+                except JourneyError as exc:
+                    violation = str(exc)
+                else:
+                    if (
+                        descendants is not None
+                        and descendants > MAX_DESCENDANT_PROCESSES
+                    ):
+                        violation = (
+                            "command exceeded its "
+                            f"{MAX_DESCENDANT_PROCESSES}-descendant process bound"
+                        )
+                next_process_count = now + 0.1
             if violation is not None:
                 _terminate_process_group(process)
                 break
-            if time.monotonic() >= deadline:
+            if now >= deadline:
                 violation = f"command exceeded the {timeout_seconds:g}s bound: {argv[0]}"
                 _terminate_process_group(process)
                 break
@@ -1199,14 +1308,14 @@ def prepare_case(
         "reference_result_sha256": _sha256(reference_path),
         "run_nonce": run_nonce,
         "record_public_key_sha256": record_key["public_key_sha256"],
+        "limits": _v4_limits(),
     }
     case_id = _sha256_bytes(
         json.dumps(identity_seed, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )[:32]
     case = {
         "schema": CASE_SCHEMA,
-        "status": "awaiting-independent-agent",
-        "acceptance_gate_satisfied": False,
+        "status": "prepared-structural-nonterminal",
         "case_id": case_id,
         "symptom": symptom,
         "workspace": str(workspace),
@@ -1219,6 +1328,7 @@ def prepare_case(
         "public_material": public_material,
         "run_nonce": run_nonce,
         "record_key": record_key,
+        "limits": _v4_limits(),
         "installed_cli": {
             **installed_identity,
             "path": str(pulp),
@@ -1255,12 +1365,12 @@ def prepare_case(
             "adapter": adapter,
         },
     }
+    _require_v4_structural_nonterminal(case, "prepared v4 case")
     case_path = case_dir / "case.json"
     _write_json(case_path, case)
     return {
         "schema": CASE_SCHEMA,
         "status": case["status"],
-        "acceptance_gate_satisfied": False,
         "case_id": case_id,
         "workspace": str(workspace),
         "private_case": str(case_path),
@@ -1467,11 +1577,17 @@ def record_agent(
     model: str,
     timeout_seconds: float,
 ) -> dict[str, Any]:
-    if not math.isfinite(timeout_seconds) or not 1.0 <= timeout_seconds <= 1800.0:
-        raise JourneyError("--timeout-seconds must be between 1 and 1800 seconds")
+    if (
+        not math.isfinite(timeout_seconds)
+        or not 1.0 <= timeout_seconds <= MAX_AGENT_WALL_CLOCK_SECONDS
+    ):
+        raise JourneyError("--timeout-seconds must be between 1 and 900 seconds")
     _require_real_directory(case_path.parent)
     case = _load_json(case_path)
-    if case.get("schema") != CASE_SCHEMA or case.get("status") != "awaiting-independent-agent":
+    if (
+        case.get("schema") != CASE_SCHEMA
+        or case.get("status") != "prepared-structural-nonterminal"
+    ):
         raise JourneyError("record requires a nonterminal prepared case")
     _require_case_identity(case, case_path)
     _validate_case_material(case, case_path)
@@ -1684,8 +1800,7 @@ def record_agent(
         final_tree = _snapshot_tree(workspace)
         session_core = {
             "schema": SESSION_SCHEMA,
-            "status": "agent-finished-awaiting-verification",
-            "acceptance_gate_satisfied": False,
+            "status": "recorded-structural-nonterminal",
             "case_id": case["case_id"],
             "case_sha256": _sha256(case_path),
             "session_id": thread_id,
@@ -1747,6 +1862,7 @@ def record_agent(
             "credential_disclosure_scan": "passed",
             "final_tree": final_tree,
         }
+        _require_v4_structural_nonterminal(session_core, "recorded v4 session")
         replacements = _redaction_pairs(case, case_path, session_core)
         redacted_session_core = _redact_value(session_core, replacements)
         attestation = trust.sign_record(session_core, private_key)
@@ -1897,9 +2013,10 @@ def _require_case_identity(case: dict[str, Any], case_path: pathlib.Path) -> Non
     _require_exact_fields(
         case,
         {
-            "schema", "status", "acceptance_gate_satisfied", "case_id", "symptom",
+            "schema", "status", "case_id", "symptom",
             "workspace", "forbidden_roots", "source_revision", "plan_revision",
             "source", "plan", "build", "public_material", "run_nonce", "record_key",
+            "limits",
             "installed_cli", "harnesses", "prompt", "initial_tree", "correction",
             "selection", "reference",
         },
@@ -1907,15 +2024,16 @@ def _require_case_identity(case: dict[str, Any], case_path: pathlib.Path) -> Non
     )
     if (
         case["schema"] != CASE_SCHEMA
-        or case["status"] != "awaiting-independent-agent"
-        or case["acceptance_gate_satisfied"] is not False
+        or case["status"] != "prepared-structural-nonterminal"
         or not isinstance(case["case_id"], str)
         or re.fullmatch(r"[0-9a-f]{32}", case["case_id"]) is None
         or not isinstance(case["symptom"], str) or not case["symptom"]
         or not isinstance(case["run_nonce"], str)
         or re.fullmatch(r"[0-9a-f]{64}", case["run_nonce"]) is None
     ):
-        raise JourneyError("prepared case is not a nonterminal v3 identity")
+        raise JourneyError("prepared case is not a structural nonterminal v4 identity")
+    if case["limits"] != _v4_limits():
+        raise JourneyError("prepared v4 case does not freeze the exact resource limits")
     _require_revision(case["source_revision"], "source revision")
     _require_revision(case["plan_revision"], "plan revision")
     source = _require_exact_fields(
@@ -2044,6 +2162,7 @@ def _require_case_identity(case: dict[str, Any], case_path: pathlib.Path) -> Non
         "reference_result_sha256": case["reference"]["result_json_sha256"],
         "run_nonce": case["run_nonce"],
         "record_public_key_sha256": record_key["public_key_sha256"],
+        "limits": _v4_limits(),
     }
     expected_case_id = _sha256_bytes(
         json.dumps(identity_seed, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -2058,7 +2177,7 @@ def _validate_session_identity(
     _require_exact_fields(
         session,
         {
-            "schema", "status", "acceptance_gate_satisfied", "case_id", "case_sha256",
+            "schema", "status", "case_id", "case_sha256",
             "session_id", "run_nonce", "model", "cwd", "path", "home", "config_home",
             "codex_home", "runtime_removed", "environment_keys", "agent_binary",
             "keychain_auth", "network_proxy",
@@ -2090,8 +2209,7 @@ def _validate_session_identity(
     )
     if (
         session["schema"] != SESSION_SCHEMA
-        or session["status"] != "agent-finished-awaiting-verification"
-        or session["acceptance_gate_satisfied"] is not False
+        or session["status"] != "recorded-structural-nonterminal"
         or session["case_id"] != case["case_id"]
         or session["case_sha256"] != _sha256(case_path)
         or not isinstance(session["session_id"], str)
@@ -3019,7 +3137,7 @@ def verify_case(
         or _is_within(receipt_path, workspace) or _is_within(receipt_path, case_path.parent)
         or _is_within(bundle_path, workspace) or _is_within(bundle_path, case_path.parent)
     ):
-        raise JourneyError("terminal receipt and bundle must be new durable A5 source artifacts")
+        raise JourneyError("structural receipt and bundle must be new durable A5 source artifacts")
     _require_real_directory(durable_parent)
     for output_path in (receipt_path, bundle_path):
         relative = output_path.relative_to(source_root).as_posix()
@@ -3031,9 +3149,9 @@ def verify_case(
             30.0,
         )
         if tracked.returncode == 0:
-            raise JourneyError("terminal receipt and bundle paths must be new untracked artifacts")
+            raise JourneyError("structural receipt and bundle paths must be new untracked artifacts")
     if receipt_path.exists() or receipt_path.is_symlink():
-        raise JourneyError("terminal acceptance receipt already exists")
+        raise JourneyError("structural verification receipt already exists")
     expected_session_path = case_path.parent / "agent-session.json"
     if session_path != expected_session_path:
         raise JourneyError("verifier requires the session beside its private prepared case")
@@ -3059,9 +3177,8 @@ def verify_case(
         pathlib.Path(case["record_key"]["public_key_path"]), 64 * 1024
     )
     bundle = {
-        "schema": "pulp.gpu-clean-agent-audit-bundle.v1",
-        "status": "verification-material-awaiting-bound-receipt",
-        "acceptance_gate_satisfied": False,
+        "schema": "pulp.gpu-clean-agent-audit-bundle.v2",
+        "status": "structural-verification-material",
         "case_id": case["case_id"],
         "redaction": {
             "format": "absolute-path-placeholders-v1",
@@ -3111,6 +3228,7 @@ def verify_case(
             "changed_negative_artifacts": changed,
         },
     }
+    _require_v4_structural_nonterminal(bundle, "v4 structural audit bundle")
     redacted_bundle, bundle_payload = _bounded_redacted_bytes(
         bundle, replacements, "durable audit bundle"
     )
@@ -3124,8 +3242,7 @@ def verify_case(
     }
     receipt = {
         "schema": VERIFICATION_SCHEMA,
-        "status": "independent-agent-accepted",
-        "acceptance_gate_satisfied": True,
+        "status": "structural-verification-passed",
         "case_id": case["case_id"],
         "case_sha256": _sha256(case_path),
         "session_sha256": _sha256(session_path),
@@ -3203,10 +3320,11 @@ def verify_case(
         },
         "trust_boundary": bundle["trust_boundary"],
     }
+    _require_v4_structural_nonterminal(receipt, "v4 structural verification")
     redacted_receipt, receipt_payload = _bounded_redacted_bytes(
-        receipt, replacements, "terminal acceptance receipt"
+        receipt, replacements, "structural verification receipt"
     )
-    _publish_terminal_pair(
+    _publish_structural_pair(
         bundle_path=bundle_path,
         bundle_payload=bundle_payload,
         receipt_path=receipt_path,
@@ -3255,7 +3373,9 @@ def _build_parser() -> argparse.ArgumentParser:
     record.add_argument("--model", required=True)
     record.add_argument("--timeout-seconds", type=float, default=900.0)
 
-    verify = subparsers.add_parser("verify", help="externally validate and publish a terminal receipt")
+    verify = subparsers.add_parser(
+        "verify", help="externally validate and publish structural nonterminal evidence"
+    )
     verify.add_argument("--case", required=True)
     verify.add_argument("--session", required=True)
     verify.add_argument("--receipt", required=True)
