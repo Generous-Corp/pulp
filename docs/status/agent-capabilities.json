@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 42,
+  "manifest_revision": 43,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -21,7 +21,7 @@
       },
       "midi": {
         "state": "partial",
-        "capabilities": 9
+        "capabilities": 10
       },
       "music": {
         "state": "partial",
@@ -713,6 +713,69 @@
         }
       },
       "contract_digest": "sha256:69f5a1211ca7e43496604f4c269c3fe9d157a2b5e71856f840ae22074a6a5349"
+    },
+    {
+      "key": "midi.linear-step-player",
+      "domain": "midi",
+      "summary": "Bounded sample-accurate linear multi-lane step player with per-step gate, pitch offset, velocity, probability, ratchet, tie/slide, and per-lane direction modes.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "reserve output and ledgers on control",
+        "process": "audio",
+        "reset": "audio with prepared output",
+        "release": "none"
+      },
+      "state_model": "Fixed lane, sounding-note, and release ledgers retain per-lane playheads and choke resolution without allocation.",
+      "seed_model": "explicit spec random_seed indexed by grid coordinate",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "input"
+      },
+      "input_domain": "lane specifications, step grid, absolute sample block, tempo map, and transport event",
+      "output_domain": "owned note-on and note-off MIDI event stream",
+      "units": [
+        "ticks",
+        "samples",
+        "MIDI note",
+        "velocity",
+        "percent",
+        "semitones"
+      ],
+      "latency": "sample-scheduled within the supplied block",
+      "tail": "owned note releases and bounded release debt",
+      "scheduling": "absolute-sample transport-aware",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/midi/step_player.hpp",
+          "qualified_name": "pulp::midi::StepPlayer<>",
+          "target": "Pulp::midi",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:f644902c6194883b17263fc5a4c51548b7c917a9ecde8cbb880f6667e401174c"
     },
     {
       "key": "midi.monophonic-note-selection",
@@ -6534,10 +6597,10 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 92,
+    "total": 93,
     "by_domain": {
       "audio": 7,
-      "midi": 9,
+      "midi": 10,
       "music": 7,
       "offline": 0,
       "sequence": 1,
