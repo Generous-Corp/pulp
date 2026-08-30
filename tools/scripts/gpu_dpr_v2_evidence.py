@@ -370,19 +370,55 @@ def _png_dimensions_and_integrity(payload: bytes, expected: tuple[int, int]) -> 
 
 
 def _file_format(payload: bytes) -> str | None:
-    if payload.startswith(b"#!"):
-        return "script"
     if payload.startswith(b"\x7fELF"):
-        return "elf"
+        if (
+            len(payload) < 64
+            or payload[4] not in {1, 2}
+            or payload[5] not in {1, 2}
+        ):
+            return None
+        byte_order = "little" if payload[5] == 1 else "big"
+        executable_type = int.from_bytes(payload[16:18], byte_order)
+        machine = int.from_bytes(payload[18:20], byte_order)
+        program_headers = int.from_bytes(
+            payload[44:46] if payload[4] == 1 else payload[56:58], byte_order
+        )
+        return "elf" if executable_type in {2, 3} and machine and program_headers else None
     if payload.startswith(b"MZ"):
-        return "pe"
+        if len(payload) < 0x40:
+            return None
+        offset = int.from_bytes(payload[0x3c:0x40], "little")
+        if offset + 26 > len(payload) or payload[offset:offset + 4] != b"PE\0\0":
+            return None
+        machine = int.from_bytes(payload[offset + 4:offset + 6], "little")
+        sections = int.from_bytes(payload[offset + 6:offset + 8], "little")
+        optional_size = int.from_bytes(payload[offset + 20:offset + 22], "little")
+        optional_magic = int.from_bytes(payload[offset + 24:offset + 26], "little")
+        return (
+            "pe" if machine and sections and optional_size and optional_magic in {0x10B, 0x20B}
+            else None
+        )
     if payload.startswith(b"\x00asm"):
-        return "wasm"
+        return "wasm" if len(payload) >= 8 and payload[4:8] == b"\x01\0\0\0" else None
     if payload[:4] in {
         b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
         b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
     }:
-        return "mach-o"
+        if len(payload) < 28:
+            return None
+        magic = payload[:4]
+        if magic in {b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}:
+            byte_order = "big" if magic == b"\xca\xfe\xba\xbe" else "little"
+            architectures = int.from_bytes(payload[4:8], byte_order)
+            return "mach-o" if architectures and 8 + architectures * 20 <= len(payload) else None
+        byte_order = "big" if magic in {b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf"} else "little"
+        commands = int.from_bytes(payload[16:20], byte_order)
+        command_bytes = int.from_bytes(payload[20:24], byte_order)
+        header_bytes = 32 if magic in {b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe"} else 28
+        return (
+            "mach-o" if commands and command_bytes and header_bytes + command_bytes <= len(payload)
+            else None
+        )
     return None
 
 
@@ -487,6 +523,17 @@ def _validate_json_artifacts(
     if sequences != expected_sequences:
         raise V2EvidenceError("frame-sequences artifact differs from the cell trials")
 
+    identity, process_ids = _expected_identity(cell)
+    scenario = next(
+        item for item in manifest["scenarios"]
+        if item["id"] == cell.get("scenario_id")
+    )
+    oracle = scenario.get("logical_input_oracle", {})
+    point = oracle.get("point", [])
+    physical_point = [
+        round(float(coordinate) * float(cell.get("observed_dpr", 0)))
+        for coordinate in point
+    ]
     input_receipt = documents["input_receipt"]
     if input_receipt != {
         "schema": "pulp.gpu-dpr-input-receipt.v2",
@@ -496,12 +543,23 @@ def _validate_json_artifacts(
         "physical_size": cell.get("physical_size"),
         "physical_dimensions_verified": cell.get("physical_dimensions_verified"),
         "logical_input_exact": cell.get("fidelity", {}).get("logical_input_exact"),
+        "event": {
+            "logical_point": point,
+            "physical_point": physical_point,
+            "expected_target": oracle.get("target"),
+            "observed_target": oracle.get("target"),
+            "process_id": identity["process_id"],
+            "hit_test_passed": True,
+        },
     }:
         raise V2EvidenceError("input receipt is not bound to the cell dimensions/input")
 
-    identity, process_ids = _expected_identity(cell)
     identity_receipt = documents["identity_receipt"]
     product = identity_receipt.get("product") if isinstance(identity_receipt, dict) else None
+    daw_documents = (
+        identity_receipt.get("daw_receipt_documents")
+        if isinstance(identity_receipt, dict) else None
+    )
     if identity_receipt != {
         "schema": "pulp.gpu-dpr-identity-receipt.v2",
         "version": 2,
@@ -510,6 +568,7 @@ def _validate_json_artifacts(
         "process_ids": process_ids,
         "product": product,
         "daw_subreceipts": cell.get("daw_subreceipts"),
+        "daw_receipt_documents": daw_documents,
     }:
         raise V2EvidenceError("identity receipt is not bound to cell/process/DAW identity")
     if not isinstance(product, dict) or set(product) != {
@@ -525,9 +584,28 @@ def _validate_json_artifacts(
         or product.get("format") != identity["format"]
         or product.get("host") != identity["host"]
         or product.get("provider") != identity["provider"]
-        or product.get("file_format") not in {"mach-o", "elf", "pe", "wasm", "script"}
+        or product.get("file_format") not in {"mach-o", "elf", "pe", "wasm"}
     ):
         raise V2EvidenceError("product artifact identity differs from measured app/format/host")
+    daw = cell.get("daw_subreceipts")
+    if not isinstance(daw, list) or not isinstance(daw_documents, list) or len(daw_documents) != len(daw):
+        raise V2EvidenceError("identity receipt lacks exact DAW subreceipt documents")
+    for projection, document in zip(daw, daw_documents):
+        expected_document = {
+            "schema": "pulp.gpu-dpr-daw-subreceipt.v2",
+            "version": 2,
+            "binding_sha256": binding,
+            "format": projection.get("format"),
+            "host": projection.get("host"),
+            "a3_role": projection.get("a3_role"),
+            "outcome": projection.get("outcome"),
+            "gates_passed": projection.get("gates_passed"),
+            "identity_sha256": projection.get("identity_sha256"),
+        }
+        if document != expected_document or canonical_sha256(document) != projection.get(
+            "receipt_sha256"
+        ):
+            raise V2EvidenceError("DAW subreceipt projection differs from retained identity bytes")
 
 def validate_cell_artifacts(
     cell: dict[str, Any], manifest: dict[str, Any], evidence_root: Path,
@@ -552,7 +630,7 @@ def validate_cell_artifacts(
         digest, byte_count, payload = file_identity(
             path, f"{kind} artifact", max_bytes=max_bytes,
             retain=kind in JSON_ARTIFACT_KINDS or kind in {"capture", "reference_capture"},
-            prefix_bytes=16 if kind == "product" else 0,
+            prefix_bytes=65536 if kind == "product" else 0,
         )
         if digest != artifact["sha256"] or byte_count != artifact["bytes"]:
             raise V2EvidenceError(f"{kind} artifact digest/length differs from its bytes")

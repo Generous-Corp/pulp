@@ -18,6 +18,7 @@ import gpu_dpr_experiment as experiment
 import gpu_dpr_evidence as evidence
 import gpu_dpr_runner as runner
 import test_gpu_first_visible_a3_acceptance as a3_fixture
+import test_gpu_dpr_v2_evidence as v2_evidence_fixture
 from gpu_dpr_test_support import (
     exact_binary, forged_minimal_dependencies, malformed_adapter_script,
     no_receipt_adapter_script, test_adapter_script, noisy_adapter_script,
@@ -1613,6 +1614,7 @@ def main() -> int:
         assert b5["status"] == "cancelled-no-change"
         assert b5["authorizes_policy_change"] is False
 
+    assert v2_evidence_fixture.main() == 0
     print(
         "gpu_dpr_runner_selftest=true matrix_cells=84 "
         f"planted_bad_evidence={planted} adapter_protocol=pass "
