@@ -15,7 +15,8 @@
 #   pulp-worktree.sh new <branch> [--base origin/main]   # create + configure
 #   pulp-worktree.sh env <branch>                          # print cache env to source
 #   pulp-worktree.sh list                                  # worktrees + build-dir sizes
-#   pulp-worktree.sh gc [--max-total-gb N] [--max-age-days N] [--merged]
+#   pulp-worktree.sh gc [--apply] [--max-total-gb N] [--max-age-days N] [--merged]
+#                           # inventory only unless --apply is explicit
 #
 # Env overrides: PULP_WT_ROOT (default ../pulp-worktrees), PULP_CI_CACHE
 # (default ~/.cache/pulp-ci), PULP_CCACHE_MAX_SIZE (default 200G).
@@ -183,36 +184,87 @@ cmd_list() {
   CCACHE_DIR="$CACHE_ROOT/ccache" ccache --show-stats 2>/dev/null | grep -iE "cache size|hit rate|hits|misses" || true
 }
 cmd_gc() {
-  local max_age="" merged=0
+  local apply=0 max_age="" max_total="" merged=0
   while [ $# -gt 0 ]; do case "$1" in
-    --max-age-days) max_age="$2"; shift 2;;
+    --apply) apply=1; shift;;
+    --max-total-gb)
+      [ $# -ge 2 ] || die "--max-total-gb requires a value"
+      max_total="$2"; shift 2;;
+    --max-age-days)
+      [ $# -ge 2 ] || die "--max-age-days requires a value"
+      max_age="$2"; shift 2;;
     --merged) merged=1; shift;;
+    -h|--help)
+      cat <<'EOF'
+Usage: pulp-worktree.sh gc [--apply] [--max-total-gb N] [--max-age-days N] [--merged]
+
+Inventory is a dry-run by default. Deletion requires an explicit --apply and
+an affirmative safety classification; a deleted upstream branch is not proof
+that a worktree merged. The safety classifier is not yet available, so this
+transition build reports zero deletion candidates even in apply mode.
+EOF
+      return 0;;
     *) die "unknown gc arg: $1";; esac; done
-  # Auto-cleanup of merged branches. Pulp SQUASH-merges and shipyard
-  # auto-merge runs --delete-branch, so a merged branch's original commits are
-  # NOT ancestors of origin/main — the reliable signal is its upstream going
-  # "[gone]" after a pruning fetch. This also avoids false-pruning a brand-new
-  # branch that was never pushed (no upstream → not [gone]).
+
+  [ -z "$max_age" ] || [[ "$max_age" =~ ^[0-9]+$ ]] ||
+    die "--max-age-days must be a non-negative integer"
+  [ -z "$max_total" ] || [[ "$max_total" =~ ^[0-9]+([.][0-9]+)?$ ]] ||
+    die "--max-total-gb must be a non-negative number"
+
+  if [ "$apply" = 1 ]; then
+    note "gc apply mode — no deletion candidates until the affirmative safety classifier is available"
+  else
+    note "gc dry-run — no files, worktrees, branches, or registry entries will be removed"
+  fi
+
+  # A pruned upstream is useful inventory, never deletion authority. Pulp can
+  # squash-merge, delete an unmerged remote branch, or retain unique local
+  # commits after the upstream disappears. Keep every such branch until the
+  # classifier can prove exact merged lineage and current inactivity.
   if [ "$merged" = 1 ]; then
-    git -C "$REPO_ROOT" fetch -p origin --quiet 2>/dev/null || true
     local gone; gone="$(git -C "$REPO_ROOT" for-each-ref \
       --format '%(refname:short) %(upstream:track)' refs/heads \
       | awk '$2=="[gone]"{print $1}')"
-    local b wt
+    local b
     for b in $gone; do
-      wt="$(git -C "$REPO_ROOT" worktree list --porcelain \
-        | awk -v br="refs/heads/$b" 'f&&$1=="branch"&&$2==br{print p} {if($1=="worktree")p=$2; f=1}')"
-      [ -n "$wt" ] && [ "$wt" != "$REPO_ROOT" ] && {
-        note "merged+deleted upstream → pruning worktree $wt ($b)"
-        git -C "$REPO_ROOT" worktree remove --force "$wt" 2>/dev/null || true
-      }
-      git -C "$REPO_ROOT" branch -D "$b" 2>/dev/null || true
+      note "keeping $b — upstream is gone, but that is not merge proof"
     done
   fi
-  [ -n "$max_age" ] && find "$WT_ROOT" -maxdepth 2 -name build -type d -mtime +"$max_age" \
-    -exec sh -c 'echo "stale build (>'"$max_age"'d): $1"; rm -rf "$1"' _ {} \; 2>/dev/null || true
-  git -C "$REPO_ROOT" worktree prune
-  note "gc done — run 'list' to review remaining build-dir sizes"
+
+  if [ -n "$max_age" ] && [ -d "$WT_ROOT" ]; then
+    local record worktree worktree_physical build stale wt_root_physical
+    wt_root_physical="$(cd "$WT_ROOT" 2>/dev/null && pwd -P)" ||
+      die "cannot resolve PULP_WT_ROOT: $WT_ROOT"
+    while IFS= read -r -d '' record; do
+      case "$record" in
+        "worktree "*) worktree="${record#worktree }";;
+        *) continue;;
+      esac
+
+      # Inventory registered worktrees only. Branch names can contain slashes,
+      # so their worktrees may be nested below WT_ROOT; a bounded depth scan
+      # misses those. Resolve both sides physically before the prefix check so
+      # a symlink cannot make an outside path look managed by this root.
+      worktree_physical="$(cd "$worktree" 2>/dev/null && pwd -P || true)"
+      [ -n "$worktree_physical" ] || continue
+      case "$worktree_physical" in
+        "$wt_root_physical"/*) ;;
+        *) continue;;
+      esac
+      build="$worktree_physical/build"
+      [ -d "$build" ] && [ ! -L "$build" ] || continue
+      stale=""
+      IFS= read -r -d '' stale < <(
+        find "$build" -prune -type d -mtime +"$max_age" -print0 2>/dev/null
+      ) || true
+      if [ -n "$stale" ]; then
+        note "keeping stale build (>${max_age}d): $build — worktree safety is unclassified"
+      fi
+    done < <(git -C "$REPO_ROOT" worktree list --porcelain -z)
+  fi
+
+  [ -z "$max_total" ] || note "candidate budget requested: ${max_total} GB; no candidates classified"
+  note "gc complete — no deletion candidates"
 }
 
 case "${1:-}" in

@@ -359,8 +359,9 @@ if [ -f "$ROOT/tools/scripts/test_skia_cross_process_cache.py" ]; then
     if ! "$PYTHON" "$ROOT/tools/scripts/test_setup_shared_skia.py" >/dev/null 2>&1 ||
        ! "$PYTHON" "$ROOT/tools/scripts/test_skia_cross_process_cache.py" >/dev/null 2>&1 ||
        ! "$PYTHON" "$ROOT/tools/ci/test_pulp_worktree_cache_env.py" >/dev/null 2>&1 ||
+       ! "$PYTHON" "$ROOT/tools/ci/test_pulp_worktree_gc.py" >/dev/null 2>&1 ||
        ! "$PYTHON" "$ROOT/tools/ci/test_cache_routing_contract.py" >/dev/null 2>&1; then
-        echo "  immutable shared-cache tests: failing — run the four focused Python tests for details." >&2
+        echo "  immutable shared-cache tests: failing — run the five focused Python tests for details." >&2
         fail=1
     else
         echo "  immutable shared-cache tests: ok" >&2
