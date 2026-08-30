@@ -140,8 +140,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/verify_gpu_probe_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "0fb0d9092bdf1ff15a253c7695c8c1c56f564715",
-          "object_id": "ada2ed4858e3e4aa033ab690623a8368d8ad07eb",
+          "revision": "a307756bf399686da67b24c998b9448755d859f0",
+          "object_id": "64e56fdc75ced99121d58f61e86101be12473184",
           "object_type": "blob"
         }
       ],
@@ -1843,8 +1843,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/verify_gpu_probe_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "0fb0d9092bdf1ff15a253c7695c8c1c56f564715",
-          "object_id": "ada2ed4858e3e4aa033ab690623a8368d8ad07eb",
+          "revision": "a307756bf399686da67b24c998b9448755d859f0",
+          "object_id": "64e56fdc75ced99121d58f61e86101be12473184",
           "object_type": "blob"
         }
       ],
