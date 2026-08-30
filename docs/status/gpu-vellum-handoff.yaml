@@ -742,8 +742,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "test/test_control_gpu_health_standalone_product.cpp",
           "state": "pulp-owned-retained",
-          "revision": "7612d8f584fe5f60f1d746fefd34752185f99c0c",
-          "object_id": "309a581b85d7747453644860d184b8dd258d0cbb",
+          "revision": "225643f81461cba1247feb8c9e961911afac94f7",
+          "object_id": "441d4307aad4bec1ad3e0722d2a365e7cd103fcc",
           "object_type": "blob"
         },
         {
@@ -3074,8 +3074,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "2ad93f3694fb6d87ba412b163ca36c353a6d356d",
-          "object_id": "415db6f88c615a43658fdbb3713f4b94ef87b07f",
+          "revision": "5d38ef60c8940b7edfe4c7e6a8761ec8fdad8d5d",
+          "object_id": "db7c73b8a7f802895b06155f5b59a8040867e8a8",
           "object_type": "blob"
         }
       ],
