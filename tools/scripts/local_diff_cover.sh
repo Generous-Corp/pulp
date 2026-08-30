@@ -254,6 +254,7 @@ diff_cover_has_no_coverable_lines() {
     local compare_branch="$1"
     python3 - "${REPO_ROOT}" "${compare_branch}" <<'PY'
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -270,6 +271,11 @@ known_non_native_suffixes = {
 }
 known_non_native_paths = {
     ".githooks/pre-push",
+}
+registration_only_cmake_paths = {
+    # This file is deliberately a pure-Python CTest registrar. Keep the
+    # exception exact: other CMake files may compile or instrument native code.
+    "test/cmake/rack_portmap_tests.cmake",
 }
 
 
@@ -293,6 +299,143 @@ def definitely_non_native(path: str) -> bool:
         return True
     suffixes = pathlib.PurePosixPath(path.lower()).suffixes
     return bool(suffixes) and suffixes[-1] in known_non_native_suffixes
+
+
+def cmake_commands(source: bytes) -> list[tuple[str, str]]:
+    """Parse the tiny, deliberately bounded CMake registrar dialect.
+
+    This is not a general CMake parser. Unknown syntax, bracket arguments,
+    unterminated strings/comments, or stray text all fail closed.
+    """
+    text = source.decode("utf-8", "strict")
+    if "#[" in text or "[[" in text or "]=" in text:
+        raise ValueError("unsupported CMake bracket syntax")
+
+    uncommented: list[str] = []
+    for line in text.splitlines():
+        quoted = False
+        escaped = False
+        kept: list[str] = []
+        for char in line:
+            if escaped:
+                kept.append(char)
+                escaped = False
+                continue
+            if char == "\\" and quoted:
+                kept.append(char)
+                escaped = True
+                continue
+            if char == '"':
+                quoted = not quoted
+                kept.append(char)
+                continue
+            if char == "#" and not quoted:
+                break
+            kept.append(char)
+        if quoted:
+            raise ValueError("unterminated quoted string")
+        uncommented.append("".join(kept))
+    text = "\n".join(uncommented)
+
+    commands: list[tuple[str, str]] = []
+    cursor = 0
+    while cursor < len(text):
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor == len(text):
+            break
+        match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", text[cursor:])
+        if match is None:
+            raise ValueError("stray text outside a CMake command")
+        name = match.group(0).lower()
+        cursor += len(match.group(0))
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor == len(text) or text[cursor] != "(":
+            raise ValueError(f"command {name} has no argument list")
+        cursor += 1
+        start = cursor
+        depth = 1
+        quoted = False
+        escaped = False
+        while cursor < len(text) and depth:
+            char = text[cursor]
+            if escaped:
+                escaped = False
+            elif char == "\\" and quoted:
+                escaped = True
+            elif char == '"':
+                quoted = not quoted
+            elif not quoted and char == "(":
+                depth += 1
+            elif not quoted and char == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            cursor += 1
+        if depth != 0 or quoted:
+            raise ValueError(f"unterminated {name} command")
+        commands.append((name, text[start:cursor]))
+        cursor += 1
+    return commands
+
+
+def is_python_ctest_registrar(source: bytes) -> bool:
+    """Prove the whole file can only register Python CTests."""
+    allowed = {"if", "endif", "foreach", "endforeach", "string",
+               "add_test", "set_tests_properties"}
+    commands = cmake_commands(source)
+    if not commands or any(name not in allowed for name, _ in commands):
+        return False
+
+    saw_test = False
+    blocks: list[str] = []
+    for name, raw_args in commands:
+        args = " ".join(raw_args.split())
+        if name == "if" and args != "Python3_Interpreter_FOUND":
+            return False
+        if name == "if":
+            blocks.append(name)
+        if name == "foreach":
+            blocks.append(name)
+        if name in {"endif", "endforeach"}:
+            expected = "if" if name == "endif" else "foreach"
+            if args or not blocks or blocks.pop() != expected:
+                return False
+        if name == "foreach":
+            if not re.fullmatch(
+                r"_rack_safety_test IN ITEMS(?: [a-z0-9_-]+)+", args
+            ):
+                return False
+        if name == "string":
+            if args != 'REPLACE "-" "_" _rack_safety_file "${_rack_safety_test}"':
+                return False
+        if name == "add_test":
+            if not re.fullmatch(
+                r"NAME [A-Za-z0-9_${}-]+ COMMAND "
+                r"\$\{Python3_EXECUTABLE\} "
+                r"\$\{CMAKE_CURRENT_SOURCE_DIR\}/\.\./tools/rack/"
+                r"test_[A-Za-z0-9_${}-]+\.py",
+                args,
+            ):
+                return False
+            saw_test = True
+        if name == "set_tests_properties":
+            if not re.fullmatch(
+                r"[A-Za-z0-9_${}-]+ PROPERTIES "
+                r"LABELS \"[A-Za-z0-9_;-]+\" TIMEOUT [1-9][0-9]*",
+                args,
+            ):
+                return False
+    return saw_test and not blocks
+
+
+def layer_blob(layer: str, path: str) -> bytes:
+    if layer == "committed":
+        return git("show", f"HEAD:{path}")
+    if layer == "staged":
+        return git("show", f":{path}")
+    return (repo / path).read_bytes()
 
 
 try:
@@ -340,6 +483,20 @@ try:
                     file=sys.stderr,
                 )
                 raise SystemExit(1)
+            if path in registration_only_cmake_paths:
+                if not is_python_ctest_registrar(layer_blob(layer, path)):
+                    print(
+                        f"[local_diff_cover] preflight: {layer} path {path} "
+                        "is not safely registration-only; retaining native coverage",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(1)
+                print(
+                    f"[local_diff_cover] preflight: {layer} path {path} is a "
+                    "registration-only Python CTest change",
+                    file=sys.stderr,
+                )
+                continue
             if not definitely_non_native(path):
                 print(
                     f"[local_diff_cover] preflight: unknown or extensionless "
