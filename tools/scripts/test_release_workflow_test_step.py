@@ -664,10 +664,18 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         )
 
     def test_darwin_leg_requires_mixed_provider_render_proof(self) -> None:
-        self.assertIn(
+        workflow = yaml.safe_load(self.text)
+        fetch_steps = [
+            step for step in workflow["jobs"]["release-build"]["steps"]
+            if step.get("name") == "Fetch sealed V8 provider (mixed-provider gate)"
+        ]
+        self.assertEqual(len(fetch_steps), 1)
+        fetch_step = fetch_steps[0]
+        self.assertEqual(
+            fetch_step["run"],
             "python3 tools/scripts/fetch_v8_for_release.py darwin-arm64",
-            self.text,
         )
+        self.assertEqual(fetch_step.get("env"), {"GH_TOKEN": "${{ github.token }}"})
         self.assertIn("-DPULP_JS_ENGINE=v8", self.text)
         self.assertIn("-DPULP_VALIDATE_V8_PROVIDER_STRICT=ON", self.text)
         self.assertIn(

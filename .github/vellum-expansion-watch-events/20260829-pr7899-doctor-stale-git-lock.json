@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260829-pr7899-doctor-stale-git-lock",
+  "created_at": "2026-08-29T10:08:06Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record a Pulp-owned `pulp doctor` diagnostic that reports stale git lock files. A `*.lock` left behind by a process that died fails every index- and ref-writing git command in a checkout while reads keep working, so the checkout looks healthy and only writes are dead; two real instances in this repository went unnoticed for nine and fifty-three days. The new row reports a lock only when it exists, no live process holds it, and it is older than an hour, and its remediation is prose rather than an argv so `--fix` declines to execute it. The watched surface this touches is `docs/status/cli-commands.yaml`, edited solely to document that new doctor row as the repository's CLI docs rule requires; the rest of the change is `tools/cli` doctor helpers plus its test. It adds no import, packaging, or release-artifact behavior, does not alter design import, generic rendering primitives, or any packaging or CLI-installation path in this family, and does not touch Vellum source authority.",
+  "tests": [
+    "pulp-test-cli-git-lock-health (stale, held-lock control, real lsof probe, worktree and probe-budget coverage)",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

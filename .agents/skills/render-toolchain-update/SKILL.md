@@ -228,3 +228,9 @@ retain those fields in the PR/landing evidence.
   When a pin or min-OS note is edited, keep these three files saying the same
   thing — they are the only place the engine contract is written down outside
   the CMake modules.
+- Matched V8 cold-fetch validation resolves the immutable builder tag through
+  the GitHub API. CI callers must expose their read-only `${{ github.token }}`
+  as `GH_TOKEN`; otherwise a valid sealed asset can fail after download when
+  the unauthenticated API budget is exhausted. The fetcher deliberately sends
+  that credential only to `https://api.github.com` and refuses redirects; it is
+  never forwarded to release-asset or cross-origin targets.

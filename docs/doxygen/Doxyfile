@@ -3,10 +3,25 @@
 
 PROJECT_NAME           = "Pulp"
 PROJECT_BRIEF          = "Cross-platform audio plugin framework"
+# Overridden at build time: tools/build-api-docs.sh streams this file through
+# stdin and appends the SDK version, so the literal below is only a fallback
+# for a bare `doxygen Doxyfile` run.
 PROJECT_NUMBER         = "0.1.0"
 OUTPUT_DIRECTORY       = ../../build/api-docs
 
 # Source paths — public headers only
+#
+# INPUT tracks the installed public header surface, so a core/* directory that
+# is absent here is absent because it is not installed, not by oversight. The
+# SDK header subsystem list in tools/cmake/PulpInstallRules.cmake is the
+# authority, and tools/scripts/doxygen_installed_header_check.py enforces
+# file-granular parity in both directions: documenting a header that is not
+# installed fails that check just as omitting an installed one does.
+#
+# core/scene/include is the one core module this leaves out. It backs the
+# pulp-scene static library and the scene3d command-line tools, and installs
+# neither its target nor its headers, so it is not part of the SDK surface
+# this reference documents.
 INPUT                  = ../../core/audio/include \
                          ../../core/canvas/include \
                          ../../core/events/include \

@@ -399,7 +399,7 @@ Set `PULP_HOME` to relocate the cache, SDK, and config root.
 
 **Status**: usable
 
-Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, generated WidgetBridge API artifacts, external SDKs (VST3, AudioUnit), platform-specific dependencies, the expected project mode, and optional observational local control-broker reachability.
+Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, stale git lock files, generated WidgetBridge API artifacts, external SDKs (VST3, AudioUnit), platform-specific dependencies, the expected project mode, and optional observational local control-broker reachability.
 
 ```bash
 pulp doctor                          # show all checks
@@ -424,7 +424,31 @@ pulp doctor quirks                   # synonym for --host-quirks
 pulp doctor --au-cache --dry-run     # preview macOS AudioComponentRegistrar refresh
 pulp doctor --only WidgetBridge      # check generated WidgetBridge .d.ts/docs staleness
 pulp doctor --only "Control broker"  # run only the non-mutating local carrier probe
+pulp doctor --only "git locks"       # run only the stale git lock-file scan
 ```
+
+#### `git locks`
+
+Git guards index and ref writes with a `*.lock` file. When the process holding
+one dies without cleaning up, the lock survives and every index- or ref-writing
+git command in that checkout fails, while reads (`git status`, `git diff`) keep
+working — so the checkout looks healthy and only writes are dead, which is why
+one can persist for days unnoticed.
+
+The row reports a lock only when all three hold: it exists, **no live process
+holds it**, and it is older than one hour. A lock a running `git commit` holds
+is the normal state and is never reported, and neither is one whose holder
+cannot be determined (no `lsof` on the host, or Windows, where the check stays
+silent). Override the age with `PULP_DOCTOR_STALE_LOCK_MINUTES`.
+
+The scan covers this checkout's git dir, the shared common dir — so a lock in
+the primary checkout is visible from every linked worktree — and each sibling
+worktree's index and HEAD locks.
+
+Remediation is deliberately manual: `--fix` will not remove a lock, because
+deleting one a live process is about to use is worse than the stale lock
+itself. Confirm nothing is running against that checkout, then delete the
+listed file.
 
 The optional `Control broker` row never contributes to a failing doctor exit.
 It uses the same connection-only probe as `pulp status`, performs no daemon or

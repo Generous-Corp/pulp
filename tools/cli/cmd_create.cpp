@@ -470,6 +470,13 @@ int cmd_create(const std::vector<std::string>& args) {
     bool env_ok = true;
     for (auto& c : checks) {
         if (c.passed) continue;
+        if (doctor_check_gates_project_creation(c)) {
+            std::cout << "  \xe2\x9c\x97 " << c.name;
+            if (!c.fix.empty()) std::cout << " — fix: " << c.fix;
+            std::cout << "\n";
+            env_ok = false;
+            continue;
+        }
         // Optional checks are advisory — they surface fix advice but
         // must not gate `pulp create`. The pulp-mcp row is
         // optional because the binary is only needed for the Claude
@@ -479,17 +486,11 @@ int cmd_create(const std::vector<std::string>& args) {
         // repo secret is not something a contributor can set, so gating here
         // made `pulp create` unusable on any machine without release
         // credentials. `pulp doctor` still fails on them.
-        if (c.optional || c.release_only) {
-            log("  \xe2\x9a\xa0 " + c.name
-                + (c.detail.empty() ? std::string{}
-                                    : (" — " + c.detail))
-                + "\n");
-            continue;
-        }
-        std::cout << "  \xe2\x9c\x97 " << c.name;
-        if (!c.fix.empty()) std::cout << " — fix: " << c.fix;
-        std::cout << "\n";
-        env_ok = false;
+        // Checkout-health rows (e.g. a stale git lock somewhere in the
+        // worktree set) describe an existing checkout, not the ability
+        // to scaffold a new project. `pulp doctor` still fails on them.
+        log("  \xe2\x9a\xa0 " + c.name
+            + (c.detail.empty() ? std::string{} : (" — " + c.detail)) + "\n");
     }
     if (!env_ok) {
         std::cerr << "\nEnvironment issues found. Run `pulp doctor --fix` first.\n";

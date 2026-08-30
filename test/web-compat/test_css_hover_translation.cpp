@@ -40,6 +40,51 @@ void hover_leave(TestEnvironment& env, const std::string& id) {
 
 } // namespace
 
+TEST_CASE("CSS hover: buttons inherit feedback and authored hover wins",
+          "[css-hover][button-default]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __plainButton = document.createElement('button');
+        __plainButton.style.opacity = 1;
+        __plainButton.style.background = 'blue';
+        document.body.appendChild(__plainButton);
+
+        var __selectedButton = document.createElement('button');
+        __selectedButton.className = 'selected-button';
+        __selectedButton.style.opacity = 1;
+        __selectedButton.style.background = 'red';
+        document.body.appendChild(__selectedButton);
+
+        var __authorHover = document.createElement('style');
+        __authorHover.textContent = '.selected-button:hover { opacity: 0.6; }';
+        document.body.appendChild(__authorHover);
+    )JS");
+
+    const auto plain_id = std::string(env.engine.evaluate(
+        "__plainButton._id").getWithDefault<std::string_view>(""));
+    const auto selected_id = std::string(env.engine.evaluate(
+        "__selectedButton._id").getWithDefault<std::string_view>(""));
+    auto* plain = env.widget(plain_id);
+    auto* selected = env.widget(selected_id);
+    REQUIRE(plain != nullptr);
+    REQUIRE(selected != nullptr);
+
+    const auto plain_background = plain->background_color();
+    const auto selected_background = selected->background_color();
+    hover_enter(env, plain_id);
+    hover_enter(env, selected_id);
+
+    CHECK(std::abs(plain->opacity() - 0.86f) < 0.001f);
+    CHECK(std::abs(selected->opacity() - 0.6f) < 0.001f);
+    CHECK(std::abs(plain->background_color().b - plain_background.b) < 0.001f);
+    CHECK(std::abs(selected->background_color().r - selected_background.r) < 0.001f);
+
+    hover_leave(env, plain_id);
+    hover_leave(env, selected_id);
+    CHECK(std::abs(plain->opacity() - 1.0f) < 0.001f);
+    CHECK(std::abs(selected->opacity() - 1.0f) < 0.001f);
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Basic translation: <style>.btn:hover { ... }</style>
 // ─────────────────────────────────────────────────────────────────────

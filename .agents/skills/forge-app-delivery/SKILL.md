@@ -103,6 +103,17 @@ Two halves are required and either alone still ships a dead app:
    `_NSGetExecutablePath` to `Contents`, then `Resources/tools/…`), after the
    Application Support copy so a user-replaceable copy still wins.
 
+The same boundary applies to native helper executables shipped inside that
+toolchain. **Build them at package time for the package's declared architecture,
+not at end-user install time and not implicitly for the packaging host.** A user
+may have no compiler, and an arm64 packaging host may be producing an x86_64
+artifact. Verify the helper's file identity, requested Mach-O slice, mode and
+system-only linkage before signing. Execute it only when its architecture is
+native to the verification host; requiring a foreign slice to run silently
+turns Rosetta into a packaging dependency. Cross-architecture verification must
+remain structural, while a native package lane exercises the helper against a
+real fixture.
+
 Signed installer staging also has a hard precondition: Pulp's unattended
 signing doctor must pass before the first production `codesign`. A missing or
 failed preflight terminates packaging; never skip it or turn it into a warning,

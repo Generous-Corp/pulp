@@ -8,6 +8,7 @@
 #include "cli_common.hpp"
 
 #include <pulp/platform/child_process.hpp>
+#include "git_lock_health.hpp"
 #include "package_registry.hpp"
 
 #ifndef PULP_CLI_HAS_CONTROL_HEALTH
@@ -314,6 +315,44 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
 #else
             c.fix = "sudo apt install git-lfs && git lfs install (or add ~/.local/bin to the non-interactive PATH)";
 #endif
+        }
+        checks.push_back(c);
+    }
+
+    // 5. Stale git locks. A leftover `*.lock` fails every index- or
+    // ref-writing git command in the checkout while reads keep
+    // working, so nothing else in this report notices it.
+    if (!active_root.empty() && doctor_check_matches_only_filter(only_filter, "git locks")) {
+        namespace git_lock = pulp::cli::git_lock;
+        DoctorCheck c{"git locks", false, {}, {}};
+        c.checkout_health = true;
+        const auto threshold = git_lock::default_stale_after();
+        const auto report = git_lock::find_stale_locks(active_root, threshold,
+                                                       git_lock::probe_holder_with_lsof);
+        const auto& stale = report.stale;
+        if (stale.empty()) {
+            c.passed = true;
+            c.detail = fs::exists(active_root / ".git") ? "No stale lock files"
+                                                        : "Not a git checkout";
+        } else {
+            constexpr std::size_t max_listed = 10;
+            std::ostringstream detail;
+            detail << stale.size() << (stale.size() == 1 ? " stale lock" : " stale locks")
+                   << " (unheld, older than " << (threshold.count() / 60) << "m):";
+            for (std::size_t i = 0; i < stale.size() && i < max_listed; ++i) {
+                detail << "\n      " << stale[i].path.string() << "  ("
+                       << (stale[i].age.count() / 3600) << "h old)";
+            }
+            if (stale.size() > max_listed)
+                detail << "\n      ... and " << (stale.size() - max_listed) << " more";
+            if (report.truncated)
+                detail << "\n      (scan stopped at the holder-probe limit; there may be more)";
+            c.detail = detail.str();
+            // Deliberately not an executable remediation: deleting a
+            // lock a live process is about to use is worse than the
+            // stale lock itself, so a human confirms before removing.
+            c.fix = "Confirm no git process is running against that checkout, then delete the "
+                    "listed lock file(s)";
         }
         checks.push_back(c);
     }
