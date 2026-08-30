@@ -1157,6 +1157,21 @@ The same applies to any sibling file the adapter calls into: `PulpWclap.cmake`
 already lists `clap_remote_controls.cpp` and `clap_note_name.cpp` next to
 `clap_adapter.cpp` for exactly this reason.
 
+## `PulpWclap.cmake` also carries its own CLAP *header* pin
+
+Separately from the source list, `PulpWclap.cmake` declares its own
+`FetchContent` of the CLAP headers, because the wasm module resolves them
+without going through `PulpDependencies.cmake`. That is a second copy of the
+CLAP version, and nothing compares the two: a native CLAP bump that only edits
+`PulpDependencies.cmake` leaves WebCLAP compiling against the previous headers.
+
+Neither the `pulp-shared-source-v1` contract in
+`tools/deps/shared-source-contract.txt` nor
+`tools/scripts/test_setup_source_cache.sh` covers this one — they check the
+native pin against `setup.sh` and `PulpDependencies.cmake` only. So moving the
+CLAP pin means editing three files, and the drift is silent until the two ABIs
+disagree at runtime.
+
 ## The source list covers `core/runtime/` too — not just the adapter's TUs
 
 The rule above ("a new CLAP adapter TU must be added to `PulpWclap.cmake`")
