@@ -63,6 +63,54 @@ TEST_CASE("Label renders text", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::set_font) == 1);
 }
 
+TEST_CASE("fixed-width single-line Label text repaints without invalidating layout",
+          "[view][widget][label][layout][perf]") {
+    Label label("BAND 1/64");
+    label.flex().dim_width = {240.0f, DimensionUnit::px};
+    label.flex().preferred_width = 240.0f;
+    label.flex().dim_height = {26.0f, DimensionUnit::px};
+    label.flex().preferred_height = 26.0f;
+    label.set_bounds({0, 0, 240, 26});
+    label.clear_layout_dirty();
+
+    const auto generation = View::layout_generation();
+    label.set_text("BAND 2/64");
+
+    CHECK(label.text() == "BAND 2/64");
+    CHECK_FALSE(label.layout_dirty());
+    CHECK(View::layout_generation() == generation);
+}
+
+TEST_CASE("intrinsic and multiline Label text still invalidates layout",
+          "[view][widget][label][layout]") {
+    SECTION("intrinsic width") {
+        Label label("short");
+        label.clear_layout_dirty();
+        const auto generation = View::layout_generation();
+
+        label.set_text("a much longer intrinsic label");
+
+        CHECK(label.layout_dirty());
+        CHECK(View::layout_generation() == generation + 1);
+    }
+
+    SECTION("fixed width but multiline") {
+        Label label("one line");
+        label.flex().dim_width = {120.0f, DimensionUnit::px};
+        label.flex().preferred_width = 120.0f;
+        label.flex().dim_height = {40.0f, DimensionUnit::px};
+        label.flex().preferred_height = 40.0f;
+        label.set_multi_line(true);
+        label.clear_layout_dirty();
+        const auto generation = View::layout_generation();
+
+        label.set_text("one line that wraps onto another line");
+
+        CHECK(label.layout_dirty());
+        CHECK(View::layout_generation() == generation + 1);
+    }
+}
+
 TEST_CASE("Label text can be changed", "[view][widget]") {
     Label label("Initial");
     REQUIRE(label.text() == "Initial");

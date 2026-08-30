@@ -551,6 +551,19 @@ View* View::focus_prev(View& root, View* current) {
 std::atomic<std::uint64_t> View::layout_generation_{1};
 std::atomic<std::uint64_t> View::layout_pass_count_{0};
 
+std::uint64_t View::tree_layout_generation() const noexcept {
+    auto* root = this;
+    while (root->parent_) root = root->parent_;
+    return root->tree_layout_generation_;
+}
+
+void View::note_layout_mutation() noexcept {
+    auto* root = this;
+    while (root->parent_) root = root->parent_;
+    ++root->tree_layout_generation_;
+    bump_layout_generation();
+}
+
 void View::set_bounds(Rect r) {
     if (bounds_ == r) return;
     bounds_ = r;
@@ -560,7 +573,7 @@ void View::set_bounds(Rect r) {
     // the generation moves. This is also why a reader must record the
     // generation AFTER its layout pass: the pass itself sets child bounds and
     // therefore bumps this counter.
-    bump_layout_generation();
+    note_layout_mutation();
     // Resize/move re-records: the recording was captured at the old size (and a
     // parent's recording placed this view at its old box). Stale this view and
     // its cached ancestors before on_resized() drives the repaint.
