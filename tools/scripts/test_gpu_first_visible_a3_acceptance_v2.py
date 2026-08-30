@@ -106,17 +106,28 @@ else:
  h=lambda x: hashlib.sha256(open(x,"rb").read()).hexdigest()
  print(json.dumps({{"schema":"pulp.gpu-first-visible-sample-verification.v2","raw_samples_sha256":h(a.raw),"trace_sha256":h(a.trace),"identity_sha256":a.identity_sha256,"valid":True}},sort_keys=True))
 ''')
+    producer_identity = {
+        "pulp_revision": SHA, "forge_revision": None, "build_id": "producer-build",
+        "product_id": "a3-evidence-producer", "product_name": "A3 evidence producer",
+        "plugin_format": "standalone",
+    }
     embedded_build_ref = write_artifact(root, "tooling/evidence-producer-build-verifier.json", {
         "schema": "pulp.gpu-first-visible-build-verification-receipt.v1", "version": 1,
-        "outcome": "pass", "reason": None,
+        "attempt_nonce": "attempt", "control": "real", "outcome": "pass", "reason": None,
         "verification_method": "embedded-canonical-build-identity",
+        "product_identity": producer_identity,
         "product_sha256": producer_ref["sha256"],
         "observed_product_sha256": producer_ref["sha256"], "marker_sha256": DIGEST,
     })
     source_build_ref = write_artifact(root, "tooling/evidence-producer-source-build.json", {
         "schema": "pulp.gpu-first-visible-source-build-receipt.v1", "version": 1,
-        "outcome": "pass", "reason": None, "source_revisions": {"pulp": SHA},
+        "attempt_nonce": "attempt", "role": "a3-evidence-producer", "outcome": "pass",
+        "reason": None, "identity": producer_identity, "source_revisions": {"pulp": SHA},
+        "build_command": ["build-evidence-producer"], "builder_id": "fixture-builder",
+        "build_started_utc": "2026-08-29T00:00:00Z", "build_finished_utc": "2026-08-29T00:00:01Z",
+        "driver_sha256": DIGEST, "product_path": "evidence-producer",
         "product_sha256": producer_ref["sha256"],
+        "bundle_path": None, "bundle_tree_sha256": None,
     })
     producer_provenance_ref = write_artifact(root, "tooling/evidence-producer-provenance.json", {
         "schema": "pulp.gpu-first-visible-evidence-producer.v1", "version": 1,

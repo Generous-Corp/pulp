@@ -497,15 +497,33 @@ def validate_existing_build_proof(
         provenance["source_build_receipt"], evidence_root,
         f"{label}.source_build_receipt",
     )
+    exact_keys(embedded, {
+        "schema", "version", "attempt_nonce", "control", "outcome", "reason",
+        "verification_method", "product_identity", "product_sha256",
+        "observed_product_sha256", "marker_sha256",
+    }, f"{label} embedded build-verifier receipt")
+    exact_keys(source_build, {
+        "schema", "version", "attempt_nonce", "role", "outcome", "reason",
+        "identity", "source_revisions", "build_command", "builder_id",
+        "build_started_utc", "build_finished_utc", "driver_sha256", "product_path",
+        "product_sha256", "bundle_path", "bundle_tree_sha256",
+    }, f"{label} exact-source rebuild receipt")
+    product_identity = embedded["product_identity"]
+    exact_keys(product_identity, {
+        "pulp_revision", "forge_revision", "build_id", "product_id",
+        "product_name", "plugin_format",
+    }, f"{label} product identity")
     if (
         embedded.get("schema") != "pulp.gpu-first-visible-build-verification-receipt.v1"
         or embedded.get("version") != 1
         or embedded.get("outcome") != "pass"
+        or embedded.get("control") != "real"
         or embedded.get("verification_method") != "embedded-canonical-build-identity"
         or embedded.get("product_sha256") != producer_ref["sha256"]
         or embedded.get("observed_product_sha256") != producer_ref["sha256"]
         or embedded.get("reason") is not None
         or not SHA256.fullmatch(str(embedded.get("marker_sha256", "")))
+        or product_identity["pulp_revision"] != implementation_head
     ):
         raise V2AcceptanceError(f"{label} lacks a passing existing embedded build-verifier receipt")
     revisions = source_build.get("source_revisions")
@@ -517,6 +535,13 @@ def validate_existing_build_proof(
         or not isinstance(revisions, dict)
         or revisions.get("pulp") != implementation_head
         or source_build.get("product_sha256") != producer_ref["sha256"]
+        or source_build.get("attempt_nonce") != embedded.get("attempt_nonce")
+        or source_build.get("identity") != product_identity
+        or not isinstance(source_build.get("build_command"), list)
+        or not source_build["build_command"]
+        or not isinstance(source_build.get("builder_id"), str)
+        or not source_build["builder_id"]
+        or not SHA256.fullmatch(str(source_build.get("driver_sha256", "")))
     ):
         raise V2AcceptanceError(f"{label} lacks a passing existing exact-source rebuild receipt")
 
