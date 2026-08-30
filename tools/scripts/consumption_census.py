@@ -859,8 +859,14 @@ def load_document(census_path: Path, schema_path: Path) -> dict:
     document = json.loads(census_path.read_text())
     problems = validate_schema(document, schema_path)
     if problems:
+        # Name the repair. The most common way to reach this is a census
+        # written before a schema change, where the violation describes a
+        # committed file the reader did not touch and the fix is not obvious
+        # from the violation alone.
         raise CensusError(
             f"{census_path} violates its schema: " + "; ".join(problems[:5])
+            + "; if it was generated before the schema changed, regenerate it with: "
+            "python3 tools/scripts/consumption_census.py --build-dir <build-dir> --write"
         )
     return document
 
