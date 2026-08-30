@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -62,9 +63,14 @@ InstallRequest parse_install_arguments(const std::vector<std::string>& args,
 ArchiveSliceAction archive_slice_action(const std::string& lipo_architectures);
 std::string input_fingerprint(const Identity& identity);
 Paths profile_paths(const fs::path& pulp_home, const Identity& identity);
+/// `node_runtime`, when present, is staged beside `pulp-import-design` as the
+/// interpreter for the browser-capture scripts. Without it the SDK ships those
+/// scripts with nothing to run them, and a Forge configure against it fails on
+/// the missing payload rather than degrading.
 std::vector<std::string> configure_arguments(const fs::path& source, const fs::path& build,
                                              const fs::path& install_prefix,
-                                             const Identity& identity);
+                                             const Identity& identity,
+                                             const std::optional<fs::path>& node_runtime);
 std::map<std::string, std::string> parse_cmake_cache(const fs::path& cache_path);
 Validation validate_staged_install(const fs::path& prefix, const fs::path& build_dir,
                                    const Identity& expected, const fs::path& expected_skia_dir);
