@@ -874,6 +874,24 @@ def main() -> int:
         mutated["source_blobs"][first_source] = "0" * 40
         expect_failure(mutated, root, "source blob mismatch")
 
+        missing_boundary = copy.deepcopy(receipt)
+        missing_boundary["source_blobs"].pop(
+            "tools/scripts/gpu_contained_process.py"
+        )
+        expect_failure(missing_boundary, root, "schema violation")
+
+        substituted_boundary = copy.deepcopy(receipt)
+        boundary_blob = substituted_boundary["source_blobs"].pop(
+            "tools/scripts/gpu_contained_process.py"
+        )
+        substituted_boundary["source_blobs"][
+            "tools/scripts/gpu_uncontained_process.py"
+        ] = boundary_blob
+        expect_failure(
+            substituted_boundary, root,
+            "source_blobs does not bind the exact A3 implementation source set",
+        )
+
         mutated = copy.deepcopy(receipt)
         unknown_head = "f" * 40
         mutated["implementation_head"] = unknown_head
@@ -1289,7 +1307,7 @@ print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup"
         ) is False
 
         print(
-            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=53 "
+            "gpu-first-visible-a3-acceptance: positive=8 planted_negatives=55 "
             "checked_in_nonterminal=verified"
         )
     return 0
