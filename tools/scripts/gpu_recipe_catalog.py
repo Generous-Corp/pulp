@@ -46,6 +46,12 @@ HANDOFF_PACKAGE_IDS = (
     "b6-pulp-vellum-adoption-skills",
     "pulp-v8-threejs-release-followup",
 )
+HANDOFF_OUTPUT_RECEIPT_OVERRIDES = {
+    "a4-pulp-dpr-experiment": "a4-pulp-dpr-experiment.terminal.v2",
+}
+HANDOFF_SUPPLEMENTAL_INPUT_RECEIPTS = {
+    "a4-pulp-dpr-experiment": ["a3-pulp-dpr-product-policy.terminal.v2"],
+}
 HANDOFF_AUTHORITIES = {
     "plan": {
         "repo": "danielraffel/pulp-planning",
@@ -496,13 +502,18 @@ def validate_handoff(document: Any) -> list[str]:
             for dependency in depends_on
             if dependency in prior_output_ids
         )
+        expected_inputs.extend(HANDOFF_SUPPLEMENTAL_INPUT_RECEIPTS.get(package_id, []))
+        expected_inputs.sort()
         if entry["input_receipts"] != expected_inputs:
             problems.append(f"{prefix}.input_receipts must exactly bind dependency outputs")
         output_receipt = entry["output_receipt"]
         if not _closed_contract(output_receipt, {"id", "schema", "path"}, set()):
             problems.append(f"{prefix}.output_receipt is incomplete")
         elif (
-            output_receipt["id"] != f"{package_id}.terminal.v1"
+            output_receipt["id"]
+            != HANDOFF_OUTPUT_RECEIPT_OVERRIDES.get(
+                package_id, f"{package_id}.terminal.v1"
+            )
             or output_receipt["schema"] != "pulp.gpu-vellum-package-terminal.v1"
             or not _safe_relative(output_receipt["path"])
         ):

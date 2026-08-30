@@ -418,15 +418,17 @@ just hangs. Add `backtrace_symbols_fd` to `trap_now` in
 
 ## DPR experiment captures are evidence, not policy
 
-For A4 DPR trials, start from `test/fixtures/gpu-ux/dpr/manifest.json` and use
-the exact requested scale for each capture. Keep logical size, fixture bytes,
+For A4 DPR v2 trials, start from `test/fixtures/gpu-ux/dpr/manifest.json` only
+after its protected A3 policy status is `authorized`, and use the exact
+requested scale for each capture. Keep logical size, fixture bytes,
 and logical input coordinates identical while the physical backing size changes
-with DPR. Record both sizes in the versioned result contract.
+with DPR. Record every applied DPR and exact rounded physical dimension in the
+raw frame-sequence artifact bound by the v2 result contract.
 
 `passes_content_floor` remains a required blank-frame guard, but it does not
 prove small-text legibility, thin-stroke fidelity, or input correctness. Record
-those oracles separately. A planned or synthetic capture is automation proof
-only and must not select a scale-policy candidate.
+those oracles separately. A planned, v1, or synthetic capture is automation
+proof only and must not select a scale-policy candidate.
 
 Use `tools/scripts/gpu_dpr_runner.py` to execute or ingest a matrix cell. A
 screenshot adapter must return the raw capture and content/fidelity oracles in
@@ -445,7 +447,8 @@ metrics, and the correlated trace. With only `PULP_DPR_SCREENSHOT_BIN`, the
 adapter retains a real preflight but deliberately returns INCONCLUSIVE; never
 rename subprocess wall time to CPU/frame/interaction time.
 
-Terminal DPR evidence additionally requires the named trace answers to report
+Terminal DPR evidence additionally requires all 84 original plus all 84 repeat
+cells and the named trace answers to report
 one `category_scope` whose evidence ID and stable Perfetto process instance are
 shared across startup, health, and probe. Global or unrelated-process trace
 categories cannot complete a cell.

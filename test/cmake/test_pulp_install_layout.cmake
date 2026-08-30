@@ -206,23 +206,26 @@ unset(_installed_gpu_health_model_header)
 unset(_source_gpu_health_model_header)
 unset(_gpu_health_model_header_compare_rc)
 
-set(_installed_gpu_dpr_schema
-    "${_prefix}/share/pulp/contracts/gpu-dpr-experiment-v1.schema.json")
-if(NOT EXISTS "${_installed_gpu_dpr_schema}")
-    message(FATAL_ERROR
-        "GPU DPR experiment schema is missing from the installed SDK:\n"
-        "${_installed_gpu_dpr_schema}")
-endif()
-set(_source_gpu_dpr_schema
-    "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-dpr-experiment-v1.schema.json")
-execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E compare_files
-            "${_source_gpu_dpr_schema}" "${_installed_gpu_dpr_schema}"
-    RESULT_VARIABLE _gpu_dpr_schema_compare_rc)
-if(NOT _gpu_dpr_schema_compare_rc EQUAL 0)
-    message(FATAL_ERROR
-        "Installed GPU DPR experiment schema differs from the source contract.")
-endif()
+foreach(_gpu_dpr_schema_version IN ITEMS v1 v2)
+    set(_installed_gpu_dpr_schema
+        "${_prefix}/share/pulp/contracts/gpu-dpr-experiment-${_gpu_dpr_schema_version}.schema.json")
+    if(NOT EXISTS "${_installed_gpu_dpr_schema}")
+        message(FATAL_ERROR
+            "GPU DPR experiment schema is missing from the installed SDK:\n"
+            "${_installed_gpu_dpr_schema}")
+    endif()
+    set(_source_gpu_dpr_schema
+        "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-dpr-experiment-${_gpu_dpr_schema_version}.schema.json")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${_source_gpu_dpr_schema}" "${_installed_gpu_dpr_schema}"
+        RESULT_VARIABLE _gpu_dpr_schema_compare_rc)
+    if(NOT _gpu_dpr_schema_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed GPU DPR experiment schema differs from the source contract.")
+    endif()
+endforeach()
+unset(_gpu_dpr_schema_version)
 
 set(_gpu_health_front_args
     --prefix "${_prefix}")

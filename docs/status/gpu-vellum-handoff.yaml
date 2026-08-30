@@ -124,8 +124,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_recipe_catalog.py",
           "state": "pulp-owned-retained",
-          "revision": "1428b79587bf8282deddb377863cd2e1812e1f32",
-          "object_id": "c551dc709a2b1681c40e10cf222713564884baab",
+          "revision": "729ef793fa00ad1534884e13a1bdf0228c6a230f",
+          "object_id": "e1387982979183054852ee4197c4c676bdac13e2",
           "object_type": "blob"
         },
         {
@@ -277,8 +277,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-trace-overhead",
           "state": "pulp-owned-retained",
-          "revision": "2e9a294ca317a111eafffe5543160a0388d91670",
-          "object_id": "ca86f61751157ff3a611de7f5df4f7484bec4082",
+          "revision": "ca185c42ead63f0f235c12119a071a59c3dabb87",
+          "object_id": "45d0b72554a40f5902acd250be82061abe75decd",
           "object_type": "tree"
         },
         {
@@ -301,16 +301,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "2e9a294ca317a111eafffe5543160a0388d91670",
-          "object_id": "eebad97ca6122a7d5fba1c9c6ff7eab70a8f95cc",
+          "revision": "ad2480ee19a0930ed1dcc71981f88d2c712297d8",
+          "object_id": "ab0d3a9834a5e5230ca3bc0796ea981e44ec5c90",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "b45f3ce59ec86460c00673d33175b47c70bfa160",
-          "object_id": "f0badb75f8a9704de267b006732a32a9f9d8c490",
+          "revision": "ca185c42ead63f0f235c12119a071a59c3dabb87",
+          "object_id": "61acc02d84c095fe9bfa0230cf58a858b86160a6",
           "object_type": "blob"
         }
       ],
@@ -907,7 +907,7 @@
     {
       "id": "a4-pulp-dpr-experiment",
       "phase": "A4 retained Pulp DPR experiment",
-      "trigger": "Always retain the corpus and runner; only a terminal queue result can start B5.",
+      "trigger": "Retain the corpus and runner, but collect no v2 cells until protected A3 product-policy authority exists; only a live-verified terminal v2 candidate can start B5.",
       "pulp_paths": [
         {
           "repo": "Generous-Corp/pulp",
@@ -919,18 +919,26 @@
         },
         {
           "repo": "Generous-Corp/pulp",
+          "path": "docs/contracts/gpu-dpr-experiment-v2.schema.json",
+          "state": "pulp-owned-retained",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "91def0ca19d929fa9fea39cf85dd83db6a843d76",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-dpr",
           "state": "pulp-owned-retained",
-          "revision": "2e9a294ca317a111eafffe5543160a0388d91670",
-          "object_id": "3cfb96a0e006fcac8c2531de4e34280f0e22ccf1",
+          "revision": "6b7bf2fd49709933fe23b5114d4d8e0692476a19",
+          "object_id": "69eb6eed8a8429dff5920a611ee29d7420e4e464",
           "object_type": "tree"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "test/fixtures/gpu-ux/dpr",
           "state": "pulp-owned-retained",
-          "revision": "9d6cadc7d0a4deade2057e4350411e30aff84716",
-          "object_id": "6d0104fd4696fc91beb3d62f1aa861d748f393e3",
+          "revision": "6b7bf2fd49709933fe23b5114d4d8e0692476a19",
+          "object_id": "5bade8bfb2fa3e9cb5482e1e0e5d60162daa784f",
           "object_type": "tree"
         },
         {
@@ -945,8 +953,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_experiment.py",
           "state": "pulp-owned-retained",
-          "revision": "9d6cadc7d0a4deade2057e4350411e30aff84716",
-          "object_id": "b3b95fb944aff515dc839fb95e2766c81f998048",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "233526f387ec70a1a7d28a3844986a34ae603cbe",
           "object_type": "blob"
         },
         {
@@ -961,25 +969,25 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_runner.py",
           "state": "pulp-owned-retained",
-          "revision": "2d2bd707d2d2b7dcf8fb676d1673f5192dfc513a",
-          "object_id": "ff00912dc8b0faaf4e39d9d2d379dcfe7e809d39",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "152956c11b625d9d3ffdd4e29462cfa4520ca72f",
           "object_type": "blob"
         }
       ],
       "vellum_paths": [],
       "api_contract": {
         "surfaces": [
-          "Closed DPR experiment plan, cells, raw evidence, and disposition"
+          "Closed DPR v2 experiment plan, 84 original cells, 84 same-unit repeat cells, raw evidence, deterministic disposition, and live publication proof"
         ],
-        "request": "Exact build/provider/scenario/DPR/policy cell and immutable corpus.",
-        "result": "Pixels, input coordinates, latency, memory, fidelity, and one derived disposition.",
-        "errors": "Missing cell, stale scale, fake trace, wrong build, or fidelity regression rejects the matrix.",
-        "availability": "A4 may close no-change; incomplete matrices never select a policy."
+        "request": "Protected A3 policy plus exact build/provider/host/scenario/DPR/mode identity, immutable corpus, and canonical deterministic seed material.",
+        "result": "Aligned per-trial pixels, input coordinates, latency, memory, fidelity, DAW subreceipts, same-unit repeats, and one recomputed disposition.",
+        "errors": "Missing or substituted cell, stale scale/dimensions, fake trace, wrong build/provider/host/app, unavailable exact baseline or fidelity, repeat mismatch, caller-selected disposition, or self-attested publication rejects the matrix.",
+        "availability": "Historical v1 receipts are nonterminal and count as zero v2 cells; incomplete or non-live-verified v2 evidence never selects a policy."
       },
       "ownership_lifetime_rt": {
         "owner": "Generous-Corp/pulp experiment orchestration",
         "ownership": "Pulp owns scenarios, evidence, corpus, runner, and disposition, not generic scale policy.",
-        "lifetime": "Every cell binds one exact product process and immutable artifacts.",
+        "lifetime": "Every original/repeat cell and DAW subreceipt binds one exact product process, A3 campaign, and immutable artifacts.",
         "threads": "Measurement and capture use documented render/UI paths.",
         "rt": "GPU-audio canaries retain zero-xrun and no-audio-thread-control requirements."
       },
@@ -990,10 +998,11 @@
           "presentation or headless completion"
         ],
         "required_fields": [
-          "DPR policy",
+          "applied DPR and mode",
           "build/provider",
-          "process/session",
-          "scenario/cell"
+          "logical/physical dimensions",
+          "process/session/trial",
+          "scenario/cell/repeat"
         ],
         "query_outputs": [
           "latency distribution",
@@ -1004,13 +1013,13 @@
       },
       "tests": {
         "unit": [
-          "Runner, evidence, matrix, policy, and digest validation."
+          "Closed v2 schema, 84-plus-84 matrix, canonical SHA-256 PRNG/bootstrap formulas, semantic validator, deterministic disposition, live publication verifier, install/release packaging, and digest validation."
         ],
         "planted": [
-          "Stale scale, wrong input coordinates, blurred corpus, fake trace, and missing cell fail."
+          "Stale scale, wrong dimensions/input coordinates, blurred corpus, fake trace, missing/repeated cell, wrong-app same-name check, truncated pagination, and caller self-attestation fail."
         ],
         "real_host": [
-          "Exact DPR matrix on native and Three.js scenarios."
+          "All 84 original and 84 same-machine repeat cells, including native, Three.js, web, input, and AUv2 Logic plus VST3/CLAP REAPER DAW subreceipts."
         ],
         "installed_prefix": [
           "Source-built product and installed runtime use the same policy identity."
@@ -1018,9 +1027,9 @@
       },
       "performance_gate": {
         "metrics": [
-          "fidelity, frame latency, input mapping, memory, and p50/p95/p99"
+          "fidelity, frame latency, first nonblank, input mapping, memory, xruns/misses, and aligned p50/p95/p99 with 10,000-sample bootstrap intervals"
         ],
-        "threshold": "A candidate must meet every fidelity/input gate and ratified latency/memory bound.",
+        "threshold": "A candidate must meet every exact-baseline, fidelity/input, ratified latency/memory/noise, class-support, and same-unit repeat gate.",
         "audio": "GPU-audio canary may not regress xruns.",
         "failure": "Inconclusive or regressing evidence derives no-change."
       },
@@ -1037,6 +1046,7 @@
       },
       "retained_paths": [
         "docs/contracts/gpu-dpr-experiment-v1.schema.json",
+        "docs/contracts/gpu-dpr-experiment-v2.schema.json",
         "docs/validation/gpu-dpr",
         "test/fixtures/gpu-ux/dpr",
         "tools/scripts/gpu_dpr_evidence.py",
@@ -1045,9 +1055,9 @@
         "tools/scripts/gpu_dpr_runner.py"
       ],
       "terminal_result": {
-        "pass": "One measured DPR candidate queues B5 with the complete corpus.",
+        "pass": "One deterministically derived measured v2 candidate is validated from exact clean live protected main and queues B5 with all 84 original and 84 repeat cells.",
         "no_change": "Retain current DPR behavior and the experiment corpus.",
-        "nonterminal": "Any missing cell, fidelity gate, or provenance remains open."
+        "nonterminal": "Blocked A3 authority, historical v1, any missing cell/subreceipt/repeat/gate/provenance, or any publication state short of fresh live protected main remains open."
       },
       "delete_paths": [],
       "deletion_gate": {
@@ -1056,27 +1066,28 @@
         "required_evidence": []
       },
       "depends_on": [
-        "a2-pulp-product-probes"
+        "a3-pulp-runtime-control"
       ],
       "accepted_dispositions": [
         "no-change",
         "pass"
       ],
       "input_receipts": [
-        "a2-pulp-product-probes.terminal.v1"
+        "a3-pulp-dpr-product-policy.terminal.v2",
+        "a3-pulp-runtime-control.terminal.v1"
       ],
       "output_receipt": {
-        "id": "a4-pulp-dpr-experiment.terminal.v1",
+        "id": "a4-pulp-dpr-experiment.terminal.v2",
         "schema": "pulp.gpu-vellum-package-terminal.v1",
         "path": "docs/validation/gpu-vellum-adoption/a4-pulp-dpr-experiment.json"
       },
       "terminal_evidence": {
         "required": [
-          "One measured DPR candidate queues B5 with the complete corpus.",
-          "a4-pulp-dpr-experiment output receipt binds exact installed revisions and terminal disposition"
+          "One deterministic measured DPR v2 candidate queues B5 with all 84 original and 84 same-unit repeat cells only after fresh live protected-main verification.",
+          "a4-pulp-dpr-experiment.terminal.v2 uses the shared package-terminal v1 envelope to bind exact installed revisions, terminal disposition, and the embedded pulp.gpu-dpr-experiment.v2 evidence artifact; no package-terminal v2 schema exists"
         ],
         "planted": [
-          "Stale scale, wrong input coordinates, blurred corpus, fake trace, and missing cell fail.",
+          "Stale scale, wrong input/dimensions, blurred corpus, fake trace, missing/repeated cell or DAW subreceipt, caller disposition, wrong-app check, truncated pagination, and caller self-attestation fail.",
           "a4-pulp-dpr-experiment planted negative produces non-pass"
         ]
       }
@@ -1106,8 +1117,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_recipe_catalog.py",
           "state": "pulp-owned-retained",
-          "revision": "1428b79587bf8282deddb377863cd2e1812e1f32",
-          "object_id": "c551dc709a2b1681c40e10cf222713564884baab",
+          "revision": "729ef793fa00ad1534884e13a1bdf0228c6a230f",
+          "object_id": "e1387982979183054852ee4197c4c676bdac13e2",
           "object_type": "blob"
         }
       ],
@@ -1199,7 +1210,7 @@
         "a2t-pulp-trace-analysis.terminal.v1",
         "a3-pulp-input-to-present-host.terminal.v1",
         "a3-pulp-runtime-control.terminal.v1",
-        "a4-pulp-dpr-experiment.terminal.v1"
+        "a4-pulp-dpr-experiment.terminal.v2"
       ],
       "output_receipt": {
         "id": "b0-adoption-authority-freeze.terminal.v1",
@@ -2292,7 +2303,7 @@
     {
       "id": "b5-vellum-dpr-policy",
       "phase": "B5 conditional Vellum surface-scale policy",
-      "trigger": "Start only from a terminal A4 queue result after B0 path refresh.",
+      "trigger": "Waiting trigger: start only when A4 v2 deterministically selects a candidate from all 84 original plus 84 repeat cells, validates it from exact clean live protected main, and B0 refreshes the adoption paths.",
       "pulp_paths": [
         {
           "repo": "Generous-Corp/pulp",
@@ -2306,8 +2317,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_runner.py",
           "state": "pulp-owned-retained",
-          "revision": "2d2bd707d2d2b7dcf8fb676d1673f5192dfc513a",
-          "object_id": "ff00912dc8b0faaf4e39d9d2d379dcfe7e809d39",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "152956c11b625d9d3ffdd4e29462cfa4520ca72f",
           "object_type": "blob"
         }
       ],
@@ -2381,10 +2392,10 @@
         "surfaces": [
           "SkiaDawnSurface logical/physical scale configuration and bounded status"
         ],
-        "request": "Logical size, physical scale, accessibility/zoom precedence, policy, bounds, and hysteresis.",
+        "request": "Only the A4 v2-selected candidate plus logical size, physical scale, accessibility/zoom precedence, policy, bounds, and hysteresis.",
         "result": "Exact applied scale, reason, transition state, and input-coordinate mapping.",
         "errors": "Invalid/stale scale, conflicting precedence, unsupported policy, and bound failure are typed.",
-        "availability": "No policy change exists unless A4 selected a candidate."
+        "availability": "No policy change exists unless a live-verified A4 v2 result selected a candidate; the current blocked/inconclusive result leaves B5 waiting."
       },
       "ownership_lifetime_rt": {
         "owner": "Generous-Corp/vellum generic surface scale",
@@ -2422,7 +2433,7 @@
           "Stale scale, blurred text, wrong coordinates, oscillation, and missing provenance fail."
         ],
         "real_host": [
-          "Full A4 native/Three.js/text/input/resize/accessibility matrix."
+          "Full A4 v2 84-original plus 84-repeat native/Three.js/web/text/input/resize/accessibility/DAW matrix."
         ],
         "installed_prefix": [
           "Thin Pulp adapter consumes one Vellum policy from a clean prefix."
@@ -2432,7 +2443,7 @@
         "metrics": [
           "fidelity, frame latency, input error, memory, policy churn, and p50/p95/p99"
         ],
-        "threshold": "Every A4 fidelity/input gate and ratified latency/memory bound passes.",
+        "threshold": "Every A4 v2 exact-baseline, fidelity/input, repeat, class-support, and ratified latency/memory/noise gate passes.",
         "audio": "GPU-audio canary has no xrun regression.",
         "failure": "Close no-change and preserve exact/default scale."
       },
@@ -2444,7 +2455,7 @@
           "Three.js",
           "native host"
         ],
-        "proof": "Rerun all frozen cells and real input/fidelity checks.",
+        "proof": "Rerun all 84 frozen cells, all 84 same-unit repeats, and every real input/fidelity/DAW subreceipt check.",
         "duplicate_rejection": "No second Pulp logical/physical scale policy."
       },
       "retained_paths": [
@@ -2452,7 +2463,7 @@
         "tools/scripts/gpu_dpr_runner.py"
       ],
       "terminal_result": {
-        "pass": "One Vellum scale policy passes the complete A4 matrix.",
+        "pass": "One Vellum scale policy passes the complete A4 v2 84-plus-84 matrix.",
         "no_change": "Retain exact/default scale and the corpus.",
         "nonterminal": "Missing queue trigger, fidelity/input, or installed-prefix proof remains open."
       },
@@ -2472,7 +2483,7 @@
         "pass"
       ],
       "input_receipts": [
-        "a4-pulp-dpr-experiment.terminal.v1",
+        "a4-pulp-dpr-experiment.terminal.v2",
         "b0-adoption-authority-freeze.terminal.v1",
         "b1-vellum-gpu-runtime.terminal.v1"
       ],
@@ -2483,7 +2494,7 @@
       },
       "terminal_evidence": {
         "required": [
-          "One Vellum scale policy passes the complete A4 matrix.",
+          "One Vellum scale policy passes the complete A4 v2 84-plus-84 matrix.",
           "b5-vellum-dpr-policy output receipt binds exact installed revisions and terminal disposition"
         ],
         "planted": [
@@ -2501,8 +2512,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/daw-smoke/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "5c502b5507e24045136f09020f2f27af521d8d1f",
-          "object_id": "e886579875858b21d6aaacd5c154a458df8e2e40",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "44423bc41cc20aa9e36a2be624a73b551353e708",
           "object_type": "blob"
         },
         {
@@ -2511,6 +2522,14 @@
           "state": "pulp-owned-retained",
           "revision": "5c502b5507e24045136f09020f2f27af521d8d1f",
           "object_id": "8d18b7722e6f66813aa866f5d74b5666a6ccba20",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/screenshot/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "950b95a7fd0166664f47887afe4394ecc2c3ae44",
           "object_type": "blob"
         },
         {
@@ -2525,8 +2544,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-analysis/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "5c502b5507e24045136f09020f2f27af521d8d1f",
-          "object_id": "9f0092a37087e360815f1df9d35b57d11825c9a7",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "adf163a2827caf77d1225c134ba457aa3909ac8e",
           "object_type": "blob"
         },
         {
@@ -2696,6 +2715,7 @@
       "retained_paths": [
         ".agents/skills/daw-smoke/SKILL.md",
         ".agents/skills/forge-app-delivery/SKILL.md",
+        ".agents/skills/screenshot/SKILL.md",
         ".agents/skills/skia-gpu-build/SKILL.md",
         ".agents/skills/trace-analysis/SKILL.md",
         ".agents/skills/trace-sql/SKILL.md",
@@ -2804,16 +2824,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "1ec7a558b4ec70ad8d9d5f8d5304b34ac13e1e1d",
-          "object_id": "67d29b09dc4ec0ab2e5ddc4970d3c15a35c34f16",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "7f51f2567a70c1cd91771db7aac5b1b33a165986",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "979fb5e1590f75ce8e3a7e491650f72b6ef258eb",
-          "object_id": "05f99e82658bdb7d43d1050959689fda74ef3ab7",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "c051316e7ccbfea35bacada68d422bab14fdf998",
           "object_type": "blob"
         },
         {
@@ -2828,8 +2848,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "236c23eec4ae658b2a0e688f2616a5e920886c76",
-          "object_id": "b6c3f95d32dc55a1d2c94234014723716676f364",
+          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
+          "object_id": "aa2b5a2c6870088285d22330c4e85f7fdca0d263",
           "object_type": "blob"
         }
       ],

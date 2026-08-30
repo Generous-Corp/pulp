@@ -606,7 +606,7 @@ def finalize(
     result["eligible_for_policy"] = policy_ready
     schema_problems = experiment.json_schema_lite.validate(
         result,
-        experiment.schema_for_lite(experiment.load_json(experiment.DEFAULT_SCHEMA)),
+        experiment.schema_for_lite(experiment.load_json(experiment.DEFAULT_SCHEMA_V1)),
     )
     problems = [*schema_problems, *experiment.result_semantic_errors(
         result, manifest, experiment.canonical_sha256(manifest)
@@ -618,6 +618,48 @@ def finalize(
     b5 = b5_gate_document(disposition, manifest)
     atomic_json(b5_path, b5)
     return b5
+
+
+def finalize_v2(
+    draft_path: Path, manifest_path: Path, output_path: Path,
+) -> dict[str, Any]:
+    """Derive v2 analysis and B5 state; no caller may select a disposition."""
+    manifest = load_json(manifest_path)
+    manifest_problems = experiment.manifest_errors(manifest, manifest_path)
+    if manifest_problems:
+        raise EvidenceError("; ".join(manifest_problems))
+    if manifest.get("v2_protocol", {}).get("status") != "authorized":
+        raise EvidenceError("v2 finalization is blocked until protected A3 product policy exists")
+    document = regular_json(draft_path, "A4 v2 draft result")
+    if document.get("schema") != "pulp.gpu-dpr-experiment.v2":
+        raise EvidenceError("v2 finalization requires a pulp.gpu-dpr-experiment.v2 draft")
+    if document.get("status") != "complete" or document.get("evidence_kind") != "measured":
+        raise EvidenceError("v2 finalization requires a complete measured draft")
+    manifest_digest = experiment.canonical_sha256(manifest)
+    document["analysis"] = experiment.compute_v2_analysis(
+        document.get("cells", []), document.get("repeat_cells", []),
+        manifest, manifest_digest,
+    )
+    disposition = document["analysis"]["disposition"]
+    document["b5_gate"] = {
+        "status": (
+            "cancelled-no-change" if disposition == "no-change" else "waiting-trigger"
+        ),
+        "requires": (
+            [] if disposition == "no-change" else ["B0-adopted-vellum-api-refresh"]
+        ),
+        "authorizes_policy_change": False,
+    }
+    schema = experiment.schema_for_lite(experiment.load_json(experiment.DEFAULT_SCHEMA))
+    problems = experiment.json_schema_lite.validate(document, schema)
+    if not problems:
+        problems = experiment.v2_semantic_errors(
+            document, manifest, manifest_digest, verify_live_publication=False,
+        )
+    if problems:
+        raise EvidenceError("; ".join(problems))
+    atomic_json(output_path, document)
+    return document["b5_gate"]
 
 
 def main() -> int:
@@ -644,12 +686,16 @@ def main() -> int:
     status = sub.add_parser("status")
     status.add_argument("--run-dir", type=Path, required=True)
     status.add_argument("--json", action="store_true")
-    finish = sub.add_parser("finalize")
+    finish = sub.add_parser("finalize-v1")
     finish.add_argument("--run-dir", type=Path, required=True)
     finish.add_argument("--disposition", choices=sorted(experiment.POLICY_DISPOSITIONS), required=True)
     finish.add_argument("--a2t-receipt", required=True)
     finish.add_argument("--a3-budget-id", required=True)
     finish.add_argument("--a3-receipt", required=True)
+    finish_v2 = sub.add_parser("finalize-v2")
+    finish_v2.add_argument("--draft", type=Path, required=True)
+    finish_v2.add_argument("--manifest", type=Path, default=experiment.DEFAULT_MANIFEST)
+    finish_v2.add_argument("--output", type=Path, default=experiment.DEFAULT_RESULT)
     args = parser.parse_args()
     try:
         if args.command == "init":
@@ -696,11 +742,14 @@ def main() -> int:
                     f"gpu_dpr_run_status={document['result_status']} "
                     f"complete={document['complete_cells']}/{document['total_cells']}"
                 )
-        else:
+        elif args.command == "finalize-v1":
             b5 = finalize(
                 args.run_dir, args.disposition, args.a2t_receipt,
                 args.a3_budget_id, args.a3_receipt
             )
+            print(json.dumps(b5, sort_keys=True))
+        else:
+            b5 = finalize_v2(args.draft, args.manifest, args.output)
             print(json.dumps(b5, sort_keys=True))
     except (EvidenceError, OSError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
         print(f"gpu-dpr-runner: {error}", file=sys.stderr)

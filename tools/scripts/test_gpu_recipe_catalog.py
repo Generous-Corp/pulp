@@ -298,6 +298,17 @@ class CatalogContract(unittest.TestCase):
         )
         self.assertEqual(tuple(b0["depends_on"]), catalog.HANDOFF_B0_DEPENDENCIES)
         self.assertEqual(b0["delete_paths"], [])
+        a4 = next(
+            entry for entry in handoff["entries"]
+            if entry["id"] == "a4-pulp-dpr-experiment"
+        )
+        self.assertEqual(
+            a4["output_receipt"]["id"], "a4-pulp-dpr-experiment.terminal.v2"
+        )
+        self.assertEqual(
+            a4["output_receipt"]["schema"], "pulp.gpu-vellum-package-terminal.v1"
+        )
+        self.assertIn("a3-pulp-dpr-product-policy.terminal.v2", a4["input_receipts"])
         followup = next(
             entry
             for entry in handoff["entries"]
@@ -314,10 +325,13 @@ class CatalogContract(unittest.TestCase):
                 self.assertTrue(entry["accepted_dispositions"])
                 self.assertTrue(entry["terminal_evidence"]["required"])
                 self.assertTrue(entry["terminal_evidence"]["planted"])
-                self.assertEqual(
-                    entry["input_receipts"],
-                    sorted(f"{dependency}.terminal.v1" for dependency in entry["depends_on"]),
-                )
+                expected_inputs = [
+                    catalog.HANDOFF_OUTPUT_RECEIPT_OVERRIDES.get(
+                        dependency, f"{dependency}.terminal.v1"
+                    )
+                    for dependency in entry["depends_on"]
+                ] + catalog.HANDOFF_SUPPLEMENTAL_INPUT_RECEIPTS.get(entry["id"], [])
+                self.assertEqual(entry["input_receipts"], sorted(expected_inputs))
                 for row in entry["pulp_paths"]:
                     self.assertRegex(row["revision"], r"^[0-9a-f]{40}$")
                     self.assertRegex(row["object_id"], r"^[0-9a-f]{40}$")
