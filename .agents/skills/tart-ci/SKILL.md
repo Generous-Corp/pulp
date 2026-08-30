@@ -11,6 +11,26 @@ requires:
 
 Run every macOS build/validation in a **throwaway VM cloned from a versioned golden image** so the host stays responsive and builds are reproducible. Generalizes to any repo via one `vm-image` manifest. Born from Pulp `planning/2026-06-01-macos-ci-isolation-plan.md`; the reusable macOS provider now lives in the sibling `/Volumes/Workshop/Code/tartci` repo. Pulp's `tools/ci/tart-runner.sh` / `tart-run-job.sh` scripts are the legacy/precursor shape and should stay as compatibility wrappers once the tartci lane graduates.
 
+## Current Pulp gate truth (read before rollout history)
+
+Pulp's production required macOS gate is the local M1/M3/M5 JIT fleet. Each
+host's checked-in profile can serve both mutually exclusive event classes:
+`pulp-build-pr-head` at derived lease priority 100 and
+`pulp-build-merge-group` at derived priority 110. Profiles must not set one
+fixed lease priority for both classes; doing so defeats merge-group priority
+and can leave reserved gate cores idle. The older `pulp-gate-fast`, M1-only,
+static-runner, and pilot-label passages below are rollout history, not the
+current production selector.
+
+A profile proves compatibility, not live participation. JIT runners register
+only while serving a job, and organization visibility does not prove that the
+Pulp repository can assign one. Establish current capacity from enabled and
+healthy Pulp supervisors, queue age, repository-visible registration, exact
+job-to-runner binding, derived lease priority, completion, and VM/JIT cleanup.
+Re-check M1, M3, and M5 live; do not preserve a dated incident snapshot as
+topology. `tools/scripts/runner_topology.json` plus
+`runner_topology_check.py --mode=report` is the declarative routing truth.
+
 ## Why (the failure modes this fixes)
 - **Build-dir churn → ODR heap corruption.** One `build/` reconfigured across branches/build-types mixes object layouts → `malloc: error for object 0x3f800000` (that's `1.0f` freed as a pointer) aborting in e.g. `Theme::~Theme`. Every job in a *pristine* clone makes this impossible.
 - **Host-local validation is fragile + invasive.** Validating in the editing checkout inherits churn, pops GUI keychain dialogs, and competes for CPU. VMs are headless and disposable.
@@ -273,13 +293,12 @@ main, reddening every PR's macOS gate.)
    - run `27251134234`: default dispatch, no selector override, `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success; hosted leftovers canceled after `macos` went green.
    - run `27251378268`: real PR, secondary-host `pulp-vm-m5-pilot-01`, `macOS (ARM64) [local]` success, `macos` alias success.
    - run `27251442228`: real PR, controller `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success.
-4. **Rollback path:** keep bare-metal fallback online. To route back to bare-metal:
-   ```bash
-   gh variable set -R Generous-Corp/pulp PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","pulp-build"]'
-   gh variable set -R Generous-Corp/pulp PULP_LOCAL_MAC_RUNNER_LABEL --body 'pulp-build'
-   launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner"
-   ssh <secondary-host> 'launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner-macos-pilot"'
-   ```
+4. **Historical rollback:** the former bare-metal selector and launchd commands
+   are intentionally not preserved here; copying them would bypass the current
+   event-class contract. If rollback is required, derive the reviewed selector
+   from `tools/scripts/runner_topology.json`, preserve both event classes and
+   their repository-scoped registration authority, and change one idle host at
+   a time with a proven assignment receipt.
 
 ## Gotchas (hard-won)
 - **Dynamic event classes require dynamic registration authority, not just
