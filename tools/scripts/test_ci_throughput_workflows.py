@@ -57,6 +57,11 @@ NON_DEVICE_WEIGHTED_SUITES = (
     "pulp-test-standalone-transport-midi",
     "pulp-test-screenshot-capture",
 )
+QUALITY_WEIGHTED_SUITES = {
+    "agent-capability-manifest-selftest",
+    "gpu-dpr-runner-selftest",
+    "gpu-first-visible-external-adapter-selftest",
+}
 
 def load_workflow(path: pathlib.Path) -> dict:
     if yaml is None:
@@ -593,7 +598,7 @@ class CTestIsolationContractTests(unittest.TestCase):
         expected = (
             WEIGHTED_CORE_AUDIO_SERIAL_SUITES
             | set(NON_DEVICE_WEIGHTED_SUITES)
-            | {"agent-capability-manifest-selftest"}
+            | QUALITY_WEIGHTED_SUITES
         )
         actual = set()
         for path in (ROOT / "test" / "cmake").glob("*.cmake"):
@@ -646,17 +651,19 @@ class CTestIsolationContractTests(unittest.TestCase):
                     self.assertRegex(call, r"\bPROCESSORS\s+8\b")
                     self.assertNotRegex(call, r"\bRUN_SERIAL\b")
 
-    def test_unrelated_quality_weight_is_not_globally_serialized(self) -> None:
+    def test_unrelated_quality_weights_are_not_globally_serialized(self) -> None:
         quality = (ROOT / "test" / "cmake" / "quality_tests.cmake").read_text(
             encoding="utf-8"
         )
-        registration = re.search(
-            r"set_tests_properties\(agent-capability-manifest-selftest\s+"
-            r"PROPERTIES\s+PROCESSORS\s+8\)",
-            quality,
-        )
-        self.assertIsNotNone(registration)
-        self.assertNotIn("RUN_SERIAL", registration.group(0))
+        for name in QUALITY_WEIGHTED_SUITES:
+            with self.subTest(suite=name):
+                registration = re.search(
+                    rf"set_tests_properties\({re.escape(name)}\s+"
+                    r"PROPERTIES\s+PROCESSORS\s+8\)",
+                    quality,
+                )
+                self.assertIsNotNone(registration)
+                self.assertNotIn("RUN_SERIAL", registration.group(0))
 
     @staticmethod
     def _run_serial_scheduler_fixture(
