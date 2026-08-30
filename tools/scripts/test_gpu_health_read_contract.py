@@ -31,6 +31,7 @@ def startup_document(health: dict[str, Any]) -> dict[str, Any]:
         "startup": {
             "status": "complete",
             "verdict": "pass",
+            "measurement_endpoint": "native-compositor-presentation",
             "budget": {
                 "budget_id": "editor-first-visible-v1",
                 "version": 1,

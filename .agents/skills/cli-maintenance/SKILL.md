@@ -159,8 +159,14 @@ surfaces synchronized:
 - `docs/status/cli-commands.yaml`, `docs/reference/cli.md`, the Claude plugin
   MCP table, and the Pulp-Vellum tooling disposition
 
-The top-level `gpu` command intentionally has no slash command: its agentic
-surface is the typed `pulp_gpu_recipes` discovery tool plus `pulp_gpu_probe`.
+The top-level `gpu` command has the required `/gpu` workflow in
+`.claude/commands/gpu.md`. It starts with `pulp doctor gpu --json` and closed
+recipe discovery, then runs a selected `pulp gpu probe` recipe and optionally
+correlates the evidence through `/trace`. The typed `pulp_gpu_recipes` and
+`pulp_gpu_probe` MCP tools expose the same discovery and probe workflow to MCP
+clients. Keep the command file, this guidance, and the slash-command inventory
+in sync; `tools/scripts/cli_sync_check.py` enforces `gpu` in
+`REQUIRED_SLASH_COMMANDS`.
 `pulp_gpu_recipes` links the CPU-only catalog model directly and must remain
 usable without a sibling `pulp-cpp`, including in `PULP_ENABLE_GPU=OFF` builds.
 Those builds keep every canonical ID visible but report execution recipes as
@@ -322,7 +328,7 @@ sync with `tools/scripts/cli_sync_check.py` and
 `tools/scripts/cli_mcp_parity_baseline.json`.
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
-build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, control, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, seq, audio-harness, audio-inspect, audio-compare
+build, test, run, validate, ship, version, doctor, gpu, create, docs, status, design, import-design, inspect, control, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, seq, audio-harness, audio-inspect, audio-compare
 
 `/seq` is the agent workflow for the top-level `pulp seq` timeline command. It
 wraps schema discovery, validate, explain, typed-command apply, import, and

@@ -112,7 +112,7 @@
     },
     "startup": {
       "type": "object",
-      "required": ["status", "verdict", "budget", "correlation", "capture", "identity", "trials", "observed_percentile_ms", "interaction_hitch_percentile_ms", "pipeline_contribution", "causal_attribution", "disposition"],
+      "required": ["status", "verdict", "measurement_endpoint", "budget", "correlation", "capture", "identity", "trials", "observed_percentile_ms", "interaction_hitch_percentile_ms", "pipeline_contribution", "causal_attribution", "disposition"],
       "additionalProperties": false,
       "properties": {
         "status": { "enum": ["complete", "incomplete", "unavailable", "unverified"] },
