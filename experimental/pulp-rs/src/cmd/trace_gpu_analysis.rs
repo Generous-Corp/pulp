@@ -281,6 +281,20 @@ fn terminate_processor_group(child: &mut command_group::GroupChild, tp_path: &Pa
     }
 }
 
+fn pace_disconnected_processor_poll(
+    readers_disconnected: bool,
+    child_running: bool,
+    wait: Duration,
+    sleep: impl FnOnce(Duration),
+) {
+    // Once both pipe readers have completed, every recv_timeout returns
+    // Disconnected immediately. Keep the child-status poll on the same bounded
+    // cadence that recv_timeout provided, but do not delay an observed exit.
+    if readers_disconnected && child_running {
+        sleep(wait);
+    }
+}
+
 fn run_processor_bounded(
     tp_path: &Path,
     sql_path: &Path,
@@ -337,6 +351,7 @@ fn run_processor_bounded(
             break;
         }
         let wait = PROCESS_POLL_INTERVAL.min(limits.deadline - elapsed);
+        let mut readers_disconnected = false;
         match receiver.recv_timeout(wait) {
             Ok(ProcessorEvent::Data(kind, bytes)) => {
                 let retained = stdout_bytes.len().saturating_add(stderr_bytes.len());
@@ -371,6 +386,7 @@ fn run_processor_bounded(
                     ));
                     break;
                 }
+                readers_disconnected = true;
             }
         }
         if status.is_none() {
@@ -385,6 +401,12 @@ fn run_processor_bounded(
                 }
             }
         }
+        pace_disconnected_processor_poll(
+            readers_disconnected,
+            status.is_none(),
+            wait,
+            thread::sleep,
+        );
     }
 
     if let Some(error) = failure {

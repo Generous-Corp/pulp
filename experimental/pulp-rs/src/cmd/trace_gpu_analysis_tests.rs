@@ -390,6 +390,28 @@ fn production_processor_limits_are_explicit() {
     assert_eq!(PROCESSOR_DEADLINE, Duration::from_secs(120));
 }
 
+#[test]
+fn disconnected_readers_keep_live_child_polling_bounded_without_delaying_exit() {
+    let wait = Duration::from_millis(17);
+    let mut sleeps = Vec::new();
+
+    // Model three successive live-child polls after both output readers close.
+    // The injected sleeper makes the cadence proof deterministic: each poll
+    // consumes exactly one wait interval instead of relying on wall-clock timing.
+    for _ in 0..3 {
+        pace_disconnected_processor_poll(true, true, wait, |duration| {
+            sleeps.push(duration)
+        });
+    }
+    assert_eq!(sleeps, vec![wait; 3]);
+
+    // Once try_wait observes exit, the same disconnected-reader state must not
+    // add another interval. Connected readers are already paced by recv_timeout.
+    pace_disconnected_processor_poll(true, false, wait, |duration| sleeps.push(duration));
+    pace_disconnected_processor_poll(false, true, wait, |duration| sleeps.push(duration));
+    assert_eq!(sleeps, vec![wait; 3]);
+}
+
 #[cfg(unix)]
 fn executable_script(root: &Path, name: &str, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
