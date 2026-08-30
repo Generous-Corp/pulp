@@ -148,10 +148,11 @@ blank screenshots, missing negative controls, Forge drift, and non-passing
 structural fields, but it cannot prove that a saved directory came from a live
 recorder. `--terminal` therefore fails closed; rerunning this recorder still
 does not create terminal authority, and no JSON marker or recomputed hash can
-upgrade an offline directory. Final A2 acceptance requires a separate protected
-cross-system acceptance package that independently binds the recorder run,
-retained receipt bytes, and exact protected integration authority. That package
-is not implemented or minted by these local scripts.
+upgrade an offline directory. Final acceptance requires the fresh recorder
+receipt and its retained artifacts to be committed unchanged on protected Pulp
+main, with the receipt bound to the final implementation source revision and
+the required exact-head checks green. This package does not require an
+additional cross-system acceptance artifact.
 
 Publication never replaces an output directory that appears during the run.
 Before any build or recipe execution the recorder retains the exact existing
@@ -162,8 +163,9 @@ links, fsyncs them, and links `receipt.json` only after the other evidence is
 durable. A raced parent/destination or partial interrupted directory is
 nonterminal and must not be promoted. A copied or hand-built directory may pass
 structural checks when its internal bytes are coherent; the same is true of a
-fresh recorder-produced directory. Both remain structural inputs to the
-separate cross-system acceptance package.
+fresh recorder-produced directory. Both remain structural inputs until
+protected-main publication supplies the repository authority that a saved
+directory cannot establish by itself.
 
 Expected recorder runtime is roughly 10–30 minutes with warm build caches and
 45–90 minutes from cold dependencies. The bounded subprocess timeouts are one
