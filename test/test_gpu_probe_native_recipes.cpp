@@ -6,6 +6,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <set>
 #include <stdexcept>
 
@@ -14,6 +15,40 @@ namespace probe = pulp::tooling::gpu_probe;
 namespace {
 
 constexpr const char* kEvidenceId = "00112233445566778899aabbccddeeff";
+
+class ScopedNativeRecipeFault {
+public:
+    explicit ScopedNativeRecipeFault(const char* value) {
+        if (const auto* old = std::getenv("PULP_GPU_PROBE_NATIVE_TEST_FAULT")) {
+            had_old_ = true;
+            old_ = old;
+        }
+#if defined(_WIN32)
+        REQUIRE(_putenv_s("PULP_GPU_PROBE_NATIVE_TEST_FAULT", value) == 0);
+#else
+        REQUIRE(setenv("PULP_GPU_PROBE_NATIVE_TEST_FAULT", value, 1) == 0);
+#endif
+    }
+
+    ~ScopedNativeRecipeFault() {
+#if defined(_WIN32)
+        (void)_putenv_s("PULP_GPU_PROBE_NATIVE_TEST_FAULT",
+                       had_old_ ? old_.c_str() : "");
+#else
+        if (had_old_)
+            (void)setenv("PULP_GPU_PROBE_NATIVE_TEST_FAULT", old_.c_str(), 1);
+        else
+            (void)unsetenv("PULP_GPU_PROBE_NATIVE_TEST_FAULT");
+#endif
+    }
+
+    ScopedNativeRecipeFault(const ScopedNativeRecipeFault&) = delete;
+    ScopedNativeRecipeFault& operator=(const ScopedNativeRecipeFault&) = delete;
+
+private:
+    bool had_old_ = false;
+    std::string old_;
+};
 
 void require_valid(const probe::RecipeRun& run) {
     std::string error;
@@ -107,6 +142,21 @@ TEST_CASE("GpuCompute WGSL mutation fails only the numeric oracle",
     REQUIRE(run.result.passes[2].code == "cpu_oracle_mismatch");
 }
 
+TEST_CASE("GpuCompute mutation source drift is unverified rather than a measured failure",
+          "[gpu][gpu-probe][mutation][contract]") {
+    const ScopedNativeRecipeFault fault{"magnitude-mutation-source-drift"};
+    const auto run = probe::run_gpu_compute_magnitude_recipe({true, kEvidenceId});
+    require_valid(run);
+    REQUIRE(run.result.verdict == probe::Verdict::unverified);
+    REQUIRE(probe::exit_code(run.result) == 2);
+    REQUIRE(run.payloads.empty());
+    for (const auto& pass : run.result.passes) {
+        REQUIRE(pass.verdict == probe::Verdict::unverified);
+        REQUIRE_FALSE(pass.work_completed);
+        REQUIRE(pass.code == "magnitude_mutation_source_drift");
+    }
+}
+
 TEST_CASE("Offline GPU STFT agrees with the double-precision CPU oracle",
           "[gpu][gpu-probe][gpu-audio]") {
     const auto run = probe::run_gpu_audio_stft_recipe({false, kEvidenceId});
@@ -151,6 +201,21 @@ TEST_CASE("GPU STFT Stockham mutation fails only the CPU oracle",
         const float observed = little_endian_float(mutation_magnitude, i);
         INFO("bin " << i);
         REQUIRE(std::abs(observed - expected) <= 1.0e-5f * (1.0f + std::abs(expected)));
+    }
+}
+
+TEST_CASE("GPU STFT mutation source drift is unverified rather than a measured failure",
+          "[gpu][gpu-probe][gpu-audio][mutation][contract]") {
+    const ScopedNativeRecipeFault fault{"stft-mutation-source-drift"};
+    const auto run = probe::run_gpu_audio_stft_recipe({true, kEvidenceId});
+    require_valid(run);
+    REQUIRE(run.result.verdict == probe::Verdict::unverified);
+    REQUIRE(probe::exit_code(run.result) == 2);
+    REQUIRE(run.payloads.empty());
+    for (const auto& pass : run.result.passes) {
+        REQUIRE(pass.verdict == probe::Verdict::unverified);
+        REQUIRE_FALSE(pass.work_completed);
+        REQUIRE(pass.code == "stft_mutation_source_drift");
     }
 }
 

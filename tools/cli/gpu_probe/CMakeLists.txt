@@ -86,6 +86,8 @@ if(PULP_ENABLE_GPU)
         src/native_recipes.cpp)
     add_library(pulp::tool-gpu-probe-recipes ALIAS pulp-tool-gpu-probe-recipes)
     target_compile_features(pulp-tool-gpu-probe-recipes PUBLIC cxx_std_20)
+    target_compile_definitions(pulp-tool-gpu-probe-recipes PRIVATE
+        PULP_GPU_PROBE_NATIVE_TEST_FAULTS=$<BOOL:${PULP_BUILD_TESTS}>)
     target_include_directories(pulp-tool-gpu-probe-recipes
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)

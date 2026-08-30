@@ -27,6 +27,7 @@
 #include <bit>
 #include <cmath>
 #include <complex>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -136,12 +137,22 @@ void unavailable_passes(ProbeResult& result, const RecipeDefinition& recipe,
                                      false, code));
 }
 
-void failed_passes(ProbeResult& result, const RecipeDefinition& recipe,
-                   std::string code) {
-    result.verdict = Verdict::fail;
+void unverified_passes(ProbeResult& result, const RecipeDefinition& recipe,
+                       std::string code) {
+    result.verdict = Verdict::unverified;
     for (std::uint32_t i = 0; i < recipe.semantic_passes.size(); ++i)
-        result.passes.push_back(pass(i, recipe.semantic_passes[i], Verdict::fail,
+        result.passes.push_back(pass(i, recipe.semantic_passes[i], Verdict::unverified,
                                      false, code));
+}
+
+bool native_recipe_test_fault(std::string_view name) {
+#if PULP_GPU_PROBE_NATIVE_TEST_FAULTS
+    const auto* fault = std::getenv("PULP_GPU_PROBE_NATIVE_TEST_FAULT");
+    return fault != nullptr && name == fault;
+#else
+    (void)name;
+    return false;
+#endif
 }
 
 std::vector<std::uint8_t> floats_as_bytes(std::span<const float> values) {
@@ -471,6 +482,9 @@ RecipeRun run_gpu_compute_magnitude_recipe(const RunOptions& options) {
     const char* builtin = gpu ? gpu->kernel_source("magnitude") : nullptr;
     std::string actual_source = builtin ? std::string{builtin}
                                         : std::string{recipe.source_identity};
+    if (options.apply_negative_mutation &&
+        native_recipe_test_fault("magnitude-mutation-source-drift"))
+        actual_source = "planted magnitude mutation source drift";
     bool mutation_installed = false;
     if (gpu && builtin && options.apply_negative_mutation) {
         mutation_installed = replace_once(actual_source, "re * re + im * im",
@@ -488,7 +502,9 @@ RecipeRun run_gpu_compute_magnitude_recipe(const RunOptions& options) {
     }
 
     if (options.apply_negative_mutation && !mutation_installed) {
-        failed_passes(run.result, recipe, "magnitude_mutation_source_drift");
+        unverified_passes(run.result, recipe, "magnitude_mutation_source_drift");
+        run.result.recommendations.emplace_back(
+            "Update the magnitude negative-control mutation for the current kernel source.");
         return run;
     }
     if (!gpu->initialize_standalone()) {
@@ -572,6 +588,9 @@ RecipeRun run_gpu_audio_stft_recipe(const RunOptions& options) {
     const char* builtin = gpu ? gpu->kernel_source("fft_stockham") : nullptr;
     std::string actual_source = builtin ? std::string{builtin}
                                         : std::string{recipe.source_identity};
+    if (options.apply_negative_mutation &&
+        native_recipe_test_fault("stft-mutation-source-drift"))
+        actual_source = "planted STFT mutation source drift";
     bool mutation_installed = false;
     if (gpu && builtin && options.apply_negative_mutation)
         mutation_installed = install_stft_mutation(*gpu, actual_source);
@@ -585,7 +604,9 @@ RecipeRun run_gpu_audio_stft_recipe(const RunOptions& options) {
         return run;
     }
     if (options.apply_negative_mutation && !mutation_installed) {
-        failed_passes(run.result, recipe, "stft_mutation_source_drift");
+        unverified_passes(run.result, recipe, "stft_mutation_source_drift");
+        run.result.recommendations.emplace_back(
+            "Update the STFT negative-control mutation for the current kernel source.");
         return run;
     }
     if (!gpu->initialize_standalone()) {
