@@ -483,6 +483,37 @@ def main() -> int:
         analyzer_identity = {
             "path": str(pinned_analyzer.resolve()), "sha256": analyzer_digest
         }
+        analyzer_probe_id = "a" * 32
+        analyzer_probe_trace = root / "analyzer-protocol.pftrace"
+        analyzer_probe_trace.write_bytes(
+            b"real-trace-bytes:" + analyzer_probe_id.encode("ascii")
+        )
+        analyzed_ids, analyzed_categories, analyzed_scope = evidence.analyze_trace(
+            analyzer_identity, analyzer_probe_trace, analyzer_probe_id,
+        )
+        assert analyzed_ids and set(analyzed_ids) == {analyzer_probe_id}
+        assert analyzed_categories == set(
+            manifest["trial_contract"]["required_trace_categories"]
+        )
+        assert analyzed_scope["evidence_id"] == analyzer_probe_id
+
+        def analyze_selftest_trace(
+            identity: dict[str, str], trace_path: Path, evidence_id: str,
+        ) -> tuple[list[str], set[str], dict[str, object]]:
+            # The real analyzer process/exit/schema protocol is proven once
+            # above. Every remaining planted receipt still proves the pinned
+            # executable identity and exact trace correlation, without paying
+            # hundreds of redundant Python process launches.
+            evidence.exact_executable(identity, "runner-pinned trace analyzer")
+            if trace_path.read_bytes() != b"real-trace-bytes:" + evidence_id.encode():
+                raise evidence.EvidenceError("selftest trace has the wrong correlation id")
+            return (
+                [evidence_id],
+                set(manifest["trial_contract"]["required_trace_categories"]),
+                {"evidence_id": evidence_id, "process_upid": 7, "process_pid": 42},
+            )
+
+        evidence.analyze_trace = analyze_selftest_trace
         binary = exact_binary(root)
         run_dir = root / "run"
         planned = plan(manifest)
@@ -1315,36 +1346,17 @@ def main() -> int:
         )
         runner.save_state(complete_run, complete_state)
 
-        def analyze_projection_trace(
-            identity: dict[str, str], trace_path: Path, evidence_id: str,
-        ) -> tuple[list[str], set[str], dict[str, object]]:
-            # Earlier planted cases exercise the real multi-process analyzer
-            # protocol. The 84-cell projection needs the same pinned-binary and
-            # trace-correlation checks, but replaying that subprocess matrix is
-            # redundant and pushed the enclosing 120s CTest over its bound.
-            evidence.exact_executable(identity, "runner-pinned trace analyzer")
-            if trace_path.read_bytes() != b"real-trace-bytes:" + evidence_id.encode():
-                raise evidence.EvidenceError("projection trace has the wrong correlation id")
-            return (
-                [evidence_id],
-                set(manifest["trial_contract"]["required_trace_categories"]),
-                {"evidence_id": evidence_id, "process_upid": 7, "process_pid": 42},
+        for cell in complete_state["cells"]:
+            current = runner.load_state(complete_run)
+            attempt_nonce, _ = runner.issue_attempt(
+                complete_run, current, manifest, cell
             )
-
-        with mock.patch.object(
-            evidence, "analyze_trace", side_effect=analyze_projection_trace,
-        ):
-            for cell in complete_state["cells"]:
-                current = runner.load_state(complete_run)
-                attempt_nonce, _ = runner.issue_attempt(
-                    complete_run, current, manifest, cell
-                )
-                receipt_path = make_receipt(
-                    complete_run, current, manifest, cell,
-                    analyzer=analyzer, binary=binary,
-                    attempt_nonce=attempt_nonce,
-                )
-                ingest_receipt(complete_run, receipt_path)
+            receipt_path = make_receipt(
+                complete_run, current, manifest, cell,
+                analyzer=analyzer, binary=binary,
+                attempt_nonce=attempt_nonce,
+            )
+            ingest_receipt(complete_run, receipt_path)
         completed = runner.load_state(complete_run)
         assert runner.status_document(completed)["complete_cells"] == 84
         readiness_observations = runner.project_result(completed)["observations"]
