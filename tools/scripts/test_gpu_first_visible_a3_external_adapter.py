@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -46,15 +47,16 @@ artifacts = {{key: None for key in (
     "host_artifact", "trace", "trace_analysis")}}
 if outcome == "pass":
     role = r["role"]
+    source_role = "standalone" if role == "pulp-standalone" else role
     root = Path(r["artifact_directory"])
     sources = {{
-        "health_result": SOURCE / f"{{role}}-health.json",
-        "raw_cold": SOURCE / f"{{role}}-cold.json",
-        "raw_warm": SOURCE / f"{{role}}-warm.json",
-        "product_artifact": SOURCE / f"{{role}}-product.bin",
-        "host_artifact": SOURCE / f"{{role}}-host.bin",
-        "trace": SOURCE / f"{{role}}-trace.pftrace",
-        "trace_analysis": SOURCE / f"{{role}}-trace-analysis.json",
+        "health_result": SOURCE / f"{{source_role}}-health.json",
+        "raw_cold": SOURCE / f"{{source_role}}-cold.json",
+        "raw_warm": SOURCE / f"{{source_role}}-warm.json",
+        "product_artifact": SOURCE / f"{{source_role}}-product.bin",
+        "host_artifact": SOURCE / f"{{source_role}}-host.bin",
+        "trace": SOURCE / f"{{source_role}}-trace.pftrace",
+        "trace_analysis": SOURCE / f"{{source_role}}-trace-analysis.json",
     }}
     for name, source in sources.items():
         if mutation == "missing-core" and name == "trace":
@@ -168,7 +170,7 @@ def run_case(
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
     output = root / f"run-{label}"
     command = [
-        sys.executable, str(RUNNER), "run-role", "--role", "standalone",
+        sys.executable, str(RUNNER), "run-role", "--role", "pulp-standalone",
         "--identity", str(identity),
         "--budget-receipt", str(evidence / "budget.json"),
         "--budget-cold", str(evidence / "budget-cold.json"),
@@ -220,7 +222,9 @@ def main() -> int:
         evidence.mkdir()
         receipt = fixture.make_fixture(evidence)
         identity_path = root / "identity.json"
-        write_json(identity_path, receipt["campaigns"][0]["identity"])
+        identity = copy.deepcopy(receipt["campaigns"][0]["identity"])
+        identity["forge_revision"] = None
+        write_json(identity_path, identity)
         producer = root / "real-product-producer.py"
         blank = root / "blank-control.py"
         audio = root / "audio-control.py"
@@ -253,7 +257,7 @@ def main() -> int:
         )
         assert completed.returncode == 2
         assert result["status"] == "incomplete"
-        assert result["dependencies"] == ["campaign-producer:standalone"]
+        assert result["dependencies"] == ["campaign-producer:pulp-standalone"]
 
         completed, result = run_case(
             root, evidence, identity_path, producer, blank, audio,

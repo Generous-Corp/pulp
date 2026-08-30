@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import math
 import random
 import re
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -550,3 +552,32 @@ def validate_v2(receipt: dict[str, Any], evidence_root: Path) -> bool:
     if publication["artifact_sha256s"] != expected_artifacts:
         raise V2AcceptanceError("protected-main publication does not enumerate every bound artifact digest")
     return True
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    verify = subparsers.add_parser("verify")
+    verify.add_argument("receipt", type=Path)
+    verify.add_argument("--evidence-root", type=Path)
+    args = parser.parse_args(argv)
+    evidence_root = (args.evidence_root or args.receipt.parent).resolve()
+    try:
+        receipt = load_json(args.receipt.resolve())
+        terminal = validate_v2(receipt, evidence_root)
+    except V2AcceptanceError as error:
+        print(f"A3 v2 acceptance: FAIL: {error}", file=sys.stderr)
+        return 1
+    if terminal:
+        print("A3 v2 acceptance: PASS terminal=true")
+        return 0
+    blockers = receipt.get("blockers", [])
+    print(
+        "A3 v2 acceptance: NONTERMINAL terminal=false blockers="
+        + ",".join(blockers)
+    )
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -6,6 +6,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
@@ -17,6 +19,8 @@ SHA = "1" * 40
 FORGE_SHA = "2" * 40
 BLOB = "3" * 40
 DIGEST = "4" * 64
+SCRIPT = Path(__file__).with_name("gpu_first_visible_a3_acceptance_v2.py")
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def write_artifact(root: Path, name: str, value: Any, *, raw: bool = False) -> dict[str, str]:
@@ -173,7 +177,38 @@ def expect_rejected(label: str, mutate: Callable[[dict[str, Any], Path], None]) 
 def main() -> int:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
-        assert v2.validate_v2(make_fixture(root), root) is True
+        receipt = make_fixture(root)
+        assert v2.validate_v2(receipt, root) is True
+        terminal_path = root / "terminal.json"
+        terminal_path.write_text(json.dumps(receipt), encoding="utf-8")
+        terminal = subprocess.run(
+            [sys.executable, str(SCRIPT), "verify", str(terminal_path),
+             "--evidence-root", str(root)],
+            text=True, capture_output=True, check=False,
+        )
+        assert terminal.returncode == 0, (terminal.stdout, terminal.stderr)
+        assert "PASS terminal=true" in terminal.stdout
+
+        invalid = copy.deepcopy(receipt)
+        invalid["protocol"]["ring_mib"] = 64
+        invalid_path = root / "invalid.json"
+        invalid_path.write_text(json.dumps(invalid), encoding="utf-8")
+        rejected = subprocess.run(
+            [sys.executable, str(SCRIPT), "verify", str(invalid_path),
+             "--evidence-root", str(root)],
+            text=True, capture_output=True, check=False,
+        )
+        assert rejected.returncode == 1, (rejected.stdout, rejected.stderr)
+        assert "A3 v2 acceptance: FAIL:" in rejected.stderr
+
+    canonical = ROOT / "docs/validation/gpu-first-visible-a3-acceptance.json"
+    nonterminal = subprocess.run(
+        [sys.executable, str(SCRIPT), "verify", str(canonical)],
+        text=True, capture_output=True, check=False,
+    )
+    assert nonterminal.returncode == 2, (nonterminal.stdout, nonterminal.stderr)
+    assert "NONTERMINAL terminal=false" in nonterminal.stdout
+    assert "blockers=product-policy,required-coverage" in nonterminal.stdout
 
     negatives: list[tuple[str, Callable[[dict[str, Any], Path], None]]] = [
         ("omitted role", lambda r, _p: r["campaigns"].pop()),
@@ -193,7 +228,10 @@ def main() -> int:
     ]
     for label, mutate in negatives:
         expect_rejected(label, mutate)
-    print(f"gpu first-visible A3 v2 acceptance: positive=1 planted_negatives={len(negatives)}")
+    print(
+        f"gpu first-visible A3 v2 acceptance: positive=1 "
+        f"cli_outcomes=3 planted_negatives={len(negatives)}"
+    )
     return 0
 
 

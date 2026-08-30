@@ -669,7 +669,7 @@ def validate_health(
     if startup["identity"]["expected_target_signature_sha256"] is None:
         raise AcceptanceError(f"{label} lacks target identity")
     gaps = causal_gaps(startup, label)
-    if role == "headless-constrained" and "present_ms" not in gaps:
+    if role in {"headless-constrained", "headless-reference"} and "present_ms" not in gaps:
         raise AcceptanceError(f"{label} headless capture must not claim compositor present timing")
     if gaps and not capture["missing_trace_categories"]:
         raise AcceptanceError(f"{label} has nullable causal fields without named instrumentation gaps")
