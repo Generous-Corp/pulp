@@ -205,8 +205,9 @@ Paths profile_paths(const fs::path& pulp_home, const Identity& identity) {
 
 std::vector<std::string> configure_arguments(const fs::path& source, const fs::path& build,
                                              const fs::path& install_prefix,
-                                             const Identity& identity) {
-    return {"cmake",
+                                             const Identity& identity,
+                                             const std::optional<fs::path>& node_runtime) {
+    std::vector<std::string> args{"cmake",
             "-S",
             source.string(),
             "-B",
@@ -226,6 +227,9 @@ std::vector<std::string> configure_arguments(const fs::path& source, const fs::p
             "-DPULP_ENABLE_INSPECTOR=OFF",
             "-DPULP_BUILD_TESTS=OFF",
             "-DPULP_BUILD_EXAMPLES=OFF"};
+    if (node_runtime)
+        args.push_back("-DPULP_NODE_RUNTIME_EXECUTABLE=" + node_runtime->string());
+    return args;
 }
 
 std::map<std::string, std::string> parse_cmake_cache(const fs::path& cache_path) {

@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -134,7 +135,8 @@ TEST_CASE("forge development SDK normalizes only archives containing arm64",
 TEST_CASE("forge development SDK configure profile pins required capabilities",
           "[cli][sdk][forge-dev]") {
     const auto args = local_sdk::configure_arguments("/source with spaces", "/build with spaces",
-                                                     "/stage with spaces", identity());
+                                                     "/stage with spaces", identity(),
+                                                     std::nullopt);
     const auto contains = [&](const std::string& value) {
         return std::find(args.begin(), args.end(), value) != args.end();
     };
@@ -154,6 +156,24 @@ TEST_CASE("forge development SDK configure profile pins required capabilities",
     REQUIRE(contains("-DCMAKE_INSTALL_PREFIX=/stage with spaces"));
     REQUIRE(contains("-DCMAKE_OSX_DEPLOYMENT_TARGET=13.4"));
     REQUIRE(contains("-DSKIA_DIR=/source with spaces/external/skia-build"));
+
+    // Design import is ON above, so the browser-capture scripts are installed.
+    // Without a Node runtime staged beside them they have no interpreter, and a
+    // Forge configure against the resulting SDK fails on the missing payload
+    // rather than degrading — so the flag has to reach CMake whenever a runtime
+    // was resolved, and must be absent when one was not.
+    const auto has_node_flag = [&] {
+        return std::any_of(args.begin(), args.end(), [](const std::string& value) {
+            return value.rfind("-DPULP_NODE_RUNTIME_EXECUTABLE=", 0) == 0;
+        });
+    };
+    REQUIRE_FALSE(has_node_flag());
+
+    const auto staged = local_sdk::configure_arguments("/source with spaces", "/build with spaces",
+                                                       "/stage with spaces", identity(),
+                                                       std::filesystem::path("/node with spaces/node"));
+    REQUIRE(std::find(staged.begin(), staged.end(),
+                      "-DPULP_NODE_RUNTIME_EXECUTABLE=/node with spaces/node") != staged.end());
 }
 
 TEST_CASE("forge development SDK validation accepts only the complete arm64 profile",

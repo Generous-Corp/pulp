@@ -3145,3 +3145,30 @@ preparer journey only from a Release configuration. Do not relax the journey's
 Release check to make the Debug gate green. Pass the generator kind and selected
 CTest configuration explicitly: single-config Debug proves rejection, while a
 multi-config registration is Release-only and installs Release explicitly.
+
+## An SDK profile that enables a feature must also stage that feature's payload
+
+`pulp sdk install --local --profile forge-dev` configures with
+`PULP_ENABLE_DESIGN_IMPORT=ON`, which installs the browser-capture scripts —
+but `PULP_NODE_RUNTIME_EXECUTABLE` defaults to empty, so for a long time every
+forge-dev SDK shipped those scripts with no interpreter.
+
+The failure mode is worth remembering because it is not the one you would
+predict. It does not degrade design import at runtime; it stops the *consumer*
+from configuring at all. Forge's `instrument/CMakeLists.txt` hard-fails on the
+missing `bin/browser_capture-v1/node`, so the entire documented local-iteration
+path — install a forge-dev SDK, point Forge at it with
+`FORGE_ALLOW_DEVELOPMENT_SDK=ON` — could not reach a build. The error names a
+missing file in the SDK, which reads like a corrupt install rather than a
+profile that never staged it.
+
+When adding or changing a profile in `tools/cli/local_sdk_profile.cpp`, check
+each `PULP_ENABLE_*` you turn ON for a *payload* it implies, not just code. If
+the release lane prepares something for that feature — grep
+`.github/workflows/release-cli.yml` for the flag — the local profile almost
+certainly needs the same preparation, or it produces an SDK that is subtly
+different from a released one in exactly the way a developer will hit first.
+
+The install path is `tools/cli/local_sdk_install.cpp`, which has the command
+runners; `configure_arguments()` in the profile file is pure and should stay
+that way, taking the resolved path rather than fetching it.

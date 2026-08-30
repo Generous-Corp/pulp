@@ -408,7 +408,7 @@ TEST_CASE("DRACO decoder unique-id overload rejects invalid data",
 
 TEST_CASE("DRACO scene adapter reaches loader callback boundary",
           "[render][draco][scene3d]") {
-    auto callback = make_scene_draco_decode_callback();
+    auto callback = pulp::scene::make_scene_draco_decode_callback();
     pulp::scene::DracoAttributeIds ids;
     ids.position = 7;
     ids.normal = 8;
@@ -444,7 +444,7 @@ TEST_CASE("DRACO scene adapter reaches loader callback boundary",
         R"({"asset":{"version":"2.0","generator":"pulp-test-renderer3d-draco-adapter"},"extensionsUsed":["KHR_draco_mesh_compression"],"extensionsRequired":["KHR_draco_mesh_compression"],"buffers":[{"uri":"mesh.bin","byteLength":46}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36,"target":34962},{"buffer":0,"byteOffset":36,"byteLength":6,"target":34963},{"buffer":0,"byteOffset":42,"byteLength":4}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-1,-1,0],"max":[1,1,0]},{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}],"meshes":[{"name":"compressed","primitives":[{"attributes":{"POSITION":0},"indices":1,"mode":4,"extensions":{"KHR_draco_mesh_compression":{"bufferView":2,"attributes":{"POSITION":7,"NORMAL":8,"TEXCOORD_0":9,"TEXCOORD_1":10,"TANGENT":11,"COLOR_0":12}}}}]}],"nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0})");
 
     pulp::scene::LoadOptions options;
-    options.draco_decode = make_scene_draco_decode_callback();
+    options.draco_decode = pulp::scene::make_scene_draco_decode_callback();
     auto result = pulp::scene::load_gltf_scene(gltf_path, options);
 
     REQUIRE_FALSE(result.success);

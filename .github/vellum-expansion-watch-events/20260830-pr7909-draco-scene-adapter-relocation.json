@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260830-pr7909-draco-scene-adapter-relocation",
+  "created_at": "2026-08-30T07:49:49Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record the removal of core/render/include/pulp/render/draco_scene_adapter.hpp from the installed render header tree. The family is affected because a watched render path is deleted, not because render behaviour changes. The header includes pulp/scene/gltf_loader.hpp unconditionally while the SDK header subsystem list installs core/render/include in every configuration and core/scene/include in none, so it shipped in every SDK and could not compile standalone; it was already unreachable from pulp-render's public interface in-tree, because core/scene/include is a PRIVATE include directory on that target. The file moves verbatim to core/scene/include/pulp/scene/draco_scene_adapter.hpp and takes the pulp::scene namespace matching its new path and its DracoDecodeCallback return type. No render asset, backend, decoder, or renderer behaviour changes: the Draco decoder, its entry points, and Renderer3D are untouched, no asset format or GPU backend selection changes, and no existing assertion, fixture, or baseline moves. The adapter keeps both in-tree consumers, which link pulp::scene and pulp::render and so see both public include directories.",
+  "tests": [
+    "installed-SDK standalone header compile differential across all installed headers, with a sibling-header control",
+    "PULP_ENABLE_SCENE3D=ON build of pulp-scene3d-inspect-native, with a break-and-restore control",
+    "scene3d public boundary verifier and its negative contract",
+    "doxygen installed-header parity",
+    "vellum-freeze-check",
+    "vellum-expansion-watch",
+    "full ctest"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
