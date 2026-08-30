@@ -273,6 +273,35 @@ def fresh_generation_errors(
     return errors
 
 
+def complete_authoring_surface(module: dict) -> bool:
+    """Whether a model can wire and parameterize this module without guessing."""
+    inputs = module.get("inputs")
+    outputs = module.get("outputs")
+    return isinstance(inputs, list) and isinstance(outputs, list) and \
+        bool(inputs or outputs) and isinstance(module.get("params"), list)
+
+
+def augment_required_tag_shortlist(
+        selected: set[tuple[str, str]],
+        required: set[tuple[str, str]]) -> None:
+    """Augment an existing shortlist without narrowing a full inventory."""
+    if selected:
+        selected.update(required)
+
+
+def required_tag_candidate_allowlist(
+        inv: dict, narrowed: bool,
+        rules: dict | None = None) -> set[tuple[str, str]]:
+    """Legal tag choices, strict only when augmenting a narrow inventory."""
+    rules = module_state_rules() if rules is None else rules
+    return {
+        (plugin, model)
+        for plugin, package in inv.items()
+        for model, module in (package.get("modules") or {}).items()
+        if (not narrowed or complete_authoring_surface(module)) and
+        fresh_generation_refusal(plugin, model, inv, rules) is None}
+
+
 def closed_module_idiom_contract(
         closed: set[tuple[str, str]], idiom_slug: str | None,
         inv: dict) -> str | None:
@@ -7274,6 +7303,24 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             "instrument. Do not add the generic multi-module topology for "
             "that idiom. The versioned authoring, cable, parameter, and "
             "runtime requirements in the inventory remain mandatory.\n")
+    tag_modules = required_tag_candidate_allowlist(inv, narrowed=bool(selected))
+    if allowed_modules is not None:
+        tag_modules &= allowed_modules
+    required_tag_additions = tag_references if base_patch is None else \
+        intent_context.unsatisfied_explicit_references(
+            tag_references, base_patch, inv)
+    required_tag_modules: set[tuple[str, str]] = set()
+    try:
+        intent_context.add_required_candidates(
+            required_tag_additions, inv, required_tag_modules,
+            allowed=tag_modules)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+    # An ordinary tag-only request previously received the full inventory; do
+    # not turn it into a tag-only shortlist. When an exact module, refinement,
+    # or structural idiom already narrowed the prompt, augment that shortlist
+    # with the independently required tag choices.
+    augment_required_tag_shortlist(selected, required_tag_modules)
     if closed_named:
         exact_list = ", ".join(
             f"{plugin}/{model}" for plugin, model in sorted(closed_named))

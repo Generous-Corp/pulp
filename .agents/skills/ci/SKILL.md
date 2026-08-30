@@ -7086,6 +7086,38 @@ rather than at the label:
 ssh <host> 'zsh -lc "launchctl list | grep tart-runner"'   # last-exit 0 = healthy
 ```
 
+### An online JIT runner can still be phantom capacity
+
+Runner presence is not assignment proof. On 2026-08-30, M1 and M5 minted
+Pulp runners with the exact PR-head labels and GitHub reported them online and
+idle in the organization runner inventory, while Pulp's repository runner
+inventory exposed no usable row and every PR-head `macos` job stayed queued.
+The event-class label split was correct; registration authority had not been
+split with it.
+
+The governed Tart fleet contract is class-specific on every M1/M3/M5 profile:
+
+- `pulp-build-merge-group` registers through protected organization runner
+  group `3`.
+- `pulp-build-pr-head` registers through Pulp's repository-scoped group `1`.
+
+Never collapse those classes back into one static label set or register both in
+group 3. Before organization-scoped JIT minting, TartCI must freshly prove that
+the group can serve `Generous-Corp/pulp`; missing, malformed, inaccessible, or
+unpaginated policy fails closed. A repository-scoped PR-head runner is proven
+usable only when it appears in Pulp's repository runner endpoint, becomes busy,
+and its exact name binds to the queued job. `online` plus `busy=false` in the
+organization inventory is not capacity evidence.
+
+If the repository cannot see an online runner, do not rerun the PR, weaken the
+labels, or add hosted overflow. Inspect the loaded profile's
+`TARTCI_RUNNER_WORKFLOW_TIER_GROUPS`, registration scope, and TartCI denial
+receipt. Deploy the reviewed TartCI profile transactionally at an idle boundary,
+then require a real repository-visible assignment receipt. TartCI's keyed denial
+fuse prevents repeated VM churn after a 401/403/404 JIT denial; a pre-lease
+registration-token capability probe is the follow-up that moves the first auth
+failure ahead of VM boot.
+
 ### The unifying invariant — no name without a heartbeat
 
 > **A name is trustworthy iff an automated process dereferences it on a
