@@ -357,6 +357,11 @@ RecipeRun run_renderer3d_recipe(const RunOptions& options) {
     RecipeRun run;
     run.result = base_result(recipe, options,
                              renderer3d_oracle::kTranslationUnitSha256, true);
+    // The mutation changes the declared execution shape even when this build
+    // cannot execute Renderer3D. This keeps typed unavailable evidence valid
+    // against the same recipe-bound identity as a callable run.
+    if (options.apply_negative_mutation)
+        run.result.dimensions = {32, 32, 1'024};
 
 #if !defined(PULP_ENABLE_SCENE3D)
     unavailable_passes(run.result, recipe, "renderer3d_not_compiled");
@@ -365,15 +370,11 @@ RecipeRun run_renderer3d_recipe(const RunOptions& options) {
     return run;
 #else
     render::HardcodedCubeRenderConfig config;
-    config.width = recipe.dimensions.width;
-    config.height = recipe.dimensions.height;
+    config.width = run.result.dimensions.width;
+    config.height = run.result.dimensions.height;
     // The planted regression must affect bytes produced by the GPU. A 32x32
     // render still exercises submission and readback while making the recipe's
     // 1,500-pixel foreground floor impossible to satisfy.
-    if (options.apply_negative_mutation) {
-        config.width = 32;
-        config.height = 32;
-    }
     run.result.dimensions = {
         config.width,
         config.height,

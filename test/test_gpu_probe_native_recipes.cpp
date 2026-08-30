@@ -17,8 +17,9 @@ constexpr const char* kEvidenceId = "00112233445566778899aabbccddeeff";
 
 void require_valid(const probe::RecipeRun& run) {
     std::string error;
+    const bool valid = probe::validate(run, &error);
     INFO(error);
-    REQUIRE(probe::validate(run, &error));
+    REQUIRE(valid);
     REQUIRE(run.result.gpu_evidence_id == kEvidenceId);
     REQUIRE(run.result.artifacts.size() == run.payloads.size());
     std::set<std::string> names;
