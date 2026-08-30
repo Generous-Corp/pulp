@@ -674,9 +674,12 @@ def required_sdk_members(
         and version_tuple(version)
         >= version_tuple(matrix.gpu_dpr_experiment_v2_contract_floor)
     ):
-        required.add(
-            "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v2.schema.json"
-        )
+        required.update({
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-corpus-v2-template.json",
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v2.schema.json",
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-live-verification-v1.schema.json",
+            "pulp-sdk/share/pulp/contracts/gpu-vellum-package-terminal-v1.schema.json",
+        })
     if (
         version is not None
         and version_tuple(version)

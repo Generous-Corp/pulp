@@ -82,6 +82,14 @@ must bind each missing event and argument to an exact path in the active
 request for post-adoption instrumentation and rerun, not authority to implement
 the event or prewarm policy in Pulp.
 
+A4 DPR orchestration, retained cell artifacts, deterministic analysis, and
+protected-main publication receipts are Pulp-owned. `init-v2` must derive its
+manifest from the fixed terminal A2T/A3 receipts; `finalize-v2` may consume only
+nonce-bound runner snapshots, never a caller manifest/result/disposition. This
+does not move generic DPR policy into Pulp: a freshly live-verified 84-plus-84
+candidate only queues B5, which remains the separately reviewed Vellum adoption
+boundary. The current zero-cell inconclusive result authorizes no route change.
+
 The Pulp-owned live seam is `ControlGpuHealthProvider` plus
 `ControlGpuHealthViewAdapter`: product hosts supply existing back-buffer and
 `GpuSurface` callbacks, while exact generic present/source/shader/cache events

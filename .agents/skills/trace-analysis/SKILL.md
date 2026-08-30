@@ -509,6 +509,13 @@ incomplete; it is not evidence that the cost was zero.
 required categories, and named `gpu-startup`, `gpu-health`, and `gpu-probe`
 receipts before ingestion. It does not run substitute SQL or turn missing GPU
 timing into zero; missing or rejected trace evidence remains resumable.
+The v2 runner first snapshots the exact A2T-authorized analyzer and each
+producer trace into its owned run root. It hashes held regular files, rejects
+symlink/outside/substituted paths, and reruns that analyzer during ingestion,
+finalization, and complete-result validation. JSON text that merely names trace
+categories is not a Perfetto trace; browser cells must retain their real
+DevTools trace form. The state HMAC is integrity-only and cannot replace the
+nonce-bound trace receipt or protected-main dependency blobs.
 Each named answer must expose one `category_scope` matching the trial evidence
 ID and stable Perfetto process instance across all three questions. Categories
 from another PID/UPID or nonce do not satisfy the manifest. Treat the closed

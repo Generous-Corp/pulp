@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
+import datetime
 import hashlib
 import itertools
 import json
@@ -13,6 +15,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +25,11 @@ DEFAULT_MANIFEST = ROOT / "test" / "fixtures" / "gpu-ux" / "dpr" / "manifest.jso
 DEFAULT_SCHEMA_V1 = ROOT / "docs" / "contracts" / "gpu-dpr-experiment-v1.schema.json"
 DEFAULT_SCHEMA = ROOT / "docs" / "contracts" / "gpu-dpr-experiment-v2.schema.json"
 DEFAULT_RESULT = ROOT / "docs" / "validation" / "gpu-dpr" / "terminal-result.json"
+DEFAULT_LIVE_SCHEMA = ROOT / "docs" / "contracts" / "gpu-dpr-live-verification-v1.schema.json"
 sys.path.insert(0, str(SCRIPT_DIR))
 import json_schema_lite  # noqa: E402
+import gpu_dpr_v2_evidence as v2_evidence  # noqa: E402
+import gpu_dpr_v2_terminal as v2_terminal  # noqa: E402
 
 REQUESTED_DPRS = [1, 1.5, 2, 3]
 MODES = ["exact", "configured_max", "adaptive_simulation"]
@@ -399,10 +405,38 @@ def _cell_semantic_errors(
         errors.append(f"{scenario_id}/{mode}/{requested_dpr}: wrong provider")
     if identity.get("host") != scenario["required_host"]:
         errors.append(f"{scenario_id}/{mode}/{requested_dpr}: wrong host")
+    trace = cell.get("trace")
+    expected_trace = (
+        {"complete": True, "kind": "browser-devtools", "process_pid": identity.get("process_id")}
+        if scenario.get("kind") == "maintained_web_canary"
+        else {"complete": True}
+    )
+    if trace != expected_trace:
+        errors.append(f"{scenario_id}/{mode}/{requested_dpr}: trace receipt is incomplete or foreign")
+    if not v2_evidence._is_lower_hex(cell.get("attempt_nonce"), 32):
+        errors.append(f"{scenario_id}/{mode}/{requested_dpr}: runner attempt nonce is missing")
     if cell.get("logical_size") != scenario["logical_size"]:
         errors.append(f"{scenario_id}/{mode}/{requested_dpr}: logical dimensions differ")
     if cell.get("physical_dimensions_verified") is not True:
         errors.append(f"{scenario_id}/{mode}/{requested_dpr}: physical dimensions unverified")
+    physical = cell.get("physical_size")
+    observed_dpr = cell.get("observed_dpr")
+    if mode == "exact":
+        expected_observed = requested_dpr
+    elif mode == "configured_max":
+        expected_observed = min(requested_dpr, manifest["configured_max_dpr"])
+    else:
+        expected_observed = observed_dpr
+        if observed_dpr not in REQUESTED_DPRS or observed_dpr > requested_dpr:
+            errors.append(f"{scenario_id}/{mode}/{requested_dpr}: adaptive capture DPR is invalid")
+    if observed_dpr != expected_observed:
+        errors.append(f"{scenario_id}/{mode}/{requested_dpr}: observed DPR differs from policy")
+    expected_physical = {
+        "width": round(scenario["logical_size"]["width"] * float(observed_dpr or 0)),
+        "height": round(scenario["logical_size"]["height"] * float(observed_dpr or 0)),
+    }
+    if physical != expected_physical:
+        errors.append(f"{scenario_id}/{mode}/{requested_dpr}: physical dimensions differ from DPR")
     trials = cell.get("measured_trials", [])
     if [trial.get("trial_index") for trial in trials] != list(range(30)):
         errors.append(f"{scenario_id}/{mode}/{requested_dpr}: measured trial indices differ from 0..29")
@@ -450,9 +484,7 @@ def _cell_semantic_errors(
     elif daw:
         errors.append(f"{scenario_id}/{mode}/{requested_dpr}: non-DAW cell carries DAW subreceipts")
     artifact_kinds = [item.get("kind") for item in cell.get("artifacts", [])]
-    expected_artifacts = {
-        "raw_trials", "frame_sequences", "capture", "trace", "input_receipt", "identity_receipt"
-    }
+    expected_artifacts = set(v2_evidence.ARTIFACT_KINDS)
     if len(artifact_kinds) != len(set(artifact_kinds)) or set(artifact_kinds) != expected_artifacts:
         errors.append(f"{scenario_id}/{mode}/{requested_dpr}: artifact coverage differs")
     if cell.get("outcome") != "pass" or not _fidelity_passes(cell, scenario):
@@ -463,6 +495,17 @@ def _cell_semantic_errors(
 def _metric(cell: dict[str, Any], field: str, percentile: bool = False) -> float:
     values = [float(trial[field]) for trial in cell["measured_trials"]]
     return nearest_rank(values, 0.95) if percentile else statistics.median(values)
+
+
+def stable_product_identity(cell: dict[str, Any]) -> dict[str, Any]:
+    identity = cell.get("identity", {})
+    return {
+        field: identity.get(field)
+        for field in (
+            "machine_id", "provider", "adapter", "adapter_sha256", "build_sha",
+            "host", "format", "app", "product_sha256",
+        )
+    }
 
 
 def _comparison(
@@ -532,7 +575,7 @@ def _comparison(
     repeat_passed = (
         (not time_material or time_repeat)
         and (not memory_material or memory_repeat)
-        and repeat_candidate.get("identity") == candidate.get("identity")
+        and stable_product_identity(repeat_candidate) == stable_product_identity(candidate)
     )
     return {
         "scenario_id": scenario_id,
@@ -635,7 +678,7 @@ def compute_v2_analysis(
 
 def v2_semantic_errors(
     result: dict[str, Any], manifest: dict[str, Any], manifest_sha256: str,
-    *, verify_live_publication: bool = False,
+    *, evidence_root: Path | None = None,
 ) -> list[str]:
     errors: list[str] = []
     if result.get("authority", {}).get("manifest_sha256") != manifest_sha256:
@@ -676,7 +719,9 @@ def v2_semantic_errors(
         or authority.get("collection_authorized") is not True
         or not all(authority.get(field) for field in (
             "product_policy_id", "product_policy_blob", "a3_receipt_sha256",
-            "timer_noise_p95_ns", "memory_sampler_resolution_bytes",
+            "a2t_receipt_sha256", "a3_runtime_receipt_sha256",
+            "runner_receipts_sha256", "trace_analyzer_sha256", "timer_noise_p95_ns",
+            "memory_sampler_resolution_bytes",
         ))
     ):
         errors.append("complete v2 result lacks ratified collection authority")
@@ -695,8 +740,48 @@ def v2_semantic_errors(
         errors.append("complete v2 result does not contain exactly 84 original cells")
     if {v2_cell_key(cell) for cell in repeats} != expected:
         errors.append("complete v2 result does not contain exactly 84 repeat cells")
-    if any(cell.get("identity") != repeats[[v2_cell_key(item) for item in repeats].index(v2_cell_key(cell))].get("identity") for cell in cells) if len(repeats) == 84 else False:
-        errors.append("repeat campaign differs from the frozen machine/provider/build identity")
+    if len(repeats) == 84:
+        repeat_by_key = {v2_cell_key(item): item for item in repeats}
+        stable_identity = {
+            "machine_id", "provider", "adapter", "adapter_sha256", "build_sha",
+            "host", "format", "app", "product_sha256",
+        }
+        for cell in cells:
+            repeated = repeat_by_key.get(v2_cell_key(cell), {})
+            if any(
+                cell.get("identity", {}).get(field)
+                != repeated.get("identity", {}).get(field)
+                for field in stable_identity
+            ):
+                errors.append(
+                    "repeat campaign differs from the frozen machine/provider/build identity"
+                )
+                break
+            original_processes = {
+                cell.get("identity", {}).get("producer_process_id"),
+                cell.get("identity", {}).get("process_id"),
+                *[item.get("pid") for item in cell.get("fresh_process_trials", [])],
+            }
+            repeat_processes = {
+                repeated.get("identity", {}).get("producer_process_id"),
+                repeated.get("identity", {}).get("process_id"),
+                *[item.get("pid") for item in repeated.get("fresh_process_trials", [])],
+            }
+            if original_processes & repeat_processes:
+                errors.append("repeat campaign reuses original process identities")
+                break
+    if evidence_root is None:
+        errors.append("complete v2 result requires retained runner evidence")
+    else:
+        try:
+            analyzer = v2_evidence.trace_analyzer_identity(
+                evidence_root, authority.get("trace_analyzer_sha256")
+            )
+            errors.extend(v2_evidence.result_artifact_errors(
+                result, manifest, evidence_root, analyzer
+            ))
+        except (OSError, TypeError, ValueError) as error:
+            errors.append(f"runner trace-analyzer evidence failed: {error}")
     if not errors:
         derived = compute_v2_analysis(cells, repeats, manifest, manifest_sha256)
         if analysis != derived:
@@ -720,8 +805,6 @@ def v2_semantic_errors(
     ]
     if gate.get("requires") != expected_requires:
         errors.append("v2 B5 dependencies differ from the deterministic disposition")
-    if verify_live_publication:
-        errors.extend(live_protected_main_errors())
     return errors
 
 
@@ -844,20 +927,71 @@ def required_check_result_errors(
     return errors
 
 
-def live_protected_main_errors() -> list[str]:
-    """Derive terminal publication from fresh GitHub state, never result fields."""
+def required_check_receipts(
+    required: set[tuple[str, int | None]], check_runs: list[dict[str, Any]],
+    statuses: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Select one exact latest green observation for every required identity."""
+    errors: list[str] = []
+    receipts: list[dict[str, Any]] = []
+    for context, integration_id in sorted(required, key=lambda item: (item[0], item[1] or -1)):
+        candidates: list[tuple[str, int, bool]] = []
+        for run in check_runs:
+            app = run.get("app")
+            app_id = app.get("id") if isinstance(app, dict) else None
+            if run.get("name") != context or (
+                integration_id is not None and app_id != integration_id
+            ):
+                continue
+            timestamp = run.get("completed_at") or run.get("started_at") or ""
+            candidates.append((
+                str(timestamp), int(run.get("id", 0)),
+                run.get("status") == "completed" and run.get("conclusion") == "success",
+            ))
+        if integration_id is None:
+            for status in statuses:
+                if status.get("context") != context:
+                    continue
+                timestamp = status.get("updated_at") or status.get("created_at") or ""
+                candidates.append((
+                    str(timestamp), int(status.get("id", 0)), status.get("state") == "success",
+                ))
+        if not candidates:
+            suffix = f" app={integration_id}" if integration_id is not None else ""
+            errors.append(f"required check is missing: {context}{suffix}")
+            continue
+        latest_timestamp = max(item[0] for item in candidates)
+        latest = [item for item in candidates if item[0] == latest_timestamp]
+        if len(latest) != 1:
+            errors.append(f"required check has ambiguous latest results: {context}")
+        elif latest[0][2] is not True:
+            errors.append(f"latest required check is not successful: {context}")
+        elif latest[0][1] <= 0 or not latest[0][0]:
+            errors.append(f"latest required check lacks durable identity: {context}")
+        else:
+            receipts.append({
+                "context": context,
+                "integration_id": integration_id,
+                "source_id": latest[0][1],
+                "completed_at": latest[0][0],
+            })
+    return receipts, errors
+
+
+def live_protected_main_state() -> tuple[dict[str, Any] | None, list[str]]:
+    """Return exact protected-head/check observations without trusting result fields."""
     errors: list[str] = []
     ghapp = shutil.which("ghapp")
     if ghapp is None:
-        return ["live protected-main proof requires ghapp"]
+        return None, ["live protected-main proof requires ghapp"]
     try:
         head = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
             capture_output=True, text=True, timeout=10,
         ).stdout.strip()
         dirty = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=ROOT, check=True,
-            capture_output=True, text=True, timeout=10,
+            ["git", "status", "--porcelain", "--untracked-files=all"], cwd=ROOT,
+            check=True, capture_output=True, text=True, timeout=10,
         ).stdout
         if dirty:
             errors.append("terminal validation requires a clean checkout")
@@ -870,9 +1004,7 @@ def live_protected_main_errors() -> list[str]:
         if branch.get("protected") is not True:
             errors.append("live main is not protected")
         classic = _optional_classic_protection(ghapp)
-        rules = _fetch_all_pages(
-            ghapp, "repos/Generous-Corp/pulp/rules/branches/main"
-        )
+        rules = _fetch_all_pages(ghapp, "repos/Generous-Corp/pulp/rules/branches/main")
         required = required_check_identities(classic, rules)
         if not required:
             errors.append("protected main exposes no required status checks")
@@ -883,10 +1015,165 @@ def live_protected_main_errors() -> list[str]:
         statuses = _fetch_all_pages(
             ghapp, f"repos/Generous-Corp/pulp/commits/{head}/statuses"
         )
-        errors.extend(required_check_result_errors(required, runs, statuses))
+        checks, check_errors = required_check_receipts(required, runs, statuses)
+        errors.extend(check_errors)
+        return ({"head": head, "required_checks": checks} if not errors else None), errors
     except (subprocess.SubprocessError, OSError, json.JSONDecodeError, ValueError) as error:
         errors.append(f"live protected-main proof failed: {error}")
+        return None, errors
+
+
+def verify_remote_product_policy(policy: dict[str, Any]) -> None:
+    """Prove exact A3 policy bytes are a blob on protected planning main."""
+    ghapp = shutil.which("ghapp")
+    if ghapp is None:
+        raise ValueError("A3 product-policy proof requires ghapp")
+    repository = policy.get("repository")
+    revision = policy.get("revision")
+    relative = policy.get("path")
+    if repository != "danielraffel/pulp-planning":
+        raise ValueError("A3 product policy names an unexpected authority repository")
+    v2_evidence.safe_relative(relative)
+    branch = _command_json([ghapp, "api", f"repos/{repository}/branches/main"])
+    live_main = branch.get("commit", {}).get("sha")
+    if branch.get("protected") is not True:
+        raise ValueError("A3 planning main is not protected")
+    comparison = _command_json([
+        ghapp, "api", f"repos/{repository}/compare/{revision}...{live_main}",
+    ])
+    if comparison.get("status") not in {"ahead", "identical"}:
+        raise ValueError("A3 policy revision is not on protected planning-main history")
+    quoted = urllib.parse.quote(str(relative), safe="/")
+    content = _command_json([
+        ghapp, "api", f"repos/{repository}/contents/{quoted}?ref={revision}",
+    ])
+    if (
+        content.get("type") != "file"
+        or content.get("sha") != policy.get("blob")
+        or content.get("encoding") != "base64"
+        or not isinstance(content.get("content"), str)
+    ):
+        raise ValueError("A3 product policy is not the declared Git blob")
+    payload = base64.b64decode(content["content"], validate=True)
+    if hashlib.sha256(payload).hexdigest() != policy.get("sha256"):
+        raise ValueError("A3 product-policy SHA-256 differs from protected bytes")
+
+
+LIVE_RECEIPT_NAME = "live-verification-v1.json"
+
+
+def live_verification_document(evidence_root: Path) -> tuple[dict[str, Any] | None, list[str]]:
+    """Revalidate canonical bytes, runner artifacts, dependencies, and live checks."""
+    errors: list[str] = []
+    if not evidence_root.is_absolute():
+        return None, ["live verification evidence root must be absolute"]
+    try:
+        resolved_evidence = evidence_root.resolve()
+        if resolved_evidence == ROOT.resolve() or ROOT.resolve() in resolved_evidence.parents:
+            errors.append("live verification evidence root must be outside the repository")
+        state, state_errors = live_protected_main_state()
+        errors.extend(state_errors)
+        if state is None:
+            return None, errors
+        head = state["head"]
+        manifest_blob = v2_terminal.canonical_blob(
+            ROOT, v2_terminal.CANONICAL_MANIFEST, head
+        )
+        result_blob = v2_terminal.canonical_blob(ROOT, v2_terminal.CANONICAL_RESULT, head)
+        manifest = load_json(ROOT / v2_terminal.CANONICAL_MANIFEST)
+        result = load_json(ROOT / v2_terminal.CANONICAL_RESULT)
+        errors.extend(manifest_errors(manifest, ROOT / v2_terminal.CANONICAL_MANIFEST))
+        dependency_documents, dependency_blobs = v2_terminal.validate_dependencies(
+            ROOT, head, verify_remote_product_policy
+        )
+        derived_manifest = v2_terminal.derive_manifest(
+            load_json(ROOT / v2_terminal.BLOCKED_MANIFEST_TEMPLATE),
+            dependency_documents,
+        )
+        if derived_manifest != manifest:
+            errors.append("canonical manifest differs from terminal A3-derived authority")
+        schema_errors = json_schema_lite.validate(
+            result, schema_for_lite(load_json(DEFAULT_SCHEMA))
+        )
+        errors.extend(schema_errors)
+        if not schema_errors:
+            errors.extend(v2_semantic_errors(
+                result, manifest, canonical_sha256(manifest), evidence_root=evidence_root,
+            ))
+        projection = v2_terminal.dependency_projection(
+            dependency_documents, dependency_blobs
+        )
+        authority = result.get("authority", {})
+        if (
+            authority.get("a2t_receipt_sha256") != projection[v2_terminal.A2T_ID]["sha256"]
+            or authority.get("a3_receipt_sha256")
+            != projection[v2_terminal.PRODUCT_POLICY_ID]["sha256"]
+            or authority.get("a3_runtime_receipt_sha256")
+            != projection[v2_terminal.A3_ID]["sha256"]
+        ):
+            errors.append("result authority differs from canonical terminal dependencies")
+        if errors:
+            return None, errors
+        return {
+            "schema": "pulp.gpu-dpr-live-verification.v1",
+            "version": 1,
+            "repository": "Generous-Corp/pulp",
+            "head": head,
+            "manifest": manifest_blob,
+            "result": result_blob,
+            "required_checks": state["required_checks"],
+            "verified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }, []
+    except (
+        OSError, ValueError, KeyError, TypeError, json.JSONDecodeError,
+        subprocess.SubprocessError,
+    ) as error:
+        errors.append(f"live A4 publication proof failed: {error}")
+        return None, errors
+
+
+def emit_live_verification(evidence_root: Path) -> dict[str, Any]:
+    document, errors = live_verification_document(evidence_root)
+    if errors or document is None:
+        raise ValueError("; ".join(errors))
+    payload = json.dumps(document, sort_keys=True, indent=2).encode("utf-8") + b"\n"
+    v2_evidence._checked_root(evidence_root, "live verification")
+    v2_evidence._atomic_bytes(evidence_root / LIVE_RECEIPT_NAME, payload, 0o400)
+    return document
+
+
+def live_receipt_errors(evidence_root: Path) -> list[str]:
+    errors: list[str] = []
+    try:
+        receipt, _, _ = v2_evidence.regular_json(
+            evidence_root, LIVE_RECEIPT_NAME, "durable live-verification receipt"
+        )
+        schema_errors = json_schema_lite.validate(
+            receipt, schema_for_lite(load_json(DEFAULT_LIVE_SCHEMA))
+        )
+        if schema_errors:
+            return schema_errors
+        expected, live_errors = live_verification_document(evidence_root)
+        errors.extend(live_errors)
+        if expected is not None:
+            observed_projection = {key: value for key, value in receipt.items() if key != "verified_at"}
+            expected_projection = {key: value for key, value in expected.items() if key != "verified_at"}
+            if observed_projection != expected_projection:
+                errors.append("durable live-verification receipt differs from fresh live proof")
+            try:
+                timestamp = datetime.datetime.fromisoformat(receipt["verified_at"])
+                if timestamp.tzinfo is None or timestamp > datetime.datetime.now(datetime.timezone.utc):
+                    errors.append("durable live-verification timestamp is invalid")
+            except (TypeError, ValueError):
+                errors.append("durable live-verification timestamp is invalid")
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        errors.append(f"durable live-verification receipt failed: {error}")
     return errors
+
+
+def live_protected_main_errors() -> list[str]:
+    """Compatibility projection for callers that only need live-state errors."""
+    return live_protected_main_state()[1]
 
 
 def result_semantic_errors(
@@ -1053,6 +1340,10 @@ def planned_v2_result(args: argparse.Namespace, manifest: dict[str, Any]) -> dic
             "product_policy_id": None,
             "product_policy_blob": None,
             "a3_receipt_sha256": None,
+            "a2t_receipt_sha256": None,
+            "a3_runtime_receipt_sha256": None,
+            "runner_receipts_sha256": None,
+            "trace_analyzer_sha256": None,
             "timer_noise_p95_ns": None,
             "memory_sampler_resolution_bytes": None,
             "collection_authorized": False,
@@ -1104,6 +1395,7 @@ def main() -> int:
     subparsers.add_parser("validate-manifest")
     validate_result = subparsers.add_parser("validate-result")
     validate_result.add_argument("result", type=Path)
+    validate_result.add_argument("--evidence-root", type=Path)
     for command in ("emit-plan", "emit-plan-v1"):
         emit = subparsers.add_parser(command)
         emit.add_argument("--experiment-id", required=True)
@@ -1142,11 +1434,21 @@ def main() -> int:
     semantic_problems = [] if schema_problems else (
         v2_semantic_errors(
             document, manifest, canonical_sha256(manifest),
-            verify_live_publication=document.get("status") == "complete",
+            evidence_root=args.evidence_root,
         ) if v2 else result_semantic_errors(
             document, manifest, canonical_sha256(manifest)
         )
     )
+    if (
+        v2 and document.get("status") == "complete"
+        and not schema_problems and not semantic_problems
+    ):
+        if args.evidence_root is None:
+            semantic_problems.append(
+                "complete v2 validation requires a durable live-verification receipt"
+            )
+        else:
+            semantic_problems.extend(live_receipt_errors(args.evidence_root))
     if schema_problems or semantic_problems:
         print("\n".join([*schema_problems, *semantic_problems]), file=sys.stderr)
         return 1

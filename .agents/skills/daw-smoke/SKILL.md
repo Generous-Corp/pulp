@@ -228,6 +228,13 @@ way and say plainly that this rung is unproven.
   from the DAW producer that reports the observed event/hit. Two same-content
   image artifacts and numeric fidelity oracles replace producer-authored pass
   booleans. Timeout is INCONCLUSIVE and durable for resumption.
+  In v2, the runner snapshots the AUv2/VST3/CLAP product executable and all
+  eight cell artifacts before acceptance, binds the actual adapter producer PID
+  plus product/fresh-process IDs, and rejects reused paths/inodes. A DAW receipt
+  outside the runner root, a script presented as the product, or an identity
+  document that merely claims the expected host/format cannot complete a cell.
+  Finalization accepts only the runner directory and fixed terminal A2T/A3
+  receipts; follow `docs/validation/gpu-dpr/README.md`.
 - **REAPER license is a secret** (`~/.config/pulp/secrets/reaper-license.txt`,
   personal non-commercial) — never commit, echo, or bake into a TartCI golden. Local
   Macs (m1/m3/m5) are already serialized; local is the primary lane.

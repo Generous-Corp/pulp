@@ -435,6 +435,14 @@ screenshot adapter must return the raw capture and content/fidelity oracles in
 the cell directory; SKIP, INCONCLUSIVE, timeout, or a rejected receipt remains
 resumable incomplete evidence.
 
+In terminal v2, a capture path string is never evidence. The runner snapshots
+both PNGs as unique owned regular files, verifies every PNG chunk and physical
+dimension, hashes exact bytes, and recomputes similarity/text/stroke fidelity
+from the retained pair. The capture/reference paths may not escape the run
+root, traverse a symlink, share an inode with another artifact/cell, or change
+between receipt and snapshot. `finalize-v2` accepts no caller draft and replays
+all 84 plus 84 snapshot pairs; see `docs/validation/gpu-dpr/README.md`.
+
 For the frozen Pulp-native fixtures,
 `tools/scripts/gpu_dpr_pulp_native_adapter.py` accepts either a capture-only
 preflight or the dedicated `pulp-gpu-dpr-native-measurement` producer. Build

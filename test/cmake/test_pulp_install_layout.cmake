@@ -227,6 +227,34 @@ foreach(_gpu_dpr_schema_version IN ITEMS v1 v2)
 endforeach()
 unset(_gpu_dpr_schema_version)
 
+foreach(_gpu_dpr_v2_contract IN ITEMS
+        gpu-dpr-corpus-v2-template.json
+        gpu-dpr-live-verification-v1.schema.json
+        gpu-vellum-package-terminal-v1.schema.json)
+    set(_installed_gpu_dpr_v2_contract
+        "${_prefix}/share/pulp/contracts/${_gpu_dpr_v2_contract}")
+    set(_source_gpu_dpr_v2_contract
+        "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/${_gpu_dpr_v2_contract}")
+    if(NOT EXISTS "${_installed_gpu_dpr_v2_contract}")
+        message(FATAL_ERROR
+            "GPU DPR v2 authority contract is missing from the installed SDK: "
+            "${_installed_gpu_dpr_v2_contract}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${_source_gpu_dpr_v2_contract}" "${_installed_gpu_dpr_v2_contract}"
+        RESULT_VARIABLE _gpu_dpr_v2_contract_compare_rc)
+    if(NOT _gpu_dpr_v2_contract_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed GPU DPR v2 authority contract differs from source: "
+            "${_gpu_dpr_v2_contract}")
+    endif()
+endforeach()
+unset(_gpu_dpr_v2_contract)
+unset(_installed_gpu_dpr_v2_contract)
+unset(_source_gpu_dpr_v2_contract)
+unset(_gpu_dpr_v2_contract_compare_rc)
+
 set(_gpu_health_front_args
     --prefix "${_prefix}")
 if(PULP_EXPECT_GPU_CLI)

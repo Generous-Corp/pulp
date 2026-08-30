@@ -411,6 +411,14 @@ scenario-specific executable adapter. The adapter receipt must bind the exact
 Forge/Pulp SHAs and binary; missing native, DAW, or browser legs stay explicit
 dependencies and must not be replaced with a Pulp example.
 
+For terminal v2, initialize only after the fixed A2T, A3 product-policy, and A3
+runtime receipts are terminal on protected Pulp main. The runner snapshots the
+actual Forge adapter, exact executable product, producer/product/fresh-process
+identities, and all eight artifacts for each original/repeat cell. Do not pass
+a Forge-authored manifest, draft result, or disposition to `finalize-v2`; it
+derives them from the terminal dependencies and 168 accepted nonce receipts.
+Protected publication is a separate fixed-path Git-blob verification step.
+
 The Forge producer must also use the shared instrument-validity contract: each
 metric declares measured/derived/unavailable provenance; timer samples carry a
 detectable known-extra-work calibration; the expected logical point/target

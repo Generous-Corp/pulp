@@ -12,6 +12,10 @@
     "product_policy_id": null,
     "product_policy_blob": null,
     "a3_receipt_sha256": null,
+    "a2t_receipt_sha256": null,
+    "a3_runtime_receipt_sha256": null,
+    "runner_receipts_sha256": null,
+    "trace_analyzer_sha256": null,
     "timer_noise_p95_ns": null,
     "memory_sampler_resolution_bytes": null,
     "collection_authorized": false

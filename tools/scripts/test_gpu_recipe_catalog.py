@@ -316,6 +316,7 @@ class CatalogContract(unittest.TestCase):
         self.assertEqual(
             a4["output_receipt"]["schema"], "pulp.gpu-vellum-package-terminal.v1"
         )
+        self.assertIn("a2t-pulp-trace-analysis.terminal.v1", a4["input_receipts"])
         self.assertIn("a3-pulp-dpr-product-policy.terminal.v2", a4["input_receipts"])
         followup = next(
             entry

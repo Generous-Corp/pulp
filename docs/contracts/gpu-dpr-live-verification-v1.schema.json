@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-dpr-live-verification-v1.schema.json",
+  "title": "Pulp GPU DPR protected-main live verification receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "repository",
+    "head",
+    "manifest",
+    "result",
+    "required_checks",
+    "verified_at"
+  ],
+  "properties": {
+    "schema": {"const": "pulp.gpu-dpr-live-verification.v1"},
+    "version": {"const": 1},
+    "repository": {"const": "Generous-Corp/pulp"},
+    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "manifest": {"$ref": "#/$defs/blob"},
+    "result": {"$ref": "#/$defs/blob"},
+    "required_checks": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["context", "integration_id", "source_id", "completed_at"],
+        "properties": {
+          "context": {"type": "string", "minLength": 1},
+          "integration_id": {"type": ["integer", "null"], "minimum": 1},
+          "source_id": {"type": "integer", "minimum": 1},
+          "completed_at": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "verified_at": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "blob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "type", "mode", "blob", "sha256", "bytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "type": {"const": "blob"},
+        "mode": {"const": "100644"},
+        "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}
