@@ -85,6 +85,35 @@ std::filesystem::path current_executable() {
     return error ? std::filesystem::path{} : result;
 }
 
+std::filesystem::path stage_product_host(const TemporaryRoot& root) {
+    const std::filesystem::path source{PULP_CONTROL_GPU_HEALTH_STANDALONE_PRODUCT_FIXTURE};
+    const std::filesystem::path source_manifest{source.string() +
+                                                ".inspector-capabilities.json"};
+    REQUIRE(std::filesystem::is_regular_file(source));
+    REQUIRE(std::filesystem::is_regular_file(source_manifest));
+
+    const auto directory = root.path / "host";
+    REQUIRE(std::filesystem::create_directory(directory));
+    std::filesystem::permissions(directory, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::replace);
+
+    const auto executable = directory / source.filename();
+    const std::filesystem::path manifest{executable.string() +
+                                         ".inspector-capabilities.json"};
+    REQUIRE(std::filesystem::copy_file(source, executable));
+    REQUIRE(std::filesystem::copy_file(source_manifest, manifest));
+    std::filesystem::permissions(executable,
+                                 std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write |
+                                     std::filesystem::perms::owner_exec,
+                                 std::filesystem::perm_options::replace);
+    std::filesystem::permissions(manifest,
+                                 std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::replace);
+    return executable;
+}
+
 struct ProductResponse {
     std::string instance_id;
     std::string registration_id;
@@ -98,9 +127,8 @@ struct ProductResponse {
 ProductResponse run_campaign(bool use_gpu, bool seed_blank = false) {
     TemporaryRoot root;
     const auto broker_executable = current_executable();
-    const std::filesystem::path host{PULP_CONTROL_GPU_HEALTH_STANDALONE_PRODUCT_FIXTURE};
+    const auto host = stage_product_host(root);
     REQUIRE_FALSE(broker_executable.empty());
-    REQUIRE(std::filesystem::is_regular_file(host));
 
     ScopedEnvironment screenshot{"PULP_A3_PRODUCT_SCREENSHOT",
                                  (root.path / "product.png").string()};

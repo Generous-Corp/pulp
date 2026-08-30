@@ -1,2 +1,2 @@
 #define PULP_CONTROL_REGISTRY_DIGEST_V1 \
-    "cadceb3fd22155bf19a4de3026ba554e16726039ce58ab2bbe0a63deb6bff7ab"
+    "9d049ead4032d56441ed4240dd37ec5efebd685cda5fc7ba32921efa134f2553"

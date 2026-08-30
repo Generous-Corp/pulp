@@ -27,7 +27,7 @@ const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
 const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_745b032f8143ce5aa90421858e6d1a745121b382136b31ece9503ec91968289e_"
+    "PULP_CONTROL_MANIFEST_SHA256_c148fbb8c766d28789a1da4579ce7ae17d13729d0c5ad3320417384a39cac813_"
     "V1";
 const volatile char kTraceControl[] = "PULP_INSPECT_CAPABILITY_TRACE_CONTROL_V1";
 const volatile char kTraceSession[] = "PULP_INSPECT_CAPABILITY_TRACE_SESSION_CONTROL_V1";
@@ -41,7 +41,7 @@ constexpr std::string_view kInstalledManifest = R"({
   "product_name": "Pulp Installed Host E2E Fixture",
   "bundle_id": "dev.pulp.test.installed-host-e2e-fixture",
   "build_id": "build:1123456789abcdef0123456789abcdef",
-  "registry_digest": "cadceb3fd22155bf19a4de3026ba554e16726039ce58ab2bbe0a63deb6bff7ab",
+  "registry_digest": "9d049ead4032d56441ed4240dd37ec5efebd685cda5fc7ba32921efa134f2553",
   "endpoint_included": true,
   "unsafe_runtime_eval_acknowledged": false,
   "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
