@@ -25,6 +25,56 @@ foreach(recipe_id IN ITEMS
 endforeach()
 
 execute_process(
+    COMMAND "${PULP_CLI}" gpu probe --help
+    RESULT_VARIABLE probe_help_rc
+    OUTPUT_VARIABLE probe_help)
+if(NOT probe_help_rc EQUAL 0)
+    message(FATAL_ERROR "GPU probe help failed (${probe_help_rc})")
+endif()
+foreach(recipe_id IN ITEMS
+        renderer3d.hardcoded-cube.v1
+        gpu-compute.magnitude.v1
+        gpu-audio.stft.v1
+        threejs.multi-pass.v1)
+    string(FIND "${probe_help}" "${recipe_id}" recipe_position)
+    if(recipe_position EQUAL -1)
+        message(FATAL_ERROR "native probe help omitted ${recipe_id}")
+    endif()
+endforeach()
+
+string(JSON catalog_recipe_count LENGTH "${catalog_json}" recipes)
+math(EXPR catalog_recipe_last "${catalog_recipe_count} - 1")
+set(threejs_callable TRUE)
+foreach(recipe_index RANGE 0 ${catalog_recipe_last})
+    string(JSON candidate_recipe_id GET "${catalog_json}" recipes ${recipe_index} id)
+    if(candidate_recipe_id STREQUAL "threejs.multi-pass.v1")
+        string(JSON threejs_callable GET "${catalog_json}" recipes ${recipe_index} callable)
+    endif()
+endforeach()
+if(NOT threejs_callable)
+    execute_process(
+        COMMAND "${PULP_CLI}" gpu probe
+            --recipe threejs.multi-pass.v1
+            --artifacts "${ARTIFACT_ROOT}/threejs-unavailable"
+            --json
+        RESULT_VARIABLE threejs_unavailable_rc
+        OUTPUT_VARIABLE threejs_unavailable_json
+        ERROR_VARIABLE threejs_unavailable_stderr)
+    if(NOT threejs_unavailable_rc EQUAL 2)
+        message(FATAL_ERROR
+            "unavailable Three.js probe must return exit 2, got "
+            "${threejs_unavailable_rc}: ${threejs_unavailable_stderr}")
+    endif()
+    string(JSON threejs_unavailable_verdict ERROR_VARIABLE threejs_json_error
+        GET "${threejs_unavailable_json}" verdict)
+    if(threejs_json_error OR NOT threejs_unavailable_verdict STREQUAL "unavailable")
+        message(FATAL_ERROR
+            "unavailable Three.js probe did not emit typed v1 evidence: "
+            "${threejs_json_error}")
+    endif()
+endif()
+
+execute_process(
     COMMAND "${PULP_CLI}" gpu recipes list
         --symptom compute-readback-mismatch --json
     RESULT_VARIABLE symptom_rc

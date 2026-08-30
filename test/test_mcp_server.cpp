@@ -926,6 +926,7 @@ TEST_CASE("MCP GPU probe preserves argv and typed status evidence", "[mcp][tools
     REQUIRE(probe_tool.isObject());
     const auto recipe_enum = probe_tool["inputSchema"]["properties"]["recipe"]["enum"];
     const auto native_recipes = gp::recipes();
+    REQUIRE(native_recipes.size() == 4);
     REQUIRE(recipe_enum.size() == native_recipes.size());
     for (uint32_t index = 0; index < recipe_enum.size(); ++index)
         REQUIRE(recipe_enum[index].getString() == native_recipes[index].id);
@@ -1033,7 +1034,6 @@ TEST_CASE("MCP GPU probe preserves argv and typed status evidence", "[mcp][tools
     require_contains(argv, "gpu\nprobe\n--recipe\ngpu-compute.magnitude.v1\n");
     require_contains(argv, "--artifacts\n" + artifacts + "\n--json\n");
 
-#if PULP_GPU_PROBE_THREEJS_CALLABLE
     std::ofstream(evidence_path, std::ios::trunc)
         << gp::to_json(gpu_probe_evidence(gp::Verdict::fail, true));
     ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", "1");
@@ -1047,19 +1047,31 @@ TEST_CASE("MCP GPU probe preserves argv and typed status evidence", "[mcp][tools
                                     std::istreambuf_iterator<char>()};
     require_contains(negative_argv, "--negative-control\n");
 
-    std::ofstream(evidence_path, std::ios::trunc)
-        << gp::to_json(gpu_probe_evidence(gp::Verdict::pass, false, "threejs.multi-pass.v1"));
-    ScopedEnvVar threejs_status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+    std::ofstream(evidence_path, std::ios::trunc) << gp::to_json(gpu_probe_evidence(
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+        gp::Verdict::pass,
+#else
+        gp::Verdict::unavailable,
+#endif
+        false, "threejs.multi-pass.v1"));
+    ScopedEnvVar threejs_status_env(
+        "PULP_TEST_GPU_PROBE_STATUS",
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+        "0"
+#else
+        "2"
+#endif
+    );
     const auto threejs = handle_request(tool_call(
         "60", "pulp_gpu_probe",
         "{\"recipe\":\"threejs.multi-pass.v1\",\"artifacts\":" + json_string(artifacts) + "}"));
     require_contains(threejs, R"JSON("recipe_id":"threejs.multi-pass.v1")JSON");
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
     REQUIRE(threejs.find(R"JSON("isError":true)JSON") == std::string::npos);
 #else
-    const auto threejs = handle_request(tool_call(
-        "60", "pulp_gpu_probe",
-        "{\"recipe\":\"threejs.multi-pass.v1\",\"artifacts\":" + json_string(artifacts) + "}"));
-    require_contains(threejs, "recipe is not in the closed catalog");
+    require_contains(threejs, R"JSON("verdict":"unavailable")JSON");
+    require_contains(threejs, R"JSON("exit_code":2)JSON");
+    require_contains(threejs, R"JSON("isError":true)JSON");
 #endif
 }
 

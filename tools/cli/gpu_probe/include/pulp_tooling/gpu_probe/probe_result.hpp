@@ -60,20 +60,12 @@ inline constexpr std::uint64_t kMaxArtifactBytes = 16 * 1024 * 1024;
 /// Maximum combined declared artifact size in bytes for one result.
 inline constexpr std::uint64_t kMaxTotalArtifactBytes = 64 * 1024 * 1024;
 
-#if PULP_GPU_PROBE_THREEJS_CALLABLE
 inline constexpr std::array kRecipeIds{
     std::string_view{"renderer3d.hardcoded-cube.v1"},
     std::string_view{"gpu-compute.magnitude.v1"},
     std::string_view{"gpu-audio.stft.v1"},
     std::string_view{"threejs.multi-pass.v1"},
 };
-#else
-inline constexpr std::array kRecipeIds{
-    std::string_view{"renderer3d.hardcoded-cube.v1"},
-    std::string_view{"gpu-compute.magnitude.v1"},
-    std::string_view{"gpu-audio.stft.v1"},
-};
-#endif
 
 /// Four-state recipe outcome that never folds missing evidence into success.
 enum class Verdict {

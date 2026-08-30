@@ -267,17 +267,19 @@ TEST_CASE("Three.js multi-pass evidence is deterministic on one adapter",
     }
 }
 #else
-TEST_CASE("Three.js multi-pass recipe rejects a build without V8 and its pinned runtime",
+TEST_CASE("Three.js multi-pass recipe reports unavailable without V8 and its pinned runtime",
           "[gpu][gpu-probe][threejs][contract]") {
-    bool rejected = false;
-    try {
-        (void)probe::run_threejs_multi_pass_recipe({false, kEvidenceId});
-    } catch (const std::runtime_error& error) {
-        rejected = true;
-        REQUIRE(std::string(error.what()) ==
-                "threejs.multi-pass.v1 requires a build with the pinned Three.js runtime and V8");
+    const auto run = probe::run_threejs_multi_pass_recipe({false, kEvidenceId});
+    require_valid(run);
+    REQUIRE(run.result.recipe_id == "threejs.multi-pass.v1");
+    REQUIRE(run.result.verdict == probe::Verdict::unavailable);
+    REQUIRE(probe::exit_code(run.result) == 2);
+    REQUIRE(run.result.passes.size() == 6);
+    for (const auto& pass : run.result.passes) {
+        REQUIRE(pass.verdict == probe::Verdict::unavailable);
+        REQUIRE(pass.code == "threejs_runtime_not_compiled");
     }
-    REQUIRE(rejected);
+    REQUIRE(run.payloads.empty());
 }
 #endif
 

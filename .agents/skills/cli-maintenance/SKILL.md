@@ -504,6 +504,14 @@ broker-owned ordinary Standalone host when inventory is empty.
 
 ### 8. Decide: does this need an MCP tool?
 
+GPU recipe discovery is capability-independent. Keep every canonical recipe ID
+visible in CLI help, the installed catalog, and the MCP schema even when the
+selected build lacks an optional provider. Execution then returns a typed
+`pulp.gpu-probe-result.v1` `unavailable` verdict with exit 2. Do not compile the
+ID out of the registry or turn missing V8/Three.js support into an unknown
+recipe or exception; agents need to distinguish an invalid ID from a valid
+workflow that requires another SDK capability.
+
 Every top-level CLI command is checked for MCP parity by
 `tools/scripts/check_cli_mcp_parity.py`. The check enforces an
 invariant: a new CLI command must either land alongside a
