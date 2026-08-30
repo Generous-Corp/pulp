@@ -161,6 +161,35 @@ fn categories_are_scoped_to_one_evidence_process_instance() {
 }
 
 #[test]
+fn duplicate_evidence_id_across_question_processes_is_unavailable() {
+    let evidence = "acacacacacacacacacacacacacacacac";
+    let trace = tempfile::NamedTempFile::new().expect("ambiguous evidence trace");
+    let fixture = serde_json::json!({"traceEvents": [
+        {"name":"gpu_health_transition_first","cat":"gpu","ph":"X","ts":1000,
+         "dur":20,"pid":81,"tid":81,"args":{"debug.gpu_evidence_id":evidence,
+         "debug.health_state":"healthy","debug.sequence":1}},
+        {"name":"gpu_probe_first","cat":"gpu","ph":"X","ts":1100,
+         "dur":20,"pid":81,"tid":81,"args":{"debug.gpu_evidence_id":evidence,
+         "debug.health_state":"healthy","debug.sequence":2}},
+        {"name":"gpu_health_transition_second","cat":"gpu","ph":"X","ts":1200,
+         "dur":20,"pid":82,"tid":82,"args":{"debug.gpu_evidence_id":evidence,
+         "debug.health_state":"healthy","debug.sequence":1}},
+        {"name":"gpu_probe_second","cat":"gpu","ph":"X","ts":1300,
+         "dur":20,"pid":82,"tid":82,"args":{"debug.gpu_evidence_id":evidence,
+         "debug.health_state":"healthy","debug.sequence":2}}
+    ]});
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    for question in ["gpu-health", "gpu-probe"] {
+        let result = run_path(question, trace.path(), 2);
+        assert_eq!(result["verdict"], "unavailable");
+        assert_eq!(result["capture_complete"], false);
+        assert_eq!(result["unavailable_reason"], "invalid-evidence-correlation");
+        assert_eq!(result["category_scope"], serde_json::Value::Null);
+    }
+}
+
+#[test]
 fn causal_probe_failure_diagnostic_cannot_be_laundered_by_healthy_state() {
     let evidence = "efefefefefefefefefefefefefefefef";
     let trace = tempfile::NamedTempFile::new().expect("probe oracle mismatch trace");

@@ -396,7 +396,7 @@ fn valid_evidence_id(value: &str) -> bool {
 fn correlated_categories(
     rows: &[RawRow],
     scopes: &[RawCategoryScope],
-) -> (Vec<String>, Option<CategoryScope>) {
+) -> (Vec<String>, Option<CategoryScope>, bool) {
     let mut evidence_ids = rows
         .iter()
         .filter_map(|row| row.evidence_id.as_deref())
@@ -405,7 +405,7 @@ fn correlated_categories(
     evidence_ids.sort_unstable();
     evidence_ids.dedup();
     if evidence_ids.len() != 1 {
-        return (Vec::new(), None);
+        return (Vec::new(), None, false);
     }
     let evidence_id = evidence_ids[0];
     let mut process_scopes = scopes
@@ -416,7 +416,7 @@ fn correlated_categories(
     process_scopes.sort_unstable();
     process_scopes.dedup();
     if process_scopes.len() != 1 {
-        return (Vec::new(), None);
+        return (Vec::new(), None, process_scopes.len() > 1);
     }
     let (process_upid, process_pid) = process_scopes[0];
     let mut categories = scopes
@@ -437,6 +437,7 @@ fn correlated_categories(
             process_upid,
             process_pid,
         }),
+        false,
     )
 }
 
@@ -566,7 +567,8 @@ fn result_from_rows_and_categories(
     capture_integrity: CaptureIntegrity,
 ) -> GpuAnalysisResult {
     rows.sort_by(|a, b| b.duration_ns.max(0).cmp(&a.duration_ns.max(0)));
-    let (observed_categories, category_scope) = correlated_categories(&rows, &category_scopes);
+    let (observed_categories, category_scope, ambiguous_evidence_process) =
+        correlated_categories(&rows, &category_scopes);
     let incomplete = rows.iter().any(|row| row.incomplete);
     let evidence_malformed = rows.iter().any(|row| {
         row.evidence_id
@@ -611,7 +613,7 @@ fn result_from_rows_and_categories(
         Some("missing-question-category")
     } else if missing_startup_cold_stage {
         Some("missing-cold-start-window")
-    } else if evidence_malformed || missing_probe_evidence {
+    } else if evidence_malformed || missing_probe_evidence || ambiguous_evidence_process {
         Some("invalid-evidence-correlation")
     } else if invalid_health_state {
         Some("invalid-health-state")

@@ -72,10 +72,11 @@ fn category_scope_excludes_other_evidence_and_rejects_cross_process_reuse() {
         process_upid: 8,
         process_pid: 43,
     };
-    let (categories, scope) =
+    let (categories, scope, ambiguous) =
         correlated_categories(std::slice::from_ref(&row), &[own.clone(), unrelated]);
     assert_eq!(categories, vec!["gpu"]);
     assert_eq!(scope.unwrap().process_upid, 7);
+    assert!(!ambiguous);
 
     let reused_in_other_process = RawCategoryScope {
         categories: vec!["text".to_owned()],
@@ -83,9 +84,11 @@ fn category_scope_excludes_other_evidence_and_rejects_cross_process_reuse() {
         process_upid: 9,
         process_pid: 44,
     };
-    let (categories, scope) = correlated_categories(&[row], &[own, reused_in_other_process]);
+    let (categories, scope, ambiguous) =
+        correlated_categories(&[row], &[own, reused_in_other_process]);
     assert!(categories.is_empty());
     assert!(scope.is_none());
+    assert!(ambiguous);
 }
 
 #[test]
