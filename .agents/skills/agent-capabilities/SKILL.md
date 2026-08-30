@@ -562,3 +562,23 @@ no line carries two statements.
 
 Extract codes from every return form, including ternaries (`return c ? 0 : N;`) — a naive
 `grep -oE "return [0-9]+;"` misses those and manufactures phantom collisions.
+
+## `PulpInstallRules.cmake` fires this gate for reasons that have nothing to do with capabilities
+
+The skill-path map ties this skill to `tools/cmake/PulpInstallRules.cmake`,
+which is right — that file decides what reaches the SDK, and a new public
+header arriving there is squarely this skill's business.
+
+But the same file also carries the SDK's *non-header* payload: CMake modules,
+plist templates, catalogs. Adding a file there because an app-bundling feature
+needs to ship a template trips this gate with nothing to classify.
+
+Both outcomes are legitimate; say which one you are in rather than reaching for
+the bypass trailer by reflex:
+
+- **New public headers under a covered root** — classify them, and re-read the
+  `PUBLIC_ROOTS` note above before trusting a green `--check`.
+- **Non-header SDK payload only** — no capability surface changed, and the
+  honest record is a line in this skill saying so, not a `Skill-Update: skip`.
+  A note costs the same as the trailer and leaves the next person something to
+  read.
