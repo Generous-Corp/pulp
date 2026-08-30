@@ -22,6 +22,22 @@ function(pulp_gpu_clean_agent_contract_mode output build_configuration
     set(${output} "${mode}" PARENT_SCOPE)
 endfunction()
 
+function(pulp_gpu_clean_agent_prepare_outcome output result stderr)
+    if(result EQUAL 0)
+        set(outcome prepared)
+    elseif((result EQUAL 2 AND
+            stderr MATCHES
+                "UNAVAILABLE: reference recipe evidence is unavailable or unverified") OR
+           (result EQUAL 1 AND
+            stderr MATCHES
+                "FAIL: acceptance requires authentic hardware adapter evidence"))
+        set(outcome hardware-nonterminal)
+    else()
+        set(outcome failure)
+    endif()
+    set(${output} "${outcome}" PARENT_SCOPE)
+endfunction()
+
 if(NOT DEFINED BUILD_CONFIGURATION OR
    NOT DEFINED SELECTED_BUILD_CONFIGURATION OR
    NOT DEFINED GENERATOR_IS_MULTI_CONFIG)
@@ -38,6 +54,20 @@ if(DEFINED CONFIGURATION_POLICY_ONLY AND CONFIGURATION_POLICY_ONLY)
             "configuration policy expected ${EXPECTED_CONFIGURATION_MODE}, got ${contract_mode}")
     endif()
     message(STATUS "gpu_clean_agent_configuration_mode=${contract_mode}")
+    return()
+endif()
+if(DEFINED PREPARE_OUTCOME_POLICY_ONLY AND PREPARE_OUTCOME_POLICY_ONLY)
+    if(NOT DEFINED PREPARE_RESULT OR NOT DEFINED PREPARE_STDERR OR
+       NOT DEFINED EXPECTED_PREPARE_OUTCOME)
+        message(FATAL_ERROR "prepare outcome policy inputs are required")
+    endif()
+    pulp_gpu_clean_agent_prepare_outcome(
+        prepare_outcome "${PREPARE_RESULT}" "${PREPARE_STDERR}")
+    if(NOT prepare_outcome STREQUAL EXPECTED_PREPARE_OUTCOME)
+        message(FATAL_ERROR
+            "prepare outcome expected ${EXPECTED_PREPARE_OUTCOME}, got ${prepare_outcome}")
+    endif()
+    message(STATUS "gpu_clean_agent_prepare_outcome=${prepare_outcome}")
     return()
 endif()
 if(contract_mode STREQUAL "multi-config-not-selected")
@@ -61,7 +91,17 @@ if(DEFINED V8_RUNTIME_LIBRARY AND NOT V8_RUNTIME_LIBRARY STREQUAL "" AND
     message(FATAL_ERROR "configured V8 runtime is unavailable")
 endif()
 
-get_filename_component(temp_root "$ENV{TMPDIR}" REALPATH)
+set(temp_candidate "$ENV{TMPDIR}")
+if(temp_candidate STREQUAL "")
+    set(temp_candidate "$ENV{TEMP}")
+endif()
+if(temp_candidate STREQUAL "")
+    set(temp_candidate "$ENV{TMP}")
+endif()
+if(temp_candidate STREQUAL "" AND EXISTS "/tmp")
+    set(temp_candidate "/tmp")
+endif()
+get_filename_component(temp_root "${temp_candidate}" REALPATH)
 if(temp_root STREQUAL "" OR temp_root STREQUAL "/")
     message(FATAL_ERROR "refusing unsafe temporary root")
 endif()
@@ -158,7 +198,20 @@ if(contract_mode STREQUAL "single-config-rejection")
         "configuration=${BUILD_CONFIGURATION}")
     return()
 endif()
-if(NOT prepare_rc EQUAL 0)
+pulp_gpu_clean_agent_prepare_outcome(
+    prepare_outcome "${prepare_rc}" "${prepare_stderr}")
+if(prepare_outcome STREQUAL "hardware-nonterminal")
+    if(EXISTS "${private_case}/agent-session.json" OR
+       EXISTS "${test_root}/terminal-receipt.json")
+        message(FATAL_ERROR
+            "preparer published terminal acceptance after a nonterminal hardware stop")
+    endif()
+    file(REMOVE_RECURSE "${test_root}")
+    message(STATUS
+        "gpu_clean_agent_preparer_hardware_nonterminal=true")
+    return()
+endif()
+if(prepare_outcome STREQUAL "failure")
     message(FATAL_ERROR "clean-agent preparer contract failed (${prepare_rc}): ${prepare_stderr}")
 endif()
 
