@@ -99,7 +99,7 @@ class Latch {
             report.complete = false;
             return report;
         }
-        for (std::size_t key = 0; key < kKeySpace; ++key) {
+        for (std::size_t key = 0; key < kKeySpace && owned_total_ != 0; ++key) {
             while (owned_depth_[key] != 0) {
                 if (!utility_detail::emit(output, note_off_for(key), report)) {
                     ++report.deferred;
@@ -107,6 +107,7 @@ class Latch {
                     return report;
                 }
                 --owned_depth_[key];
+                --owned_total_;
             }
         }
         physical_depth_.fill(0);
@@ -144,10 +145,7 @@ class Latch {
     }
 
     bool empty() const noexcept {
-        for (const auto depth : owned_depth_)
-            if (depth != 0)
-                return false;
-        return true;
+        return owned_total_ == 0;
     }
 
     /// Number of note-offs the latch still owes for `channel`/`note`.
@@ -160,7 +158,7 @@ class Latch {
                        MidiUtilityProcessReport& report) noexcept {
         if (spec_.mode == LatchMode::Off) {
             if (utility_detail::emit(output, event, report))
-                increment(owned_depth_[static_cast<std::size_t>(key)]);
+                acquire(key);
             increment(physical_depth_[static_cast<std::size_t>(key)]);
             increment(physical_down_);
             return;
@@ -177,7 +175,7 @@ class Latch {
             return;
         }
         if (utility_detail::emit(output, event, report))
-            increment(owned_depth_[static_cast<std::size_t>(key)]);
+            acquire(key);
         increment(physical_depth_[static_cast<std::size_t>(key)]);
         increment(physical_down_);
     }
@@ -191,9 +189,8 @@ class Latch {
                 --physical_down_;
         }
         if (spec_.mode == LatchMode::Off) {
-            auto& owned = owned_depth_[static_cast<std::size_t>(key)];
-            if (utility_detail::emit(output, event, report) && owned != 0)
-                --owned;
+            if (utility_detail::emit(output, event, report))
+                surrender(key);
             return;
         }
         // Retained: the latch, not the player, decides when this note ends.
@@ -202,20 +199,46 @@ class Latch {
 
     void release_key(int key, std::int32_t sample_offset, MidiBuffer& output,
                      MidiUtilityProcessReport& report) noexcept {
-        auto& owned = owned_depth_[static_cast<std::size_t>(key)];
-        while (owned != 0) {
-            auto off = utility_detail::at(note_off_for(static_cast<std::size_t>(key)), sample_offset);
+        while (owned_depth_[static_cast<std::size_t>(key)] != 0) {
+            auto off =
+                utility_detail::at(note_off_for(static_cast<std::size_t>(key)), sample_offset);
             if (!utility_detail::emit(output, off, report)) {
                 ++report.deferred;
                 report.complete = false;
                 return;
             }
-            --owned;
+            surrender(key);
         }
+    }
+
+    /// Take ownership of one more sounding note on `key`. The per-key depth and
+    /// the total move together so `empty()` and the scan skip can never
+    /// disagree with the table they summarize.
+    void acquire(int key) noexcept {
+        auto& depth = owned_depth_[static_cast<std::size_t>(key)];
+        if (depth == std::numeric_limits<std::uint32_t>::max())
+            return;
+        ++depth;
+        increment(owned_total_);
+    }
+
+    void surrender(int key) noexcept {
+        auto& depth = owned_depth_[static_cast<std::size_t>(key)];
+        if (depth == 0)
+            return;
+        --depth;
+        if (owned_total_ != 0)
+            --owned_total_;
     }
 
     void release_all_owned(std::int32_t sample_offset, MidiBuffer& output,
                            MidiUtilityProcessReport& report) noexcept {
+        // The retention table spans the whole key space so retention can never
+        // overflow, which makes the scan the price of that guarantee. Counting
+        // owned notes keeps the common case — a phrase start with nothing
+        // retained — off the audio thread's critical path entirely.
+        if (owned_total_ == 0)
+            return;
         for (std::size_t key = 0; key < kKeySpace; ++key)
             release_key(static_cast<int>(key), sample_offset, output, report);
     }
@@ -236,6 +259,7 @@ class Latch {
     std::array<std::uint32_t, kKeySpace> owned_depth_{};
     std::array<std::uint32_t, kKeySpace> physical_depth_{};
     std::uint32_t physical_down_ = 0;
+    std::uint32_t owned_total_ = 0;
 };
 
 } // namespace pulp::midi

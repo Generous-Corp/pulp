@@ -475,7 +475,7 @@ EXPORTS = [
             include="pulp/midi/humanize.hpp",
             qualified_name="pulp::midi::Humanize",
             target="Pulp::midi",
-            header_fingerprint="sha256:4c0cd54d149e705b17334f3d0c5770386626f9beb0505f86dadfb3ec1b93d077",
+            header_fingerprint="sha256:eb1b342c0dc35280d028d649d911262c8f2249f3c35d64badc58ad966408c02e",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -523,7 +523,7 @@ EXPORTS = [
             include="pulp/midi/latch.hpp",
             qualified_name="pulp::midi::Latch",
             target="Pulp::midi",
-            header_fingerprint="sha256:29bf8438081f5838c6f34d3783c4f43836a5f51b06cb575140e94abc1ce39e78",
+            header_fingerprint="sha256:b690accb10c2278d4fe41bd1f886f831a9f9aacd11cf78a5a7d7e1bc76266cb6",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -571,7 +571,7 @@ EXPORTS = [
             include="pulp/midi/note_delay.hpp",
             qualified_name="pulp::midi::NoteDelay<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:d5bdecf2a384369ea0abae41b8c13eba627ffc0e6a62b39be80195766b3ce3d8",
+            header_fingerprint="sha256:a40fff6bb8e925908aa919c5e772c279daf41f4ea8aab4df9f3c328bf039d29c",
         )],
         _link_probes=[{
             "role": "entrypoint",

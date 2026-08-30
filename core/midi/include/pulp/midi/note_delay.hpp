@@ -33,7 +33,12 @@ struct NoteDelaySpec {
     constexpr auto operator<=>(const NoteDelaySpec&) const = default;
 };
 
-template <std::size_t MaximumScheduledNotes = 128> class NoteDelay {
+/// `MaximumHeldSources` bounds how many authored notes can have armed echoes at
+/// once. Like the scheduled-note queue it is a polyphony bound, not the whole
+/// 16x128 key space: the key space would make the kernel a 52 KiB object to buy
+/// headroom no keyboard can reach.
+template <std::size_t MaximumScheduledNotes = 128, std::size_t MaximumHeldSources = 64>
+class NoteDelay {
   public:
     using Block = note_schedule::Block;
 
@@ -204,15 +209,29 @@ template <std::size_t MaximumScheduledNotes = 128> class NoteDelay {
     }
 
   private:
-    static constexpr std::size_t kKeySpace = 16 * 128;
-
-    /// The authored attack an armed echo group came from. Group ids are the
-    /// key index plus one, so 0 stays available as "no group".
+    /// The authored attack an armed echo group came from. Group ids are the key
+    /// index plus one, so 0 stays available as "no group".
     struct Source {
         std::int64_t attack = 0;
-        std::int64_t stride = 0;
+        std::uint16_t group = 0;
         bool armed = false;
     };
+
+    Source* find_source(std::uint16_t group) noexcept {
+        for (auto& source : sources_)
+            if (source.armed && source.group == group)
+                return &source;
+        return nullptr;
+    }
+
+    Source* claim_source(std::uint16_t group) noexcept {
+        if (auto* existing = find_source(group); existing != nullptr)
+            return existing;
+        for (auto& source : sources_)
+            if (!source.armed)
+                return &source;
+        return nullptr;
+    }
 
     static constexpr std::uint16_t group_for(std::uint8_t channel, std::uint8_t note) noexcept {
         return static_cast<std::uint16_t>(utility_detail::key_index(channel, note) + 1);
@@ -222,12 +241,19 @@ template <std::size_t MaximumScheduledNotes = 128> class NoteDelay {
                          MidiUtilityProcessReport& report) noexcept {
         const auto stride = repeat_stride(spec_, block);
         const auto group = group_for(event.channel(), event.note());
-        const auto key = static_cast<std::size_t>(group - 1);
         // A re-attack before the previous release retires the old group's arm,
         // so the earlier echoes keep the length they already have instead of
         // being rolled back by the wrong release.
         retire_group(group);
-        sources_[key] = {absolute, stride, true};
+        auto* source = claim_source(group);
+        if (source == nullptr) {
+            // With nothing to record the arm against, the echoes could never be
+            // rolled back to a real length, so none is scheduled.
+            ++report.dropped;
+            report.complete = false;
+            return;
+        }
+        *source = {absolute, group, true};
         for (std::size_t index = 1; index <= spec_.repeats; ++index) {
             const auto pitch = repeat_note(spec_, event.note(), index);
             if (!pitch)
@@ -258,18 +284,17 @@ template <std::size_t MaximumScheduledNotes = 128> class NoteDelay {
     void roll_back_armed(const MidiEvent& event, std::int64_t absolute, const Block& block,
                          MidiBuffer& output, MidiUtilityProcessReport& report) noexcept {
         const auto group = group_for(event.channel(), event.note());
-        const auto key = static_cast<std::size_t>(group - 1);
-        auto& source = sources_[key];
-        if (!source.armed)
+        auto* source = find_source(group);
+        if (source == nullptr)
             return;
-        const auto held = std::max<std::int64_t>(1, absolute - source.attack);
+        const auto held = std::max<std::int64_t>(1, absolute - source->attack);
         queue_.visit([&](note_schedule::ScheduledNote& slot) {
             if (slot.group != group || slot.end != note_schedule::kArmedEnd)
                 return;
             const auto end = utility_detail::saturating_sample_add(slot.start, held);
             slot.end = slot.sounding ? std::max(end, absolute) : end;
         });
-        source.armed = false;
+        *source = {};
         emit_due_before(absolute, block, output, report);
     }
 
@@ -301,7 +326,7 @@ template <std::size_t MaximumScheduledNotes = 128> class NoteDelay {
     bool valid_ = true;
     std::optional<NoteDelaySpec> pending_spec_{};
     note_schedule::ScheduleQueue<MaximumScheduledNotes> queue_{};
-    std::array<Source, kKeySpace> sources_{};
+    std::array<Source, MaximumHeldSources> sources_{};
 };
 
 } // namespace pulp::midi

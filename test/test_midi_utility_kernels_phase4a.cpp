@@ -280,8 +280,8 @@ TEST_CASE("latch allocates nothing while processing", "[midi][latch][rt-safety]"
 TEST_CASE("humanize with zero amounts is exact identity", "[midi][humanize][parity]") {
     // Negative control for the bypass claim.
     const std::array input{on(0, 60), on(37, 64, 90), off(500, 60), off(513, 64)};
-    REQUIRE(midi::Humanize::is_identity({0, 0, 99}));
-    midi::Humanize humanize{{0, 0, 99}};
+    REQUIRE(midi::Humanize<>::is_identity({0, 0, 99}));
+    midi::Humanize<> humanize{{0, 0, 99}};
     auto out = render(
         [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
             humanize.process(in, o, {start}, count);
@@ -300,7 +300,7 @@ TEST_CASE("humanize keeps jitter inside the declared bounds", "[midi][humanize]"
         input.push_back(on(static_cast<std::int64_t>(note - 48) * 400, note, 100));
         input.push_back(off(static_cast<std::int64_t>(note - 48) * 400 + 300, note));
     }
-    midi::Humanize humanize{{kTiming, kVelocity, 7'331}};
+    midi::Humanize<> humanize{{kTiming, kVelocity, 7'331}};
     auto out = render(
         [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
             humanize.process(in, o, {start}, count);
@@ -340,7 +340,7 @@ TEST_CASE("humanize is invariant under block partition", "[midi][humanize][parit
         input.push_back(off(static_cast<std::int64_t>(note - 60) * 700 + 600, note));
     }
     auto run = [&](std::span<const std::int32_t> partitions) {
-        midi::Humanize humanize{{96, 9, 4'242}};
+        midi::Humanize<> humanize{{96, 9, 4'242}};
         return render(
             [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
                 humanize.process(in, o, {start}, count);
@@ -359,7 +359,7 @@ TEST_CASE("humanize never lets a jittered attack outrun its own release", "[midi
     // A note shorter than the jitter window would otherwise emit its note-off
     // before its note-on.
     const std::array input{on(0, 60, 100), off(4, 60)};
-    midi::Humanize humanize{{4'096, 0, 5}};
+    midi::Humanize<> humanize{{4'096, 0, 5}};
     auto out = render(
         [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
             humanize.process(in, o, {start}, count);
@@ -376,7 +376,7 @@ TEST_CASE("humanize never lets a jittered attack outrun its own release", "[midi
 }
 
 TEST_CASE("humanize allocates nothing while processing", "[midi][humanize][rt-safety]") {
-    midi::Humanize humanize{{64, 8, 11}};
+    midi::Humanize<> humanize{{64, 8, 11}};
     auto input = prepared_buffer();
     auto output = prepared_buffer();
     REQUIRE(input.add(midi::MidiEvent::note_on(0, 60, 100)));
@@ -988,7 +988,7 @@ TEST_CASE("chord memory allocates nothing while processing", "[midi][chord-memor
 // ---------------------------------------------------------------------------
 
 TEST_CASE("every Phase 4A kernel declares a bounded utility contract", "[midi][parity]") {
-    const std::array contracts{midi::Latch::contract(),        midi::Humanize::contract(),
+    const std::array contracts{midi::Latch::contract(),        midi::Humanize<>::contract(),
                                midi::NoteRepeat<>::contract(), midi::NoteDelay<>::contract(),
                                midi::Strum<>::contract(),      midi::ChordMemory<>::contract()};
     for (const auto& contract : contracts) {
@@ -1008,7 +1008,7 @@ TEST_CASE("every Phase 4A kernel refuses an aliased output block", "[midi][rt-sa
     midi::Latch latch{{midi::LatchMode::Hold}};
     REQUIRE_FALSE(latch.process(shared, shared).complete);
 
-    midi::Humanize humanize{{16, 4, 1}};
+    midi::Humanize<> humanize{{16, 4, 1}};
     REQUIRE_FALSE(humanize.process(shared, shared, {0}, 512).complete);
 
     midi::NoteRepeat<> repeat{{{kSixteenthTicks}, 4, 50, 100, 100, 0}};

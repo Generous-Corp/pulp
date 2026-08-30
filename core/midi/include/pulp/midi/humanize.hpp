@@ -29,16 +29,20 @@ struct HumanizeSpec {
     constexpr auto operator<=>(const HumanizeSpec&) const = default;
 };
 
-class Humanize {
+/// `MaximumPendingAttacks` bounds how many attacks can sit in the jitter window
+/// at once. It is deliberately a polyphony bound rather than the whole 16x128
+/// key space: the key space would make the kernel a 64 KiB object and would put
+/// a 2048-slot scan on the audio thread for every event, to buy headroom no
+/// keyboard can reach.
+template <std::size_t MaximumPendingAttacks = 128> class Humanize {
   public:
-    static constexpr std::size_t kKeySpace = 16 * 128;
     /// Random streams are separated so changing one amount cannot shift the
     /// other's draw for the same note.
     static constexpr std::uint64_t kTimingStream = 1;
     static constexpr std::uint64_t kVelocityStream = 2;
 
     static constexpr MidiUtilityContract contract() noexcept {
-        return {1, kKeySpace, MidiUtilityOverflowPolicy::FailOpenBalanced,
+        return {1, MaximumPendingAttacks, MidiUtilityOverflowPolicy::FailOpenBalanced,
                 MidiUtilitySameSampleOrder::InputStable,
                 MidiUtilityTransportRequirement::FlushOnDiscontinuity};
     }
@@ -143,10 +147,10 @@ class Humanize {
             report.complete = false;
             return report;
         }
-        for (std::size_t key = 0; key < kKeySpace; ++key) {
-            if (!pending_[key].active)
+        for (auto& slot : pending_) {
+            if (!slot.active)
                 continue;
-            if (!emit_pending(key, pending_[key].scheduled, block_start, output, report)) {
+            if (!emit_pending(slot, slot.scheduled, block_start, output, report)) {
                 ++report.deferred;
                 report.complete = false;
                 return report;
@@ -194,8 +198,23 @@ class Humanize {
     struct Pending {
         MidiEvent event{};
         std::int64_t scheduled = 0;
+        int key = 0;
         bool active = false;
     };
+
+    Pending* find_pending(int key) noexcept {
+        for (auto& slot : pending_)
+            if (slot.active && slot.key == key)
+                return &slot;
+        return nullptr;
+    }
+
+    Pending* free_pending() noexcept {
+        for (auto& slot : pending_)
+            if (!slot.active)
+                return &slot;
+        return nullptr;
+    }
 
     static std::uint64_t draw_value(std::uint64_t seed, std::uint8_t channel, std::uint8_t note,
                                     std::int64_t absolute, std::uint64_t stream,
@@ -210,46 +229,48 @@ class Humanize {
     void schedule_attack(const MidiEvent& event, std::int64_t absolute,
                          timebase::SamplePosition block_start, MidiBuffer& output,
                          MidiUtilityProcessReport& report) noexcept {
-        const auto key = static_cast<std::size_t>(
-            utility_detail::key_index(event.channel(), event.note()));
+        const auto key = utility_detail::key_index(event.channel(), event.note());
         // One key holds at most one attack in flight; a re-attack forces the
         // earlier one out first so the pair order is never inverted.
-        if (pending_[key].active)
-            emit_pending(key, absolute, block_start, output, report);
-        auto shaped = event;
-        const auto velocity = jittered_velocity(spec_, event.channel(), event.note(), absolute,
-                                                event.velocity());
-        shaped = MidiEvent::note_on(event.channel(), event.note(), velocity);
+        if (auto* existing = find_pending(key); existing != nullptr)
+            emit_pending(*existing, absolute, block_start, output, report);
+        auto* slot = free_pending();
+        if (slot == nullptr) {
+            // FailOpenBalanced: with no slot to hold the jitter, the attack is
+            // forwarded unchanged rather than dropped, so the player's note
+            // always sounds and its release always matches something.
+            utility_detail::emit(output, event, report);
+            ++report.deferred;
+            return;
+        }
+        const auto velocity =
+            jittered_velocity(spec_, event.channel(), event.note(), absolute, event.velocity());
+        auto shaped = MidiEvent::note_on(event.channel(), event.note(), velocity);
         shaped.timestamp = event.timestamp;
-        const auto scheduled =
-            jittered_position(spec_, event.channel(), event.note(), absolute);
-        pending_[key] = {shaped, scheduled, true};
+        *slot = {shaped, jittered_position(spec_, event.channel(), event.note(), absolute), key,
+                 true};
     }
 
     void clamp_pending_against_release(int key, std::int64_t release_absolute,
                                        timebase::SamplePosition block_start, MidiBuffer& output,
                                        MidiUtilityProcessReport& report) noexcept {
-        auto& slot = pending_[static_cast<std::size_t>(key)];
-        if (!slot.active || slot.scheduled < release_absolute)
+        auto* slot = find_pending(key);
+        if (slot == nullptr || slot->scheduled < release_absolute)
             return;
         const auto latest = release_absolute > 0 ? release_absolute - 1 : release_absolute;
-        emit_pending(static_cast<std::size_t>(key), std::min(slot.scheduled, latest), block_start,
-                     output, report);
+        emit_pending(*slot, std::min(slot->scheduled, latest), block_start, output, report);
     }
 
     void emit_due_before(std::int64_t boundary, timebase::SamplePosition block_start,
                          MidiBuffer& output, MidiUtilityProcessReport& report) noexcept {
-        for (std::size_t key = 0; key < kKeySpace; ++key) {
-            auto& slot = pending_[key];
+        for (auto& slot : pending_)
             if (slot.active && slot.scheduled < boundary)
-                emit_pending(key, slot.scheduled, block_start, output, report);
-        }
+                emit_pending(slot, slot.scheduled, block_start, output, report);
     }
 
-    bool emit_pending(std::size_t key, std::int64_t at_absolute,
+    bool emit_pending(Pending& slot, std::int64_t at_absolute,
                       timebase::SamplePosition block_start, MidiBuffer& output,
                       MidiUtilityProcessReport& report) noexcept {
-        auto& slot = pending_[key];
         if (!slot.active)
             return true;
         const auto offset = at_absolute - block_start.value;
@@ -264,7 +285,7 @@ class Humanize {
     HumanizeSpec spec_{};
     bool valid_ = true;
     std::optional<HumanizeSpec> pending_spec_{};
-    std::array<Pending, kKeySpace> pending_{};
+    std::array<Pending, MaximumPendingAttacks> pending_{};
 };
 
 } // namespace pulp::midi
