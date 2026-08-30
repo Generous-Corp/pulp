@@ -171,6 +171,25 @@ class GpuResourceLockTests(unittest.TestCase):
                 )
         self.assertGreater(checked, 0, "matched no GPU suites — mapping broke")
 
+    def test_literal_catch_locks_precede_labels(self) -> None:
+        """Keep Catch's list-valued LABELS from swallowing later properties."""
+        checked = 0
+        for manifest in manifests():
+            text = manifest.read_text(encoding="utf-8")
+            for target, body in _calls(text, ("catch_discover_tests",)):
+                lock_at = body.find(LOCK)
+                if lock_at < 0:
+                    continue
+                checked += 1
+                labels_at = body.find("LABELS")
+                with self.subTest(target=target, manifest=manifest.name):
+                    self.assertTrue(
+                        labels_at < 0 or lock_at < labels_at,
+                        f"{target} ({manifest.name}) places {LOCK!r} after LABELS; "
+                        "Catch may serialize it as another label instead of a test property.",
+                    )
+        self.assertGreater(checked, 0, "matched no literal Catch GPU locks")
+
     def test_known_offscreen_suites_are_covered(self) -> None:
         """Guard the detector itself, not just the policy.
 
