@@ -124,8 +124,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_recipe_catalog.py",
           "state": "pulp-owned-retained",
-          "revision": "729ef793fa00ad1534884e13a1bdf0228c6a230f",
-          "object_id": "e1387982979183054852ee4197c4c676bdac13e2",
+          "revision": "a0ac75cc3b84f8d807dd73082e7f75b81072e620",
+          "object_id": "d385e4e1bb5ad997b4ff7f0281c4593570d15b12",
           "object_type": "blob"
         },
         {
@@ -1047,6 +1047,14 @@
       "pulp_paths": [
         {
           "repo": "Generous-Corp/pulp",
+          "path": "docs/contracts/gpu-dpr-corpus-v2-template.json",
+          "state": "pulp-owned-retained",
+          "revision": "317b86b1931e11cc2affd6581607ced071babfd4",
+          "object_id": "cd883f2b5028a1c18cf1856646e4f1f5fbbca8ae",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
           "path": "docs/contracts/gpu-dpr-experiment-v1.schema.json",
           "state": "pulp-owned-retained",
           "revision": "f81eb97fdfbf7db6c44c664815d672331d4fd947",
@@ -1057,16 +1065,32 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/contracts/gpu-dpr-experiment-v2.schema.json",
           "state": "pulp-owned-retained",
-          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
-          "object_id": "91def0ca19d929fa9fea39cf85dd83db6a843d76",
+          "revision": "2ad93f3694fb6d87ba412b163ca36c353a6d356d",
+          "object_id": "3f64d76c2556ffa472048994c855130bf9261d4b",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/contracts/gpu-dpr-live-verification-v1.schema.json",
+          "state": "pulp-owned-retained",
+          "revision": "317b86b1931e11cc2affd6581607ced071babfd4",
+          "object_id": "e41592aa3ddc3cfee76e44f8bcbb01f555143ec3",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "docs/contracts/gpu-vellum-package-terminal-v1.schema.json",
+          "state": "pulp-owned-retained",
+          "revision": "317b86b1931e11cc2affd6581607ced071babfd4",
+          "object_id": "1aeaa2b41b3b60640d023c3f98f08d6fed59fb9b",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-dpr",
           "state": "pulp-owned-retained",
-          "revision": "6b7bf2fd49709933fe23b5114d4d8e0692476a19",
-          "object_id": "69eb6eed8a8429dff5920a611ee29d7420e4e464",
+          "revision": "dced5a2b889af353fbba88a48ba6f6daabe7a6aa",
+          "object_id": "e96c8bb62c4613ab48ebaa5589a423bc69dc6bba",
           "object_type": "tree"
         },
         {
@@ -1089,8 +1113,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_experiment.py",
           "state": "pulp-owned-retained",
-          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
-          "object_id": "233526f387ec70a1a7d28a3844986a34ae603cbe",
+          "revision": "2ad93f3694fb6d87ba412b163ca36c353a6d356d",
+          "object_id": "3e56d86c34760c57f0998657566f09c856c7bc4d",
           "object_type": "blob"
         },
         {
@@ -1105,25 +1129,49 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_runner.py",
           "state": "pulp-owned-retained",
-          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
-          "object_id": "152956c11b625d9d3ffdd4e29462cfa4520ca72f",
+          "revision": "317b86b1931e11cc2affd6581607ced071babfd4",
+          "object_id": "4c09275dcc3191f8aa25ba0c63fc401411a4db3a",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_dpr_v2_evidence.py",
+          "state": "pulp-owned-retained",
+          "revision": "2ad93f3694fb6d87ba412b163ca36c353a6d356d",
+          "object_id": "82a6af29d2140840c1e29cdbd86e7ed28f5d9020",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_dpr_v2_runner.py",
+          "state": "pulp-owned-retained",
+          "revision": "2ad93f3694fb6d87ba412b163ca36c353a6d356d",
+          "object_id": "2eaa1fec12386366ad6f4449a262a6b676ff6dd7",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_dpr_v2_terminal.py",
+          "state": "pulp-owned-retained",
+          "revision": "317b86b1931e11cc2affd6581607ced071babfd4",
+          "object_id": "47f8b7122cf77e7d8b88222da02e9ce6b2115377",
           "object_type": "blob"
         }
       ],
       "vellum_paths": [],
       "api_contract": {
         "surfaces": [
-          "Closed DPR v2 experiment plan, 84 original cells, 84 same-unit repeat cells, raw evidence, deterministic disposition, and live publication proof"
+          "Closed DPR v2 terminal dependencies, runner-derived manifest, 84 original cells, 84 same-unit repeat cells, 1,344 retained artifacts, deterministic disposition, and durable live publication proof"
         ],
-        "request": "Protected A3 policy plus exact build/provider/host/scenario/DPR/mode identity, immutable corpus, and canonical deterministic seed material.",
-        "result": "Aligned per-trial pixels, input coordinates, latency, memory, fidelity, DAW subreceipts, same-unit repeats, and one recomputed disposition.",
-        "errors": "Missing or substituted cell, stale scale/dimensions, fake trace, wrong build/provider/host/app, unavailable exact baseline or fidelity, repeat mismatch, caller-selected disposition, or self-attested publication rejects the matrix.",
-        "availability": "Historical v1 receipts are nonterminal and count as zero v2 cells; incomplete or non-live-verified v2 evidence never selects a policy."
+        "request": "Fixed-path terminal A2T, A3 DPR product-policy, and A3 runtime receipts plus exact build/provider/host/scenario/DPR/mode identity, immutable corpus template, runner-issued nonce, exact producer/product executables, and canonical deterministic seed material.",
+        "result": "Aligned per-trial pixels, input coordinates, latency, memory, fidelity, DAW subreceipts, same-unit repeats, one recomputed disposition, and a durable fixed-path protected-main Git-blob receipt.",
+        "errors": "Missing/nonterminal dependency, caller manifest/draft, missing or substituted cell/file, unsafe/symlink/outside/reused path, wrong digest/type/content/blob/head, stale scale/dimensions, fake trace/product, wrong producer/build/provider/host/app/format, unavailable exact baseline or fidelity, repeat mismatch, caller-selected disposition, or self-attested publication rejects the matrix.",
+        "availability": "Historical v1 receipts are nonterminal and count as zero v2 cells; the local state HMAC is integrity-only; incomplete or non-live-verified v2 evidence never selects a policy."
       },
       "ownership_lifetime_rt": {
         "owner": "Generous-Corp/pulp experiment orchestration",
         "ownership": "Pulp owns scenarios, evidence, corpus, runner, and disposition, not generic scale policy.",
-        "lifetime": "Every original/repeat cell and DAW subreceipt binds one exact product process, A3 campaign, and immutable artifacts.",
+        "lifetime": "Every original/repeat cell and DAW subreceipt binds one runner-issued nonce, actual adapter producer PID, exact product/fresh processes, A3 campaign, and eight unique runner-owned immutable artifacts.",
         "threads": "Measurement and capture use documented render/UI paths.",
         "rt": "GPU-audio canaries retain zero-xrun and no-audio-thread-control requirements."
       },
@@ -1149,10 +1197,10 @@
       },
       "tests": {
         "unit": [
-          "Closed v2 schema, 84-plus-84 matrix, canonical SHA-256 PRNG/bootstrap formulas, semantic validator, deterministic disposition, live publication verifier, install/release packaging, and digest validation."
+          "Closed v2 schema, terminal dependency chain, 84-plus-84 matrix with eight retained artifacts per cell, canonical SHA-256 PRNG/bootstrap formulas, semantic validator, nonce-only finalizer, deterministic disposition, durable fixed-path Git-blob live verifier, install/release packaging, and digest validation."
         ],
         "planted": [
-          "Stale scale, wrong dimensions/input coordinates, blurred corpus, fake trace, missing/repeated cell, wrong-app same-name check, truncated pagination, and caller self-attestation fail."
+          "No file, wrong digest/content/path, symlink/outside/cross-cell reuse, fake trace/product, caller draft/manifest/state-key self-attestation, caller-owned run directory, wrong Git blob/type/head, stale scale, wrong dimensions/input, wrong-app same-name check, and truncated pagination fail."
         ],
         "real_host": [
           "All 84 original and 84 same-machine repeat cells, including native, Three.js, web, input, and AUv2 Logic plus VST3/CLAP REAPER DAW subreceipts."
@@ -1181,14 +1229,20 @@
         "duplicate_rejection": "One generic policy owns logical-to-physical scaling."
       },
       "retained_paths": [
+        "docs/contracts/gpu-dpr-corpus-v2-template.json",
         "docs/contracts/gpu-dpr-experiment-v1.schema.json",
         "docs/contracts/gpu-dpr-experiment-v2.schema.json",
+        "docs/contracts/gpu-dpr-live-verification-v1.schema.json",
+        "docs/contracts/gpu-vellum-package-terminal-v1.schema.json",
         "docs/validation/gpu-dpr",
         "test/fixtures/gpu-ux/dpr",
         "tools/scripts/gpu_dpr_evidence.py",
         "tools/scripts/gpu_dpr_experiment.py",
         "tools/scripts/gpu_dpr_pulp_native_adapter.py",
-        "tools/scripts/gpu_dpr_runner.py"
+        "tools/scripts/gpu_dpr_runner.py",
+        "tools/scripts/gpu_dpr_v2_evidence.py",
+        "tools/scripts/gpu_dpr_v2_runner.py",
+        "tools/scripts/gpu_dpr_v2_terminal.py"
       ],
       "terminal_result": {
         "pass": "One deterministically derived measured v2 candidate is validated from exact clean live protected main and queues B5 with all 84 original and 84 repeat cells.",
@@ -1209,6 +1263,7 @@
         "pass"
       ],
       "input_receipts": [
+        "a2t-pulp-trace-analysis.terminal.v1",
         "a3-pulp-dpr-product-policy.terminal.v2",
         "a3-pulp-runtime-control.terminal.v1"
       ],
@@ -1219,11 +1274,11 @@
       },
       "terminal_evidence": {
         "required": [
-          "One deterministic measured DPR v2 candidate queues B5 with all 84 original and 84 same-unit repeat cells only after fresh live protected-main verification.",
+          "One deterministic measured DPR v2 candidate queues B5 with all 84 original and 84 same-unit repeat cells only after the runner rederives 1,344 retained real artifacts and fresh durable fixed-path live protected-main Git-blob verification.",
           "a4-pulp-dpr-experiment.terminal.v2 uses the shared package-terminal v1 envelope to bind exact installed revisions, terminal disposition, and the embedded pulp.gpu-dpr-experiment.v2 evidence artifact; no package-terminal v2 schema exists"
         ],
         "planted": [
-          "Stale scale, wrong input/dimensions, blurred corpus, fake trace, missing/repeated cell or DAW subreceipt, caller disposition, wrong-app check, truncated pagination, and caller self-attestation fail.",
+          "Missing/wrong-digest/unsafe/cross-cell artifacts, stale scale, wrong input/dimensions, blurred corpus, fake trace/product, missing/repeated cell or DAW subreceipt, caller draft/manifest/state-key/disposition, wrong Git blob/type/head/app check, truncated pagination, and self-attested publication fail.",
           "a4-pulp-dpr-experiment planted negative produces non-pass"
         ]
       }
@@ -1253,8 +1308,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_recipe_catalog.py",
           "state": "pulp-owned-retained",
-          "revision": "729ef793fa00ad1534884e13a1bdf0228c6a230f",
-          "object_id": "e1387982979183054852ee4197c4c676bdac13e2",
+          "revision": "a0ac75cc3b84f8d807dd73082e7f75b81072e620",
+          "object_id": "d385e4e1bb5ad997b4ff7f0281c4593570d15b12",
           "object_type": "blob"
         }
       ],
@@ -2453,8 +2508,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_runner.py",
           "state": "pulp-owned-retained",
-          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
-          "object_id": "152956c11b625d9d3ffdd4e29462cfa4520ca72f",
+          "revision": "317b86b1931e11cc2affd6581607ced071babfd4",
+          "object_id": "4c09275dcc3191f8aa25ba0c63fc401411a4db3a",
           "object_type": "blob"
         }
       ],
@@ -2648,24 +2703,40 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/daw-smoke/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
-          "object_id": "44423bc41cc20aa9e36a2be624a73b551353e708",
+          "revision": "dced5a2b889af353fbba88a48ba6f6daabe7a6aa",
+          "object_id": "21c2f931d17dc1f269b0b33df140ae6ce9a57677",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/forge-app-delivery/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "5c502b5507e24045136f09020f2f27af521d8d1f",
-          "object_id": "8d18b7722e6f66813aa866f5d74b5666a6ccba20",
+          "revision": "dced5a2b889af353fbba88a48ba6f6daabe7a6aa",
+          "object_id": "154da5354f5f39ecf9a5d4afdd9dad010629dee8",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/prove-before-showing/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "dced5a2b889af353fbba88a48ba6f6daabe7a6aa",
+          "object_id": "16bdc756c5e1a358515c895ff1bc2ef5464a7112",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "dced5a2b889af353fbba88a48ba6f6daabe7a6aa",
+          "object_id": "9ff0ebafa3bfc270ed15b0765d9b52c43b4ea538",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/screenshot/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
-          "object_id": "950b95a7fd0166664f47887afe4394ecc2c3ae44",
+          "revision": "dced5a2b889af353fbba88a48ba6f6daabe7a6aa",
+          "object_id": "24016e12521763dcaccc2a27dc57a6d45f9dfa1e",
           "object_type": "blob"
         },
         {
@@ -2680,8 +2751,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-analysis/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "f18b694ed37e3d504f9a29438a2459bea80b7b87",
-          "object_id": "4627949b95fbf2ff333e46aacf187ce488ab49bd",
+          "revision": "dced5a2b889af353fbba88a48ba6f6daabe7a6aa",
+          "object_id": "6264a88b25937142f8b1211f7ae3fb557051541a",
           "object_type": "blob"
         },
         {
@@ -2698,6 +2769,14 @@
           "state": "pulp-owned-retained",
           "revision": "5c502b5507e24045136f09020f2f27af521d8d1f",
           "object_id": "7037ffd9dbe6c8dac1f13122af1b8b448e1b4007",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": ".agents/skills/web-plugins/SKILL.md",
+          "state": "pulp-owned-retained",
+          "revision": "dced5a2b889af353fbba88a48ba6f6daabe7a6aa",
+          "object_id": "8e5ab6866419265cfd1b1100bbebcf155d517de0",
           "object_type": "blob"
         },
         {
@@ -2851,11 +2930,14 @@
       "retained_paths": [
         ".agents/skills/daw-smoke/SKILL.md",
         ".agents/skills/forge-app-delivery/SKILL.md",
+        ".agents/skills/prove-before-showing/SKILL.md",
+        ".agents/skills/pulp-vellum-change-routing/SKILL.md",
         ".agents/skills/screenshot/SKILL.md",
         ".agents/skills/skia-gpu-build/SKILL.md",
         ".agents/skills/trace-analysis/SKILL.md",
         ".agents/skills/trace-sql/SKILL.md",
         ".agents/skills/view-bridge/SKILL.md",
+        ".agents/skills/web-plugins/SKILL.md",
         "docs/validation/gpu-first-visible-a3-acceptance.md"
       ],
       "terminal_result": {
@@ -2960,8 +3042,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
-          "object_id": "7f51f2567a70c1cd91771db7aac5b1b33a165986",
+          "revision": "2ad93f3694fb6d87ba412b163ca36c353a6d356d",
+          "object_id": "c7cd4967f529f9a9480a35cac27cbee6233dd515",
           "object_type": "blob"
         },
         {
@@ -2984,8 +3066,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "ae79914d73c20fb551efe3f75696af56db77d1de",
-          "object_id": "aa2b5a2c6870088285d22330c4e85f7fdca0d263",
+          "revision": "2ad93f3694fb6d87ba412b163ca36c353a6d356d",
+          "object_id": "415db6f88c615a43658fdbb3713f4b94ef87b07f",
           "object_type": "blob"
         }
       ],
