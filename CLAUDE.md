@@ -1897,14 +1897,15 @@ advisory unless explicitly required by branch protection.
 
 **A slow / stuck PR is worth investigating before assuming runner saturation.**
 Saturation is possible (a real burst, or a wedged runner), but the required
-`macos` gate runs on the local Mac Studios (usually idle), so confirm it rather
-than assume it. Before concluding capacity:
+`macos` gate runs on the local M1/M3/M5 event-class JIT pool, so confirm it
+rather than assume it. Before concluding capacity:
 (1) check the required checks even registered — a Shipyard-App-opened PR does NOT
 auto-trigger `pull_request` workflows, so `ghapp workflow run build.yml --ref
 <branch>` + `… version-skill-check.yml --ref <branch>` are often needed;
 (2) check for a version-bump race (PR goes `DIRTY` on the `CMakeLists.txt`
-VERSION line — re-merge `main`); (3) only then verify capacity with
-`ghapp api repos/Generous-Corp/pulp/actions/runners` (`busy` per runner) —
+VERSION line — re-merge `main`); (3) only then verify capacity from queue age,
+host supervisor/lease state, and an exact repository-visible job assignment.
+A JIT runner census alone proves neither idle capacity nor outage.
 GitHub-*hosted* advisory lanes queue independently and don't block merge. Full
 diagnosis + the non-Shipyard fallback: the `ci` skill, "Diagnosing a slow /
 stuck PR."
@@ -1927,10 +1928,16 @@ disable overflow; unset restores the hosted `macos-15` fallback.
 
 macOS runs on **local Macs + GitHub-hosted**, in this order:
 
-1. **Fast JIT VM pool on M3 + M5**
-   (`pulp-build-vm,pulp-gate-fast`, `PULP_LOCAL_MACOS_RUNS_ON_JSON`) — the
-   primary required `macos` gate. M1 retains the generic `pulp-build-vm` label
-   for rollback/non-required work but cannot win required-gate placement.
+1. **Event-class-v2 JIT VM pool on M1 + M3 + M5**
+   (`PULP_LOCAL_MACOS_RUNS_ON_JSON`) — the primary required `macos` gate.
+   `build.yml` replaces the legacy base selector with exactly one class:
+   `pulp-build-pr-head` (derived lease priority 100) or
+   `pulp-build-merge-group` (priority 110). All three checked-in profiles can
+   serve both classes. A profile is not live-capacity proof: re-check enabled
+   supervisors and exact repository-visible assignment, and never set one
+   fixed profile-wide lease priority for both classes.
+   M1 is a deliberate delayed fallback and waits 10 minutes before taking Pulp
+   work; that is latency policy, not inability to serve the required gate.
 2. **Local overflow is disabled**:
    `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`.
 3. **GitHub-hosted macOS** — sanitizers, coverage, release-cli, and the
