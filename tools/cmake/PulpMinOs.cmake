@@ -180,21 +180,42 @@ function(_pulp_min_os_note_linux)
   # link. We publish the declared floor as PULP_LINUX_GLIBC_FLOOR (for CI /
   # packaging) and leave the actual verification to:
   #   tools/scripts/measure_min_os.py --elf <built .so/exe> --max <floor>
-  # run over a freshly linked Pulp binary. The shipped Skia/Dawn/V8 prebuilts are
-  # already built on an Ubuntu 22.04 base (glibc 2.34) by the portable-linux
-  # release lanes, so a floor above 2.34 means THIS build host re-leaked a newer
-  # glibc — build Pulp's Linux artifacts on the same <=floor base.
+  # run over a freshly linked Pulp binary. Floors are architecture-specific:
+  # linux-x64 is portable to glibc 2.34, while the m153 linux-arm64 V8 provider
+  # alone measures GLIBC 2.39 / GLIBCXX 3.4.32 and Skia/Dawn remain unmeasured.
+  # Never project the x64 floor onto ARM64.
   if(NOT EXISTS "${PULP_MIN_OS_JSON}")
     return()
   endif()
   file(READ "${PULP_MIN_OS_JSON}" _json)
-  string(JSON _floor ERROR_VARIABLE _err GET "${_json}" platforms linux-x64 floor)
+  if(DEFINED PULP_LINUX_ARCH AND NOT PULP_LINUX_ARCH STREQUAL "")
+    set(_linux_arch "${PULP_LINUX_ARCH}")
+  elseif(DEFINED CMAKE_SYSTEM_PROCESSOR AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "")
+    set(_linux_arch "${CMAKE_SYSTEM_PROCESSOR}")
+  else()
+    execute_process(COMMAND uname -m OUTPUT_VARIABLE _linux_arch
+                    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  endif()
+  if(_linux_arch MATCHES "^(aarch64|arm64)$")
+    set(_platform_key "linux-arm64")
+  elseif(_linux_arch MATCHES "^(x86_64|amd64|AMD64)$")
+    set(_platform_key "linux-x64")
+  else()
+    unset(PULP_LINUX_GLIBC_FLOOR CACHE)
+    message(STATUS "Pulp min-OS: no declared Linux floor for architecture ${_linux_arch}; measure the final binary")
+    return()
+  endif()
+  string(JSON _floor ERROR_VARIABLE _err GET "${_json}" platforms ${_platform_key} floor)
   if(NOT _err STREQUAL "NOTFOUND" OR _floor STREQUAL "" OR _floor STREQUAL "null")
+    # Clear an x64 floor cached by a prior configure rather than publishing it
+    # for an architecture whose aggregate provider floor is unknown.
+    unset(PULP_LINUX_GLIBC_FLOOR CACHE)
+    message(STATUS "Pulp min-OS: ${_platform_key} aggregate glibc floor is unknown; measure the final binary without an x64 --max ceiling")
     return()
   endif()
   set(PULP_LINUX_GLIBC_FLOOR "${_floor}" CACHE STRING
       "Pulp min-OS: declared Linux glibc floor (verify built binaries with measure_min_os.py --elf)")
-  message(STATUS "Pulp min-OS: Linux glibc floor is ${_floor} "
+  message(STATUS "Pulp min-OS: ${_platform_key} glibc floor is ${_floor} "
                  "(post-link check: measure_min_os.py --elf <binary> --max ${_floor})")
 endfunction()
 

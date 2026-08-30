@@ -1853,16 +1853,26 @@ bool View::start_file_drag(const FileDragRequest& request) {
 }
 
 void View::simulate_hover(Point root_pos) {
-    // Clear hover on all children first via a simple recursive walk
-    std::function<void(View*)> clear_hover = [&](View* v) {
-        if (v->hovered_) v->set_hovered(false);
-        for (size_t i = 0; i < v->child_count(); ++i)
-            clear_hover(v->child_at(i));
-    };
-    clear_hover(this);
-
-    // Set hover on the hit target
     auto* target = hit_test(root_pos);
+    std::vector<View*> hover_path;
+    for (auto* view = target; view; view = view->parent()) {
+        hover_path.push_back(view);
+        if (view == this) break;
+    }
+
+    std::function<void(View*)> clear_stale_hover = [&](View* view) {
+        for (size_t i = 0; i < view->child_count(); ++i)
+            clear_stale_hover(view->child_at(i));
+        if (view->hovered_
+            && std::find(hover_path.begin(), hover_path.end(), view)
+                == hover_path.end())
+            view->set_hovered(false);
+    };
+    clear_stale_hover(this);
+
+    for (auto it = hover_path.rbegin(); it != hover_path.rend(); ++it)
+        (*it)->set_hovered(true);
+
     if (pulp::view::motion::input_recording_enabled()) {
         const std::string id = target ? target->id() : std::string();
         std::vector<std::pair<std::string, double>> coords;
@@ -1871,7 +1881,6 @@ void View::simulate_hover(Point root_pos) {
         pulp::view::motion::record_simulated_input("hover", id, std::move(coords));
     }
     if (target) {
-        target->set_hovered(true);
         // Also deliver a positioned hover sample so a widget can track which
         // sub-region of itself the pointer is over (e.g. the
         // inspector ToolStrip's per-button tooltip, which set_hovered() alone

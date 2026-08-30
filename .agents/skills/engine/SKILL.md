@@ -170,7 +170,7 @@ Use `recommend` logic above, but **never auto-switch** — always confirm first.
   old header comment, not the implementation.
 - `quickjs`: Explicit QuickJS. Same as auto today.
 - `jsc`: JavaScriptCore on Apple. Build fails on non-Apple.
-- `v8`: V8 on desktop/Android via the pinned sealed `libv8` (fetched into `external/v8-build/`). Build fails if not fetched; iOS errors out (no JIT). See "V8 provider library" below.
+- `v8`: V8 on desktop and Android API 29+ via the pinned sealed `libv8` (fetched into `external/v8-build/`). Build fails if not fetched; Android API 26-28 and iOS fail closed for this provider. See "V8 provider library" below.
 
 The engine choice is a **build-time** CMake option. Changing it requires reconfigure + rebuild. The abstraction ensures all JS bridge code works identically across engines — the switch is invisible to UI scripts.
 
@@ -218,13 +218,14 @@ prebuilt `libv8`** from the
 fork — the same pin/fetch/Find pattern as Skia:
 
 1. **Pin:** the `V8` entry in `tools/deps/manifest.json`
-   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-15.2.24-lkgr-97440bd4f523`).
+   (`determinism.release_assets`, per-platform URL + sha256, tag `v8-m153-15.3.76.5-26cef0256b0e`).
 2. **Fetch:** `python3 tools/scripts/fetch_v8_for_release.py <platform>`
    downloads + sha256-verifies + unpacks to `external/v8-build/<platform>/`
    (`include/` + `lib/`). Platforms: `darwin-arm64`, `darwin-x64`,
    `linux-x64`, `linux-arm64`, `windows-x64`, `windows-arm64`,
-   `android-arm64`, `ios-simulator-arm64` (headers-only — iOS supports
-   QuickJS/JSC but not V8).
+   `android-arm64`, `ios-simulator-arm64`. The iOS asset is an actual jitless
+   simulator `V8.framework`; Pulp validates its provenance and headers but does
+   not select or package it as an iOS/AUv3 runtime.
 3. **Resolve:** `tools/cmake/FindV8.cmake` finds `external/v8-build/<key>`
    (or a baked `$V8_DIR`, or legacy overrides) and exposes the `v8::v8`
    imported target. The configure log prints
@@ -243,12 +244,14 @@ FindV8 resolves the fetched artifact automatically — no `V8_INCLUDE_DIR`/
 local-experiment overrides** (point at a hand-built V8). `V8_DIR` points at
 a baked V8 (golden VMs: `V8_DIR=~/pulp-v8-build`).
 
-**Two behavior rules:**
+**Three behavior rules:**
 - `PULP_JS_ENGINE=auto` **never** pulls in V8 — V8 is strictly opt-in via
   `=v8`. (Previously `auto` + `V8_INCLUDE_DIR` silently enabled it.)
-- `PULP_JS_ENGINE=v8` on **iOS** is a configure-time `FATAL_ERROR` — V8
-  needs JIT, forbidden in iOS apps / AUv3 extensions. Use QuickJS (the
-  default) or select JSC explicitly.
+- `PULP_JS_ENGINE=v8` on **iOS** is a configure-time `FATAL_ERROR`. The pinned
+  m153 asset is a jitless simulator framework, but Pulp has no device/AUv3 V8
+  runtime acceptance or packaging contract. Use QuickJS (the default) or JSC.
+- `PULP_JS_ENGINE=v8` on **Android** requires API 29+ for the pinned m153
+  provider. Pulp's general Android floor remains API 26; use QuickJS below 29.
 
 **Why the sealed build (the ICU caveat):** the v8-builder `libv8` exports
 only the `v8::`/`cppgc::` API and keeps its bundled ICU/zlib/Abseil
@@ -262,15 +265,18 @@ header.
 
 ## Windows sealed v8-builder V8 (clang-cl + Chromium libc++ `__Cr`)
 
-The v8-builder sealed Windows `v8.dll` (e.g. `v8-15.2.24-lkgr-97440bd4f523`) is a special
+The v8-builder sealed Windows `v8.dll` (e.g. `v8-m153-15.3.76.5-26cef0256b0e`) is a special
 ABI lane, NOT a drop-in for MSVC cl. It is built (v8-builder
 `build-v8.py:win_gn_args()`) with **pointer compression ON**, **Chromium's
 bundled libc++ (`__Cr` ABI namespace)**, sandbox OFF, rtti OFF. So
 `v8.dll.lib` exports its `std::`-bearing API mangled into `__Cr@std`
 (verify: hundreds of `...@__Cr@std@@` symbols). A consumer built with
 **MSVC cl + MSVC STL will not link** — its plain `@std@@` symbols never
-resolve against the `__Cr@std` imports. The contract (all verified on the
-Win11-24H2 arm64 QEMU golden, x64 V8 under ARM x64 emulation):
+resolve against the `__Cr@std` imports. The m153 archive's ABI shape and
+required files are inspected and pinned. The following consumer contract was
+last link/run proven with m152 (`15.2.124.7`) on the Win11-24H2 arm64 QEMU
+golden (x64 V8 under ARM x64 emulation); the m153 consumer link/run remains a
+required platform acceptance step:
 
 1. Compile the V8 TU (`js_v8_engine.cpp`) with **clang-cl**, not cl.
    `tools/cmake/PulpV8Windows.cmake` hard-fails configure if the compiler
@@ -304,16 +310,18 @@ On Windows, additionally supply `PULP_V8_WIN_LIBCXX_INCLUDE` and
 `PULP_V8_WIN_LIBCXX_LIB` (the Chromium-style libc++ headers + the
 `__Cr`-ABI `libc++.lib`). `core/view/CMakeLists.txt` links `v8::v8` and
 then calls `pulp_v8_windows_apply_abi(pulp-view-script)` (no-op off
-Windows). Proven: choc V8 consumer init + `evaluateExpression
-("40 + 2") == 42`, `V8::GetVersion() == 15.2.24`. The mac/linux sealed
+Windows). Last runtime proof (m152): choc V8 consumer init +
+`evaluateExpression("40 + 2") == 42`, `V8::GetVersion() == 15.2.124.7`.
+The m153 Windows archive has passed structural ABI inspection but not this
+consumer link/run gate. The mac/linux sealed
 artifacts use the **system** libc++ (no `__Cr`) and need none of this —
 the `__Cr` contract is Windows-only.
 
 **Cross-platform rollout + ship/sign/package** (Windows MSVC `/MT` ABI,
 macOS nested-dylib re-signing, Android ABI gating, golden-VM bake) are
 tracked in `planning/2026-06-06-v8-sealed-libv8-provider-migration-plan.md`.
-macOS arm64 is the proven lane; other platforms are pinned but pending
-per-platform verification.
+macOS arm64 is the proven m153 runtime lane; other platforms are pinned but
+pending per-platform verification.
 
 ### Sealed v8-builder provider (`FindV8.cmake` → `external/v8-build/`)
 
@@ -341,7 +349,8 @@ defs from the resolved artifact: `PULP_V8_PROVIDER_KIND` (`v8builder`),
 in `manifest.json`). The build-tree rpath for `@rpath/libv8.dylib` is handled
 by FindV8's imported target. This is the explicit V8 lane only — it does NOT
 change the engine default (`auto` stays QuickJS; iOS is a configure-time
-`FATAL_ERROR` since V8 needs JIT).
+`FATAL_ERROR` because Pulp has no accepted device/AUv3 V8 runtime or packaging
+contract for the simulator-only jitless provider).
 
 **Identity surface:** `JsEngine::runtime_version()` (V8's
 `v8::V8::GetVersion()`) / `provider_kind()` / `provider_path()` /

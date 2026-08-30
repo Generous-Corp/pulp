@@ -97,8 +97,10 @@ TEST_CASE("HTML role attribute routes through ARIA->AccessRole bucket",
     // 'button' used to have no Pulp enum slot and collapsed to `group`, so a
     // screen reader announced a button as a group.
     REQUIRE(bridge.widget("bn")->access_role() == View::AccessRole::button);
+    REQUIRE(bridge.widget("bn")->default_hover_feedback());
     // Empty / unknown role clears to none.
     REQUIRE(bridge.widget("un")->access_role() == View::AccessRole::none);
+    REQUIRE_FALSE(bridge.widget("un")->default_hover_feedback());
 }
 
 TEST_CASE("HTML setAttribute(aria-label) flushes through web-compat shim",
@@ -219,6 +221,19 @@ TEST_CASE("HTML aria-pressed / -checked / -disabled / -hidden route to View slot
         btn.setAttribute('aria-pressed', 'true');
         btn.setAttribute('aria-disabled', 'false');
 
+        // Eager path: _ensureNative creates the widget before appendChild,
+        // so __domAppend must apply button semantics before its early
+        // existing-widget reparent return.
+        var eagerBtn = document.createElement('button');
+        eagerBtn.id = 'eager-btn';
+        eagerBtn._ensureNative();
+        document.body.appendChild(eagerBtn);
+
+        // Exact fast-path shape used when an eager native button already has
+        // the stock ToggleButton role and __domAppend reparents it.
+        createToggleButton('eager-native-btn', '');
+        __domAppend(document.body._id, 'eager-native-btn', 'button', '');
+
         // Replay path: setAttribute before mount, appendChild flushes.
         var chk = document.createElement('div');
         chk.id = 'tristate-chk';
@@ -234,11 +249,37 @@ TEST_CASE("HTML aria-pressed / -checked / -disabled / -hidden route to View slot
     auto chk_id = std::string(engine.evaluate(
         "document.getElementById('tristate-chk')._id"
     ).getWithDefault<std::string_view>(""));
+    auto eager_btn_id = std::string(engine.evaluate(
+        "document.getElementById('eager-btn')._id"
+    ).getWithDefault<std::string_view>(""));
 
     auto* btn = bridge.widget(btn_id);
     auto* chk = bridge.widget(chk_id);
+    auto* eager_btn = bridge.widget(eager_btn_id);
+    auto* eager_native_btn = bridge.widget("eager-native-btn");
     REQUIRE(btn != nullptr);
     REQUIRE(chk != nullptr);
+    REQUIRE(eager_btn != nullptr);
+    REQUIRE(eager_native_btn != nullptr);
+
+    // Lowercase HTML buttons get usable semantics even when an importer or
+    // materialized React tree does not emit an explicit role attribute.
+    REQUIRE(btn->access_role() == View::AccessRole::button);
+    REQUIRE(btn->default_hover_feedback());
+    REQUIRE(eager_btn->access_role() == View::AccessRole::button);
+    REQUIRE(eager_btn->default_hover_feedback());
+    REQUIRE(eager_native_btn->access_role() == View::AccessRole::button);
+    REQUIRE(eager_native_btn->default_hover_feedback());
+
+    // Removing an explicit role restores the HTML element's implicit button
+    // semantics instead of erasing both accessibility and hover feedback.
+    bridge.load_script(R"(
+        var semanticButton = document.getElementById('mute-btn');
+        semanticButton.setAttribute('role', 'switch');
+        semanticButton.removeAttribute('role');
+    )");
+    REQUIRE(btn->access_role() == View::AccessRole::button);
+    REQUIRE(btn->default_hover_feedback());
 
     // Fast-path values.
     REQUIRE(btn->access_pressed()  == "true");

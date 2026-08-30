@@ -2207,6 +2207,13 @@ Intel nightly watchdog                        : SUCCESS
 every night**. The Intel signal was there the whole time, buried under a run-level
 conclusion poisoned by a *different* leg.
 
+For m153+, that job has a fourth required component before the universal build:
+one JSON capability receipt compile/links/runs the universal provider's arm64
+slice natively and its x86_64 slice through explicit Rosetta. `Compute result`
+must count the capability status with build, lipo, and auval. A universal product
+link can otherwise stay green while currently-unused m153 symbols are missing
+from one slice, so neither a partial receipt nor a skipped probe is acceptable.
+
 `native-intel` on `macos-15-intel` had **never once completed**: that image CPU-pegs,
 so the job hit its 120-minute limit every run. **GitHub reports a job timeout as
 `cancelled`, and a cancelled job cancels the whole RUN.** So a leg producing zero
@@ -4511,6 +4518,13 @@ build's canonical inventory, then run
 Otherwise the full suite can finish almost entirely green and fail only at the
 inventory self-test, forcing a needless second admission cycle.
 
+Catch2 `TEST_CASE` additions, removals, and renames are CTest topology changes
+too: discovery materializes each case as a registration even when no CMake
+manifest changed. A 2026-08-28 sequence added four cases and removed one after
+the last inventory refresh, leaving main's contract three registrations stale
+until the next unrelated full proof exposed it. Treat changes to discovered test
+sources exactly like explicit `add_test` changes for this refresh requirement.
+
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued
@@ -5136,7 +5150,7 @@ If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them
 
 `ci/visual-harness.Dockerfile` and `.github/workflows/visual-harness.yml`
 provide the deterministic visual-harness smoke environment. The Docker image
-downloads the pinned Skia `chrome/m151` Linux release asset (from the
+downloads the pinned Skia `chrome/m153` Linux release asset (from the
 `danielraffel/skia-builder` fork — adds iOS/visionOS/mac-x86_64 slices the
 upstream `olilarkin/skia-builder` omits), verifies its SHA-256, installs the
 bundled Pulp fonts into fontconfig, and installs `skia-python==144.0.post2`
@@ -5152,13 +5166,21 @@ hand-sync typo is a silent behavioural bug rather than a doc lag. When bumping
 `tools/deps/manifest.json`, keep these in lockstep — all are enforced in CI
 (`workflow-lint.yml`) and pre-push (`gates.sh`):
 - `ci/visual-harness.Dockerfile` ← `tools/harness/visual/check_skia_pin.py`
-- `external/skia-build/VERSION.md` digest table (a *fetch cache-skip oracle* —
-  `fetch_skia_for_release.py` trusts it to skip downloads) and `DEPENDENCIES.md`
+- `external/skia-build/VERSION.md` digest table (documentation only — a
+  missing fetcher-written asset stamp always forces verified re-download) and `DEPENDENCIES.md`
   Skia/Dawn/V8 version cells ← `tools/scripts/check_manifest_mirrors.py`
 - `tools/harness/visual/pins.py` ← `test_skia_determinism.py`
 
+For m153+, the pin checks are necessary but not sufficient: run
+`tools/scripts/verify_skia_m153_capabilities.py --platform <matching-native-desktop-platform>
+--skia-dir <generation>` against the exact stamped manifest generation so
+`SkLogHandler` and Graphite's executor field are proven through the archive's
+exported symbols. After the pin lands, each active Mac build host
+must populate its own immutable SHA-addressed generation through the fetcher
+and prove the second fetch is a no-download hit; do not rsync one runner's
+checkout cache to another.
+
 The `macOS local smoke` job resolves `runs-on` from
-`macOS local smoke` job resolves `runs-on` from
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` first and falls back to hosted `macos-15` only
 when the local selector variable is absent. On the persistent local runner,
 this job deliberately uses the installed `python3.12` and a worktree-local venv

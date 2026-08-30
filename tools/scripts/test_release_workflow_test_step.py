@@ -649,6 +649,60 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         self.assertIn("lfs: false", self.text)
         self.assertNotIn("lfs: true", self.text)
 
+    def test_native_release_path_requires_provider_capability_and_receipt_probe(self) -> None:
+        self.assertIn("Verify m153+ provider capabilities and extracted receipt", self.text)
+        self.assertIn("tools/scripts/verify_skia_m153_capabilities.py", self.text)
+        self.assertIn("--skia-dir external/skia-build", self.text)
+        self.assertIn("matrix.platform == 'darwin-arm64' || matrix.platform == 'linux-x64'", self.text)
+
+    def test_release_path_builds_bind_to_the_verified_checkout_provider(self) -> None:
+        self.assertEqual(
+            self.text.count('-DSKIA_DIR="$PWD/external/skia-build"'),
+            2,
+            "both release-path configure calls must consume the provider that "
+            "the preceding receipt/capability step verified",
+        )
+
+    def test_darwin_leg_requires_mixed_provider_render_proof(self) -> None:
+        workflow = yaml.safe_load(self.text)
+        fetch_steps = [
+            step for step in workflow["jobs"]["release-build"]["steps"]
+            if step.get("name") == "Fetch sealed V8 provider (mixed-provider gate)"
+        ]
+        self.assertEqual(len(fetch_steps), 1)
+        fetch_step = fetch_steps[0]
+        self.assertEqual(
+            fetch_step["run"],
+            "python3 tools/scripts/fetch_v8_for_release.py darwin-arm64",
+        )
+        self.assertEqual(fetch_step.get("env"), {"GH_TOKEN": "${{ github.token }}"})
+        self.assertIn("-DPULP_JS_ENGINE=v8", self.text)
+        self.assertIn("-DPULP_VALIDATE_V8_PROVIDER_STRICT=ON", self.text)
+        self.assertIn(
+            "tools/ci/governed-build.sh cmake --build build --config Release",
+            self.text,
+        )
+        self.assertIn("provider_identity_test.cmake", self.text)
+        self.assertIn("matrix.platform == 'darwin-arm64'", self.text)
+        dependencies = (REPO_ROOT / "tools/cmake/PulpDependencies.cmake").read_text(encoding="utf-8")
+        match = re.search(
+            r"# three\.js .*?\n(?P<body>if\(\(PULP_BUILD_TESTS.*?\nendif\(\))",
+            dependencies,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "could not isolate the three.js FetchContent guard")
+        guard = match.group("body")
+        self.assertIn("PULP_BUILD_EXAMPLES", guard)
+        for exclusion in (
+            "NOT ANDROID",
+            "NOT IOS",
+            "NOT PULP_IOS",
+            "NOT EMSCRIPTEN",
+            'NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten"',
+            'NOT CMAKE_SYSTEM_NAME STREQUAL "WASI"',
+        ):
+            self.assertIn(exclusion, guard)
+
 
 class ReleaseCliDualBinaryPackaging(unittest.TestCase):
     """release-cli.yml must keep `pulp` and `pulp-cpp` bundled and smoked.
@@ -1505,6 +1559,30 @@ class NightlyIsTheRealIntelGate(unittest.TestCase):
     def test_nightly_result_counts_auval(self) -> None:
         self.assertIn("steps.auval.outputs.status", self.text)
         self.assertIn('[ "$auval" = "pass" ]', self.text)
+
+    def test_universal_capability_proof_precedes_build(self) -> None:
+        proof = self.text.index("Verify both universal Skia m153 capability slices")
+        configure = self.text.index("Configure (universal arm64;x86_64)")
+        self.assertLess(proof, configure)
+        self.assertIn("--platform darwin-universal", self.text[proof:configure])
+        self.assertIn("--result skia-m153-universal-capabilities.json", self.text[proof:configure])
+
+    def test_nightly_result_counts_universal_capabilities(self) -> None:
+        self.assertIn("steps.capabilities.outputs.status", self.text)
+        self.assertIn('[ "$capabilities" = "pass" ]', self.text)
+        self.assertIn("skia-m153-universal-capabilities.json", self.text)
+
+    def test_nightly_watchdog_reports_capability_failure_surface(self) -> None:
+        self.assertIn(
+            "capabilities: ${{ steps.capabilities.outputs.status }}", self.text
+        )
+        self.assertIn(
+            "B_CAPABILITIES: ${{ needs.universal-crosscheck.outputs.capabilities }}",
+            self.text,
+        )
+        self.assertIn("Skia m153 universal capabilities", self.text)
+        self.assertIn("capability-step log first", self.text)
+        self.assertIn("skia-m153-universal-capabilities.json", self.text)
 
 
 class EveryLegIsIndividuallyRoutable(unittest.TestCase):
