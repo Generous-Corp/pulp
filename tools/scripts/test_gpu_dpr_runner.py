@@ -620,7 +620,24 @@ def v2_nested_snapshot_test(root: Path) -> None:
         raise AssertionError("finalize did not survive producer-output deletion")
 
 
+def assert_typed_adapter_termination() -> None:
+    planted = mock.Mock(pid=9191)
+    failure = runner.contained_process.ProcessTreeTerminationError(
+        "adapter-termination-failed: planted"
+    )
+    with mock.patch.object(
+        runner.contained_process, "terminate_contained", side_effect=failure,
+    ):
+        try:
+            runner.terminate_adapter(planted)
+        except runner.AdapterTerminationError as error:
+            assert error.code in str(error)
+        else:
+            raise AssertionError("DPR runner erased the typed termination failure")
+
+
 def main() -> int:
+    assert_typed_adapter_termination()
     # The matrix projection uses generated executable fixtures, not an installed
     # browser. Product-signature rejection has its own focused adapter test.
     evidence.validate_browser_product = lambda _path, _product: None
@@ -1835,6 +1852,7 @@ def main() -> int:
     print(
         "gpu_dpr_runner_selftest=true matrix_cells=84 "
         f"planted_bad_evidence={planted} adapter_protocol=pass "
+        "typed_adapter_termination=pass "
         "skip_inconclusive_incomplete=pass timeout_incomplete=pass "
         "malformed_receipt_incomplete=pass nested_v2_snapshot_finalize=pass "
         "b5_gate=pass"

@@ -18,6 +18,7 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR))
+import gpu_contained_process as contained_process  # noqa: E402
 import gpu_dpr_experiment as experiment  # noqa: E402
 import gpu_dpr_v2_runner as runner_v2  # noqa: E402
 from gpu_dpr_evidence import (  # noqa: E402
@@ -35,6 +36,12 @@ RUN_SCHEMA = "pulp.gpu-dpr-run-state.v1"
 REQUEST_SCHEMA = "pulp.gpu-dpr-cell-request.v1"
 B5_SCHEMA = "pulp.gpu-dpr-b5-gate.v1"
 OUTPUT_CAP_BYTES = 1024 * 1024
+
+
+class AdapterTerminationError(EvidenceError):
+    """The DPR runner could not contain, terminate, and reap an adapter tree."""
+
+    code = contained_process.ProcessTreeTerminationError.code
 
 
 def initial_state(
@@ -268,22 +275,18 @@ def issue_attempt(
 
 
 def terminate_adapter(process: subprocess.Popen[bytes]) -> None:
-    """Stop an adapter process group without collecting unbounded output."""
+    """Stop an adapter process tree without an unbounded post-kill wait."""
     try:
-        if os.name == "posix":
-            os.killpg(process.pid, 15)
-        else:
-            process.terminate()
-    except ProcessLookupError:
-        pass
+        contained_process.terminate_contained(process)
+    except contained_process.ProcessTreeTerminationError as error:
+        raise AdapterTerminationError(str(error)) from error
+
+
+def spawn_adapter(command: list[str], *, cwd: Path) -> subprocess.Popen[bytes]:
     try:
-        process.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        if os.name == "posix":
-            os.killpg(process.pid, 9)
-        else:
-            process.kill()
-        process.wait()
+        return contained_process.spawn_contained(command, cwd=cwd)
+    except contained_process.ProcessTreeTerminationError as error:
+        raise AdapterTerminationError(str(error)) from error
 
 
 def communicate_bounded(
@@ -316,13 +319,17 @@ def communicate_bounded(
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             timed_out = True
-            terminate_adapter(process)
             break
         if exceeded.wait(min(0.05, remaining)):
-            terminate_adapter(process)
             break
+    terminate_adapter(process)
     for thread in threads:
         thread.join(timeout=2)
+    if any(thread.is_alive() for thread in threads):
+        raise AdapterTerminationError(
+            f"{AdapterTerminationError.code}: adapter output pipes remained open "
+            "after bounded process-tree termination"
+        )
     return (
         buffers[0].decode("utf-8", errors="replace"),
         buffers[1].decode("utf-8", errors="replace"),
@@ -386,10 +393,9 @@ def run_cells(
         receipt = cell_dir / f"receipt-attempt-{attempt_nonce}.json"
         if receipt.exists():
             receipt.unlink()
-        process = subprocess.Popen(
+        process = spawn_adapter(
             [str(pinned_adapter), "--request", str(request), "--receipt", str(receipt)],
-            cwd=cell_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True,
+            cwd=cell_dir,
         )
         stdout, stderr, timed_out, output_exceeded = communicate_bounded(
             process, timeout_seconds

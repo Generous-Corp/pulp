@@ -59,6 +59,9 @@ def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
     return module
 
 
+contained_process = _load_local_source(
+    "gpu_contained_process", "gpu_contained_process.py"
+)
 a3 = _load_local_source(
     "gpu_first_visible_a3_acceptance", "gpu_first_visible_a3_acceptance.py"
 )
@@ -92,6 +95,12 @@ ADAPTER_ARTIFACT_KEYS = {
 
 class CampaignError(ValueError):
     """An adapter result cannot support the requested A3 campaign role."""
+
+
+class AdapterTerminationError(CampaignError):
+    """The campaign could not terminate and reap its owned adapter tree."""
+
+    code = contained_process.ProcessTreeTerminationError.code
 
 
 def regular_file_bytes(path: Path, label: str) -> bytes:
@@ -225,22 +234,20 @@ def snapshot_budget(
     return validated, refs
 
 
+def spawn_adapter(command: list[str], *, cwd: Path) -> subprocess.Popen[bytes]:
+    try:
+        return contained_process.spawn_contained(
+            command, cwd=cwd, stdin=subprocess.DEVNULL,
+        )
+    except contained_process.ProcessTreeTerminationError as error:
+        raise AdapterTerminationError(str(error)) from error
+
+
 def terminate_adapter(process: subprocess.Popen[bytes]) -> None:
     try:
-        if os.name == "posix":
-            os.killpg(process.pid, 15)
-        else:
-            process.terminate()
-    except ProcessLookupError:
-        pass
-    try:
-        process.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        if os.name == "posix":
-            os.killpg(process.pid, 9)
-        else:
-            process.kill()
-        process.wait()
+        contained_process.terminate_contained(process)
+    except contained_process.ProcessTreeTerminationError as error:
+        raise AdapterTerminationError(str(error)) from error
 
 
 def communicate_bounded(
@@ -273,13 +280,17 @@ def communicate_bounded(
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             timed_out = True
-            terminate_adapter(process)
             break
         if exceeded.wait(min(0.05, remaining)):
-            terminate_adapter(process)
             break
+    terminate_adapter(process)
     for thread in threads:
         thread.join(timeout=2)
+    if any(thread.is_alive() for thread in threads):
+        raise AdapterTerminationError(
+            f"{AdapterTerminationError.code}: adapter output pipes remained open "
+            "after bounded process-tree termination"
+        )
     return (
         buffers[0].decode("utf-8", errors="replace"),
         buffers[1].decode("utf-8", errors="replace"),
@@ -499,11 +510,10 @@ def run_role(args: argparse.Namespace) -> int:
         "sha256": hashlib.sha256(regular_file_bytes(request_path, "campaign request")).hexdigest(),
     }
     receipt_path = run_dir / "adapter-output" / "receipt.json"
-    process = subprocess.Popen(
+    process = spawn_adapter(
         [adapter_snapshot["path"], "--request", str(request_path.resolve()),
          "--receipt", str(receipt_path.resolve())],
-        cwd=run_dir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, start_new_session=True,
+        cwd=run_dir,
     )
     stdout, stderr, timed_out, output_exceeded = communicate_bounded(
         process, args.timeout_seconds

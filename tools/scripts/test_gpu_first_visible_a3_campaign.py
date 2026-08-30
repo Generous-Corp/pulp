@@ -13,6 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
@@ -27,6 +28,9 @@ def assert_runner_ignores_acceptance_bytecode() -> None:
         root = Path(temporary)
         copied_runner = root / RUNNER.name
         copied_runner.write_bytes(RUNNER.read_bytes())
+        (root / "gpu_contained_process.py").write_bytes(
+            (SCRIPT_DIR / "gpu_contained_process.py").read_bytes()
+        )
         safe = root / "gpu_first_visible_a3_acceptance.py"
         safe_source = b'CAMPAIGN_ROLES={"standalone"}\n'
         malicious = b'raise SystemExit("planted acceptance bytecode executed")\n'
@@ -47,6 +51,31 @@ def assert_runner_ignores_acceptance_bytecode() -> None:
             text=True, capture_output=True, check=False,
         )
         assert completed.returncode == 0, (completed.stdout, completed.stderr)
+
+
+def assert_typed_process_boundary() -> None:
+    planted = mock.Mock(pid=8181)
+    failure = campaign.contained_process.ProcessTreeTerminationError(
+        "adapter-termination-failed: planted"
+    )
+    with mock.patch.object(
+        campaign.contained_process, "terminate_contained", side_effect=failure,
+    ):
+        try:
+            campaign.terminate_adapter(planted)
+        except campaign.AdapterTerminationError as error:
+            assert error.code in str(error)
+        else:
+            raise AssertionError("campaign erased the typed termination failure")
+
+    spawned = mock.Mock()
+    with mock.patch.object(
+        campaign.contained_process, "spawn_contained", return_value=spawned,
+    ) as spawn:
+        assert campaign.spawn_adapter(["adapter"], cwd=Path("/owned")) is spawned
+    spawn.assert_called_once_with(
+        ["adapter"], cwd=Path("/owned"), stdin=subprocess.DEVNULL,
+    )
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -193,6 +222,7 @@ def run_adapter(
 
 def main() -> int:
     assert_runner_ignores_acceptance_bytecode()
+    assert_typed_process_boundary()
     with tempfile.TemporaryDirectory(prefix="pulp-a3-campaign-") as temporary:
         root = Path(temporary)
         evidence = root / "evidence"
@@ -261,7 +291,10 @@ def main() -> int:
         else:
             raise AssertionError("Forge campaign accepted a non-standalone product format")
 
-        print("gpu-first-visible-a3-campaign: positive=2 planted_negatives=12")
+        print(
+            "gpu-first-visible-a3-campaign: positive=2 planted_negatives=12 "
+            "typed_process_boundary=pass"
+        )
     return 0
 
 

@@ -8,7 +8,6 @@ import math
 import os
 import secrets
 import shutil
-import signal
 import stat
 import subprocess
 import threading
@@ -16,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import gpu_contained_process as contained_process
 import gpu_dpr_experiment as experiment
 import gpu_dpr_v2_evidence as evidence
 import gpu_dpr_v2_terminal as terminal
@@ -33,6 +33,12 @@ EXIT_BY_OUTCOME = {"pass": 0, "fail": 1}
 
 class V2RunnerError(ValueError):
     """The v2 runner cannot prove an exact collection/finalization step."""
+
+
+class AdapterTerminationError(V2RunnerError):
+    """The runner could not terminate and reap its owned adapter process tree."""
+
+    code = contained_process.ProcessTreeTerminationError.code
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -433,28 +439,20 @@ def reject_issued_attempt(
     save_state(run_dir, state)
 
 
+def _spawn_adapter(
+    command: list[str], *, cwd: Path, stdin: Any = None,
+) -> subprocess.Popen[bytes]:
+    try:
+        return contained_process.spawn_contained(command, cwd=cwd, stdin=stdin)
+    except contained_process.ProcessTreeTerminationError as error:
+        raise AdapterTerminationError(str(error)) from error
+
+
 def _terminate_adapter(process: subprocess.Popen[bytes]) -> None:
-    """Terminate the adapter process group without collecting unbounded output."""
     try:
-        if os.name == "posix":
-            os.killpg(process.pid, signal.SIGTERM)
-        else:
-            process.terminate()
-    except ProcessLookupError:
-        pass
-    try:
-        process.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        pass
-    try:
-        if os.name == "posix":
-            os.killpg(process.pid, signal.SIGKILL)
-        elif process.poll() is None:
-            process.kill()
-    except ProcessLookupError:
-        pass
-    if process.poll() is None:
-        process.wait()
+        contained_process.terminate_contained(process)
+    except contained_process.ProcessTreeTerminationError as error:
+        raise AdapterTerminationError(str(error)) from error
 
 
 def _communicate_bounded(
@@ -489,17 +487,19 @@ def _communicate_bounded(
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             timed_out = True
-            _terminate_adapter(process)
             break
         if exceeded.wait(min(0.05, remaining)):
-            _terminate_adapter(process)
             break
+    # This is also required after a clean adapter exit: descendants may still
+    # own inherited pipes or mutate the attempt after its direct parent exits.
+    _terminate_adapter(process)
     for thread in threads:
         thread.join(timeout=2)
     if any(thread.is_alive() for thread in threads):
-        _terminate_adapter(process)
-        for thread in threads:
-            thread.join(timeout=2)
+        raise AdapterTerminationError(
+            f"{AdapterTerminationError.code}: adapter output pipes remained open "
+            "after bounded process-tree termination"
+        )
     return timed_out, exceeded.is_set()
 
 
@@ -702,10 +702,9 @@ def run_one(
     producer_root.mkdir(mode=0o700)
     process: subprocess.Popen[bytes] | None = None
     try:
-        process = subprocess.Popen(
+        process = _spawn_adapter(
             [str(adapter), "--request", str(request_path), "--output", str(producer_root)],
-            cwd=request_path.parent, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True,
+            cwd=request_path.parent,
         )
         timed_out, output_exceeded = _communicate_bounded(process, timeout_seconds)
         if timed_out:
@@ -720,7 +719,10 @@ def run_one(
             run_dir, key, nonce, process.pid, process.returncode
         )
     except Exception as error:
-        if process is not None and process.poll() is None:
+        if (
+            process is not None and process.poll() is None
+            and not isinstance(error, AdapterTerminationError)
+        ):
             _terminate_adapter(process)
         reason = str(error) or error.__class__.__name__
         reject_issued_attempt(run_dir, key, nonce, reason)

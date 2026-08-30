@@ -134,6 +134,7 @@ A3_IMPLEMENTATION_SOURCE_PATHS = {
     "tools/scripts/gpu_first_visible_a3_acceptance.py",
     "tools/scripts/gpu_first_visible_a3_build_verifier.py",
     "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_contained_process.py",
     "tools/scripts/gpu_first_visible_a3_external_adapter.py",
     "tools/scripts/gpu_first_visible_a3_forge_producer.py",
     "tools/scripts/gpu_first_visible_a3_headless_producer.py",

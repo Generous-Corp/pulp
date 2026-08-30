@@ -569,7 +569,113 @@ def git_object_tests(root: Path) -> None:
         raise AssertionError("wrong Git object type passed")
 
 
+class NeverReapedAdapter:
+    """Planted process double that rejects any unbounded wait immediately."""
+
+    def __init__(self) -> None:
+        self.pid = 424242
+        self.args = ["planted-adapter"]
+        self.returncode = None
+        self.wait_timeouts: list[float] = []
+        self.killed = False
+
+    def poll(self) -> None:
+        return None
+
+    def terminate(self) -> None:
+        pass
+
+    def kill(self) -> None:
+        self.killed = True
+
+    def wait(self, timeout: float | None = None) -> int:
+        assert timeout is not None, "planted adapter reached an unbounded wait()"
+        self.wait_timeouts.append(timeout)
+        raise subprocess.TimeoutExpired(self.args, timeout)
+
+
+def termination_boundary_tests() -> None:
+    process_boundary = runner.contained_process
+    planted = NeverReapedAdapter()
+    with (
+        mock.patch.object(process_boundary.os, "name", "posix"),
+        mock.patch.object(process_boundary.os, "killpg") as killpg,
+    ):
+        try:
+            runner._terminate_adapter(planted)  # type: ignore[arg-type]
+        except runner.AdapterTerminationError as error:
+            assert error.code in str(error)
+        else:
+            raise AssertionError("unreapable adapter lacked a typed termination failure")
+    assert planted.wait_timeouts == [
+        process_boundary.TERMINATION_GRACE_SECONDS,
+        process_boundary.TERMINATION_FINAL_SECONDS,
+    ]
+    assert killpg.call_args_list == [
+        mock.call(planted.pid, process_boundary.signal.SIGTERM),
+        mock.call(planted.pid, process_boundary.signal.SIGKILL),
+    ]
+
+    events: list[str] = []
+    suspended = mock.Mock(pid=31337, _handle=99)
+
+    def popen(*_args: Any, **_kwargs: Any) -> Any:
+        events.append("spawn-suspended")
+        return suspended
+
+    def assign(process: Any) -> None:
+        events.append("assign-job")
+        setattr(process, process_boundary.WINDOWS_JOB_ATTRIBUTE, 77)
+
+    def resume(_process: Any) -> None:
+        events.append("resume")
+
+    with (
+        mock.patch.object(process_boundary.os, "name", "nt"),
+        mock.patch.object(
+            process_boundary.subprocess, "Popen", side_effect=popen,
+        ) as spawn,
+        mock.patch.object(process_boundary, "_assign_windows_job", side_effect=assign),
+        mock.patch.object(process_boundary, "_resume_windows_process", side_effect=resume),
+    ):
+        assert runner._spawn_adapter(["adapter"], cwd=Path("/owned")) is suspended
+    assert events == ["spawn-suspended", "assign-job", "resume"]
+    spawn_options = spawn.call_args.kwargs
+    assert spawn_options["start_new_session"] is False
+    assert spawn_options["creationflags"] & 0x00000004
+    assert spawn_options["creationflags"] & 0x00000200
+
+    failed = mock.Mock(pid=31338, _handle=100)
+    failed.poll.return_value = None
+    failed.wait.return_value = 1
+    resume_call = mock.Mock()
+    with (
+        mock.patch.object(process_boundary.os, "name", "nt"),
+        mock.patch.object(process_boundary.subprocess, "Popen", return_value=failed),
+        mock.patch.object(
+            process_boundary, "_assign_windows_job",
+            side_effect=process_boundary.ProcessTreeTerminationError(
+                "planted assignment failure"
+            ),
+        ),
+        mock.patch.object(process_boundary, "_resume_windows_process", resume_call),
+        mock.patch.object(process_boundary, "_close_windows_job"),
+    ):
+        try:
+            runner._spawn_adapter(["adapter"], cwd=Path("/owned"))
+        except runner.AdapterTerminationError:
+            pass
+        else:
+            raise AssertionError("uncontained Windows adapter was resumed")
+    resume_call.assert_not_called()
+    failed.kill.assert_called_once_with()
+    failed.wait.assert_called_once_with(
+        timeout=process_boundary.TERMINATION_FINAL_SECONDS
+    )
+
+
 def main() -> int:
+    termination_boundary_tests()
     manifest, scenario = small_manifest()
     with tempfile.TemporaryDirectory(prefix="pulp-a4-v2-files-") as directory:
         root = Path(directory).resolve()
@@ -989,7 +1095,8 @@ def main() -> int:
         "gpu_dpr_v2_evidence_selftest=true corpus=84+84 artifacts=8 "
         "no_file=pass digest=pass content=pass path=pass symlink=pass outside=pass "
         "cross_cell=pass runner_process=pass producer_pid=pass retry=pass "
-        "output_bound=pass forged_state_key=pass "
+        "output_bound=pass bounded_termination=pass windows_job_spawn=pass "
+        "forged_state_key=pass "
         "frame_rederive=pass gpu_calibration=pass runtime_input=pass "
         "fixed_a3_daw_identity=pass caller_draft=pass "
         "git_blob_type_head=pass live_receipt=pass"
