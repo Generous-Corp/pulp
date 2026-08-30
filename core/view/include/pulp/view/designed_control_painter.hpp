@@ -26,6 +26,10 @@ struct DesignedControlSkin {
     canvas::Color track{0.25f, 0.28f, 0.32f, 1.0f};     ///< the inactive arc / track
     canvas::Color accent{0.08f, 0.72f, 0.65f, 1.0f};    ///< the value arc / fill
     canvas::Color indicator{0.92f, 0.94f, 0.96f, 1.0f}; ///< the pointer / thumb
+    /// True only when this control supplied its own indicator colour. Without
+    /// provenance, `indicator` is merely a fallback and the design theme's
+    /// control.thumb token must retain precedence.
+    bool indicator_authored = false;
     float ring_width = 4.0f;
     float indicator_width = 2.5f;
     /// Ring radius as a fraction of the shorter side of the control box.

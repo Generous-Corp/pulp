@@ -13,6 +13,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/audio/midi_voice_modulation_adapter.hpp": "Pulp::audio",
     "pulp/audio/onset_detector.hpp": "Pulp::audio",
     "pulp/audio/unison_voice_stack.hpp": "Pulp::audio",
+    "pulp/audio/voice_modulation_sources.hpp": "Pulp::audio",
     "pulp/audio/voice_runtime_facade.hpp": "Pulp::audio",
     "pulp/audio/wavetable_authoring.hpp": "Pulp::audio",
     "pulp/midi/arpeggiator.hpp": "Pulp::midi",

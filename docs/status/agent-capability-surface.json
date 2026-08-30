@@ -37,27 +37,27 @@
     }
   ],
   "counts": {
-    "public_headers": 452,
-    "reviewed_headers": 160,
+    "public_headers": 446,
+    "reviewed_headers": 154,
     "legacy_unreviewed_headers": 292,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 106,
+      "capability_entrypoint": 101,
       "capability_support": 39,
-      "infrastructure": 13,
+      "infrastructure": 12,
       "legacy_unreviewed": 292,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
-        "public_headers": 112,
-        "reviewed_headers": 8,
+        "public_headers": 113,
+        "reviewed_headers": 9,
         "legacy_unreviewed_headers": 104,
         "unsupported_headers": 0
       },
       "midi": {
-        "public_headers": 50,
-        "reviewed_headers": 21,
+        "public_headers": 43,
+        "reviewed_headers": 14,
         "legacy_unreviewed_headers": 29,
         "unsupported_headers": 0
       },
@@ -1025,6 +1025,17 @@
     },
     {
       "domain": "audio",
+      "source": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
+      "fingerprint": "sha256:b5c08f132df70323065b1d7c1d9109ddfc95ed8baeacb0c595fd5eb21771dbe8",
+      "include": "pulp/audio/voice_modulation_sources.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "audio.voice-modulation-sources"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "audio",
       "source": "core/audio/include/pulp/audio/voice_runtime_facade.hpp",
       "fingerprint": "sha256:4237f8cdf64ed1a28330822f41ea8d3fc5a42d955a5b964a54ba24106a7ceab6",
       "include": "pulp/audio/voice_runtime_facade.hpp",
@@ -1176,17 +1187,6 @@
     },
     {
       "domain": "midi",
-      "source": "core/midi/include/pulp/midi/chord_memory.hpp",
-      "fingerprint": "sha256:3bce0cc159d68496cf145ad1fb8cd26415f0c7ba18446d5d3618d6cd7bede81b",
-      "include": "pulp/midi/chord_memory.hpp",
-      "disposition": "capability_entrypoint",
-      "capability_keys": [
-        "midi.chord-memory"
-      ],
-      "rationale": "Public binding for a curated consumer capability."
-    },
-    {
-      "domain": "midi",
       "source": "core/midi/include/pulp/midi/controller_utility_kernels.hpp",
       "fingerprint": "sha256:4e28f94ab7787db493e743d3f8cf65d1d6c0015dfd15e9425f6006dfe1d9c711",
       "include": "pulp/midi/controller_utility_kernels.hpp",
@@ -1210,15 +1210,6 @@
     },
     {
       "domain": "midi",
-      "source": "core/midi/include/pulp/midi/detail/note_schedule.hpp",
-      "fingerprint": "sha256:2c3079340fe726d87e09042f023fb307aa7c0a0a9a25719cb1d4d0b16eb51e23",
-      "include": "pulp/midi/detail/note_schedule.hpp",
-      "disposition": "infrastructure",
-      "capability_keys": [],
-      "rationale": "Private tick-to-sample projection and scheduled-note queue shared by the note repeat and note delay kernels; it binds no capability of its own."
-    },
-    {
-      "domain": "midi",
       "source": "core/midi/include/pulp/midi/device.hpp",
       "fingerprint": "sha256:e09c197d2137be61c745d5f2db9c6266bbac7e8f9b757fcf386daae5881be45d",
       "include": "pulp/midi/device.hpp",
@@ -1228,34 +1219,12 @@
     },
     {
       "domain": "midi",
-      "source": "core/midi/include/pulp/midi/humanize.hpp",
-      "fingerprint": "sha256:eb1b342c0dc35280d028d649d911262c8f2249f3c35d64badc58ad966408c02e",
-      "include": "pulp/midi/humanize.hpp",
-      "disposition": "capability_entrypoint",
-      "capability_keys": [
-        "midi.humanize"
-      ],
-      "rationale": "Public binding for a curated consumer capability."
-    },
-    {
-      "domain": "midi",
       "source": "core/midi/include/pulp/midi/keyboard_state.hpp",
       "fingerprint": "sha256:bec4e61084cecc823ee01cd0abb9b1a679d483d68bee499f319f142c07c6b76b",
       "include": "pulp/midi/keyboard_state.hpp",
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
-    },
-    {
-      "domain": "midi",
-      "source": "core/midi/include/pulp/midi/latch.hpp",
-      "fingerprint": "sha256:b690accb10c2278d4fe41bd1f886f831a9f9aacd11cf78a5a7d7e1bc76266cb6",
-      "include": "pulp/midi/latch.hpp",
-      "disposition": "capability_entrypoint",
-      "capability_keys": [
-        "midi.latch"
-      ],
-      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "midi",
@@ -1391,28 +1360,6 @@
     },
     {
       "domain": "midi",
-      "source": "core/midi/include/pulp/midi/note_delay.hpp",
-      "fingerprint": "sha256:c3cdd5ca2c4b7d82efbb46f2740d42a4987796403cdb950ba2c96dc9bca3c731",
-      "include": "pulp/midi/note_delay.hpp",
-      "disposition": "capability_entrypoint",
-      "capability_keys": [
-        "midi.note-delay"
-      ],
-      "rationale": "Public binding for a curated consumer capability."
-    },
-    {
-      "domain": "midi",
-      "source": "core/midi/include/pulp/midi/note_repeat.hpp",
-      "fingerprint": "sha256:8c00626a60e2ac1813d8ac117f0ce13e0931040107c8383b9265038d932ef763",
-      "include": "pulp/midi/note_repeat.hpp",
-      "disposition": "capability_entrypoint",
-      "capability_keys": [
-        "midi.note-repeat"
-      ],
-      "rationale": "Public binding for a curated consumer capability."
-    },
-    {
-      "domain": "midi",
       "source": "core/midi/include/pulp/midi/note_utility_kernels.hpp",
       "fingerprint": "sha256:6b4005421eb2f5f98b88765883154451e800a76188a8608887755201f9cc21e6",
       "include": "pulp/midi/note_utility_kernels.hpp",
@@ -1480,17 +1427,6 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "midi.linear-step-player"
-      ],
-      "rationale": "Public binding for a curated consumer capability."
-    },
-    {
-      "domain": "midi",
-      "source": "core/midi/include/pulp/midi/strum.hpp",
-      "fingerprint": "sha256:bb5df51eb73e754c6493881a22103f6a43ba0957982e590f606052134f5dda75",
-      "include": "pulp/midi/strum.hpp",
-      "disposition": "capability_entrypoint",
-      "capability_keys": [
-        "midi.strum-spread"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },
@@ -1603,19 +1539,13 @@
       "capability_keys": [
         "midi.arpeggiator",
         "midi.channel-routing",
-        "midi.chord-memory",
         "midi.controller-mapping",
-        "midi.humanize",
         "midi.keyboard-split",
-        "midi.latch",
         "midi.linear-step-player",
         "midi.monophonic-note-selection",
-        "midi.note-delay",
         "midi.note-length-shaping",
         "midi.note-range-filtering",
-        "midi.note-repeat",
-        "midi.scale-aware-mpe-pitch",
-        "midi.strum-spread"
+        "midi.scale-aware-mpe-pitch"
       ],
       "rationale": "Shared overflow, ordering, transport, reporting, and fail-closed emission vocabulary supports every MIDI utility kernel."
     },

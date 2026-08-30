@@ -222,6 +222,50 @@ ImportPngImage synthetic_fader_panel() {
     return panel;
 }
 
+ImportPngImage hollow_fader_static_panel() {
+    ImportPngImage panel;
+    panel.width = kPanelWidth;
+    panel.height = kPanelHeight;
+    panel.rgba.assign(static_cast<std::size_t>(panel.width) * panel.height * 4, 0);
+    for (int y = 0; y < panel.height; ++y) {
+        for (int x = 0; x < panel.width; ++x) {
+            auto* p = pixel_at(panel, x, y);
+            p[0] = 18;
+            p[1] = 22;
+            p[2] = 28;
+            p[3] = 255;
+        }
+    }
+    return panel;
+}
+
+ImportPngImage hollow_fader_panel() {
+    auto panel = hollow_fader_static_panel();
+    for (int y = 0; y < kFaderIndicatorHeight; ++y) {
+        for (int x = 0; x < kFaderIndicatorWidth; ++x) {
+            const int edge_distance = std::min(
+                {x, y, kFaderIndicatorWidth - 1 - x,
+                 kFaderIndicatorHeight - 1 - y});
+            auto* p = pixel_at(panel, kFaderIndicatorLeft + x,
+                               kFaderIndicatorTop + y);
+            if (edge_distance == 4) {
+                // This opaque near-background fringe is the first pixel an
+                // outward-from-centre probe encounters. It must not become the
+                // durable live-thumb colour.
+                p[0] = 54;
+                p[1] = 61;
+                p[2] = 68;
+            } else if (edge_distance == 2 || edge_distance == 3) {
+                // The authored two-pixel outline is the readable moving art.
+                p[0] = 40;
+                p[1] = 220;
+                p[2] = 240;
+            }
+        }
+    }
+    return panel;
+}
+
 IRNode declared_fader() {
     IRNode fader;
     fader.type = "frame";
@@ -657,6 +701,11 @@ TEST_CASE("a declared fader hoists its authored thumb and keeps live chrome",
           std::to_string(kFaderIndicatorHeight));
     CHECK(std::stof(node.attributes.at("fader_indicator_cross")) ==
           Catch::Approx(0.4f));
+    // The exact PNG is used during immediate import. This durable authored
+    // colour keeps the live thumb legible when a self-contained faithful-
+    // capture project later removes importer-scratch sprite paths.
+    REQUIRE(node.attributes.count("fader_ind_color") == 1);
+    CHECK(node.attributes.at("fader_ind_color") == "#f4e7b4ff");
     CHECK(node.attributes.count("browser_sprite_crop_px") == 0);
     CHECK(node.attributes.count("browser_sprite_indicator_px") == 0);
 
@@ -784,6 +833,49 @@ TEST_CASE("a declared fader hoists its authored thumb and keeps live chrome",
     CHECK(web_js.find("setOrientation") != std::string::npos);
     CHECK(web_js.find("'horizontal'") != std::string::npos);
     CHECK(web_js.find("maliciousCall") == std::string::npos);
+}
+
+TEST_CASE("a hollow fader thumb preserves its authored outline color",
+          "[import-design][browser-capture][fader][indicator][color]") {
+    TempDirectory temp;
+    const auto live = hollow_fader_panel();
+    const auto static_panel = hollow_fader_static_panel();
+    const auto capture = temp.root / "browser.png";
+    const auto static_capture = temp.root / "browser-static.png";
+    write_png(capture, live);
+    write_png(static_capture, static_panel);
+
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = static_cast<float>(kPanelWidth) * 0.5f;
+    ir.root.style.height = static_cast<float>(kPanelHeight) * 0.5f;
+    auto fader = declared_fader();
+    // Proves the durable per-control result is not the panel-wide fallback.
+    fader.attributes["design_indicator"] = "#ff0000";
+    ir.root.children.push_back(std::move(fader));
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error, static_capture) == 1);
+    CHECK(error.empty());
+
+    const auto& node = ir.root.children.front();
+    REQUIRE(node.attributes.count("fader_ind_color") == 1);
+    CHECK(node.attributes.at("fader_ind_color") == "#28dcf0ff");
+    CHECK(node.attributes.at("fader_ind_color") !=
+          node.attributes.at("design_indicator"));
+
+    const auto indicator =
+        read_png(node.attributes.at("fader_indicator_asset_path"));
+    REQUIRE(indicator.valid());
+    // The test is genuinely hollow and the nearer blend remains present, so a
+    // centre sample or first-opaque outward probe would return the wrong color.
+    CHECK(pixel_at(indicator, indicator.width / 2,
+                   indicator.height / 2)[3] == 0);
+    CHECK(pixel_at(indicator, indicator.width / 2, 4)[0] == 54);
+    CHECK(pixel_at(indicator, indicator.width / 2, 3)[0] == 40);
 }
 
 TEST_CASE("a static browser fader keeps authored track and ticks while its thumb moves",

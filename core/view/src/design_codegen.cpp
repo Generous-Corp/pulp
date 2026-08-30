@@ -13,6 +13,7 @@
 // Definitions only; declarations stay in pulp/view/design_import.hpp.
 
 #include <pulp/view/css_effect_parse.hpp>
+#include <pulp/view/css_gradient.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_capture_lowering.hpp>
 #include <pulp/view/design_fidelity.hpp>
@@ -127,6 +128,29 @@ static bool is_collapsed_selector(const IRNode& node) {
                       [](unsigned char lhs, unsigned char rhs) {
                           return std::tolower(lhs) == std::tolower(rhs);
                       });
+}
+
+// Browser capture persists a per-control authored indicator colour separately
+// from the sprite paths that supplied it. Those paths may be pruned when the
+// project is made self-contained, so codegen must not use their presence as
+// provenance. The per-control value wins over the panel-wide design fallback;
+// an empty result deliberately leaves the bridge/widget theme in authority.
+struct IndicatorColorSelection {
+    std::string color;
+    bool authored = false;
+};
+
+static IndicatorColorSelection select_indicator_color(
+    const IRNode& node, const char* per_control_key) {
+    if (const auto it = node.attributes.find(per_control_key);
+        it != node.attributes.end() &&
+        css_color_syntax_supported(it->second))
+        return {it->second, true};
+    if (const auto it = node.attributes.find("design_indicator");
+        it != node.attributes.end() &&
+        css_color_syntax_supported(it->second))
+        return {it->second, false};
+    return {};
 }
 
 static bool captured_line_decision_usable(const IRNode& node) {
@@ -509,15 +533,51 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                        << (attr_bool(node, "fader_body_includes_static_track")
                                ? "true" : "false")
                        << ");\n";
-                    const auto color = [&](const char* key) {
-                        const auto it = node.attributes.find(key);
-                        return it != node.attributes.end()
-                            ? js_single_quote_escape(it->second) : std::string();
-                    };
+                }
+            }
+
+            // This authored skin is durable even when the captured body/thumb
+            // asset paths were pruned. `fader_ind_color` is control-specific
+            // provenance and therefore wins over the panel-wide
+            // `design_indicator`; if both are absent the empty thumb argument
+            // leaves the widget theme untouched.
+            if (node.audio_widget == AudioWidgetType::fader) {
+                const auto color = [&](const char* key) {
+                    const auto it = node.attributes.find(key);
+                    return it != node.attributes.end()
+                        ? js_single_quote_escape(it->second) : std::string();
+                };
+                const auto indicator = select_indicator_color(
+                    node, "fader_ind_color");
+                if (!color("design_track").empty() ||
+                    !color("design_accent").empty() || !indicator.color.empty()) {
                     ss << ind << "setFaderSkin(" << var << "._id, '"
                        << color("design_track") << "', '"
                        << color("design_accent") << "', '"
-                       << color("design_indicator") << "', '');\n";
+                       << js_single_quote_escape(indicator.color)
+                       << "', '', 0, 0, 0, "
+                       << (indicator.authored ? "true" : "false") << ");\n";
+                }
+            }
+
+            // Pointer geometry and its durable authored colour are independent
+            // of the sprite body. This keeps browser-captured knobs live after
+            // self-contained persistence prunes their importer-time asset path.
+            if (node.audio_widget == AudioWidgetType::knob) {
+                const double r_out = finite_numeric_attribute(
+                    node, "knob_ind_r_out", 0.0);
+                if (r_out > 0.0) {
+                    const auto indicator = select_indicator_color(
+                        node, "knob_ind_color");
+                    ss << ind << "setKnobCapturedIndicator(" << var << "._id, "
+                       << finite_numeric_attribute(node, "knob_ind_r_in", 0.0)
+                       << ", " << r_out << ", "
+                       << finite_numeric_attribute(node, "knob_ind_w", 0.0)
+                       << ", '" << js_single_quote_escape(indicator.color)
+                       << "', "
+                       << finite_numeric_attribute(node, "knob_ind_phase_rad", 0.0)
+                       << ", " << (indicator.authored ? "true" : "false")
+                       << ");\n";
                 }
             }
 
@@ -1546,23 +1606,27 @@ static void emit_js_audio_widget(const NativeEmit& e) {
                        << kattr_f("art_core_x") << ", " << kattr_f("art_core_y")
                        << ", " << cw << ", " << ch << ");\n";
                 }
-                // The design's OWN pointer, when the importer recovered it —
-                // fractions of the disc half-extent, the same data the native
-                // materializer forwards. Without this the scripted path draws
-                // the generic notch over the design's disc while the
-                // materialized path draws the design's pointer: one import,
-                // two different knobs.
-                if (auto c = node.attributes.find("knob_ind_color");
-                    node.attributes.count("knob_ind_r_out") != 0) {
-                    ss << ind << "setKnobCapturedIndicator('" << id << "', "
-                       << kattr_f("knob_ind_r_in") << ", "
-                       << kattr_f("knob_ind_r_out") << ", "
-                       << kattr_f("knob_ind_w") << ", '"
-                       << js_single_quote_escape(
-                              c != node.attributes.end() ? c->second : "")
-                       << "', " << kattr_f("knob_ind_phase_rad") << ");\n";
-                }
             }
+        }
+
+        // The design's OWN pointer, when the importer recovered it — fractions
+        // of the disc half-extent, the same data the native materializer
+        // forwards. Its durable colour/geometry do not depend on the sprite
+        // path surviving persistence.
+        const double knob_r_out = finite_numeric_attribute(
+            node, "knob_ind_r_out", 0.0);
+        if (knob_r_out > 0.0) {
+            const auto indicator = select_indicator_color(
+                node, "knob_ind_color");
+            ss << ind << "setKnobCapturedIndicator('" << id << "', "
+               << finite_numeric_attribute(node, "knob_ind_r_in", 0.0)
+               << ", " << knob_r_out << ", "
+               << finite_numeric_attribute(node, "knob_ind_w", 0.0)
+               << ", '" << js_single_quote_escape(indicator.color)
+               << "', "
+               << finite_numeric_attribute(node, "knob_ind_phase_rad", 0.0)
+               << ", " << (indicator.authored ? "true" : "false")
+               << ");\n";
         }
         emit_style(id);
         // Per-knob stroke color from child ellipse (used by minimal paint path)
@@ -1660,15 +1724,25 @@ static void emit_js_audio_widget(const NativeEmit& e) {
                    << (attr_bool(node, "fader_body_includes_static_track")
                            ? "true" : "false")
                    << ");\n";
-                const auto color = [&](const char* key) {
-                    const auto it = node.attributes.find(key);
-                    return it != node.attributes.end()
-                        ? js_single_quote_escape(it->second) : std::string();
-                };
+            }
+        }
+        // Panel/design colours are fallbacks. Emit them before pixel-derived
+        // per-control skin and mark the thumb colour unauthored so a live
+        // control.thumb theme remains in authority.
+        {
+            auto attr = [&](const char* k) -> std::string {
+                auto it = node.attributes.find(k);
+                return it != node.attributes.end() ? it->second : std::string();
+            };
+            const std::string track = attr("design_track");
+            const std::string fill = attr("design_accent");
+            const std::string thumb = attr("design_indicator");
+            if (!track.empty() || !fill.empty() || !thumb.empty()) {
                 ss << ind << "setFaderSkin('" << id << "', '"
-                   << color("design_track") << "', '"
-                   << color("design_accent") << "', '"
-                   << color("design_indicator") << "', '');\n";
+                   << js_single_quote_escape(track) << "', '"
+                   << js_single_quote_escape(fill) << "', '"
+                   << js_single_quote_escape(thumb)
+                   << "', '', 0, 0, 0, false);\n";
             }
         }
         // Value-driven skin derived from the captured asset. The importer
@@ -1687,7 +1761,8 @@ static void emit_js_audio_widget(const NativeEmit& e) {
             std::string tbc = attr("skin_thumb_border_color");
             if (!tc.empty() || !fc.empty() || !thc.empty() || !tbc.empty()) {
                 ss << ind << "setFaderSkin('" << id << "', '"
-                   << tc << "', '" << fc << "', '" << thc << "', '" << tbc << "');\n";
+                   << tc << "', '" << fc << "', '" << thc << "', '" << tbc
+                   << "', 0, 0, 0, true);\n";
             }
             // Derived thin track width (logical px). Drives the fader's
             // track/fill thickness so it draws the narrow captured line
@@ -1703,6 +1778,15 @@ static void emit_js_audio_widget(const NativeEmit& e) {
             if (!tbo.empty()) {
                 ss << ind << "setFaderTrackBorder('" << id << "', '" << tbo << "');\n";
             }
+        }
+        // The isolated thumb is genuine per-control authored evidence. Apply
+        // it last so it wins over both panel fallback and sampled per-control skin,
+        // independently of captured-art path survival.
+        if (const auto thumb = node.attributes.find("fader_ind_color");
+            thumb != node.attributes.end() && !thumb->second.empty()) {
+            ss << ind << "setFaderSkin('" << id << "', '', '', '"
+               << js_single_quote_escape(thumb->second)
+               << "', '', 0, 0, 0, true);\n";
         }
         emit_style(id);
         if (!label_text.empty()) {
