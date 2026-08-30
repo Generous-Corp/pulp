@@ -9,7 +9,10 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <limits>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -551,6 +554,149 @@ MemberWrite write_member(const DirectoryHandle& root, const fs::path& root_path,
 #endif
 }
 
+// ── Member reading ──────────────────────────────────────────────────────
+
+enum class MemberRead : std::uint8_t { ok, size_mismatch, failed };
+
+/// Read one staged member, walking the path components relative to the pinned
+/// root and refusing to follow a link at any hop, exactly as writing one does.
+///
+/// The size on disk is compared against the row's declared size *before* the
+/// bytes are copied out, so the allocation is bounded by what the owner-private
+/// tree actually holds rather than by a number a caller-supplied row asserted.
+/// A disagreement is reported rather than repaired: a member that is not the
+/// length its row declares is not the member that was verified as it landed.
+MemberRead read_member(const DirectoryHandle& root, const fs::path& root_path,
+                       const std::vector<std::string>& components, std::uint64_t declared_bytes,
+                       std::vector<std::uint8_t>& bytes, std::uint64_t& found_bytes) {
+    bytes.clear();
+    found_bytes = 0;
+
+    const auto materialize = [&bytes](std::uint64_t size) {
+        if (size > static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)()))
+            return false;
+        try {
+            bytes.resize(static_cast<std::size_t>(size));
+        } catch (const std::bad_alloc&) {
+            // A member the machine cannot hold is a staging failure, not a
+            // silent short read: returning fewer bytes than the row declares
+            // would hand the caller a truncated file that looks complete.
+            return false;
+        }
+        return true;
+    };
+
+#if defined(_WIN32)
+    (void)root;
+    fs::path current = root_path;
+    for (std::size_t index = 0; index + 1 < components.size(); ++index) {
+        current /= path_from_utf8(components[index]);
+        const auto attributes = ::GetFileAttributesW(current.c_str());
+        // Nothing in this module creates a reparse point, so one standing on
+        // the path means the staged tree is not what this module built.
+        if (attributes == INVALID_FILE_ATTRIBUTES ||
+            (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+            (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+            return MemberRead::failed;
+    }
+    current /= path_from_utf8(components.back());
+    const auto handle = ::CreateFileW(current.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                      OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (handle == INVALID_HANDLE_VALUE)
+        return MemberRead::failed;
+    const auto finish = [handle](MemberRead outcome) noexcept {
+        ::CloseHandle(handle);
+        return outcome;
+    };
+
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (::GetFileInformationByHandle(handle, &info) == 0 ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        return finish(MemberRead::failed);
+
+    found_bytes = (static_cast<std::uint64_t>(info.nFileSizeHigh) << 32) |
+                  static_cast<std::uint64_t>(info.nFileSizeLow);
+    if (found_bytes != declared_bytes)
+        return finish(MemberRead::size_mismatch);
+    if (!materialize(found_bytes))
+        return finish(MemberRead::failed);
+
+    std::size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto request = static_cast<DWORD>(
+            (std::min)(bytes.size() - offset, static_cast<std::size_t>(0x7ffff000u)));
+        DWORD read = 0;
+        if (::ReadFile(handle, bytes.data() + offset, request, &read, nullptr) == 0 || read == 0)
+            return finish(MemberRead::failed);
+        offset += read;
+    }
+    return finish(MemberRead::ok);
+#else
+    (void)root_path;
+    // Every hop is opened relative to the pinned root with O_NOFOLLOW, so no
+    // component of the path can redirect the read through a symlink.
+    const int root_descriptor = root.descriptor();
+    int current = root_descriptor;
+    const auto release = [root_descriptor](int descriptor) noexcept {
+        if (descriptor != root_descriptor && descriptor >= 0)
+            ::close(descriptor);
+    };
+    for (std::size_t index = 0; index + 1 < components.size(); ++index) {
+        const auto next = ::openat(current, components[index].c_str(), O_RDONLY | O_CLOEXEC
+#ifdef O_DIRECTORY
+                                                                          | O_DIRECTORY
+#endif
+#ifdef O_NOFOLLOW
+                                                                          | O_NOFOLLOW
+#endif
+        );
+        release(current);
+        if (next < 0)
+            return MemberRead::failed;
+        current = next;
+    }
+    const auto descriptor = ::openat(current, components.back().c_str(), O_RDONLY | O_CLOEXEC
+#ifdef O_NOFOLLOW
+                                                                             | O_NOFOLLOW
+#endif
+    );
+    release(current);
+    if (descriptor < 0)
+        return MemberRead::failed;
+    const auto finish = [descriptor](MemberRead outcome) noexcept {
+        ::close(descriptor);
+        return outcome;
+    };
+
+    struct stat status{};
+    // Only a plain file. A directory, a device, or a fifo standing where a
+    // member belongs means the tree is not the one extraction wrote.
+    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode))
+        return finish(MemberRead::failed);
+
+    found_bytes = static_cast<std::uint64_t>(status.st_size);
+    if (found_bytes != declared_bytes)
+        return finish(MemberRead::size_mismatch);
+    if (!materialize(found_bytes))
+        return finish(MemberRead::failed);
+
+    std::size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto count = ::read(descriptor, bytes.data() + offset, bytes.size() - offset);
+        if (count < 0 && errno == EINTR)
+            continue;
+        // A short read before the declared end means the file changed under
+        // the reader; the partial buffer is discarded rather than returned.
+        if (count <= 0)
+            return finish(MemberRead::failed);
+        offset += static_cast<std::size_t>(count);
+    }
+    return finish(MemberRead::ok);
+#endif
+}
+
 }  // namespace
 
 // ── StagingArea ─────────────────────────────────────────────────────────
@@ -814,6 +960,51 @@ runtime::Result<void, CapsuleError> extract_declared(const CapsuleArchive& archi
             return fail(CapsuleStatus::staging_failed, entry.path);
     }
     return {};
+}
+
+runtime::Result<std::vector<std::uint8_t>, CapsuleError>
+read_staged_member(const StagingArea& staging, const FileEntry& entry) {
+    using Result = runtime::Result<std::vector<std::uint8_t>, CapsuleError>;
+    const auto reject = [](CapsuleStatus status, std::string subject, std::string required = {},
+                           std::string found = {}) {
+        return Result(runtime::Err(
+            CapsuleError{status, std::move(subject), std::move(required), std::move(found)}));
+    };
+
+    const auto& root = staging.root();
+    if (root.empty())
+        return reject(CapsuleStatus::staging_failed, {});
+    auto root_handle = DirectoryHandle::open(root);
+    if (!root_handle.valid() || !root_handle.still_named_by(root))
+        return reject(CapsuleStatus::staging_failed, path_to_utf8(root));
+
+    // The row's path faces the full grammar again, for the same reason
+    // extraction re-admits it: this is a public entry point taking an arbitrary
+    // FileEntry, so it cannot assume a caller ran preview or extraction first.
+    // The join happens here, inside the layer that owns the admission rules,
+    // rather than in every consumer that holds a staging root.
+    auto admitted = admit_member_path(entry.path);
+    if (!admitted) return Result(runtime::Err(std::move(admitted).error()));
+    const std::string path = std::move(admitted).value();
+
+    std::vector<std::string> components;
+    if (!split_contained_path(path, components))
+        return reject(CapsuleStatus::path_rejected, path);
+
+    std::vector<std::uint8_t> bytes;
+    std::uint64_t found_bytes = 0;
+    const auto outcome =
+        read_member(root_handle, root, components, entry.bytes, bytes, found_bytes);
+    if (outcome == MemberRead::size_mismatch)
+        return reject(CapsuleStatus::staging_failed, path, std::to_string(entry.bytes),
+                      std::to_string(found_bytes));
+    if (outcome != MemberRead::ok)
+        return reject(CapsuleStatus::staging_failed, path);
+
+    if (!root_handle.still_named_by(root))
+        return reject(CapsuleStatus::staging_failed, path_to_utf8(root));
+
+    return Result(runtime::Ok(std::move(bytes)));
 }
 
 }  // namespace pulp::authoring_capsule

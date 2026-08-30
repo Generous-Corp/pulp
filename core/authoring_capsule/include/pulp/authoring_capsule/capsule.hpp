@@ -37,6 +37,11 @@ struct AdmissionOptions {
 /// Steps 1-4 of the import state machine: bounded manifest read, structural
 /// and closure validation, optional trust envelope, and a non-executing
 /// preview. Nothing is written outside the process.
+///
+/// This is also where the profile's `required_roles()` is applied — a missing
+/// role surfaces as `missing_required_role` in `unmet` with an `unsupported`
+/// verdict, which `admit_to_staging()` then refuses on. A consumer does not
+/// repeat that check.
 runtime::Result<CapsulePreview, CapsuleError> preview_capsule(const CapsuleArchive& archive,
                                                               const ProfileRegistry& registry,
                                                               const AdmissionOptions& options);
@@ -67,6 +72,25 @@ struct ExportRequest {
 /// Fill in the closure — sorted `files`, digests, sizes, and `revision_id` —
 /// and write one deterministic archive to a destination that must not exist.
 /// Repeating this for unchanged content reproduces the file byte for byte.
+///
+/// What it validates, exactly. Each item's path is re-admitted and may not
+/// claim `capsule.json`; each digest and size is *measured* from the bytes
+/// that travel rather than taken from what the caller declared; the item set
+/// is checked for case and confusable collisions; and the finished manifest is
+/// read back through `parse_manifest()` before the archive is created. That
+/// last step is what applies the structural rules — a `files[]` row must
+/// declare `source_availability: included`, a dependency's `provider` must be
+/// `https://` or `capsule-library:`, `format`/`profile`/`product`/
+/// `project_id` must be present — to a `Manifest` that was assembled in memory
+/// and never parsed. `to_canonical_json()` alone applies none of them, so
+/// without the read-back a caller passing its own dependency rows straight
+/// through could mint a capsule this same code refuses to read. The refusal
+/// carries `parse_manifest()`'s status and JSON-pointer subject, and nothing
+/// is written.
+///
+/// `dependencies[]` is otherwise carried through as given: this layer resolves
+/// nothing, contacts no provider, and cannot confirm that a dependency's
+/// digest names the bytes a recipient will eventually fetch.
 runtime::Result<std::uint64_t, CapsuleError>
 export_capsule(ExportRequest request, const std::filesystem::path& destination,
                const CapsuleLimits& limits = kCapsuleLimitsV1);

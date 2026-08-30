@@ -39,7 +39,7 @@ struct DependencySummary {
     std::string id;
     std::string provider;
     std::string license_expression;
-    Redistribution redistribution = Redistribution::unknown;
+    Redistribution redistribution;
     bool required = true;
     bool resolvable_locally = false;
 };
@@ -52,8 +52,14 @@ struct RightsSummary {
     bool any_restricted_redistribution = false;
     bool attribution_required = false;
     std::vector<std::string> license_expressions;
-    /// Components that block a self-contained redistributable claim.
-    std::vector<std::string> blocking_component_paths;
+    /// Components that block a self-contained redistributable claim, each
+    /// named by its own kind of identity: an archive path for a `files[]`
+    /// row, the content identity for a `dependencies[]` row. A path-only list
+    /// could not name a dependency, so for any profile whose blockers are
+    /// dependencies it would be empty exactly when it had the most to say.
+    /// Sorted and deduplicated, so a difference between two previews is a
+    /// difference in the capsules.
+    std::vector<ComponentRef> blocking_components;
 };
 
 struct CapsulePreview {

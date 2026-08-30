@@ -36,8 +36,21 @@ public:
     /// the user learns which update they need.
     virtual std::uint32_t max_profile_version() const noexcept = 0;
 
-    /// Roles this profile requires. A required role the reader does not know
-    /// fails closed.
+    /// Roles this profile requires.
+    ///
+    /// The substrate enforces this; a consumer must not repeat the check.
+    /// `preview_capsule()` calls this and reports every role absent from the
+    /// manifest's `files[]` and `dependencies[]` as `missing_required_role`,
+    /// which lands as `CompatibilityVerdict::unsupported` in the preview
+    /// rather than as an immediate error — the preview exists to tell a person
+    /// what is missing. `admit_to_staging()` is where that verdict bites: it
+    /// refuses before extracting anything, so nothing reaches
+    /// `validate_staged()` with a required role missing.
+    ///
+    /// Only the missing direction is checked. A role this list does not name
+    /// is not rejected: unknown optional metadata must round-trip, and which
+    /// unrecognized roles matter is this profile's own judgment, in
+    /// `validate_staged()`.
     virtual std::vector<std::string> required_roles() const = 0;
 
     /// Capabilities this profile can satisfy locally.

@@ -137,7 +137,7 @@ Row fields, with the policy fields nested under a single `policy` object:
 | `policy.source_availability` | `included`, `external`, `local-only`, `omitted` |
 | `policy.editability` | `editable`, `opaque` |
 | `policy.disclosure` | `public`, `recipient-scoped`, `private`, `redacted`, `not_recorded` |
-| `policy.redistribution` | `allowed`, `restricted`, `unknown` |
+| `policy.redistribution` | `allowed`, `restricted`, `unknown` (defaults to `unknown`) |
 | `policy.license_expression` | SPDX expression or `LicenseRef-…` |
 | `policy.license_notice_sha256` | digest of the included notice, when one is required |
 | `policy.creator`, `policy.source_uri`, `policy.attribution_required` | provenance facts |
@@ -152,6 +152,26 @@ component nothing can ever resolve. Anything not in the archive is a
 `unknown` never becomes permissive by omission or by projection. A hash
 establishes identity and integrity; it grants no right to copy, remix, publish,
 or sell.
+
+The substrate enforces that in the type rather than stating it in a comment.
+`Redistribution` default-, value-, and zero-initializes to `unknown`, and the
+granted state is reachable only by naming `Redistribution::granted()`, so a row
+cannot acquire a grant from an aggregate initializer, a forgotten field, or an
+enumerator that happens to sit at zero. The wire tokens are unchanged:
+`allowed`, `restricted`, `unknown`. The rule exists because a grant is a claim
+about someone else's work, and a permissive value that costs nothing to reach
+is the one a writer reaches for without deciding anything.
+
+### Rights facts a preview reports
+
+A preview reports which components block a self-contained redistributable
+claim. A blocker is named by a typed reference: kind `file` carrying the
+archive path, or kind `dependency` carrying the dependency's `id`. The two row
+kinds are identified in different namespaces and a dependency has no path, so a
+path-only list would be structurally empty for a profile whose components are
+entirely dependencies, which is the case where the list has the most to say.
+The list is sorted by kind then identifier and deduplicated, so two previews of
+the same capsule agree.
 
 ## Canonicalization and revision identity
 
@@ -213,15 +233,58 @@ they are the same project and `parent_revision` records the lineage.
 
 ## Canonical PCM
 
-A capsule embeds audio in exactly one portable runtime representation:
-interleaved little-endian IEEE float32, one or two channels, an integer source
-sample rate in `[8000, 192000]`, finite samples only, and an exact frame count.
-The digest covers the canonical PCM bytes together with the rate, channel
-count, and frame count.
+A capsule embeds audio in exactly one portable runtime representation: a
+self-describing member holding interleaved little-endian IEEE float32, one or
+two channels, an integer source sample rate in `[8000, 192000]`, finite
+samples only, and an exact frame count. The member's byte layout is frozen —
+every audio member's identity is the SHA-256 of exactly these bytes:
 
-Importers decode allowed source WAV PCM16/PCM24/PCM32/float32 through one
-versioned decoder. Any other codec or channel layout fails with
-`decode_unsupported` rather than being approximated. The user's original
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 8 | magic, the ASCII bytes `pulp.pcm` |
+| 8 | 4 | `decoder_version`, uint32 little-endian |
+| 12 | 4 | `channels`, uint32 little-endian, 1 or 2 |
+| 16 | 4 | `sample_rate`, uint32 little-endian, in `[8000, 192000]` |
+| 20 | 8 | `frame_count`, uint64 little-endian |
+| 28 | — | `frame_count × channels` interleaved little-endian IEEE-754 binary32 samples, exactly to the end of the member |
+
+The header travels inside the hashed bytes, which buys three properties at
+once. First, an audio row's `sha256` is simply the digest of the member bytes
+— the same uniform rule every other `files[]` row follows, so the exporter's
+generic member hashing and the importer's per-member extraction check need no
+audio-specific side channel. Second, the member decodes from its bytes alone:
+`from_canonical_bytes()` takes only the bytes, reads the geometry from the
+header, and enforces `decoder_version` itself, refusing a version it does not
+implement — the guard binds to the bytes rather than to metadata a consumer
+could drop or forge. Third, two renditions that differ only in declared rate
+have different identities, because the rate is inside the hash.
+`canonical_pcm_digest()` is defined as the SHA-256 of `to_canonical_bytes()`,
+bare lowercase hex. There is no separate media struct on the parse side: a
+successful parse returns the header's fields in the `CanonicalPcm` itself, and
+the decoder version is not surfaced because success proves it is the current
+one.
+
+Importers decode source audio through one versioned decoder
+(`decode_to_canonical()`), dispatching on the container's own magic, never on
+a filename. Admitted are exactly the formats that decode deterministically —
+identical bytes in, identical samples out, on every ISA:
+
+- **WAV** — RIFF/WAVE PCM16/PCM24/PCM32 and float32, including
+  `WAVE_FORMAT_EXTENSIBLE` wrapping those subformats;
+- **AIFF and AIFF-C** — big-endian PCM at 9–32 declared bits (sample points
+  are left-justified in whole bytes, so they decode exactly at the container
+  depth), plus AIFF-C `NONE`/`twos`, 16-bit `sowt`, and `fl32` float32;
+- **FLAC** — via dr_flac's bit-exact integer frame decode; the
+  integer-to-float conversion is this module's own power-of-two scaling, part
+  of `decoder_version`, so FLAC and WAV/AIFF sources of equal content produce
+  identical samples.
+
+MP3, OGG, and AAC are **not** admitted: their float decode kernels differ
+across ISAs or lose resolution, so the same file could mint different
+identities on different machines. They fail with `decode_unsupported` naming
+the format found, as do CAF, Ogg-wrapped FLAC, and any codec inside a
+supported container that is not listed above — a refusal the user can act on
+rather than an approximation they did not ask for. The user's original
 compressed or high-resolution file may travel as an optional source role; it is
 never required for playback on the receiving machine.
 
@@ -280,6 +343,57 @@ A consumer that wants full verification before consent can extract to a staging
 area it then discards. The substrate does not do that by default because it
 would make previewing a large capsule as expensive as importing one.
 
+### Reading a staged member
+
+A consumer never joins a manifest path to a staging root itself.
+`read_staged_member()` takes the staging area and the `files[]` row, re-admits
+the path under the same grammar extraction uses, performs the join inside this
+layer, opens every hop relative to the staging area's pinned root without
+following links, and refuses anything but a plain file.
+
+The join is the reason the reader exists. A path rule is only worth having
+where the path meets a real directory, and `staging_root / entry.path` written
+in a consumer is that decision made outside the module that owns it — losing
+NFC, depth, byte-budget, reserved-name, and containment checking in a place no
+substrate test can see.
+
+The size on disk must equal the row's declared `bytes`, checked before the
+bytes are copied out, so the read is bounded by what the private tree holds
+rather than by a number the row asserted. Content digests are not recomputed:
+step 6 verified each member before it was allowed to land, and staging is
+readable only by its owner. A caller wanting the stronger check hashes the
+returned bytes itself.
+
+## What export validates
+
+An exporter must not mint a capsule this same code would refuse to read, so
+`export_capsule()` holds itself to the reader's rules:
+
+- the format identifier and version must be the ones this build writes;
+- every item path is admitted under the member-path grammar and may not claim
+  `capsule.json`;
+- every `sha256` and `bytes` is **measured** from the bytes that travel, never
+  copied from what the caller declared;
+- the item set is checked for exact, case, and confusable collisions;
+- the finished manifest is read back through `parse_manifest()` before the
+  archive is created.
+
+That last step is what applies the structural rules to a manifest that was
+assembled in memory and never parsed. Canonical serialization applies none of
+them by design — it serializes what it is handed — so the files-must-be-included
+rule and the provider-shape rule would otherwise be parse-time only, and a
+caller passing its own `dependencies[]` rows straight through could publish a
+`file:///Users/someone/…` provider that leaks the exporting machine into a
+shared capsule. Reading its own output back is deliberately how the writer
+enforces them: a second copy of the rule set would be free to drift from the
+one the reader uses. A rejected export keeps `parse_manifest()`'s status and
+JSON-pointer subject and writes no file.
+
+Everything a dependency row asserts about bytes that are not in the archive is
+carried through as given. This layer resolves nothing and contacts no provider,
+so it cannot confirm that a dependency's digest names what a recipient will
+fetch.
+
 ## Error taxonomy
 
 Every admission failure resolves to exactly one of these; a generic failure is
@@ -287,8 +401,8 @@ a defect.
 
 `unsupported_format`, `unsupported_format_version`, `unsupported_profile`,
 `unsupported_profile_version`, `unsupported_product`,
-`unsupported_capability`, `runtime_floor_too_old`, `schema_migration_refused`,
-`closure_violation`, `digest_mismatch`, `unsafe_archive`,
+`unsupported_capability`, `missing_required_role`, `runtime_floor_too_old`,
+`schema_migration_refused`, `closure_violation`, `digest_mismatch`, `unsafe_archive`,
 `archive_budget_exceeded`, `path_rejected`, `path_collision`,
 `manifest_invalid`, `manifest_not_first`, `missing_dependency`,
 `dependency_digest_mismatch`, `dependency_provider_denied`,
@@ -369,3 +483,15 @@ version. The registry has no compile-time dependency on any consumer. An
 unregistered required profile yields `unsupported_profile` with the exact
 identifier and version the capsule asked for, so the product can name the
 download the user needs.
+
+The substrate enforces `required_roles()`; a profile publishes the vocabulary
+and this layer checks it without understanding what any role means. Preview
+reports each role absent from `files[]` and `dependencies[]` as
+`missing_required_role`, carried as an `unsupported` verdict rather than an
+immediate error — preview exists to say what is missing — and admission refuses
+on that verdict before extracting anything, so nothing reaches the profile's
+`validate_staged()` with a required role missing. A consumer that re-checks is
+duplicating a rule it does not own. Only the missing direction is checked: a
+role the profile does not list is not rejected, because unknown optional
+metadata must round-trip and deciding which unrecognized roles matter is the
+profile's own job.

@@ -62,9 +62,9 @@ constexpr std::array<std::pair<std::string_view, Disclosure>, 5> kDisclosureToke
 }};
 
 constexpr std::array<std::pair<std::string_view, Redistribution>, 3> kRedistributionTokens{{
-    {"allowed", Redistribution::allowed},
-    {"restricted", Redistribution::restricted},
-    {"unknown", Redistribution::unknown},
+    {"allowed", Redistribution::granted()},
+    {"restricted", Redistribution::restricted()},
+    {"unknown", Redistribution::unknown()},
 }};
 
 constexpr std::array<std::pair<std::string_view, RequiredFor>, 4> kRequiredForTokens{{

@@ -328,7 +328,7 @@ Manifest manifest_for(const std::vector<Payload>& payloads) {
         entry.bytes = payload.bytes.size();
         entry.media_type = "application/octet-stream";
         entry.policy.source_availability = ac::SourceAvailability::included;
-        entry.policy.redistribution = ac::Redistribution::allowed;
+        entry.policy.redistribution = ac::Redistribution::granted();
         manifest.files.push_back(std::move(entry));
     }
     return manifest;
@@ -1378,5 +1378,987 @@ TEST_CASE("publication never replaces what is already there",
         REQUIRE(written.is_err());
         CHECK(written.error().status == CapsuleStatus::path_rejected);
         CHECK(sandbox.snapshot() == before);
+    }
+}
+
+// ── Reader input shape ──────────────────────────────────────────────────
+//
+// Everything above this point hands `open_archive` a real file with hostile
+// *contents*. These cases hand it something that is not a readable regular
+// file at all, which is the branch that decides whether the reader ever gets
+// as far as parsing a header.
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+namespace {
+
+/// A capsule small enough that the reader's fixed overhead dominates every
+/// budget figure derived from it.
+std::vector<std::uint8_t> tiny_capsule() {
+    return well_formed_capsule({{"data/a.bin", noise(64, 201)}});
+}
+
+}  // namespace
+
+TEST_CASE("an input that is not a readable regular file is refused before any header",
+          "[authoring-capsule][hostile][reader]") {
+    Sandbox sandbox;
+
+    SECTION("control: a regular capsule file opens") {
+        const auto file = sandbox.write("control.forged", tiny_capsule());
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+        CHECK(archive->members().size() == 2);
+    }
+
+    SECTION("a directory") {
+        // A directory exists and is readable; what it is not is a file whose
+        // bytes could ever be a container.
+        auto archive = ac::open_archive(sandbox.root());
+        REQUIRE(archive.is_err());
+        CHECK(archive.error().status == CapsuleStatus::unsafe_archive);
+        CHECK(archive.error().subject == sandbox.root().string());
+        CHECK(archive.error().required == "regular file");
+    }
+
+    SECTION("a path that is not there") {
+        const auto absent = sandbox.root() / "absent.capsule";
+        auto archive = ac::open_archive(absent);
+        REQUIRE(archive.is_err());
+        CHECK(archive.error().status == CapsuleStatus::staging_failed);
+        CHECK(archive.error().subject == absent.string());
+    }
+
+#ifndef _WIN32
+    SECTION("a fifo") {
+        // The interesting non-regular case: a fifo has no size and reading it
+        // blocks, so a reader that only checked existence would hang on one.
+        const auto fifo = sandbox.root() / "pipe.capsule";
+        REQUIRE(::mkfifo(fifo.c_str(), 0600) == 0);
+        auto archive = ac::open_archive(fifo);
+        REQUIRE(archive.is_err());
+        CHECK(archive.error().status == CapsuleStatus::unsafe_archive);
+        CHECK(archive.error().required == "regular file");
+        std::error_code ignored;
+        fs::remove(fifo, ignored);
+    }
+
+    SECTION("a regular file the process cannot open") {
+        // Root bypasses the permission bits, so the case would silently become
+        // a success there and prove nothing.
+        if (::geteuid() == 0) {
+            SUCCEED("running as root: file permissions cannot deny a read");
+        } else {
+            const auto file = sandbox.write("unreadable.forged", tiny_capsule());
+            REQUIRE(::chmod(file.c_str(), 0) == 0);
+            auto archive = ac::open_archive(file);
+            // Restored before any assertion can abandon the section, so the
+            // sandbox stays removable.
+            REQUIRE(::chmod(file.c_str(), 0600) == 0);
+            REQUIRE(archive.is_err());
+            CHECK(archive.error().status == CapsuleStatus::staging_failed);
+            CHECK(archive.error().subject == file.string());
+
+            // The control that separates "the reader refused the open" from
+            // "the forge produced a container nothing can read": the same
+            // bytes, readable, are admitted.
+            CHECK(ac::open_archive(file));
+        }
+    }
+#endif
+
+    SECTION("an oversized container names the ceiling and the size it found") {
+        const auto bytes = tiny_capsule();
+        const auto file = sandbox.write("oversize.forged", bytes);
+
+        CapsuleLimits tight = kCapsuleLimitsV1;
+        tight.max_compressed_bytes = bytes.size() - 1;
+        auto refused = ac::open_archive(file, tight);
+        REQUIRE(refused.is_err());
+        CHECK(refused.error().status == CapsuleStatus::archive_budget_exceeded);
+        // Attributed to the file, with both numbers a person needs to act on.
+        CHECK(refused.error().subject == file.string());
+        CHECK(refused.error().required == std::to_string(bytes.size() - 1));
+        CHECK(refused.error().found == std::to_string(bytes.size()));
+
+        CapsuleLimits exact = kCapsuleLimitsV1;
+        exact.max_compressed_bytes = bytes.size();
+        CHECK(ac::open_archive(file, exact));
+    }
+}
+
+// ── Reading one member ──────────────────────────────────────────────────
+
+TEST_CASE("a member that inflates to fewer bytes than it declared is refused",
+          "[authoring-capsule][hostile][member]") {
+    // The over-run direction is covered above. The under-run is the same lie
+    // told the other way: the container's directory promises a size the stream
+    // does not deliver, so anything that trusted the header would hand back a
+    // short buffer while believing it was complete.
+    Sandbox sandbox;
+
+    const auto content = noise(8192, 202);
+    const std::vector<Payload> payloads{{"data/short.bin", content}};
+    auto manifest = manifest_for(payloads);
+    const auto manifest_bytes = seal(manifest);
+
+    SECTION("control: the honest declaration reads back in full") {
+        auto members = members_for(manifest_bytes, payloads);
+        members[1].deflate = true;
+        const auto file = sandbox.write("honest.forged", forge_zip(members));
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+        auto expanded = archive->read("data/short.bin");
+        REQUIRE(expanded);
+        CHECK((*expanded == content));
+    }
+
+    SECTION("declared twice the bytes the stream produces") {
+        auto members = members_for(manifest_bytes, payloads);
+        members[1].deflate = true;
+        members[1].declared_expanded = static_cast<std::uint32_t>(content.size() * 2);
+
+        const auto file = sandbox.write("short.forged", forge_zip(members));
+        auto archive = ac::open_archive(file);
+        // The container shape is legal — twice 8 KiB is inside every budget —
+        // so only expansion can catch this one.
+        REQUIRE(archive);
+        CHECK(archive->members()[1].expanded_bytes == content.size() * 2);
+
+        auto expanded = archive->read("data/short.bin");
+        REQUIRE(expanded.is_err());
+        CHECK(expanded.error().status == CapsuleStatus::unsafe_archive);
+        CHECK(expanded.error().subject == "data/short.bin");
+    }
+}
+
+TEST_CASE("reading a member the archive does not carry is a closure violation",
+          "[authoring-capsule][hostile][member]") {
+    Sandbox sandbox;
+    const std::vector<Payload> payloads{{"data/a.bin", noise(128, 203)}};
+    const auto file = sandbox.write("lookup.forged", well_formed_capsule(payloads));
+    auto archive = ac::open_archive(file);
+    REQUIRE(archive);
+
+    // The control: the lookup itself works, so a miss below is an absent
+    // member rather than a search that can never find anything.
+    auto present = archive->read("data/a.bin");
+    REQUIRE(present);
+    CHECK((*present == payloads.front().bytes));
+
+    // The manifest is reachable by name and yields the same bytes the bounded
+    // read already produced, rather than being inflated a second time.
+    auto manifest_member = archive->read(ac::kManifestPath);
+    REQUIRE(manifest_member);
+    const auto manifest_span = archive->manifest_bytes();
+    CHECK((*manifest_member ==
+           std::vector<std::uint8_t>(manifest_span.begin(), manifest_span.end())));
+
+    for (const auto* missing : {"data/b.bin", "DATA/A.BIN", "data/a.bin/x", ""}) {
+        INFO("missing member: " << missing);
+        auto absent = archive->read(missing);
+        REQUIRE(absent.is_err());
+        CHECK(absent.error().status == CapsuleStatus::closure_violation);
+        CHECK(absent.error().subject == missing);
+    }
+}
+
+TEST_CASE("a read that would exceed the working set is refused rather than served",
+          "[authoring-capsule][hostile][budget]") {
+    // The working set is what bounds admission of a capsule far larger than
+    // memory: the archive still opens, and it is the individual read that has
+    // to fail closed.
+    Sandbox sandbox;
+
+    constexpr std::size_t kBigBytes = 2u * 1024u * 1024u;
+    const auto big = noise(kBigBytes, 204);
+    const auto small = noise(128, 205);
+    const std::vector<Payload> payloads{{"data/big.bin", big}, {"data/small.bin", small}};
+    const auto file = sandbox.write("workingset.forged", well_formed_capsule(payloads));
+
+    CapsuleLimits tight = kCapsuleLimitsV1;
+    tight.max_working_set_bytes = 512u * 1024u;
+
+    SECTION("control: the same archive and member read under a generous budget") {
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+        auto expanded = archive->read("data/big.bin");
+        REQUIRE(expanded);
+        CHECK((*expanded == big));
+    }
+
+    SECTION("the oversized member is refused, the small one is still served") {
+        auto archive = ac::open_archive(file, tight);
+        // Opening stays inside the budget because only the manifest is
+        // expanded; if this failed the case below would be measuring the open,
+        // not the read.
+        REQUIRE(archive);
+
+        auto refused = archive->read("data/big.bin");
+        REQUIRE(refused.is_err());
+        CHECK(refused.error().status == CapsuleStatus::archive_budget_exceeded);
+        CHECK(refused.error().subject == "data/big.bin");
+
+        // Same archive, same budget, a member that fits: the refusal above is
+        // the ceiling and not a reader that stopped working.
+        auto served = archive->read("data/small.bin");
+        REQUIRE(served);
+        CHECK((*served == small));
+
+        // Nothing the reader charged ever passed the ceiling it was given.
+        CHECK(archive->peak_bytes() <= tight.max_working_set_bytes);
+    }
+}
+
+// ── Writer refusals ─────────────────────────────────────────────────────
+
+namespace {
+
+/// A minimal well-formed inventory: the manifest member the writer insists on,
+/// plus one payload. Cases below mutate exactly one thing about it.
+std::vector<ac::WriteMember> writer_inventory(std::vector<std::uint8_t> payload) {
+    std::vector<ac::WriteMember> members;
+    members.push_back(ac::WriteMember{std::string(ac::kManifestPath), noise(16, 206)});
+    members.push_back(ac::WriteMember{"data/x.bin", std::move(payload)});
+    return members;
+}
+
+}  // namespace
+
+TEST_CASE("the writer refuses an inventory or destination it cannot honour",
+          "[authoring-capsule][hostile][writer]") {
+    Sandbox sandbox;
+
+    SECTION("control: a valid inventory writes to a free name") {
+        const auto destination = sandbox.root() / "ok.capsule";
+        REQUIRE(ac::write_archive_no_replace(writer_inventory(noise(64, 207)), destination));
+        CHECK(fs::exists(destination));
+        // And the result is a container this module's own reader admits, which
+        // is what makes every refusal below attributable to the mutation.
+        CHECK(ac::open_archive(destination).has_value());
+    }
+
+    SECTION("the destination's parent is a regular file") {
+        sandbox.write("blocker", noise(8, 208));
+        const auto parent = sandbox.root() / "blocker";
+        const auto before = sandbox.snapshot();
+
+        auto written =
+            ac::write_archive_no_replace(writer_inventory(noise(64, 209)), parent / "out.capsule");
+        REQUIRE(written.is_err());
+        CHECK(written.error().status == CapsuleStatus::staging_failed);
+        // Named as the parent, not the destination: the parent is the thing a
+        // person has to fix.
+        CHECK(written.error().subject == parent.string());
+        // A staging file is a sibling of the destination, so a writer that got
+        // this far would have tried to create one inside a regular file.
+        CHECK(sandbox.snapshot() == before);
+    }
+
+    SECTION("the destination's parent does not exist") {
+        const auto parent = sandbox.root() / "no-such-directory";
+        const auto before = sandbox.snapshot();
+        auto written =
+            ac::write_archive_no_replace(writer_inventory(noise(64, 210)), parent / "out.capsule");
+        REQUIRE(written.is_err());
+        CHECK(written.error().status == CapsuleStatus::staging_failed);
+        CHECK(written.error().subject == parent.string());
+        CHECK(sandbox.snapshot() == before);
+    }
+
+    SECTION("a member path the writer itself rejects") {
+        const auto before = sandbox.snapshot();
+        auto members = writer_inventory(noise(64, 211));
+        members[1].path = "data\\x.bin";
+        auto written =
+            ac::write_archive_no_replace(members, sandbox.root() / "backslash.capsule");
+        REQUIRE(written.is_err());
+        CHECK(written.error().status == CapsuleStatus::path_rejected);
+        CHECK(written.error().subject == "data\\x.bin");
+        // The rule token, so a product can explain the refusal without
+        // re-deriving which of a dozen path rules fired.
+        CHECK(written.error().required == "forward-slash-separator");
+        CHECK(sandbox.snapshot() == before);
+    }
+
+    SECTION("a member over the per-member size budget") {
+        auto members = writer_inventory(noise(64, 212));
+        const auto destination = sandbox.root() / "toobig.capsule";
+        const auto before = sandbox.snapshot();
+
+        CapsuleLimits tight = kCapsuleLimitsV1;
+        tight.max_member_expanded_bytes = 63;
+        auto written = ac::write_archive_no_replace(members, destination, tight);
+        REQUIRE(written.is_err());
+        CHECK(written.error().status == CapsuleStatus::archive_budget_exceeded);
+        // The oversized payload, not the manifest that shares the inventory
+        // with it and is well inside the same ceiling.
+        CHECK(written.error().subject == "data/x.bin");
+        CHECK(written.error().required == "63");
+        CHECK(written.error().found == "64");
+        CHECK_FALSE(fs::exists(destination));
+        CHECK(sandbox.snapshot() == before);
+
+        CapsuleLimits exact = kCapsuleLimitsV1;
+        exact.max_member_expanded_bytes = 64;
+        CHECK(ac::write_archive_no_replace(members, sandbox.root() / "exact.capsule", exact));
+    }
+
+    SECTION("the manifest is not the first member") {
+        auto members = writer_inventory(noise(64, 213));
+        std::swap(members[0], members[1]);
+        const auto destination = sandbox.root() / "notfirst.capsule";
+        const auto before = sandbox.snapshot();
+
+        auto written = ac::write_archive_no_replace(members, destination);
+        REQUIRE(written.is_err());
+        // The writer holds itself to the reader's rule; without this it could
+        // mint an archive this same library rejects.
+        CHECK(written.error().status == CapsuleStatus::manifest_not_first);
+        CHECK(written.error().subject == "data/x.bin");
+        CHECK(written.error().required == std::string(ac::kManifestPath));
+        CHECK(written.error().found == "data/x.bin");
+        CHECK_FALSE(fs::exists(destination));
+        CHECK(sandbox.snapshot() == before);
+    }
+
+    SECTION("an empty inventory") {
+        const auto destination = sandbox.root() / "empty.capsule";
+        const auto before = sandbox.snapshot();
+        auto written = ac::write_archive_no_replace({}, destination);
+        REQUIRE(written.is_err());
+        CHECK(written.error().status == CapsuleStatus::manifest_not_first);
+        CHECK(written.error().subject.empty());
+        CHECK(written.error().required == std::string(ac::kManifestPath));
+        CHECK_FALSE(fs::exists(destination));
+        CHECK(sandbox.snapshot() == before);
+    }
+}
+
+// ── Admission: what the profile and the trust adapter can refuse ─────────
+
+namespace {
+
+/// A profile whose every answer is set by the case. The substrate is supposed
+/// to carry a profile's own verdict through unchanged where the verdict is one
+/// it recognizes, and to rename it where it is not; a profile that could not
+/// be told what to answer could not distinguish those two.
+class ScriptedProfile final : public ac::ProfileValidator {
+public:
+    std::string id = std::string(kTestProfile);
+    std::uint32_t max_version = 1;
+    std::vector<std::string> roles{"test.payload"};
+    std::vector<std::string> denied_capabilities;
+    std::optional<CapsuleError> compatibility_error;
+    std::optional<CapsuleError> staged_error;
+
+    std::string_view profile_id() const noexcept override { return id; }
+    std::uint32_t max_profile_version() const noexcept override { return max_version; }
+    std::vector<std::string> required_roles() const override { return roles; }
+    bool supports_capability(std::string_view name) const noexcept override {
+        return std::find(denied_capabilities.begin(), denied_capabilities.end(), name) ==
+               denied_capabilities.end();
+    }
+    pulp::runtime::Result<void, CapsuleError> check_compatibility(const Manifest&) const override {
+        if (compatibility_error) return pulp::runtime::Err(*compatibility_error);
+        return {};
+    }
+    pulp::runtime::Result<void, CapsuleError> validate_staged(const Manifest&,
+                                                              const fs::path&) const override {
+        if (staged_error) return pulp::runtime::Err(*staged_error);
+        return {};
+    }
+};
+
+/// A verifier whose three answers are likewise set by the case, and which
+/// records the digest it was handed so a test can prove it was the computed
+/// one rather than the string the capsule asserts about itself.
+class ScriptedVerifier final : public ac::SignatureVerifier {
+public:
+    std::optional<CapsuleError> verify_error;
+    bool revoked = false;
+    std::optional<CapsuleError> floor_error;
+    mutable std::string digest_seen;
+    mutable std::string floor_product_seen;
+
+    pulp::runtime::Result<void, CapsuleError> verify(const ac::SignatureEnvelope&,
+                                                     std::string_view computed) const override {
+        digest_seen = std::string(computed);
+        if (verify_error) return pulp::runtime::Err(*verify_error);
+        return {};
+    }
+    bool is_revoked(std::string_view) const override { return revoked; }
+    pulp::runtime::Result<void, CapsuleError>
+    check_floor(const ac::VersionFloor& floor) const override {
+        floor_product_seen = floor.product;
+        if (floor_error) return pulp::runtime::Err(*floor_error);
+        return {};
+    }
+};
+
+std::shared_ptr<ScriptedProfile> scripted_profile() {
+    return std::make_shared<ScriptedProfile>();
+}
+
+ac::ProfileRegistry registry_with(std::shared_ptr<ac::ProfileValidator> validator) {
+    ac::ProfileRegistry registry;
+    registry.register_profile(std::move(validator));
+    return registry;
+}
+
+/// Forge a capsule after `mutate` has had the manifest, then seal it, so the
+/// only thing a case changes is the field it is testing and the capsule stays
+/// internally consistent.
+template <typename Mutate>
+std::vector<std::uint8_t> capsule_mutated(const std::vector<Payload>& payloads, Mutate mutate) {
+    auto manifest = manifest_for(payloads);
+    mutate(manifest);
+    const auto manifest_bytes = seal(manifest);
+    return forge_zip(members_for(manifest_bytes, payloads));
+}
+
+const std::vector<Payload>& scripted_payloads() {
+    static const std::vector<Payload> payloads{{"data/a.bin", noise(256, 220)}};
+    return payloads;
+}
+
+/// One attestation row, valid enough that `preview_capsule` builds an envelope
+/// from it and reaches the trust adapter.
+std::string signature_attestation(std::string_view claimed_digest = {}) {
+    std::string row = R"([{"algorithm":"ed25519","signature":"AAECAw==","signer_id":"signer-1")";
+    if (!claimed_digest.empty()) {
+        row += R"(,"signed_payload_digest":")";
+        row += claimed_digest;
+        row += '"';
+    }
+    row += "}]";
+    return row;
+}
+
+}  // namespace
+
+TEST_CASE("preview reports what this runtime cannot offer, and admission refuses on it",
+          "[authoring-capsule][hostile][preview]") {
+    Sandbox sandbox;
+    const auto& payloads = scripted_payloads();
+
+    // The refusal each case asserts is only meaningful next to an admission of
+    // the same capsule with the one unsatisfiable requirement removed.
+    SECTION("control: a registered profile that answers yes to everything") {
+        const auto file = sandbox.write("ok.forged", well_formed_capsule(payloads));
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+        const auto registry = registry_with(scripted_profile());
+        auto preview = ac::preview_capsule(*archive, registry, corpus_options());
+        REQUIRE(preview);
+        CHECK(preview->compatibility == ac::CompatibilityVerdict::supported);
+        CHECK(preview->unmet.status == CapsuleStatus::ok);
+
+        auto staging = ac::StagingArea::create(sandbox.root());
+        REQUIRE(staging);
+        CHECK(ac::admit_to_staging(*archive, *preview, registry, *staging));
+    }
+
+    SECTION("the profile is not registered here") {
+        const auto file = sandbox.write("noprofile.forged", well_formed_capsule(payloads));
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+        // A registry holding a different profile, not an empty one: this is
+        // the case where a near-match must not be substituted.
+        auto other = scripted_profile();
+        other->id = "org.pulp.test.some-other-profile";
+        const auto registry = registry_with(other);
+
+        auto preview = ac::preview_capsule(*archive, registry, corpus_options());
+        // Preview succeeds on purpose: it exists to say what is missing.
+        REQUIRE(preview);
+        CHECK(preview->compatibility == ac::CompatibilityVerdict::unsupported);
+        CHECK(preview->unmet.status == CapsuleStatus::unsupported_profile);
+        // The exact identifier and version, so a product can name the download.
+        CHECK(preview->unmet.subject == std::string(kTestProfile));
+        CHECK(preview->unmet.required == "1");
+
+        auto staging = ac::StagingArea::create(sandbox.root());
+        REQUIRE(staging);
+        const auto staging_root = staging->root();
+        auto admitted = ac::admit_to_staging(*archive, *preview, registry, *staging);
+        REQUIRE(admitted.is_err());
+        CHECK(admitted.error().status == CapsuleStatus::unsupported_profile);
+        // Refused before extraction, so no member reached the private tree.
+        CHECK_FALSE(fs::exists(staging_root / "data" / "a.bin"));
+    }
+
+    SECTION("the profile version is above what this build understands") {
+        const auto bytes = capsule_mutated(payloads, [](Manifest& manifest) {
+            manifest.profile_version = 4;
+        });
+        const auto file = sandbox.write("newerprofile.forged", bytes);
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+
+        auto profile = scripted_profile();
+        profile->max_version = 3;
+        const auto registry = registry_with(profile);
+        auto preview = ac::preview_capsule(*archive, registry, corpus_options());
+        REQUIRE(preview);
+        CHECK(preview->compatibility == ac::CompatibilityVerdict::unsupported);
+        CHECK(preview->unmet.status == CapsuleStatus::unsupported_profile_version);
+        CHECK(preview->unmet.subject == std::string(kTestProfile));
+        // Both numbers: what the capsule wants, and what this build has.
+        CHECK(preview->unmet.required == "4");
+        CHECK(preview->unmet.found == "3");
+
+        auto staging = ac::StagingArea::create(sandbox.root());
+        REQUIRE(staging);
+        auto admitted = ac::admit_to_staging(*archive, *preview, registry, *staging);
+        REQUIRE(admitted.is_err());
+        CHECK(admitted.error().status == CapsuleStatus::unsupported_profile_version);
+
+        // Control: the same capsule against a build that does understand it.
+        profile->max_version = 4;
+        const auto newer = registry_with(profile);
+        auto ok = ac::preview_capsule(*archive, newer, corpus_options());
+        REQUIRE(ok);
+        CHECK(ok->compatibility == ac::CompatibilityVerdict::supported);
+    }
+
+    SECTION("a required capability this profile cannot satisfy") {
+        const auto bytes = capsule_mutated(payloads, [](Manifest& manifest) {
+            manifest.required_capabilities = {"pcm-sample-bank", "exotic-synthesis"};
+        });
+        const auto file = sandbox.write("capability.forged", bytes);
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+
+        auto profile = scripted_profile();
+        profile->denied_capabilities = {"exotic-synthesis"};
+        const auto registry = registry_with(profile);
+        auto preview = ac::preview_capsule(*archive, registry, corpus_options());
+        REQUIRE(preview);
+        CHECK(preview->compatibility == ac::CompatibilityVerdict::unsupported);
+        CHECK(preview->unmet.status == CapsuleStatus::unsupported_capability);
+        CHECK(preview->unmet.subject == "exotic-synthesis");
+
+        // Every requirement is reported, available or not, so a caller never
+        // re-runs the checks to explain the refusal.
+        REQUIRE(preview->capabilities.size() == 2);
+        CHECK(preview->capabilities[0].name == "pcm-sample-bank");
+        CHECK(preview->capabilities[0].available);
+        CHECK(preview->capabilities[1].name == "exotic-synthesis");
+        CHECK_FALSE(preview->capabilities[1].available);
+
+        auto staging = ac::StagingArea::create(sandbox.root());
+        REQUIRE(staging);
+        auto admitted = ac::admit_to_staging(*archive, *preview, registry, *staging);
+        REQUIRE(admitted.is_err());
+        CHECK(admitted.error().status == CapsuleStatus::unsupported_capability);
+
+        // Control: the same two requirements, both satisfiable.
+        profile->denied_capabilities.clear();
+        const auto full = registry_with(profile);
+        auto ok = ac::preview_capsule(*archive, full, corpus_options());
+        REQUIRE(ok);
+        CHECK(ok->compatibility == ac::CompatibilityVerdict::supported);
+        CHECK(ok->capabilities[1].available);
+    }
+
+    SECTION("the profile's own compatibility answer") {
+        const auto file = sandbox.write("floor.forged", well_formed_capsule(payloads));
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+        auto profile = scripted_profile();
+        const auto registry = registry_with(profile);
+
+        // A status the compatibility family owns survives verbatim, subject
+        // and both version strings included.
+        profile->compatibility_error =
+            CapsuleError{CapsuleStatus::runtime_floor_too_old, "pulp-runtime", "2.0.0", "1.4.0"};
+        auto too_old = ac::preview_capsule(*archive, registry, corpus_options());
+        REQUIRE(too_old);
+        CHECK(too_old->compatibility == ac::CompatibilityVerdict::runtime_too_old);
+        CHECK(too_old->unmet.status == CapsuleStatus::runtime_floor_too_old);
+        CHECK(too_old->unmet.subject == "pulp-runtime");
+        CHECK(too_old->unmet.required == "2.0.0");
+        CHECK(too_old->unmet.found == "1.4.0");
+
+        // A different member of the same family is likewise not rewritten —
+        // proving the rename below is a family check and not a blanket one.
+        profile->compatibility_error =
+            CapsuleError{CapsuleStatus::schema_migration_refused, "/topology", "3", "5"};
+        auto migration = ac::preview_capsule(*archive, registry, corpus_options());
+        REQUIRE(migration);
+        CHECK(migration->unmet.status == CapsuleStatus::schema_migration_refused);
+        CHECK(migration->unmet.subject == "/topology");
+
+        auto staging = ac::StagingArea::create(sandbox.root());
+        REQUIRE(staging);
+        const auto staging_root = staging->root();
+        auto admitted = ac::admit_to_staging(*archive, *migration, registry, *staging);
+        REQUIRE(admitted.is_err());
+        CHECK(admitted.error().status == CapsuleStatus::schema_migration_refused);
+        CHECK_FALSE(fs::exists(staging_root / "data" / "a.bin"));
+    }
+
+    SECTION("a compatibility answer from outside the family is renamed, not passed through") {
+        const auto file = sandbox.write("outoffamily.forged", well_formed_capsule(payloads));
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+        auto profile = scripted_profile();
+        const auto registry = registry_with(profile);
+
+        // A terse validator returning a default-constructed error would
+        // otherwise make a capsule look like it had a malformed manifest.
+        profile->compatibility_error = CapsuleError{};
+        auto defaulted = ac::preview_capsule(*archive, registry, corpus_options());
+        REQUIRE(defaulted);
+        CHECK(defaulted->compatibility == ac::CompatibilityVerdict::runtime_too_old);
+        CHECK(defaulted->unmet.status == CapsuleStatus::runtime_floor_too_old);
+
+        // The rename replaces the status and nothing else: the subject the
+        // profile named is what makes the refusal actionable, so it survives.
+        profile->compatibility_error =
+            CapsuleError{CapsuleStatus::digest_mismatch, "graph/topology", "want", "got"};
+        auto renamed = ac::preview_capsule(*archive, registry, corpus_options());
+        REQUIRE(renamed);
+        CHECK(renamed->unmet.status == CapsuleStatus::runtime_floor_too_old);
+        CHECK(renamed->unmet.subject == "graph/topology");
+        CHECK(renamed->unmet.required == "want");
+        CHECK(renamed->unmet.found == "got");
+    }
+
+    SECTION("a capsule that belongs to a sibling product is routed, not refused") {
+        const auto bytes = capsule_mutated(payloads, [](Manifest& manifest) {
+            manifest.product = "some-other-product";
+        });
+        const auto file = sandbox.write("otherproduct.forged", bytes);
+        auto archive = ac::open_archive(file);
+        REQUIRE(archive);
+        const auto registry = registry_with(scripted_profile());
+
+        auto preview = ac::preview_capsule(*archive, registry, corpus_options());
+        REQUIRE(preview);
+        CHECK(preview->compatibility == ac::CompatibilityVerdict::other_product);
+        CHECK(preview->unmet.status == CapsuleStatus::unsupported_product);
+        CHECK(preview->unmet.subject == "some-other-product");
+        CHECK(preview->unmet.found == std::string(kTestProduct));
+
+        // Understood, just not ours. Extraction is exactly what a caller needs
+        // in order to hand it to the product that owns it, so this verdict
+        // must not bite the way `unsupported` does.
+        auto staging = ac::StagingArea::create(sandbox.root());
+        REQUIRE(staging);
+        const auto staging_root = staging->root();
+        REQUIRE(ac::admit_to_staging(*archive, *preview, registry, *staging));
+        CHECK(fs::exists(staging_root / "data" / "a.bin"));
+
+        // An unstated caller product cannot contradict the capsule's, so the
+        // same capsule is simply supported when the caller does not say who it
+        // is. Without this the verdict above could be an unconditional one.
+        ac::AdmissionOptions anonymous;
+        anonymous.limits = kCapsuleLimitsV1;
+        auto unstated = ac::preview_capsule(*archive, registry, anonymous);
+        REQUIRE(unstated);
+        CHECK(unstated->compatibility == ac::CompatibilityVerdict::supported);
+    }
+}
+
+TEST_CASE("a trust adapter's verdict is carried through or renamed into the trust family",
+          "[authoring-capsule][hostile][trust]") {
+    Sandbox sandbox;
+    const auto& payloads = scripted_payloads();
+
+    auto sealed_digest = std::string{};
+    const auto bytes = capsule_mutated(payloads, [&](Manifest& manifest) {
+        manifest.attestations_json = signature_attestation();
+        manifest.compatibility.min_product_version = "9.9.9";
+    });
+    {
+        // The digest the reader will recompute. Attestations are outside the
+        // identity, so adding one above did not move it.
+        auto manifest = manifest_for(payloads);
+        manifest.compatibility.min_product_version = "9.9.9";
+        auto digest = ac::revision_digest(manifest);
+        REQUIRE(digest);
+        sealed_digest = *digest;
+    }
+
+    const auto file = sandbox.write("signed.forged", bytes);
+    auto archive = ac::open_archive(file);
+    REQUIRE(archive);
+    const auto registry = registry_with(scripted_profile());
+
+    SECTION("no verifier configured is unsigned, never verified") {
+        auto preview = ac::preview_capsule(*archive, registry, corpus_options());
+        REQUIRE(preview);
+        // The signer is reported so a person can see who claims it; the
+        // absence of a checker must never read as a passing check.
+        CHECK(preview->signer_id == "signer-1");
+        CHECK_FALSE(preview->signature_verified);
+    }
+
+    SECTION("control: a verifier that accepts") {
+        ScriptedVerifier verifier;
+        auto options = corpus_options();
+        options.verifier = &verifier;
+        auto preview = ac::preview_capsule(*archive, registry, options);
+        REQUIRE(preview);
+        CHECK(preview->signature_verified);
+        CHECK(preview->signer_id == "signer-1");
+        // Handed the digest computed from these bytes, not one the capsule
+        // nominated for itself.
+        CHECK(verifier.digest_seen == sealed_digest);
+        CHECK(verifier.floor_product_seen == std::string(kTestProduct));
+    }
+
+    SECTION("a verify failure outside the trust family is renamed into it") {
+        ScriptedVerifier verifier;
+        verifier.verify_error = CapsuleError{CapsuleStatus::closure_violation, {}};
+        auto options = corpus_options();
+        options.verifier = &verifier;
+        auto preview = ac::preview_capsule(*archive, registry, options);
+        REQUIRE(preview.is_err());
+        CHECK(preview.error().status == CapsuleStatus::signature_invalid);
+        // An adapter that named no subject gets the signer, so the refusal
+        // still says who it is about.
+        CHECK(preview.error().subject == "signer-1");
+    }
+
+    SECTION("a verify failure inside the trust family survives verbatim") {
+        ScriptedVerifier verifier;
+        verifier.verify_error =
+            CapsuleError{CapsuleStatus::creator_identity_required, "publisher-42"};
+        auto options = corpus_options();
+        options.verifier = &verifier;
+        auto preview = ac::preview_capsule(*archive, registry, options);
+        REQUIRE(preview.is_err());
+        CHECK(preview.error().status == CapsuleStatus::creator_identity_required);
+        CHECK(preview.error().subject == "publisher-42");
+    }
+
+    SECTION("a revoked signer is distinct from an invalid signature") {
+        ScriptedVerifier verifier;
+        verifier.revoked = true;
+        auto options = corpus_options();
+        options.verifier = &verifier;
+        auto preview = ac::preview_capsule(*archive, registry, options);
+        REQUIRE(preview.is_err());
+        // The bytes are intact and the identity is real; which of the two
+        // failed is exactly what the person needs to be told.
+        CHECK(preview.error().status == CapsuleStatus::revoked_signer);
+        CHECK(preview.error().subject == "signer-1");
+    }
+
+    SECTION("a floor failure outside the trust family is renamed and completed") {
+        ScriptedVerifier verifier;
+        verifier.floor_error = CapsuleError{CapsuleStatus::manifest_invalid, {}};
+        auto options = corpus_options();
+        options.verifier = &verifier;
+        auto preview = ac::preview_capsule(*archive, registry, options);
+        REQUIRE(preview.is_err());
+        CHECK(preview.error().status == CapsuleStatus::downgrade_refused);
+        CHECK(preview.error().subject == std::string(kTestProduct));
+        CHECK(preview.error().required == "9.9.9");
+    }
+
+    SECTION("an envelope naming a different digest is refused before any verifier runs") {
+        const auto lifted = capsule_mutated(payloads, [](Manifest& manifest) {
+            manifest.compatibility.min_product_version = "9.9.9";
+            manifest.attestations_json = signature_attestation("sha256:" + std::string(64, '0'));
+        });
+        const auto lifted_file = sandbox.write("lifted.forged", lifted);
+        auto lifted_archive = ac::open_archive(lifted_file);
+        REQUIRE(lifted_archive);
+
+        // No verifier at all: an envelope lifted from another capsule must not
+        // depend on a consumer's adapter noticing.
+        auto preview = ac::preview_capsule(*lifted_archive, registry, corpus_options());
+        REQUIRE(preview.is_err());
+        CHECK(preview.error().status == CapsuleStatus::signature_invalid);
+        CHECK(preview.error().subject == "signer-1");
+        CHECK(preview.error().required == sealed_digest);
+    }
+}
+
+TEST_CASE("admission refuses a preview a caller assembled rather than obtained",
+          "[authoring-capsule][hostile][preview]") {
+    // `CapsulePreview` is a public struct, so a consumer can hand
+    // `admit_to_staging` one it built. These are the two states such a preview
+    // can be in that a real preview never is, and both must fail closed rather
+    // than extract.
+    Sandbox sandbox;
+    const auto& payloads = scripted_payloads();
+    const auto file = sandbox.write("handbuilt.forged", well_formed_capsule(payloads));
+    auto archive = ac::open_archive(file);
+    REQUIRE(archive);
+    const auto registry = registry_with(scripted_profile());
+
+    auto genuine = ac::preview_capsule(*archive, registry, corpus_options());
+    REQUIRE(genuine);
+
+    SECTION("an unsatisfied verdict carrying no reason") {
+        auto forged = *genuine;
+        forged.compatibility = ac::CompatibilityVerdict::unsupported;
+        forged.unmet = CapsuleError{CapsuleStatus::ok, {}};
+
+        auto staging = ac::StagingArea::create(sandbox.root());
+        REQUIRE(staging);
+        const auto staging_root = staging->root();
+        auto admitted = ac::admit_to_staging(*archive, forged, registry, *staging);
+        REQUIRE(admitted.is_err());
+        // Something accurate rather than `ok`, which would read as a stale
+        // rejection nobody could act on.
+        CHECK(admitted.error().status == CapsuleStatus::unsupported_capability);
+        CHECK(admitted.error().subject == std::string(kTestProfile));
+        CHECK_FALSE(fs::exists(staging_root / "data" / "a.bin"));
+    }
+
+    SECTION("a supported verdict for a profile the registry does not hold") {
+        ac::ProfileRegistry empty;
+        auto staging = ac::StagingArea::create(sandbox.root());
+        REQUIRE(staging);
+        const auto staging_root = staging->root();
+        auto admitted = ac::admit_to_staging(*archive, *genuine, empty, *staging);
+        REQUIRE(admitted.is_err());
+        CHECK(admitted.error().status == CapsuleStatus::unsupported_profile);
+        CHECK(admitted.error().subject == std::string(kTestProfile));
+        CHECK(admitted.error().required == "1");
+        CHECK_FALSE(fs::exists(staging_root / "data" / "a.bin"));
+    }
+
+    SECTION("the profile's own staged verdict surfaces verbatim") {
+        auto profile = scripted_profile();
+        profile->staged_error = CapsuleError{CapsuleStatus::missing_licensed_sample, "kick.pcm"};
+        const auto strict = registry_with(profile);
+        auto staging = ac::StagingArea::create(sandbox.root());
+        REQUIRE(staging);
+        auto admitted = ac::admit_to_staging(*archive, *genuine, strict, *staging);
+        REQUIRE(admitted.is_err());
+        CHECK(admitted.error().status == CapsuleStatus::missing_licensed_sample);
+        CHECK(admitted.error().subject == "kick.pcm");
+    }
+}
+
+// ── Export refusals ─────────────────────────────────────────────────────
+
+namespace {
+
+ac::ExportItem export_item(std::string path, std::vector<std::uint8_t> bytes) {
+    ac::ExportItem item;
+    item.entry.role = "test.payload";
+    item.entry.path = std::move(path);
+    item.entry.media_type = "application/octet-stream";
+    item.entry.policy.source_availability = ac::SourceAvailability::included;
+    item.entry.policy.redistribution = ac::Redistribution::granted();
+    item.bytes = std::move(bytes);
+    return item;
+}
+
+ac::ExportRequest export_request(std::vector<ac::ExportItem> items) {
+    ac::ExportRequest request;
+    request.manifest = manifest_for({});
+    request.items = std::move(items);
+    return request;
+}
+
+}  // namespace
+
+TEST_CASE("export refuses an inventory this same code could not read back",
+          "[authoring-capsule][hostile][export]") {
+    Sandbox sandbox;
+
+    SECTION("control: two distinct items export and re-open") {
+        const auto destination = sandbox.root() / "ok.capsule";
+        auto request = export_request({export_item("data/a.bin", noise(64, 230)),
+                                       export_item("data/b.bin", noise(64, 231))});
+        REQUIRE(ac::export_capsule(std::move(request), destination));
+        auto archive = ac::open_archive(destination);
+        REQUIRE(archive);
+        CHECK(archive->members().size() == 3);
+    }
+
+    SECTION("items that collide on a case-insensitive filesystem") {
+        const auto destination = sandbox.root() / "collide.capsule";
+        const auto before = sandbox.snapshot();
+        auto request = export_request({export_item("data/A.bin", noise(64, 232)),
+                                       export_item("data/a.bin", noise(64, 233))});
+        auto written = ac::export_capsule(std::move(request), destination);
+        REQUIRE(written.is_err());
+        CHECK(written.error().status == CapsuleStatus::path_collision);
+        // Sorted by path before the check, so the reported pair is the same on
+        // every run regardless of the order the caller supplied.
+        CHECK(written.error().subject == "data/A.bin");
+        CHECK(written.error().found == "data/a.bin");
+        CHECK_FALSE(fs::exists(destination));
+        CHECK(sandbox.snapshot() == before);
+    }
+
+    SECTION("an item claiming the manifest's own name") {
+        const auto destination = sandbox.root() / "selfclaim.capsule";
+        auto request = export_request({export_item(std::string(ac::kManifestPath), noise(8, 234))});
+        auto written = ac::export_capsule(std::move(request), destination);
+        REQUIRE(written.is_err());
+        CHECK(written.error().status == CapsuleStatus::closure_violation);
+        CHECK(written.error().subject == std::string(ac::kManifestPath));
+        CHECK_FALSE(fs::exists(destination));
+    }
+
+    SECTION("a files row that says its bytes are not in the archive") {
+        // Canonical serialization applies no structural rules, so without the
+        // read-back this would mint a capsule declaring a component nothing
+        // can ever resolve.
+        const auto destination = sandbox.root() / "external.capsule";
+        auto item = export_item("data/a.bin", noise(64, 235));
+        item.entry.policy.source_availability = ac::SourceAvailability::external;
+        auto written = ac::export_capsule(export_request({std::move(item)}), destination);
+        REQUIRE(written.is_err());
+        CHECK(written.error().status == CapsuleStatus::manifest_invalid);
+        // The reader's own JSON pointer, which is what makes it actionable.
+        CHECK(written.error().subject == "/files/0/policy/source_availability");
+        CHECK_FALSE(fs::exists(destination));
+    }
+
+    SECTION("a dependency provider that leaks the exporting machine") {
+        const auto destination = sandbox.root() / "provider.capsule";
+        auto request = export_request({export_item("data/a.bin", noise(64, 236))});
+        ac::DependencyEntry dependency;
+        dependency.role = "test.dependency";
+        dependency.id = "sample-pack-1";
+        dependency.sha256 = digest_of(noise(32, 237));
+        dependency.bytes = 32;
+        dependency.media_type = "application/octet-stream";
+        dependency.provider = "file:///Users/someone/samples.zip";
+        request.manifest.dependencies.push_back(std::move(dependency));
+
+        auto written = ac::export_capsule(std::move(request), destination);
+        REQUIRE(written.is_err());
+        CHECK(written.error().status == CapsuleStatus::dependency_provider_denied);
+        CHECK(written.error().subject == "/dependencies/0/provider");
+        CHECK(written.error().found == "file:///Users/someone/samples.zip");
+        CHECK_FALSE(fs::exists(destination));
+    }
+
+    SECTION("a format identifier or version this build does not write") {
+        const auto destination = sandbox.root() / "format.capsule";
+
+        auto foreign = export_request({export_item("data/a.bin", noise(64, 238))});
+        foreign.manifest.format = "com.example.other-format";
+        auto refused_format = ac::export_capsule(std::move(foreign), destination);
+        REQUIRE(refused_format.is_err());
+        CHECK(refused_format.error().status == CapsuleStatus::unsupported_format);
+        CHECK(refused_format.error().subject == "format");
+        CHECK(refused_format.error().required == std::string(ac::kFormatId));
+
+        auto newer = export_request({export_item("data/a.bin", noise(64, 239))});
+        newer.manifest.format_version = ac::kFormatVersion + 1;
+        auto refused_version = ac::export_capsule(std::move(newer), destination);
+        REQUIRE(refused_version.is_err());
+        CHECK(refused_version.error().status == CapsuleStatus::unsupported_format_version);
+        CHECK(refused_version.error().subject == "format_version");
+        CHECK(refused_version.error().found == std::to_string(ac::kFormatVersion + 1));
+
+        CHECK_FALSE(fs::exists(destination));
     }
 }

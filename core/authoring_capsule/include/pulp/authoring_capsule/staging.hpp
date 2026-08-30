@@ -14,10 +14,12 @@
 #include <pulp/authoring_capsule/status.hpp>
 #include <pulp/runtime/result.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace pulp::authoring_capsule {
 
@@ -58,5 +60,38 @@ runtime::Result<void, CapsuleError> extract_declared(const CapsuleArchive& archi
                                                      const Manifest& manifest,
                                                      const StagingArea& staging,
                                                      const ExtractionProgress& progress = {});
+
+/// Read one member back out of a staged tree.
+///
+/// This exists so a consumer never joins a manifest path to a staging root
+/// itself. The path rules and the join belong to the same layer: a consumer
+/// doing `staging.root() / entry.path` by hand is a path-admission decision
+/// made outside the module that owns path admission, and it silently loses the
+/// NFC, depth, byte-budget, reserved-name, and containment checks. So the row
+/// is re-admitted here — this is a public entry point taking an arbitrary
+/// `FileEntry`, and it cannot assume a caller ran preview or extraction first.
+///
+/// Every hop is opened relative to the staging area's pinned root refusing to
+/// follow links, and only a plain file is read: nothing in this module creates
+/// a symlink, a device, or a directory where a member belongs, so one standing
+/// there means the tree is not the one extraction wrote.
+///
+/// The size on disk must equal `entry.bytes`. That is checked before the bytes
+/// are copied out, so the read is bounded by what the owner-private tree
+/// actually holds rather than by a size the row asserted, and a truncated or
+/// replaced member is refused rather than returned as if it were whole. The
+/// content digest is *not* recomputed: `extract_declared()` verified it before
+/// the member was allowed to land, and the staging directory is readable only
+/// by its owner, so re-hashing on every read would charge a repeated cost for
+/// a property already established. A caller that wants the stronger check can
+/// hash the returned bytes against `entry.sha256` itself.
+///
+/// Failures are exact. A path that fails admission reports whatever
+/// `admit_member_path()` decided — `path_rejected` for a path that could
+/// escape or that the grammar refuses. Everything else is `staging_failed`,
+/// with the declared and found sizes in `required` and `found` when the
+/// disagreement is a size.
+runtime::Result<std::vector<std::uint8_t>, CapsuleError>
+read_staged_member(const StagingArea& staging, const FileEntry& entry);
 
 }  // namespace pulp::authoring_capsule

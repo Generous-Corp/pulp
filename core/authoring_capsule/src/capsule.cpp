@@ -147,9 +147,8 @@ void accumulate_rights(const ComponentPolicy& policy, RightsSummary& rights) {
     // `unknown` is recorded as `unknown`. It never decays to allowed here, and
     // no projection later in the pipeline can recover a permission this layer
     // refused to invent.
-    if (policy.redistribution == Redistribution::unknown) rights.any_unknown_redistribution = true;
-    if (policy.redistribution == Redistribution::restricted)
-        rights.any_restricted_redistribution = true;
+    if (policy.redistribution.is_unknown()) rights.any_unknown_redistribution = true;
+    if (policy.redistribution.is_restricted()) rights.any_restricted_redistribution = true;
     if (policy.attribution_required) rights.attribution_required = true;
     if (!policy.license_expression.empty())
         rights.license_expressions.push_back(policy.license_expression);
@@ -159,11 +158,15 @@ void accumulate_rights(const ComponentPolicy& policy, RightsSummary& rights) {
 /// not in the capsule, or when the right to pass them on is anything other than
 /// granted. An absent statement is not a permission, so `unknown` blocks.
 bool blocks_self_contained(const ComponentPolicy& policy) {
-    return policy.redistribution != Redistribution::allowed ||
+    return !policy.redistribution.is_granted() ||
            policy.source_availability != SourceAvailability::included;
 }
 
-void sort_unique(std::vector<std::string>& values) {
+/// Both rights lists are reported sorted and deduplicated. `ComponentRef`
+/// orders by kind then identifier, so the two row kinds cannot collide even
+/// when a path and a dependency identity spell the same string.
+template <typename T>
+void sort_unique(std::vector<T>& values) {
     std::sort(values.begin(), values.end());
     values.erase(std::unique(values.begin(), values.end()), values.end());
 }
@@ -427,7 +430,7 @@ runtime::Result<CapsulePreview, CapsuleError> preview_capsule(const CapsuleArchi
         if (entry.executable_data) preview.contains_executable_data = true;
         accumulate_rights(entry.policy, preview.rights);
         if (blocks_self_contained(entry.policy))
-            preview.rights.blocking_component_paths.push_back(entry.path);
+            preview.rights.blocking_components.push_back(ComponentRef::to_file(entry.path));
     }
 
     preview.dependencies.reserve(manifest.dependencies.size());
@@ -452,14 +455,20 @@ runtime::Result<CapsulePreview, CapsuleError> preview_capsule(const CapsuleArchi
         // dependency that gates play be omitted from the list a person reads
         // while the completeness verdict still counts it. The two derived
         // facts have to agree, and they agree by both ignoring the hint.
+        //
+        // A dependency is named by its content identity, not a path. For a
+        // profile whose components are entirely dependencies these are the
+        // only blockers there are, so dropping them would leave the list
+        // silent about a capsule nobody may pass on.
         if (blocks_self_contained(dependency.policy))
-            preview.rights.blocking_component_paths.push_back(dependency.id);
+            preview.rights.blocking_components.push_back(
+                ComponentRef::to_dependency(dependency.id));
     }
 
     // Deterministic and deduplicated, so a difference between two previews is a
     // real difference in the capsules rather than in the order they were read.
     sort_unique(preview.rights.license_expressions);
-    sort_unique(preview.rights.blocking_component_paths);
+    sort_unique(preview.rights.blocking_components);
 
     // Sizes come from the container's directory, so no member is expanded to
     // report them. `archive_bytes` is the sum of the members' compressed
@@ -592,6 +601,26 @@ export_capsule(ExportRequest request, const std::filesystem::path& destination,
     auto canonical = to_canonical_json(request.manifest);
     if (!canonical) return Err(std::move(canonical).error());
     const std::string manifest_json = std::move(canonical).value();
+
+    // Prove the bytes about to be written are bytes this same code can read.
+    //
+    // `to_canonical_json()` serializes whatever it is handed; it applies none
+    // of the structural rules, because a `Manifest` reaching it may have been
+    // assembled in memory rather than parsed. So without this the writer would
+    // happily mint a capsule the reader refuses — a `files[]` row declaring
+    // `source_availability: external`, a caller-supplied dependency row whose
+    // provider is `file:///Users/someone/…` leaking the exporting machine into
+    // a shared capsule, an empty `project_id`. Those rules are enforced in
+    // `parse_manifest()`, so the writer holds itself to them by reading its own
+    // output back rather than by keeping a second copy of the rule set that
+    // could drift from the first.
+    //
+    // It runs on the exact member-0 bytes, and before the archive is created,
+    // so a rejected export leaves no file behind. The failure keeps
+    // `parse_manifest()`'s own status and JSON-pointer subject, which is what
+    // makes the refusal actionable.
+    if (auto readable = parse_manifest(manifest_json); !readable)
+        return Err(std::move(readable).error());
 
     std::vector<WriteMember> members;
     members.reserve(request.items.size() + 1);

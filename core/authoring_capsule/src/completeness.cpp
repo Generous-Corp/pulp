@@ -68,7 +68,7 @@ Completeness derive_completeness(const Manifest& manifest) {
         // gating filter so a component that gates nothing still cannot be
         // carried into a self-contained claim on rights nobody granted.
         if (policy.source_availability == SourceAvailability::included &&
-            policy.redistribution != Redistribution::allowed)
+            !policy.redistribution.is_granted())
             every_required_row_present_and_redistributable = false;
 
         const bool gates_play = required_for(policy, RequiredFor::play);
@@ -76,7 +76,7 @@ Completeness derive_completeness(const Manifest& manifest) {
         if (!gates_play && !gates_rebuild) continue;
 
         const bool present = policy.source_availability == SourceAvailability::included;
-        const bool redistributable = policy.redistribution == Redistribution::allowed;
+        const bool redistributable = policy.redistribution.is_granted();
         const bool resolvable = policy.source_availability == SourceAvailability::external &&
                                 !row.provider.empty();
 

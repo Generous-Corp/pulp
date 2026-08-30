@@ -223,3 +223,49 @@ TEST_CASE("Result<void, E> destroys its error exactly once", "[runtime][result]"
     }
     REQUIRE(Counted::live == 0);
 }
+
+TEST_CASE("Result<void, E> move-assignment replaces an error with an error",
+          "[runtime][result]") {
+    // The error-over-error path is the one with an ordering requirement: the
+    // incoming error is constructed into a temporary BEFORE the old one is
+    // destroyed, so a throwing move cannot leave the destination holding a
+    // destroyed error under a `has_value()` that still says false.
+    Counted::live = 0;
+    {
+        Result<void, Counted> dst(Err(Counted(1)));
+        Result<void, Counted> src(Err(Counted(2)));
+        REQUIRE(Counted::live == 2);
+
+        dst = std::move(src);
+        REQUIRE(dst.is_err());
+        CHECK(dst.error().payload == 2);
+        // The destination's original error is gone; only the moved-in one and
+        // the (still alive, moved-from) source remain.
+        CHECK(Counted::live == 2);
+    }
+    CHECK(Counted::live == 0);
+
+    // The same crossing with a copy, which takes the sibling branch.
+    Counted::live = 0;
+    {
+        Result<void, Counted> dst(Err(Counted(3)));
+        const Result<void, Counted> src(Err(Counted(4)));
+        dst = src;
+        REQUIRE(dst.is_err());
+        CHECK(dst.error().payload == 4);
+        CHECK(Counted::live == 2);
+    }
+    CHECK(Counted::live == 0);
+
+    // Self-assignment must not destroy the error it is about to read.
+    Counted::live = 0;
+    {
+        Result<void, Counted> self(Err(Counted(5)));
+        Result<void, Counted>& alias = self;
+        self = std::move(alias);
+        REQUIRE(self.is_err());
+        CHECK(self.error().payload == 5);
+        CHECK(Counted::live == 1);
+    }
+    CHECK(Counted::live == 0);
+}
