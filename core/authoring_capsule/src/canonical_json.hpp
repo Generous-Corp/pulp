@@ -25,16 +25,14 @@
 #include <choc/containers/choc_Value.h>
 
 #include <cstdint>
-#include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace pulp::authoring_capsule::detail {
 
-/// The value model. Parsing, building, and serializing all speak choc values
-/// so an unknown key is carried as data rather than reconstructed from a
-/// guess about its shape.
+/// The value model. Parsing and serializing both speak choc values so an
+/// unknown key is carried as data rather than reconstructed from a guess
+/// about its shape.
 using Json = choc::value::Value;
 using JsonView = choc::value::ValueView;
 
@@ -88,106 +86,6 @@ runtime::Result<std::string, CapsuleError> canonical_number(double value,
 
 /// The canonical decimal for an integer. Always exact, never fails.
 std::string canonical_number(std::int64_t value);
-
-// ── Building ─────────────────────────────────────────────────────────────
-//
-// Insertion order is irrelevant — the serializer sorts. Build in whatever
-// order reads best at the call site.
-
-Json json_object();
-Json json_array();
-Json json_string_array(const std::vector<std::string>& values);
-
-/// Set a member, replacing any existing member of the same name. Replacing
-/// rather than appending keeps a builder mistake from producing a duplicate
-/// key, which has no canonical serialization.
-void put(Json& object, std::string_view key, const JsonView& value);
-void put_string(Json& object, std::string_view key, std::string_view value);
-void put_int(Json& object, std::string_view key, std::int64_t value);
-void put_uint(Json& object, std::string_view key, std::uint64_t value);
-void put_bool(Json& object, std::string_view key, bool value);
-
-/// Attach JSON *text* (an object or array held as a string on `Manifest`) as a
-/// real subtree, so it is canonicalized with everything else instead of being
-/// spliced in as an opaque string.
-runtime::Result<void, CapsuleError> put_json_text(Json& object, std::string_view key,
-                                                  std::string_view json_text,
-                                                  std::string_view subject = {});
-
-void append(Json& array, const JsonView& value);
-
-// ── Unknown-key preservation ─────────────────────────────────────────────
-
-/// The members of `source` whose names are not in `known`, as an object.
-///
-/// An unknown *optional* key must survive a round-trip through a reader that
-/// predates it: dropping it would silently discard metadata a newer writer
-/// emitted and, because the digest covers the envelope, would also change the
-/// revision identity of a project nobody edited.
-Json unknown_members(const JsonView& source, std::span<const std::string_view> known);
-
-/// Copy each member of `extra` into `object` that `object` does not already
-/// have. A key the envelope owns is never overwritten, so preserved metadata
-/// can never forge a routing input such as `profile` or `required_capabilities`.
-///
-/// `extra` must not be a view into `object`: growing `object` moves its packed
-/// storage, which would leave such a view dangling mid-merge.
-void merge_absent_members(Json& object, const JsonView& extra);
-
-// ── Reading ──────────────────────────────────────────────────────────────
-
-bool has_member(const JsonView& object, std::string_view key);
-
-/// A required string member. Fails `manifest_invalid` when absent or when the
-/// member is present with another type.
-runtime::Result<std::string, CapsuleError> require_string(const JsonView& object,
-                                                          std::string_view key,
-                                                          std::string_view pointer_root = {});
-
-/// A required non-negative integer member.
-runtime::Result<std::uint64_t, CapsuleError> require_uint(const JsonView& object,
-                                                          std::string_view key,
-                                                          std::string_view pointer_root = {});
-
-/// An optional member. A present member of the wrong type is an error rather
-/// than a silent fallback: a `bytes` field spelled as a string is a defect in
-/// the writer, and answering 0 would let a closure check pass on a lie.
-runtime::Result<std::string, CapsuleError> optional_string(const JsonView& object,
-                                                           std::string_view key,
-                                                           std::string_view fallback = {},
-                                                           std::string_view pointer_root = {});
-runtime::Result<std::uint64_t, CapsuleError> optional_uint(const JsonView& object,
-                                                           std::string_view key,
-                                                           std::uint64_t fallback = 0,
-                                                           std::string_view pointer_root = {});
-runtime::Result<bool, CapsuleError> optional_bool(const JsonView& object, std::string_view key,
-                                                  bool fallback = false,
-                                                  std::string_view pointer_root = {});
-runtime::Result<std::vector<std::string>, CapsuleError>
-optional_string_array(const JsonView& object, std::string_view key,
-                      std::string_view pointer_root = {});
-
-/// The canonical text of a nested object or array member, or `fallback` when
-/// the member is absent. This is how a profile-owned subtree reaches the
-/// `Manifest`'s `*_json` string fields without losing its canonical form.
-runtime::Result<std::string, CapsuleError> optional_json_text(const JsonView& object,
-                                                              std::string_view key,
-                                                              std::string_view fallback,
-                                                              std::string_view pointer_root = {});
-
-// ── Subtree and digest ───────────────────────────────────────────────────
-
-/// A new object holding only the named members of `object` that exist, in
-/// their original values. This is the operator that builds the semantic
-/// subtree `revision_id` is taken over: the digest is defined by what it
-/// *includes*, so a descriptive key added later cannot disturb it.
-Json subtree(const JsonView& object, std::span<const std::string_view> keys);
-
-/// Reorder an array of objects by a string member, in byte order — the rule
-/// the format states for `files[]`. Fails when an element is not an object or
-/// lacks the key, since a partial order is not a canonical one.
-runtime::Result<void, CapsuleError> sort_array_by_string_member(Json& array, std::string_view key,
-                                                                std::string_view pointer_root = {});
 
 // There is deliberately no digest helper here. `revision_digest()` in
 // manifest.cpp is the one place that turns canonical bytes into an identity,
