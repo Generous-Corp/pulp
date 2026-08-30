@@ -531,6 +531,12 @@ TEST_CASE("GPU health provider keeps available non-native adapter identity unver
 TEST_CASE("GPU health provider trusts native adapter type rather than backend labels") {
     using AdapterType =
         pulp::inspect::ControlGpuHealthProvider::AdapterIdentity::Type;
+    struct ClassificationResult {
+        gh::AdapterClass classification;
+        gh::Verdict health_verdict;
+        gh::Verdict submit_verdict;
+        std::string submit_code;
+    };
 
     const auto classification_for = [](AdapterType type, std::string backend,
                                        std::string name, std::string vendor,
@@ -550,27 +556,30 @@ TEST_CASE("GPU health provider trusts native adapter type rather than backend la
         REQUIRE(provider.record_presented_frame(observed));
         require_valid(provider);
         const auto snapshot = provider.snapshot();
-        return std::pair{snapshot->health.probes.front().adapter.classification,
-                         snapshot->health.verdict};
+        const auto& probe = snapshot->health.probes.front();
+        return ClassificationResult{probe.adapter.classification, snapshot->health.verdict,
+                                    probe.events[1].verdict, probe.events[1].code};
     };
 
-    CHECK(classification_for(AdapterType::integrated_gpu, "Metal", "Apple GPU", "Apple").first ==
-          gh::AdapterClass::hardware);
-    CHECK(classification_for(AdapterType::discrete_gpu, "D3D12", "AMD Radeon", "AMD").first ==
-          gh::AdapterClass::hardware);
+    CHECK(classification_for(AdapterType::integrated_gpu, "Metal", "Apple GPU", "Apple")
+              .classification == gh::AdapterClass::hardware);
+    CHECK(classification_for(AdapterType::discrete_gpu, "D3D12", "AMD Radeon", "AMD")
+              .classification == gh::AdapterClass::hardware);
     // This label deliberately lacks the old string classifier's software
     // keywords. Only Dawn's CPU adapter type proves that WARP is software.
     CHECK(classification_for(AdapterType::cpu, "D3D12", "Microsoft Basic Render Driver",
-                             "Microsoft").first == gh::AdapterClass::software);
+                             "Microsoft").classification == gh::AdapterClass::software);
     // Dawn Null may report CPU as its adapter type. The backend enum is the
     // authoritative discriminator and the resulting probe must remain valid
     // without ever becoming a health pass.
     const auto null_cpu = classification_for(AdapterType::cpu, "Null", "Dawn Null Adapter",
                                               "Dawn", true, false);
-    CHECK(null_cpu.first == gh::AdapterClass::null_adapter);
-    CHECK(null_cpu.second == gh::Verdict::unavailable);
-    CHECK(classification_for(AdapterType::unknown, "Metal", "Apple GPU", "Apple").first ==
-          gh::AdapterClass::unknown);
+    CHECK(null_cpu.classification == gh::AdapterClass::null_adapter);
+    CHECK(null_cpu.health_verdict == gh::Verdict::unavailable);
+    CHECK(null_cpu.submit_verdict == gh::Verdict::unavailable);
+    CHECK(null_cpu.submit_code == "gpu.submit.unavailable");
+    CHECK(classification_for(AdapterType::unknown, "Metal", "Apple GPU", "Apple")
+              .classification == gh::AdapterClass::unknown);
 }
 
 TEST_CASE("GPU health provider fails closed for malformed producer measurements") {
