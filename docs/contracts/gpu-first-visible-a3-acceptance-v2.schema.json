@@ -6,7 +6,8 @@
   "required": [
     "$schema", "schema", "version", "status", "recorded_at",
     "implementation_head", "plan", "product_policy", "protocol",
-    "campaigns", "publication", "disposition", "observations", "blockers"
+    "campaigns", "blank_negative", "audio_thread_exclusion",
+    "trace_producer_overhead", "publication", "disposition", "observations", "blockers"
   ],
   "additionalProperties": false,
   "properties": {
@@ -84,34 +85,29 @@
       "type": "array", "maxItems": 7, "uniqueItems": true,
       "items": { "$ref": "#/$defs/campaign" }
     },
+    "blank_negative": { "$ref": "#/$defs/terminalControl" },
+    "audio_thread_exclusion": { "$ref": "#/$defs/terminalControl" },
+    "trace_producer_overhead": {
+      "type": "object",
+      "required": ["status", "reason", "receipt"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["missing", "unavailable", "pass", "fail"] },
+        "reason": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 2048 }] },
+        "receipt": { "$ref": "#/$defs/nullableArtifact" }
+      }
+    },
     "publication": {
       "oneOf": [
         { "type": "null" },
         {
           "type": "object",
-          "required": [
-            "repository", "branch", "head", "receipt_blob", "protected",
-            "required_checks", "artifact_sha256s"
-          ],
+          "required": ["repository", "branch", "receipt_path", "artifact_sha256s"],
           "additionalProperties": false,
           "properties": {
             "repository": { "const": "Generous-Corp/pulp" },
             "branch": { "const": "main" },
-            "head": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-            "receipt_blob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-            "protected": { "const": true },
-            "required_checks": {
-              "type": "array", "minItems": 1, "uniqueItems": true,
-              "items": {
-                "type": "object",
-                "required": ["name", "conclusion"],
-                "additionalProperties": false,
-                "properties": {
-                  "name": { "type": "string", "minLength": 1, "maxLength": 256 },
-                  "conclusion": { "const": "success" }
-                }
-              }
-            },
+            "receipt_path": { "const": "docs/validation/gpu-first-visible-a3-acceptance.json" },
             "artifact_sha256s": {
               "type": "array", "minItems": 1, "uniqueItems": true,
               "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
@@ -149,6 +145,15 @@
     }
   },
   "$defs": {
+    "terminalControl": {
+      "type": "object",
+      "required": ["status", "receipt"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["missing", "pass", "fail"] },
+        "receipt": { "$ref": "#/$defs/nullableArtifact" }
+      }
+    },
     "artifact": {
       "type": "object",
       "required": ["path", "sha256"],
@@ -182,7 +187,8 @@
       "type": "object",
       "required": [
         "role_id", "status", "identity", "raw_samples", "trace",
-        "trace_analysis", "causal_attribution"
+        "trace_analysis", "sample_provenance", "trace_analyzer", "trace_analyzer_provenance",
+        "trace_binding", "causal_attribution"
       ],
       "additionalProperties": false,
       "properties": {
@@ -223,6 +229,23 @@
         "raw_samples": { "$ref": "#/$defs/artifact" },
         "trace": { "$ref": "#/$defs/artifact" },
         "trace_analysis": { "$ref": "#/$defs/artifact" },
+        "sample_provenance": { "$ref": "#/$defs/artifact" },
+        "trace_analyzer": { "$ref": "#/$defs/artifact" },
+        "trace_analyzer_provenance": { "$ref": "#/$defs/artifact" },
+        "trace_binding": {
+          "type": "object",
+          "required": ["campaign_id", "instance_id", "build_id", "gpu_evidence_id", "trace_evidence_id", "process_pid", "process_upid"],
+          "additionalProperties": false,
+          "properties": {
+            "campaign_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "instance_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "build_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "gpu_evidence_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "trace_evidence_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "process_pid": { "type": "integer", "minimum": 1 },
+            "process_upid": { "type": "integer", "minimum": 0 }
+          }
+        },
         "causal_attribution": {
           "type": "object",
           "required": ["render_pipeline_material", "instrumentation_complete", "missing_events", "transferred_vellum_routes"],

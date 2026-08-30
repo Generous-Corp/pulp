@@ -436,3 +436,5 @@ validation on every machine whose adapter happened to offer timestamps.
 If you need per-recording GPU time in a capture, enable it explicitly on the
 host's Options. If a trace shows no `gpu_render_time`, check that flag before
 suspecting the adapter.
+
+A3 v2 terminal evidence is analyzer-derived rather than sidecar-attested. The pinned replay must bind the exact trace digest, role/campaign/instance/build identity, GPU and trace evidence IDs, process PID/UPID, the closed category set, zero drops, and a completed flush.

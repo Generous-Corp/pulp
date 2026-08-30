@@ -38,6 +38,13 @@
     ]
   },
   "campaigns": [],
+  "blank_negative": {"status": "missing", "receipt": null},
+  "audio_thread_exclusion": {"status": "missing", "receipt": null},
+  "trace_producer_overhead": {
+    "status": "unavailable",
+    "reason": "No implementation-bound four-state overhead campaign exists while product policy and required coverage remain blocked.",
+    "receipt": null
+  },
   "publication": null,
   "disposition": null,
   "observations": [],

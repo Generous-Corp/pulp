@@ -39,6 +39,41 @@ The verifier returns `0` only for a terminal pass, `2` for a valid nonterminal
 receipt, and `1` for malformed, inconsistent, missing, or digest-mismatched
 evidence. A nonterminal result is never an acceptance pass.
 
+Terminal v2 verification is intentionally online and canonical-path-only. The
+receipt may request publication only as `Generous-Corp/pulp`, `main`, the exact
+canonical receipt path, and a complete sorted artifact-digest set. It may not
+self-attest a head, blob, protection bit, or check result. The verifier derives
+fresh live `main`, verifies the checkout is clean at that exact head, compares
+the local/indexed/GitHub receipt blob, unions classic branch protection and
+ruleset requirements, exhausts paginated check-run/status results, preserves
+required app identities, and rejects missing, ambiguous-latest, pending, or
+non-successful results.
+
+The same live pass resolves the product-policy source to its exact Git blob,
+requires its revision at a protected branch head, and verifies Daniel's stable
+GitHub user ID as exact-head author or approver. Support-matrix and A1 inputs
+are not accepted as bare JSON claims: each is a digest-bound wrapper whose
+source-bound executable producer is rerun against the exact payload. Producer
+identity reuses the existing passing embedded build-verifier and independent
+exact-source rebuild receipts; a new self-attestation protocol is not accepted.
+Campaign samples use the same rule, with producer output bound to raw-sample,
+trace, and canonical identity digests.
+
+Every terminal campaign retains the exact raw samples, trace, sample-producer
+provenance, prepared analyzer and analyzer provenance, and a closed binding for
+role/campaign/instance/build, GPU/trace evidence, and process PID/UPID. The
+verifier hashes the trace and analyzer, runs the pinned analyzer over those
+exact bytes, and requires the fresh replay to agree with the closed category,
+zero-drop, completed-flush, evidence, and process bindings. A submitted trace
+analysis sidecar cannot pass by itself.
+
+The per-sample `blank=false` and zero audio-work counters are necessary but not
+sufficient. Terminal v2 separately requires a caught, trace-digest-bound blank
+negative; an executable, external-instrumented-harness audio-thread exclusion
+receipt bound to the same campaign traces; and the existing derived four-state
+trace-producer overhead receipt with a passing verdict at the implementation
+head. Missing or unavailable controls keep the canonical receipt nonterminal.
+
 ## Historical v1 generation and collection reference
 
 The remaining generation and product-collection commands document the

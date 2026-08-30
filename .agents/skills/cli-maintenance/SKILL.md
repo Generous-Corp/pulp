@@ -3064,3 +3064,5 @@ during a capture — which reads as a broken import rather than a short manifest
 The array's size is a literal beside the literal list, so bump both. Two tests
 hold the line: one compares the C++ list against the on-disk manifest, the
 other resolves the installed graph.
+
+The A3 v2 verifier is fail-closed evidence tooling: its terminal result requires the canonical receipt on fresh protected `main`; caller-supplied head, protection, or check assertions are invalid input, not an offline mode.

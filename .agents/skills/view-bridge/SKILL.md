@@ -2211,3 +2211,5 @@ Acquire/submit/present are mandatory; every other signature remains counted
 and an unobserved one is not-covered, not zero-cost. Require zero producer
 events on declared audio TIDs. Do not add evidence IDs, session control, or
 synthesized compositor timestamps to ViewBridge to satisfy the receipt.
+
+A3 v2 terminal acceptance preserves that boundary with an external audio-thread exclusion receipt and an independently digest-bound blank-frame negative. Per-sample zero counters do not replace either control.

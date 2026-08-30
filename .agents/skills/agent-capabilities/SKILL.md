@@ -581,3 +581,5 @@ no line carries two statements.
 
 Extract codes from every return form, including ternaries (`return c ? 0 : N;`) — a naive
 `grep -oE "return [0-9]+;"` misses those and manufactures phantom collisions.
+
+For A3 v2 terminal acceptance, never treat receipt fields as publication or trace proof. The verifier must derive protected `main`, the canonical receipt blob, required check identities/results, and artifact digests live, then replay the pinned analyzer over the exact trace bytes.

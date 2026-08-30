@@ -298,3 +298,5 @@ default-deny rebuilds the exact source row without the measured plug-in,
 ambient build tree, or network, then requires identical executable bytes and
 the requested tracing sentinel state. Keep its source/build/toolchain artifacts
 with the campaign; an already-built bundle or receipt assertion is not proof.
+
+A3 v2 additionally binds each DAW campaign's sample provenance and exact trace bytes, then reruns the prepared analyzer and checks campaign, instance, process, GPU-evidence, trace-evidence, category, and completeness identity. A JSON sidecar alone is never terminal proof.

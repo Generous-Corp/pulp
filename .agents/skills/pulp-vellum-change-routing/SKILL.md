@@ -133,3 +133,5 @@ emits the digest-bound `pulp-vellum-routing-contract-execution` artifact. Pull
 requests and manual dispatches validate the contract without publishing release
 evidence. That receipt is evidence for Vellum's release verifier; do not
 hand-author or replay it.
+
+A3 v2 terminal acceptance is Pulp integration evidence. Its attribution may queue Vellum follow-up, but terminal proof must bind exact transferred routes and may not manufacture missing generic instrumentation in Pulp.
