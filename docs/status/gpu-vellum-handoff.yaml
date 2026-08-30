@@ -108,8 +108,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "1bc322794f6630cbbf5c6159d6ca3242ccb70b96",
-          "object_id": "505d3186c4468ceeff6962c36761de85ced55e78",
+          "revision": "2c7df5cf0143c776ae0ae440d44647c899ef6767",
+          "object_id": "975ef35801a685ea6d8efdb1b39bd57de55518cf",
           "object_type": "tree"
         },
         {
@@ -293,8 +293,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
           "state": "pulp-owned-retained",
-          "revision": "c230ff1703ab2be4f8a484d12dd7cd178b605f17",
-          "object_id": "b23de70b8c06ffa86d8dd08ab44c67051aba7344",
+          "revision": "0c8bb3a6db7ac2b0a55a72badb14089932a2514e",
+          "object_id": "76d518bcc942afc01c301305d90952bf1e8ba61b",
           "object_type": "blob"
         },
         {
@@ -1658,8 +1658,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "1bc322794f6630cbbf5c6159d6ca3242ccb70b96",
-          "object_id": "505d3186c4468ceeff6962c36761de85ced55e78",
+          "revision": "2c7df5cf0143c776ae0ae440d44647c899ef6767",
+          "object_id": "975ef35801a685ea6d8efdb1b39bd57de55518cf",
           "object_type": "tree"
         },
         {
