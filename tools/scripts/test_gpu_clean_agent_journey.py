@@ -169,7 +169,12 @@ class CleanAgentHarnessTests(unittest.TestCase):
             {"name": "Generic GPU"},
             {"architecture": "unknown"},
             {"device": "vendor=0x0,device=0x0"},
+            {"device": "vendor=0x1234,device=0x0"},
             {"device": "malformed"},
+            {"device": "unknown"},
+            {"device": 0},
+            {"device": {}},
+            {"device": []},
         )
         for mutation in cases:
             with self.subTest(mutation=mutation):

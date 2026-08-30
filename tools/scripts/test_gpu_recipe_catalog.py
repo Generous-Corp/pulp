@@ -544,9 +544,12 @@ class CatalogContract(unittest.TestCase):
         # Use a real, durable Pulp revision that contains this path. The
         # reviewed handoff-authority commit predates the file and is not a
         # valid fixture for a planted blob-drift test.
-        row["revision"] = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=catalog.ROOT, text=True,
-        ).strip()
+        path_history = subprocess.check_output(
+            ["git", "log", "--format=%H", "HEAD", "--", row["path"]],
+            cwd=catalog.ROOT, text=True,
+        ).splitlines()
+        self.assertGreaterEqual(len(path_history), 2)
+        row["revision"] = path_history[1]
         row["object_id"] = subprocess.check_output(
             ["git", "rev-parse", f"{row['revision']}:{row['path']}"],
             cwd=catalog.ROOT, text=True,

@@ -908,13 +908,12 @@ def _authentic_adapter(evidence: dict[str, Any]) -> dict[str, Any]:
             or re.fullmatch(r"Apple (?:M|A)[1-9][0-9]*(?: Pro| Max| Ultra)?", adapter["name"])
             is None
             or re.fullmatch(r"metal-[1-9][0-9]*", adapter["architecture"]) is None
-            or (device_match is not None and int(device_match.group(1), 16) == 0)
-            or (
-                raw_device not in (None, "")
-                and isinstance(raw_device, str)
-                and raw_device.strip().casefold() not in placeholders
-                and device_match is None
-            )
+            or (device_match is not None and int(device_match.group(1), 16) != 0x106B)
+            # Dawn omits the optional numeric identity when Metal exposes no
+            # registry/PCI-style IDs. Exactly JSON null is allowed behind the
+            # strict Apple identity above; placeholders and malformed values
+            # remain failures.
+            or (raw_device is not None and device_match is None)
         ):
             raise JourneyError("Metal adapter evidence has no concrete Apple identity")
     elif (

@@ -218,7 +218,9 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
     def test_historical_v1_ignores_current_head_source_drift(self) -> None:
         target = "tools/cli/gpu_probe/src/native_recipes.cpp"
         historical = MODULE._git_blobs(
-            json.loads((FIXTURE / "receipt.json").read_text())["integration_head"],
+            json.loads((FIXTURE / "receipt.json").read_text())[
+                "verification_equivalent_head"
+            ],
             MODULE.EXPECTED_SOURCE_BLOBS,
         ).get(target)
         self.assertIsNotNone(historical)

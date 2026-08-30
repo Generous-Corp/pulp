@@ -74,7 +74,11 @@ def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
         ["git", "rev-parse", "--is-shallow-repository"], cwd=root,
         text=True, capture_output=True, check=True,
     ).stdout.strip() == "true"
-    if missing and shallow:
+    # A warm self-hosted checkout can retain every object while checkout@v5
+    # rewrites the shallow boundary. Object presence therefore does not prove
+    # ancestry; always reconnect the exact event history when Git says the
+    # repository is shallow.
+    if shallow:
         event_ref = os.environ.get("GITHUB_REF", "")
         if not event_ref.startswith("refs/"):
             raise HydrationError("shallow checkout lacks an exact GITHUB_REF to hydrate")
