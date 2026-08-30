@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -550,6 +551,7 @@ TEST_CASE("external harness observes every GPU health entry point off a register
     auto registered_future = registered.get_future();
     std::promise<void> release;
     auto release_future = release.get_future();
+    std::atomic<bool> audio_thread_hold_timed_out{false};
     std::thread audio_thread([&] {
         const auto hashed =
             static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
@@ -557,7 +559,8 @@ TEST_CASE("external harness observes every GPU health entry point off a register
             std::min(std::max<std::uint64_t>(hashed, 1),
                      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
         registered.set_value();
-        (void)release_future.wait_for(10s);
+        if (release_future.wait_for(30s) != std::future_status::ready)
+            audio_thread_hold_timed_out.store(true, std::memory_order_relaxed);
     });
     const bool audio_thread_registered =
         registered_future.wait_for(10s) == std::future_status::ready;
@@ -583,6 +586,7 @@ TEST_CASE("external harness observes every GPU health entry point off a register
 
     release.set_value();
     audio_thread.join();
+    REQUIRE_FALSE(audio_thread_hold_timed_out.load(std::memory_order_relaxed));
     REQUIRE(audio_thread_id > 0);
     REQUIRE(frame_begin);
     REQUIRE(frame_recorded);
