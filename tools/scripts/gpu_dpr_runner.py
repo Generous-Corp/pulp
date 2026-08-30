@@ -606,7 +606,7 @@ def finalize(
     result["eligible_for_policy"] = policy_ready
     schema_problems = experiment.json_schema_lite.validate(
         result,
-        experiment.schema_for_lite(experiment.load_json(experiment.DEFAULT_SCHEMA)),
+        experiment.schema_for_lite(experiment.load_json(experiment.DEFAULT_SCHEMA_V1)),
     )
     problems = [*schema_problems, *experiment.result_semantic_errors(
         result, manifest, experiment.canonical_sha256(manifest)

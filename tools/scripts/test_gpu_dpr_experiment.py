@@ -124,6 +124,184 @@ def complete_fixture(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def v2_cell(
+    scenario: dict[str, Any], mode: str, requested_dpr: float,
+    campaign: str, manifest: dict[str, Any], manifest_digest: str,
+) -> dict[str, Any]:
+    affected = mode in {"configured_max", "adaptive_simulation"} and requested_dpr == 3
+    gpu = 1_000_000
+    memory = 10_000
+    if affected and mode == "configured_max":
+        gpu, memory = 800_000, 8_000
+    elif affected and mode == "adaptive_simulation":
+        gpu, memory = 650_000, 6_500
+    trials = []
+    for index in range(30):
+        trials.append({
+            "trial_index": index,
+            "mode_order": contract.deterministic_mode_order(
+                manifest_digest, scenario["id"], requested_dpr, index
+            ),
+            "frame_count": 240,
+            "gpu_p95_ns": gpu,
+            "cpu_median_ns": 500_000,
+            "cpu_p95_ns": 600_000,
+            "first_frame_median_ns": 5_000_000,
+            "first_frame_p95_ns": 6_000_000,
+            "interaction_median_ns": 2_000_000,
+            "interaction_p95_ns": 2_500_000,
+            "render_target_p95_bytes": memory,
+            "resident_p95_bytes": memory * 2,
+            "upload_p95_bytes": 1_000,
+            "frame_misses": 0,
+            "xruns": 0,
+            "affected": affected,
+            "sequence_sha256": hashlib.sha256(
+                f"{campaign}:{scenario['id']}:{mode}:{requested_dpr}:{index}".encode()
+            ).hexdigest(),
+        })
+    pid_base = int(hashlib.sha256(
+        f"{campaign}:{scenario['id']}:{mode}:{requested_dpr}".encode()
+    ).hexdigest()[:7], 16) + 1
+    fresh = [{
+        "trial_index": index,
+        "pid": pid_base + index,
+        "first_nonblank_present_ns": 5_000_000,
+        "started_at_highest_eligible_rung": True,
+        "counters_zero": True,
+        "sequence_sha256": hashlib.sha256(
+            f"fresh:{campaign}:{scenario['id']}:{mode}:{requested_dpr}:{index}".encode()
+        ).hexdigest(),
+    } for index in range(20)]
+    required = set(scenario["required_oracles"])
+    daw = []
+    if scenario["id"] == "forge-modular-daw":
+        daw = [{
+            "format": fmt, "host": host, "a3_role": role,
+            "outcome": "pass", "gates_passed": True,
+            "identity_sha256": hashlib.sha256(f"identity:{fmt}:{host}".encode()).hexdigest(),
+            "receipt_sha256": hashlib.sha256(
+                f"receipt:{campaign}:{mode}:{requested_dpr}:{fmt}:{host}".encode()
+            ).hexdigest(),
+        } for fmt, host, role in contract.DAW_SUBRECEIPTS]
+    artifacts = [{
+        "kind": kind, "path": f"evidence/{campaign}/{scenario['id']}/{mode}/{requested_dpr}/{kind}",
+        "sha256": hashlib.sha256(
+            f"{campaign}:{scenario['id']}:{mode}:{requested_dpr}:{kind}".encode()
+        ).hexdigest(),
+    } for kind in (
+        "raw_trials", "frame_sequences", "capture", "trace", "input_receipt",
+        "identity_receipt",
+    )]
+    return {
+        "campaign": campaign,
+        "scenario_id": scenario["id"],
+        "policy_class": scenario["policy_class"],
+        "mode": mode,
+        "requested_dpr": requested_dpr,
+        "outcome": "pass",
+        "identity": {
+            "machine_id": "m5-reference",
+            "provider": scenario["required_provider"],
+            "adapter": "apple-m5-hardware",
+            "build_sha": SHA_B,
+            "host": scenario["required_host"],
+            "format": "aggregate" if scenario["id"] == "forge-modular-daw" else "standalone",
+        },
+        "logical_size": scenario["logical_size"],
+        "physical_dimensions_verified": True,
+        "warmup_count": 5,
+        "measured_trials": trials,
+        "fresh_process_trials": fresh,
+        "adaptive_summary": ({
+            "initial_rung": requested_dpr,
+            "counters_zero": True,
+            "min_applied_dpr": 2 if requested_dpr == 3 else requested_dpr,
+            "max_applied_dpr": requested_dpr,
+            "all_transitions_one_rung": True,
+            "no_state_leakage": True,
+        } if mode == "adaptive_simulation" else None),
+        "fidelity": {
+            "capture_similarity": 0.995,
+            "small_text_luminance_stddev": (
+                2.0 if "small_text" in required else "not-applicable-by-manifest"
+            ),
+            "thin_stroke_coverage": (
+                0.01 if "thin_strokes" in required else "not-applicable-by-manifest"
+            ),
+            "content_floor": True,
+            "logical_input_exact": True,
+            "identity": True,
+        },
+        "daw_subreceipts": daw,
+        "artifacts": artifacts,
+    }
+
+
+def complete_v2_fixture(manifest: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    authorized = copy.deepcopy(manifest)
+    authorized["v2_protocol"]["status"] = "authorized"
+    authorized["v2_protocol"]["product_policy"] = {
+        "id": "synthetic-policy", "path": "planning/policy.json",
+        "blob": SHA_A, "a3_receipt_sha256": DIGEST_A,
+    }
+    authorized["trial_contract"]["timer_noise_p95_ns"] = 1_000
+    authorized["trial_contract"]["memory_sampler_resolution_bytes"] = 1
+    for scenario in authorized["scenarios"]:
+        scenario["frame_budget_ns"] = 16_666_667
+    digest = contract.canonical_sha256(authorized)
+    cells = [
+        v2_cell(scenario, mode, dpr, "original", authorized, digest)
+        for scenario in authorized["scenarios"]
+        for mode in contract.MODES for dpr in contract.REQUESTED_DPRS
+    ]
+    repeats = copy.deepcopy(cells)
+    for cell in repeats:
+        cell["campaign"] = "repeat"
+        for index, trial in enumerate(cell["measured_trials"]):
+            trial["sequence_sha256"] = hashlib.sha256(
+                f"repeat:{cell['scenario_id']}:{cell['mode']}:{cell['requested_dpr']}:{index}".encode()
+            ).hexdigest()
+        for index, trial in enumerate(cell["fresh_process_trials"]):
+            trial["pid"] += 10_000_000
+            trial["sequence_sha256"] = hashlib.sha256(
+                f"repeat-fresh:{cell['scenario_id']}:{cell['mode']}:{cell['requested_dpr']}:{index}".encode()
+            ).hexdigest()
+        for artifact in cell["artifacts"]:
+            artifact["path"] = artifact["path"].replace("/original/", "/repeat/")
+    document = {
+        "schema": "pulp.gpu-dpr-experiment.v2", "version": 2,
+        "status": "complete", "evidence_kind": "measured",
+        "experiment_id": "synthetic-v2-control", "plan_revision": SHA_A,
+        "pulp_sha": SHA_B, "forge_sha": SHA_C,
+        "authority": {
+            "manifest_sha256": digest, "product_policy_id": "synthetic-policy",
+            "product_policy_blob": SHA_A, "a3_receipt_sha256": DIGEST_A,
+            "timer_noise_p95_ns": 1_000, "memory_sampler_resolution_bytes": 1,
+            "collection_authorized": True,
+        },
+        "matrix": {
+            "scenario_ids": [item["id"] for item in authorized["scenarios"]],
+            "modes": contract.MODES, "requested_dprs": contract.REQUESTED_DPRS,
+            "cell_count": 84, "repeat_cell_count": 84,
+        },
+        "cells": cells, "repeat_cells": repeats,
+        "analysis": {},
+        "publication": {
+            "status": "verified-protected-main", "repository": "Generous-Corp/pulp",
+            "revision": SHA_B,
+            "path": "docs/validation/gpu-dpr/terminal-result.json",
+            "protected_main_verified": True, "required_checks_green": True,
+        },
+        "b5_gate": {
+            "status": "waiting-trigger", "requires": ["B0-adopted-vellum-api-refresh"],
+            "authorizes_policy_change": False,
+        },
+    }
+    document["analysis"] = contract.compute_v2_analysis(cells, repeats, authorized, digest)
+    return document, authorized
+
+
 def expect_semantic_failure(
     document: dict[str, Any], manifest: dict[str, Any], label: str
 ) -> None:
@@ -184,7 +362,7 @@ def main() -> int:
     if not contract.manifest_errors(mutated_manifest, contract.DEFAULT_MANIFEST):
         raise AssertionError("out-of-bounds web fidelity region unexpectedly passed")
 
-    schema = contract.schema_for_lite(contract.load_json(contract.DEFAULT_SCHEMA))
+    schema = contract.schema_for_lite(contract.load_json(contract.DEFAULT_SCHEMA_V1))
     fixture = complete_fixture(manifest)
     assert not json_schema_lite.validate(fixture, schema)
     assert not contract.result_semantic_errors(
@@ -252,7 +430,7 @@ def main() -> int:
 
     command = [
         sys.executable, str(SCRIPT_DIR / "gpu_dpr_experiment.py"),
-        "emit-plan", "--experiment-id", "a4-planned-control",
+        "emit-plan-v1", "--experiment-id", "a4-planned-control",
         "--plan-revision", SHA_A, "--pulp-sha", SHA_B,
     ]
     emitted = subprocess.run(command, check=True, capture_output=True, text=True)
@@ -262,11 +440,93 @@ def main() -> int:
     assert planned["disposition"] is None
     assert planned["eligible_for_policy"] is False
 
+    canonical = contract.load_json(contract.DEFAULT_RESULT)
+    v2_schema = contract.schema_for_lite(contract.load_json(contract.DEFAULT_SCHEMA))
+    assert not json_schema_lite.validate(canonical, v2_schema)
+    assert not contract.v2_semantic_errors(
+        canonical, manifest, contract.canonical_sha256(manifest)
+    )
+    assert canonical["status"] == "inconclusive"
+    assert canonical["analysis"]["disposition"] is None
+    assert canonical["b5_gate"]["authorizes_policy_change"] is False
+
+    v2, authorized = complete_v2_fixture(manifest)
+    authorized_digest = contract.canonical_sha256(authorized)
+    schema_errors = json_schema_lite.validate(v2, v2_schema)
+    if schema_errors:
+        raise AssertionError(f"valid v2 fixture failed schema: {schema_errors[:3]}")
+    semantic_errors = contract.v2_semantic_errors(v2, authorized, authorized_digest)
+    if semantic_errors:
+        raise AssertionError(f"valid v2 fixture failed semantics: {semantic_errors[:3]}")
+    assert v2["analysis"]["disposition"] == "adaptive-candidate"
+
+    v2_mutations: list[tuple[str, Any]] = []
+    missing = copy.deepcopy(v2)
+    missing["cells"].pop()
+    v2_mutations.append(("missing original cell", missing))
+    missing_repeat = copy.deepcopy(v2)
+    missing_repeat["repeat_cells"].pop()
+    v2_mutations.append(("missing repeat cell", missing_repeat))
+    wrong_manifest = copy.deepcopy(v2)
+    wrong_manifest["authority"]["manifest_sha256"] = DIGEST_B
+    v2_mutations.append(("manifest digest drift", wrong_manifest))
+    wrong_provider = copy.deepcopy(v2)
+    wrong_provider["cells"][0]["identity"]["provider"] = "substitute-provider"
+    v2_mutations.append(("wrong provider", wrong_provider))
+    wrong_class = copy.deepcopy(v2)
+    wrong_class["cells"][0]["policy_class"] = "web"
+    v2_mutations.append(("wrong scenario class", wrong_class))
+    wrong_order = copy.deepcopy(v2)
+    wrong_order["cells"][0]["measured_trials"][0]["mode_order"].reverse()
+    v2_mutations.append(("stale raw pair and mode order", wrong_order))
+    bad_adaptive = copy.deepcopy(v2)
+    adaptive_cell = next(
+        cell for cell in bad_adaptive["cells"]
+        if cell["mode"] == "adaptive_simulation" and cell["requested_dpr"] == 3
+    )
+    adaptive_cell["adaptive_summary"]["all_transitions_one_rung"] = False
+    v2_mutations.append(("bad adaptive transition", bad_adaptive))
+    leaked = copy.deepcopy(v2)
+    leaked_cell = next(cell for cell in leaked["cells"] if cell["mode"] == "adaptive_simulation")
+    leaked_cell["adaptive_summary"]["no_state_leakage"] = False
+    v2_mutations.append(("adaptive state leakage", leaked))
+    missing_daw = copy.deepcopy(v2)
+    daw_cell = next(cell for cell in missing_daw["cells"] if cell["scenario_id"] == "forge-modular-daw")
+    daw_cell["daw_subreceipts"].pop()
+    v2_mutations.append(("missing DAW subreceipt", missing_daw))
+    substituted_format = copy.deepcopy(v2)
+    daw_cell = next(cell for cell in substituted_format["cells"] if cell["scenario_id"] == "forge-modular-daw")
+    daw_cell["daw_subreceipts"][0]["host"] = "reaper"
+    v2_mutations.append(("substituted DAW host", substituted_format))
+    dimension_repeat = copy.deepcopy(v2)
+    dimension_repeat["repeat_cells"][0]["logical_size"]["width"] += 1
+    v2_mutations.append(("dimensional mismatch repeat", dimension_repeat))
+    bypass = copy.deepcopy(v2)
+    bypass["cells"][0]["fidelity"]["logical_input_exact"] = False
+    v2_mutations.append(("fidelity input bypass", bypass))
+    wrong_seed = copy.deepcopy(v2)
+    wrong_seed["analysis"]["comparisons"][0]["seed_sha256"] = DIGEST_B
+    v2_mutations.append(("wrong bootstrap seed", wrong_seed))
+    wrong_resamples = copy.deepcopy(v2)
+    wrong_resamples["analysis"]["comparisons"][0]["resamples"] = 9999
+    v2_mutations.append(("wrong bootstrap resample count", wrong_resamples))
+    executor_disposition = copy.deepcopy(v2)
+    executor_disposition["analysis"]["disposition"] = "configured-max-candidate"
+    v2_mutations.append(("executor-selected disposition", executor_disposition))
+    for label, mutated in v2_mutations:
+        schema_failure = json_schema_lite.validate(mutated, v2_schema)
+        semantic_failure = contract.v2_semantic_errors(
+            mutated, authorized, authorized_digest
+        ) if not schema_failure else schema_failure
+        if not semantic_failure:
+            raise AssertionError(f"v2 mutation unexpectedly passed: {label}")
+
     print(
         "gpu_dpr_contract_selftest=true "
         f"matrix_cells={len(contract.expected_matrix(manifest))} "
         f"semantic_mutations={len(mutations)} schema_mutations=2 "
-        f"manifest_mutations={len(manifest_mutations)}"
+        f"manifest_mutations={len(manifest_mutations)} "
+        f"v2_mutations={len(v2_mutations)}"
     )
     return 0
 
