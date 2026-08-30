@@ -1049,6 +1049,14 @@ trace PIDs/nonces, native adapters, or handwritten category claims are invalid.
 The checked-in Python tests prove those rejection paths; they do not replace a
 real browser run.
 
+The terminal v2 runner must invoke and snapshot the exact executable adapter,
+bind its actual producer PID, and retain eight unique files for every original
+and repeat web cell: JSON projections, both real PNGs, the real DevTools trace,
+and the exact wasm/Mach-O/ELF/PE product bytes. A filename, data string, or
+producer-authored `pass` claim cannot substitute for those bytes. Only
+`finalize-v2 --run-dir ...` may derive the candidate, and only fixed-path Git
+blobs plus `verify-live-v2` establish protected-main publication.
+
 Install exactly `playwright-core@1.61.1` in the isolated measurement package;
 the producer records and verifies that version and rejects drift. Each metric
 declares measured/derived/unavailable provenance. WebGL timing includes five

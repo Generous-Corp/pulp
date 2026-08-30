@@ -50,15 +50,11 @@ coverage. Validate that truthful boundary before scheduling hardware work:
 python3 tools/scripts/gpu_dpr_experiment.py validate-manifest
 python3 tools/scripts/gpu_dpr_experiment.py validate-result \
   docs/validation/gpu-dpr/terminal-result.json
-python3 tools/scripts/gpu_dpr_experiment.py emit-plan \
-  --experiment-id "a4-YYYYMMDD-NNN" \
-  --plan-revision "$PULP_DPR_PLAN_REVISION" \
-  --pulp-sha "$(git rev-parse HEAD)" \
-  --forge-sha "$PULP_DPR_FORGE_SHA" > /tmp/pulp-dpr-plan.json
 ```
 
-Export `PULP_DPR_PLAN_REVISION` and `PULP_DPR_FORGE_SHA` as the exact 40-hex
-commits under test first; placeholder or branch names are rejected.
+`emit-plan` is a structural nonterminal fixture surface, not collection
+authority. The terminal runner derives revisions, policy, and manifest from the
+fixed receipts described below; a caller-generated plan cannot replace them.
 
 The v2 plan covers exactly 84 original and 84 same-machine repeat cells: seven
 scenarios, DPR 1/1.5/2/3, and exact/configured-max/nonshipping-adaptive modes.
@@ -80,35 +76,38 @@ cells and cannot select B5.
 ### Execute and resume the matrix after A3 authority
 
 Do not initialize collection while `v2_protocol.status` is
-`blocked-product-policy`. After the protected authority updates the manifest,
-initialize a durable run journal and supply the exact scenario adapters. Each
-adapter is an absolute executable path and receives
-`--request <json> --receipt <json>`; it must preserve its raw samples, capture,
-Perfetto trace, input receipt, machine identity, and graphics-adapter identity
-inside the requested cell directory.
+`blocked-product-policy`. Do not ask a caller to update or supply the manifest.
+After the fixed A2T, A3 DPR product-policy, and A3 runtime terminal receipts are
+ordinary blobs at live protected Pulp `main`, `init-v2` validates those exact
+bytes and derives the authorized manifest itself. The run directory must be an
+absolute absent path created by the runner. Each v2 adapter is an absolute
+executable path and receives `--request <json> --output <directory>`; its
+producer receipt must name eight real artifacts that the runner can snapshot
+and revalidate.
 
 ```bash
-python3 tools/scripts/gpu_dpr_runner.py init \
-  --plan /tmp/pulp-dpr-plan.json --run-dir /tmp/pulp-dpr-run
-python3 tools/scripts/gpu_dpr_runner.py run \
-  --run-dir /tmp/pulp-dpr-run \
-  --adapter dense-text-thin-strokes=/absolute/path/to/pulp-capture-adapter \
-  --limit 1
-python3 tools/scripts/gpu_dpr_runner.py status \
-  --run-dir /tmp/pulp-dpr-run --json
+python3 tools/scripts/gpu_dpr_runner.py init-v2 \
+  --run-dir /absolute/owned/pulp-dpr-run \
+  --experiment-id <campaign-id> \
+  --trace-analyzer /absolute/path/to/the/a2t-authorized-analyzer
+python3 tools/scripts/gpu_dpr_runner.py run-v2 \
+  --run-dir /absolute/owned/pulp-dpr-run \
+  --cell 'original__dense-text-thin-strokes__exact__dpr-1' \
+  --adapter /absolute/path/to/a/v2-measurement-adapter
+python3 tools/scripts/gpu_dpr_runner.py status-v2 \
+  --run-dir /absolute/owned/pulp-dpr-run
 ```
 
-The existing runner/adapter protocol is historical v1 collection machinery and
-remains useful only as nonterminal migration input until each producer emits the
-v2 triplet/repeat contract. Re-running `run` resumes incomplete v1 cells. Missing adapters, adapter timeouts,
-SKIP, INCONCLUSIVE, rejected evidence, or failed exit/receipt agreement are
-durable incomplete attempts, never measurements. Existing Pulp screenshot,
-Three.js, Forge-native, real-DAW, browser, logical-input, and A2T tools may be
-wrapped as scenario adapters, but no generic adapter is implied: absent product
-legs remain explicit dependencies.
+The existing `init`/`run`/`issue`/`ingest` protocol and checked-in native/web
+adapters remain historical v1 collection machinery. They are nonterminal until
+a real product-specific v2 adapter emits the closed producer receipt and eight
+artifact kinds; do not pass a v1 adapter to `run-v2` or wrap missing product
+legs with invented JSON. A v2 timeout, per-stream output overflow, bad exit,
+missing receipt, or rejected bytes closes that nonce as inconclusive and allows
+a fresh attempt. It never completes the cell.
 
-The checked-in Pulp-native adapter supports both a capture-only preflight and a
-terminal measurement producer for the three frozen native fixtures. Build the
+The checked-in Pulp-native v1 adapter supports both a capture-only preflight and
+a v1 measurement producer for the three frozen native fixtures. Build the
 producer with benchmark counters and tracing enabled, then point the adapter at
 that exact executable:
 
@@ -159,12 +158,15 @@ browser dependency from its exact lock with `npm ci --ignore-scripts` in
 `examples/web-demos/super-convolver-ui/browser-test`; do not use an unpinned
 global Playwright package.
 
-`ingest` accepts an independently produced cell receipt and applies the same
-fidelity, logical-input, artifact-hash, identity, trace-category, and raw-sample
-checks. Every closed trace question must return exactly the cell's issued
+Historical v1 `ingest` accepts an independently produced cell receipt and
+applies the v1 fidelity, logical-input, artifact-hash, identity, trace-category,
+and raw-sample checks. Every closed trace question must return exactly the cell's issued
 32-hex attempt nonce as its sole GPU evidence ID; IDs from another cell or a
 capture containing ambiguous cohorts fail closed rather than being unioned.
-For v2, `finalize-v2 --draft ...` accepts no disposition argument. It recomputes
+For v2, `finalize-v2 --run-dir /absolute/owned/pulp-dpr-run` accepts no
+manifest, draft, result, or disposition argument. It freshly revalidates the
+terminal dependencies and rederives all 168 nonce-bound runner receipts and
+1,344 artifact files before it recomputes
 all candidate-vs-exact and adaptive-vs-configured intervals, regression gates,
 same-unit repeat tolerances, class support, and the simplest-policy tie-break.
 A candidate needs repeated material affected DPR-3 evidence in Pulp-native,
@@ -172,14 +174,18 @@ Forge-native/DAW, and web classes. `no-change` cancels B5; either candidate
 leaves B5 `waiting-trigger` on `B0-adopted-vellum-api-refresh`. Every B5 receipt
 keeps `authorizes_policy_change=false`.
 
-A complete measurement JSON is still only a publication candidate. Its schema
-forces `protected_main_verified=false` and `required_checks_green=false`; callers
-cannot self-attest them. `validate-result` derives terminal publication from a
-clean checkout whose exact HEAD is fresh live protected Pulp `main`, unions
+A complete measurement JSON is still only a publication candidate. Publish the
+runner-derived bytes only at the fixed manifest/result repository paths. From a
+clean checkout at the exact fresh live protected Pulp `main` head, run
+`verify-live-v2 --evidence-root /absolute/owned/pulp-dpr-run`; it emits a durable
+receipt binding those ordinary Git blobs and bytes. `validate-result` requires
+and freshly recomputes that receipt, unions
 classic branch-protection and repository-ruleset required checks (including app
 IDs), exhausts bounded pagination, and requires the unique latest matching
 result to be successful. An open PR, wrong-app same-name check, truncated API
-response, local commit, or caller-written `true` remains nonterminal.
+response, dirty/symlinked/outside/substituted candidate, wrong blob/type/head,
+local commit, or caller-written `true` remains nonterminal. The complete
+operator contract is in `docs/validation/gpu-dpr/README.md`.
 
 ## Verified (Real Hardware)
 
