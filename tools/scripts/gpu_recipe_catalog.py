@@ -50,7 +50,10 @@ HANDOFF_OUTPUT_RECEIPT_OVERRIDES = {
     "a4-pulp-dpr-experiment": "a4-pulp-dpr-experiment.terminal.v2",
 }
 HANDOFF_SUPPLEMENTAL_INPUT_RECEIPTS = {
-    "a4-pulp-dpr-experiment": ["a3-pulp-dpr-product-policy.terminal.v2"],
+    "a4-pulp-dpr-experiment": [
+        "a2t-pulp-trace-analysis.terminal.v1",
+        "a3-pulp-dpr-product-policy.terminal.v2",
+    ],
 }
 HANDOFF_AUTHORITIES = {
     "plan": {
