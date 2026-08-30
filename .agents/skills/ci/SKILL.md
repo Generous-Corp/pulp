@@ -1673,6 +1673,28 @@ bisectable.
   unimplemented keyword *raises* rather than being skipped — so no schema
   constraint can be silently unchecked. **Adding a gate-script test file is not
   enough: `test_gates.py` must import its `TestCase`, or it runs nowhere.**
+- **Yoga oracle/pin lockstep (`check_yoga_oracle_pin.py`).** Whole-tree
+  invariant (not diff-scoped). The web-compat harness decides scope by looking a
+  CSS property up **by name** in `tools/harness/oracles/yoga/yoga-supported.json`
+  — a table hand-transcribed from one Yoga release — and
+  `tools/harness/adapters/yoga.py` reports anything absent from it as
+  `Status.OOS`, "out-of-scope", not as an uncovered gap. Yoga itself is pinned
+  independently in `tools/cmake/PulpDependencies.cmake`. Bumping the pin without
+  re-transcribing the table therefore reclassifies every property and enum value
+  the new Yoga gained as out of scope, and compat coverage *improves* because the
+  measurement went blind — the worst gate failure shape there is. The check reads
+  both ends and fails when they disagree. It also rejects the two cmake pin sites
+  (`pulp_register_fetchcontent_source ... REF` and the `FetchContent_Declare`
+  `GIT_TAG`) disagreeing with each other, and a missing or uncited version stamp,
+  so it cannot pass vacuously: exit `1` is drift, exit `2` is an unparseable or
+  absent stamp. Runs in `gates.sh`, in the pre-push hook, and as the
+  `yoga-oracle-pin-lockstep` ctest (with `yoga-oracle-pin-lockstep-selftest`
+  covering the checker itself). The ctest is the authoritative lane: the
+  pre-push hook shares `run_gate_captured`'s exit `2` with its own
+  capture-directory error, so — like every other gate there — it treats `2` as
+  an advisory internal error rather than a hard fail. Fixing it means restamping the oracle's `version`
+  and its `source` citation against the new `facebook/yoga@<ref>` YGEnums.h
+  *and* re-reading the property table — restamping alone re-hides the gap.
 - **Conflict-marker guard (`conflict_marker_check.py`).** Whole-tree guard (not
   diff-scoped): no tracked file may carry a git conflict marker. Born from the
   incident where a squash-merge's stale side collided with an already-advanced
