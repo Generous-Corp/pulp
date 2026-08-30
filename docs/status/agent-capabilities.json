@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 44,
+  "manifest_revision": 45,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 59
+        "capabilities": 60
       },
       "timebase": {
         "state": "partial",
@@ -3191,6 +3191,67 @@
         }
       },
       "contract_digest": "sha256:81ba54734e3a70376db0820de63e996499e17a8f9d235114d87fd338828f1ba5"
+    },
+    {
+      "key": "signal.fir-equiripple-design",
+      "domain": "signal",
+      "summary": "Offline weighted-minimax (Parks-McClellan Remez exchange) design of bounded real Type I-IV linear-phase FIRs from band requirements.",
+      "rt_class": "offline",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "offline design; may allocate bounded workspace",
+        "process": "offline design request",
+        "reset": "none",
+        "release": "destruction off audio"
+      },
+      "state_model": "Bounded band requirements, a dense exchange grid, the alternation set, and returned coefficients, per-band ripple, extremal frequencies, and iteration count.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "ascending disjoint bands in [0, pi] with signed amplitude and positive weight, plus a bounded tap/type specification and iteration budget",
+      "output_domain": "real linear-phase FIR coefficients, achieved per-band ripple, the alternation set, and the equalized minimax error",
+      "units": [
+        "radians per sample",
+        "taps",
+        "linear amplitude",
+        "weighted minimax error"
+      ],
+      "latency": "offline whole-design exchange",
+      "tail": "none",
+      "scheduling": "offline request",
+      "bindings": [
+        {
+          "role": "designer",
+          "kind": "cpp_function",
+          "include": "pulp/signal/fir_design.hpp",
+          "qualified_name": "pulp::signal::design_fir_equiripple",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:a63418e9e30fd082d06cb9e61e2987205479bd5f2158b7c19975ecfe351b9f23"
     },
     {
       "key": "signal.fm-operator-engine",
@@ -6657,14 +6718,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 94,
+    "total": 95,
     "by_domain": {
       "audio": 8,
       "midi": 10,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 59,
+      "signal": 60,
       "timebase": 9
     }
   },
@@ -9549,6 +9610,15 @@
           {
             "class": "FirLeastSquaresResult",
             "qualified_name": "pulp::signal::FirLeastSquaresResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "FirEquirippleResult",
+            "qualified_name": "pulp::signal::FirEquirippleResult",
             "template": null,
             "methods": [
               "bool()"
