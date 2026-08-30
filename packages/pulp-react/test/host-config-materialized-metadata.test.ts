@@ -27,7 +27,14 @@ const instance = (id: string) => ({
 function mutate(): void {
     const commitUpdate = PulpHostConfig.commitUpdate as
         (...args: unknown[]) => void;
-    commitUpdate(instance('a'), null, 'view', {}, {}, null);
+    commitUpdate(instance('a'), null, 'view', { opacity: 0 }, { opacity: 1 }, null);
+}
+
+function updateText(oldProps: Record<string, unknown>,
+                    newProps: Record<string, unknown>): void {
+    const commitUpdate = PulpHostConfig.commitUpdate as
+        (...args: unknown[]) => void;
+    commitUpdate(instance('status'), null, 'span', oldProps, newProps, null);
 }
 
 function reorderSiblings(): void {
@@ -76,6 +83,53 @@ describe('host-config materialized metadata', () => {
         resetAfterCommit?.({});   // still nothing mutated
 
         expect(applications).toBe(1);
+    });
+
+    it('does not re-apply metadata for fixed single-line text-only updates', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'BAND 1/64', width: '100%', height: '100%', whiteSpace: 'nowrap' },
+            { children: 'BAND 2/64', width: '100%', height: '100%', whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(1);
+    });
+
+    it('re-applies metadata when changed text can affect geometry', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText({ children: 'short' }, { children: 'a longer intrinsic label' });
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    it('re-applies metadata when fixed text changes with another host prop', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'BAND 1/64', width: 240, height: 26,
+              whiteSpace: 'nowrap', opacity: 0.5 },
+            { children: 'BAND 2/64', width: 240, height: 26,
+              whiteSpace: 'nowrap', opacity: 1 },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
     });
 
     // insertBefore's same-parent branch reorders childIds and returns WITHOUT

@@ -464,6 +464,35 @@ const TEXT_BEARING: Set<Type> = new Set([
     'figure', 'figcaption', 'form', 'ul', 'ol', 'dl', 'dt', 'dd',
 ] as Type[]);
 
+function hasFixedTextDimension(value: unknown): boolean {
+    if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+    if (typeof value !== 'string') return false;
+    const match = value.trim().match(/^([0-9]+(?:\.[0-9]+)?)(?:px|%)?$/);
+    return match !== null && Number(match[1]) > 0;
+}
+
+/// True when a React commit changes only the copy of a text-bearing native
+/// Label whose geometry is explicitly fixed. In that case Label::set_text()
+/// repaints without invalidating Yoga, and re-applying Chromium-captured
+/// metadata would manufacture a full-tree layout that the native mutation did
+/// not require.
+function isFixedTextOnlyUpdate(type: Type, oldProps: Props, newProps: Props): boolean {
+    if (!TEXT_BEARING.has(type)) return false;
+    const oldText = asText(oldProps.children) ?? (oldProps.text as string | undefined);
+    const newText = asText(newProps.children) ?? (newProps.text as string | undefined);
+    if (oldText === newText || newText === undefined) return false;
+    if (!hasFixedTextDimension(newProps.width)
+        || !hasFixedTextDimension(newProps.height)
+        || newProps.whiteSpace !== 'nowrap') return false;
+    const nonTextKeys = new Set([...Object.keys(oldProps), ...Object.keys(newProps)]);
+    nonTextKeys.delete('children');
+    nonTextKeys.delete('text');
+    for (const key of nonTextKeys) {
+        if (oldProps[key] !== newProps[key]) return false;
+    }
+    return true;
+}
+
 // ── HostConfig ──────────────────────────────────────────────────────
 export const PulpHostConfig: HostConfig<
     Type, Props, Container, Instance, TextInstance, SuspenseInstance,
@@ -701,9 +730,9 @@ export const PulpHostConfig: HostConfig<
     },
 
     commitUpdate(instance, _updatePayload, type, oldProps, newProps, _internalHandle) {
-        markMaterializedTreeDirty();
         const oldN = normalizeHostProps(type, oldProps as Record<string, unknown>);
         const newN = normalizeHostProps(type, newProps as Record<string, unknown>);
+        if (!isFixedTextOnlyUpdate(type, oldN, newN)) markMaterializedTreeDirty();
         applyChangedProps(instance, oldN, newN);
         instance.props = { ...newN };
         if (instance._dom && typeof instance._dom === 'object') {
