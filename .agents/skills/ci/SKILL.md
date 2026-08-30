@@ -544,13 +544,15 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    bare `--paginate` concatenates page documents and breaks its single-document
    JSON decoding past 100 check runs.
 3. **Only THEN consider capacity — and verify, don't assume.** The required
-   `macos` gate runs on the **fast local JIT VM pool** selected by
-   `pulp-gate-fast` (M3 + M5), which is usually idle. Confirm with:
+   `macos` gate runs on the M1/M3/M5 local JIT VM pool, selected by the mutually
+   exclusive `pulp-build-merge-group` and `pulp-build-pr-head` event classes.
+   Confirm currently registered runners with:
    ```bash
    ghapp api repos/Generous-Corp/pulp/actions/runners \
      | python3 -c "import sys,json;[print(r['name'],r['status'],'busy='+str(r['busy'])) for r in json.load(sys.stdin)['runners']]"
    ```
-   If the Studios show `busy=False`, the pool is NOT saturated — say so. What DOES
+   A zero-runner result is healthy-idle and is not proof of a dead lane; use
+   queue age plus host-side supervisor/lease/VM evidence. What DOES
    queue independently is the **GitHub-hosted advisory lanes** (Linux, Windows,
    sanitizers, coverage, android) on GitHub's shared pool; those are advisory, not
    the required gate, so a long queue there does not block merge.
@@ -4135,8 +4137,8 @@ revalidates the complete open PR identity (base and head repository/ref/SHA)
 before posting. Immutable recovery identity must be uploaded before the pending
 check exists; the protected source-free `workflow_run` reconciler terminalizes
 that exact check if cancellation skips the normal reporter. The local route is
-fail-closed even for the current
-`pulp-gate-fast` JIT Tart selector: disposal after a job does not protect the
+fail-closed even for the current event-class JIT Tart selector: disposal after
+a job does not protect the
 main-scoped runtime/cache token while runner and PR code share the guest admin
 account. Re-enable it only with a separately proven two-account Tart class.
 Namespace accepts
@@ -4611,8 +4613,9 @@ one raises nothing), which is why it keeps getting re-proposed. Three things to
 check before spending a cycle on it, all readable in a minute:
 
 - **The gate hosts have no host-identifying label.** Matching is by label subset,
-  and every gate runner on all three registers the same `self-hosted, macOS,
-  ARM64, pulp-build, pulp-build-vm, pulp-gate-fast`; the labels that vary
+  and every gate runner on all three registers the same base `self-hosted, macOS,
+  ARM64, pulp-build, pulp-build-vm` labels plus its selected event class; labels
+  that vary
   (`pulp-build-studio`, `pulp-build-vm-secondary`) are role labels, and m1's and
   m5's are label-identical. There is no `pulp-host-m3` analogue to
   `pulp-host-macpro` / `pulp-host-macmini`. So three per-host entries match one
@@ -5242,8 +5245,9 @@ native child is absent). That name MUST NOT be renamed.
 Routing variables (verify before debugging "stuck" macOS PRs):
 - `PULP_DEFAULT_RUNNER_PROVIDER = github-hosted` (Linux/Windows default)
 - `PULP_LOCAL_MACOS_RUNS_ON_JSON` must match the
-  `tools/scripts/runner_topology.json` contract (currently the ephemeral
-  `pulp-gate-fast` class)
+  `tools/scripts/runner_topology.json` base-selector contract. For PR and merge
+  events, `build.yml` replaces its legacy `pulp-gate-fast` discriminator with
+  the applicable event-class label before assignment.
 - `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON = local-only` (no Namespace overflow)
 - `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` should be unset unless the operator is deliberately testing Namespace
 
@@ -6957,9 +6961,11 @@ variables and service history with:
 python3 tools/scripts/runner_topology_check.py --mode=report
 ```
 
-The contracted required gate is the fast M3/M5 JIT class, macOS overflow is
-disabled with the `local-only` sentinel, and paid Namespace variables remain
-unset. Read the JSON contract for exact labels and hosts.
+The contracted required gate is the M1/M3/M5 JIT pool. The JSON records the
+legacy base selector; `build.yml` replaces `pulp-gate-fast` with the exact PR or
+merge-group event class before assignment. macOS overflow is disabled with the
+`local-only` sentinel, and paid Namespace variables remain unset. Read both
+surfaces together for the effective selector.
 
 **Required/advisory isolation.** The `pulp-build*` and `pulp-preamble*` labels
 are reserved for required merge-gate work. Example validation and format
@@ -7086,17 +7092,18 @@ split with it.
 
 The governed Tart fleet contract is class-specific on every M1/M3/M5 profile:
 
-- `pulp-build-merge-group` registers through protected organization runner
-  group `3`.
-- `pulp-build-pr-head` registers through Pulp's repository-scoped group `1`.
+- `pulp-build-merge-group` registers through Pulp's repository-scoped group `1`
+  and derives merge priority `110`.
+- `pulp-build-pr-head` registers through Pulp's repository-scoped group `1` and
+  derives PR priority `100`.
 
-Never collapse those classes back into one static label set or register both in
-group 3. Before organization-scoped JIT minting, TartCI must freshly prove that
-the group can serve `Generous-Corp/pulp`; missing, malformed, inaccessible, or
-unpaginated policy fails closed. A repository-scoped PR-head runner is proven
-usable only when it appears in Pulp's repository runner endpoint, becomes busy,
-and its exact name binds to the queued job. `online` plus `busy=false` in the
-organization inventory is not capacity evidence.
+Both classes must remain repository-scoped because a `merge_group` ref cannot
+satisfy the protected organization group's main-ref workflow restriction.
+Never collapse the classes back into one static label set or move either to
+group 3. A runner is proven usable only when it appears in Pulp's repository
+runner endpoint, becomes busy, and its exact name binds to the queued job.
+`online` plus `busy=false` in the organization inventory is not capacity
+evidence.
 
 If the repository cannot see an online runner, do not rerun the PR, weaken the
 labels, or add hosted overflow. Inspect the loaded profile's
