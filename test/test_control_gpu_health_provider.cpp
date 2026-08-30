@@ -386,6 +386,39 @@ TEST_CASE("GPU health provider associates event loss without consuming a lifecyc
         std::chrono::steady_clock::time_point{} + 600ms));
 }
 
+TEST_CASE("GPU health provider never masks stronger terminal evidence with event loss") {
+    SECTION("blank frame") {
+        pulp::inspect::ControlGpuHealthProvider provider(
+            {.pulp_build_id = "test-build", .seed_blank_first_frame = true});
+        REQUIRE(provider.begin_editor_open(
+            pulp::inspect::ControlGpuHealthProvider::CacheState::cold,
+            std::chrono::steady_clock::time_point{}));
+        REQUIRE(provider.record_dropped_events(1));
+        REQUIRE(provider.record_presented_frame(frame(true)));
+        REQUIRE(provider.snapshot()->startup.trials.back().verdict == gh::Verdict::fail);
+        REQUIRE(provider.snapshot()->startup.trials.back().diagnostic_code ==
+                "gpu.startup.blank");
+    }
+
+    for (const bool instance_lost : {false, true}) {
+        CAPTURE(instance_lost);
+        pulp::inspect::ControlGpuHealthProvider provider(
+            {.pulp_build_id = "test-build", .timeout = 5ms});
+        const auto requested_at = std::chrono::steady_clock::time_point{};
+        REQUIRE(provider.begin_editor_open(
+            pulp::inspect::ControlGpuHealthProvider::CacheState::cold, requested_at));
+        REQUIRE(provider.record_dropped_events(1));
+        if (instance_lost)
+            REQUIRE(provider.record_instance_lost());
+        else
+            REQUIRE(provider.record_timeout(requested_at + 6ms));
+        REQUIRE(provider.snapshot()->startup.trials.back().verdict ==
+                gh::Verdict::unavailable);
+        REQUIRE(provider.snapshot()->startup.trials.back().diagnostic_code ==
+                (instance_lost ? "gpu.startup.instance_lost" : "gpu.startup.timeout"));
+    }
+}
+
 TEST_CASE("GPU health provider seeded blank first frame fails closed") {
     pulp::inspect::ControlGpuHealthProvider provider(
         {.pulp_build_id = "test-build", .seed_blank_first_frame = true});

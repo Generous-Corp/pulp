@@ -488,7 +488,8 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
         trial.diagnostic_code =
             trace_complete ? "gpu.startup.unverified" : "gpu.startup.trace_incomplete";
     }
-    if (impl_->active_trial_lost_events) {
+    if (impl_->active_trial_lost_events && trial.verdict != gh::Verdict::fail &&
+        trial.verdict != gh::Verdict::unavailable) {
         trial.verdict = gh::Verdict::unverified;
         trial.diagnostic_code = "gpu.startup.event_loss";
     }
@@ -525,10 +526,8 @@ bool ControlGpuHealthProvider::record_timeout(
     trial.sequence = static_cast<std::uint32_t>(result->startup.trials.size());
     trial.cache_state =
         impl_->cache_state == CacheState::cold ? gh::CacheState::cold : gh::CacheState::warm;
-    trial.verdict = impl_->active_trial_lost_events ? gh::Verdict::unverified
-                                                   : gh::Verdict::unavailable;
-    trial.diagnostic_code =
-        impl_->active_trial_lost_events ? "gpu.startup.event_loss" : "gpu.startup.timeout";
+    trial.verdict = gh::Verdict::unavailable;
+    trial.diagnostic_code = "gpu.startup.timeout";
     result->startup.trials.push_back(std::move(trial));
     record_capture_event(result->startup.capture);
     derive_startup_state(result->startup);
@@ -560,10 +559,8 @@ bool ControlGpuHealthProvider::record_instance_lost() noexcept {
     trial.sequence = static_cast<std::uint32_t>(result->startup.trials.size());
     trial.cache_state =
         impl_->cache_state == CacheState::cold ? gh::CacheState::cold : gh::CacheState::warm;
-    trial.verdict = impl_->active_trial_lost_events ? gh::Verdict::unverified
-                                                   : gh::Verdict::unavailable;
-    trial.diagnostic_code = impl_->active_trial_lost_events ? "gpu.startup.event_loss"
-                                                            : "gpu.startup.instance_lost";
+    trial.verdict = gh::Verdict::unavailable;
+    trial.diagnostic_code = "gpu.startup.instance_lost";
     result->startup.trials.push_back(std::move(trial));
     record_capture_event(result->startup.capture);
     derive_startup_state(result->startup);
