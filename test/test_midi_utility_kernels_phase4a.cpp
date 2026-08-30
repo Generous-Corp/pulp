@@ -1264,3 +1264,43 @@ TEST_CASE("chord memory returns to passthrough when its memory is cleared",
     for (std::size_t index = 0; index < out.size(); ++index)
         REQUIRE(out[index].identity() == input[index].identity());
 }
+
+TEST_CASE("note delay retrigger still ends the first attack's echoes",
+          "[midi][note-delay][rt-safety]") {
+    // Pressing the same key again before releasing it must not strand the
+    // echoes the first press scheduled. They cannot wait for the second press's
+    // release — that release describes a different note — so they take the
+    // length the first note had actually been held when it was retriggered.
+    const std::array input{on(0, 60, 100), on(3'000, 60, 100), off(3'500, 60)};
+    midi::NoteDelaySpec spec{};
+    spec.interval = {kSixteenthTicks};
+    spec.repeats = 2;
+    spec.velocity_decay_percent = 100;
+    // Transposing the echoes puts them on their own pitches, so the ledger below
+    // measures only what the kernel owns. The dry stream here is deliberately
+    // unbalanced — two presses and one release is what a retrigger IS — and that
+    // is the player's note, not the kernel's, so folding it in would assert the
+    // opposite of the send contract.
+    spec.transpose_semitones = 4;
+    midi::NoteDelay<> delay{spec};
+    auto out = render(
+        [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
+            delay.process(in, o, constant_block(start, count));
+        },
+        40'000, kRaggedBlocks, input);
+
+    EventLedger ledger;
+    std::size_t echo_attacks = 0;
+    for (const auto& event : out) {
+        if (event.event.note() == 60)
+            continue; // the dry note, which this kernel forwards and never owns
+        ledger.feed(event);
+        if (event.attack())
+            ++echo_attacks;
+    }
+    // Both presses scheduled two echoes each, and every one of them ended on its
+    // own without a flush.
+    REQUIRE(echo_attacks == 4);
+    REQUIRE(ledger.balanced());
+    REQUIRE(delay.empty());
+}

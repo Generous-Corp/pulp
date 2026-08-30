@@ -241,10 +241,11 @@ class NoteDelay {
                          MidiUtilityProcessReport& report) noexcept {
         const auto stride = repeat_stride(spec_, block);
         const auto group = group_for(event.channel(), event.note());
-        // A re-attack before the previous release retires the old group's arm,
-        // so the earlier echoes keep the length they already have instead of
-        // being rolled back by the wrong release.
-        retire_group(group);
+        // A re-attack before the previous release ends the earlier press's
+        // echoes here, using the length that press had actually been held. They
+        // cannot wait for the next release: that release describes a different
+        // note, and leaving them armed would sustain them until flush.
+        close_group(group, absolute);
         auto* source = claim_source(group);
         if (source == nullptr) {
             // With nothing to record the arm against, the echoes could never be
@@ -284,25 +285,30 @@ class NoteDelay {
     void roll_back_armed(const MidiEvent& event, std::int64_t absolute, const Block& block,
                          MidiBuffer& output, MidiUtilityProcessReport& report) noexcept {
         const auto group = group_for(event.channel(), event.note());
+        if (!close_group(group, absolute))
+            return;
+        emit_due_before(absolute, block, output, report);
+    }
+
+    /// Give every armed echo of `group` the length its source note had been
+    /// held at `absolute`, and disarm the source. This is the one place an
+    /// armed end becomes a real one, so both the authored release and a
+    /// retrigger end up on exactly the same arithmetic.
+    bool close_group(std::uint16_t group, std::int64_t absolute) noexcept {
         auto* source = find_source(group);
         if (source == nullptr)
-            return;
+            return false;
         const auto held = std::max<std::int64_t>(1, absolute - source->attack);
         queue_.visit([&](note_schedule::ScheduledNote& slot) {
             if (slot.group != group || slot.end != note_schedule::kArmedEnd)
                 return;
             const auto end = utility_detail::saturating_sample_add(slot.start, held);
+            // An echo already sounding cannot end before now, or its note-off
+            // would be emitted ahead of the note-on that started it.
             slot.end = slot.sounding ? std::max(end, absolute) : end;
         });
         *source = {};
-        emit_due_before(absolute, block, output, report);
-    }
-
-    void retire_group(std::uint16_t group) noexcept {
-        queue_.visit([&](note_schedule::ScheduledNote& slot) {
-            if (slot.group == group)
-                slot.group = 0;
-        });
+        return true;
     }
 
     void emit_due_before(std::int64_t boundary, const Block& block, MidiBuffer& output,
