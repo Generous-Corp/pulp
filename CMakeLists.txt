@@ -86,6 +86,9 @@ option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
 option(PULP_ENABLE_PROJECT_PACKAGE
        "Build and export the durable project-package subsystem and dependent C++ timeline authoring tools"
        ON)
+option(PULP_ENABLE_AUTHORING_CAPSULE
+       "Build and export the portable authoring-capsule substrate"
+       ON)
 option(PULP_ENABLE_SCENE3D "Enable opt-in native no-JS 3D scene/glTF renderer spikes" OFF)
 # Opt-in lane for the native-component Rust contract proof: builds a Cargo
 # `staticlib` reference core (with an RT-checking global allocator) and links
@@ -373,6 +376,9 @@ add_subdirectory(core/events)
 add_subdirectory(core/sample_bank_manifest)
 add_subdirectory(core/state)
 add_subdirectory(core/audio)
+if(PULP_ENABLE_AUTHORING_CAPSULE)
+    add_subdirectory(core/authoring_capsule)
+endif()
 add_subdirectory(core/interchange)
 add_subdirectory(core/dawproject)
 add_subdirectory(core/smf)

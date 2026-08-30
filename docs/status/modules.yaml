@@ -26,6 +26,12 @@ modules:
     dependencies: [timeline, runtime]
     docs: reference/modules.md#project_package
 
+  - name: authoring_capsule
+    summary: Portable authoring capsules a bounded deterministic container plus a canonical manifest that states exactly what is inside what it is compatible with what it depends on and what rights attach to each component with admission closure safe paths non-executing preview private staging and atomic no-replace publication owned here while a registered profile owns what the payload means
+    status: experimental
+    dependencies: [runtime, audio]
+    docs: reference/authoring-capsule.md
+
   - name: timeline_editor
     summary: The editor rung's interfaces starting with SequencerUiHost the whole coupling a timeline view has toward playback carrying value-copied playhead readings audition requests and emitted intents in document vocabulary only plus the pointer-neutral EditIntent verbs their lowering onto ordinary transactions a separate TrackEditIntent channel for arranging tracks and the undo budget a streaming gesture is priced against before it opens
     status: experimental
