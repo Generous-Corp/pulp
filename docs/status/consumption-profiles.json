@@ -35,7 +35,7 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "ON"
+        "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
         "installed_target_count": 66,
