@@ -752,6 +752,10 @@ install(FILES
     # lib/cmake/Pulp/scripts too — the authoritative copy lives at
     # tools/scripts/check_bundle_architectures.py.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/check_bundle_architectures.py"
+    # pulp_add_ios_auv3() consumes these at downstream build time when the
+    # installed SDK advertises its verified Three.js runtime.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/bundle_threejs_for_jsc.mjs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/view/js/web-compat-three-shim.js"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp/scripts
 )
 

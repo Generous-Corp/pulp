@@ -235,6 +235,10 @@ endif()
 set(PULP_HAS_THREEJS_RUNTIME @PULP_HAS_THREEJS@)
 set(PULP_THREEJS_RUNTIME_REVISION "@PULP_THREEJS_REVISION@")
 set(PULP_THREEJS_RUNTIME_DIR "")
+set(PULP_THREEJS_BUNDLER_SCRIPT
+    "${CMAKE_CURRENT_LIST_DIR}/scripts/bundle_threejs_for_jsc.mjs")
+set(PULP_THREEJS_WEB_COMPAT_SHIM
+    "${CMAKE_CURRENT_LIST_DIR}/scripts/web-compat-three-shim.js")
 if(PULP_HAS_THREEJS_RUNTIME)
     set(PULP_THREEJS_RUNTIME_DIR
         "${PACKAGE_PREFIX_DIR}/share/pulp/threejs")
@@ -302,6 +306,18 @@ if(PULP_HAS_THREEJS_RUNTIME)
     unset(_pulp_threejs_runtime_path)
     unset(_pulp_threejs_installed_revision)
     unset(_pulp_threejs_runtime_manifest)
+    foreach(_pulp_threejs_build_asset IN ITEMS
+            "${PULP_THREEJS_BUNDLER_SCRIPT}"
+            "${PULP_THREEJS_WEB_COMPAT_SHIM}")
+        if(NOT EXISTS "${_pulp_threejs_build_asset}")
+            set(Pulp_FOUND FALSE)
+            set(Pulp_NOT_FOUND_MESSAGE
+                "Installed Three.js AUv3 build asset is missing: "
+                "${_pulp_threejs_build_asset}")
+            return()
+        endif()
+    endforeach()
+    unset(_pulp_threejs_build_asset)
 endif()
 
 if(NOT DEFINED PULP_ENABLE_AAX)

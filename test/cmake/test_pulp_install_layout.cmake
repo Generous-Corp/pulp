@@ -376,6 +376,16 @@ file(STRINGS "${PULP_BUILD_DIR}/CMakeCache.txt" _threejs_runtime_cache
     REGEX "^PULP_ENABLE_THREEJS_RUNTIME:BOOL=")
 if(_threejs_runtime_cache MATCHES "=ON$")
     set(_threejs_runtime_root "${_prefix}/share/pulp/threejs")
+    set(_threejs_bundler
+        "${_pulp_cmake_dir}/scripts/bundle_threejs_for_jsc.mjs")
+    set(_threejs_shim
+        "${_pulp_cmake_dir}/scripts/web-compat-three-shim.js")
+    foreach(_threejs_build_asset IN ITEMS "${_threejs_bundler}" "${_threejs_shim}")
+        if(NOT EXISTS "${_threejs_build_asset}")
+            message(FATAL_ERROR
+                "Installed Three.js AUv3 build asset is missing: ${_threejs_build_asset}")
+        endif()
+    endforeach()
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E compare_files
             "${CMAKE_CURRENT_LIST_DIR}/../../tools/cmake/threejs-runtime-manifest.json"
@@ -410,6 +420,11 @@ if(NOT PULP_THREEJS_RUNTIME_REVISION STREQUAL "${EXPECTED_THREEJS_REVISION}")
     message(FATAL_ERROR
         "Unexpected Three.js revision: ${PULP_THREEJS_RUNTIME_REVISION}")
 endif()
+foreach(_asset_var IN ITEMS PULP_THREEJS_BUNDLER_SCRIPT PULP_THREEJS_WEB_COMPAT_SHIM)
+    if(NOT EXISTS "${${_asset_var}}")
+        message(FATAL_ERROR "Installed Three.js AUv3 asset did not resolve: ${_asset_var}")
+    endif()
+endforeach()
 ]=])
     execute_process(
         COMMAND "${CMAKE_COMMAND}"
@@ -426,6 +441,84 @@ endif()
         message(FATAL_ERROR
             "Installed Three.js consumer configure failed:\n"
             "${_threejs_consumer_stdout}${_threejs_consumer_stderr}")
+    endif()
+
+    # On Apple hosts, configure the public iOS AUv3 helper from the installed
+    # package and prove its generated build rule references only installed,
+    # verified Three.js inputs plus the packaged bundler/shim. Configure-only is
+    # intentional: this host SDK's archives are macOS artifacts, while the
+    # boundary under test is downstream helper generation and asset routing.
+    if(CMAKE_HOST_APPLE)
+        find_program(_threejs_xcrun NAMES xcrun)
+        if(_threejs_xcrun)
+            execute_process(
+                COMMAND "${_threejs_xcrun}" --sdk iphonesimulator --show-sdk-path
+                RESULT_VARIABLE _threejs_ios_sdk_rc
+                OUTPUT_QUIET ERROR_QUIET)
+        endif()
+        if(_threejs_xcrun AND _threejs_ios_sdk_rc EQUAL 0)
+            set(_threejs_ios_consumer_source
+                "${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-ios-installed-consumer")
+            set(_threejs_ios_consumer_build
+                "${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-ios-installed-consumer-build")
+            file(REMOVE_RECURSE
+                "${_threejs_ios_consumer_source}" "${_threejs_ios_consumer_build}")
+            file(MAKE_DIRECTORY "${_threejs_ios_consumer_source}")
+            file(WRITE "${_threejs_ios_consumer_source}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.24)
+project(PulpThreeJsIosInstalledConsumer LANGUAGES C CXX OBJC OBJCXX)
+# This configure-only helper proof consumes a macOS SDK install while selecting
+# the iOS toolchain. Its mac-gpu Skia archive is intentionally not an iOS slice;
+# provide only the imported target name needed to validate generated build rules.
+add_library(skia::skia INTERFACE IMPORTED)
+find_package(Pulp CONFIG REQUIRED)
+pulp_add_ios_auv3(
+    NAME InstalledThreeJs
+    BUNDLE_ID com.pulp.tests.host.InstalledThreeJs
+    MANUFACTURER Pulp
+    MANUFACTURER_CODE Pulp
+    SUBTYPE_CODE ItJs
+    AU_TYPE aumu
+    VERSION 1.0.0)
+]=])
+            execute_process(
+                COMMAND "${CMAKE_COMMAND}"
+                    -S "${_threejs_ios_consumer_source}"
+                    -B "${_threejs_ios_consumer_build}"
+                    -G Xcode
+                    -DCMAKE_SYSTEM_NAME=iOS
+                    -DCMAKE_OSX_SYSROOT=iphonesimulator
+                    -DCMAKE_OSX_ARCHITECTURES=arm64
+                    -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4
+                    "-DCMAKE_PREFIX_PATH=${_prefix}"
+                    "-DPulp_DIR=${_pulp_cmake_dir}"
+                    -DPULP_ALLOW_DEBUG_SDK=ON
+                    "-D_PULP_NODE_EXE=${CMAKE_COMMAND}"
+                RESULT_VARIABLE _threejs_ios_consumer_rc
+                OUTPUT_VARIABLE _threejs_ios_consumer_stdout
+                ERROR_VARIABLE _threejs_ios_consumer_stderr)
+            if(NOT _threejs_ios_consumer_rc EQUAL 0)
+                message(FATAL_ERROR
+                    "Installed Three.js iOS AUv3 consumer configure failed:\n"
+                    "${_threejs_ios_consumer_stdout}${_threejs_ios_consumer_stderr}")
+            endif()
+            file(READ
+                "${_threejs_ios_consumer_build}/PulpThreeJsIosInstalledConsumer.xcodeproj/project.pbxproj"
+                _threejs_ios_project)
+            foreach(_threejs_expected_build_input IN ITEMS
+                    "${_threejs_runtime_root}/build/three.webgpu.js"
+                    "${_threejs_runtime_root}/examples/jsm/controls/OrbitControls.js"
+                    "${_threejs_bundler}"
+                    "${_threejs_shim}")
+                string(FIND "${_threejs_ios_project}"
+                    "${_threejs_expected_build_input}" _threejs_input_offset)
+                if(_threejs_input_offset EQUAL -1)
+                    message(FATAL_ERROR
+                        "Installed iOS AUv3 rule omitted Three.js input: "
+                        "${_threejs_expected_build_input}")
+                endif()
+            endforeach()
+        endif()
     endif()
 endif()
 
