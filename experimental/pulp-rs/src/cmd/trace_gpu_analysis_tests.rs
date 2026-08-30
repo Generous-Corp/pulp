@@ -415,7 +415,7 @@ fn processor_receives_only_the_private_trace_snapshot() {
         root.path(),
         "snapshot-observer.sh",
         &format!(
-            "#!/bin/sh\nprintf '%s' \"$3\" > {}\ncat \"$3\" > {}\n",
+            "#!/bin/sh\nprintf '%s' \"$3\" > {}\ncat \"$3\" > {}\nprintf '%s\\n' '__PULP_GPU_INTEGRITY__0|0|0|0'\n",
             shell_quote(&observed_path.to_string_lossy()),
             shell_quote(&observed_bytes.to_string_lossy()),
         ),
