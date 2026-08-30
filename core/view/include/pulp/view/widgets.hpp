@@ -60,6 +60,30 @@ public:
 
     void set_text(std::string text) {
         if (text == text_) return;
+        // A horizontal, single-line Label with explicit width AND height cannot
+        // move itself or its siblings when only its copy changes. Live
+        // readouts commonly update this kind of Label every pointer sample.
+        // Re-running Yoga for the whole imported tree in that case is pure
+        // work and can consume multiple milliseconds of the input budget.
+        //
+        // Keep the conservative path for intrinsic-width, multiline,
+        // vertical, attributed, and captured-wrap Labels. Their text can
+        // change measured geometry, so they must still invalidate layout.
+        const auto& style = flex();
+        const bool has_explicit_width =
+            style.preferred_width > 0.0f ||
+            (style.dim_width.unit != DimensionUnit::auto_ &&
+             style.dim_width.value > 0.0f);
+        const bool has_explicit_height =
+            style.preferred_height > 0.0f ||
+            (style.dim_height.unit != DimensionUnit::auto_ &&
+             style.dim_height.value > 0.0f);
+        const bool horizontal =
+            text_direction_ != canvas::TextDirection::top_to_bottom &&
+            text_direction_ != canvas::TextDirection::bottom_to_top;
+        const bool text_geometry_is_fixed =
+            has_explicit_width && has_explicit_height && horizontal && !multi_line_ &&
+            !captured_wrap_fallback_ && !has_attributed_;
         text_ = std::move(text);
         // The text IS the accessible name for a label — the two-arg ctor set it
         // and set_text() did not, so every Label built by the JS bridge
@@ -81,7 +105,8 @@ public:
         // PreText-style shaper cache is keyed by (text, family, size), so the
         // new text simply hits a different cache entry — no algorithm change,
         // just cache-correct re-measurement.
-        invalidate_layout();
+        if (!text_geometry_is_fixed) invalidate_layout();
+        request_repaint();
     }
     const std::string& text() const { return text_; }
 

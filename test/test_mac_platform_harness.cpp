@@ -739,8 +739,10 @@ TEST_CASE("mac GPU resize keeps a pinned root and presents before returning",
     CHECK(root.bounds() == Rect{0.0f, 0.0f, 640.0f, 480.0f});
     CHECK(root.paint_count > paints_before);
     REQUIRE(resize_callbacks > 0);
-    CHECK(View::layout_pass_count() - layouts_before
-          == static_cast<std::uint64_t>(root.paint_count - paints_before));
+    // The pinned design root did not change during this resize. Painting the
+    // replacement drawable must reuse its already-current geometry instead of
+    // paying one whole-tree layout per presented frame.
+    CHECK(View::layout_pass_count() - layouts_before == 0);
 }
 
 TEST_CASE("standalone GPU host resyncs the first frame after a Retina backing change",

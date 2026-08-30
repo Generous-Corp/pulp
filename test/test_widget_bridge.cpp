@@ -6625,6 +6625,81 @@ TEST_CASE("repeated geometry reads with no mutation cost one layout pass",
     CHECK(passes <= 1);
 }
 
+TEST_CASE("host paint reuses a layout completed by the bridge",
+          "[view][bridge][layout][perf]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('outer', '');
+        setFlex('outer', 'width', 300);
+        setFlex('outer', 'height', 200);
+        createLabel('leaf', 'Leaf', 'outer');
+        setFlex('leaf', 'height', 24);
+        layout();
+    )");
+
+    const auto before = View::layout_pass_count();
+    engine.evaluate("getLayoutRect('leaf').height");
+    root.layout_children_if_needed();
+    CHECK(View::layout_pass_count() - before == 0);
+
+    engine.evaluate("setFlex('leaf', 'height', 72)");
+    root.layout_children_if_needed();
+    engine.evaluate("getLayoutRect('leaf').height");
+    CHECK(View::layout_pass_count() - before == 1);
+}
+
+TEST_CASE("layout invalidation is isolated between independent view trees",
+          "[view][bridge][layout][perf]") {
+    View editor_root;
+    editor_root.set_bounds({0, 0, 400, 300});
+    editor_root.layout_children_if_needed();
+
+    View helper_root;
+    helper_root.set_bounds({0, 0, 32, 32});
+
+    const auto before = View::layout_pass_count();
+    helper_root.invalidate_layout();
+    editor_root.layout_children_if_needed();
+
+    // A process-wide generation makes the editor pay for the helper tree's
+    // mutation. Per-tree generations keep the already-current editor intact.
+    CHECK(View::layout_pass_count() - before == 0);
+}
+
+TEST_CASE("live text in an explicitly sized label does not relayout the root",
+          "[view][bridge][layout][perf][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('status', '');
+        setFlex('status', 'width', 240);
+        setFlex('status', 'height', 26);
+        createLabel('status-text', 'BAND 1/64', 'status');
+        setFlex('status-text', 'width', '100%');
+        setFlex('status-text', 'height', '100%');
+        layout();
+    )");
+
+    engine.evaluate("getLayoutBoxMetrics('status-text').offsetWidth");
+    const auto before = View::layout_pass_count();
+    engine.evaluate("setText('status-text', 'BAND 2/64')");
+    root.layout_children_if_needed();
+
+    CHECK(View::layout_pass_count() - before == 0);
+    auto* label = dynamic_cast<Label*>(bridge.widget("status-text"));
+    REQUIRE(label != nullptr);
+    CHECK(label->text() == "BAND 2/64");
+}
+
 TEST_CASE("replaying an identical flex value does not dirty geometry",
           "[view][bridge][layout][perf]") {
     ScriptEngine engine;

@@ -42,6 +42,24 @@ TEST_CASE("TextShaper prepare handles newlines", "[canvas][text_shaper]") {
     REQUIRE(prepared.segments()[1].is_newline);
 }
 
+TEST_CASE("TextShaper repairs malformed UTF-8 before native measurement",
+          "[canvas][text_shaper][utf8]") {
+    TextShaper shaper;
+    const std::string malformed{"A\xE2\x82" "B\xFF" "C"
+                                "\xE0\x80\x80" "D"
+                                "\xF0\x80\x80\x80" "E"};
+    const auto prepared = shaper.prepare(malformed, "system", 14);
+
+    REQUIRE_FALSE(prepared.empty());
+    REQUIRE(prepared.segments().size() == 1);
+    CHECK(prepared.segments()[0].text ==
+          "A\xEF\xBF\xBD\xEF\xBF\xBD"
+          "B\xEF\xBF\xBD" "C"
+          "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD" "D"
+          "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD" "E");
+    CHECK(prepared.segments()[0].width > 0);
+}
+
 TEST_CASE("TextShaper prepare caches measurements", "[canvas][text_shaper]") {
     TextShaper shaper;
     auto p1 = shaper.prepare("Hello World", "system", 14);
