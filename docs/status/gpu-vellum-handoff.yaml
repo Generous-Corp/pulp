@@ -630,8 +630,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
           "state": "pulp-owned-retained",
-          "revision": "7612d8f584fe5f60f1d746fefd34752185f99c0c",
-          "object_id": "2fd37d17725b335c54d2d267177825283ba44d9f",
+          "revision": "f84e2c51959ee02082a1336d37ec7735787484a6",
+          "object_id": "758cf76b692515bc9b17ffff177c387fc60e4fe1",
           "object_type": "blob"
         },
         {
@@ -646,8 +646,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/contracts/gpu-health-read-result-v1.schema.json",
           "state": "pulp-owned-retained",
-          "revision": "fefbfecd9fc014df54fc55d6f3259524f1179a49",
-          "object_id": "2d6539c370c7b4b61c2cb80036c8382be95b3301",
+          "revision": "c06226a47941f0e6cd392c350594173e422f6cbf",
+          "object_id": "bf864521f6b622c132d94d0d90e4147d887faa9c",
           "object_type": "blob"
         },
         {
@@ -766,8 +766,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "c95affdf98ea486a8724c31f35c1673001ef4e6d",
-          "object_id": "b65367d3eee43e2e66fd0641732bc3bf420f3be8",
+          "revision": "4f68dd43194f9cb5c96e553cd3e87aaa23781018",
+          "object_id": "cab9a536d8c5bde2042b387744fa5a53c12b705c",
           "object_type": "blob"
         },
         {
@@ -790,8 +790,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_campaign.py",
           "state": "pulp-owned-retained",
-          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
-          "object_id": "036918d3cd644ff695415b16be2f7214ed46610c",
+          "revision": "4f68dd43194f9cb5c96e553cd3e87aaa23781018",
+          "object_id": "9b3fb0aa589992781c0b10b85357f1db28df65a9",
           "object_type": "blob"
         },
         {
@@ -862,8 +862,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
-          "object_id": "f24ae00cd631fa77cb5a1e8d2b73c22d84bc6f2d",
+          "revision": "f84e2c51959ee02082a1336d37ec7735787484a6",
+          "object_id": "4af3b705e0fa554c4fd12bd9376bb127bd49f197",
           "object_type": "blob"
         },
         {
@@ -878,8 +878,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_first_visible_a3_campaign.py",
           "state": "pulp-owned-retained",
-          "revision": "eb8f7d4906215a282c4491b4b75c6c865d5f56fd",
-          "object_id": "b9100952b2b297da003e058ebf39c34dba6c4724",
+          "revision": "4f68dd43194f9cb5c96e553cd3e87aaa23781018",
+          "object_id": "8b761d9e681bc9844027be2ed80d8540ee42d065",
           "object_type": "blob"
         },
         {
@@ -1137,8 +1137,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_runner.py",
           "state": "pulp-owned-retained",
-          "revision": "317b86b1931e11cc2affd6581607ced071babfd4",
-          "object_id": "4c09275dcc3191f8aa25ba0c63fc401411a4db3a",
+          "revision": "4f68dd43194f9cb5c96e553cd3e87aaa23781018",
+          "object_id": "fae881f8a24c1f61863d5e9213b364f5285bc04b",
           "object_type": "blob"
         },
         {
@@ -1153,8 +1153,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_v2_runner.py",
           "state": "pulp-owned-retained",
-          "revision": "4c451454cbb6469fbae667684c2ccb26b088cf0f",
-          "object_id": "657ab3a39aee0b31d58a97fbdc30061bad3a1e6d",
+          "revision": "4f68dd43194f9cb5c96e553cd3e87aaa23781018",
+          "object_id": "0173228a23c3d6a16805828cce2711111fcff82f",
           "object_type": "blob"
         },
         {
@@ -2516,8 +2516,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_runner.py",
           "state": "pulp-owned-retained",
-          "revision": "317b86b1931e11cc2affd6581607ced071babfd4",
-          "object_id": "4c09275dcc3191f8aa25ba0c63fc401411a4db3a",
+          "revision": "4f68dd43194f9cb5c96e553cd3e87aaa23781018",
+          "object_id": "fae881f8a24c1f61863d5e9213b364f5285bc04b",
           "object_type": "blob"
         }
       ],
