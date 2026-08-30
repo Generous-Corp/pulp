@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 41,
+  "manifest_revision": 42,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -7320,7 +7320,8 @@
             "methods": [
               "prepare(std::size_t capacity_samples)",
               "reset()",
-              "process(double x, double segment_samples, double mod_offset_samples)"
+              "process(double x, double segment_samples, double mod_offset_samples)",
+              "minimum_capacity_samples()"
             ],
             "enums": []
           }

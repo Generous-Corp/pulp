@@ -31,7 +31,26 @@ struct DoctorCheck {
     // lacking a release credential, including every contributor's, since a repo
     // secret is not something they can set.
     bool release_only = false;
+    // Checkout-health checks describe the state of an existing git
+    // checkout rather than a capability needed to build or scaffold.
+    // `pulp doctor` gates on them — a write-dead checkout must be a
+    // loud signal — but `pulp create` must not inherit it: a stale lock
+    // in some unrelated sibling worktree has no bearing on whether a
+    // new project can be scaffolded, and gating there would repeat the
+    // release_only mistake above.
+    bool checkout_health = false;
 };
+
+// Whether a failing check should stop `pulp create` from scaffolding.
+// The decision is a meaningful intermediate in its own right, so it is
+// reachable and testable here rather than living inside the command's
+// loop: `optional`, `release_only`, and `checkout_health` rows all
+// surface their advice without gating, and only a plain failing check
+// blocks. `pulp doctor` gates on all of them except `optional`.
+inline bool doctor_check_gates_project_creation(const DoctorCheck& check) {
+    if (check.passed) return false;
+    return !check.optional && !check.release_only && !check.checkout_health;
+}
 
 // `only_filter`: case-insensitive substring. When non-empty,
 // individual probes whose name doesn't match are SKIPPED — no process

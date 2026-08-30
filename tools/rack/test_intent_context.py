@@ -22,6 +22,8 @@ INVENTORY = {
     "Else": {"modules": {
         "Sampler": {"name": "Sampler", "tags": ["Sampler"],
                     "description": "Sample player"},
+        "Compressor": {"name": "Compressor", "tags": ["Dynamics"],
+                       "description": "Dynamics processor"},
     }},
     "Core": {"modules": {
         "AudioInterface2": {"name": "Audio", "tags": []},
@@ -72,6 +74,87 @@ def check_tag_context() -> tuple[int, int]:
         print("  WRONG  # tag validation did not distinguish a matching patch")
     else:
         print("  ok     explicit tags are verified against final patch modules")
+
+    narrowed = {("Core", "AudioInterface2")}
+    choices = I.add_required_candidates(
+        refs, INVENTORY, narrowed, allowed={
+            ("CVfunk", "Step"), ("Core", "AudioInterface2")})
+    ran += 1
+    if ("CVfunk", "Step") not in narrowed or \
+            [row[:2] for row in choices["Sequencer"]] != [("CVfunk", "Step")]:
+        bad += 1
+        print("  WRONG  required tag choices fell out of a narrowed inventory")
+    else:
+        print("  ok     required tag choices survive structural inventory narrowing")
+
+    ran += 1
+    try:
+        I.add_required_candidates(refs, INVENTORY, set(), allowed=set())
+    except ValueError as error:
+        if "#Sequencer" not in str(error):
+            bad += 1
+            print(f"  WRONG  unavailable tag refusal omitted its name: {error}")
+        else:
+            print("  ok     an impossible required tag fails before a provider call")
+    else:
+        bad += 1
+        print("  WRONG  an impossible required tag reached model generation")
+
+    dynamics_refs = I.resolve_tag_references(
+        "Build a euclidean rhythm. Include at least one #Dynamics module.",
+        INVENTORY, INDEX)
+    selected = {("Core", "AudioInterface2"), ("CVfunk", "Step")}
+    I.add_required_candidates(
+        dynamics_refs, INVENTORY, selected,
+        allowed={("Else", "Compressor"), ("Core", "AudioInterface2"),
+                 ("CVfunk", "Step")})
+    narrowed = {
+        plugin: {"modules": {
+            model: INVENTORY[plugin]["modules"][model]
+            for chosen_plugin, model in selected
+            if chosen_plugin == plugin}}
+        for plugin in INVENTORY
+        if any(chosen_plugin == plugin for chosen_plugin, _ in selected)}
+    context = I.render_tag_context(dynamics_refs, narrowed)
+    ran += 1
+    if "`Else/Compressor`" not in context or \
+            "No installed module currently carries this tag" in context:
+        bad += 1
+        print("  WRONG  exact Euclidean #Dynamics context remained contradictory")
+    else:
+        print("  ok     exact Euclidean #Dynamics context exposes a legal choice")
+
+    crowded = {
+        "Blocked": {"modules": {
+            f"Dynamics{index}": {"name": f"Blocked {index}",
+                                  "tags": ["Dynamics"]}
+            for index in range(8)}},
+        "Allowed": {"modules": {
+            "Dynamics": {"name": "Allowed", "tags": ["Dynamics"]}}},
+    }
+    selected = set()
+    choices = I.add_required_candidates(
+        dynamics_refs, crowded, selected,
+        allowed={("Allowed", "Dynamics")}, limit=6)
+    ran += 1
+    if [row[:2] for row in choices["Dynamics"]] != [("Allowed", "Dynamics")]:
+        bad += 1
+        print("  WRONG  candidate limit hid the only permitted tag module")
+    else:
+        print("  ok     policy filtering happens before the tag candidate limit")
+
+    existing = {"modules": [
+        {"plugin": "Else", "model": "Compressor"},
+        {"plugin": "Core", "model": "AudioInterface2"},
+    ]}
+    remaining = I.unsatisfied_explicit_references(
+        dynamics_refs, existing, INVENTORY)
+    ran += 1
+    if remaining:
+        bad += 1
+        print("  WRONG  refinement re-requested an already satisfied tag")
+    else:
+        print("  ok     an existing matching module satisfies refinement tags")
     return bad, ran
 
 

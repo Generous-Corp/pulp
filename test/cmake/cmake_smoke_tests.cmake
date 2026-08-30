@@ -77,6 +77,21 @@ set_tests_properties(cmake-au-v2-type-selection PROPERTIES
     LABELS "cmake;au;au-v2;midi"
     TIMEOUT 30)
 
+# Standalone document-type / exported-UTType declaration contract. Argument
+# validation runs under `cmake -P` everywhere; on macOS the same test also
+# configures a throwaway bundle project and reads the Info.plist CMake
+# generated, which is the only way to prove the ${MACOSX_BUNDLE_*} keys an
+# app gets today survive the switch to a custom plist template.
+add_test(NAME cmake-standalone-document-types
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_DOC_TYPE_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/standalone-document-types
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_standalone_document_types.cmake)
+set_tests_properties(cmake-standalone-document-types PROPERTIES
+    LABELS "cmake;app;standalone;plist"
+    # Runs in ~1.5s warm; the budget covers three throwaway project configures
+    # on macOS, each paying compiler detection on a cold CI runner.
+    TIMEOUT 180)
+
 # Engine selection negative contracts run under `cmake -P`: they exercise the
 # real module's fail-fast validation without requiring an invalid full build or
 # access to a second host OS.
@@ -327,6 +342,12 @@ add_test(NAME cmake-pulp-minos-consumer-pin
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_minos_consumer_pin.cmake)
 set_tests_properties(cmake-pulp-minos-consumer-pin PROPERTIES
     LABELS "cmake;min-os"
+    TIMEOUT 60)
+add_test(NAME cmake-pulp-minos-linux-arch
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_minos_linux_arch.cmake)
+set_tests_properties(cmake-pulp-minos-linux-arch PROPERTIES
+    LABELS "cmake;min-os;linux"
     TIMEOUT 60)
 if(APPLE)
     add_test(NAME cmake-pulp-macos-archive-floor

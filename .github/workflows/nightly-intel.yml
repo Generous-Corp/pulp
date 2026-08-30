@@ -211,6 +211,7 @@ jobs:
     timeout-minutes: 120
     outputs:
       result: ${{ steps.report.outputs.result }}
+      capabilities: ${{ steps.capabilities.outputs.status }}
     env:
       BUILD_DIR: build-universal
 
@@ -233,6 +234,17 @@ jobs:
       - name: Fetch prebuilt Skia (macOS universal)
         shell: bash
         run: python3 tools/scripts/fetch_skia_for_release.py darwin-universal
+
+      - name: Verify both universal Skia m153 capability slices
+        id: capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/verify_skia_m153_capabilities.py \
+            --platform darwin-universal \
+            --skia-dir external/skia-build \
+            --result skia-m153-universal-capabilities.json
+          echo "status=pass" >> "$GITHUB_OUTPUT"
 
       - name: Configure (universal arm64;x86_64)
         shell: bash
@@ -345,25 +357,29 @@ jobs:
           build='${{ steps.build.outputs.status }}'
           lipo='${{ steps.lipo.outputs.status }}'
           auval='${{ steps.auval.outputs.status }}'
+          capabilities='${{ steps.capabilities.outputs.status }}'
           # auval counts. It did not before — the step printed its output, threw the
           # result away, and this line never read it, so a genuinely failing auval
           # scored a green nightly. This is the only place dual-arch auval is
           # asserted now that the release gate is gone, so a silent pass here would
           # mean no Intel auval coverage at all.
-          if [ "$build" = "pass" ] && [ "$lipo" = "pass" ] && [ "$auval" = "pass" ]; then
+          if [ "$capabilities" = "pass" ] && [ "$build" = "pass" ] && \
+             [ "$lipo" = "pass" ] && [ "$auval" = "pass" ]; then
             result="success"
           else
             result="failure"
           fi
           echo "result=${result}" >> "$GITHUB_OUTPUT"
-          echo "universal-crosscheck: build=${build} lipo=${lipo} auval=${auval} -> ${result}"
+          echo "universal-crosscheck: capabilities=${capabilities} build=${build} lipo=${lipo} auval=${auval} -> ${result}"
 
       - name: Upload universal logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nightly-intel-universal-logs
-          path: build-universal.log
+          path: |
+            build-universal.log
+            skia-m153-universal-capabilities.json
           retention-days: 14
           if-no-files-found: ignore
 
@@ -385,6 +401,7 @@ jobs:
       A_RUNNER: ${{ needs.native-intel.outputs.runner }}
       B_RESULT: ${{ needs.universal-crosscheck.result }}
       B_VERDICT: ${{ needs.universal-crosscheck.outputs.result }}
+      B_CAPABILITIES: ${{ needs.universal-crosscheck.outputs.capabilities }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       RUN_SHA: ${{ github.sha }}
 
@@ -459,15 +476,16 @@ jobs:
             echo "|-----|--------|---------|"
             echo "| Native Intel | \`${A_RUNNER:-unknown}\` | ${A_VERDICT:-did-not-complete} (job=${A_RESULT}${A_INFRA:+, infra=${A_INFRA}}) |"
             echo "| Universal cross-check | \`macos-15\` | ${B_VERDICT:-did-not-complete} (job=${B_RESULT}) |"
+            echo "| Skia m153 universal capabilities | \`arm64 + Rosetta x86_64\` | ${B_CAPABILITIES:-not-run} |"
             echo
             if [ "$a_product_fail" = "true" ]; then
               echo "**Native Intel PRODUCT failure** — the x86_64 build/test broke on a real Intel CPU. This is a genuine portability regression; inspect \`nightly-intel-native-logs\`."
             elif [ "$a_infra" = "true" ] && [ "$b_ok" != "true" ]; then
-              echo "**Universal cross-check failed** while native Intel hit a runner-infra signature. The x86_64/universal packaging (lipo/codesign) or build regressed — inspect \`nightly-intel-universal-logs\`. The native-Intel red is runner-infra (do not page on it)."
+              echo "**Universal cross-check failed** while native Intel hit a runner-infra signature. Inspect the capability-step log first (provider/provenance/Rosetta/dual-arch compile-link-run), then \`skia-m153-universal-capabilities.json\` when present and the remaining \`nightly-intel-universal-logs\` (build/lipo/codesign/auval). The native-Intel red is runner-infra (do not page on it)."
             elif [ "$a_infra" = "true" ]; then
               echo "**Native Intel runner-infra signature** (linker-image / CPU-peg / timeout) — NOT a product failure. Do not page. Tracked because a run of infra-only reds delays Tier-1 promotion (see docs/guides/intel-support.md)."
             else
-              echo "**Universal cross-check failed** — inspect \`nightly-intel-universal-logs\` (lipo -archs / codesign --verify / build)."
+              echo "**Universal cross-check failed** — inspect the capability-step log first (provider/provenance/Rosetta/dual-arch compile-link-run), then \`skia-m153-universal-capabilities.json\` when present and \`nightly-intel-universal-logs\` (build/lipo/codesign/auval)."
             fi
             echo
             echo "**Run:** ${RUN_URL}"

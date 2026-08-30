@@ -543,14 +543,19 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    must keep `gh api --paginate --slurp`, `filter=latest`, and `per_page=100`:
    bare `--paginate` concatenates page documents and breaks its single-document
    JSON decoding past 100 check runs.
-3. **Only THEN consider capacity — and verify, don't assume.** The required
-   `macos` gate runs on the **fast local JIT VM pool** selected by
-   `pulp-gate-fast` (M3 + M5), which is usually idle. Confirm with:
+3. **Only THEN consider capacity — and verify, don't assume.** Same-repository
+   self-hosted PR and merge-group `macos` gates run on the M1/M3/M5 local JIT VM
+   pool, selected by the mutually exclusive `pulp-build-pr-head` and
+   `pulp-build-merge-group` event classes. Fork, hosted, workflow-dispatch, and
+   operator selectors retain their separately resolved shapes.
+   Confirm currently registered runners with:
    ```bash
    ghapp api repos/Generous-Corp/pulp/actions/runners \
      | python3 -c "import sys,json;[print(r['name'],r['status'],'busy='+str(r['busy'])) for r in json.load(sys.stdin)['runners']]"
    ```
-   If the Studios show `busy=False`, the pool is NOT saturated — say so. What DOES
+   A zero-runner result is consistent with healthy idle but proves neither
+   health nor failure; use queue age plus host-side supervisor/lease/VM
+   evidence. What DOES
    queue independently is the **GitHub-hosted advisory lanes** (Linux, Windows,
    sanitizers, coverage, android) on GitHub's shared pool; those are advisory, not
    the required gate, so a long queue there does not block merge.
@@ -2207,6 +2212,13 @@ Intel nightly watchdog                        : SUCCESS
 every night**. The Intel signal was there the whole time, buried under a run-level
 conclusion poisoned by a *different* leg.
 
+For m153+, that job has a fourth required component before the universal build:
+one JSON capability receipt compile/links/runs the universal provider's arm64
+slice natively and its x86_64 slice through explicit Rosetta. `Compute result`
+must count the capability status with build, lipo, and auval. A universal product
+link can otherwise stay green while currently-unused m153 symbols are missing
+from one slice, so neither a partial receipt nor a skipped probe is acceptable.
+
 `native-intel` on `macos-15-intel` had **never once completed**: that image CPU-pegs,
 so the job hit its 120-minute limit every run. **GitHub reports a job timeout as
 `cancelled`, and a cancelled job cancels the whole RUN.** So a leg producing zero
@@ -2497,18 +2509,25 @@ group, and every later run on that ref sits at `pending` with **zero jobs**.
 Pushing again does not clear it — the new run just queues behind the same held
 group.
 
-The tell, and it is unambiguous: the run's `status` is `pending` **and** its
-`jobs` array is EMPTY, while sibling workflows from the same trigger dispatched
-normally.
+The tell is an aged `pending` or `queued` run whose jobs API remains exactly
+`total_count: 0` and `jobs: []` across two reads around an exact-run identity
+check, while sibling workflows from the same trigger dispatched normally. A
+single empty response is not sufficient evidence, and a `pending` ↔ `queued`
+transition is an ambiguous sweep rather than recovery.
 
 ```bash
 ghapp api "repos/Generous-Corp/pulp/actions/runs/<run_id>" --jq '[.status,.conclusion]|@tsv'
-ghapp api "repos/Generous-Corp/pulp/actions/runs/<run_id>/jobs" --jq '.jobs|length'   # 0 == wedged
-# clear it by cancelling the OLDER, non-terminal run on the same ref:
+ghapp api "repos/Generous-Corp/pulp/actions/runs/<run_id>/jobs" --jq '[.total_count, (.jobs|length)]'
+# Re-read the run and jobs before acting. Clear only an exact superseded-head
+# holder selected and revalidated by the merge steward:
 ghapp api -X POST "repos/Generous-Corp/pulp/actions/runs/<old_run_id>/cancel"
 ```
 
-The new run dispatches within seconds of the old one going terminal.
+Do not cancel a current-head run, rerun the obsolete head, or use `shipyard
+rescue` on the stale run: rescue redispatches work, while this recovery is
+cancel-only. The off-fleet `runner-health-check.yml` watchdog detects this
+pre-expansion shape without mutating it; degraded API evidence cannot close or
+maintain its tracker.
 
 All three aliases now resolve their runner through `PULP_PREAMBLE_RUNS_ON_JSON`
 (self-hosted) rather than a bare `ubuntu-latest`, which removes the mechanism:
@@ -4128,8 +4147,8 @@ revalidates the complete open PR identity (base and head repository/ref/SHA)
 before posting. Immutable recovery identity must be uploaded before the pending
 check exists; the protected source-free `workflow_run` reconciler terminalizes
 that exact check if cancellation skips the normal reporter. The local route is
-fail-closed even for the current
-`pulp-gate-fast` JIT Tart selector: disposal after a job does not protect the
+fail-closed even for the current event-class JIT Tart selector: disposal after
+a job does not protect the
 main-scoped runtime/cache token while runner and PR code share the guest admin
 account. Re-enable it only with a separately proven two-account Tart class.
 Namespace accepts
@@ -4511,6 +4530,13 @@ build's canonical inventory, then run
 Otherwise the full suite can finish almost entirely green and fail only at the
 inventory self-test, forcing a needless second admission cycle.
 
+Catch2 `TEST_CASE` additions, removals, and renames are CTest topology changes
+too: discovery materializes each case as a registration even when no CMake
+manifest changed. A 2026-08-28 sequence added four cases and removed one after
+the last inventory refresh, leaving main's contract three registrations stale
+until the next unrelated full proof exposed it. Treat changes to discovered test
+sources exactly like explicit `add_test` changes for this refresh requirement.
+
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued
@@ -4597,8 +4623,9 @@ one raises nothing), which is why it keeps getting re-proposed. Three things to
 check before spending a cycle on it, all readable in a minute:
 
 - **The gate hosts have no host-identifying label.** Matching is by label subset,
-  and every gate runner on all three registers the same `self-hosted, macOS,
-  ARM64, pulp-build, pulp-build-vm, pulp-gate-fast`; the labels that vary
+  and every gate runner on all three registers the same base `self-hosted, macOS,
+  ARM64, pulp-build, pulp-build-vm` labels plus its selected event class; labels
+  that vary
   (`pulp-build-studio`, `pulp-build-vm-secondary`) are role labels, and m1's and
   m5's are label-identical. There is no `pulp-host-m3` analogue to
   `pulp-host-macpro` / `pulp-host-macmini`. So three per-host entries match one
@@ -5136,7 +5163,7 @@ If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them
 
 `ci/visual-harness.Dockerfile` and `.github/workflows/visual-harness.yml`
 provide the deterministic visual-harness smoke environment. The Docker image
-downloads the pinned Skia `chrome/m151` Linux release asset (from the
+downloads the pinned Skia `chrome/m153` Linux release asset (from the
 `danielraffel/skia-builder` fork — adds iOS/visionOS/mac-x86_64 slices the
 upstream `olilarkin/skia-builder` omits), verifies its SHA-256, installs the
 bundled Pulp fonts into fontconfig, and installs `skia-python==144.0.post2`
@@ -5152,13 +5179,21 @@ hand-sync typo is a silent behavioural bug rather than a doc lag. When bumping
 `tools/deps/manifest.json`, keep these in lockstep — all are enforced in CI
 (`workflow-lint.yml`) and pre-push (`gates.sh`):
 - `ci/visual-harness.Dockerfile` ← `tools/harness/visual/check_skia_pin.py`
-- `external/skia-build/VERSION.md` digest table (a *fetch cache-skip oracle* —
-  `fetch_skia_for_release.py` trusts it to skip downloads) and `DEPENDENCIES.md`
+- `external/skia-build/VERSION.md` digest table (documentation only — a
+  missing fetcher-written asset stamp always forces verified re-download) and `DEPENDENCIES.md`
   Skia/Dawn/V8 version cells ← `tools/scripts/check_manifest_mirrors.py`
 - `tools/harness/visual/pins.py` ← `test_skia_determinism.py`
 
+For m153+, the pin checks are necessary but not sufficient: run
+`tools/scripts/verify_skia_m153_capabilities.py --platform <matching-native-desktop-platform>
+--skia-dir <generation>` against the exact stamped manifest generation so
+`SkLogHandler` and Graphite's executor field are proven through the archive's
+exported symbols. After the pin lands, each active Mac build host
+must populate its own immutable SHA-addressed generation through the fetcher
+and prove the second fetch is a no-download hit; do not rsync one runner's
+checkout cache to another.
+
 The `macOS local smoke` job resolves `runs-on` from
-`macOS local smoke` job resolves `runs-on` from
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` first and falls back to hosted `macos-15` only
 when the local selector variable is absent. On the persistent local runner,
 this job deliberately uses the installed `python3.12` and a worktree-local venv
@@ -5220,8 +5255,9 @@ native child is absent). That name MUST NOT be renamed.
 Routing variables (verify before debugging "stuck" macOS PRs):
 - `PULP_DEFAULT_RUNNER_PROVIDER = github-hosted` (Linux/Windows default)
 - `PULP_LOCAL_MACOS_RUNS_ON_JSON` must match the
-  `tools/scripts/runner_topology.json` contract (currently the ephemeral
-  `pulp-gate-fast` class)
+  `tools/scripts/runner_topology.json` base-selector contract. For PR and merge
+  events, `build.yml` replaces its legacy `pulp-gate-fast` discriminator with
+  the applicable event-class label before assignment.
 - `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON = local-only` (no Namespace overflow)
 - `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` should be unset unless the operator is deliberately testing Namespace
 
@@ -6935,9 +6971,11 @@ variables and service history with:
 python3 tools/scripts/runner_topology_check.py --mode=report
 ```
 
-The contracted required gate is the fast M3/M5 JIT class, macOS overflow is
-disabled with the `local-only` sentinel, and paid Namespace variables remain
-unset. Read the JSON contract for exact labels and hosts.
+The contracted required gate is the M1/M3/M5 JIT pool. The JSON records the
+legacy base selector; `build.yml` replaces `pulp-gate-fast` with the exact PR or
+merge-group event class before assignment. macOS overflow is disabled with the
+`local-only` sentinel, and paid Namespace variables remain unset. Read both
+surfaces together for the effective selector.
 
 **Required/advisory isolation.** The `pulp-build*` and `pulp-preamble*` labels
 are reserved for required merge-gate work. Example validation and format
@@ -7052,6 +7090,39 @@ rather than at the label:
 ```bash
 ssh <host> 'zsh -lc "launchctl list | grep tart-runner"'   # last-exit 0 = healthy
 ```
+
+### An online JIT runner can still be phantom capacity
+
+Runner presence is not assignment proof. On 2026-08-30, M1 and M5 minted
+Pulp runners with the exact PR-head labels and GitHub reported them online and
+idle in the organization runner inventory, while Pulp's repository runner
+inventory exposed no usable row and every PR-head `macos` job stayed queued.
+The event-class label split was correct; registration authority had not been
+split with it.
+
+The governed Tart fleet contract is class-specific on every M1/M3/M5 profile:
+
+- `pulp-build-merge-group` registers through Pulp's repository-scoped group `1`
+  and derives merge priority `110`.
+- `pulp-build-pr-head` registers through Pulp's repository-scoped group `1` and
+  derives PR priority `100`.
+
+Both classes must remain repository-scoped because a `merge_group` ref cannot
+satisfy the protected organization group's main-ref workflow restriction.
+Never collapse the classes back into one static label set or move either to
+group 3. A runner is proven usable only when it appears in Pulp's repository
+runner endpoint, becomes busy, and its exact name binds to the queued job.
+`online` plus `busy=false` in the organization inventory is not capacity
+evidence.
+
+If the repository cannot see an online runner, do not rerun the PR, weaken the
+labels, or add hosted overflow. Inspect the loaded profile's
+`TARTCI_RUNNER_WORKFLOW_TIER_GROUPS`, registration scope, and TartCI denial
+receipt. Deploy the reviewed TartCI profile transactionally at an idle boundary,
+then require a real repository-visible assignment receipt. TartCI's keyed denial
+fuse prevents repeated VM churn after a 401/403/404 JIT denial; a pre-lease
+registration-token capability probe is the follow-up that moves the first auth
+failure ahead of VM boot.
 
 ### The unifying invariant — no name without a heartbeat
 

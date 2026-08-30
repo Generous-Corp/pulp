@@ -1,7 +1,7 @@
 {
   "schema": "pulp.agent-capability-legacy-baseline.v1",
-  "frozen_count": 338,
-  "entries_digest": "sha256:c0739388ee0662998961374a53e5c803be0f4e2e16d8b105e8011c4d126cae1c",
+  "frozen_count": 337,
+  "entries_digest": "sha256:1763b6d191d6a9aa0904f80abcb0b68f935c4910b3379eb96c802bf5b0361a30",
   "entries": [
     {
       "include": "pulp/audio/analyzer_provider.hpp",
@@ -630,10 +630,6 @@
     {
       "include": "pulp/signal/character_delay/primitives.hpp",
       "fingerprint": "sha256:3c90c636f429e11f2912e015919302fcf473067fe3f2a329e70ef7ddd086a65e"
-    },
-    {
-      "include": "pulp/signal/character_delay/reverse.hpp",
-      "fingerprint": "sha256:c1c53d21dcb25833f48f3901e6770318a01d84399045014d3cc0d96a0d68aa48"
     },
     {
       "include": "pulp/signal/character_delay/tables.hpp",

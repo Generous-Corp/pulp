@@ -41,6 +41,8 @@ on:
       - 'tools/scripts/test_sdk_provenance.py'
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
+      - 'tools/scripts/queue_age_watchdog.py'
+      - 'tools/scripts/test_queue_age_watchdog.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/test_coverage_surface_contract.py'
@@ -61,6 +63,15 @@ on:
       - 'tools/scripts/test_build_dir_sentinel.py'
       - 'tools/scripts/checkout_preflight.py'
       - 'tools/scripts/test_checkout_preflight.py'
+      - 'tools/scripts/fetch_skia_for_release.py'
+      - 'tools/scripts/test_fetch_skia_for_release.py'
+      - 'tools/scripts/verify_skia_m153_capabilities.py'
+      - 'tools/scripts/test_verify_skia_m153_capabilities.py'
+      - 'tools/build-skia.sh'
+      - 'tools/deps/validate_render_update.py'
+      - 'tools/deps/test_validate_render_update.py'
+      - 'tools/deps/validate_hosts.py'
+      - 'tools/deps/test_validate_hosts.py'
       - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
       - 'tools/scripts/test_api_contracts_workflow.py'
@@ -127,6 +138,8 @@ on:
       - 'tools/scripts/test_sdk_provenance.py'
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
+      - 'tools/scripts/queue_age_watchdog.py'
+      - 'tools/scripts/test_queue_age_watchdog.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/test_coverage_surface_contract.py'
@@ -147,6 +160,15 @@ on:
       - 'tools/scripts/test_build_dir_sentinel.py'
       - 'tools/scripts/checkout_preflight.py'
       - 'tools/scripts/test_checkout_preflight.py'
+      - 'tools/scripts/fetch_skia_for_release.py'
+      - 'tools/scripts/test_fetch_skia_for_release.py'
+      - 'tools/scripts/verify_skia_m153_capabilities.py'
+      - 'tools/scripts/test_verify_skia_m153_capabilities.py'
+      - 'tools/build-skia.sh'
+      - 'tools/deps/validate_render_update.py'
+      - 'tools/deps/test_validate_render_update.py'
+      - 'tools/deps/validate_hosts.py'
+      - 'tools/deps/test_validate_hosts.py'
       - '.shipyard/config.toml'
       - 'tools/scripts/test_ci_throughput_workflows.py'
       - 'tools/scripts/test_api_contracts_workflow.py'
@@ -279,6 +301,7 @@ jobs:
           python3 tools/scripts/test_workflow_lint.py
           python3 tools/scripts/test_ios_gate_skip_contract.py
           python3 tools/scripts/test_api_contracts_workflow.py
+          python3 tools/scripts/test_queue_age_watchdog.py
           python3 tools/scripts/test_shipyard_merge_steward_workflow.py
           python3 tools/scripts/test_shipyard_provenance_label_plan.py
           python3 tools/scripts/test_shipyard_pull_request_run_cleanup.py
@@ -340,6 +363,9 @@ jobs:
           # them late and by symptom.
           python3 tools/scripts/test_checkout_preflight.py
           python3 tools/scripts/test_fetch_skia_for_release.py
+          python3 tools/scripts/test_verify_skia_m153_capabilities.py
+          python3 tools/deps/test_validate_render_update.py
+          python3 tools/deps/test_validate_hosts.py
           python3 tools/scripts/test_setup_shared_skia.py
           python3 tools/scripts/test_skia_cross_process_cache.py
           python3 tools/ci/test_pulp_worktree_cache_env.py

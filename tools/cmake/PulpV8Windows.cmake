@@ -1,7 +1,7 @@
 # PulpV8Windows.cmake — Windows V8-consumer ABI contract for the sealed
 # v8-builder drop-in.
 #
-# The sealed Windows v8.dll (v8-builder, v8-m152-15.2.124.7-cdec2b8282a8) is built — by deliberate,
+# The sealed Windows v8.dll (v8-builder, v8-m153-15.3.76.5-26cef0256b0e) is built — by deliberate,
 # documented decision in v8-builder/build-v8.py:win_gn_args() — with:
 #
 #   * v8_enable_pointer_compression = true   (Windows-only; mac/linux are OFF)
@@ -10,12 +10,15 @@
 #   * v8_enable_sandbox              = false
 #   * use_rtti                       = false
 #
-# Consequences for the consumer, all VERIFIED on the Win11-24H2 arm64 QEMU golden
-# (host arm64; x64 V8 + x64 consumer run under Windows-ARM x64 emulation):
+# The m153 archive's ABI shape and required files are inspected and pinned.
+# The following consumer consequences were last link/run VERIFIED with m152
+# (15.2.124.7) on the Win11-24H2 arm64 QEMU golden (host arm64; x64 V8 + x64
+# consumer run under Windows-ARM x64 emulation). Repeat that gate for m153 before
+# claiming m153 Windows runtime acceptance:
 #
 #  1. v8.dll.lib exports its std::-bearing API surface mangled into the Chromium
-#     libc++ ABI namespace — e.g. ...V?$shared_ptr@...@__Cr@std@@... (302 such
-#     exports / 756 __Cr references). A consumer built with MSVC cl + the MSVC
+#     libc++ ABI namespace — e.g. ...V?$shared_ptr@...@__Cr@std@@... (hundreds
+#     of such records in the m153 import library). A consumer built with MSVC cl + the MSVC
 #     STL emits plain `@std@@` symbols that never resolve against those `__Cr@std`
 #     imports → unresolved-external link failure (observed:
 #     `lld-link: error: undefined symbol: ... std::unique_ptr<v8::Platform> ...
@@ -35,10 +38,12 @@
 #     `runtimes` tree: LLVM_ENABLE_RUNTIMES=libcxx, LIBCXX_ABI_NAMESPACE=__Cr,
 #     LIBCXX_ABI_VERSION=2, LIBCXX_CXX_ABI=vcruntime, RTTI ON / exceptions ON).
 #
-# Proof: a consumer that includes the real choc V8 wrapper
+# Last runtime proof (m152): a consumer that includes the real choc V8 wrapper
 # (choc_javascript_V8.h + Console) built with the flags below links the sealed
 # v8.dll.lib + a __Cr-ABI libc++.lib and runs —
 #   V8::GetVersion() = 15.2.124.7 / evaluateExpression('40 + 2') = 42 / PASS.
+# m153 has structural ABI inspection only; its equivalent consumer link/run is
+# still pending.
 #
 # This module is a NO-OP off Windows.
 
@@ -83,7 +88,7 @@ function(pulp_v8_windows_require_clang_cl)
             "clang-cl toolchain, e.g.:\n"
             "  cmake -S . -B build -G Ninja \\\n"
             "    -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl \\\n"
-            "    -DPULP_JS_ENGINE=v8 -DPULP_V8BUILDER_ROOT=<unpacked v8-win-x64> \\\n"
+            "    -DPULP_JS_ENGINE=v8 -DV8_DIR=<unpacked v8 provider root> \\\n"
             "    -DPULP_V8_WIN_LIBCXX_INCLUDE=<llvm-project>/libcxx/include \\\n"
             "    -DPULP_V8_WIN_LIBCXX_LIB=<__Cr libc++.lib>\n"
             "See tools/cmake/PulpV8Windows.cmake for the full ABI rationale.")

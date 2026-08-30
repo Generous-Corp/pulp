@@ -585,6 +585,9 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpIosHostApp.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake"
+    # Included by PulpAppTargets.cmake, so an installed SDK without it fails
+    # the include() outright rather than silently losing the function.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDocumentTypes.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
@@ -617,6 +620,9 @@ install(FILES
     # rejects the plugin or codesign names it `<name>-<hash>`.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.clap.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in"
+    # App-bundle plist template resolved by PulpDocumentTypes.cmake relative to
+    # its own directory, so it must land beside it in the installed SDK too.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.standalone.in"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
 
@@ -866,10 +872,13 @@ if(PULP_HAS_SKIA)
     # used (e.g. a worktree whose external/skia-build holds only headers). Using
     # the resolved SKIA_DIR makes the installed SDK self-contained either way.
     if(SKIA_DIR AND EXISTS "${SKIA_DIR}")
-        install(DIRECTORY "${SKIA_DIR}/" DESTINATION external/skia-build)
+        install(DIRECTORY "${SKIA_DIR}/" DESTINATION external/skia-build
+            PATTERN ".skia-source-archive.zip" EXCLUDE
+        )
     else()
         install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build"
             DESTINATION external
+            PATTERN ".skia-source-archive.zip" EXCLUDE
         )
     endif()
 endif()

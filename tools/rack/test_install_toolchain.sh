@@ -19,6 +19,10 @@ INSTALL="$HERE/install_toolchain.sh"
 pass=0
 fail=0
 
+# install_toolchain consumes package-built helpers. Build the decoder once on
+# this maintainer test path; each installer invocation below must only copy it.
+"$HERE/build_rack_patch_decode.sh" "$HERE/../../build/rack_patch_decode" || exit 1
+
 ok()   { printf '  ok     %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  WRONG  %s\n' "$1"; fail=$((fail + 1)); }
 
@@ -160,6 +164,7 @@ for component in signal format audio state platform runtime timebase; do
         "$STAGED/core/$component/include"
 done
 cp "$HERE/../../build/shape_text" "$STAGED/build/shape_text"
+cp "$HERE/../../build/rack_patch_decode" "$STAGED/build/rack_patch_decode"
 printf '0.13.0\n2026-08-06T00:00:00Z\n' \
     > "$STAGED/tools/rack/FORGE_TOOLCHAIN_STAMP"
 mkdir -p "$FRESH/private"

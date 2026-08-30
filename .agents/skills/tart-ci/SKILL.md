@@ -110,7 +110,12 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 - A persistent operator VM (e.g. `pulp-vm`) on a host consumes 1 of its 2 slots.
 - **Capacity-aware local queue draining is implemented and VM-slot-aware.** The current tartci/Shipyard path shares one rule: a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host), and only macOS/Darwin guests consume the `macos` VM slot. Linux Tart and Windows QEMU lanes use their own labels, supervisors, and caps; they do not reduce macOS free slots, though CPU/RAM can still need route weights or reservations.
 - **Local-first policy:** Pulp's automatic macOS overflow is disabled with `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not point full-local saturation at GitHub-hosted `macos-15`; let jobs queue for the next local Mac slot. Hosted macOS is an explicit operator fallback for a local fleet outage/unhealthy fleet or a workflow that intentionally wants hosted coverage. Rollback for the old behavior: `gh variable set -R Generous-Corp/pulp PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'`.
-- **Production required macOS route is fast-VM-only (2026-07-31):** `PULP_LOCAL_MACOS_RUNS_ON_JSON=["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm","pulp-gate-fast"]` and `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-gate-fast`. M3/M5 supervisors advertise `pulp-gate-fast`; M1 retains only the generic `pulp-build-vm` label as the rollback pool and cannot win required-gate placement. The reviewed profile in `.shipyard/ci-profiles/normal-local-fast.toml` must preserve the same selector.
+- **Production required macOS routing is event-class-aware.** `build.yml` adds
+  `pulp-build-merge-group` for merge-queue work and `pulp-build-pr-head` for PR
+  validation. M1, M3, and M5 can serve both classes through their checked-in
+  TartCI profiles; M1 deliberately waits 10 minutes before taking Pulp work.
+  Healthy idle JIT capacity has no registered runner, so prove service from
+  queue age and exact job-to-runner assignment rather than a static runner row.
 
 ## Linux + Windows pool runners (join the Actions pool like macOS)
 
@@ -249,7 +254,13 @@ main, reddening every PR's macOS gate.)
 ## Rollout: pilot → graduate
 1. **Additive pilot (safe):** run `tartci serve macos --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
 2. **Required-label prevalidation (safe):** run a one-shot VM with `pulp-build` **plus a unique proof label**, then dispatch `Build and Test` with `macos_runner_selector_json` requiring both labels. This proves a VM can satisfy the required label while bare-metal `pulp-build` remains online. Verified 2026-06-10: run `27250564395`, runner `tartci-phase6-pulp-build-proof-r2-20260610`, `macOS (ARM64) [operator]` success, `macos` alias success, VM/JIT runner cleaned up. Cancel unrelated Linux/Windows legs after `macos` is green.
-3. **Graduated production default route:** M3/M5 VM supervisors advertise `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-gate-fast`, and Pulp's required macOS selector requires that full set. M1 remains a generic `pulp-build-vm` rollback pool.
+3. **Graduated production default route:** M1/M3/M5 VM supervisors share the
+   base `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm` labels and select one
+   mutually exclusive event-class label per job. Merge groups receive priority
+   `110`; PR heads receive priority `100`. This keeps merge-queue work ahead
+   without reserving a permanently static VM slot.
+   The following June runs prove the underlying ephemeral base pool; they
+   predate event-class V2 and are not V2 assignment receipts:
    - run `27251134234`: default dispatch, no selector override, `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success; hosted leftovers canceled after `macos` went green.
    - run `27251378268`: real PR, secondary-host `pulp-vm-m5-pilot-01`, `macOS (ARM64) [local]` success, `macos` alias success.
    - run `27251442228`: real PR, controller `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success.
@@ -262,6 +273,23 @@ main, reddening every PR's macOS gate.)
    ```
 
 ## Gotchas (hard-won)
+- **Dynamic event classes require dynamic registration authority, not just
+  dynamic labels.** The 2026-08-30 M1/M5 incident produced exact-label
+  `pulp-build-pr-head` runners that were online and idle in the organization
+  inventory but invisible to Pulp's repository runner endpoint, so GitHub could
+  never assign the queued PR jobs. The fleet-wide contract is
+  `pulp-build-merge-group|1` and `pulp-build-pr-head|1`, both repository-scoped,
+  rendered through
+  `TARTCI_RUNNER_WORKFLOW_TIER_GROUPS` for M1, M3, and M5. Do not infer usable
+  capacity from an organization row. A PR-head proof requires the runner in the
+  repository endpoint, `online` then `busy`, an exact job-to-runner binding, job
+  completion, and ephemeral reclamation. TartCI must fail closed before JIT
+  minting when an organization group's repository access cannot be proven; a
+  401/403/404 records a contract-keyed denial so the loop does not keep booting
+  VMs. Roll profiles out only through `tartci pool off` ->
+  `tartci fleet-macos install ... --apply` -> receipt verification ->
+  `tartci pool on`, one idle host at a time. Preserve active jobs and the M1
+  delayed-fallback policy.
 - **A held lease must keep beating, and the refresher is harder to write than it looks.** tartci stamps a heartbeat at `leases acquire` and marks the lease stale once it ages past `TARTCI_LEASE_STALE_SECS` (default **300s**). Any build longer than that reads as `stale_heartbeat_live_owner` in `tartci status` while its owner PID and whole descendant tree are healthy — telemetry that invites a controller or an operator to preempt a working build. `tools/ci/governed-build.sh` refreshes every 60s via `tartci leases heartbeat --id`, stops refreshing *before* releasing, and watches the parent PID so a SIGKILLed build cannot leave a keepalive refreshing a lease nobody owns. Two bash traps bit this in review, and both are invisible until you run it:
   1. `while sleep N; do …` **cannot be stopped promptly** — bash defers a trapped signal until the current *foreground* command returns, so the refresher ignores its own SIGTERM until the interval elapses and adds up to a full interval to every build's exit. Background the `sleep` and `wait` on it; `wait` is signal-interruptible.
   2. A background child **inherits the caller's stdout**, and a caller that runs the wrapper inside a command substitution blocks until every holder of that pipe closes it. An un-redirected refresher makes `out="$(governed-build.sh …)"` hang for a full interval after the build finished. Detach the refresher's fds at spawn.

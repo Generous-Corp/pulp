@@ -888,7 +888,7 @@ ai_shader_design:
     status: partial
     notes: >
       setWidgetLottie/seekWidgetLottie bridge, Lottie JSON storage, and scrub
-      state on Knob/Fader/Toggle work and are tested. Skia chrome/m152 restores
+      state on Knob/Fader/Toggle work and are tested. Skia chrome/m153 includes
       the jsonreader and skresources archives required by native skottie, and
       the configure-time real link probe in core/canvas/CMakeLists.txt enables
       PULP_LOTTIE only where the complete archive set links. LottieView still

@@ -9,6 +9,12 @@ Linux is Pulp's third supported platform. This guide covers dependencies, buildi
 - CMake 3.24+
 - ALSA development libraries
 
+The pinned m153 V8 provider has different portability evidence by architecture:
+`linux-x64` is measured at GLIBC 2.34, while `linux-arm64` V8 is measured at
+GLIBC 2.39 / GLIBCXX 3.4.32 and the combined Skia/Dawn/V8 ARM64 floor is still
+unknown. ARM64 packaging must measure the final binary; do not apply the x64
+`--max 2.34` check or claim an Ubuntu 22.04 floor.
+
 ## Dependencies
 
 ### Ubuntu / Debian

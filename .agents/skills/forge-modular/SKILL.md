@@ -146,6 +146,37 @@ separate defects were found and fixed there in the time one model call takes.
 If a failure is not diagnosable from what is on disk, fix the harness first —
 that is cheaper than another run, every time.
 
+## A Rack-saved `.vcv` is not the JSON Forge originally wrote
+
+Forge emits a new patch as plain JSON, but Rack 2 saves that patch back as a
+Zstandard-compressed tar archive containing `./` and `./patch.json`. Reading a
+Rack-saved file with `json.load()` therefore reports a misleading UTF-8 error;
+moving or renaming the file is unrelated.
+
+`rack_open.py` distinguishes the two formats from the immutable input bytes.
+Archived patches are decoded only by the adjacent `rack_patch_decode` helper,
+built from the pinned vendored zstd decoder. The helper parses the tar in
+memory, accepts exactly one regular root `patch.json` plus Rack's zero-byte root
+directory entry, caps both input and expanded data, and rejects traversal,
+links, nested directories, duplicates, bad checksums and trailing ambiguity.
+It never extracts a member and never depends at runtime on Homebrew, `tar`,
+`zstd`, Python extensions, or Rack itself.
+
+Build the helper on the maintainer/package path with
+`tools/rack/build_rack_patch_decode.sh build/rack_patch_decode`. The signed app
+ships that prebuilt binary beside `shape_text`, and `install_toolchain.sh` only
+copies and validates it; an ordinary end-user install must never require a C or
+C++ compiler. Cross-architecture packaging sets
+`PULP_RACK_PATCH_DECODE_ARCH` and verifies the helper's exact Mach-O slice;
+running a helper on the packaging host does not prove it can run on the target,
+and a foreign target slice must not require Rosetta merely to verify a package.
+
+Do not load `libRack.dylib` through Python `ctypes` to decode this format.
+Rack's library expects application runtime initialization; an exploratory call
+reached OpenSSL `BIO_new_ex` with invalid state and crashed Python with
+`EXC_BAD_ACCESS`. Keep the crash boundary out of the app process and preserve
+the packaged-helper tests under a minimal Finder-style `PATH`.
+
 ## Reading the patch gate's trace
 
 - `out0=...` is the **instantaneous** voltage at the end of the run. The
@@ -248,6 +279,15 @@ sweep, a decaying tone and silence, and asserts each measures as itself.
 a suite that measures nothing goes green. It caught one on its first run.
 
 ## What the model knows about a module
+
+An explicit `#Tag` and a claimed idiom are two independent constraints. The
+idiom compiler narrows the model inventory to port-complete structural choices;
+before that subset is rendered, `intent_context.add_required_candidates()` must
+add fresh-generation-safe choices for every explicit tag. Otherwise the prompt
+can say both "required" and "no installed module carries this tag", while final
+lint still rejects the missing tag. That contradiction spends a provider call
+on a patch that cannot pass. An impossible combination fails before the call;
+never weaken the final tag check to make a narrowed prompt agree with itself.
 
 ### Installed does not mean authorable from a fresh patch
 
