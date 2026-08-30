@@ -57,7 +57,7 @@
     },
     "profiles": {
       "type": "object",
-      "description": "One entry per measured consumption profile, keyed by platform. A platform Pulp has not measured is absent rather than guessed at, and the drift gate skips on a host whose key is missing.",
+      "description": "One entry per measured consumption profile, keyed by platform and enabled feature set. A configuration Pulp has not measured is absent rather than guessed at, and the drift gate skips on a host whose key is missing. Two feature sets on one platform are two profiles, never one overwriting the other.",
       "minProperties": 1,
       "additionalProperties": {
         "type": "object",
@@ -74,7 +74,7 @@
         "properties": {
           "key": {
             "type": "string",
-            "pattern": "^[a-z0-9]+-[a-z0-9_]+$"
+            "pattern": "^[a-z0-9]+-[a-z0-9_]+-[a-z0-9+-]+$"
           },
           "system_name": {
             "type": "string"
@@ -91,7 +91,7 @@
                 "OFF"
               ]
             },
-            "description": "Switches that change which targets exist or what they link. A build tree that disagrees here is measuring a different SDK, so the drift gate skips rather than compares."
+            "description": "Switches that change which targets exist or what they link. They are part of the profile's key, so a build tree configured differently matches a different profile; a profile whose features disagree with its own key is a broken artifact and fails the drift gate."
           },
           "build_scope": {
             "type": "object",

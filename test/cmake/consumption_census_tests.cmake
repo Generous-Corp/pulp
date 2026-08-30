@@ -36,10 +36,11 @@ endfunction()
 # build defines is already present, whichever order the subdirectories run in.
 function(_pulp_census_write_facts)
     # Switches worth recording alongside the graph. The first ten change which
-    # targets exist or what they link, so a build tree that disagrees on one of
-    # them is measuring a different SDK and the census refuses to compare it.
-    # The last two decide only which CONSUMERS the tree builds; the generator
-    # records them as provenance and deliberately does not compare them.
+    # targets exist or what they link, so they form part of a profile's key: a
+    # build tree that disagrees on one of them is measuring a different SDK and
+    # gets its own profile rather than overwriting another. The last two decide
+    # only which CONSUMERS the tree builds; the generator records them as
+    # provenance and deliberately keeps them out of the key.
     set(_feature_vars
         PULP_HAS_SKIA
         PULP_ENABLE_JS
@@ -269,9 +270,11 @@ add_test(NAME consumption-census-schema
 set_tests_properties(consumption-census-schema PROPERTIES
     PASS_REGULAR_EXPRESSION "consumption_census_schema_valid=true")
 
-# Closures depend on the platform and on the feature switches recorded in the
-# census, so a build tree that is a different profile is not a failure and must
-# not be reported as a pass either: the generator exits 77 and this SKIPs.
+# Closures depend on the platform and on the feature switches, and a profile's
+# key names both, so a build tree the census has not measured is not a failure
+# and must not be reported as a pass either: the generator exits 77 and this
+# SKIPs. A census that records this tree's key but disagrees about the features
+# behind it contradicts itself, and that fails rather than skips.
 add_test(NAME consumption-census-drift
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/consumption_census.py"
@@ -290,4 +293,4 @@ add_test(NAME consumption-census-negative-contract
 set_tests_properties(consumption-census-negative-contract PROPERTIES
     SKIP_RETURN_CODE 77
     PASS_REGULAR_EXPRESSION
-        "consumption_census_contract_case=valid-current.*consumption_census_contract_case=census-missing.*consumption_census_contract_case=closure-count-drift.*consumption_census_contract_case=exported-target-removed.*consumption_census_contract_case=exported-target-added.*consumption_census_contract_case=schema-violation.*consumption_census_contract_case=profile-not-recorded.*consumption_census_contract_case=profile-feature-mismatch.*consumption_census_contract_case=foreign-profile-ignored.*consumption_census_contract_case=facts-missing.*consumption_census_contract_case=unknown-generator-expression.*consumption_census_contract_case=export-without-target.*consumption_census_contract_verified=true")
+        "consumption_census_contract_case=valid-current.*consumption_census_contract_case=census-missing.*consumption_census_contract_case=closure-count-drift.*consumption_census_contract_case=exported-target-removed.*consumption_census_contract_case=exported-target-added.*consumption_census_contract_case=schema-violation.*consumption_census_contract_case=profile-not-recorded.*consumption_census_contract_case=profile-feature-mismatch.*consumption_census_contract_case=profile-not-clobbered.*consumption_census_contract_case=foreign-profile-ignored.*consumption_census_contract_case=facts-missing.*consumption_census_contract_case=unknown-generator-expression.*consumption_census_contract_case=export-without-target.*consumption_census_contract_verified=true")
