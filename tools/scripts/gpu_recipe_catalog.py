@@ -271,17 +271,8 @@ def _parse_registry_body(body: str) -> list[str]:
 
 
 def probe_registry_variants(header_text: str) -> dict[frozenset[str], list[str]]:
-    """Read the default and optional Three.js+V8 native recipe registries."""
+    """Read the single capability-independent native recipe registry."""
 
-    conditional = re.search(
-        r"#if\s+PULP_GPU_PROBE_THREEJS_CALLABLE\s*"
-        r"inline\s+constexpr\s+std::array\s+kRecipeIds\s*\{(?P<enabled>.*?)\};\s*"
-        r"#else\s*"
-        r"inline\s+constexpr\s+std::array\s+kRecipeIds\s*\{(?P<default>.*?)\};\s*"
-        r"#endif",
-        header_text,
-        flags=re.DOTALL,
-    )
     matches = list(
         re.finditer(
             r"inline\s+constexpr\s+std::array\s+kRecipeIds\s*\{(?P<body>.*?)\};",
@@ -289,15 +280,6 @@ def probe_registry_variants(header_text: str) -> dict[frozenset[str], list[str]]
             flags=re.DOTALL,
         )
     )
-    if conditional:
-        if len(matches) != 2:
-            raise ValueError("conditional native kRecipeIds registry is ambiguous")
-        return {
-            frozenset(): _parse_registry_body(conditional.group("default")),
-            frozenset({"pinned-threejs-runtime", "v8"}): _parse_registry_body(
-                conditional.group("enabled")
-            ),
-        }
     if len(matches) != 1:
         raise ValueError("native kRecipeIds registry was not found exactly once")
     return {frozenset(): _parse_registry_body(matches[0].group("body"))}
@@ -309,19 +291,13 @@ def probe_registry_ids(header_text: str) -> list[str]:
     return probe_registry_variants(header_text)[frozenset()]
 
 
-def catalog_probe_ids(
-    document: dict[str, Any], enabled_features: frozenset[str] = frozenset()
-) -> list[str]:
-    """Return catalog rows that project the native `pulp gpu probe` registry."""
+def catalog_probe_ids(document: dict[str, Any]) -> list[str]:
+    """Return every catalog row projected by the native probe registry."""
 
     indexed_ids = []
     for recipe in document["recipes"]:
         command = recipe["entrypoints"]["cli"]["command"]
-        required = frozenset(recipe["availability"]["required_features"])
-        if (
-            command[:4] == ["pulp", "gpu", "probe", "--recipe"]
-            and required.issubset(enabled_features)
-        ):
+        if command[:4] == ["pulp", "gpu", "probe", "--recipe"]:
             indexed_ids.append((recipe["native_registry_index"], recipe["id"]))
     indices = [index for index, _ in indexed_ids]
     if sorted(indices) != list(range(len(indexed_ids))):
@@ -332,11 +308,10 @@ def catalog_probe_ids(
 def validate_registry_projection(
     document: dict[str, Any],
     registry_ids: list[str],
-    enabled_features: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Require exact equality so a newly callable recipe cannot remain undiscoverable."""
+    """Require exact equality so every native recipe remains discoverable."""
 
-    catalog_ids = catalog_probe_ids(document, enabled_features)
+    catalog_ids = catalog_probe_ids(document)
     native_ids = registry_ids
     if catalog_ids == native_ids:
         return []
@@ -344,7 +319,6 @@ def validate_registry_projection(
     extra = sorted(set(catalog_ids) - set(native_ids))
     return [
         "catalog/native probe registry drift: "
-        f"features={sorted(enabled_features)} "
         f"missing={missing or '[]'} extra={extra or '[]'}; "
         "every kRecipeIds entry must be added to gpu-recipes.yaml explicitly"
     ]
@@ -353,12 +327,11 @@ def validate_registry_projection(
 def validate_registry_variants(
     document: dict[str, Any], variants: dict[frozenset[str], list[str]]
 ) -> list[str]:
-    """Validate every native capability variant exposed by the source registry."""
+    """Reject capability-dependent registries and validate the canonical sequence."""
 
-    problems = []
-    for features, ids in variants.items():
-        problems.extend(validate_registry_projection(document, ids, features))
-    return problems
+    if set(variants) != {frozenset()}:
+        return ["native kRecipeIds must be one capability-independent registry"]
+    return validate_registry_projection(document, variants[frozenset()])
 
 
 def validate_repository_references(document: dict[str, Any], root: pathlib.Path) -> list[str]:

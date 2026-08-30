@@ -722,13 +722,16 @@ RecipeRun run_gpu_audio_stft_recipe(const RunOptions& options) {
 
 RecipeRun run_threejs_multi_pass_recipe(
     const RunOptions& options, std::optional<std::string> threejs_runtime_root) {
-#if !PULP_GPU_PROBE_THREEJS_CALLABLE
-    (void)options;
-    (void)threejs_runtime_root;
-    throw std::runtime_error(
-        "threejs.multi-pass.v1 requires a build with the pinned Three.js runtime and V8");
-#else
     const auto& recipe = *find_recipe(kRecipeIds[3]);
+#if !PULP_GPU_PROBE_THREEJS_CALLABLE
+    (void)threejs_runtime_root;
+    RecipeRun run;
+    run.result = base_result(recipe, options, recipe.source_identity);
+    unavailable_passes(run.result, recipe, "threejs_runtime_not_compiled");
+    run.result.recommendations.emplace_back(
+        "Use a GPU-enabled SDK carrying the pinned Three.js runtime and V8.");
+    return run;
+#else
 #if !PULP_GPU_PROBE_HAS_THREEJS
     RecipeRun run;
     run.result = base_result(recipe, options, recipe.source_identity);

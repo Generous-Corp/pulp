@@ -131,6 +131,21 @@ def main() -> int:
             any("Threading and real-time safety" in item for item in checker.check(root)),
             "missing GPU tooling Doxygen content escaped",
         )
+        for breadcrumb in ("A2T trace", "A3 acceptance", "plan-defined verifier"):
+            fixture(root)
+            public_header = root / "inspect/include/pulp/inspect/protocol.hpp"
+            public_header.write_text(f"/// {breadcrumb}\n")
+            require(
+                any("planning breadcrumb" in item for item in checker.check(root)),
+                f"installed public Doxygen breadcrumb escaped: {breadcrumb}",
+            )
+        fixture(root)
+        public_header = root / "inspect/include/pulp/inspect/protocol.hpp"
+        public_header.write_text("// A3 is an internal implementation token.\n")
+        require(
+            not checker.check(root),
+            "ordinary non-Doxygen implementation comment was treated as public API",
+        )
         fixture(root)
         cli = subprocess.run(
             [sys.executable, str(Path(checker.__file__)), "--repo-root", str(root), "--check"],

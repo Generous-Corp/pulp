@@ -31,6 +31,14 @@ GPU_TOOLING_DOCUMENTATION_CONTRACTS = {
         "@par Results, unavailable evidence, and errors",
     ),
 }
+PUBLIC_DOXYGEN_BREADCRUMBS = (
+    re.compile(r"\b(?:A2T|A3)\b"),
+    re.compile(r"\bplan-defined\b", re.IGNORECASE),
+)
+PUBLIC_DOXYGEN_STABLE_SEMANTICS_ROOTS = (
+    "inspect/include/pulp/inspect/",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/",
+)
 
 
 def _reject_symlink_components(root: Path, relative: Path) -> None:
@@ -103,6 +111,31 @@ def _gpu_tooling_documentation_errors(root: Path) -> list[str]:
             if marker not in text:
                 errors.append(
                     f"GPU tooling Doxygen contract missing {marker!r}: {relative}"
+                )
+    return errors
+
+
+def _public_doxygen_breadcrumb_errors(root: Path, headers: set[str]) -> list[str]:
+    errors: list[str] = []
+    for relative in sorted(headers):
+        if not relative.startswith(PUBLIC_DOXYGEN_STABLE_SEMANTICS_ROOTS):
+            continue
+        source = GENERATED_TEMPLATE if relative == GENERATED_HEADER else relative
+        text = (root / source).read_text()
+        comments = "\n".join(
+            match.group(0)
+            for match in re.finditer(
+                r"///[^\n]*|//![^\n]*|/\*\*.*?\*/|/\*!.*?\*/",
+                text,
+                flags=re.DOTALL,
+            )
+        )
+        for pattern in PUBLIC_DOXYGEN_BREADCRUMBS:
+            match = pattern.search(comments)
+            if match:
+                errors.append(
+                    "installed public Doxygen contains a planning breadcrumb "
+                    f"{match.group(0)!r}: {relative}"
                 )
     return errors
 
@@ -283,6 +316,7 @@ def check(root: Path, installed_prefix: Path | None = None,
         return [str(error)]
 
     errors.extend(tooling_documentation_errors)
+    errors.extend(_public_doxygen_breadcrumb_errors(root, installed_on))
     exception_set = set(exceptions)
     for path in sorted(exception_set):
         if path not in documented:

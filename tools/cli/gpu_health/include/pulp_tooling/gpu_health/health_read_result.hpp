@@ -69,8 +69,8 @@ struct StartupCapture {
     bool truncated = false;
     /// Instrumentation coverage gaps in an otherwise bounded capture. These
     /// are not dropped events: loss is represented only by dropped_event_count
-    /// or truncated. A terminal A3 verifier may accept explicit gaps only for
-    /// its plan-defined no-change or queue-B4-investigation dispositions.
+    /// or truncated. A verifier may accept explicit gaps only for a declared
+    /// disposition whose semantics permit incomplete causal attribution.
     std::vector<std::string> missing_trace_categories;
 };
 

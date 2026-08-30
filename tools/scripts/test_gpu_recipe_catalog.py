@@ -140,6 +140,15 @@ class CatalogContract(unittest.TestCase):
         native = catalog.probe_registry_ids(
             catalog.DEFAULT_REGISTRY_HEADER.read_text(encoding="utf-8")
         )
+        self.assertEqual(
+            native,
+            [
+                "renderer3d.hardcoded-cube.v1",
+                "gpu-compute.magnitude.v1",
+                "gpu-audio.stft.v1",
+                "threejs.multi-pass.v1",
+            ],
+        )
         self.assertEqual(catalog.validate_registry_projection(document, native), [])
         self.assertEqual(catalog.validate_repository_references(document, catalog.ROOT), [])
         self.assertEqual(catalog.main([]), 0)
@@ -176,9 +185,9 @@ class CatalogContract(unittest.TestCase):
             catalog.DEFAULT_REGISTRY_HEADER.read_text(encoding="utf-8")
         )
         problems = catalog.validate_registry_projection(
-            document, [*native, "threejs.multi-pass.v1"]
+            document, [*native, "not-yet-cataloged.v1"]
         )
-        self.assertIn("missing=['threejs.multi-pass.v1']", "\n".join(problems))
+        self.assertIn("missing=['not-yet-cataloged.v1']", "\n".join(problems))
 
     def test_native_registry_reorder_is_rejected(self) -> None:
         document = catalog.load_and_validate(catalog.DEFAULT_CATALOG)
@@ -188,24 +197,23 @@ class CatalogContract(unittest.TestCase):
         problems = catalog.validate_registry_projection(document, list(reversed(native)))
         self.assertTrue(problems)
 
-    def test_conditional_threejs_registry_matches_only_with_runtime_and_v8(self) -> None:
+    def test_conditional_registry_is_rejected(self) -> None:
+        native = catalog.probe_registry_ids(
+            catalog.DEFAULT_REGISTRY_HEADER.read_text(encoding="utf-8")
+        )
+        with self.assertRaisesRegex(ValueError, "not found exactly once"):
+            catalog.probe_registry_variants(
+                conditional_registry_header(native, [*native, "threejs.multi-pass.v1"])
+            )
+
+    def test_catalog_discovery_does_not_hide_unavailable_recipes(self) -> None:
         document = catalog.load_and_validate(catalog.DEFAULT_CATALOG)
         native = catalog.probe_registry_ids(
             catalog.DEFAULT_REGISTRY_HEADER.read_text(encoding="utf-8")
         )
-        variants = catalog.probe_registry_variants(
-            conditional_registry_header(native, [*native, "threejs.multi-pass.v1"])
-        )
-        self.assertEqual(catalog.validate_registry_variants(document, variants), [])
         self.assertEqual(
-            catalog.catalog_probe_ids(document, frozenset()),
+            catalog.catalog_probe_ids(document),
             native,
-        )
-        self.assertEqual(
-            catalog.catalog_probe_ids(
-                document, frozenset({"pinned-threejs-runtime", "v8"})
-            ),
-            [*native, "threejs.multi-pass.v1"],
         )
 
     def test_catalog_recipe_not_in_native_registry_is_rejected(self) -> None:
@@ -214,7 +222,7 @@ class CatalogContract(unittest.TestCase):
             catalog.DEFAULT_REGISTRY_HEADER.read_text(encoding="utf-8")
         )
         problems = catalog.validate_registry_projection(document, native[:-1])
-        self.assertIn("extra=['gpu-audio.stft.v1']", "\n".join(problems))
+        self.assertIn("extra=['threejs.multi-pass.v1']", "\n".join(problems))
 
     def test_clean_agent_can_select_a_recipe_by_exact_symptom(self) -> None:
         document = catalog.load_and_validate(catalog.DEFAULT_CATALOG)
