@@ -628,6 +628,14 @@
         },
         {
           "repo": "Generous-Corp/pulp",
+          "path": "docs/contracts/gpu-first-visible-a3-acceptance-v2.schema.json",
+          "state": "pulp-owned-retained",
+          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
+          "object_id": "a7fb26a2c6f5f2a0617ec10844328670cdc5aa54",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
           "path": "docs/contracts/gpu-health-read-result-v1.schema.json",
           "state": "pulp-owned-retained",
           "revision": "fefbfecd9fc014df54fc55d6f3259524f1179a49",
@@ -638,16 +646,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-first-visible-a3-acceptance.json",
           "state": "pulp-owned-retained",
-          "revision": "7612d8f584fe5f60f1d746fefd34752185f99c0c",
-          "object_id": "b6bd5846bf66e0826a90a24538946938f348f6bb",
+          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
+          "object_id": "4e868414dfd7db397400c4816128b9a29f232241",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-first-visible-a3-acceptance.md",
           "state": "pulp-owned-retained",
-          "revision": "b45f3ce59ec86460c00673d33175b47c70bfa160",
-          "object_id": "94c2c830a7f9b5c499a5c7230b586b0fd777ead3",
+          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
+          "object_id": "5b2f56fb077a65a2557e88a2258c5c1866c542f3",
           "object_type": "blob"
         },
         {
@@ -750,36 +758,148 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "7612d8f584fe5f60f1d746fefd34752185f99c0c",
-          "object_id": "0e962fea7df24c8e46fa85a896ff22f843da943d",
+          "revision": "eb8f7d4906215a282c4491b4b75c6c865d5f56fd",
+          "object_id": "d295c9bc138fd385a4e42c9be70e589f9f091f0d",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_acceptance_v2.py",
+          "state": "pulp-owned-retained",
+          "revision": "fe6368f3bee611db70df27bc78ba0ef56843be89",
+          "object_id": "878c3b82894285c5af9ac288e98383be7646561d",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_auv2_logic_producer.py",
+          "state": "pulp-owned-retained",
+          "revision": "fe6368f3bee611db70df27bc78ba0ef56843be89",
+          "object_id": "976a95d646d7387429c5e3e1aecb4ceb0ead99ef",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_campaign.py",
           "state": "pulp-owned-retained",
-          "revision": "7612d8f584fe5f60f1d746fefd34752185f99c0c",
-          "object_id": "79754efe1b6f5e41a7d0f3370cbde4f13b029226",
+          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
+          "object_id": "036918d3cd644ff695415b16be2f7214ed46610c",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_clap_reaper_producer.py",
+          "state": "pulp-owned-retained",
+          "revision": "fe6368f3bee611db70df27bc78ba0ef56843be89",
+          "object_id": "b94795bc2f02a470b4d4baf3f3ec6c7e14111cad",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_constrained_adapter_producer.py",
+          "state": "pulp-owned-retained",
+          "revision": "fe6368f3bee611db70df27bc78ba0ef56843be89",
+          "object_id": "ef31416d8f4f77d60c12523cebe2c989195db8be",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_external_adapter.py",
           "state": "pulp-owned-retained",
-          "revision": "7612d8f584fe5f60f1d746fefd34752185f99c0c",
-          "object_id": "6c02aea1b568e32cde699566370048adeb4df944",
+          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
+          "object_id": "4fe1faefed1a5fc00e93caa22fde57e960c293dc",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+          "state": "pulp-owned-retained",
+          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
+          "object_id": "ea45f5c907f681205be56c733cafa1e8bb09bd23",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+          "state": "pulp-owned-retained",
+          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
+          "object_id": "e70eb4a1373bed182562eb6567f79212c31c1852",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_role_producer.py",
+          "state": "pulp-owned-retained",
+          "revision": "5060b7e7d0c0e4032e5c781df6e43d0cfa0fd95d",
+          "object_id": "b22d39b18d6a6d36a0590dad104c6a26902baeab",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+          "state": "pulp-owned-retained",
+          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
+          "object_id": "2e4193831ed2e45626568a5b2710a754570d6ce3",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/gpu_first_visible_a3_vst3_reaper_producer.py",
+          "state": "pulp-owned-retained",
+          "revision": "fe6368f3bee611db70df27bc78ba0ef56843be89",
+          "object_id": "1add9ad41dd92ab506c2e9ad17042907f1718f84",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+          "state": "pulp-owned-retained",
+          "revision": "5ce88b2d70b9553e06a40250bf559f5175b4bf7a",
+          "object_id": "f24ae00cd631fa77cb5a1e8d2b73c22d84bc6f2d",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
+          "state": "pulp-owned-retained",
+          "revision": "fe6368f3bee611db70df27bc78ba0ef56843be89",
+          "object_id": "b9dff9c61c9d04de1ea7a5a1ea0735688e083b15",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/test_gpu_first_visible_a3_campaign.py",
+          "state": "pulp-owned-retained",
+          "revision": "eb8f7d4906215a282c4491b4b75c6c865d5f56fd",
+          "object_id": "b9100952b2b297da003e058ebf39c34dba6c4724",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/test_gpu_first_visible_a3_external_adapter.py",
+          "state": "pulp-owned-retained",
+          "revision": "eb8f7d4906215a282c4491b4b75c6c865d5f56fd",
+          "object_id": "d2737c665e437ede32b3d3b3324ea0e9391be4f6",
+          "object_type": "blob"
+        },
+        {
+          "repo": "Generous-Corp/pulp",
+          "path": "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
+          "state": "pulp-owned-retained",
+          "revision": "fe6368f3bee611db70df27bc78ba0ef56843be89",
+          "object_id": "c3d9d3dba132b9b37386563741bc21ef02ff654f",
           "object_type": "blob"
         }
       ],
       "vellum_paths": [],
       "api_contract": {
         "surfaces": [
-          "dev.pulp.gpu/health.read@1 and closed A3 campaign receipts"
+          "dev.pulp.gpu/health.read@1, closed A3 v2 acceptance, and seven-role campaign receipts"
         ],
-        "request": "Exact instance, build, product, role, 10 cold/10 warm lifecycle, and evidence IDs.",
-        "result": "Bounded immutable health, campaign, overhead, A2T, control, and B4 disposition.",
+        "request": "Daniel-approved protected planning product-policy authority plus fresh live validation, then exact instance, build, product, seven-role lifecycle, and evidence IDs.",
+        "result": "Bounded immutable health, seven-role campaign, overhead, A2T, control, and one A3 v2 B4 disposition.",
         "errors": "Pending, unavailable, unverified, wrong instance, missing lifecycle, and stale receipt stay fail-closed.",
-        "availability": "Only exact standalone, constrained-headless, real DAW, and Forge roles can close A3."
+        "availability": "Only exact Pulp standalone, Forge standalone, Forge AUv2/Logic, Forge VST3/REAPER, Forge CLAP/REAPER, headless-reference, and authority-selected constrained-adapter roles can close A3."
       },
       "ownership_lifetime_rt": {
         "owner": "Generous-Corp/pulp product control and acceptance",
@@ -811,13 +931,13 @@
       },
       "tests": {
         "unit": [
-          "Closed schemas, lifecycle, cache, budget, control, and role producers."
+          "Closed v1 historical and v2 terminal schemas, lifecycle, cache, product-policy binding, control, and seven-role producers."
         ],
         "planted": [
           "Blank frame, wrong instance, stale head, fake lifecycle, trace tamper, and audio-thread entry fail."
         ],
         "real_host": [
-          "10 cold and 10 warm standalone, constrained-headless, REAPER, and Forge runs."
+          "The exact seven-role M5 campaign runs the v2 warmup, warm, and cold trial protocol."
         ],
         "installed_prefix": [
           "Independent source-built product and exact Forge shell identities."
@@ -827,7 +947,7 @@
         "metrics": [
           "first-visible p50/p95/p99, hitch, four-state producer overhead, and xruns"
         ],
-        "threshold": "Ratified budget and all four role campaigns plus producer-overhead receipt pass.",
+        "threshold": "Protected product-policy budgets, all seven role campaigns, and the producer-overhead receipt pass.",
         "audio": "Zero xruns and zero provider/producer events on declared audio TIDs.",
         "failure": "Missing terminal M5 evidence or failed overhead leaves A3 nonterminal."
       },
@@ -846,6 +966,7 @@
       },
       "retained_paths": [
         "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
+        "docs/contracts/gpu-first-visible-a3-acceptance-v2.schema.json",
         "docs/contracts/gpu-health-read-result-v1.schema.json",
         "docs/validation/gpu-first-visible-a3-acceptance.json",
         "docs/validation/gpu-first-visible-a3-acceptance.md",
@@ -862,11 +983,25 @@
         "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
         "tools/cli/gpu_health/src/health_read_result_json.cpp",
         "tools/scripts/gpu_first_visible_a3_acceptance.py",
+        "tools/scripts/gpu_first_visible_a3_acceptance_v2.py",
+        "tools/scripts/gpu_first_visible_a3_auv2_logic_producer.py",
         "tools/scripts/gpu_first_visible_a3_campaign.py",
-        "tools/scripts/gpu_first_visible_a3_external_adapter.py"
+        "tools/scripts/gpu_first_visible_a3_clap_reaper_producer.py",
+        "tools/scripts/gpu_first_visible_a3_constrained_adapter_producer.py",
+        "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+        "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+        "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+        "tools/scripts/gpu_first_visible_a3_role_producer.py",
+        "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+        "tools/scripts/gpu_first_visible_a3_vst3_reaper_producer.py",
+        "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+        "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
+        "tools/scripts/test_gpu_first_visible_a3_campaign.py",
+        "tools/scripts/test_gpu_first_visible_a3_external_adapter.py",
+        "tools/scripts/test_gpu_first_visible_a3_role_producers.py"
       ],
       "terminal_result": {
-        "pass": "All four roles, controls, trace replay, overhead, and one derived disposition pass.",
+        "pass": "The protected planning product-policy authority and fresh validation bind all seven roles; controls, trace replay, overhead, and one derived disposition pass.",
         "no_change": "Keep product policy and record no generic optimization.",
         "nonterminal": "Any unavailable, unverified, stale, or missing M5 leg remains open."
       },
@@ -895,7 +1030,8 @@
       },
       "terminal_evidence": {
         "required": [
-          "All four roles, controls, trace replay, overhead, and one derived disposition pass.",
+          "A3 v2 terminal acceptance binds the exact Daniel-approved protected planning product-policy revision, path, blob, and fresh live validation without changing the shared package-envelope version.",
+          "All seven roles, controls, trace replay, overhead, and one derived disposition pass.",
           "a3-pulp-runtime-control output receipt binds exact installed revisions and terminal disposition"
         ],
         "planted": [

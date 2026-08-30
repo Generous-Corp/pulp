@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared fail-closed engine for the four Pulp-owned A3 role producers.
+"""Shared fail-closed engine for the seven authority-bound A3 role producers.
 
 The role entry points are deliberately thin. This engine snapshots itself and
 the configured lifecycle driver before either can contribute evidence. The
