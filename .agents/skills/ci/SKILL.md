@@ -12,6 +12,34 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+## Current required-macOS truth (read before older incident notes)
+
+Pulp's required PR and merge-queue macOS checks use the local M1/M3/M5 Tart
+JIT pool. `build.yml` replaces the legacy base selector with exactly one
+event-class-v2 label: `pulp-build-pr-head` for PR validation or
+`pulp-build-merge-group` for merge groups. All three checked-in host profiles
+can serve both classes; merge groups derive lease priority 110 and PR heads
+derive 100. Do not reserve a host permanently for either class and do not set a
+fixed profile-wide lease priority, because that disables class-derived
+priority and can strand usable reserved capacity.
+M1 is a deliberate delayed fallback and waits 10 minutes before taking Pulp
+work; that affects latency, not its ability to serve either required class.
+
+JIT runners exist in GitHub only while claiming a job, so an empty runner list
+is healthy-idle as well as dead. Conversely, an organization-visible idle
+runner is not proof that Pulp can assign it. Prove service with queue age,
+healthy host supervisors, repository-visible registration, exact
+job-to-runner assignment, and lease/VM reclamation. A checked-in profile says
+what a host *can* serve, not whether its Pulp pool is enabled now; re-check M1,
+M3, and M5 live rather than carrying an incident snapshot forward.
+
+The names `pulp-gate-fast`, "local M1s", persistent Studio runners, and
+busy-count overflow below describe superseded implementations or historical
+incidents unless a section explicitly says otherwise. They are not the current
+required-gate topology. The authoritative declarative surface is
+`tools/scripts/runner_topology.json`; reconcile it with live variables using
+`python3 tools/scripts/runner_topology_check.py --mode=report`.
+
 ## Runner timing metrics
 
 When asked whether Pulp's local runners are fast, stuck, regressing, or worth
@@ -544,10 +572,13 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    bare `--paginate` concatenates page documents and breaks its single-document
    JSON decoding past 100 check runs.
 3. **Only THEN consider capacity — and verify, don't assume.** Same-repository
-   self-hosted PR and merge-group `macos` gates run on the M1/M3/M5 local JIT VM
-   pool, selected by the mutually exclusive `pulp-build-pr-head` and
-   `pulp-build-merge-group` event classes. Fork, hosted, workflow-dispatch, and
-   operator selectors retain their separately resolved shapes.
+   self-hosted PR and merge-group `macos` gates target the event-class-v2 local
+   JIT VM pool, selected by the mutually exclusive `pulp-build-pr-head` and
+   `pulp-build-merge-group` event classes. M1, M3, and M5 have compatible
+   profiles, but a checked-in profile is not live capacity: only a host whose
+   matching Pulp gate supervisors are enabled and healthy is participating.
+   Fork, hosted, workflow-dispatch, and operator selectors retain their
+   separately resolved shapes.
    Confirm currently registered runners with:
    ```bash
    ghapp api repos/Generous-Corp/pulp/actions/runners \
@@ -555,10 +586,13 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    ```
    A zero-runner result is consistent with healthy idle but proves neither
    health nor failure; use queue age plus host-side supervisor/lease/VM
-   evidence. What DOES
-   queue independently is the **GitHub-hosted advisory lanes** (Linux, Windows,
-   sanitizers, coverage, android) on GitHub's shared pool; those are advisory, not
-   the required gate, so a long queue there does not block merge.
+   evidence and exact job-to-runner assignment. At the 2026-08-30 incident
+   boundary M1 and M5 participate while M3's two compatible profiles are
+   intentionally disabled pending the admission-fix canary. Re-check live
+   supervisor state rather than carrying that incident snapshot forward. What
+   does queue independently is the **GitHub-hosted advisory lanes** (Linux,
+   Windows, sanitizers, coverage, android) on GitHub's shared pool; those are
+   advisory, not the required gate, so a long queue there does not block merge.
 4. **Is `shipyard run/ship` failing at `stage=configure` with `D
    external/skia-build/build`?** That's the Skia symlink loop (a tracked
    machine-specific absolute symlink autofetch deletes at configure → tree-drift),
@@ -2256,9 +2290,16 @@ is skipped is a CI bug.
 
 `workflow_dispatch` defaults `runner_provider` to `github-hosted`, not
 Namespace; do not dispatch with `runner_provider=namespace`. Linux/Windows
-use GitHub-hosted runners by default. macOS routes through the self-hosted
-`pulp-build` pool (`pulp-m1-01`, `pulp-m1-02`) via
-`PULP_LOCAL_MACOS_RUNS_ON_JSON`; repository variables control any overflow.
+use GitHub-hosted runners by default. Required macOS PR and merge-group work
+routes through the M1/M3/M5 event-class-v2 JIT pool described at the top of
+this skill; repository variables control any overflow.
+
+Advisory macOS supervisors that share a host with the event-class-v2 gate must
+yield to both required Build and Test classes. Their
+`TARTCI_YIELD_TO_LABELS` selector includes the base gate labels plus both
+`pulp-build-merge-group` and `pulp-build-pr-head`: the idle gate is
+admission-only and cannot evict a sanitizer that started during PR validation
+when a merge group arrives later. Base labels alone match neither v2 class.
 
 The authoritative Windows x64 functional matrix is pinned to `windows-2022`
 (Visual Studio 2022) by `.github/workflows/build.yml`. Shipyard's current ship
@@ -3551,6 +3592,11 @@ place — which is precisely why no amount of green CI would have caught it.
 
 ### Why your macOS leg routed to `[github-hosted]`, and why re-running did not fix it
 
+**Historical incident only.** This section describes the pre-event-class
+busy-count overflow implementation. Live required-gate overflow is now
+`local-only`; do not use the thresholds, M1-only labels, or dispatch pacing
+below to reason about the current M1/M3/M5 JIT pool.
+
 Two independent traps, found across three days and roughly six mis-routed
 required legs on 2026-08-18. Together they are the whole story.
 
@@ -3913,24 +3959,16 @@ ARM64 smoke.
 ### macOS runner routing (current)
 
 As of 2026-05-20, Namespace macOS routing is disabled for cost control.
-The required macOS PR gate runs through the self-hosted `pulp-build`
-runners (`pulp-m1-01`, `pulp-m1-02`) via
-`PULP_LOCAL_MACOS_RUNS_ON_JSON`. Shipyard's `mac` target must stay
-`backend = "local"`; do not flip it to `cloud` unless the operator is
-explicitly re-enabling Namespace.
-
-**Tart VM ephemeral runners** are graduating into the `pulp-build` pool:
-each CI job runs in a throwaway clone of the `pulp-build-runner` golden,
-then the VM is destroyed (no build-dir churn / state drift). Driven by
-`tools/ci/tart-runner.sh`, persisted via
-`tools/launchd/pulp-tart-runner.plist.template` (needs Full Disk Access
-for the `/Volumes` VM store; launchd doesn't expand `$HOME`). Add VM
-runners additively while the bare-metal runners remain the safety net;
-never leave the required label with zero online runners. Full guide:
-the `tart-ci` skill. NOTE: shipyard `backend = "local"` validates in the
-editing checkout, which false-fails via Debug-over-Release build-dir
-churn + host-keychain prompts — Phase 2 points that validation at the
-VM lane instead.
+The required macOS PR and merge-group gates run through the M1/M3/M5
+event-class-v2 Tart JIT pool via `PULP_LOCAL_MACOS_RUNS_ON_JSON`; see the
+current-truth section at the top for labels, priorities, and proof. Shipyard's
+`mac` target must stay `backend = "local"`; do not flip it to `cloud` unless
+the operator is explicitly re-enabling Namespace. Each CI job runs in a
+throwaway clone of the `pulp-build-runner` golden and then destroys the VM.
+The sibling tartci repo owns the production provider; Pulp's
+`tools/ci/tart-runner.sh` and launchd template are compatibility/rollout
+surfaces, not evidence of current host participation. Full guide: the
+`tart-ci` skill.
 
 Linux and Windows CI legs default to GitHub-hosted runners.
 
@@ -3977,14 +4015,9 @@ every declared target. (m5's local overlay defines `local` / `normal` / `full`
 profiles for exactly this purpose; they have no effect on preflight.) Only
 *declaring* a target matters.
 
-If a PR's macOS check is queued, first verify whether it is actually
-waiting on the self-hosted runner pool before taking action:
-
-```bash
-gh api repos/Generous-Corp/pulp/actions/runners --jq \
-  '.runners[] | select(.labels[].name == "pulp-build") |
-   {name,status,busy,labels:[.labels[].name]}'
-```
+If a PR's macOS check is queued, verify queue age, enabled host supervisors,
+lease/VM state, repository-visible registration, and exact assignment before
+taking action. A runner census by itself is inconclusive for the JIT pool.
 
 Do not rerun or empty-commit just to "unstick" a queued macOS job. Rebase
 only when the branch needs current `main` fixes, and cancel stale
@@ -4039,7 +4072,7 @@ load). Recovery, once confirmed flaky — **reach for the one-liner first**: arm
 **`shipyard rescue <pr> --rerun-failed`**.
 `rescue` cancels stuck runs and, with `--rerun-failed`, re-dispatches completed
 failed/cancelled runs — "e.g. a flaky required leg" (its own help) — re-resolving
-the provider so the rerun lands local-first on the idle Studios; the armed
+the provider so the rerun lands local-first on the JIT pool; the armed
 auto-merge then fires when it goes green. Do NOT hand-crank the cancel+rerun
 unless `rescue` is unavailable. `shipyard ship` now also *detects* this exact
 wedge (validated green + a red required check that maps to a validated-green
@@ -4062,7 +4095,13 @@ deeper structural fix for the rerun lock — splitting the required macOS leg in
 its own workflow so advisory legs can never hold its run open — is a tracked
 follow-up.
 
-### Gotcha: the macOS overflow busy-probe must count only *running* M1 legs (#2467)
+### Historical: superseded M1 busy-count overflow probe (#2467)
+
+This section records why the former busy-count implementation under-counted.
+It is not current routing guidance: the required gate now uses the M1/M3/M5
+event-class-v2 JIT pool described at the top of this skill, and live overflow
+is the `local-only` sentinel. Do not recover the old `pulp-gate-fast`, M1-only,
+or persistent-runner assumptions from this incident note.
 
 `build.yml`'s `resolve-provider` job has an inline-Python "busy probe"
 (`_count_busy_local_mac_runners`) that decides whether a PR's macOS leg
@@ -5149,12 +5188,12 @@ test -f "$HOME/Library/Application Support/Pulp/local-ci/config.json" || echo "W
 # Fallback (worktree-local legacy config)
 test -f tools/local-ci/config.json || echo "WARNING: no worktree fallback config.json"
 
-# Verify GitHub Actions runner routing. Namespace handles macOS PR work
-# (2026-05-18 re-commissioning); GHA-hosted handles Linux+Windows.
+# Verify GitHub Actions runner routing. The local event-class JIT pool handles
+# required macOS work; GHA-hosted handles Linux+Windows.
 gh variable list -R Generous-Corp/pulp | grep -q '^PULP_DEFAULT_RUNNER_PROVIDER[[:space:]]*github-hosted' || echo "WARNING: PULP_DEFAULT_RUNNER_PROVIDER should be github-hosted"
 gh variable list -R Generous-Corp/pulp | grep -q '^PULP_LOCAL_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_LOCAL_MACOS_RUNS_ON_JSON is missing; macOS build will use hosted macos-15"
-gh variable list -R Generous-Corp/pulp | grep -q '^PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is missing; macOS overflow will not reach Namespace"
-gh variable list -R Generous-Corp/pulp | grep -q '^PULP_LOCAL_MAC_OVERFLOW_THRESHOLD[[:space:]]*0' || echo "INFO: PULP_LOCAL_MAC_OVERFLOW_THRESHOLD is non-zero; macOS leg will prefer the local self-hosted Mac before overflowing to Namespace"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON[[:space:]]*local-only' || echo "WARNING: required macOS overflow is not the reviewed local-only sentinel"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON' && echo "WARNING: Namespace macOS routing should be unset outside an explicit operator test" || true
 ```
 
 If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them to pull latest main.
@@ -5262,8 +5301,9 @@ Routing variables (verify before debugging "stuck" macOS PRs):
 - `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` should be unset unless the operator is deliberately testing Namespace
 
 `shipyard pr` is the authoritative ship path. Do NOT push empty commits to
-retrigger a slow macOS check. If macOS is queued >45 min, check
-`gh api repos/Generous-Corp/pulp/actions/runners` first.
+retrigger a slow macOS check. If macOS is queued >45 min, inspect the
+off-fleet queue-age watchdog plus host supervisor/lease state and exact
+repository assignment; do not treat a runner census as a verdict.
 
 ## Pre-push rebase hygiene
 
@@ -5330,15 +5370,11 @@ while debugging runner routing.
 ### Verifying your branch isn't burning macOS runner time
 
 Each failed macOS leg consumes one of the scarce self-hosted runners and
-queues every other PR behind your run. Before broadcasting "my CI is
-stuck", confirm:
-
-```bash
-# Are the pulp-build runners online and busy?
-gh api repos/Generous-Corp/pulp/actions/runners --jq \
-  '.runners[] | select(.labels[].name == "pulp-build")
-   | "\(.name) status=\(.status) busy=\(.busy)"'
-```
+queues every other PR behind your run. Before broadcasting "my CI is stuck",
+inspect the exact job state and queue age, then the eligible hosts'
+supervisor/lease/VM state and repository-visible assignment. An absent JIT
+runner can mean healthy idle, while an organization-visible idle runner can be
+phantom capacity.
 
 If your branch's macOS leg is the only thing failing, rebase. If
 multiple branches are failing on the same test, file an issue — that's
@@ -7022,7 +7058,8 @@ The `resolve-provider` job in `build.yml` decides per-run where each
   local JIT pool. If an operator deliberately re-enables overflow, that
   variable supplies its selector; unsetting it falls back to free
   GitHub-hosted `macos-15`.
-- **Capacity-aware (`#3299`).** "Saturated" is decided by real SUPPLY
+- **Historical capacity-aware implementation (`#3299`).** Before event-class
+  V2 and the live `local-only` sentinel, "saturated" was decided by SUPPLY
   first, not just DEMAND. `_count_idle_local_runners()` queries
   `actions/runners` for self-hosted macOS runners that are `online` AND
   `busy == false` carrying `LOCAL_MAC_RUNNER_LABEL`. If **any** idle
@@ -7176,17 +7213,13 @@ The recovery rules, learned the hard way:
    later dispatch run cannot overwrite; you then *must* `gh run rerun`
    the cancelled run to clear it. Let it finish or rerun it — don't
    cancel it.
-4. **Check real idle capacity before assuming "stuck."**
-   `gh api repos/<owner>/<repo>/actions/runners --jq '[.runners[] |
-   select(.status=="online" and .busy==false) | .name]'` lists idle
-   self-hosted runners (`pulp-build-studio` Studios + the `pulp-build-m5`
-   blackbook M5 are the usual idle ones; `pulp-m1-*` are often offline).
-   If a leg failed on saturation while these sit idle, the
-   `gh run rerun` will now claim them (capacity-aware routing, #3299).
-   **This census is meaningful for PERSISTENT runners only.** The JIT VM
-   labels (`pulp-build-vm`, `pulp-build-vm-release`) are absent from it
-   whenever they are idle — that is normal, not an outage. See "A JIT
-   lane's IDLE state is indistinguishable from DEAD" above.
+4. **Check real capacity before assuming "stuck."** For the current M1/M3/M5
+   JIT gate, a runner census alone proves neither idle capacity nor outage.
+   Inspect queue age, each host's enabled Pulp supervisors and lease/VM state,
+   then require repository-visible exact assignment evidence. See "Current
+   required-macOS truth" and "An online JIT runner can still be phantom
+   capacity" above. Persistent-runner census instructions from the former
+   Studio topology are historical and must not be applied to this pool.
 5. **Batch stuck PRs into one.** When several PRs are wedged on the gate,
    combining them into a single PR (cherry-pick onto one branch) cuts N
    macОС runs to 1 — landed `#3411` (four PRs) this way on one local run.

@@ -55,13 +55,18 @@
     sanitizer VM left on bare `gh` would multiply it. (`ghapp` is on the PATH
     above via $HOME/.local/bin.)
 
-  ── SHARED gate host vs DEDICATED host ───────────────────────────────────────
-  The TARTCI_YIELD_TO_* keys below are the idle gate, correct when this lane
-  SHARES a host with the required gate (e.g. an interim Mac Studio stint). On a
-  DEDICATED advisory host (e.g. the M1), DELETE both TARTCI_YIELD_TO_* keys: the
-  idle gate yields to repo-wide "Build and Test" demand, which on a dedicated box
-  (whose gate jobs run elsewhere) would needlessly idle it. Dedicated = idle gate
-  OFF; shared = idle gate ON. See the tart-ci skill.
+  ── Event-class-aware merge-queue yield ──────────────────────────────────────
+  M1 now shares its two macOS VM slots with the required Pulp gate. Keep the
+  TARTCI_YIELD_TO_* keys on every host where this sanitizer lane can run. The
+  priority selector includes both `pulp-build-merge-group` and
+  `pulp-build-pr-head`, so the advisory TSan VM starts only when no required
+  Build and Test work can claim the shared host. This also preserves a free slot
+  if merge-group demand arrives while PR validation is running: the idle gate is
+  admission-only and cannot preempt an already-running sanitizer. Do not reduce
+  the selector to the base gate labels: event-class-v2 jobs request an additional
+  class label, so a base-only selector matches neither class and silently
+  disables yielding.
+  See the tart-ci skill.
 
   Prereq: install tartci into $HOME (provides $HOME/.local/bin/tartci) and keep
   the macOS golden under $HOME/VMs — same as the build runner.
@@ -142,7 +147,7 @@
         <key>TARTCI_YIELD_TO_WORKFLOW_NAME</key>
         <string>Build and Test</string>
         <key>TARTCI_YIELD_TO_LABELS</key>
-        <string>self-hosted,macOS,ARM64,pulp-build,pulp-build-vm</string>
+        <string>self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-build-merge-group,pulp-build-pr-head</string>
     </dict>
 </dict>
 </plist>

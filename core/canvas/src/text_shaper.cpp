@@ -49,6 +49,71 @@ std::atomic<std::uint64_t>& detail_prepare_calls() {
     static std::atomic<std::uint64_t> calls{0};
     return calls;
 }
+
+bool valid_utf8(std::string_view text) noexcept {
+    std::size_t i = 0;
+    while (i < text.size()) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        if (lead < 0x80u) {
+            ++i;
+            continue;
+        }
+
+        std::size_t length = 0;
+        std::uint32_t scalar = 0;
+        if (lead >= 0xC2u && lead <= 0xDFu) {
+            length = 2;
+            scalar = lead & 0x1Fu;
+        } else if (lead >= 0xE0u && lead <= 0xEFu) {
+            length = 3;
+            scalar = lead & 0x0Fu;
+        } else if (lead >= 0xF0u && lead <= 0xF4u) {
+            length = 4;
+            scalar = lead & 0x07u;
+        } else {
+            return false;
+        }
+        if (i + length > text.size()) return false;
+        for (std::size_t offset = 1; offset < length; ++offset) {
+            const auto byte = static_cast<unsigned char>(text[i + offset]);
+            if ((byte & 0xC0u) != 0x80u) return false;
+            scalar = (scalar << 6) | (byte & 0x3Fu);
+        }
+        if ((length == 3 && scalar < 0x800u) ||
+            (length == 3 && scalar >= 0xD800u && scalar <= 0xDFFFu) ||
+            (length == 4 && scalar < 0x10000u) ||
+            (length == 4 && scalar > 0x10FFFFu))
+            return false;
+        i += length;
+    }
+    return true;
+}
+
+std::string replace_invalid_utf8(std::string_view text) {
+    std::string result;
+    result.reserve(text.size());
+    std::size_t i = 0;
+    while (i < text.size()) {
+        const auto suffix = text.substr(i);
+        std::size_t length = 1;
+        const auto lead = static_cast<unsigned char>(text[i]);
+        if (lead >= 0xC2u && lead <= 0xDFu) length = 2;
+        else if (lead >= 0xE0u && lead <= 0xEFu) length = 3;
+        else if (lead >= 0xF0u && lead <= 0xF4u) length = 4;
+
+        if (lead < 0x80u) {
+            result.push_back(static_cast<char>(lead));
+            ++i;
+        } else if (length <= suffix.size() && valid_utf8(suffix.substr(0, length))) {
+            result.append(suffix.substr(0, length));
+            i += length;
+        } else {
+            result.append("\xEF\xBF\xBD");
+            ++i;
+        }
+    }
+    return result;
+}
 }  // namespace
 
 // ── Shared: PreText-style arithmetic line breaking ──────────────────────
@@ -1018,6 +1083,16 @@ PreparedText TextShaper::prepare(
     int font_weight, int font_slant, float letter_spacing,
     const std::vector<Canvas::FontFeature>& font_features) {
     detail_prepare_calls().fetch_add(1, std::memory_order_relaxed);
+    // SkFont's UTF-8 decoder reports malformed input as a negative glyph
+    // count; its temporary glyph buffer then treats that as an enormous
+    // allocation and aborts the process. Text can cross several external
+    // boundaries before reaching the shaper, so make this core seam total:
+    // preserve valid input byte-for-byte and replace each malformed byte.
+    std::string repaired_text;
+    if (!valid_utf8(text)) {
+        repaired_text = replace_invalid_utf8(text);
+        text = repaired_text;
+    }
     PreparedText result;
     result.font_family_ = std::string(font_family);
     result.font_size_ = font_size;

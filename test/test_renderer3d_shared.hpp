@@ -2,7 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/render/draco_decoder.hpp>
-#include <pulp/render/draco_scene_adapter.hpp>
+#include <pulp/scene/draco_scene_adapter.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/renderer3d.hpp>
 #include <pulp/scene/bake_preflight.hpp>

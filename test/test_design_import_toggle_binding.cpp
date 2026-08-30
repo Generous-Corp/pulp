@@ -28,6 +28,7 @@
 #include <pulp/view/widgets.hpp>
 
 #include <string>
+#include <algorithm>
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -136,7 +137,8 @@ T* find_widget(View& view) {
 
 /// The binding context an embedding host writes: resolve the declared key
 /// against this plugin's parameters and install the write-back.
-class StoreBindingContext final : public NativeImportBindingContext {
+class StoreBindingContext final : public NativeImportBindingContext,
+                                  public NativeImportComboBoxBindingContext {
 public:
     explicit StoreBindingContext(pulp::state::StateStore& store) : store_(store) {}
 
@@ -159,6 +161,18 @@ public:
         segmented.set_selected_silent(
             selector_segment_index(store_.get_value(id), count));
         segmented.on_change = [this, id, count](int index) {
+            store_.set_value(id, selector_segment_value(index, count));
+        };
+    }
+
+    void bind_combo_box(ComboBox& combo,
+                        const NativeImportSegmentedBindingDescriptor& d) override {
+        const auto id = id_for(d.param_key);
+        if (id == 0) return;
+        const int count = d.segment_count;
+        combo.set_selected_silent(
+            selector_segment_index(store_.get_value(id), count));
+        combo.on_change = [this, id, count](int index) {
             store_.set_value(id, selector_segment_value(index, count));
         };
     }
@@ -311,6 +325,16 @@ DesignIR panel_with_a_selector(const std::string& param) {
     return ir;
 }
 
+DesignIR panel_with_a_dropdown(const std::string& param) {
+    auto ir = panel_with_a_selector(param);
+    // Mixed case proves every emitter follows the native resolver's
+    // case-insensitive IR type contract rather than only the browser
+    // capture's canonical lowercase spelling.
+    ir.root.children.front().type = "Select";
+    ir.root.children.front().audio_default = selector_segment_value(1, 4);
+    return ir;
+}
+
 /// Click the centre of segment `index` of `count` along the control's track.
 void click_segment(View& control, int index, int count) {
     const auto box = control.bounds();
@@ -393,6 +417,88 @@ TEST_CASE("a selector drives its parameter through both script emitters",
         INFO("after segment 1: " << store.get_value(1));
         CHECK(store.get_value(1) == selector_segment_value(1, 4));
         CHECK(segmented->selected() == 1);
+    }
+}
+
+TEST_CASE("a browser select stays collapsed and live through every emitter",
+          "[view][import][native-materializer][binding][dropdown]") {
+    auto ir = panel_with_a_dropdown("sync");
+    // The captured current value can differ from the declared default after a
+    // project restore. Every consumer must open on the current value, not jump
+    // back to the default item.
+    ir.root.children.front().attributes["value"] = "1";
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root != nullptr);
+    auto* combo = find_widget<ComboBox>(*root);
+    REQUIRE(combo != nullptr);
+    REQUIRE(combo->items() == std::vector<std::string>{"Up", "Down", "Converge", "Random"});
+    CHECK(combo->selected() == 3);
+    CHECK(find_widget<SegmentedControl>(*root) == nullptr);
+
+    pulp::state::StateStore store;
+    add_sync_param(store);
+    store.set_value(1, selector_segment_value(2, 4));
+    StoreBindingContext ctx{store};
+    std::vector<ImportDiagnostic> diagnostics;
+    bind_native_view_tree(*root, ir, ctx, {.diagnostics_out = &diagnostics});
+    CHECK(diagnostics.empty());
+    combo->set_selected(3);
+    CHECK(store.get_value(1) == 1.0f);
+
+    // A binding context compiled before ComboBox support has no optional
+    // capability interface. The current runtime must diagnose and skip that
+    // route instead of dispatching through a vtable slot the legacy object
+    // does not have.
+    auto legacy_root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(legacy_root != nullptr);
+    NativeImportBindingContext legacy_context;
+    std::vector<ImportDiagnostic> legacy_diagnostics;
+    bind_native_view_tree(*legacy_root, ir, legacy_context,
+                          {.diagnostics_out = &legacy_diagnostics});
+    CHECK(std::any_of(legacy_diagnostics.begin(), legacy_diagnostics.end(),
+                      [](const ImportDiagnostic& diagnostic) {
+                          return diagnostic.code == "native-binding-not-applied";
+                      }));
+
+    for (const auto mode : {CodeGenMode::web_compat,
+                            CodeGenMode::bridge_native_js}) {
+        CodeGenOptions options;
+        options.mode = mode;
+        options.include_comments = false;
+        const auto js = generate_pulp_js(ir, options);
+        INFO(js);
+        CHECK((js.find("createCombo") != std::string::npos ||
+               js.find("createElement('combo')") != std::string::npos));
+        CHECK(js.find("setItems") != std::string::npos);
+        CHECK(js.find("setSelected") != std::string::npos);
+        CHECK(js.find("createSegmented") == std::string::npos);
+        CHECK(js.find("setSegments") == std::string::npos);
+
+        ScriptEngine engine;
+        View script_root;
+        pulp::state::StateStore script_store;
+        add_sync_param(script_store);
+        int gesture_begins = 0;
+        int gesture_ends = 0;
+        script_store.set_gesture_callbacks(
+            [&](pulp::state::ParamID) { ++gesture_begins; },
+            [&](pulp::state::ParamID) { ++gesture_ends; });
+        WidgetBridge bridge(engine, script_root, script_store);
+        bridge.load_script(js);
+        auto* script_combo = find_widget<ComboBox>(script_root);
+        REQUIRE(script_combo != nullptr);
+        REQUIRE(script_combo->items().size() == 4);
+        CHECK(script_combo->selected() == 3);
+        REQUIRE(bridge.param_binding_count() == 1);
+        script_store.set_value(1, selector_segment_value(2, 4));
+        bridge.service_param_bindings();
+        CHECK(script_combo->selected() == 2);
+        script_combo->set_selected(1);
+        CHECK(script_store.get_value(1) == selector_segment_value(1, 4));
+        CHECK(gesture_begins == 1);
+        CHECK(gesture_ends == 1);
+        CHECK(script_store.open_gesture_count() == 0);
     }
 }
 

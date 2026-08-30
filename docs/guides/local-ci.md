@@ -775,6 +775,12 @@ workflow has queued or in-progress demand matching those labels. Enabling the
 hook on a *subset* of gate slots lets release work claim a VM slot promptly
 while the never-yielding remainder of the gate pool keeps serving PRs — the
 subset size is the gate-capacity floor, expressed purely in per-host config.
+For an advisory lane sharing a Pulp event-class-v2 host, include both
+`pulp-build-merge-group` and `pulp-build-pr-head` in the yield selector. The
+idle gate cannot preempt an already-running advisory VM, so ignoring PR-head
+demand could consume the last free slot just before strict merge-group demand
+arrives. Using only the base gate labels matches neither v2 class because each
+job requests its additional mutually exclusive class label.
 
 One sharp edge to monitor for: the yield probe **fails closed** — any `gh`
 error while scanning the priority workflow's queue reads as "demand exists,
@@ -1275,7 +1281,7 @@ required job: path-filtering the workflow or job would prevent the stable
 required context from reporting.
 
 CTest display names are not identities: the authoritative target currently has
-20,895 registrations but only 20,836 unique names. The inventory validator
+20,899 registrations but only 20,840 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned
@@ -2691,8 +2697,14 @@ and both belong to the required `macos` build gate. A local sanitizer VM
 is a *third* guest, so localizing is gated on the **tartci idle-gate**:
 the `pulp-sanitizer-vm-macos` lane shares `TART_HOME` with the gate (a real
 host-wide 2-guest semaphore) and yields its slot whenever the gate has
-queued/in-progress work — it can never starve the required check the way
-the coverage lane did. Pick **TSan**: it is the longest sanitizer (scoped
+queued/in-progress merge-group work. M1 now carries two event-class-v2 Pulp
+gate slots, so it is a shared host and must retain the template's yield keys;
+the exact selector is
+`self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-build-merge-group,pulp-build-pr-head`.
+It can never start while required Build and Test work is demanding the host,
+which protects the strict merge queue from the coverage-lane failure mode.
+Pick **TSan**:
+it is the longest sanitizer (scoped
 `-j1` serial, ~45 min on the 3 vCPU `macos-14`) and the highest value for a
 real-time audio framework, and being single-core-bound it gains most from a
 local M-series runner. ASan stays on `macos-15`, UBSan stays on `macos-26`,

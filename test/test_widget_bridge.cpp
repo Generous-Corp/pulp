@@ -467,6 +467,168 @@ TEST_CASE("WidgetBridge setFaderSkin applies derived colors to the fader",
     REQUIRE(f->thumb_shape() == Fader::ThumbShape::rectangle);
 }
 
+TEST_CASE("scripted indicator provenance keeps live theme precedence",
+          "[view][bridge][indicator-precedence]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    const auto black = pulp::canvas::Color::rgba8(0, 0, 0);
+    const auto blue = pulp::canvas::Color::rgba8(0, 64, 255);
+    const auto white = pulp::canvas::Color::rgba8(255, 255, 255);
+    root.set_color("knob.thumb", black);
+    root.set_color("control.thumb", black);
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(
+        "createKnob('dial', '');"
+        "setKnobCapturedIndicator('dial', 0.55, 0.9, 0.04, '#ff0000', 0, false);"
+        "createFader('level', 'vertical', '');"
+        "setFaderSkin('level', '', '', '#ff0000', '', 0, 0, 0, false);");
+
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("dial"));
+    auto* fader = dynamic_cast<Fader*>(bridge.widget("level"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(fader != nullptr);
+    CHECK_FALSE(knob->captured_indicator_color_authored());
+    CHECK_FALSE(fader->has_skin_thumb_color());
+    CHECK(fader->has_skin_thumb_fallback_color());
+    CHECK_FALSE(fader->has_skin());
+    knob->set_bounds({0, 0, 100, 100});
+    fader->set_bounds({0, 0, 24, 120});
+
+    const auto last_line_color = [](Knob& control) {
+        pulp::canvas::RecordingCanvas canvas;
+        control.paint(canvas);
+        pulp::canvas::Color current{};
+        pulp::canvas::Color painted{};
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_stroke_color)
+                current = command.color;
+            if (command.type == pulp::canvas::DrawCommand::Type::stroke_line)
+                painted = current;
+        }
+        return painted;
+    };
+    const auto last_thumb_color = [](Fader& control) {
+        pulp::canvas::RecordingCanvas canvas;
+        control.paint(canvas);
+        pulp::canvas::Color current{};
+        pulp::canvas::Color painted{};
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_fill_color)
+                current = command.color;
+            if (command.type == pulp::canvas::DrawCommand::Type::fill_rounded_rect)
+                painted = current;
+        }
+        return painted;
+    };
+
+    // The red panel fallback never freezes either control; the current host
+    // theme wins and remains live after the bridge call has returned.
+    CHECK(last_line_color(*knob) == black);
+    CHECK(last_thumb_color(*fader) == black);
+    root.set_color("knob.thumb", blue);
+    CHECK(last_line_color(*knob) == blue);
+    CHECK(last_thumb_color(*fader) == black);
+    root.set_color("control.thumb", blue);
+    CHECK(last_line_color(*knob) == blue);
+    CHECK(last_thumb_color(*fader) == blue);
+
+    bridge.load_script(
+        "setKnobCapturedIndicator('dial', 0.55, 0.9, 0.04, '#ffffff', 0, true);"
+        "setFaderSkin('level', '', '', '#ffffff', '', 0, 0, 0, true);");
+    CHECK(knob->captured_indicator_color_authored());
+    CHECK(fader->has_skin_thumb_color());
+    CHECK(last_line_color(*knob) == white);
+    CHECK(last_thumb_color(*fader) == white);
+
+    // Modern space-separated and percentage RGB forms accepted as authored
+    // evidence must parse to the same color instead of being confidently
+    // accepted and then misread by the shared CSS parser.
+    bridge.load_script(
+        "setKnobCapturedIndicator('dial', 0.55, 0.9, 0.04, 'rgb(0 255 0)', 0, true);"
+        "setFaderSkin('level', '', '', 'rgb(0% 100% 0%)', '', 0, 0, 0, true);");
+    const auto green = pulp::canvas::Color::rgba8(0, 255, 0);
+    CHECK(last_line_color(*knob) == green);
+    CHECK(last_thumb_color(*fader) == green);
+
+    // Replaying a panel fallback must retire the stale authored thumb rather
+    // than leaving white frozen over the current live theme.
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ff0000', '', 0, 0, 0, false);");
+    CHECK_FALSE(fader->has_skin_thumb_color());
+    CHECK(fader->has_skin_thumb_fallback_color());
+    CHECK(last_thumb_color(*fader) == blue);
+    root.set_color("control.thumb", black);
+    CHECK(last_thumb_color(*fader) == black);
+
+    // An explicit unauthored call with no fallback colour returns authority
+    // fully to the theme instead of reviving stale authored state later.
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '', '', 0, 0, 0, false);");
+    CHECK_FALSE(fader->has_skin_thumb_color());
+    CHECK_FALSE(fader->has_skin_thumb_fallback_color());
+    CHECK(last_thumb_color(*fader) == black);
+
+    // The inverse provenance transition remains authoritative.
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ffffff', '', 0, 0, 0, true);");
+    CHECK(fader->has_skin_thumb_color());
+    CHECK(last_thumb_color(*fader) == white);
+}
+
+TEST_CASE("setFaderSkin track-only styling preserves authored thumb geometry",
+          "[view][bridge][indicator-precedence]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createFader('level', 'vertical', '');");
+    auto* fader = dynamic_cast<Fader*>(bridge.widget("level"));
+    REQUIRE(fader != nullptr);
+    fader->set_thumb_shape(Fader::ThumbShape::circle);
+
+    bridge.load_script("setFaderSkin('level', '#112233', '#334455', '', '');");
+    CHECK(fader->thumb_shape() == Fader::ThumbShape::circle);
+
+    // A panel-wide fallback is palette data, not per-thumb geometry.
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ff0000', '', 0, 0, 0, false);");
+    CHECK(fader->thumb_shape() == Fader::ThumbShape::circle);
+}
+
+TEST_CASE("setFaderSkin fallback retires stale authored thumb styling",
+          "[view][bridge][indicator-precedence]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createFader('level', 'vertical', '');");
+    auto* fader = dynamic_cast<Fader*>(bridge.widget("level"));
+    REQUIRE(fader != nullptr);
+    fader->set_thumb_shape(Fader::ThumbShape::circle);
+
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ffffff', '#222222', 12, 18, 3, true);");
+    CHECK(fader->has_skin_thumb_color());
+    CHECK(fader->has_skin_thumb_border_color());
+    CHECK(fader->thumb_shape() == Fader::ThumbShape::rectangle);
+    CHECK(fader->thumb_width() == 12.0f);
+    CHECK(fader->thumb_height() == 18.0f);
+    CHECK(fader->thumb_corner_radius() == 3.0f);
+
+    bridge.load_script(
+        "setFaderSkin('level', '', '', '#ff0000', '', 0, 0, 0, false);");
+    CHECK_FALSE(fader->has_skin_thumb_color());
+    CHECK(fader->has_skin_thumb_fallback_color());
+    CHECK_FALSE(fader->has_skin_thumb_border_color());
+    CHECK(fader->thumb_shape() == Fader::ThumbShape::circle);
+    CHECK(fader->thumb_width() == 0.0f);
+    CHECK(fader->thumb_height() == 0.0f);
+    CHECK(fader->thumb_corner_radius() == 0.0f);
+}
+
 TEST_CASE("a scripted skin colour resolves every form the shared CSS parser does",
           "[view][bridge][color]") {
     // The scripted bridge and the native materializer read the same colour
@@ -5656,12 +5818,14 @@ TEST_CASE("WidgetBridge creates Ink & Signal design-system widgets from JS",
 
 TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callbacks",
           "[view][bridge][design-system][discrete][gesture][lifetime]") {
-    struct Variant { const char* name; const char* create; bool segmented; };
+    struct Variant { const char* name; const char* create; int kind; };
     for (const auto variant : {
-             Variant{"factory stepper", "createStepper('control', '');", false},
-             Variant{"DOM stepper", "__domAppend('', 'control', 'stepper');", false},
-             Variant{"factory segmented", "createSegmented('control', ''); setSegments('control', ['A','B','C']);", true},
-             Variant{"DOM segmented", "__domAppend('', 'control', 'segmented'); setSegments('control', ['A','B','C']);", true}}) {
+             Variant{"factory stepper", "createStepper('control', '');", 0},
+             Variant{"DOM stepper", "__domAppend('', 'control', 'stepper');", 0},
+             Variant{"factory segmented", "createSegmented('control', ''); setSegments('control', ['A','B','C']);", 1},
+             Variant{"DOM segmented", "__domAppend('', 'control', 'segmented'); setSegments('control', ['A','B','C']);", 1},
+             Variant{"factory combo", "createCombo('control', ''); setItems('control', ['A','B','C']);", 2},
+             Variant{"DOM combo", "__domAppend('', 'control', 'select'); setItems('control', ['A','B','C']);", 2}}) {
         DYNAMIC_SECTION(variant.name) {
             ScriptEngine engine;
             View root;
@@ -5680,8 +5844,13 @@ TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callb
             bridge.load_script(std::string(variant.create) +
                                "bindWidgetToParam('control', 'choice');");
 
-            if (variant.segmented) {
+            if (variant.kind == 1) {
                 auto* control = dynamic_cast<SegmentedControl*>(bridge.widget("control"));
+                REQUIRE(control != nullptr);
+                REQUIRE(control->on_change);
+                control->on_change(1);
+            } else if (variant.kind == 2) {
+                auto* control = dynamic_cast<ComboBox*>(bridge.widget("control"));
                 REQUIRE(control != nullptr);
                 REQUIRE(control->on_change);
                 control->on_change(1);
@@ -5700,10 +5869,12 @@ TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callb
     // A JS handler may tear down the bridge during dispatch. The callback must
     // not touch its destroyed `this` while closing the instantaneous gesture.
     for (const auto variant : {
-             Variant{"teardown factory stepper", "createStepper('control', '');", false},
-             Variant{"teardown DOM stepper", "__domAppend('', 'control', 'stepper');", false},
-             Variant{"teardown factory segmented", "createSegmented('control', '');", true},
-             Variant{"teardown DOM segmented", "__domAppend('', 'control', 'segmented');", true}}) {
+             Variant{"teardown factory stepper", "createStepper('control', '');", 0},
+             Variant{"teardown DOM stepper", "__domAppend('', 'control', 'stepper');", 0},
+             Variant{"teardown factory segmented", "createSegmented('control', '');", 1},
+             Variant{"teardown DOM segmented", "__domAppend('', 'control', 'segmented');", 1},
+             Variant{"teardown factory combo", "createCombo('control', '');", 2},
+             Variant{"teardown DOM combo", "__domAppend('', 'control', 'select');", 2}}) {
         DYNAMIC_SECTION(variant.name) {
             ScriptEngine engine;
             View root;
@@ -5716,11 +5887,15 @@ TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callb
                 });
             bridge = std::make_unique<WidgetBridge>(engine, root, store);
             bridge->load_script(std::string(variant.create) +
-                "on('control', '" + (variant.segmented ? "select" : "change") +
+                "on('control', '" + (variant.kind == 0 ? "change" : "select") +
                 "', function() { __destroyDiscreteBridge(); });");
 
-            if (variant.segmented) {
+            if (variant.kind == 1) {
                 auto callback = dynamic_cast<SegmentedControl*>(
+                    bridge->widget("control"))->on_change;
+                REQUIRE_NOTHROW(callback(1));
+            } else if (variant.kind == 2) {
+                auto callback = dynamic_cast<ComboBox*>(
                     bridge->widget("control"))->on_change;
                 REQUIRE_NOTHROW(callback(1));
             } else {
@@ -6610,6 +6785,81 @@ TEST_CASE("repeated geometry reads with no mutation cost one layout pass",
     // 120 reads, nothing mutated: at most one pass. Before the fix this was 120.
     INFO("layout passes for 120 reads: " << passes);
     CHECK(passes <= 1);
+}
+
+TEST_CASE("host paint reuses a layout completed by the bridge",
+          "[view][bridge][layout][perf]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('outer', '');
+        setFlex('outer', 'width', 300);
+        setFlex('outer', 'height', 200);
+        createLabel('leaf', 'Leaf', 'outer');
+        setFlex('leaf', 'height', 24);
+        layout();
+    )");
+
+    const auto before = View::layout_pass_count();
+    engine.evaluate("getLayoutRect('leaf').height");
+    root.layout_children_if_needed();
+    CHECK(View::layout_pass_count() - before == 0);
+
+    engine.evaluate("setFlex('leaf', 'height', 72)");
+    root.layout_children_if_needed();
+    engine.evaluate("getLayoutRect('leaf').height");
+    CHECK(View::layout_pass_count() - before == 1);
+}
+
+TEST_CASE("layout invalidation is isolated between independent view trees",
+          "[view][bridge][layout][perf]") {
+    View editor_root;
+    editor_root.set_bounds({0, 0, 400, 300});
+    editor_root.layout_children_if_needed();
+
+    View helper_root;
+    helper_root.set_bounds({0, 0, 32, 32});
+
+    const auto before = View::layout_pass_count();
+    helper_root.invalidate_layout();
+    editor_root.layout_children_if_needed();
+
+    // A process-wide generation makes the editor pay for the helper tree's
+    // mutation. Per-tree generations keep the already-current editor intact.
+    CHECK(View::layout_pass_count() - before == 0);
+}
+
+TEST_CASE("live text in an explicitly sized label does not relayout the root",
+          "[view][bridge][layout][perf][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('status', '');
+        setFlex('status', 'width', 240);
+        setFlex('status', 'height', 26);
+        createLabel('status-text', 'BAND 1/64', 'status');
+        setFlex('status-text', 'width', '100%');
+        setFlex('status-text', 'height', '100%');
+        layout();
+    )");
+
+    engine.evaluate("getLayoutBoxMetrics('status-text').offsetWidth");
+    const auto before = View::layout_pass_count();
+    engine.evaluate("setText('status-text', 'BAND 2/64')");
+    root.layout_children_if_needed();
+
+    CHECK(View::layout_pass_count() - before == 0);
+    auto* label = dynamic_cast<Label*>(bridge.widget("status-text"));
+    REQUIRE(label != nullptr);
+    CHECK(label->text() == "BAND 2/64");
 }
 
 TEST_CASE("replaying an identical flex value does not dirty geometry",

@@ -36,6 +36,7 @@ namespace pulp::view {
 
 class View;
 class Checkbox;
+class ComboBox;
 class SegmentedControl;
 class Stepper;
 class Knob;
@@ -294,6 +295,19 @@ public:
         (void)checkbox;
         (void)descriptor;
     }
+};
+
+/// Optional capability for binding a collapsed selector. This is a separate
+/// interface rather than a new NativeImportBindingContext virtual so a current
+/// runtime can safely receive a context compiled against an older SDK. Hosts
+/// opt in with multiple inheritance; older contexts fail closed for ComboBox
+/// routes without an invalid vtable dispatch.
+class NativeImportComboBoxBindingContext {
+public:
+    virtual ~NativeImportComboBoxBindingContext() = default;
+    virtual void bind_combo_box(
+        ComboBox& combo,
+        const NativeImportSegmentedBindingDescriptor& descriptor) = 0;
 };
 
 std::unique_ptr<View> build_native_view_tree(

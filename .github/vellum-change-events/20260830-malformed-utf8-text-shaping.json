@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20260830-malformed-utf8-text-shaping",
+  "kind": "change",
+  "created_at": "2026-08-30T08:05:00Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Spectr reproduced a native abort after malformed UTF-8 reached Pulp's transferred text-shaping kernel and produced an invalid glyph count followed by a huge allocation request. Pulp must carry the bounded repair immediately to unblock a crash-free plug-in release: validate UTF-8 before shaping and replace malformed sequences with U+FFFD, including overlong three-byte and four-byte encodings. The change adds no public API and expires within fourteen days while Vellum issue #27 ports the generic repair to the authoritative framework.",
+  "tests": [
+    "Vellum freeze",
+    "pulp-test-text-shaper"
+  ],
+  "disposition": "emergency-exception",
+  "owner": "@danielraffel",
+  "expiry": "2026-09-13",
+  "follow_up": "https://github.com/Generous-Corp/vellum/issues/27"
+}

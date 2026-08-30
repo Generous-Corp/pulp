@@ -198,6 +198,44 @@ const pulp::canvas::DrawCommand* first_meter_fill_rect(const pulp::canvas::Recor
     return nullptr;
 }
 
+const pulp::canvas::DrawCommand* stroke_color_for_first_line(
+    const pulp::canvas::RecordingCanvas& canvas) {
+    const pulp::canvas::DrawCommand* current_color = nullptr;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == pulp::canvas::DrawCommand::Type::set_stroke_color)
+            current_color = &command;
+        if (command.type == pulp::canvas::DrawCommand::Type::stroke_line)
+            return current_color;
+    }
+    return nullptr;
+}
+
+const pulp::canvas::DrawCommand* stroke_color_for_last_line(
+    const pulp::canvas::RecordingCanvas& canvas) {
+    const pulp::canvas::DrawCommand* current_color = nullptr;
+    const pulp::canvas::DrawCommand* painted_color = nullptr;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == pulp::canvas::DrawCommand::Type::set_stroke_color)
+            current_color = &command;
+        if (command.type == pulp::canvas::DrawCommand::Type::stroke_line)
+            painted_color = current_color;
+    }
+    return painted_color;
+}
+
+const pulp::canvas::DrawCommand* fill_color_for_last_rounded_rect(
+    const pulp::canvas::RecordingCanvas& canvas) {
+    const pulp::canvas::DrawCommand* current_color = nullptr;
+    const pulp::canvas::DrawCommand* painted_color = nullptr;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == pulp::canvas::DrawCommand::Type::set_fill_color)
+            current_color = &command;
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_rounded_rect)
+            painted_color = current_color;
+    }
+    return painted_color;
+}
+
 std::string minimal_live_react_shim() {
     return R"JS(
 (function() {
@@ -3340,6 +3378,362 @@ TEST_CASE("Fader::paint consults its paint delegate, as Knob::paint does",
     REQUIRE(painter->linear == 1);
     REQUIRE(painter->last_horizontal == false);
     REQUIRE(painter->last_thumb_pos == Catch::Approx(0.25f));
+}
+
+TEST_CASE("authored designed-control indicators override the inherited thumb token",
+          "[view][import][native-materializer][designed-control][indicator-color]") {
+    const auto white = pulp::canvas::Color::rgba8(255, 255, 255);
+    const auto black = pulp::canvas::Color::rgba8(0, 0, 0);
+    const auto red = pulp::canvas::Color::rgba8(255, 0, 0);
+    const auto cyan = pulp::canvas::Color::rgba8(40, 220, 240);
+
+    SECTION("the recorder observes an authored color when no theme conflicts") {
+        DesignIR ir;
+        ir.root = frame("root", 200.0f, 160.0f, LayoutDirection::row);
+
+        auto knob_node = frame("knob", 160.0f, 160.0f, LayoutDirection::column);
+        knob_node.audio_widget = AudioWidgetType::knob;
+        knob_node.attributes["designed_body"] = "capture";
+        knob_node.attributes["design_indicator"] = "#ffffff";
+        knob_node.attributes["knob_ind_r_in"] = "0.80";
+        knob_node.attributes["knob_ind_r_out"] = "1.15";
+        ir.root.children.push_back(std::move(knob_node));
+
+        auto fader_node = frame("fader", 20.0f, 100.0f, LayoutDirection::column);
+        fader_node.audio_widget = AudioWidgetType::fader;
+        fader_node.attributes["designed_body"] = "capture";
+        fader_node.attributes["design_indicator"] = "#ffffff";
+        ir.root.children.push_back(std::move(fader_node));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+        REQUIRE(knob != nullptr);
+        knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+        pulp::canvas::RecordingCanvas canvas;
+        knob->paint(canvas);
+        const auto* pointer_color = stroke_color_for_first_line(canvas);
+        REQUIRE(pointer_color != nullptr);
+        CHECK(pointer_color->color == white);
+
+        auto* fader = dynamic_cast<Fader*>(root->child_at(1));
+        REQUIRE(fader != nullptr);
+        fader->set_bounds({0, 0, 20.0f, 100.0f});
+        fader->set_orientation(Fader::Orientation::vertical);
+        fader->set_value(0.25f);
+
+        pulp::canvas::RecordingCanvas fader_canvas;
+        fader->paint(fader_canvas);
+        const auto* thumb_color = fill_color_for_last_rounded_rect(fader_canvas);
+        REQUIRE(thumb_color != nullptr);
+        CHECK(thumb_color->color == white);
+    }
+
+    SECTION("an unauthored pointer retains the design theme fallback") {
+        DesignIR ir;
+        ir.root = frame("root", 160.0f, 160.0f, LayoutDirection::row);
+
+        auto knob_node = frame("knob", 160.0f, 160.0f, LayoutDirection::column);
+        knob_node.audio_widget = AudioWidgetType::knob;
+        knob_node.attributes["designed_body"] = "capture";
+        knob_node.attributes["design_ring_radius"] = "0.50";
+        knob_node.attributes["design_indicator"] = "#00ff00";
+        ir.root.children.push_back(std::move(knob_node));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        // Distinct tokens make this falsifiable: designed rotary pointers use
+        // the same knob-specific token as every other Knob paint path.
+        root->set_color("control.thumb", red);
+        root->set_color("knob.thumb", black);
+        auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+        REQUIRE(knob != nullptr);
+        knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+        pulp::canvas::RecordingCanvas canvas;
+        knob->paint(canvas);
+        const auto* pointer_color = stroke_color_for_first_line(canvas);
+        REQUIRE(pointer_color != nullptr);
+        CHECK(pointer_color->color == black);
+        CHECK(pointer_color->color != red);
+    }
+
+    SECTION("a knob keeps its captured pointer color over the global theme") {
+        DesignIR ir;
+        ir.root = frame("root", 160.0f, 160.0f, LayoutDirection::row);
+
+        auto knob_node = frame("knob", 160.0f, 160.0f, LayoutDirection::column);
+        knob_node.audio_widget = AudioWidgetType::knob;
+        knob_node.attributes["designed_body"] = "capture";
+        knob_node.attributes["design_indicator"] = "#ff0000";
+        knob_node.attributes["knob_ind_r_in"] = "0.80";
+        knob_node.attributes["knob_ind_r_out"] = "1.15";
+        knob_node.attributes["knob_ind_color"] = "#ffffff";
+        ir.root.children.push_back(std::move(knob_node));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        root->set_color("control.thumb", black);
+        auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+        REQUIRE(knob != nullptr);
+        knob->set_bounds({0, 0, 160.0f, 160.0f});
+
+        pulp::canvas::RecordingCanvas canvas;
+        knob->paint(canvas);
+        const auto* pointer_color = stroke_color_for_first_line(canvas);
+        REQUIRE(pointer_color != nullptr);
+        CHECK(pointer_color->color == white);
+        CHECK(pointer_color->color != black);
+        CHECK(pointer_color->color != red);
+    }
+
+    SECTION("a sprite-less ordinary knob retains its durable authored pointer") {
+        DesignIR ir;
+        ir.root = frame("root", 160.0f, 160.0f, LayoutDirection::row);
+
+        auto knob_node = frame("knob", 160.0f, 160.0f,
+                               LayoutDirection::column);
+        knob_node.audio_widget = AudioWidgetType::knob;
+        // No asset_path and no designed_body eligibility: durable pointer
+        // metadata alone must reach the ordinary native Knob path.
+        knob_node.attributes["knob_ind_r_in"] = "0.52";
+        knob_node.attributes["knob_ind_r_out"] = "0.91";
+        knob_node.attributes["knob_ind_w"] = "0.04";
+        knob_node.attributes["knob_ind_phase_rad"] = "0.25";
+        knob_node.attributes["knob_ind_color"] = "#ffffff";
+        ir.root.children.push_back(std::move(knob_node));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        root->set_color("knob.thumb", black);
+        auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+        REQUIRE(knob != nullptr);
+        REQUIRE(knob->has_captured_indicator());
+        CHECK(knob->captured_indicator_r_in() == Catch::Approx(0.52f));
+        CHECK(knob->captured_indicator_r_out() == Catch::Approx(0.91f));
+        CHECK(knob->captured_indicator_phase_rad() == Catch::Approx(0.25f));
+        CHECK(knob->captured_indicator_color_authored());
+
+        knob->set_bounds({0, 0, 160.0f, 160.0f});
+        pulp::canvas::RecordingCanvas canvas;
+        knob->paint(canvas);
+        // The durable pointer is the final overlay on an ordinary procedural
+        // knob; earlier stroked lines belong to its body chrome.
+        const auto* pointer_color = stroke_color_for_last_line(canvas);
+        REQUIRE(pointer_color != nullptr);
+        CHECK(pointer_color->color == white);
+        CHECK(pointer_color->color != black);
+    }
+
+    SECTION("invalid durable pointer geometry keeps the stock knob indicator") {
+        DesignIR ir;
+        ir.root = frame("root", 320.0f, 160.0f, LayoutDirection::row);
+
+        auto zero = frame("zero", 160.0f, 160.0f,
+                          LayoutDirection::column);
+        zero.audio_widget = AudioWidgetType::knob;
+        zero.attributes["knob_ind_r_out"] = "0";
+        ir.root.children.push_back(std::move(zero));
+
+        auto non_finite = frame("nan", 160.0f, 160.0f,
+                                LayoutDirection::column);
+        non_finite.audio_widget = AudioWidgetType::knob;
+        non_finite.attributes["knob_ind_r_out"] = "nan";
+        ir.root.children.push_back(std::move(non_finite));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        REQUIRE(root->child_count() == 2);
+        auto* zero_knob = dynamic_cast<Knob*>(root->child_at(0));
+        auto* nan_knob = dynamic_cast<Knob*>(root->child_at(1));
+        REQUIRE(zero_knob != nullptr);
+        REQUIRE(nan_knob != nullptr);
+        CHECK_FALSE(zero_knob->has_captured_indicator());
+        CHECK_FALSE(nan_knob->has_captured_indicator());
+    }
+
+    SECTION("malformed indicator colors retain fallback rather than authored authority") {
+        DesignIR ir;
+        ir.root = frame("root", 220.0f, 160.0f, LayoutDirection::row);
+
+        auto knob_node = frame("knob", 160.0f, 160.0f,
+                               LayoutDirection::column);
+        knob_node.audio_widget = AudioWidgetType::knob;
+        knob_node.attributes["design_indicator"] = "#ff0000";
+        knob_node.attributes["knob_ind_r_out"] = "0.91";
+        knob_node.attributes["knob_ind_color"] = "rgb(nope)";
+        ir.root.children.push_back(std::move(knob_node));
+
+        auto fader_node = frame("fader", 20.0f, 100.0f,
+                                LayoutDirection::column);
+        fader_node.audio_widget = AudioWidgetType::fader;
+        fader_node.attributes["design_indicator"] = "#ff0000";
+        fader_node.attributes["fader_ind_color"] = "rgb(255)";
+        ir.root.children.push_back(std::move(fader_node));
+
+        auto invalid_panel = frame("invalid-panel", 20.0f, 100.0f,
+                                   LayoutDirection::column);
+        invalid_panel.audio_widget = AudioWidgetType::fader;
+        invalid_panel.attributes["design_indicator"] = "rgb(nope)";
+        ir.root.children.push_back(std::move(invalid_panel));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        REQUIRE(root->child_count() == 3);
+
+        auto* knob = dynamic_cast<Knob*>(root->child_at(0));
+        REQUIRE(knob != nullptr);
+        REQUIRE(knob->has_captured_indicator());
+        CHECK_FALSE(knob->captured_indicator_color_authored());
+        knob->set_bounds({0, 0, 160.0f, 160.0f});
+        pulp::canvas::RecordingCanvas knob_canvas;
+        knob->paint(knob_canvas);
+        const auto* pointer_color = stroke_color_for_last_line(knob_canvas);
+        REQUIRE(pointer_color != nullptr);
+        CHECK(pointer_color->color == red);
+
+        auto* fader = dynamic_cast<Fader*>(root->child_at(1));
+        REQUIRE(fader != nullptr);
+        REQUIRE(fader->has_skin_thumb_fallback_color());
+        CHECK_FALSE(fader->has_skin_thumb_color());
+        CHECK(fader->skin_thumb_fallback_color() == red);
+
+        auto* invalid_fader = dynamic_cast<Fader*>(root->child_at(2));
+        REQUIRE(invalid_fader != nullptr);
+        CHECK_FALSE(invalid_fader->has_skin_thumb_fallback_color());
+        CHECK_FALSE(invalid_fader->has_skin_thumb_color());
+    }
+
+    SECTION("a fader keeps its captured thumb color over the global theme") {
+        DesignIR ir;
+        ir.root = frame("root", 40.0f, 120.0f, LayoutDirection::row);
+
+        auto fader_node = frame("fader", 20.0f, 100.0f, LayoutDirection::column);
+        fader_node.audio_widget = AudioWidgetType::fader;
+        fader_node.attributes["designed_body"] = "capture";
+        fader_node.attributes["design_indicator"] = "#ff0000";
+        fader_node.attributes["fader_ind_color"] = "#ffffff";
+        ir.root.children.push_back(std::move(fader_node));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        root->set_color("control.thumb", black);
+        auto* fader = dynamic_cast<Fader*>(root->child_at(0));
+        REQUIRE(fader != nullptr);
+        fader->set_bounds({0, 0, 20.0f, 100.0f});
+        fader->set_orientation(Fader::Orientation::vertical);
+        fader->set_value(0.25f);
+
+        pulp::canvas::RecordingCanvas canvas;
+        fader->paint(canvas);
+        const auto* thumb_color = fill_color_for_last_rounded_rect(canvas);
+        REQUIRE(thumb_color != nullptr);
+        CHECK(thumb_color->color == white);
+        CHECK(thumb_color->color != black);
+        CHECK(thumb_color->color != red);
+    }
+
+    SECTION("a sprite-less ordinary fader retains its durable authored thumb") {
+        DesignIR ir;
+        ir.root = frame("root", 40.0f, 120.0f, LayoutDirection::row);
+
+        auto fader_node = frame("fader", 20.0f, 100.0f,
+                                LayoutDirection::column);
+        fader_node.audio_widget = AudioWidgetType::fader;
+        // No captured art and no designed_body eligibility: the durable
+        // per-control colour must still reach the ordinary native Fader path.
+        fader_node.attributes["fader_ind_color"] = "#ffffff";
+        ir.root.children.push_back(std::move(fader_node));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        root->set_color("control.thumb", black);
+        auto* fader = dynamic_cast<Fader*>(root->child_at(0));
+        REQUIRE(fader != nullptr);
+        REQUIRE(fader->has_skin_thumb_color());
+        CHECK(fader->skin_thumb_color() == white);
+
+        fader->set_bounds({0, 0, 20.0f, 100.0f});
+        fader->set_orientation(Fader::Orientation::vertical);
+        fader->set_value(0.25f);
+        pulp::canvas::RecordingCanvas canvas;
+        fader->paint(canvas);
+        const auto* thumb_color = fill_color_for_last_rounded_rect(canvas);
+        REQUIRE(thumb_color != nullptr);
+        CHECK(thumb_color->color == white);
+        CHECK(thumb_color->color != black);
+    }
+
+    SECTION("a sprite-less ordinary fader retains the panel thumb fallback") {
+        DesignIR ir;
+        ir.root = frame("root", 40.0f, 120.0f, LayoutDirection::row);
+
+        auto fader_node = frame("fader", 20.0f, 100.0f,
+                                LayoutDirection::column);
+        fader_node.audio_widget = AudioWidgetType::fader;
+        // No captured art, designed body, or per-control colour: the panel
+        // fallback must still reach the ordinary native Fader path.
+        fader_node.attributes["design_indicator"] = "#ff0000";
+        ir.root.children.push_back(std::move(fader_node));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        auto* fader = dynamic_cast<Fader*>(root->child_at(0));
+        REQUIRE(fader != nullptr);
+        REQUIRE(fader->has_skin_thumb_fallback_color());
+        CHECK_FALSE(fader->has_skin_thumb_color());
+        CHECK(fader->skin_thumb_fallback_color() == red);
+
+        fader->set_bounds({0, 0, 20.0f, 100.0f});
+        fader->set_orientation(Fader::Orientation::vertical);
+        fader->set_value(0.25f);
+        pulp::canvas::RecordingCanvas fallback_canvas;
+        fader->paint(fallback_canvas);
+        const auto* fallback_color =
+            fill_color_for_last_rounded_rect(fallback_canvas);
+        REQUIRE(fallback_color != nullptr);
+        CHECK(fallback_color->color == red);
+
+        root->set_color("control.thumb", black);
+        pulp::canvas::RecordingCanvas themed_canvas;
+        fader->paint(themed_canvas);
+        const auto* themed_color = fill_color_for_last_rounded_rect(themed_canvas);
+        REQUIRE(themed_color != nullptr);
+        CHECK(themed_color->color == black);
+    }
+
+    SECTION("captured-art faders retain per-control color provenance") {
+        DesignIR ir;
+        ir.root = frame("root", 80.0f, 140.0f, LayoutDirection::row);
+        auto fader_node = frame("fader", 40.0f, 120.0f,
+                                LayoutDirection::column);
+        fader_node.audio_widget = AudioWidgetType::fader;
+        const auto fixture = (fs::path(PULP_REPO_ROOT) / "test" / "fixtures" /
+                              "import-fidelity" / "assets" / "fader_ref.png")
+                                 .string();
+        fader_node.attributes["fader_body_asset_path"] = fixture;
+        fader_node.attributes["fader_indicator_asset_path"] = fixture;
+        fader_node.attributes["fader_body_natural_w"] = "40";
+        fader_node.attributes["fader_body_natural_h"] = "120";
+        fader_node.attributes["fader_indicator_natural_w"] = "40";
+        fader_node.attributes["fader_indicator_natural_h"] = "120";
+        fader_node.attributes["design_indicator"] = "#ff0000";
+        fader_node.attributes["fader_ind_color"] = "#28dcf0";
+        ir.root.children.push_back(std::move(fader_node));
+
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        root->set_color("control.thumb", black);
+        auto* fader = dynamic_cast<Fader*>(root->child_at(0));
+        REQUIRE(fader != nullptr);
+        REQUIRE(fader->has_captured_indicator_art());
+        REQUIRE(fader->has_skin_thumb_color());
+        CHECK(fader->has_skin_thumb_fallback_color());
+        CHECK(fader->skin_thumb_color() == cyan);
+        CHECK(fader->skin_thumb_color() != red);
+        CHECK(fader->skin_thumb_color() != black);
+    }
 }
 
 TEST_CASE("a lowered control does not repaint the box-shadow its underlay drew",

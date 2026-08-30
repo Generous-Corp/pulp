@@ -55,7 +55,7 @@ The current branch still matches the plan's native-renderer risk model:
   overload for the glTF `KHR_draco_mesh_compression` semantic map, while the
   old named-attribute decoder remains for existing callers. `core/scene` now
   routes compressed bufferView bytes and semantic unique IDs through an injected
-  Draco decode callback, and `core/render/include/pulp/render/draco_scene_adapter.hpp`
+  Draco decode callback, and `core/scene/include/pulp/scene/draco_scene_adapter.hpp`
   provides the concrete renderer-decoder callback adapter without adding a
   `pulp-scene` -> `pulp-render` link cycle.
 - `pulp-scene3d-inspect-native --native-draco` is a render-owned inspector

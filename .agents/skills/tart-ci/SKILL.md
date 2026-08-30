@@ -11,6 +11,26 @@ requires:
 
 Run every macOS build/validation in a **throwaway VM cloned from a versioned golden image** so the host stays responsive and builds are reproducible. Generalizes to any repo via one `vm-image` manifest. Born from Pulp `planning/2026-06-01-macos-ci-isolation-plan.md`; the reusable macOS provider now lives in the sibling `/Volumes/Workshop/Code/tartci` repo. Pulp's `tools/ci/tart-runner.sh` / `tart-run-job.sh` scripts are the legacy/precursor shape and should stay as compatibility wrappers once the tartci lane graduates.
 
+## Current Pulp gate truth (read before rollout history)
+
+Pulp's production required macOS gate is the local M1/M3/M5 JIT fleet. Each
+host's checked-in profile can serve both mutually exclusive event classes:
+`pulp-build-pr-head` at derived lease priority 100 and
+`pulp-build-merge-group` at derived priority 110. Profiles must not set one
+fixed lease priority for both classes; doing so defeats merge-group priority
+and can leave reserved gate cores idle. The older `pulp-gate-fast`, M1-only,
+static-runner, and pilot-label passages below are rollout history, not the
+current production selector.
+
+A profile proves compatibility, not live participation. JIT runners register
+only while serving a job, and organization visibility does not prove that the
+Pulp repository can assign one. Establish current capacity from enabled and
+healthy Pulp supervisors, queue age, repository-visible registration, exact
+job-to-runner binding, derived lease priority, completion, and VM/JIT cleanup.
+Re-check M1, M3, and M5 live; do not preserve a dated incident snapshot as
+topology. `tools/scripts/runner_topology.json` plus
+`runner_topology_check.py --mode=report` is the declarative routing truth.
+
 ## Why (the failure modes this fixes)
 - **Build-dir churn → ODR heap corruption.** One `build/` reconfigured across branches/build-types mixes object layouts → `malloc: error for object 0x3f800000` (that's `1.0f` freed as a pointer) aborting in e.g. `Theme::~Theme`. Every job in a *pristine* clone makes this impossible.
 - **Host-local validation is fragile + invasive.** Validating in the editing checkout inherits churn, pops GUI keychain dialogs, and competes for CPU. VMs are headless and disposable.
@@ -112,10 +132,16 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 - **Local-first policy:** Pulp's automatic macOS overflow is disabled with `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not point full-local saturation at GitHub-hosted `macos-15`; let jobs queue for the next local Mac slot. Hosted macOS is an explicit operator fallback for a local fleet outage/unhealthy fleet or a workflow that intentionally wants hosted coverage. Rollback for the old behavior: `gh variable set -R Generous-Corp/pulp PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'`.
 - **Production required macOS routing is event-class-aware.** `build.yml` adds
   `pulp-build-merge-group` for merge-queue work and `pulp-build-pr-head` for PR
-  validation. M1, M3, and M5 can serve both classes through their checked-in
-  TartCI profiles; M1 deliberately waits 10 minutes before taking Pulp work.
-  Healthy idle JIT capacity has no registered runner, so prove service from
-  queue age and exact job-to-runner assignment rather than a static runner row.
+  validation. M1, M3, and M5 have checked-in profiles compatible with both
+  classes; that configured topology is not proof that a host currently serves
+  either class. Only enabled, healthy Pulp gate supervisors provide live
+  capacity, and M1 deliberately waits 10 minutes before taking Pulp work.
+  Healthy idle JIT capacity has no registered runner, so prove participation
+  from supervisor state, queue age, and exact job-to-runner assignment rather
+  than a profile or static runner row. At the 2026-08-30 incident boundary M1
+  and M5 participate while M3's two compatible profiles remain intentionally
+  disabled pending the admission-fix canary; re-check instead of treating that
+  snapshot as durable topology.
 
 ## Linux + Windows pool runners (join the Actions pool like macOS)
 
@@ -254,23 +280,25 @@ main, reddening every PR's macOS gate.)
 ## Rollout: pilot → graduate
 1. **Additive pilot (safe):** run `tartci serve macos --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
 2. **Required-label prevalidation (safe):** run a one-shot VM with `pulp-build` **plus a unique proof label**, then dispatch `Build and Test` with `macos_runner_selector_json` requiring both labels. This proves a VM can satisfy the required label while bare-metal `pulp-build` remains online. Verified 2026-06-10: run `27250564395`, runner `tartci-phase6-pulp-build-proof-r2-20260610`, `macOS (ARM64) [operator]` success, `macos` alias success, VM/JIT runner cleaned up. Cancel unrelated Linux/Windows legs after `macos` is green.
-3. **Graduated production default route:** M1/M3/M5 VM supervisors share the
-   base `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm` labels and select one
+3. **Graduated production default route:** the configured M1/M3/M5 VM
+   supervisor profiles share the base
+   `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm` labels and select one
    mutually exclusive event-class label per job. Merge groups receive priority
    `110`; PR heads receive priority `100`. This keeps merge-queue work ahead
-   without reserving a permanently static VM slot.
+   without reserving a permanently static VM slot. Treat a host as live only
+   after its matching supervisors and a current assignment or service receipt
+   prove participation.
    The following June runs prove the underlying ephemeral base pool; they
    predate event-class V2 and are not V2 assignment receipts:
    - run `27251134234`: default dispatch, no selector override, `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success; hosted leftovers canceled after `macos` went green.
    - run `27251378268`: real PR, secondary-host `pulp-vm-m5-pilot-01`, `macOS (ARM64) [local]` success, `macos` alias success.
    - run `27251442228`: real PR, controller `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success.
-4. **Rollback path:** keep bare-metal fallback online. To route back to bare-metal:
-   ```bash
-   gh variable set -R Generous-Corp/pulp PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","pulp-build"]'
-   gh variable set -R Generous-Corp/pulp PULP_LOCAL_MAC_RUNNER_LABEL --body 'pulp-build'
-   launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner"
-   ssh <secondary-host> 'launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner-macos-pilot"'
-   ```
+4. **Historical rollback:** the former bare-metal selector and launchd commands
+   are intentionally not preserved here; copying them would bypass the current
+   event-class contract. If rollback is required, derive the reviewed selector
+   from `tools/scripts/runner_topology.json`, preserve both event classes and
+   their repository-scoped registration authority, and change one idle host at
+   a time with a proven assignment receipt.
 
 ## Gotchas (hard-won)
 - **Dynamic event classes require dynamic registration authority, not just
@@ -313,7 +341,7 @@ main, reddening every PR's macOS gate.)
 
 - **Coverage VM lane: three things the build lane didn't need.** (1) **The label-matched queue scan must cover `in_progress` runs, not just `queued`.** A Coverage (or Release CLI) run flips to `in_progress` the moment its GitHub-hosted resolver/classify job starts — *before* the self-hosted macOS leg is even queued — so a queued-only run scan sees `q=0` forever and the VM never boots. `tart-runner.sh queued_work` and the tartci macOS provider both iterate `for st in queued in_progress`. (2) **Run the coverage agent from `$HOME` like the build runner** (`~/.local/bin/tartci serve macos --loop`, `TART_HOME=$HOME/VMs`), NOT a repo checkout on `/Volumes` — the FDA/`Operation not permitted` trap above bites the coverage agent too, and the `$HOME` layout sidesteps it entirely instead of needing Full Disk Access. (3) **Cap the coverage supervisor at 1** (`TARTCI_MACOS_VM_CAP=1`): label isolation (`pulp-coverage-vm-macos`, never `pulp-build`/`pulp-build-vm`) keeps the *jobs* off the gate, but coverage VMs still share host slots, so the cap is what stops an advisory coverage run from occupying every slot and stalling the required `macos` gate. Routing var: `PULP_COVERAGE_MACOS_RUNS_ON_JSON`.
 
-- **Cap=1 is necessary but NOT sufficient — a long secondary VM still throttles the gate. Use the priority-aware idle gate.** The coverage lane above was **backed out 2026-06-16**: with shared `TART_HOME` and cap=1 it booted whenever the host was idle, then *held* one of the two macOS slots for ~1h, so a required-gate burst (which wants both slots) ran at half throughput and ultimately wedged the gate (launchctl exit 126). cap=1 stops "occupy *every* slot" but not "hold the slot the gate needs." The fix is the tartci provider's opt-in **idle gate**: set `TARTCI_YIELD_TO_WORKFLOW_NAME` (e.g. `Build and Test`) + `TARTCI_YIELD_TO_LABELS` (the gate pool) so the secondary lane boots only when the gate has **no** queued/in-progress work (`priority_demand()` in `providers/tart-macos/runner.sh`; preview with `serve macos --print-priority-demand`; behaviorally tested in `tartci/scripts/test_idle_gate.py`). **Keep the secondary lane on the SAME `TART_HOME` as the gate** so `running_macos_vms` stays a true host-wide 2-guest semaphore — a *separate* store hides the secondary VM from the gate's count and lets total guests hit 3 → the 3rd `tart run` fails on Apple's host-wide cap (and duplicates the ~150GB golden). The same idle gate is how to re-enable coverage safely.
+- **Cap=1 is necessary but NOT sufficient — a long secondary VM still throttles the gate. Use the priority-aware idle gate.** The coverage lane above was **backed out 2026-06-16**: with shared `TART_HOME` and cap=1 it booted whenever the host was idle, then *held* one of the two macOS slots for ~1h, so a required-gate burst (which wants both slots) ran at half throughput and ultimately wedged the gate (launchctl exit 126). cap=1 stops "occupy *every* slot" but not "hold the slot the gate needs." The fix is the tartci provider's opt-in **idle gate**: set `TARTCI_YIELD_TO_WORKFLOW_NAME=Build and Test` and include both event classes in `TARTCI_YIELD_TO_LABELS`. For Pulp's advisory TSan lane that selector is `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-build-merge-group,pulp-build-pr-head`. The idle gate is admission-only, so ignoring PR-head demand could let TSan occupy the last free slot just before merge-group work arrives; yielding to both preserves strict queue capacity. Base gate labels alone match neither event-class-v2 job because each requests an additional class label, silently disabling the yield. `priority_demand()` lives in `providers/tart-macos/runner.sh`; preview with `serve macos --print-priority-demand`, and keep its behavioral regression in `tartci/scripts/test_idle_gate.py`. **Keep the secondary lane on the SAME `TART_HOME` as the gate** so `running_macos_vms` stays a true host-wide 2-guest semaphore — a *separate* store hides the secondary VM from the gate's count and lets total guests hit 3 → the 3rd `tart run` fails on Apple's host-wide cap (and duplicates the ~150GB golden). The same idle gate is how to re-enable coverage safely.
 
 - **A lease DENIAL is a capacity report — never answer it with a host-derived bound.** `tools/ci/governed-build.sh` wraps Shipyard's `local` mac backend (the one path that does NOT go through the `pulp` CLI, so the CLI's lease integration never sees it). It sizes a lease from `tartci host-profile`'s `PULP_BUILD_JOBS`; when that is refused, the only safe responses are a **smaller lease sized from `tartci leases status --json` → `capacity.non_gate_available_cores`**, or leaseless at a conservative floor (`PULP_GOVERNED_BUILD_MIN_JOBS`, default 2). It originally fell back to the **tier-0** bound, `min(cores, RAM_budget/1.5 GiB)` — which reads conservative but is not: on a big-RAM host the memory axis never binds and tier-0 degrades to the **full core count**, so a refusal was answered by running *wider* than the request that had just been denied. Observed on the 28-core/96 GB Studio while it served the required `macos` gate: profile asked 12, store reported **6** free (limit 12, a Tart VM holding 6), denial → **leaseless `-j28`**, host load 50 → 68 in ~90 s. Two shell traps make this easy to re-break under `set -euo pipefail`: a bare `[ a -lt b ] && x=…` whose test is *false* returns non-zero and **kills the script**, and `v="$(f)"` propagates `f`'s failure the same way — so any capacity probe must `return 0` and the comparisons must be full `if` blocks. The **binding limit is the non-gate pool, not `available_cores`** (12 was denied while `available_cores` was 20 and non-gate was 6). Behavior is pinned by `tools/ci/test_governed_build.py` (stub `tartci` on PATH; no compile, no lease store) — registered as the `governed-build-selftest` ctest, because for a long while nothing under `tools/ci/test_*.py` ran anywhere, which is how the unbounded fallback shipped in the first place.
 
@@ -323,7 +351,7 @@ main, reddening every PR's macOS gate.)
 
 - **A contended build now says so — read the failure record before blaming the diff.** Contention and breakage were indistinguishable, and the tempting reading is the wrong one: an installed-SDK consumer matrix timed out at **1200.82 s under load 163** and passed in **646 s on the same commit** once the host was quiet, while Shipyard's mac lane reported `Stage 'configure' failed` after **3382 s in configure** (normally minutes) on a commit whose GitHub `macos` check passed. On failure only, `governed-build.sh` now logs elapsed, core count, load average at start **and** at failure, the granted `-j`, the floor, and the lease id — then prints an explicit `VERDICT:` line when the build was pinned at the parallelism floor or load exceeded 1.5x cores. **The floor half is the one that bites:** parallelism is negotiated **once, at startup**, so a build that begins while the host is busy stays pinned at `-j2` for its entire life even after the host goes quiet — which is how a build that comfortably fits `timeout_secs` on an idle host blows straight through it. A stale lease producing a FALSE denial pins it the same way. When you see that VERDICT, re-run on a quiet host before editing anything; this signature has repeatedly gone green with no code change.
 
-- **Sanitizer VM lane — the first idle-gate consumer; localize TSan only.** `tools/launchd/pulp-tart-runner-sanitizer-macos.plist.template` (label `pulp-sanitizer-vm-macos`, workflow `Sanitizer Tests`, cap=1, shared `$HOME/VMs`, idle-gate env) serves the advisory sanitizer matrix. Pilot is **TSan only**: it is the longest leg (scoped `-j1` serial, ~45 min on `macos-14`), the highest-value for the threaded audio model, and single-core-bound so it gains most from a local M-series host. ASan stays on `macos-15` and UBSan stays on `macos-26` — the four run in parallel on GitHub but serialize (~4×) on one cap=1 lane, slower than hosted except during a backlog; full parallel local sanitizers need a 3rd host. `sanitizers.yml` carries `--deny-labels pulp-build,pulp-build-vm` on the 3 macOS sanitizers so one can never land on the gate pool. Flip `PULP_SANITIZER_TSAN_RUNS_ON_JSON` only after a `workflow_dispatch` proof on the lane, one sanitizer at a time behind a measured gate-latency + matrix-wall-clock go/no-go.
+- **Sanitizer VM lane — the first idle-gate consumer; localize TSan only.** `tools/launchd/pulp-tart-runner-sanitizer-macos.plist.template` (label `pulp-sanitizer-vm-macos`, workflow `Sanitizer Tests`, cap=1, shared `$HOME/VMs`, merge-group-aware idle-gate env) serves the advisory sanitizer matrix. M1 is no longer a dedicated advisory host: its two event-class-v2 gate slots make the yield keys mandatory there. Pilot is **TSan only**: it is the longest leg (scoped `-j1` serial, ~45 min on `macos-14`), the highest-value for the threaded audio model, and single-core-bound so it gains most from a local M-series host. ASan stays on `macos-15` and UBSan stays on `macos-26` — the four run in parallel on GitHub but serialize (~4×) on one cap=1 lane, slower than hosted except during a backlog; full parallel local sanitizers need a 3rd host. `sanitizers.yml` carries `--deny-labels pulp-build,pulp-build-vm` on the 3 macOS sanitizers so one can never land on the gate pool. Flip `PULP_SANITIZER_TSAN_RUNS_ON_JSON` only after a `workflow_dispatch` proof on the lane, one sanitizer at a time behind a measured gate-latency + matrix-wall-clock go/no-go.
 
 ## Store & hygiene
 **`TART_HOME` is declared by the host, never by the repo** — hosts with an external build SSD keep the store on a `/Volumes` mount, hosts on internal storage keep it under `$HOME`, and both are correct. Exclude it from Spotlight (`.metadata_never_index`). Tag goldens `:<date>` + roll `:latest`. Ephemeral job VMs are deleted after use; confirm cleanup (`tart delete` fails silently on a *running* VM — stop → delete → verify). Reclaim with `tart-provision.sh list` + prune.

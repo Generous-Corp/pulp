@@ -275,6 +275,22 @@ bool bind_imported_view(View& view,
                                    static_cast<int>(segmented->segments().size())});
         return true;
     }
+    if (auto* combo = dynamic_cast<ComboBox*>(&view);
+        combo && has_text(md.param_key)) {
+        if (auto* combo_ctx =
+                dynamic_cast<NativeImportComboBoxBindingContext*>(&ctx)) {
+            combo_ctx->bind_combo_box(
+                *combo,
+                NativeImportSegmentedBindingDescriptor{
+                    .route_id = text_or_empty(md.route_id),
+                    .param_key = text_or_empty(md.param_key),
+                    .binding_module = text_or_empty(md.binding_module),
+                    .binding_param = text_or_empty(md.binding_param),
+                    .segment_count = static_cast<int>(combo->items().size())});
+            return true;
+        }
+        return false;
+    }
     if (auto* pad = dynamic_cast<XYPad*>(&view);
         pad && has_text(md.x_param_key) && has_text(md.y_param_key)) {
         ctx.bind_xy_pad(*pad,
@@ -354,7 +370,9 @@ bool bind_imported_view(View& view,
     return false;
 }
 
-bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
+bool can_bind_imported_view(View& view,
+                            const NativeBindingMetadata& md,
+                            NativeImportBindingContext& ctx) {
     if (dynamic_cast<Knob*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<Fader*>(&view) && has_text(md.param_key))
@@ -363,6 +381,8 @@ bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
         return true;
     if (dynamic_cast<SegmentedControl*>(&view) && has_text(md.param_key))
         return true;
+    if (dynamic_cast<ComboBox*>(&view) && has_text(md.param_key))
+        return dynamic_cast<NativeImportComboBoxBindingContext*>(&ctx) != nullptr;
     if (dynamic_cast<Stepper*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
@@ -417,7 +437,7 @@ void bind_imported_node_by_anchor(View& root,
                         "' matched multiple materialized native views, so no binding callback was installed",
                     "stable_anchor_id");
             } else if (matches.first != nullptr) {
-                if (!can_bind_imported_view(*matches.first, md)) {
+                if (!can_bind_imported_view(*matches.first, md, ctx)) {
                     append_binding_diagnostic(
                         diagnostics,
                         node,
@@ -762,7 +782,14 @@ ResolvedNativeNode resolve_node(const IRNode& node,
                                 std::string_view path,
                                 const AssetIndex& assets) {
     ResolvedNativeNode out;
-    if (auto audio_kind = kind_from_audio(node.audio_widget)) {
+    // Browser capture carries both the live parameter role (audio_widget) and
+    // the authored presentation (type). A select is collapsed; a tab remains
+    // segmented. Respect the more specific presentation before the generic
+    // selector audio role can erase it.
+    if (node.audio_widget == AudioWidgetType::selector &&
+        lower_copy(node.type) == "select") {
+        out.kind = NativeWidgetKind::combo_box;
+    } else if (auto audio_kind = kind_from_audio(node.audio_widget)) {
         out.kind = *audio_kind;
     } else if (auto name_kind = kind_from_name(node)) {
         out.kind = *name_kind;
@@ -908,7 +935,7 @@ float normalized_audio_default_impl(const IRNode& node) {
     return std::clamp(node.audio_default, 0.0f, 1.0f);
 }
 
-float normalized_audio_value(const IRNode& node) {
+float normalized_audio_value_impl(const IRNode& node) {
     if (auto value = attr_float(node, "value")) return std::clamp(*value, 0.0f, 1.0f);
     return normalized_audio_default_impl(node);
 }
@@ -1387,6 +1414,14 @@ static std::optional<Color> parse_any_css_color(const std::string& value) {
         value == "transparent")
         return parse_css_color(value);
     return std::nullopt;
+}
+
+// Indicator provenance changes theme precedence, so a parser fallback must
+// never turn malformed authored text into an authoritative colour. Keep this
+// validation identical to the generated-JS/WidgetBridge path.
+static std::optional<Color> parse_indicator_css_color(const std::string& value) {
+    if (!css_color_syntax_supported(value)) return std::nullopt;
+    return parse_any_css_color(value);
 }
 
 void apply_visual_style(View& view, const IRStyle& style,
@@ -1941,7 +1976,17 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
     if (const auto hex = attr(node, "design_track"); hex && !hex->empty())
         skin.track = parse_css_color(*hex);
     if (const auto hex = attr(node, "design_indicator"); hex && !hex->empty())
-        skin.indicator = parse_css_color(*hex);
+        if (const auto parsed = parse_indicator_css_color(*hex))
+            skin.indicator = *parsed;
+    // Browser capture can isolate a fader's authored thumb even when the
+    // static thumb asset is pruned before persistence. Preserve that durable
+    // per-control color over the broader design token, just as
+    // `knob_ind_color` below preserves a captured knob pointer.
+    if (const auto hex = attr(node, "fader_ind_color"); hex && !hex->empty())
+        if (const auto parsed = parse_indicator_css_color(*hex)) {
+            skin.indicator = *parsed;
+            skin.indicator_authored = true;
+        }
 
     // Where the value ring rides.
     //
@@ -2026,7 +2071,10 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
         if (const auto w = attr_float(node, "knob_ind_w"); w && *w > 0.0f && box > 0.0f)
             skin.indicator_width = std::max(1.0f, *w * 0.5f * box);
         if (const auto hex = attr(node, "knob_ind_color"); hex && !hex->empty())
-            if (auto parsed = parse_any_css_color(*hex)) skin.indicator = *parsed;
+            if (auto parsed = parse_indicator_css_color(*hex)) {
+                skin.indicator = *parsed;
+                skin.indicator_authored = true;
+            }
     }
 
     apply_designed_control_skin(control, skin);
@@ -2059,21 +2107,51 @@ void apply_captured_art_knob_skin(
     if (cw > 0.0f && ch > 0.0f)
         knob.set_sprite_core(attr_float(node, "art_core_x").value_or(0.0f),
                              attr_float(node, "art_core_y").value_or(0.0f), cw, ch);
+}
+
+void apply_durable_knob_indicator(Knob& knob, const IRNode& node) {
     // Design's own pointer geometry (Figma "Vector 7"), captured by
     // hoist_captured_art_knobs as fractions of the disc half-extent. When
-    // present, Knob::paint draws THIS pointer over the static disc — pivoting at
-    // the disc core center on the value arc — instead of the synthetic notch, so
-    // it rides the disc's baked min/center/max reference ticks.
-    if (auto r_out = attr_float(node, "knob_ind_r_out")) {
-        const float r_in = attr_float(node, "knob_ind_r_in").value_or(0.0f);
-        const float w = attr_float(node, "knob_ind_w").value_or(0.0f);
+    // present, Knob::paint draws THIS pointer over either the captured static
+    // disc or its sprite-less procedural body. This metadata is durable and
+    // must not be gated on importer-scratch asset paths surviving persistence.
+    if (const auto r_out = attr_float(node, "knob_ind_r_out");
+        r_out && std::isfinite(*r_out) && *r_out > 0.0f) {
+        const auto finite_or = [&](std::string_view key, float fallback) {
+            const auto value = attr_float(node, key);
+            return value && std::isfinite(*value) ? *value : fallback;
+        };
+        const float r_in = finite_or("knob_ind_r_in", 0.0f);
+        const float w = finite_or("knob_ind_w", 0.0f);
         Color color = Color::rgba(0.92f, 0.92f, 0.92f, 1.0f);
+        bool color_authored = false;
+        if (auto hex = attr(node, "design_indicator"))
+            if (auto parsed = parse_indicator_css_color(*hex)) color = *parsed;
         if (auto hex = attr(node, "knob_ind_color"))
-            if (auto parsed = parse_any_css_color(*hex)) color = *parsed;
+            if (auto parsed = parse_indicator_css_color(*hex)) {
+                color = *parsed;
+                color_authored = true;
+            }
         knob.set_captured_indicator(
             r_in, *r_out, w, color,
-            attr_float(node, "knob_ind_phase_rad").value_or(0.0f));
+            finite_or("knob_ind_phase_rad", 0.0f),
+            color_authored);
     }
+}
+
+void apply_durable_fader_indicator(Fader& fader, const IRNode& node) {
+    // The panel-wide indicator is a fallback, not per-control authorship. Keep
+    // it on ordinary procedural faders too so native materialization matches
+    // the generated-JS path when no designed body or captured art survived.
+    if (const auto hex = attr(node, "design_indicator"); hex && !hex->empty())
+        if (const auto color = parse_indicator_css_color(*hex))
+            fader.set_skin_thumb_fallback_color(*color);
+
+    // The isolated thumb colour is durable control provenance and therefore
+    // replaces the fallback regardless of whether captured art survived.
+    if (const auto hex = attr(node, "fader_ind_color"); hex && !hex->empty())
+        if (const auto color = parse_indicator_css_color(*hex))
+            fader.set_skin_thumb_color(*color);
 }
 
 void apply_captured_art_fader_skin(
@@ -2209,7 +2287,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             // builds the identical control from the identical list.
             auto combo = std::make_unique<ComboBox>();
             combo->set_items(semantics.combo_items);
-            combo->set_selected_silent(0);
+            combo->set_selected_silent(semantics.combo_selected_index);
             return combo;
         }
         case NativeWidgetKind::checkbox: {
@@ -2301,6 +2379,9 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             // Captured-art skin (design's disc + native notch overlay): keeps the
             // knob design-faithful AND interactive. See hoist_captured_art_knobs.
             apply_captured_art_knob_skin(*knob, node, options);
+            // Pointer geometry/color outlives the optional sprite body and is
+            // therefore installed exactly once on every native knob path.
+            apply_durable_knob_indicator(*knob, node);
             apply_designed_body_skin(*knob, node);
             return knob;
         }
@@ -2342,11 +2423,12 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                     if (const auto color = parse_any_css_color(*hex))
                         fader->set_skin_fill_color(*color);
                 if (const auto hex = attr(node, "design_indicator"))
-                    if (const auto color = parse_any_css_color(*hex))
-                        fader->set_skin_thumb_color(*color);
+                    if (const auto color = parse_indicator_css_color(*hex))
+                        fader->set_skin_thumb_fallback_color(*color);
             } else {
                 apply_designed_body_skin(*fader, node);
             }
+            apply_durable_fader_indicator(*fader, node);
             return fader;
         }
         case NativeWidgetKind::meter: {
@@ -2562,6 +2644,10 @@ canvas::AttributedString attributed_text_for_node(const IRNode& node) {
 
 float normalized_audio_default(const IRNode& node) {
     return normalized_audio_default_impl(node);
+}
+
+float normalized_audio_value(const IRNode& node) {
+    return normalized_audio_value_impl(node);
 }
 
 // Exported (design_import_native_common.hpp). Defined in the named namespace so
@@ -2808,6 +2894,10 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
             out.text_value = out.text;
     }
 
+    out.normalized_value = normalized_audio_value_impl(node);
+    out.normalized_default = normalized_audio_default(node);
+    out.peak_value = attr_float(node, "peak").value_or(out.normalized_value);
+
     // `pulpChoices` is a pipe-separated list, because a segment label may
     // legitimately contain a comma ("1, 2 & 4") and a comma-separated list
     // would silently split it into two segments.
@@ -2825,12 +2915,19 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
     // binding descriptor's count.
     if (resolved.kind == NativeWidgetKind::segmented && out.segments.empty())
         out.segments.push_back(out.text.empty() ? std::string("1") : out.text);
-    // A dropdown's shown value is its only real option in a static design.
-    // Resolved here, in the shared model, so the runtime materializer and the
-    // baked C++ lane build the same ComboBox from the same list.
+    // A browser-authored dropdown carries the full declared choice table;
+    // static design-system dropdowns carry only their shown text. Resolve both
+    // here so runtime materialization and baked C++ build the same ComboBox.
     if (resolved.kind == NativeWidgetKind::combo_box) {
-        std::string selected = first_text_descendant(node).value_or(out.text);
-        if (!selected.empty()) out.combo_items.push_back(std::move(selected));
+        if (!out.segments.empty()) {
+            out.combo_items = out.segments;
+            out.combo_selected_index = selector_segment_index(
+                out.normalized_value,
+                static_cast<int>(out.combo_items.size()));
+        } else {
+            std::string selected = first_text_descendant(node).value_or(out.text);
+            if (!selected.empty()) out.combo_items.push_back(std::move(selected));
+        }
     }
     out.stepper_step = imported_stepper_step(node);
     out.checked = attr_bool(node, "checked");
@@ -2843,10 +2940,6 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
     out.toggle_off_border_color = non_empty(md.off_border_color);
     out.toggle_corner_radius = md.corner_radius_value();
     out.toggle_font_size = md.font_size_value();
-
-    out.normalized_value = normalized_audio_value(node);
-    out.normalized_default = normalized_audio_default(node);
-    out.peak_value = attr_float(node, "peak").value_or(out.normalized_value);
 
     if (resolved.kind == NativeWidgetKind::fader) {
         if (auto orientation = attr(node, "orientation");

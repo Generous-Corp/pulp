@@ -20,6 +20,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
     "pulp/midi/note_utility_kernels.hpp": "Pulp::midi",
     "pulp/midi/routing_utility_kernels.hpp": "Pulp::midi",
+    "pulp/midi/step_player.hpp": "Pulp::midi",
     "pulp/music/chord.hpp": "Pulp::music",
     "pulp/music/harmony.hpp": "Pulp::music",
     "pulp/music/markov.hpp": "Pulp::music",
@@ -422,7 +423,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "disposition": "capability_support",
         "capability_keys": [
             "midi.arpeggiator", "midi.channel-routing", "midi.controller-mapping",
-            "midi.keyboard-split", "midi.monophonic-note-selection",
+            "midi.keyboard-split", "midi.linear-step-player", "midi.monophonic-note-selection",
             "midi.note-length-shaping", "midi.note-range-filtering",
             "midi.scale-aware-mpe-pitch",
         ],

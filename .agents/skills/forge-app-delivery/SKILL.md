@@ -85,6 +85,25 @@ transport, persistence, and control-surface ladder. The durable win is one
 shared repair plus narrow product-specific proofs, not identical code or a
 single sibling's green build standing in for the rest.
 
+### A Modular-only release starts from Forge, not the historical seam base
+
+The supported Modular-only signed/notarized installer entry point is
+`examples/forge-modular/release-package.sh`. Its product binaries come from a
+clean detached current Forge checkout and its Release build; do not reconstruct
+them from `forge-seam/patches/BASE`, which records the historical patch seam and
+is not release source authority.
+
+The release driver deliberately passes exactly Forge Modular AU, VST3, CLAP,
+and Standalone to the shared `build_combined_installer.sh` primitive. It rejects
+different Forge source snapshots, Pulp SDK refs, toolchain stamps or toolchain
+content across those four bundles, requires the runtime-resolved Rack
+saved-patch decoder and checks both bundled helper architectures, then expands
+the finished PKG and refuses
+any FX, Instrument, MIDI, Sequencer, or other product bundle. Notarization is
+not optional on this path. Local packaging experiments that need an unsigned
+artifact continue to use the older development `package.sh`; they are not a
+release claim.
+
 ## Ship the runtime, not just the binary
 
 A Forge app runs a Python generator. If the installer carries the app and not the

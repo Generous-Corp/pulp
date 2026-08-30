@@ -273,7 +273,8 @@ void emit_widget_specific(std::ostringstream& out,
             emit_line(out, depth, opts.indent_spaces,
                       std::string(var) + "->set_items(std::vector<std::string>" + items + ");");
             emit_line(out, depth, opts.indent_spaces,
-                      std::string(var) + "->set_selected_silent(0);");
+                      std::string(var) + "->set_selected_silent(" +
+                          std::to_string(semantics.combo_selected_index) + ");");
             break;
         }
         case NativeWidgetKind::stepper:

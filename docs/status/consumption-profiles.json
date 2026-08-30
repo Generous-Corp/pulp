@@ -123,12 +123,12 @@
           {
             "exported_as": "Pulp::gpu-audio",
             "closure_node_count": 69,
-            "public_header_count": 29
+            "public_header_count": 28
           },
           {
             "exported_as": "Pulp::render",
             "closure_node_count": 55,
-            "public_header_count": 17
+            "public_header_count": 16
           },
           {
             "exported_as": "Pulp::canvas",
@@ -203,7 +203,7 @@
           {
             "exported_as": "Pulp::midi",
             "closure_node_count": 20,
-            "public_header_count": 42
+            "public_header_count": 43
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -1414,7 +1414,7 @@
             ]
           },
           "public_headers": {
-            "count": 29,
+            "count": 28,
             "roots": [
               "core/gpu_audio/include",
               "core/render/include"
@@ -3071,7 +3071,7 @@
             ]
           },
           "public_headers": {
-            "count": 42,
+            "count": 43,
             "roots": [
               "core/midi/include"
             ],
@@ -3538,7 +3538,7 @@
             ]
           },
           "public_headers": {
-            "count": 17,
+            "count": 16,
             "roots": [
               "core/render/include"
             ],
