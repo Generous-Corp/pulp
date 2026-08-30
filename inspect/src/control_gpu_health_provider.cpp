@@ -369,7 +369,7 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
     const auto submission_verdict =
         frame.gpu_submission_observed
             ? gh::Verdict::pass
-            : (!capture_unavailable && adapter.status == gh::IdentityStatus::authentic
+            : (!capture_unavailable && usable_adapter_identity
                    ? gh::Verdict::unverified
                    : gh::Verdict::unavailable);
     probe.events.push_back(

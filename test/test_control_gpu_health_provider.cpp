@@ -534,7 +534,8 @@ TEST_CASE("GPU health provider trusts native adapter type rather than backend la
 
     const auto classification_for = [](AdapterType type, std::string backend,
                                        std::string name, std::string vendor,
-                                       bool null_backend = false) {
+                                       bool null_backend = false,
+                                       bool gpu_submission_observed = true) {
         pulp::inspect::ControlGpuHealthProvider provider({.pulp_build_id = "test-build"});
         REQUIRE(provider.begin_editor_open(
             pulp::inspect::ControlGpuHealthProvider::CacheState::cold,
@@ -545,6 +546,7 @@ TEST_CASE("GPU health provider trusts native adapter type rather than backend la
         observed.adapter.backend = std::move(backend);
         observed.adapter.name = std::move(name);
         observed.adapter.vendor = std::move(vendor);
+        observed.gpu_submission_observed = gpu_submission_observed;
         REQUIRE(provider.record_presented_frame(observed));
         require_valid(provider);
         const auto snapshot = provider.snapshot();
@@ -563,10 +565,10 @@ TEST_CASE("GPU health provider trusts native adapter type rather than backend la
     // Dawn Null may report CPU as its adapter type. The backend enum is the
     // authoritative discriminator and the resulting probe must remain valid
     // without ever becoming a health pass.
-    const auto null_cpu =
-        classification_for(AdapterType::cpu, "Null", "Dawn Null Adapter", "Dawn", true);
+    const auto null_cpu = classification_for(AdapterType::cpu, "Null", "Dawn Null Adapter",
+                                              "Dawn", true, false);
     CHECK(null_cpu.first == gh::AdapterClass::null_adapter);
-    CHECK(null_cpu.second == gh::Verdict::unverified);
+    CHECK(null_cpu.second == gh::Verdict::unavailable);
     CHECK(classification_for(AdapterType::unknown, "Metal", "Apple GPU", "Apple").first ==
           gh::AdapterClass::unknown);
 }
