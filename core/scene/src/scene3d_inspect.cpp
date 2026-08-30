@@ -4,7 +4,7 @@
 
 #ifdef PULP_SCENE3D_INSPECT_NATIVE_DRACO
 #include <pulp/render/draco_decoder.hpp>
-#include <pulp/render/draco_scene_adapter.hpp>
+#include <pulp/scene/draco_scene_adapter.hpp>
 #endif
 
 #include <cstddef>
@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
     pulp::scene::LoadOptions options;
 #ifdef PULP_SCENE3D_INSPECT_NATIVE_DRACO
     if (native_draco) {
-        options.draco_decode = pulp::render::make_scene_draco_decode_callback();
+        options.draco_decode = pulp::scene::make_scene_draco_decode_callback();
         std::cout << "native_draco_decoder_available="
                   << (pulp::render::draco_decoder_available() ? "true" : "false")
                   << "\n";
