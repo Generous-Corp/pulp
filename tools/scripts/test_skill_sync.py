@@ -188,6 +188,22 @@ class RealSkillPathMapOwnershipTests(unittest.TestCase):
                 "repo path; update it to the path the file moved to.",
         )
 
+    def test_friction_report_skill_keeps_public_exposure_contract(self) -> None:
+        """The process contract must not silently regress to Shipyard-only fixes."""
+        text = (REPO_ROOT / ".agents/skills/friction-report/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "## Orchestrator independence",
+            "**Public exposure:** EXPOSED | NOT EXPOSED",
+            "**Public mechanism:**",
+            "**Public proof:**",
+            "optional defense-in-depth",
+            "friction_report_exposure_check.py",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+
     # ── Side 1: engine internals must NOT demand web-plugins ──────────
 
     def test_engine_internal_change_does_not_demand_web_plugins(self) -> None:
