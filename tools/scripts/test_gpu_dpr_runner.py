@@ -67,16 +67,25 @@ def fixture_png(width: int, height: int, *, flat: bool = False) -> bytes:
         (226, 106, 156, 255), (102, 146, 245, 255), (238, 127, 78, 255),
         (168, 211, 68, 255), (179, 130, 226, 255),
     )
-    rows = bytearray()
-    for y in range(height):
-        rows.append(0)
-        if flat:
-            rows.extend(bytes(palette[0]) * width)
-        else:
-            rows.extend(b"".join(
-                bytes(palette[((x // 4) + (y // 4)) % len(palette)])
-                for x in range(width)
-            ))
+    palette_bytes = tuple(bytes(colour) for colour in palette)
+    if flat:
+        scanlines = (b"\0" + palette_bytes[0] * width) * height
+    else:
+        # Build the same four-pixel tiled pattern a row at a time. The former
+        # per-pixel generator is pathologically slow under CPython 3.14 and can
+        # exhaust the outer CTest hang guard even though this is fixture setup.
+        tile_cycle = b"".join(colour * 4 for colour in palette_bytes)
+        row_bytes = width * 4
+        repetitions = (row_bytes + len(tile_cycle) - 1) // len(tile_cycle) + 1
+        rows_by_phase = tuple(
+            ((tile_cycle[phase * 16:] + tile_cycle[:phase * 16]) * repetitions)
+            [:row_bytes]
+            for phase in range(len(palette_bytes))
+        )
+        scanlines = b"".join(
+            b"\0" + rows_by_phase[(y // 4) % len(rows_by_phase)]
+            for y in range(height)
+        )
 
     def chunk(kind: bytes, payload: bytes) -> bytes:
         return (
@@ -87,7 +96,7 @@ def fixture_png(width: int, height: int, *, flat: bool = False) -> bytes:
     png = (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
+        + chunk(b"IDAT", zlib.compress(scanlines, 9))
         + chunk(b"IEND", b"")
     )
     PNG_CACHE[key] = png
