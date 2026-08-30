@@ -83,6 +83,9 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             "tools/deps/test_validate_render_update.py",
             "tools/deps/validate_hosts.py",
             "tools/deps/test_validate_hosts.py",
+            "tools/ci/pulp-worktree.sh",
+            "tools/ci/test_pulp_worktree_cache_env.py",
+            "tools/ci/test_pulp_worktree_gc.py",
         ):
             self.assertGreaterEqual(path_patterns.count(path), 2, path)
 
@@ -206,6 +209,14 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         )
         self.assertIn(
             "python3 tools/scripts/test_preamble_python_stable_cwd.py",
+            step,
+        )
+        self.assertIn(
+            "python3 tools/ci/test_pulp_worktree_cache_env.py",
+            step,
+        )
+        self.assertIn(
+            "python3 tools/ci/test_pulp_worktree_gc.py",
             step,
         )
 
