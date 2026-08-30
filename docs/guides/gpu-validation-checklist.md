@@ -38,13 +38,18 @@ to inspect bundle discovery and ABI details. If it reports a completed failure,
 preserve the JSON result and reproduce with the focused render/compute tests
 before moving to a live application.
 
-## DPR experiment evidence (A4 foundation)
+## DPR experiment evidence (A4 v2)
 
-The committed A4 corpus defines a reproducible matrix; it does not change
-Pulp's scale policy. Validate and expand it before scheduling hardware work:
+The committed A4 corpus defines an evidence-only experiment; it does not change
+Pulp's scale policy. The canonical result is deliberately `inconclusive` with
+zero v2 cells until the protected A3 product policy supplies every scenario's
+frame budget, timer-noise bound, memory-sampler resolution, and required M5
+coverage. Validate that truthful boundary before scheduling hardware work:
 
 ```bash
 python3 tools/scripts/gpu_dpr_experiment.py validate-manifest
+python3 tools/scripts/gpu_dpr_experiment.py validate-result \
+  docs/validation/gpu-dpr/terminal-result.json
 python3 tools/scripts/gpu_dpr_experiment.py emit-plan \
   --experiment-id "a4-YYYYMMDD-NNN" \
   --plan-revision "$PULP_DPR_PLAN_REVISION" \
@@ -55,25 +60,29 @@ python3 tools/scripts/gpu_dpr_experiment.py emit-plan \
 Export `PULP_DPR_PLAN_REVISION` and `PULP_DPR_FORGE_SHA` as the exact 40-hex
 commits under test first; placeholder or branch names are rejected.
 
-The plan covers DPR 1, 1.5, 2, and 3 in exact, configured-max, and explicitly
-nonshipping adaptive modes. A complete measured result must cover every matrix
-cell, bind the Pulp and Forge revisions and artifacts, preserve identical
-logical content and input coordinates, and include the required frame, memory,
-fidelity, and interaction observations. Dense text must have a legibility
-oracle; a content-floor pass alone is insufficient.
+The v2 plan covers exactly 84 original and 84 same-machine repeat cells: seven
+scenarios, DPR 1/1.5/2/3, and exact/configured-max/nonshipping-adaptive modes.
+Every cell has five reset warm-ups, 30 aligned measured triplets of at least 240
+frames, and 20 reset fresh-process first-nonblank trials. Mode order and all
+bootstrap seeds use canonical UTF-8 length-prefixed fields and SHA-256
+counter-mode; candidate intervals use exactly 10,000 aligned-trial percentile
+resamples. The Forge DAW aggregate additionally requires AUv2 in Logic plus VST3
+and CLAP in REAPER for every cell. Metrics remain independently retained; the
+three subreceipts must agree on terminal verdict, gates, and bound identity.
 
-A2T named Perfetto-question coverage and an A3 budget receipt are hard
-prerequisites for a complete result. Missing trace categories, absent Forge or
-web canaries, changed logical input, an unavailable small-text oracle, SKIP, or
-INCONCLUSIVE leaves the experiment incomplete. Planned or synthetic evidence
-may test automation but cannot justify `configured-max-candidate` or
-`adaptive-candidate`. Those dispositions identify later Vellum policy work;
-they do not authorize a Pulp render-policy change.
+A2T Perfetto coverage and the protected A3 policy/campaign are hard
+prerequisites. Missing categories, a missing/changed pair or repeat, substituted
+host/provider/format, stale dimensions, unavailable metric, exact-baseline or
+fidelity failure, SKIP, or INCONCLUSIVE leaves v2 inconclusive. Historical v1
+receipts are retained only as `historical-v1-nonterminal`; they count as zero v2
+cells and cannot select B5.
 
-### Execute and resume the matrix
+### Execute and resume the matrix after A3 authority
 
-Initialize a durable run journal, then supply only the scenario adapters that
-exist on the machine. Each adapter is an absolute executable path and receives
+Do not initialize collection while `v2_protocol.status` is
+`blocked-product-policy`. After the protected authority updates the manifest,
+initialize a durable run journal and supply the exact scenario adapters. Each
+adapter is an absolute executable path and receives
 `--request <json> --receipt <json>`; it must preserve its raw samples, capture,
 Perfetto trace, input receipt, machine identity, and graphics-adapter identity
 inside the requested cell directory.
@@ -89,7 +98,9 @@ python3 tools/scripts/gpu_dpr_runner.py status \
   --run-dir /tmp/pulp-dpr-run --json
 ```
 
-Re-running `run` resumes incomplete cells. Missing adapters, adapter timeouts,
+The existing runner/adapter protocol is historical v1 collection machinery and
+remains useful only as nonterminal migration input until each producer emits the
+v2 triplet/repeat contract. Re-running `run` resumes incomplete v1 cells. Missing adapters, adapter timeouts,
 SKIP, INCONCLUSIVE, rejected evidence, or failed exit/receipt agreement are
 durable incomplete attempts, never measurements. Existing Pulp screenshot,
 Three.js, Forge-native, real-DAW, browser, logical-input, and A2T tools may be
@@ -153,10 +164,22 @@ fidelity, logical-input, artifact-hash, identity, trace-category, and raw-sample
 checks. Every closed trace question must return exactly the cell's issued
 32-hex attempt nonce as its sole GPU evidence ID; IDs from another cell or a
 capture containing ambiguous cohorts fail closed rather than being unioned.
-`finalize` requires all 84 cells plus exact A2T and A3 receipts. A
-`no-change` disposition cancels B5; either candidate leaves B5
-`waiting-trigger` on `B0-adopted-vellum-api-refresh`. Neither result authorizes
-a Pulp policy change.
+For v2, `finalize-v2 --draft ...` accepts no disposition argument. It recomputes
+all candidate-vs-exact and adaptive-vs-configured intervals, regression gates,
+same-unit repeat tolerances, class support, and the simplest-policy tie-break.
+A candidate needs repeated material affected DPR-3 evidence in Pulp-native,
+Forge-native/DAW, and web classes. `no-change` cancels B5; either candidate
+leaves B5 `waiting-trigger` on `B0-adopted-vellum-api-refresh`. Every B5 receipt
+keeps `authorizes_policy_change=false`.
+
+A complete measurement JSON is still only a publication candidate. Its schema
+forces `protected_main_verified=false` and `required_checks_green=false`; callers
+cannot self-attest them. `validate-result` derives terminal publication from a
+clean checkout whose exact HEAD is fresh live protected Pulp `main`, unions
+classic branch-protection and repository-ruleset required checks (including app
+IDs), exhausts bounded pagination, and requires the unique latest matching
+result to be successful. An open PR, wrong-app same-name check, truncated API
+response, local commit, or caller-written `true` remains nonterminal.
 
 ## Verified (Real Hardware)
 

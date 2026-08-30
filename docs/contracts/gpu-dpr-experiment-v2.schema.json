@@ -209,12 +209,12 @@
       "type": "object", "additionalProperties": false,
       "required": ["status", "repository", "revision", "path", "protected_main_verified", "required_checks_green"],
       "properties": {
-        "status": {"enum": ["nonterminal", "verified-protected-main"]},
+        "status": {"enum": ["nonterminal", "candidate-awaiting-live-proof"]},
         "repository": {"const": "Generous-Corp/pulp"},
         "revision": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
         "path": {"const": "docs/validation/gpu-dpr/terminal-result.json"},
-        "protected_main_verified": {"type": "boolean"},
-        "required_checks_green": {"type": "boolean"}
+        "protected_main_verified": {"const": false},
+        "required_checks_green": {"const": false}
       }
     },
     "b5Gate": {

@@ -166,6 +166,7 @@ class ProductMatrix:
     threejs_runtime_floor: str
     gpu_health_read_contract_floor: str
     gpu_dpr_experiment_contract_floor: str
+    gpu_dpr_experiment_v2_contract_floor: str
     gpu_trace_human_review_contract_floor: str
     platforms: tuple[str, ...]
     # The subset of `platforms` a release currently BUILDS and PUBLISHES.
@@ -248,6 +249,9 @@ class ProductMatrix:
                 ),
                 gpu_dpr_experiment_contract_floor=str(
                     doc.get("gpu_dpr_experiment_contract_floor", "999999.0.0")
+                ),
+                gpu_dpr_experiment_v2_contract_floor=str(
+                    doc.get("gpu_dpr_experiment_v2_contract_floor", "999999.0.0")
                 ),
                 gpu_trace_human_review_contract_floor=str(
                     doc.get(
@@ -664,6 +668,14 @@ def required_sdk_members(
     ):
         required.add(
             "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v1.schema.json"
+        )
+    if (
+        version is not None
+        and version_tuple(version)
+        >= version_tuple(matrix.gpu_dpr_experiment_v2_contract_floor)
+    ):
+        required.add(
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v2.schema.json"
         )
     if (
         version is not None

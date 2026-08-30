@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
@@ -288,10 +289,10 @@ def complete_v2_fixture(manifest: dict[str, Any]) -> tuple[dict[str, Any], dict[
         "cells": cells, "repeat_cells": repeats,
         "analysis": {},
         "publication": {
-            "status": "verified-protected-main", "repository": "Generous-Corp/pulp",
-            "revision": SHA_B,
+            "status": "candidate-awaiting-live-proof", "repository": "Generous-Corp/pulp",
+            "revision": None,
             "path": "docs/validation/gpu-dpr/terminal-result.json",
-            "protected_main_verified": True, "required_checks_green": True,
+            "protected_main_verified": False, "required_checks_green": False,
         },
         "b5_gate": {
             "status": "waiting-trigger", "requires": ["B0-adopted-vellum-api-refresh"],
@@ -459,6 +460,51 @@ def main() -> int:
     if semantic_errors:
         raise AssertionError(f"valid v2 fixture failed semantics: {semantic_errors[:3]}")
     assert v2["analysis"]["disposition"] == "adaptive-candidate"
+    with mock.patch.object(contract, "live_protected_main_errors", return_value=[]):
+        assert not contract.v2_semantic_errors(
+            v2, authorized, authorized_digest, verify_live_publication=True
+        )
+    with mock.patch.object(
+        contract, "live_protected_main_errors",
+        return_value=["checkout HEAD is not exact live protected main"],
+    ):
+        assert contract.v2_semantic_errors(
+            v2, authorized, authorized_digest, verify_live_publication=True
+        )
+    rules_only = [{
+        "type": "required_status_checks",
+        "parameters": {"required_status_checks": [{
+            "context": "macos", "integration_id": 42,
+        }]},
+    }]
+    required = contract.required_check_identities({}, rules_only)
+    assert required == {("macos", 42)}
+    good_run = {
+        "id": 1, "name": "macos", "app": {"id": 42},
+        "status": "completed", "conclusion": "success",
+        "completed_at": "2026-08-30T00:00:00Z",
+    }
+    assert not contract.required_check_result_errors(required, [good_run], [])
+    wrong_app = copy.deepcopy(good_run)
+    wrong_app["app"]["id"] = 43
+    assert contract.required_check_result_errors(required, [wrong_app], [])
+    ambiguous = [copy.deepcopy(good_run), copy.deepcopy(good_run)]
+    ambiguous[1]["id"] = 2
+    assert contract.required_check_result_errors(required, ambiguous, [])
+    with mock.patch.object(
+        contract, "_command_json", return_value={
+            "total_count": 101, "check_runs": [good_run] * 100,
+        },
+    ):
+        try:
+            contract._fetch_all_pages(
+                "/fake/ghapp", "repos/Generous-Corp/pulp/commits/deadbeef/check-runs",
+                object_key="check_runs", max_pages=1,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("truncated required-check pagination was accepted")
 
     v2_mutations: list[tuple[str, Any]] = []
     missing = copy.deepcopy(v2)
@@ -513,6 +559,10 @@ def main() -> int:
     executor_disposition = copy.deepcopy(v2)
     executor_disposition["analysis"]["disposition"] = "configured-max-candidate"
     v2_mutations.append(("executor-selected disposition", executor_disposition))
+    caller_attested = copy.deepcopy(v2)
+    caller_attested["publication"]["protected_main_verified"] = True
+    caller_attested["publication"]["required_checks_green"] = True
+    v2_mutations.append(("caller self-attested protected main", caller_attested))
     for label, mutated in v2_mutations:
         schema_failure = json_schema_lite.validate(mutated, v2_schema)
         semantic_failure = contract.v2_semantic_errors(

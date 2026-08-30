@@ -213,10 +213,13 @@ way and say plainly that this rung is unproven.
   believing any verdict. Until the key names are fixed, use `--format au`.
 - **SKIP is never PASS.** Exit codes: 0 PASS / 1 FAIL / 2 SKIP (REAPER absent) /
   3 INCONCLUSIVE. A gate must treat SKIP/INCONCLUSIVE as not-passed.
-- **A4 DPR evidence requires a real, format-qualified editor pass.** Bind the
-  result to the exact plugin binary and DPR matrix cell. SKIP/INCONCLUSIVE,
+- **A4 DPR v2 evidence requires all three format-qualified editor passes for
+  every Forge DAW cell:** AUv2 in Logic, plus VST3 and CLAP in REAPER. Bind each
+  subreceipt to the exact A3 lifecycle, plugin binary, host, and aggregate DPR
+  matrix cell. All three must agree on terminal verdict, gates, and identity;
+  their metrics remain independently retained. SKIP/INCONCLUSIVE,
   absence from the portable scan cache, or a different format being inserted
-  leaves that cell incomplete. Keep the file-handshake rule above; DPR evidence
+  leaves the aggregate cell incomplete. Keep the file-handshake rule above; DPR evidence
   does not authorize screen-driving.
   Drive or ingest that cell through `tools/scripts/gpu_dpr_runner.py`; the DAW
   adapter must emit the exact format, binary, scan-cache, raw-sample, artifact,

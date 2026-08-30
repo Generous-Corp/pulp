@@ -496,8 +496,10 @@ suspecting the adapter.
 ## DPR experiment traces reuse A2T
 
 A4 DPR trials do not introduce a second profiler or a new ad-hoc SQL report.
-They must answer the named A2T Perfetto questions and carry the A3 budget
-receipt referenced by `docs/contracts/gpu-dpr-experiment-v1.schema.json`.
+They must answer the named A2T Perfetto questions and carry the protected A3
+policy/campaign identity required by
+`docs/contracts/gpu-dpr-experiment-v2.schema.json`. V1 receipts are historical
+nonterminal input and count as zero v2 cells.
 Validate required categories from the DPR manifest before interpreting a run.
 Missing categories, unavailable real GPU timing where the question requires it,
 or a trace that cannot be bound to the trial artifact leaves the cell
@@ -514,12 +516,15 @@ probe failure diagnostics `cpu_oracle_mismatch` and
 `magnitude_dispatch_failed` as causal failures even if adapter health was
 reported healthy.
 
-The native DPR producer emits the 30 steady samples in the same process as the
-correlated trace. Its 20 first-frame values are different: each comes from a
+Each v2 mode emits 30 aligned trials of at least 240 frames in the same process
+as the correlated trace, plus five independently reset warm-ups. Its 20
+first-frame values are different: each comes from a
 fresh child process and has a typed ledger row binding attempt nonce/number,
 unique PID, producer/content/build digests, exact adapter identity, and the
 sample. The adapter and runner revalidate that ledger; a reused PID or mixed
 identity is incomplete evidence, even when the aggregate sample count is 20.
+Repeat the complete 84-cell matrix on the same frozen machine/provider/build;
+an isolated attractive trace cannot replace the same-unit repeat formulas.
 
 Trace timing does not bypass instrument validity. The raw metric must say
 whether it is measured, derived, or unavailable, and GPU timer evidence must

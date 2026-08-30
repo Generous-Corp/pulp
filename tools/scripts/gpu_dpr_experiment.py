@@ -9,6 +9,7 @@ import hashlib
 import itertools
 import json
 import math
+import shutil
 import statistics
 import subprocess
 import sys
@@ -475,10 +476,11 @@ def _comparison(
         "adaptive-vs-configured" if label == "adaptive-vs-configured"
         else "candidate-vs-exact"
     )
-    seed = seed_sha256(
-        manifest_sha256, scenario_id, dpr_token(requested_dpr),
-        label if label != "adaptive-vs-configured" else "", seed_label,
-    )
+    seed_parts = [manifest_sha256, scenario_id, dpr_token(requested_dpr)]
+    if label != "adaptive-vs-configured":
+        seed_parts.append(label)
+    seed_parts.append(seed_label)
+    seed = seed_sha256(*seed_parts)
     exact_gpu = [float(item["gpu_p95_ns"]) for item in baseline["measured_trials"]]
     candidate_gpu = [float(item["gpu_p95_ns"]) for item in candidate["measured_trials"]]
     point, low, high = paired_percentile_bootstrap(exact_gpu, candidate_gpu, seed)
@@ -667,6 +669,7 @@ def v2_semantic_errors(
         errors.append("v2 status must be inconclusive or complete")
         return errors
     authority = result.get("authority", {})
+    product_policy = manifest.get("v2_protocol", {}).get("product_policy")
     if (
         result.get("evidence_kind") != "measured"
         or manifest.get("v2_protocol", {}).get("status") != "authorized"
@@ -677,6 +680,16 @@ def v2_semantic_errors(
         ))
     ):
         errors.append("complete v2 result lacks ratified collection authority")
+    if isinstance(product_policy, dict) and (
+        authority.get("product_policy_id") != product_policy.get("id")
+        or authority.get("product_policy_blob") != product_policy.get("blob")
+        or authority.get("a3_receipt_sha256") != product_policy.get("a3_receipt_sha256")
+        or authority.get("timer_noise_p95_ns")
+        != manifest["trial_contract"].get("timer_noise_p95_ns")
+        or authority.get("memory_sampler_resolution_bytes")
+        != manifest["trial_contract"].get("memory_sampler_resolution_bytes")
+    ):
+        errors.append("v2 result authority differs from the manifest-bound A3 policy")
     expected = expected_matrix(manifest)
     if {v2_cell_key(cell) for cell in cells} != expected:
         errors.append("complete v2 result does not contain exactly 84 original cells")
@@ -689,26 +702,190 @@ def v2_semantic_errors(
         if analysis != derived:
             errors.append("v2 analysis/disposition differs from deterministic recomputation")
     if (
-        publication.get("status") != "verified-protected-main"
-        or publication.get("protected_main_verified") is not True
-        or publication.get("required_checks_green") is not True
+        publication.get("status") != "candidate-awaiting-live-proof"
+        or publication.get("revision") is not None
+        or publication.get("protected_main_verified") is not False
+        or publication.get("required_checks_green") is not False
         or gate.get("authorizes_policy_change") is not False
     ):
-        errors.append("complete v2 result lacks protected-main publication evidence")
+        errors.append("complete v2 result must remain a non-self-attested publication candidate")
     expected_gate = (
         "cancelled-no-change" if analysis.get("disposition") == "no-change"
         else "waiting-trigger"
     )
     if gate.get("status") != expected_gate:
         errors.append("v2 B5 gate differs from the deterministic disposition")
-    if verify_live_publication and publication.get("revision"):
-        revision = publication["revision"]
-        check = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", revision, "origin/main"],
-            cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    expected_requires = [] if expected_gate == "cancelled-no-change" else [
+        "B0-adopted-vellum-api-refresh"
+    ]
+    if gate.get("requires") != expected_requires:
+        errors.append("v2 B5 dependencies differ from the deterministic disposition")
+    if verify_live_publication:
+        errors.extend(live_protected_main_errors())
+    return errors
+
+
+def _command_json(command: list[str]) -> Any:
+    completed = subprocess.run(
+        command, cwd=ROOT, check=True, capture_output=True, text=True,
+        timeout=30,
+    )
+    return json.loads(completed.stdout)
+
+
+def _optional_classic_protection(ghapp: str) -> dict[str, Any]:
+    completed = subprocess.run(
+        [ghapp, "api", "repos/Generous-Corp/pulp/branches/main/protection/required_status_checks"],
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
+    )
+    if completed.returncode == 0:
+        value = json.loads(completed.stdout)
+        return value if isinstance(value, dict) else {}
+    if "404" in completed.stderr:
+        return {}
+    raise subprocess.CalledProcessError(
+        completed.returncode, completed.args, completed.stdout, completed.stderr
+    )
+
+
+def _fetch_all_pages(
+    ghapp: str, endpoint: str, *, object_key: str | None = None,
+    max_pages: int = 20,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    expected_total: int | None = None
+    separator = "&" if "?" in endpoint else "?"
+    for page in range(1, max_pages + 1):
+        value = _command_json([
+            ghapp, "api", f"{endpoint}{separator}per_page=100&page={page}",
+        ])
+        if object_key is not None:
+            if not isinstance(value, dict) or not isinstance(value.get(object_key), list):
+                raise ValueError(f"paginated {object_key} response is malformed")
+            if isinstance(value.get("total_count"), int):
+                expected_total = value["total_count"]
+            page_rows = value[object_key]
+        else:
+            if not isinstance(value, list):
+                raise ValueError("paginated response is not an array")
+            page_rows = value
+        if any(not isinstance(item, dict) for item in page_rows):
+            raise ValueError("paginated response contains a non-object")
+        rows.extend(page_rows)
+        if len(page_rows) < 100:
+            if expected_total is not None and len(rows) != expected_total:
+                raise ValueError("paginated response count differs from total_count")
+            return rows
+    raise ValueError(f"paginated response exceeds the {max_pages * 100}-row bound")
+
+
+def required_check_identities(
+    classic: dict[str, Any], rules: list[dict[str, Any]],
+) -> set[tuple[str, int | None]]:
+    required: set[tuple[str, int | None]] = set()
+    for context in classic.get("contexts", []):
+        if isinstance(context, str) and context:
+            required.add((context, None))
+    for check in classic.get("checks", []):
+        if isinstance(check, dict) and isinstance(check.get("context"), str):
+            app_id = check.get("app_id")
+            required.add((check["context"], app_id if isinstance(app_id, int) else None))
+    for rule in rules:
+        if rule.get("type") != "required_status_checks":
+            continue
+        parameters = rule.get("parameters", {})
+        for check in parameters.get("required_status_checks", []):
+            if not isinstance(check, dict) or not isinstance(check.get("context"), str):
+                continue
+            integration_id = check.get("integration_id")
+            required.add((
+                check["context"], integration_id if isinstance(integration_id, int) else None,
+            ))
+    return required
+
+
+def required_check_result_errors(
+    required: set[tuple[str, int | None]], check_runs: list[dict[str, Any]],
+    statuses: list[dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    for context, integration_id in sorted(required, key=lambda item: (item[0], item[1] or -1)):
+        candidates: list[tuple[str, int, bool]] = []
+        for run in check_runs:
+            app = run.get("app")
+            app_id = app.get("id") if isinstance(app, dict) else None
+            if run.get("name") != context or (
+                integration_id is not None and app_id != integration_id
+            ):
+                continue
+            timestamp = run.get("completed_at") or run.get("started_at") or ""
+            candidates.append((
+                str(timestamp), int(run.get("id", 0)),
+                run.get("status") == "completed" and run.get("conclusion") == "success",
+            ))
+        if integration_id is None:
+            for status in statuses:
+                if status.get("context") != context:
+                    continue
+                timestamp = status.get("updated_at") or status.get("created_at") or ""
+                candidates.append((
+                    str(timestamp), int(status.get("id", 0)), status.get("state") == "success",
+                ))
+        if not candidates:
+            suffix = f" app={integration_id}" if integration_id is not None else ""
+            errors.append(f"required check is missing: {context}{suffix}")
+            continue
+        latest_timestamp = max(item[0] for item in candidates)
+        latest = [item for item in candidates if item[0] == latest_timestamp]
+        if len(latest) != 1:
+            errors.append(f"required check has ambiguous latest results: {context}")
+        elif latest[0][2] is not True:
+            errors.append(f"latest required check is not successful: {context}")
+    return errors
+
+
+def live_protected_main_errors() -> list[str]:
+    """Derive terminal publication from fresh GitHub state, never result fields."""
+    errors: list[str] = []
+    ghapp = shutil.which("ghapp")
+    if ghapp is None:
+        return ["live protected-main proof requires ghapp"]
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=ROOT, check=True,
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+        if dirty:
+            errors.append("terminal validation requires a clean checkout")
+        branch = _command_json([
+            ghapp, "api", "repos/Generous-Corp/pulp/branches/main",
+        ])
+        live_main = branch.get("commit", {}).get("sha")
+        if live_main != head:
+            errors.append("checkout HEAD is not exact live protected main")
+        if branch.get("protected") is not True:
+            errors.append("live main is not protected")
+        classic = _optional_classic_protection(ghapp)
+        rules = _fetch_all_pages(
+            ghapp, "repos/Generous-Corp/pulp/rules/branches/main"
         )
-        if check.returncode != 0:
-            errors.append("publication revision is not on refreshed origin/main")
+        required = required_check_identities(classic, rules)
+        if not required:
+            errors.append("protected main exposes no required status checks")
+        runs = _fetch_all_pages(
+            ghapp, f"repos/Generous-Corp/pulp/commits/{head}/check-runs",
+            object_key="check_runs",
+        )
+        statuses = _fetch_all_pages(
+            ghapp, f"repos/Generous-Corp/pulp/commits/{head}/statuses"
+        )
+        errors.extend(required_check_result_errors(required, runs, statuses))
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError, ValueError) as error:
+        errors.append(f"live protected-main proof failed: {error}")
     return errors
 
 
