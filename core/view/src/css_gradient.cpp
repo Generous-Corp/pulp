@@ -17,6 +17,149 @@
 // now delegates here.
 namespace pulp::view {
 
+bool css_color_syntax_supported(std::string_view token) {
+    if (token.empty()) return false;
+    if (token == "transparent") return true;
+    if (token.front() == '#') {
+        if (token.size() != 4 && token.size() != 7 && token.size() != 9)
+            return false;
+        return std::all_of(token.begin() + 1, token.end(), [](unsigned char c) {
+            return std::isxdigit(c) != 0;
+        });
+    }
+    static constexpr std::string_view kFunctionalForms[] = {
+        "rgb(", "rgba(", "hsl(", "hsla(", "oklab(", "oklch("};
+    const auto form = std::find_if(
+        std::begin(kFunctionalForms), std::end(kFunctionalForms),
+        [&](std::string_view candidate) {
+            return token.substr(0, candidate.size()) == candidate;
+        });
+    if (form == std::end(kFunctionalForms) || token.back() != ')')
+        return false;
+
+    std::string inner(token.substr(form->size(), token.size() - form->size() - 1));
+    for (std::size_t i = 0; i < inner.size(); ++i) {
+        if (inner[i] == ',' || inner[i] == '/') {
+            inner.insert(i, 1, ' ');
+            inner.insert(i + 2, 1, ' ');
+            i += 2;
+        }
+    }
+
+    std::vector<std::string> components;
+    int comma_count = 0;
+    int slash_count = 0;
+    std::size_t slash_at = std::string::npos;
+    bool delimiter_needs_component = false;
+    std::istringstream stream(inner);
+    std::string part;
+    while (stream >> part) {
+        if (part == "," || part == "/") {
+            if (components.empty() || delimiter_needs_component) return false;
+            delimiter_needs_component = true;
+            if (part == ",") {
+                ++comma_count;
+            } else {
+                ++slash_count;
+                slash_at = components.size();
+            }
+            continue;
+        }
+        components.push_back(part);
+        delimiter_needs_component = false;
+    }
+    if (delimiter_needs_component || slash_count > 1 ||
+        (comma_count > 0 && slash_count > 0))
+        return false;
+
+    // Comma syntax needs a delimiter between every component. Space syntax
+    // carries alpha only after `/`; a bare fourth component is not CSS.
+    if (comma_count > 0) {
+        if (comma_count != static_cast<int>(components.size()) - 1)
+            return false;
+    } else if (slash_count == 1) {
+        if (slash_at != 3 || components.size() != 4) return false;
+    } else if (components.size() != 3) {
+        return false;
+    }
+
+    struct Component {
+        bool valid = false;
+        bool percent = false;
+        bool degrees = false;
+        bool none = false;
+    };
+    const auto classify = [](std::string component) {
+        Component result;
+        if (component == "none") {
+            result.valid = true;
+            result.none = true;
+            return result;
+        }
+        if (!component.empty() && component.back() == '%') {
+            result.percent = true;
+            component.pop_back();
+        } else if (component.size() > 3 &&
+                   component.compare(component.size() - 3, 3, "deg") == 0) {
+            result.degrees = true;
+            component.erase(component.size() - 3);
+        }
+        try {
+            std::size_t consumed = 0;
+            const float value = std::stof(component, &consumed);
+            result.valid = consumed == component.size() && std::isfinite(value);
+        } catch (...) {
+            result.valid = false;
+        }
+        return result;
+    };
+
+    std::vector<Component> parsed;
+    parsed.reserve(components.size());
+    for (const auto& component : components) {
+        parsed.push_back(classify(component));
+        if (!parsed.back().valid) return false;
+    }
+
+    const bool is_rgb = *form == "rgb(" || *form == "rgba(";
+    const bool is_hsl = *form == "hsl(" || *form == "hsla(";
+    const bool is_oklab = *form == "oklab(";
+    const bool is_oklch = *form == "oklch(";
+    const bool legacy_alpha = comma_count > 0 && components.size() == 4;
+    if (legacy_alpha && *form != "rgba(" && *form != "hsla(") return false;
+    if (comma_count > 0 && components.size() != 3 && !legacy_alpha)
+        return false;
+
+    const std::size_t color_components = slash_count == 1 ? slash_at
+                                                           : (legacy_alpha ? 3 : components.size());
+    if (color_components != 3) return false;
+    const bool has_alpha = slash_count == 1 || legacy_alpha;
+    const auto alpha = has_alpha ? parsed[3] : Component{};
+    if (has_alpha && (alpha.degrees || (alpha.none && !is_oklab && !is_oklch)))
+        return false;
+
+    if (is_rgb) {
+        for (std::size_t i = 0; i < 3; ++i)
+            if (parsed[i].degrees || parsed[i].none) return false;
+        return true;
+    }
+    if (is_hsl) {
+        return !parsed[0].percent && !parsed[0].none &&
+               parsed[1].percent && !parsed[1].degrees && !parsed[1].none &&
+               parsed[2].percent && !parsed[2].degrees && !parsed[2].none;
+    }
+    if (is_oklab) {
+        for (std::size_t i = 0; i < 3; ++i)
+            if (parsed[i].degrees) return false;
+        return true;
+    }
+    if (is_oklch) {
+        return !parsed[0].degrees && !parsed[1].degrees &&
+               !parsed[2].percent;
+    }
+    return false;
+}
+
 // Built-in CSS color parser: #RGB / #RRGGBB / #RRGGBBAA, rgb(), rgba(),
 // `transparent`. Mirrors WidgetBridge's parseColor minus named colors (the
 // bridge passes its own parser to cover those). Exported via css_gradient.hpp.
@@ -45,19 +188,31 @@ canvas::Color parse_css_color(const std::string& str) {
     if (str.substr(0, 4) == "rgb(" || str.substr(0, 5) == "rgba(") {
         auto inner = str.substr(str.find('(') + 1);
         inner = inner.substr(0, inner.find(')'));
+        for (auto& ch : inner)
+            if (ch == ',' || ch == '/') ch = ' ';
         float vals[4] = {0, 0, 0, 1};
+        bool percentages[4] = {false, false, false, false};
         int n = 0;
         std::istringstream ss(inner);
         std::string tok;
-        while (std::getline(ss, tok, ',') && n < 4) {
-            while (!tok.empty() && tok[0] == ' ') tok.erase(0, 1);
+        while (ss >> tok && n < 4) {
+            if (!tok.empty() && tok.back() == '%') {
+                percentages[n] = true;
+                tok.pop_back();
+            }
             try { vals[n] = std::stof(tok); } catch (...) { vals[n] = 0.0f; }
             ++n;
         }
-        c.r = std::clamp(vals[0] / 255.0f, 0.0f, 1.0f);
-        c.g = std::clamp(vals[1] / 255.0f, 0.0f, 1.0f);
-        c.b = std::clamp(vals[2] / 255.0f, 0.0f, 1.0f);
-        c.a = std::clamp(vals[3], 0.0f, 1.0f);  // alpha is already 0-1 in CSS
+        const auto channel = [&](int index) {
+            return std::clamp(vals[index] /
+                                  (percentages[index] ? 100.0f : 255.0f),
+                              0.0f, 1.0f);
+        };
+        c.r = channel(0);
+        c.g = channel(1);
+        c.b = channel(2);
+        c.a = std::clamp(vals[3] / (percentages[3] ? 100.0f : 1.0f),
+                         0.0f, 1.0f);
         return c;
     }
 

@@ -2782,7 +2782,10 @@ private:
         } else {
             root_.set_bounds({0, 0, width_, height_});
         }
-        root_.layout_children();  // emits the "layout" span
+        // A bridge geometry read or React's commit flush may already have
+        // completed layout for this exact generation. Reuse that result rather
+        // than walking the same tree again immediately before paint.
+        root_.layout_children_if_needed();
 
         // Paint pass: background fill + view-tree paint into the canvas. Runs
         // after layout, before the GPU submit/present in render_frame.
