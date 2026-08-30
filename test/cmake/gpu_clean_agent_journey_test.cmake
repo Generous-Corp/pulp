@@ -1,5 +1,51 @@
+function(pulp_gpu_clean_agent_contract_mode output build_configuration
+         selected_build_configuration generator_is_multi_config)
+    if(NOT generator_is_multi_config STREQUAL "TRUE" AND
+       NOT generator_is_multi_config STREQUAL "FALSE")
+        message(FATAL_ERROR "generator multi-config metadata must be TRUE or FALSE")
+    endif()
+    if(generator_is_multi_config STREQUAL "TRUE")
+        if(NOT build_configuration STREQUAL "Release")
+            message(FATAL_ERROR
+                "multi-config clean-agent contract must use explicit Release")
+        endif()
+        if(selected_build_configuration STREQUAL "Release")
+            set(mode journey)
+        else()
+            set(mode multi-config-not-selected)
+        endif()
+    elseif(build_configuration STREQUAL "Release")
+        set(mode journey)
+    else()
+        set(mode single-config-rejection)
+    endif()
+    set(${output} "${mode}" PARENT_SCOPE)
+endfunction()
+
+if(NOT DEFINED BUILD_CONFIGURATION OR
+   NOT DEFINED SELECTED_BUILD_CONFIGURATION OR
+   NOT DEFINED GENERATOR_IS_MULTI_CONFIG)
+    message(FATAL_ERROR
+        "build configuration, selected configuration, and generator metadata are required")
+endif()
+pulp_gpu_clean_agent_contract_mode(
+    contract_mode "${BUILD_CONFIGURATION}" "${SELECTED_BUILD_CONFIGURATION}"
+    "${GENERATOR_IS_MULTI_CONFIG}")
+if(DEFINED CONFIGURATION_POLICY_ONLY AND CONFIGURATION_POLICY_ONLY)
+    if(NOT DEFINED EXPECTED_CONFIGURATION_MODE OR
+       NOT contract_mode STREQUAL EXPECTED_CONFIGURATION_MODE)
+        message(FATAL_ERROR
+            "configuration policy expected ${EXPECTED_CONFIGURATION_MODE}, got ${contract_mode}")
+    endif()
+    message(STATUS "gpu_clean_agent_configuration_mode=${contract_mode}")
+    return()
+endif()
+if(contract_mode STREQUAL "multi-config-not-selected")
+    message(FATAL_ERROR
+        "multi-config clean-agent contract must be registered only for Release")
+endif()
+
 if(NOT DEFINED PULP_CLI OR NOT DEFINED CLI_INSTALL_SCRIPT OR
-   NOT DEFINED BUILD_CONFIGURATION OR
    NOT DEFINED WEBGPU_RUNTIME_LIB OR
    NOT DEFINED PYTHON OR NOT DEFINED JOURNEY_SCRIPT OR NOT DEFINED SOURCE_ROOT OR
    NOT DEFINED BUILD_ROOT)
@@ -98,7 +144,7 @@ execute_process(
     RESULT_VARIABLE prepare_rc
     OUTPUT_VARIABLE prepare_json
     ERROR_VARIABLE prepare_stderr)
-if(NOT BUILD_CONFIGURATION STREQUAL "Release")
+if(contract_mode STREQUAL "single-config-rejection")
     if(prepare_rc EQUAL 0 OR
        NOT prepare_stderr MATCHES
            "build tree does not expose an exact Release configuration")

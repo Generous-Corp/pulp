@@ -407,11 +407,22 @@ if(PULP_BUILD_TESTS)
             RESOURCE_LOCK pulp_gpu)
 
         if(PULP_ENABLE_PROJECT_PACKAGE)
+            get_property(_pulp_gpu_clean_agent_multi_config GLOBAL
+                PROPERTY GENERATOR_IS_MULTI_CONFIG)
+            if(_pulp_gpu_clean_agent_multi_config)
+                set(_pulp_gpu_clean_agent_multi_config TRUE)
+                set(_pulp_gpu_clean_agent_build_configuration Release)
+            else()
+                set(_pulp_gpu_clean_agent_multi_config FALSE)
+                set(_pulp_gpu_clean_agent_build_configuration $<CONFIG>)
+            endif()
             add_test(NAME cli-gpu-clean-agent-preparer-contract
                 COMMAND ${CMAKE_COMMAND}
                     -DPULP_CLI=$<TARGET_FILE:pulp-cli>
                     -DCLI_INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake
-                    -DBUILD_CONFIGURATION=$<CONFIG>
+                    -DBUILD_CONFIGURATION=${_pulp_gpu_clean_agent_build_configuration}
+                    -DSELECTED_BUILD_CONFIGURATION=$<CONFIG>
+                    -DGENERATOR_IS_MULTI_CONFIG=${_pulp_gpu_clean_agent_multi_config}
                     -DV8_RUNTIME_LIBRARY=${V8_RUNTIME_LIBRARY}
                     -DWEBGPU_RUNTIME_LIB=${WEBGPU_RUNTIME_LIB}
                     -DPYTHON=${Python3_EXECUTABLE}
@@ -422,6 +433,10 @@ if(PULP_BUILD_TESTS)
             set_tests_properties(cli-gpu-clean-agent-preparer-contract PROPERTIES
                 LABELS "gpu;gpu-probe;cli;clean-agent-preparer"
                 RESOURCE_LOCK pulp_gpu)
+            if(_pulp_gpu_clean_agent_multi_config)
+                set_tests_properties(cli-gpu-clean-agent-preparer-contract PROPERTIES
+                    CONFIGURATIONS Release)
+            endif()
         endif()
     endif()
 

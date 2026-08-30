@@ -145,6 +145,56 @@ def codex_rollout(*, originator: str = "codex_exec", nonce: str = NONCE) -> byte
 
 
 class CleanAgentHarnessTests(unittest.TestCase):
+    def test_cmake_contract_distinguishes_single_and_multi_config_debug(self) -> None:
+        cmake = shutil.which("cmake")
+        self.assertIsNotNone(cmake)
+        script = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "test/cmake/gpu_clean_agent_journey_test.cmake"
+        )
+
+        def check(
+            *, build: str, selected: str, multi: bool, expected: str
+        ) -> None:
+            completed = subprocess.run(
+                [
+                    str(cmake),
+                    "-DCONFIGURATION_POLICY_ONLY=ON",
+                    f"-DBUILD_CONFIGURATION={build}",
+                    f"-DSELECTED_BUILD_CONFIGURATION={selected}",
+                    f"-DGENERATOR_IS_MULTI_CONFIG={'TRUE' if multi else 'FALSE'}",
+                    f"-DEXPECTED_CONFIGURATION_MODE={expected}",
+                    "-P",
+                    str(script),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn(
+                f"gpu_clean_agent_configuration_mode={expected}",
+                completed.stdout + completed.stderr,
+            )
+
+        check(
+            build="Debug",
+            selected="Debug",
+            multi=False,
+            expected="single-config-rejection",
+        )
+        check(
+            build="Release",
+            selected="Debug",
+            multi=True,
+            expected="multi-config-not-selected",
+        )
+        check(
+            build="Release",
+            selected="Release",
+            multi=True,
+            expected="journey",
+        )
+
     def test_bounded_trust_command_kills_stream_at_cap(self) -> None:
         started = time.monotonic()
         with self.assertRaisesRegex(trust.isolation.IsolationError, "stdout cap"):

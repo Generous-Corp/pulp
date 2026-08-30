@@ -3119,6 +3119,6 @@ The A5 clean-agent preparer has an exact Release-provenance boundary, while
 Pulp's required macOS gate intentionally configures Debug. Its CTest contract
 must therefore prove that a non-Release tree is rejected and run the complete
 preparer journey only from a Release configuration. Do not relax the journey's
-Release check to make the Debug gate green; pass the selected CTest configuration
-through to the install replay, and keep Release replay explicit for multi-config
-generators.
+Release check to make the Debug gate green. Pass the generator kind and selected
+CTest configuration explicitly: single-config Debug proves rejection, while a
+multi-config registration is Release-only and installs Release explicitly.
