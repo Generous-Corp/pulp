@@ -7,6 +7,7 @@ import ctypes
 import os
 import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,11 @@ def _windows_kernel32() -> Any:
     kernel32.AssignProcessToJobObject.restype = ctypes.c_int
     kernel32.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
     kernel32.TerminateJobObject.restype = ctypes.c_int
+    kernel32.QueryInformationJobObject.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32,
+        ctypes.c_void_p,
+    ]
+    kernel32.QueryInformationJobObject.restype = ctypes.c_int
     kernel32.CreateToolhelp32Snapshot.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
     kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
     kernel32.Thread32First.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
@@ -190,6 +196,48 @@ def _terminate_windows_job(process: subprocess.Popen[bytes]) -> None:
         )
 
 
+def _windows_job_active_processes(process: subprocess.Popen[bytes]) -> int:
+    class BasicAccountingInformation(ctypes.Structure):
+        _fields_ = [
+            ("total_user_time", ctypes.c_int64),
+            ("total_kernel_time", ctypes.c_int64),
+            ("period_user_time", ctypes.c_int64),
+            ("period_kernel_time", ctypes.c_int64),
+            ("total_page_fault_count", ctypes.c_uint32),
+            ("total_processes", ctypes.c_uint32),
+            ("active_processes", ctypes.c_uint32),
+            ("total_terminated_processes", ctypes.c_uint32),
+        ]
+
+    handle = getattr(process, WINDOWS_JOB_ATTRIBUTE, None)
+    if not isinstance(handle, int) or handle <= 0:
+        return 0
+    information = BasicAccountingInformation()
+    if not _windows_kernel32().QueryInformationJobObject(
+        ctypes.c_void_p(handle), 1, ctypes.byref(information),
+        ctypes.sizeof(information), None,
+    ):
+        raise ProcessTreeTerminationError(
+            f"{ProcessTreeTerminationError.code}: querying adapter Job Object "
+            f"liveness failed with Windows error {ctypes.get_last_error()}"
+        )
+    return int(information.active_processes)
+
+
+def _wait_windows_job_empty(
+    process: subprocess.Popen[bytes], timeout_seconds: float,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while _windows_job_active_processes(process) != 0:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProcessTreeTerminationError(
+                f"{ProcessTreeTerminationError.code}: adapter Job Object retained "
+                "live descendants past the final termination bound"
+            )
+        time.sleep(min(0.02, remaining))
+
+
 def spawn_contained(
     command: list[str], *, cwd: Path, stdin: Any = None,
 ) -> subprocess.Popen[bytes]:
@@ -227,6 +275,11 @@ def spawn_contained(
                 process.wait(timeout=TERMINATION_FINAL_SECONDS)
             except (OSError, subprocess.TimeoutExpired) as wait_error:
                 cleanup_error = wait_error
+            if isinstance(handle, int) and handle > 0:
+                try:
+                    _wait_windows_job_empty(process, TERMINATION_FINAL_SECONDS)
+                except ProcessTreeTerminationError as job_wait_error:
+                    cleanup_error = cleanup_error or job_wait_error
         except OSError as terminate_error:
             cleanup_error = terminate_error
         finally:
@@ -287,6 +340,10 @@ def terminate_contained(process: subprocess.Popen[bytes]) -> None:
         force_error = force_error or error
     finally:
         if os.name == "nt":
+            try:
+                _wait_windows_job_empty(process, TERMINATION_FINAL_SECONDS)
+            except ProcessTreeTerminationError as error:
+                force_error = force_error or error
             try:
                 _close_windows_job(process)
             except ProcessTreeTerminationError as error:

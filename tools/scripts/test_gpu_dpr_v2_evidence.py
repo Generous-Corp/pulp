@@ -673,6 +673,41 @@ def termination_boundary_tests() -> None:
         timeout=process_boundary.TERMINATION_FINAL_SECONDS
     )
 
+    exited_root = mock.Mock(pid=31339)
+    exited_root.poll.return_value = 0
+    setattr(exited_root, process_boundary.WINDOWS_JOB_ATTRIBUTE, 88)
+    active_processes = mock.Mock(side_effect=[1, 1, 0])
+    with (
+        mock.patch.object(process_boundary.os, "name", "nt"),
+        mock.patch.object(process_boundary, "_terminate_windows_job") as terminate_job,
+        mock.patch.object(
+            process_boundary, "_windows_job_active_processes",
+            active_processes,
+        ),
+        mock.patch.object(process_boundary.time, "sleep") as bounded_sleep,
+        mock.patch.object(process_boundary, "_close_windows_job") as close_job,
+    ):
+        process_boundary.terminate_contained(exited_root)
+    terminate_job.assert_called_once_with(exited_root)
+    assert active_processes.call_count == 3
+    assert bounded_sleep.call_count == 2
+    close_job.assert_called_once_with(exited_root)
+    exited_root.wait.assert_not_called()
+
+    with (
+        mock.patch.object(
+            process_boundary, "_windows_job_active_processes", return_value=1,
+        ),
+        mock.patch.object(process_boundary.time, "monotonic", side_effect=[0.0, 3.0]),
+        mock.patch.object(process_boundary.time, "sleep"),
+    ):
+        try:
+            process_boundary._wait_windows_job_empty(exited_root, 2.0)
+        except process_boundary.ProcessTreeTerminationError as error:
+            assert error.code in str(error)
+        else:
+            raise AssertionError("live Windows Job descendants exceeded the final bound")
+
 
 def main() -> int:
     termination_boundary_tests()
@@ -1096,6 +1131,7 @@ def main() -> int:
         "no_file=pass digest=pass content=pass path=pass symlink=pass outside=pass "
         "cross_cell=pass runner_process=pass producer_pid=pass retry=pass "
         "output_bound=pass bounded_termination=pass windows_job_spawn=pass "
+        "windows_job_quiescence=pass "
         "forged_state_key=pass "
         "frame_rederive=pass gpu_calibration=pass runtime_input=pass "
         "fixed_a3_daw_identity=pass caller_draft=pass "
