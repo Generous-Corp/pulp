@@ -195,6 +195,17 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+    # setup.sh bootstraps a checkout; the build it performs along the way must
+    # default to Release with examples off, matching the required gate's own
+    # configure. Nothing else in the tree reads those defaults, so they can
+    # regress silently. The selftest is the load-bearing half: it regresses a
+    # copy of the real script and requires the guard to reject each mutation.
+    add_test(NAME setup-bootstrap-plan-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/setup_bootstrap_plan_guard.py")
+    add_test(NAME setup-bootstrap-plan-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_bootstrap_plan_guard.py")
+    set_tests_properties(setup-bootstrap-plan-guard setup-bootstrap-plan-guard-selftest
+        PROPERTIES TIMEOUT 120)
     # A fork's code must never be routed onto the self-hosted Macs, which hold
     # the signing keychain. Runs the resolver build.yml actually embeds.
     add_test(NAME fork-pr-runner-routing COMMAND ${Python3_EXECUTABLE}
