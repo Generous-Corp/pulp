@@ -4115,6 +4115,10 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "control",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "coverage-diff",
         "disposition": "candidate-shared-later"
       },
@@ -4133,6 +4137,10 @@
       {
         "name": "doctor",
         "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "gpu",
+        "disposition": "pulp-owned"
       },
       {
         "name": "import-design",
