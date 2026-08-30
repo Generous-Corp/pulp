@@ -447,7 +447,9 @@ def _cell_semantic_errors(
         ):
             errors.append(f"{scenario_id}/{mode}/{requested_dpr}: wrong deterministic mode order")
             break
-        expected_affected = mode == "configured_max" and requested_dpr > 2
+        expected_affected = (
+            mode == "configured_max" and expected_observed < requested_dpr
+        )
         if mode in {"exact", "configured_max"} and trial.get("affected") is not expected_affected:
             errors.append(f"{scenario_id}/{mode}/{requested_dpr}: affected flag disagrees with applied policy")
             break
@@ -481,6 +483,13 @@ def _cell_semantic_errors(
             errors.append(f"{scenario_id}/{mode}/{requested_dpr}: DAW subreceipt coverage differs")
         if len({(item.get("outcome"), item.get("gates_passed")) for item in daw}) != 1:
             errors.append(f"{scenario_id}/{mode}/{requested_dpr}: DAW subreceipts disagree on verdict/gates")
+        if any(
+            item.get("outcome") != "pass" or item.get("gates_passed") is not True
+            for item in daw
+        ):
+            errors.append(
+                f"{scenario_id}/{mode}/{requested_dpr}: required DAW subreceipt did not pass"
+            )
     elif daw:
         errors.append(f"{scenario_id}/{mode}/{requested_dpr}: non-DAW cell carries DAW subreceipts")
     artifact_kinds = [item.get("kind") for item in cell.get("artifacts", [])]

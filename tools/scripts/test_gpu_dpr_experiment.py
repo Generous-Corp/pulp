@@ -130,7 +130,10 @@ def v2_cell(
     scenario: dict[str, Any], mode: str, requested_dpr: float,
     campaign: str, manifest: dict[str, Any], manifest_digest: str,
 ) -> dict[str, Any]:
-    affected = mode in {"configured_max", "adaptive_simulation"} and requested_dpr == 3
+    affected = (
+        mode == "configured_max"
+        and min(requested_dpr, manifest["configured_max_dpr"]) < requested_dpr
+    ) or (mode == "adaptive_simulation" and requested_dpr == 3)
     gpu = 1_000_000
     memory = 10_000
     if affected and mode == "configured_max":
@@ -377,9 +380,104 @@ def v2_structural_errors(
         )
 
 
+def neutralize_adaptive_cells(document: dict[str, Any]) -> None:
+    for campaign_key in ("cells", "repeat_cells"):
+        cells = document[campaign_key]
+        by_key = {contract.v2_cell_key(cell): cell for cell in cells}
+        for cell in cells:
+            if cell["mode"] != "adaptive_simulation":
+                continue
+            exact = by_key[(cell["scenario_id"], "exact", float(cell["requested_dpr"]))]
+            for candidate_trial, exact_trial in zip(
+                cell["measured_trials"], exact["measured_trials"], strict=True
+            ):
+                for field in (
+                    "gpu_p95_ns", "cpu_median_ns", "cpu_p95_ns",
+                    "first_frame_median_ns", "first_frame_p95_ns",
+                    "interaction_median_ns", "interaction_p95_ns",
+                    "render_target_p95_bytes", "resident_p95_bytes",
+                    "upload_p95_bytes", "frame_misses", "xruns",
+                ):
+                    candidate_trial[field] = exact_trial[field]
+                candidate_trial["affected"] = False
+            requested = cell["requested_dpr"]
+            cell["adaptive_summary"]["min_applied_dpr"] = requested
+            cell["adaptive_summary"]["max_applied_dpr"] = requested
+
+
+def neutralize_configured_cells_except(
+    document: dict[str, Any], selected_dpr: float | None,
+) -> None:
+    for campaign_key in ("cells", "repeat_cells"):
+        cells = document[campaign_key]
+        by_key = {contract.v2_cell_key(cell): cell for cell in cells}
+        for cell in cells:
+            if (
+                cell["mode"] != "configured_max"
+                or cell["requested_dpr"] == selected_dpr
+            ):
+                continue
+            exact = by_key[(cell["scenario_id"], "exact", float(cell["requested_dpr"]))]
+            for candidate_trial, exact_trial in zip(
+                cell["measured_trials"], exact["measured_trials"], strict=True
+            ):
+                for field in (
+                    "gpu_p95_ns", "cpu_median_ns", "cpu_p95_ns",
+                    "first_frame_median_ns", "first_frame_p95_ns",
+                    "interaction_median_ns", "interaction_p95_ns",
+                    "render_target_p95_bytes", "resident_p95_bytes",
+                    "upload_p95_bytes", "frame_misses", "xruns",
+                ):
+                    candidate_trial[field] = exact_trial[field]
+
+
+def check_configured_max_rungs(manifest: dict[str, Any]) -> None:
+    for configured_max in contract.REQUESTED_DPRS:
+        candidate_manifest = copy.deepcopy(manifest)
+        candidate_manifest["configured_max_dpr"] = configured_max
+        candidate, authorized = complete_v2_fixture(candidate_manifest)
+        digest = contract.canonical_sha256(authorized)
+
+        scenario = authorized["scenarios"][0]
+        for requested_dpr in contract.REQUESTED_DPRS:
+            cell = v2_cell(
+                scenario, "configured_max", requested_dpr,
+                "original", authorized, digest,
+            )
+            expected_affected = requested_dpr > configured_max
+            assert all(
+                trial["affected"] is expected_affected
+                for trial in cell["measured_trials"]
+            )
+            assert not contract._cell_semantic_errors(
+                cell, authorized, digest, "original"
+            )
+            cell["measured_trials"][0]["affected"] = not expected_affected
+            assert any(
+                "affected flag disagrees" in error
+                for error in contract._cell_semantic_errors(
+                    cell, authorized, digest, "original"
+                )
+            )
+
+        selected_dpr = 3 if configured_max < 3 else None
+        neutralize_adaptive_cells(candidate)
+        neutralize_configured_cells_except(candidate, selected_dpr)
+        candidate["analysis"] = contract.compute_v2_analysis(
+            candidate["cells"], candidate["repeat_cells"], authorized, digest
+        )
+        expected_disposition = (
+            "configured-max-candidate" if selected_dpr is not None else "no-change"
+        )
+        assert candidate["analysis"]["disposition"] == expected_disposition
+        if selected_dpr is not None:
+            assert all(candidate["analysis"]["class_support"].values())
+
+
 def main() -> int:
     manifest = contract.load_json(contract.DEFAULT_MANIFEST)
     assert not contract.manifest_errors(manifest, contract.DEFAULT_MANIFEST)
+    check_configured_max_rungs(manifest)
     assert len(contract.expected_matrix(manifest)) == 84
     validity = contract.load_json(
         ROOT / "docs/validation/gpu-dpr/instrument-validity-state.json"
@@ -598,6 +696,19 @@ def main() -> int:
     daw_cell = next(cell for cell in substituted_format["cells"] if cell["scenario_id"] == "forge-modular-daw")
     daw_cell["daw_subreceipts"][0]["host"] = "reaper"
     v2_mutations.append(("substituted DAW host", substituted_format))
+    all_failed_daw = copy.deepcopy(v2)
+    daw_cell = next(
+        cell for cell in all_failed_daw["cells"]
+        if cell["scenario_id"] == "forge-modular-daw"
+    )
+    for subreceipt in daw_cell["daw_subreceipts"]:
+        subreceipt["outcome"] = "fail"
+        subreceipt["gates_passed"] = False
+    all_failed_errors = v2_structural_errors(
+        all_failed_daw, authorized, authorized_digest
+    )
+    assert any("required DAW subreceipt did not pass" in error for error in all_failed_errors)
+    v2_mutations.append(("unanimously failed DAW subreceipts", all_failed_daw))
     dimension_repeat = copy.deepcopy(v2)
     dimension_repeat["repeat_cells"][0]["logical_size"]["width"] += 1
     v2_mutations.append(("dimensional mismatch repeat", dimension_repeat))
