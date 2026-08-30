@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 60,
+  "inventory_version": 61,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -37,12 +37,12 @@
     }
   ],
   "counts": {
-    "public_headers": 444,
-    "reviewed_headers": 152,
+    "public_headers": 445,
+    "reviewed_headers": 153,
     "legacy_unreviewed_headers": 292,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 99,
+      "capability_entrypoint": 100,
       "capability_support": 39,
       "infrastructure": 12,
       "legacy_unreviewed": 292,
@@ -56,8 +56,8 @@
         "unsupported_headers": 0
       },
       "midi": {
-        "public_headers": 42,
-        "reviewed_headers": 13,
+        "public_headers": 43,
+        "reviewed_headers": 14,
         "legacy_unreviewed_headers": 29,
         "unsupported_headers": 0
       },
@@ -1410,6 +1410,17 @@
     },
     {
       "domain": "midi",
+      "source": "core/midi/include/pulp/midi/step_player.hpp",
+      "fingerprint": "sha256:840cc4783c205d1e0416d1115c74a1a2ac3dd15fbea9185cdcbfb679a9898cd7",
+      "include": "pulp/midi/step_player.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "midi.linear-step-player"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "midi",
       "source": "core/midi/include/pulp/midi/synthesiser.hpp",
       "fingerprint": "sha256:831ae4496996596eea75fb8e6ec7ae6fa7ee3aca61976a633727ac96174eb1a0",
       "include": "pulp/midi/synthesiser.hpp",
@@ -1519,6 +1530,7 @@
         "midi.channel-routing",
         "midi.controller-mapping",
         "midi.keyboard-split",
+        "midi.linear-step-player",
         "midi.monophonic-note-selection",
         "midi.note-length-shaping",
         "midi.note-range-filtering",

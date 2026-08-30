@@ -46,6 +46,10 @@ pulp_add_test_suite(pulp-test-midi-utility-controller
 pulp_add_test_suite(pulp-test-midi-arpeggiator
     SOURCES test_midi_arpeggiator.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::midi)
+# Linear multi-lane step player (survey entry 092)
+pulp_add_test_suite(pulp-test-midi-step-player
+    SOURCES test_midi_step_player.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 pulp_add_test_suite(pulp-test-midi-voice-modulation-adapter
     SOURCES test_midi_voice_modulation_adapter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
