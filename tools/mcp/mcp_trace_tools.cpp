@@ -136,7 +136,7 @@ std::string handle_trace_analyze(const std::string& params_json) {
     if (process.timed_out)
         return local_error("cli-timeout", "pulp trace exceeded its bounded timeout",
                            diagnostic_output);
-    if (process.was_cancelled)
+    if (process.output_limit_exceeded || process.was_cancelled)
         return local_error("cli-output-limit", "pulp trace exceeded its bounded output limit",
                            diagnostic_output);
     if (process.exit_code < 0)
