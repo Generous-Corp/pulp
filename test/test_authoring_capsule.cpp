@@ -1232,3 +1232,144 @@ TEST_CASE("revision identity survives a change of container compression",
     CHECK(digest_or_fail(*from_deflated) == digest_or_fail(*from_stored));
     CHECK(canonical_or_fail(*from_deflated) == canonical_or_fail(*from_stored));
 }
+
+// ── Fail-closed behaviour found by adversarial review ───────────────────────
+//
+// Each of these covers a check that was declared in the contract and absent
+// from the code. They are grouped because they share one failure mode: a
+// promise that reads as enforced while nothing enforces it.
+
+TEST_CASE("self_contained cannot be forged by omitting required_for",
+          "[authoring-capsule][completeness][rights]") {
+    // `required_for` is optional, so a manifest can leave it off every row. A
+    // derivation that only inspected gating rows would then touch nothing and
+    // fall through to its initial `true`, reporting a capsule full of
+    // unknown-rights components as "every required byte is present and may be
+    // redistributed" — while the same preview lists those rows as blocking.
+    Manifest manifest = base_manifest();
+    manifest.dependencies.clear();
+    manifest.files.clear();
+
+    FileEntry ungated = file_row("dsp/main.cpp");
+    ungated.policy.required_for.clear();
+    ungated.policy.redistribution = Redistribution::unknown;
+    manifest.files.push_back(ungated);
+
+    CHECK(derive_completeness(manifest) != Completeness::self_contained);
+
+    // The same row with an explicit grant is fine: it is the unknown rights
+    // that disqualify it, not the missing gate.
+    manifest.files.front().policy.redistribution = Redistribution::allowed;
+    CHECK(derive_completeness(manifest) == Completeness::self_contained);
+
+    // `restricted` is disqualifying for the same reason, and neither ever
+    // decays to `allowed`.
+    manifest.files.front().policy.redistribution = Redistribution::restricted;
+    CHECK(derive_completeness(manifest) != Completeness::self_contained);
+}
+
+TEST_CASE("a profile's required role must actually be present",
+          "[authoring-capsule][preview][roles]") {
+    TempDir temp;
+    const fs::path destination = temp.path() / "no-role.capsule";
+
+    // TestProfileValidator requires "dsp.source". Ship a capsule that carries
+    // only a rendition, so the role the profile published is missing.
+    ExportRequest request;
+    request.manifest = base_manifest();
+    request.manifest.files.clear();
+    request.manifest.dependencies.clear();
+
+    ExportItem audio;
+    audio.entry = file_row("audio/render.pcm", "audio.rendition");
+    audio.entry.media_type = "audio/x-pulp-canonical-pcm";
+    audio.entry.policy = included_policy(Redistribution::allowed, {RequiredFor::play});
+    audio.bytes = to_canonical_bytes(make_pcm(1, 48000, {0.0f, 0.25f}));
+    request.items = {audio};
+
+    REQUIRE(export_capsule(request, destination).has_value());
+    auto archive = open_archive(destination);
+    REQUIRE(archive.has_value());
+
+    AdmissionOptions options;
+    options.product = "test-product";
+    const auto preview = preview_capsule(*archive, test_registry(), options);
+    REQUIRE(preview.has_value());
+
+    CHECK(preview->compatibility == CompatibilityVerdict::unsupported);
+    CHECK(preview->unmet.status == CapsuleStatus::missing_required_role);
+    CHECK(preview->unmet.subject == "dsp.source");
+
+    // And the verdict has to bite: extraction must refuse rather than hand an
+    // unsatisfiable capsule to the validator.
+    auto staging = StagingArea::create(temp.path());
+    REQUIRE(staging.has_value());
+    auto admitted = admit_to_staging(*archive, *preview, test_registry(), *staging);
+    REQUIRE_FALSE(admitted.has_value());
+    CHECK(admitted.error().status == CapsuleStatus::missing_required_role);
+}
+
+TEST_CASE("admit_to_staging refuses an unsupported capability",
+          "[authoring-capsule][preview][fail-closed]") {
+    TempDir temp;
+    const fs::path destination = temp.path() / "needs-gpu.capsule";
+
+    ExportRequest request = make_export_request();
+    request.manifest.required_capabilities = {"gpu-nam"};
+
+    REQUIRE(export_capsule(request, destination).has_value());
+    auto archive = open_archive(destination);
+    REQUIRE(archive.has_value());
+
+    AdmissionOptions options;
+    options.product = "test-product";
+    const auto preview = preview_capsule(*archive, test_registry(), options);
+
+    // Preview itself succeeds — it exists so a product can say what is
+    // missing — but records the capability as unavailable.
+    REQUIRE(preview.has_value());
+    CHECK(preview->compatibility == CompatibilityVerdict::unsupported);
+    CHECK(preview->unmet.status == CapsuleStatus::unsupported_capability);
+    CHECK(preview->unmet.subject == "gpu-nam");
+
+    auto staging = StagingArea::create(temp.path());
+    REQUIRE(staging.has_value());
+    auto admitted = admit_to_staging(*archive, *preview, test_registry(), *staging);
+    REQUIRE_FALSE(admitted.has_value());
+    CHECK(admitted.error().status == CapsuleStatus::unsupported_capability);
+
+    // Nothing was extracted: a refusal must not leave the capsule's contents
+    // sitting in staging for a caller that ignored the error.
+    CHECK(fs::is_empty(staging->root()));
+}
+
+TEST_CASE("an attestation naming a different digest is refused",
+          "[authoring-capsule][preview][trust]") {
+    TempDir temp;
+    const fs::path destination = temp.path() / "wrong-digest.capsule";
+
+    // An envelope lifted wholesale from another capsule: well-formed, real
+    // signer, decodable signature, but it names a digest these bytes do not
+    // produce. Without this check it would reach a consumer's verifier looking
+    // entirely ordinary, and a verifier that trusts the field over the computed
+    // digest would accept it.
+    ExportRequest request = make_export_request();
+    request.manifest.attestations_json =
+        R"([{"algorithm":"ed25519","signature":"AAAA","signer_id":"someone",)"
+        R"("signed_payload_digest":"sha256:)" +
+        std::string(64, 'b') + R"("}])";
+
+    REQUIRE(export_capsule(request, destination).has_value());
+    auto archive = open_archive(destination);
+    REQUIRE(archive.has_value());
+
+    AdmissionOptions options;
+    options.product = "test-product";
+
+    // No verifier is configured, so this refusal comes from the substrate
+    // itself rather than from an adapter that might not look.
+    const auto preview = preview_capsule(*archive, test_registry(), options);
+    REQUIRE_FALSE(preview.has_value());
+    CHECK(preview.error().status == CapsuleStatus::signature_invalid);
+    CHECK(preview.error().subject == "someone");
+}
