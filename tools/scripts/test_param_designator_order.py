@@ -21,13 +21,17 @@ class that no unit test would otherwise catch, on the platform CI is thinnest on
 from __future__ import annotations
 
 import re
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from repo_source_scan import iter_sources  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PARAMETER_HPP = REPO_ROOT / "core" / "state" / "include" / "pulp" / "state" / "parameter.hpp"
-
-SKIP_DIRS = ("external", "build", ".git", "node_modules")
 
 # A designator at the start of a line inside an initializer: `.name = ...`
 DESIGNATOR = re.compile(r"^\s*\.(\w+)\s*=", re.M)
@@ -65,14 +69,8 @@ def param_info_field_order() -> list[str]:
     return fields
 
 
-def cpp_sources() -> list[Path]:
-    out: list[Path] = []
-    for pattern in ("*.hpp", "*.cpp", "*.h", "*.cc"):
-        for p in REPO_ROOT.rglob(pattern):
-            if any(part in SKIP_DIRS for part in p.parts):
-                continue
-            out.append(p)
-    return out
+def cpp_sources(root: Path | None = None) -> list[Path]:
+    return list(iter_sources(root or REPO_ROOT, ("*.hpp", "*.cpp", "*.h", "*.cc")))
 
 
 class ParamInfoDesignatorOrder(unittest.TestCase):
@@ -96,6 +94,27 @@ class ParamInfoDesignatorOrder(unittest.TestCase):
             "add_parameter initializer must be reordered to match, or GCC will "
             "reject them and every release's Linux legs will fail.",
         )
+
+    def test_scan_ignores_generated_and_foreign_trees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            planted = {
+                "core/state/param.cpp",
+                "build/gen/param.cpp",
+                "build-cov/gen/param.cpp",
+                "external/vendor/param.cpp",
+                "planning/scratch/param.cpp",
+                ".claude/worktrees/agent-0/core/state/param.cpp",
+            }
+            for relative in planted:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    "store.add_parameter({.kind = k, .range = r});\n",
+                    encoding="utf-8",
+                )
+            found = {str(p.relative_to(root)) for p in cpp_sources(root)}
+            self.assertEqual(found, {"core/state/param.cpp"})
 
     def test_every_add_parameter_follows_declaration_order(self) -> None:
         rank = {name: i for i, name in enumerate(self.order)}

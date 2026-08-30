@@ -20,6 +20,10 @@ from pathlib import Path
 from unittest import mock
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from repo_source_scan import iter_sources  # noqa: E402
+
 SCRIPT = Path(__file__).with_name("release_artifact_contents.py")
 spec = importlib.util.spec_from_file_location("release_artifact_contents", SCRIPT)
 assert spec and spec.loader
@@ -160,8 +164,8 @@ INTERFACE_TARGET_SOURCE_DIRS = ("core", "inspect", "ship", "tools")
 def interface_target_definition_files(root: Path = ROOT) -> list[Path]:
     files = [root / "CMakeLists.txt"]
     for name in INTERFACE_TARGET_SOURCE_DIRS:
-        files.extend(sorted((root / name).rglob("CMakeLists.txt")))
-    files.extend(sorted((root / "tools" / "cmake").rglob("*.cmake")))
+        files.extend(iter_sources(root / name, ("CMakeLists.txt",)))
+    files.extend(iter_sources(root / "tools" / "cmake", ("*.cmake",)))
     return files
 
 
@@ -595,6 +599,12 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 ),
                 "examples/demo/CMakeLists.txt": (
                     "add_library(pulp-example-decoy INTERFACE)"
+                ),
+                "core/build-cov/CMakeLists.txt": (
+                    "add_library(pulp-nested-build-decoy INTERFACE)"
+                ),
+                "tools/.claude/worktrees/agent-0/cmake/Stale.cmake": (
+                    "add_library(pulp-nested-dot-decoy INTERFACE)"
                 ),
             }
             for relative, text in planted.items():

@@ -272,6 +272,26 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_odr_macro_gated_headers.py")
     set_tests_properties(odr-macro-gated-headers PROPERTIES TIMEOUT 120)
 
+    # Shared source-tree traversal used by the Python guard scripts. A walk from
+    # the repository root reads build directories, fetched dependency sources,
+    # and agent tool directories that hold complete checkouts of other branches,
+    # so a guard walking it can report a violation belonging to a different
+    # tree. The scan prunes those; this test plants a decoy in each shape and
+    # asserts none of them is read.
+    add_test(NAME repo-source-scan COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_repo_source_scan.py")
+    set_tests_properties(repo-source-scan PROPERTIES TIMEOUT 120)
+
+    # ParamInfo designated-initializer order. Clang accepts out-of-order
+    # designators and GCC rejects them, so an out-of-order initializer passes
+    # every macOS gate and then fails both Linux legs of the release CLI build,
+    # which stops the release from publishing. Every gate in this repo that
+    # could see it is Clang, so the static check is the only host-independent
+    # enforcement. Stdlib-only.
+    add_test(NAME param-designator-order COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_param_designator_order.py")
+    set_tests_properties(param-designator-order PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test
