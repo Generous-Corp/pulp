@@ -181,7 +181,7 @@ constexpr std::array<std::int32_t, 3> kRaggedBlocks{37, 512, 111};
 } // namespace
 
 // ---------------------------------------------------------------------------
-// Entry 126 — latch
+// Latch
 // ---------------------------------------------------------------------------
 
 TEST_CASE("latch off is exact passthrough", "[midi][latch][parity]") {
@@ -274,7 +274,7 @@ TEST_CASE("latch allocates nothing while processing", "[midi][latch][rt-safety]"
 }
 
 // ---------------------------------------------------------------------------
-// Entry 121 — humanize
+// Humanize
 // ---------------------------------------------------------------------------
 
 TEST_CASE("humanize with zero amounts is exact identity", "[midi][humanize][parity]") {
@@ -388,7 +388,7 @@ TEST_CASE("humanize allocates nothing while processing", "[midi][humanize][rt-sa
 }
 
 // ---------------------------------------------------------------------------
-// Entry 119 — note repeat
+// Note repeat
 // ---------------------------------------------------------------------------
 
 TEST_CASE("note repeat with count 1 is exact identity", "[midi][note-repeat][parity]") {
@@ -519,7 +519,7 @@ TEST_CASE("note repeat allocates nothing while processing", "[midi][note-repeat]
 }
 
 // ---------------------------------------------------------------------------
-// Entry 127 — note delay
+// Note delay
 // ---------------------------------------------------------------------------
 
 TEST_CASE("note delay with zero repeats is exact dry passthrough", "[midi][note-delay][parity]") {
@@ -672,7 +672,7 @@ TEST_CASE("note delay allocates nothing while processing", "[midi][note-delay][r
 }
 
 // ---------------------------------------------------------------------------
-// Entry 120 — strum
+// Strum
 // ---------------------------------------------------------------------------
 
 TEST_CASE("strum passes a single note through unchanged", "[midi][strum][parity]") {
@@ -805,7 +805,7 @@ TEST_CASE("strum allocates nothing while processing", "[midi][strum][rt-safety]"
 }
 
 // ---------------------------------------------------------------------------
-// Entry 126 — chord memory
+// Chord memory
 // ---------------------------------------------------------------------------
 
 TEST_CASE("chord memory with nothing captured is exact passthrough",
@@ -984,10 +984,10 @@ TEST_CASE("chord memory allocates nothing while processing", "[midi][chord-memor
 }
 
 // ---------------------------------------------------------------------------
-// Family contract
+// Shared utility-kernel contract
 // ---------------------------------------------------------------------------
 
-TEST_CASE("every Phase 4A kernel declares a bounded utility contract", "[midi][parity]") {
+TEST_CASE("every MIDI utility kernel declares a bounded contract", "[midi][parity]") {
     const std::array contracts{midi::Latch::contract(),        midi::Humanize<>::contract(),
                                midi::NoteRepeat<>::contract(), midi::NoteDelay<>::contract(),
                                midi::Strum<>::contract(),      midi::ChordMemory<>::contract()};
@@ -999,7 +999,7 @@ TEST_CASE("every Phase 4A kernel declares a bounded utility contract", "[midi][p
     }
 }
 
-TEST_CASE("every Phase 4A kernel refuses an aliased output block", "[midi][rt-safety]") {
+TEST_CASE("every MIDI utility kernel refuses an aliased output block", "[midi][rt-safety]") {
     // The contract declares distinct input and output blocks; each kernel must
     // enforce it rather than corrupt the buffer it is reading.
     auto shared = prepared_buffer();
@@ -1029,7 +1029,7 @@ TEST_CASE("every Phase 4A kernel refuses an aliased output block", "[midi][rt-sa
 }
 
 // ---------------------------------------------------------------------------
-// Contract surfaces the dispositions name but the cases above do not reach
+// Contract surfaces the cases above do not reach
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -1222,7 +1222,7 @@ TEST_CASE("note repeat and note delay release owned notes on flush", "[midi][rt-
     }
 }
 
-TEST_CASE("every Phase 4A kernel rejects a spec it cannot honour", "[midi][parity]") {
+TEST_CASE("every MIDI utility kernel rejects a spec it cannot honour", "[midi][parity]") {
     REQUIRE_FALSE(midi::NoteRepeat<>::valid_spec({{0}, 4, 50, 100, 100, 0}));      // no interval
     REQUIRE_FALSE(midi::NoteRepeat<>::valid_spec({{100}, 4, 0, 100, 100, 0}));     // zero gate
     REQUIRE_FALSE(midi::NoteRepeat<>::valid_spec({{100}, 4, 50, 200, 100, 0}));    // probability > 100

@@ -51,8 +51,8 @@ pulp_add_test_suite(pulp-test-midi-step-player
     SOURCES test_midi_step_player.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::midi)
 # Note repeat, strum, humanize, chord memory, latch and note delay kernels
-pulp_add_test_suite(pulp-test-midi-utility-kernels-phase4a
-    SOURCES test_midi_utility_kernels_phase4a.cpp harness/rt_allocation_probe.cpp
+pulp_add_test_suite(pulp-test-midi-performance-kernels
+    SOURCES test_midi_performance_kernels.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::midi pulp::music)
 pulp_add_test_suite(pulp-test-midi-voice-modulation-adapter
     SOURCES test_midi_voice_modulation_adapter.cpp harness/rt_allocation_probe.cpp
