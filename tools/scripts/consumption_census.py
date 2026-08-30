@@ -521,9 +521,10 @@ DERIVATION = {
     ),
     "limitations": [
         "Each profile is one configured build tree: one platform, one feature set, and its "
-        "key names both. A tree whose features the census has not measured is a profile it "
+        "key names both. A tree whose feature set the census has not measured is a profile it "
         "does not record, so the drift gate skips rather than comparing it against another "
-        "configuration's numbers.",
+        "configuration's numbers. A tree that defines different feature SWITCHES than the "
+        "census records is not an unmeasured configuration but a stale census, and fails.",
         "$<INSTALL_INTERFACE:...> dependencies are dropped and $<BUILD_INTERFACE:...> kept, "
         "so the graph is the build tree's. Where the two name the same library under "
         "different aliases (Pulp::yogacore vs yogacore) the build-tree name is recorded.",
@@ -923,18 +924,44 @@ def check_profile_recorded(build_dir: Path, census_path: Path, schema_path: Path
     except CensusError as error:
         print(f"consumption_census: {error}", file=sys.stderr)
         return 1
-    recorded = document["profiles"].get(key)
-    if recorded is None:
-        print(
-            f"consumption_census_skipped reason=profile-not-recorded host={key} "
-            f"recorded={','.join(sorted(document['profiles']))}"
-        )
-        return 77
     features = {
         name: value
         for name, value in facts["features"].items()
         if name not in BUILD_SCOPE_FEATURES
     }
+    recorded = document["profiles"].get(key)
+    if recorded is None:
+        # A key the census does not record is normally a configuration nobody
+        # has measured, which is a skip. But a census whose profiles all name a
+        # DIFFERENT set of switches predates this tree's feature list, so it
+        # describes no configuration of this tree at all. Skipping that would
+        # retire the gate the moment someone adds a switch defaulting ON, which
+        # moves every key at once and would otherwise read as an unmeasured
+        # configuration rather than a census that needs regenerating.
+        rosters = [set(profile["features"]) for profile in document["profiles"].values()]
+        if rosters and not any(roster == set(features) for roster in rosters):
+            unmeasured = sorted(set(features).difference(*rosters))
+            retired = sorted(set().union(*rosters) - set(features))
+            print(
+                "consumption_census: the census records a different set of feature "
+                "switches than this build tree defines",
+                file=sys.stderr,
+            )
+            if unmeasured:
+                print(f"  switches no profile records: {', '.join(unmeasured)}", file=sys.stderr)
+            if retired:
+                print(f"  switches the tree no longer defines: {', '.join(retired)}", file=sys.stderr)
+            print(
+                "  regenerate with: python3 tools/scripts/consumption_census.py "
+                f"--build-dir {build_dir} --write",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"consumption_census_skipped reason=profile-not-recorded host={key} "
+            f"recorded={','.join(sorted(document['profiles']))}"
+        )
+        return 77
     # The key already names the enabled feature set, so a profile found under
     # this tree's key that disagrees about its features is an inconsistent
     # artifact rather than a different configuration — the two halves of the

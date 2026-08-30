@@ -198,6 +198,22 @@ def main(argv: list[str]) -> int:
             renamed["profiles"][foreign_key]["system_processor"] = "riscv64"
             expect("profile-not-recorded", run_check(script, staged, write(renamed), schema), 77)
 
+            # A census naming a different SET of switches than the tree defines
+            # predates this tree's feature list, so it describes no
+            # configuration of it — not even the ones it names. Skipping that
+            # would retire the gate the moment someone adds a switch that
+            # defaults ON, because that moves every recorded key at once.
+            stale = root / "stale"
+            stale_build = stage_build_dir(args.build_dir.resolve(), stale)
+            stale_facts = json.loads((stale_build / FACTS_NAME).read_text())
+            stale_facts["features"]["PULP_ENABLE_UNMEASURED_SWITCH"] = "ON"
+            (stale_build / FACTS_NAME).write_text(json.dumps(stale_facts))
+            expect(
+                "feature-roster-stale",
+                run_check(script, stale_build, write(document), schema),
+                1,
+            )
+
             # A profile whose key says one feature set and whose body says
             # another contradicts itself. Nothing can be compared against it,
             # and calling that "a different profile" would retire the gate.
