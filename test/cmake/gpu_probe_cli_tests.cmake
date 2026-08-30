@@ -52,6 +52,28 @@ foreach(recipe_index RANGE 0 ${catalog_recipe_last})
         string(JSON threejs_callable GET "${catalog_json}" recipes ${recipe_index} callable)
     endif()
 endforeach()
+
+get_filename_component(build_cursor "${PULP_CLI}" DIRECTORY)
+set(pulp_build_cache "")
+foreach(parent_index RANGE 0 4)
+    if(EXISTS "${build_cursor}/CMakeCache.txt")
+        set(pulp_build_cache "${build_cursor}/CMakeCache.txt")
+        break()
+    endif()
+    get_filename_component(build_cursor "${build_cursor}" DIRECTORY)
+endforeach()
+if(NOT pulp_build_cache)
+    message(FATAL_ERROR "could not locate the CLI build cache")
+endif()
+file(STRINGS "${pulp_build_cache}" pulp_js_engine_line
+    REGEX "^PULP_JS_ENGINE:[^=]*=")
+if(NOT pulp_js_engine_line)
+    message(FATAL_ERROR "CLI build cache does not declare PULP_JS_ENGINE")
+endif()
+if(NOT pulp_js_engine_line MATCHES "=v8$" AND threejs_callable)
+    message(FATAL_ERROR
+        "non-V8 CLI build advertised threejs.multi-pass.v1 as callable")
+endif()
 if(NOT threejs_callable)
     execute_process(
         COMMAND "${PULP_CLI}" gpu probe

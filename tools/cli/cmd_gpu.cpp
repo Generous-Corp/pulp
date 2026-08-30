@@ -115,8 +115,12 @@ bool recipe_matches_symptom(const JsonValue& recipe, const std::string& symptom)
 
 bool recipe_is_callable(const JsonValue& recipe) {
     const auto* id = recipe.get("id");
-    return id && id->type == JsonValue::String &&
-           pulp::tooling::gpu_probe::find_recipe(id->str_val) != nullptr;
+    if (!id || id->type != JsonValue::String ||
+        pulp::tooling::gpu_probe::find_recipe(id->str_val) == nullptr)
+        return false;
+    if (id->str_val == "threejs.multi-pass.v1")
+        return PULP_GPU_PROBE_THREEJS_CALLABLE != 0;
+    return true;
 }
 
 std::string discovery_json(const std::vector<const JsonValue*>& recipes) {
