@@ -11,7 +11,7 @@ are encoded in this launchd template:
      exactly what crash-looped the earlier coverage template.
   2. Gate-protecting routing — a dedicated label (never the pulp-build gate
      pool), cap=1, and the tartci idle-gate env (yield to "Build and Test") so
-     the lane stands down whenever the required gate has work.
+     the lane stands down whenever either required event class has demand.
 
 These are parsed from the actual plist (plistlib), not grepped loosely, so a
 drift in any contract value fails the test by behavior.
@@ -27,6 +27,8 @@ from pathlib import Path
 LAUNCHD = Path(__file__).resolve().parents[2] / "tools" / "launchd"
 SANITIZER = LAUNCHD / "pulp-tart-runner-sanitizer-macos.plist.template"
 GATE_POOL = {"pulp-build", "pulp-build-vm"}
+MERGE_GROUP_CLASS = "pulp-build-merge-group"
+PR_HEAD_CLASS = "pulp-build-pr-head"
 
 
 def _load(path: Path) -> dict:
@@ -124,12 +126,15 @@ class SanitizerTemplateTests(unittest.TestCase):
 
     def test_idle_gate_yields_to_required_gate(self) -> None:
         # The idle-gate env is what makes a shared-store secondary lane safe.
+        # Include both event classes. The gate is admission-only and cannot
+        # preempt TSan if merge-group demand arrives during a PR-head build.
         self.assertEqual(self.env["TARTCI_YIELD_TO_WORKFLOW_NAME"], "Build and Test")
         yield_labels = {s.strip() for s in
                         self.env["TARTCI_YIELD_TO_LABELS"].split(",")}
-        # It must yield to the actual gate pool (so it detects gate demand).
         self.assertTrue(GATE_POOL.issubset(yield_labels),
                         f"yield labels {yield_labels} must include the gate pool")
+        self.assertIn(MERGE_GROUP_CLASS, yield_labels)
+        self.assertIn(PR_HEAD_CLASS, yield_labels)
 
     def test_does_not_read_namespace_vars(self) -> None:
         # Advisory lanes must not be wired to the paid Namespace pool.
