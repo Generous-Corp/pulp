@@ -9,4 +9,8 @@ target_include_directories(pulp-dsl INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(pulp-dsl INTERFACE pulp::format)
+# dsl_processor.hpp includes exactly one format header, pulp/format/processor.hpp,
+# which is the authoring vocabulary and nothing else. Linking the umbrella here
+# pulled the whole editor surface -- and through it core/view's Skia and Dawn
+# archives -- into every DSL consumer that never asked for a UI.
+target_link_libraries(pulp-dsl INTERFACE pulp::format-core)

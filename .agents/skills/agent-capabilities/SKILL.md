@@ -646,3 +646,22 @@ the bypass trailer by reflex:
   honest record is a line in this skill saying so, not a `Skill-Update: skip`.
   A note costs the same as the trailer and leaves the next person something to
   read.
+
+## Splitting an exported target means exporting BOTH halves
+
+`tools/cmake/PulpInstallRules.cmake` holds `PULP_SDK_TARGETS`, the list
+`cmake --install` exports. If you split a target that appears in that list into
+an umbrella plus its halves, **every half must be added to the list too**, not
+just kept behind the umbrella name.
+
+The trap is that the umbrella still installs fine on its own. What breaks is
+the consumer: the exported umbrella's `INTERFACE_LINK_LIBRARIES` names the
+halves, so a downstream `find_package(Pulp)` resolves a target whose interface
+references targets the export set never defined, and fails there rather than at
+install time. The symptom appears in someone else's build, one step removed
+from the change that caused it.
+
+`pulp-format` is the worked example: it exports as `pulp-format`,
+`pulp-format-core` and `pulp-format-view`. Note also that the umbrella must
+stay a real STATIC library rather than INTERFACE, because the export set
+expects an archive artifact.

@@ -2136,3 +2136,26 @@ If you are reordering members in either adapter, the tracing attachment must
 destroy LAST (after the bridge and the editor host), because the final detach
 flushes the trace and joins the auto-flush timer — it has to outlive every span
 those objects can still emit.
+
+## `ViewBridge` is a view-side symbol despite living in `namespace pulp::format`
+
+`ViewBridge` is declared in `pulp::format` but **defined in
+`core/format/src/view_bridge.cpp`**, which is compiled into
+`pulp-format-view`, not `pulp-format-core`. The namespace and the owning
+target disagree, and that has bitten a symbol sweep already.
+
+Concretely: `clap_adapter.cpp` carries an undefined
+`pulp::format::ViewBridge::~ViewBridge()` (reached through the implicit
+`~PulpClapPlugin`, which destroys a `std::unique_ptr<ViewBridge>` member). An
+`nm` sweep filtering on `pulp::view::` does not see it and reports the object
+as view-free. It is not.
+
+**A namespace is not a proxy for target ownership.** When auditing what pulls
+the view layer in, filter on the symbols a target *defines*, or skip the filter
+entirely and let a link decide — `pulp-test-format-core-only-consumer` exists
+for exactly that, and a linker applies no predicate.
+
+`vst3_plug_view.cpp` also defines `make_plug_view()`, the view-free factory
+`vst3_adapter.cpp` calls instead of naming `PulpPlugView`. Keep the factory's
+definition in that file: it is compiled per-plugin, so the symbol resolves the
+same way `PulpPlugView`'s constructor always did.

@@ -5,6 +5,7 @@
 #ifdef PULP_VST3_GUI
 
 #include <pulp/format/vst3_plug_view.hpp>
+#include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/runtime/log.hpp>
@@ -14,10 +15,19 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace pulp::format::vst3 {
 
 using namespace Steinberg;
+
+// Keeps the concrete editor type out of vst3_adapter.cpp, so the audio
+// adapter compiles without pulp/view on its include path. Declared in
+// vst3_adapter.hpp.
+IPlugView* make_plug_view(Processor& processor, state::StateStore& store,
+                          runtime::AliveToken::Handle owner_alive) {
+    return new PulpPlugView(processor, store, std::move(owner_alive));
+}
 
 PulpPlugView::PulpPlugView(Processor& processor, state::StateStore& store,
                            runtime::AliveToken::Handle owner_alive)
