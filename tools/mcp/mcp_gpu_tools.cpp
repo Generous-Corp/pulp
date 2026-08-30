@@ -181,7 +181,7 @@ std::string handle_gpu_doctor(const std::string& params_json) {
     if (process.timed_out)
         return local_error(-1, "cli-timeout", "pulp-cpp doctor gpu exceeded its bounded timeout",
                            diagnostic_output);
-    if (process.was_cancelled)
+    if (process.output_limit_exceeded || process.was_cancelled)
         return local_error(-1, "cli-output-limit",
                            "pulp-cpp doctor gpu exceeded its bounded output limit",
                            diagnostic_output);
@@ -289,7 +289,7 @@ std::string handle_gpu_probe(const std::string& params_json) {
         return local_error(-1, "cli-timeout", "pulp-cpp gpu probe exceeded its bounded timeout",
                            process.stdout_output.empty() ? process.stderr_output
                                                          : process.stdout_output);
-    if (process.was_cancelled)
+    if (process.output_limit_exceeded || process.was_cancelled)
         return local_error(-1, "cli-output-limit",
                            "pulp-cpp gpu probe exceeded its bounded output limit",
                            process.stdout_output.empty() ? process.stderr_output

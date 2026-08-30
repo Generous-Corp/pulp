@@ -31,5 +31,15 @@ int main(int argc, char** argv) {
 
     std::ifstream evidence(evidence_path);
     std::cout << evidence.rdbuf();
+    if (const auto* stdout_bytes_text =
+            std::getenv("PULP_TEST_GPU_PROBE_STDOUT_TRAILING_BYTES")) {
+        auto remaining = static_cast<std::size_t>(std::stoull(stdout_bytes_text));
+        const std::string chunk(4096, 'x');
+        while (remaining != 0) {
+            const auto count = std::min(remaining, chunk.size());
+            std::cout.write(chunk.data(), static_cast<std::streamsize>(count));
+            remaining -= count;
+        }
+    }
     return std::stoi(status_text);
 }

@@ -925,6 +925,23 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status", "[mcp][tools][gp
     const auto unsupported =
         handle_request(tool_call("57", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
     require_contains(unsupported, "malformed-cli-output");
+
+    std::ifstream pass_fixture(repo_root_path() / "test" / "fixtures" / "gpu-ux" /
+                               "pass-hardware.json");
+    REQUIRE(pass_fixture);
+    std::ofstream(evidence_path, std::ios::trunc) << pass_fixture.rdbuf();
+    std::filesystem::copy_file(PULP_TEST_GPU_PROBE_FAKE_CLI, cli,
+                               std::filesystem::copy_options::overwrite_existing);
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", evidence_path.string());
+    ScopedEnvVar argv_env("PULP_TEST_GPU_PROBE_ARGV", argv_path.string());
+    ScopedEnvVar capped_status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+    ScopedEnvVar capped_output_env("PULP_TEST_GPU_PROBE_STDOUT_TRAILING_BYTES",
+                                   std::to_string((1 << 20) + 4096));
+    const auto capped =
+        handle_request(tool_call("58", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
+    require_contains(capped, "cli-output-limit");
+    require_contains(capped, R"JSON("isError":true)JSON");
+    REQUIRE(capped.find(R"JSON("structuredContent")JSON") == std::string::npos);
 }
 
 TEST_CASE("MCP GPU probe preserves argv and typed status evidence", "[mcp][tools][gpu-probe]") {
@@ -1069,6 +1086,16 @@ TEST_CASE("MCP GPU probe preserves argv and typed status evidence", "[mcp][tools
     require_contains(threejs, R"JSON("exit_code":2)JSON");
     require_contains(threejs, R"JSON("isError":true)JSON");
 #endif
+
+    std::ofstream(evidence_path, std::ios::trunc)
+        << gp::to_json(gpu_probe_evidence(gp::Verdict::pass));
+    ScopedEnvVar capped_status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+    ScopedEnvVar capped_output_env("PULP_TEST_GPU_PROBE_STDOUT_TRAILING_BYTES",
+                                   std::to_string((1 << 20) + 4096));
+    const auto capped = handle_request(tool_call("61", "pulp_gpu_probe", params));
+    require_contains(capped, "cli-output-limit");
+    require_contains(capped, R"JSON("isError":true)JSON");
+    REQUIRE(capped.find(R"JSON("structuredContent")JSON") == std::string::npos);
 }
 
 TEST_CASE("MCP trace analyzer preserves typed verdicts and closed questions",
