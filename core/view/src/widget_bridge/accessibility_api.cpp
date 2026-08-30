@@ -49,7 +49,13 @@ void BridgeRegistrars::register_accessibility_api(WidgetBridge& self) {
         // ARIA role token -> View::AccessRole. Single shared table so the
         // JS bridge, the widget defaults, and the platform mappings agree.
         const View::AccessRole r = access_role_from_aria(role);
-        it->second->set_access_role(r);
+        if (role.empty()) it->second->restore_implicit_access_role();
+        else it->second->set_access_role(r);
+        const View::AccessRole effective_role = it->second->access_role();
+        it->second->set_default_hover_feedback(
+            effective_role == View::AccessRole::button
+            || effective_role == View::AccessRole::tab
+            || effective_role == View::AccessRole::menu_item);
         return choc::value::Value();
     });
 

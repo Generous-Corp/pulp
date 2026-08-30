@@ -690,7 +690,14 @@ int cmd_doctor(const std::vector<std::string>& args) {
                             std::cout << "      " << color::yellow() << c.fix << color::reset() << "\n";
                         }
                     } else if (dry_run) {
-                        std::cout << "    " << color::dim() << "[dry-run] Would run: " << c.fix << color::reset() << "\n";
+                        // A remediation that is prose rather than an argv is
+                        // never executed by --fix, so promising to run it
+                        // misreports what --fix would do.
+                        const bool executable = automatic_fix_argv(c.fix).has_value();
+                        std::cout << "    " << color::dim()
+                                  << (executable ? "[dry-run] Would run: "
+                                                 : "[dry-run] Manual, would not run: ")
+                                  << c.fix << color::reset() << "\n";
                     } else {
                         std::cout << "    Fix: " << color::yellow() << c.fix << color::reset() << "\n";
                     }

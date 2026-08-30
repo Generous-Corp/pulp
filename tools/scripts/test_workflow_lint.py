@@ -73,6 +73,18 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         self.assertGreaterEqual(path_patterns.count(".github/workflows/**"), 2)
         self.assertGreaterEqual(path_patterns.count(".github/actions/**"), 2)
         self.assertGreaterEqual(path_patterns.count("tools/shipyard.toml"), 2)
+        for path in (
+            "tools/scripts/fetch_skia_for_release.py",
+            "tools/scripts/test_fetch_skia_for_release.py",
+            "tools/scripts/verify_skia_m153_capabilities.py",
+            "tools/scripts/test_verify_skia_m153_capabilities.py",
+            "tools/build-skia.sh",
+            "tools/deps/validate_render_update.py",
+            "tools/deps/test_validate_render_update.py",
+            "tools/deps/validate_hosts.py",
+            "tools/deps/test_validate_hosts.py",
+        ):
+            self.assertGreaterEqual(path_patterns.count(path), 2, path)
 
     def test_actionlint_knows_the_authority_runner_label(self) -> None:
         self.assertTrue(

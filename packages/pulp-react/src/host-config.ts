@@ -215,6 +215,12 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     call('setBottom', textId, 0);
                     call('setLeft', textId, 0);
                     call('setPointerEvents', textId, 'none');
+                    // Preserve native HTML semantics on the authored box. In
+                    // addition to accessibility this opts the generic View
+                    // into Pulp's baseline hover overlay; the selected/resting
+                    // face remains entirely authored.
+                    call('setAccessibilityRole', id, 'button');
+                    if (text) call('setAccessibilityLabel', id, text);
                     return;
                 }
                 case 'input': {

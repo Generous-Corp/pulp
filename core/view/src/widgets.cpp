@@ -5,6 +5,7 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
+#include <pulp/view/theme_contrast.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/widget_schema.hpp>
 #include "knob_sprite_paint.hpp"
@@ -1386,6 +1387,14 @@ void ToggleButton::paint(canvas::Canvas& canvas) {
     auto border = on_
         ? on_border_color_.value_or(resolve_color("control.border", canvas::Color::rgba8(80, 80, 100)))
         : off_border_color_.value_or(resolve_color("control.border", canvas::Color::rgba8(80, 80, 100)));
+    // A semantic button must remain visibly interactive even when it is
+    // already selected. Derive hover from the resolved state-specific face,
+    // so off+hover and on+hover are both distinct without erasing the selected
+    // state. A custom painter can still replace this default completely.
+    if (is_hovered()) {
+        bg = adjust_lightness(bg, 0.06f);
+        border = adjust_lightness(border, 0.08f);
+    }
     const bool has_custom_border = on_ ? on_border_color_.has_value() : off_border_color_.has_value();
     const float radius = corner_radius_.value_or(6.0f);
     const bool per_corner = has_corner_radii();

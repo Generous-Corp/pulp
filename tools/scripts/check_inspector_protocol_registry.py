@@ -29,7 +29,7 @@ NON_PROTOCOL_LITERALS = {
     "CanvasRenderingContext2D.clearRect", "Color.clear", "Component.tsx",
     "Compressor.vst3", "DBusObjectPathVTable.message", "DEPENDENCIES.md",
     "DESIGN.md", "Date.now", "Foo.vst3", "GainStage.tsx", "HANDOFF.md",
-    "Info.plist", "JSON.h", "JSON.stringify", "KEYS.len", "KeyboardEvent.key", "LICENSE.md",
+    "HEAD.lock", "Info.plist", "JSON.h", "JSON.stringify", "KEYS.len", "KeyboardEvent.key", "LICENSE.md",
     "Math.random", "My.clap", "MyPlugin.component", "NOTICE.md", "ObjBase.h",
     "Number.isFinite", "Object.create", "Object.defineProperty", "Object.prototype",
     "Promise.resolve", "Promise.then",

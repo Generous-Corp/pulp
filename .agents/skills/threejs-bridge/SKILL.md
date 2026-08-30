@@ -56,7 +56,17 @@ Not supported by this skill:
 
 2. **gpu_surface MUST be passed to WidgetBridge** — The native GPU bridge only initializes when WidgetBridge receives a non-null GpuSurface pointer. Without it, Three.js gets no WebGPU device and the 3D canvas renders black. This is the `attach_gpu_surface()` call in the demo.
 
-3. **Three.js fetched via FetchContent** — `PULP_HAS_THREEJS` is set automatically when GPU + tests are enabled.
+3. **Three.js fetched via FetchContent** — `PULP_HAS_THREEJS` is set automatically
+   when GPU plus tests are enabled, or for an eligible native examples build
+   (`PULP_BUILD_EXAMPLES=ON`; not Android, iOS, Emscripten, or WASI). The latter
+   is the narrow release-path provider-identity cube lane.
+
+4. **Bind runtime demo fixtures at configure time** — ccache may prefix-map
+   `__FILE__` to a cache-owned diagnostic path. Files such as
+   `demo.js.template` must use a CMake-provided source-directory definition;
+   never derive runtime asset paths from `__FILE__` or from the fetched
+   Three.js directory. The strict provider-identity cube gate must work from a
+   warm shared cache and an arbitrary build directory.
 
 ## Failure Modes To Recognize
 

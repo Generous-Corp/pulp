@@ -866,10 +866,13 @@ if(PULP_HAS_SKIA)
     # used (e.g. a worktree whose external/skia-build holds only headers). Using
     # the resolved SKIA_DIR makes the installed SDK self-contained either way.
     if(SKIA_DIR AND EXISTS "${SKIA_DIR}")
-        install(DIRECTORY "${SKIA_DIR}/" DESTINATION external/skia-build)
+        install(DIRECTORY "${SKIA_DIR}/" DESTINATION external/skia-build
+            PATTERN ".skia-source-archive.zip" EXCLUDE
+        )
     else()
         install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build"
             DESTINATION external
+            PATTERN ".skia-source-archive.zip" EXCLUDE
         )
     endif()
 endif()

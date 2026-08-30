@@ -4,6 +4,7 @@
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
@@ -313,6 +314,120 @@ TEST_CASE("View simulate_hover sets hovered state", "[view][widget_animation]") 
 
     root.simulate_hover({150, 50}); // outside knob
     REQUIRE_FALSE(knob_ptr->is_hovered());
+}
+
+TEST_CASE("View simulate_hover preserves hover through the hit ancestry",
+          "[view][widget_animation][hover]") {
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+
+    auto option = std::make_unique<View>();
+    option->set_bounds({10, 10, 100, 40});
+    auto* option_ptr = option.get();
+    auto label = std::make_unique<View>();
+    label->set_bounds({10, 5, 80, 30});
+    auto* label_ptr = label.get();
+    option->add_child(std::move(label));
+    root.add_child(std::move(option));
+
+    int option_enters = 0;
+    int option_leaves = 0;
+    option_ptr->on_hover_enter = [&] { ++option_enters; };
+    option_ptr->on_hover_leave = [&] { ++option_leaves; };
+
+    root.simulate_hover({30, 30});
+    REQUIRE(root.is_hovered());
+    REQUIRE(option_ptr->is_hovered());
+    REQUIRE(label_ptr->is_hovered());
+    REQUIRE(option_enters == 1);
+
+    root.simulate_hover({40, 30});
+    REQUIRE(option_ptr->is_hovered());
+    REQUIRE(option_enters == 1);
+    REQUIRE(option_leaves == 0);
+
+    root.simulate_hover({150, 50});
+    REQUIRE(root.is_hovered());
+    REQUIRE_FALSE(option_ptr->is_hovered());
+    REQUIRE_FALSE(label_ptr->is_hovered());
+    REQUIRE(option_leaves == 1);
+}
+
+TEST_CASE("ToggleButton hover remains distinct in resting and selected states",
+          "[view][widget_animation][hover]") {
+    const auto painted_face = [](ToggleButton& button) {
+        pulp::canvas::RecordingCanvas canvas;
+        button.paint(canvas);
+        pulp::canvas::Color active{};
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_fill_color)
+                active = command.color;
+            else if (command.type
+                     == pulp::canvas::DrawCommand::Type::fill_rounded_rect)
+                return active;
+        }
+        return active;
+    };
+    const auto differs = [](const pulp::canvas::Color& a,
+                            const pulp::canvas::Color& b) {
+        return std::abs(a.r - b.r) > 0.001f
+            || std::abs(a.g - b.g) > 0.001f
+            || std::abs(a.b - b.b) > 0.001f
+            || std::abs(a.a - b.a) > 0.001f;
+    };
+
+    ToggleButton button;
+    button.set_bounds({0, 0, 100, 28});
+    const auto resting = painted_face(button);
+    button.set_hovered(true);
+    const auto resting_hover = painted_face(button);
+    REQUIRE(differs(resting, resting_hover));
+
+    button.set_on(true);
+    button.set_hovered(false);
+    const auto selected = painted_face(button);
+    button.set_hovered(true);
+    const auto selected_hover = painted_face(button);
+    REQUIRE(differs(selected, selected_hover));
+    REQUIRE(differs(resting_hover, selected_hover));
+}
+
+TEST_CASE("View default semantic hover feedback paints the tokenized control face",
+          "[view][widget_animation][hover]") {
+    const auto paints_hover_face = [](float radius, bool enabled,
+                                      pulp::canvas::DrawCommand::Type shape) {
+        Theme theme = Theme::dark();
+        theme.colors["text.primary"] = pulp::canvas::Color::rgba8(40, 80, 120);
+
+        View control;
+        control.set_bounds({0, 0, 100, 28});
+        control.set_theme(theme);
+        control.set_border_radius(radius);
+        control.set_default_hover_feedback(true);
+        control.set_hovered(true);
+        control.set_enabled(enabled);
+
+        pulp::canvas::RecordingCanvas canvas;
+        control.paint_all(canvas);
+        pulp::canvas::Color active{};
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_fill_color) {
+                active = command.color;
+            } else if (command.type == shape
+                       && active.r8() == 40 && active.g8() == 80
+                       && active.b8() == 120 && active.a8() == 15) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    REQUIRE(paints_hover_face(
+        4.0f, true, pulp::canvas::DrawCommand::Type::fill_rounded_rect));
+    REQUIRE(paints_hover_face(
+        0.0f, true, pulp::canvas::DrawCommand::Type::fill_rect));
+    REQUIRE_FALSE(paints_hover_face(
+        4.0f, false, pulp::canvas::DrawCommand::Type::fill_rounded_rect));
 }
 
 // ── FrameClock integration test ─────────────────────────────────────────────

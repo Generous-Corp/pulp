@@ -55,6 +55,14 @@ def make_zip_bytes(rel_path: pathlib.Path, payload: bytes = b"skia") -> bytes:
     return buf.getvalue()
 
 
+def make_provider_zip_bytes(payload: bytes = b"skia") -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("build/mac-gpu/lib/Release/libskia.a", payload)
+        zf.writestr("build/mac-gpu/lib/Release/libdawn_combined.a", b"dawn-" + payload)
+    return buf.getvalue()
+
+
 @contextlib.contextmanager
 def cwd(path: pathlib.Path):
     old = pathlib.Path.cwd()
@@ -135,7 +143,7 @@ class FetchSkiaForReleaseExtraTests(unittest.TestCase):
 
     def test_main_unpacks_valid_asset_and_reports_zip_layout_drift(self) -> None:
         with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
-            data = make_zip_bytes(pathlib.Path("build/mac-gpu/lib/Release/libskia.a"), b"abc")
+            data = make_provider_zip_bytes(b"abc")
             digest = hashlib.sha256(data).hexdigest()
             manifest = pathlib.Path("tools/deps/manifest.json")
             manifest.parent.mkdir(parents=True)
@@ -185,7 +193,7 @@ class FetchSkiaForReleaseExtraTests(unittest.TestCase):
                  contextlib.redirect_stdout(io.StringIO()), \
                  contextlib.redirect_stderr(err := io.StringIO()):
                 self.assertEqual(skia.main(["fetch", "darwin-arm64"]), 1)
-            self.assertIn("expected library not found", err.getvalue())
+            self.assertIn("expected materialized Skia/Dawn archives not found", err.getvalue())
 
 
 class BakedSkiaShortCircuit(unittest.TestCase):
@@ -206,17 +214,20 @@ class BakedSkiaShortCircuit(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _bake(self, root: pathlib.Path, stamp: str) -> None:
-        lib = root / "build/mac-gpu/lib/Release/libskia.a"
-        lib.parent.mkdir(parents=True, exist_ok=True)
-        lib.write_bytes(b"baked")
+    def _bake(self, root: pathlib.Path, data: bytes, stamp: str) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            archive.extractall(root)
+        (root / skia.SOURCE_ARCHIVE).write_bytes(data)
+        skia.write_generation_receipt(root, "darwin-arm64", stamp)
         (root / ".skia-asset-sha256").write_text(stamp, encoding="utf-8")
 
     def test_baked_matching_stamp_skips_fetch_without_download(self) -> None:
         with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
-            digest = "a" * 64
+            data = make_provider_zip_bytes(b"baked")
+            digest = hashlib.sha256(data).hexdigest()
             self._manifest(digest)
-            baked = pathlib.Path("baked"); self._bake(baked, digest)
+            baked = pathlib.Path("baked"); self._bake(baked, data, digest)
 
             def _boom(*a, **k):
                 raise AssertionError("urlopen must NOT be called when baked Skia matches the pin")
@@ -232,10 +243,12 @@ class BakedSkiaShortCircuit(unittest.TestCase):
 
     def test_baked_stale_stamp_refetches(self) -> None:
         with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
-            data = make_zip_bytes(pathlib.Path("build/mac-gpu/lib/Release/libskia.a"), b"fresh")
+            data = make_provider_zip_bytes(b"fresh")
             digest = hashlib.sha256(data).hexdigest()
             self._manifest(digest)
-            baked = pathlib.Path("baked"); self._bake(baked, "0" * 64)  # stale stamp != pin
+            old_data = make_provider_zip_bytes(b"stale")
+            old_digest = hashlib.sha256(old_data).hexdigest()
+            baked = pathlib.Path("baked"); self._bake(baked, old_data, old_digest)
 
             out = io.StringIO()
             with mock.patch.dict(os.environ, {"PULP_USE_BAKED_SKIA": "1", "SKIA_DIR": str(baked.resolve())}), \
@@ -250,7 +263,7 @@ class BakedSkiaShortCircuit(unittest.TestCase):
         # A prior cache restore can leave external/skia-build/build already present.
         # Unpacking must overwrite it, not raise FileExistsError on the dir entry.
         with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
-            data = make_zip_bytes(pathlib.Path("build/mac-gpu/lib/Release/libskia.a"), b"fresh")
+            data = make_provider_zip_bytes(b"fresh")
             digest = hashlib.sha256(data).hexdigest()
             manifest = pathlib.Path("tools/deps/manifest.json")
             manifest.parent.mkdir(parents=True)
@@ -284,7 +297,7 @@ class BakedSkiaShortCircuit(unittest.TestCase):
         # (its target gone). Unpacking must remove the broken link and succeed,
         # not abort with the FileNotFound/FileExists pair the link produces.
         with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
-            data = make_zip_bytes(pathlib.Path("build/mac-gpu/lib/Release/libskia.a"), b"ok")
+            data = make_provider_zip_bytes(b"ok")
             digest = hashlib.sha256(data).hexdigest()
             manifest = pathlib.Path("tools/deps/manifest.json")
             manifest.parent.mkdir(parents=True)

@@ -120,6 +120,10 @@ for part in "${PARTS[@]}"; do
     # alone when it does not.
     source_has_stamp=0
     if [ "$part" = "tools/rack" ]; then
+      # The saved-patch decoder is copied and atomically replaced below. Keep
+      # the last verified executable alive if validation of its successor
+      # fails; source, license, provenance and fixtures still refresh normally.
+      printf '%s\n' rack_patch_decode >> "$exclude_file"
       if [ -f "$SRC/$part/FORGE_TOOLCHAIN_STAMP" ]; then
         source_has_stamp=1
       else
@@ -210,6 +214,64 @@ done
 # single mode bit. A tool that does what it says, afterwards, is the only way
 # to know.
 chmod -R u+rwX "$DEST"
+
+# Rack 2 saves patches as zstd-compressed tar, while Forge's fresh patches are
+# plain JSON. The package build produces the self-contained reader, just as it
+# produces shape_text below. Copy that prebuilt helper into the exact directory
+# rack_open.py resolves, then prove it against Rack's real directory-plus-patch
+# member layout without giving it a compiler, Homebrew, tar, or zstd on PATH.
+# The previous verified executable remains live until its successor passes.
+DECODER="$DEST/tools/rack/rack_patch_decode"
+DECODER_STAGED="$(mktemp "$DEST/tools/rack/.rack_patch_decode.install.XXXXXX")"
+DECODER_PROBE="$(mktemp)"
+cleanup_decoder_stage() {
+  rm -f "$DECODER_STAGED" "$DECODER_PROBE"
+}
+trap cleanup_decoder_stage EXIT
+if [ ! -x "$SRC/build/rack_patch_decode" ]; then
+  echo "  FAILED: no prebuilt Rack saved-patch decoder at $SRC/build/rack_patch_decode" >&2
+  echo "         Package builds must run: tools/rack/build_rack_patch_decode.sh build/rack_patch_decode" >&2
+  exit 1
+fi
+cp "$SRC/build/rack_patch_decode" "$DECODER_STAGED"
+chmod 0755 "$DECODER_STAGED"
+if [ ! -x "$DECODER_STAGED" ]; then
+  echo "  FAILED: installed Rack saved-patch decoder is not executable" >&2
+  exit 1
+fi
+if ! /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin "$DECODER_STAGED" \
+    < "$DEST/tools/rack/test_fixtures/rack-open/rack-saved-rack2-valid.vcv" \
+    > "$DECODER_PROBE"; then
+  echo "  FAILED: installed Rack saved-patch decoder rejected Rack 2 format" >&2
+  exit 1
+fi
+if ! python3 - "$DECODER_PROBE" <<'PY'
+import json
+import pathlib
+import sys
+
+document = json.loads(pathlib.Path(sys.argv[1]).read_bytes())
+if not isinstance(document, dict) or len(document.get("modules", [])) != 2:
+    raise SystemExit("decoded fixture did not contain its two declared modules")
+PY
+then
+  echo "  FAILED: installed Rack saved-patch decoder emitted invalid JSON" >&2
+  exit 1
+fi
+if [ "$(uname -s)" = "Darwin" ]; then
+  NONSYSTEM_DEPS="$(/usr/bin/otool -L "$DECODER_STAGED" | /usr/bin/tail -n +2 | \
+    /usr/bin/awk '{print $1}' | \
+    /usr/bin/grep -Ev '^/usr/lib/|^/System/Library/' || true)"
+  if [ -n "$NONSYSTEM_DEPS" ]; then
+    echo "  FAILED: Rack saved-patch decoder has non-system dependencies:" >&2
+    printf '%s\n' "$NONSYSTEM_DEPS" >&2
+    exit 1
+  fi
+fi
+mv -f "$DECODER_STAGED" "$DECODER"
+rm -f "$DECODER_PROBE"
+trap - EXIT
+echo "  verified the self-contained Rack saved-patch decoder"
 
 # The acceptance test is a real panel, not a file listing. A complete-looking
 # tree that cannot emit an SVG is the failure this script exists to prevent.
