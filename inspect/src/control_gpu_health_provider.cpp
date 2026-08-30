@@ -289,6 +289,7 @@ struct ControlGpuHealthProvider::Impl {
     bool all_trace_observations_complete = true;
     std::set<std::string> lifecycle_ids;
     bool trace_span_open = false;
+    bool active_trial_lost_events = false;
 };
 
 ControlGpuHealthProvider::ControlGpuHealthProvider(Config config)
@@ -306,6 +307,7 @@ bool ControlGpuHealthProvider::begin_editor_open(
         return false;
     impl_->cache_state = cache_state;
     impl_->requested_at = requested_at;
+    impl_->active_trial_lost_events = false;
     impl_->begin_trace(static_cast<std::uint32_t>(snapshot->startup.trials.size()), cache_state);
     return true;
 }
@@ -486,6 +488,10 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
         trial.diagnostic_code =
             trace_complete ? "gpu.startup.unverified" : "gpu.startup.trace_incomplete";
     }
+    if (impl_->active_trial_lost_events) {
+        trial.verdict = gh::Verdict::unverified;
+        trial.diagnostic_code = "gpu.startup.event_loss";
+    }
     result->startup.trials.push_back(std::move(trial));
     if (impl_->config.gpu_evidence_id && evidence_id(*impl_->config.gpu_evidence_id))
         result->startup.correlation.gpu_evidence_id = impl_->config.gpu_evidence_id;
@@ -495,6 +501,7 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
                             result->health.health_state);
     impl_->end_trace();
     impl_->requested_at.reset();
+    impl_->active_trial_lost_events = false;
     impl_->publish(std::move(result));
     return true;
 }
@@ -518,8 +525,10 @@ bool ControlGpuHealthProvider::record_timeout(
     trial.sequence = static_cast<std::uint32_t>(result->startup.trials.size());
     trial.cache_state =
         impl_->cache_state == CacheState::cold ? gh::CacheState::cold : gh::CacheState::warm;
-    trial.verdict = gh::Verdict::unavailable;
-    trial.diagnostic_code = "gpu.startup.timeout";
+    trial.verdict = impl_->active_trial_lost_events ? gh::Verdict::unverified
+                                                   : gh::Verdict::unavailable;
+    trial.diagnostic_code =
+        impl_->active_trial_lost_events ? "gpu.startup.event_loss" : "gpu.startup.timeout";
     result->startup.trials.push_back(std::move(trial));
     record_capture_event(result->startup.capture);
     derive_startup_state(result->startup);
@@ -528,6 +537,7 @@ bool ControlGpuHealthProvider::record_timeout(
                             result->health.health_state);
     impl_->end_trace();
     impl_->requested_at.reset();
+    impl_->active_trial_lost_events = false;
     impl_->publish(std::move(result));
     return true;
 }
@@ -550,8 +560,10 @@ bool ControlGpuHealthProvider::record_instance_lost() noexcept {
     trial.sequence = static_cast<std::uint32_t>(result->startup.trials.size());
     trial.cache_state =
         impl_->cache_state == CacheState::cold ? gh::CacheState::cold : gh::CacheState::warm;
-    trial.verdict = gh::Verdict::unavailable;
-    trial.diagnostic_code = "gpu.startup.instance_lost";
+    trial.verdict = impl_->active_trial_lost_events ? gh::Verdict::unverified
+                                                   : gh::Verdict::unavailable;
+    trial.diagnostic_code = impl_->active_trial_lost_events ? "gpu.startup.event_loss"
+                                                            : "gpu.startup.instance_lost";
     result->startup.trials.push_back(std::move(trial));
     record_capture_event(result->startup.capture);
     derive_startup_state(result->startup);
@@ -560,6 +572,7 @@ bool ControlGpuHealthProvider::record_instance_lost() noexcept {
                             result->health.health_state);
     impl_->end_trace();
     impl_->requested_at.reset();
+    impl_->active_trial_lost_events = false;
     impl_->publish(std::move(result));
     return true;
 }
@@ -573,19 +586,8 @@ bool ControlGpuHealthProvider::record_dropped_events(std::uint64_t count) noexce
             ? kMaximumExactJsonInteger
             : result->startup.capture.dropped_event_count + count;
     result->startup.capture.truncated = true;
-    if (result->startup.trials.empty()) {
-        gh::StartupTrial trial;
-        trial.sequence = 0;
-        trial.cache_state =
-            impl_->cache_state == CacheState::cold ? gh::CacheState::cold : gh::CacheState::warm;
-        trial.verdict = gh::Verdict::unverified;
-        trial.diagnostic_code = "gpu.startup.event_loss";
-        result->startup.trials.push_back(std::move(trial));
-    } else {
-        auto& trial = result->startup.trials.back();
-        trial.verdict = gh::Verdict::unverified;
-        trial.diagnostic_code = "gpu.startup.event_loss";
-    }
+    if (impl_->requested_at)
+        impl_->active_trial_lost_events = true;
     derive_startup_state(result->startup);
     impl_->publish(std::move(result));
     return true;

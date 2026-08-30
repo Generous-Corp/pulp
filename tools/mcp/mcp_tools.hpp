@@ -20,6 +20,11 @@ struct InspectorMcpToolDescriptor {
     std::string_view method;
 };
 
+struct TraceAnalyzeProcessLimits {
+    int timeout_ms;
+    std::size_t max_output_bytes;
+};
+
 std::span<const InspectorMcpToolDescriptor> inspector_mcp_tool_registry();
 const InspectorMcpToolDescriptor* find_inspector_mcp_tool(std::string_view name);
 std::string_view inspector_mcp_tool_capability(const InspectorMcpToolDescriptor& tool);
@@ -37,6 +42,13 @@ void configure_gpu_doctor_executable(std::string executable_path);
 std::string handle_trace_analyze(const std::string& params_json);
 /// Capture pulp-mcp's launch identity for cwd-independent trace CLI resolution.
 void configure_trace_analyze_executable(std::string executable_path);
+/// The outer MCP allowance. It must remain strictly subordinate to the CLI's
+/// own trace_processor deadline, output cap, and process-tree cleanup.
+TraceAnalyzeProcessLimits trace_analyze_process_limits();
+/// Tests only: scale the outer allowance without making production policy
+/// controllable through inherited environment variables.
+void configure_trace_analyze_process_limits_for_testing(
+    std::optional<TraceAnalyzeProcessLimits> limits);
 std::string handle_minos(const std::string& params_json);
 std::string handle_kit(const std::string& params_json);
 std::string handle_kit_search(const std::string& params_json);

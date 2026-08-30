@@ -20,6 +20,7 @@ namespace {
 
 std::mutex g_executable_mutex;
 std::filesystem::path g_mcp_executable;
+std::optional<TraceAnalyzeProcessLimits> g_process_limits_for_testing;
 
 std::string local_error(const std::string& code, const std::string& message,
                         const std::string& raw_output = {}) {
@@ -37,8 +38,14 @@ bool valid_question(const std::string& question) {
     return question == "gpu-startup" || question == "gpu-health" || question == "gpu-probe";
 }
 
-constexpr int kTraceAnalyzeTimeoutMs = 60 * 1000;
-constexpr std::size_t kTraceAnalyzeMaximumOutputBytes = 1 << 20;
+// The Rust analyzer owns trace_processor's complete process group (a Job Object
+// on Windows), applies a 120-second deadline and a 4 MiB combined-output cap,
+// then allows two seconds to terminate/reap it. This outer wrapper must not
+// preempt that cleanup: ChildProcess cancellation only targets its direct child.
+constexpr int kTraceAnalyzeTimeoutMs = 135 * 1000;
+constexpr std::size_t kTraceAnalyzeMaximumOutputBytes = 8 << 20;
+static_assert(kTraceAnalyzeTimeoutMs > (120 + 2) * 1000);
+static_assert(kTraceAnalyzeMaximumOutputBytes > 4 * 1024 * 1024);
 
 std::string trim_output(const std::string& value) {
     constexpr std::string_view whitespace = " \t\r\n";
@@ -61,6 +68,18 @@ int expected_status(std::string_view verdict) {
 void configure_trace_analyze_executable(std::string executable_path) {
     std::lock_guard lock(g_executable_mutex);
     g_mcp_executable = std::move(executable_path);
+}
+
+TraceAnalyzeProcessLimits trace_analyze_process_limits() {
+    std::lock_guard lock(g_executable_mutex);
+    return g_process_limits_for_testing.value_or(
+        TraceAnalyzeProcessLimits{kTraceAnalyzeTimeoutMs, kTraceAnalyzeMaximumOutputBytes});
+}
+
+void configure_trace_analyze_process_limits_for_testing(
+    std::optional<TraceAnalyzeProcessLimits> limits) {
+    std::lock_guard lock(g_executable_mutex);
+    g_process_limits_for_testing = limits;
 }
 
 std::string handle_trace_analyze(const std::string& params_json) {
@@ -107,9 +126,10 @@ std::string handle_trace_analyze(const std::string& params_json) {
         return local_error("cli-unavailable", "the sibling installed pulp executable was not found");
 
     const std::vector<std::string> arguments{"trace", question, "--trace", trace, "--json"};
+    const auto limits = trace_analyze_process_limits();
     pulp::platform::ProcessOptions options;
-    options.timeout_ms = kTraceAnalyzeTimeoutMs;
-    options.max_output_bytes = kTraceAnalyzeMaximumOutputBytes;
+    options.timeout_ms = limits.timeout_ms;
+    options.max_output_bytes = limits.max_output_bytes;
     const auto process = pulp::platform::ChildProcess::run(cli.string(), arguments, options);
     const auto diagnostic_output = process.stdout_output.empty()
         ? process.stderr_output : process.stdout_output;

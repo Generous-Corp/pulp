@@ -351,7 +351,39 @@ TEST_CASE("GPU health provider invalidates a completed campaign after event loss
     REQUIRE(snapshot->startup.capture.truncated);
     REQUIRE(snapshot->startup.status == gh::MeasurementStatus::incomplete);
     REQUIRE(snapshot->startup.verdict == gh::Verdict::unverified);
-    REQUIRE(snapshot->startup.trials.back().diagnostic_code == "gpu.startup.event_loss");
+    REQUIRE(snapshot->startup.trials.back().diagnostic_code == "gpu.startup.pass");
+}
+
+TEST_CASE("GPU health provider associates event loss without consuming a lifecycle trial") {
+    pulp::inspect::ControlGpuHealthProvider provider(ratified_campaign_config());
+    const auto requested_at = std::chrono::steady_clock::time_point{};
+    REQUIRE(provider.begin_editor_open(
+        pulp::inspect::ControlGpuHealthProvider::CacheState::cold, requested_at));
+    REQUIRE(provider.record_dropped_events(1));
+
+    auto observed = frame(true);
+    observed.lifecycle_id = "event-loss-lifecycle";
+    observed.observed_cache_state = pulp::inspect::ControlGpuHealthProvider::CacheState::cold;
+    observed.cache_provenance =
+        pulp::inspect::ControlGpuHealthProvider::CacheProvenance::fresh_process;
+    observed.native_present_observed = true;
+    observed.native_presented_at = requested_at + 10ms;
+    observed.interaction_hitch_ms = 1.0;
+    observed.trace_evidence_id = "trace-native-lifecycle";
+    observed.observed_signature_sha256 = std::string(64, 'a');
+    observed.observed_at = requested_at + 10ms;
+    REQUIRE(provider.record_presented_frame(observed));
+    REQUIRE(provider.snapshot()->startup.trials.size() == 1);
+    REQUIRE(provider.snapshot()->startup.trials.front().diagnostic_code ==
+            "gpu.startup.event_loss");
+
+    for (std::uint32_t index = 1; index < 20; ++index)
+        record_complete_campaign_trial(provider, index);
+    require_valid(provider);
+    REQUIRE(provider.snapshot()->startup.trials.size() == 20);
+    REQUIRE_FALSE(provider.begin_editor_open(
+        pulp::inspect::ControlGpuHealthProvider::CacheState::warm,
+        std::chrono::steady_clock::time_point{} + 600ms));
 }
 
 TEST_CASE("GPU health provider seeded blank first frame fails closed") {

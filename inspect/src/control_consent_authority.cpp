@@ -74,6 +74,23 @@ std::string safe_display_token(std::string_view input) {
     return output;
 }
 
+std::string grant_duration_display(std::chrono::milliseconds duration) {
+    using namespace std::chrono;
+    if (duration.count() > 0 && duration % hours{1} == milliseconds::zero()) {
+        const auto count = duration_cast<hours>(duration).count();
+        return std::to_string(count) + (count == 1 ? " hour" : " hours");
+    }
+    if (duration.count() > 0 && duration % minutes{1} == milliseconds::zero()) {
+        const auto count = duration_cast<minutes>(duration).count();
+        return std::to_string(count) + (count == 1 ? " minute" : " minutes");
+    }
+    if (duration.count() > 0 && duration % seconds{1} == milliseconds::zero()) {
+        const auto count = duration_cast<seconds>(duration).count();
+        return std::to_string(count) + (count == 1 ? " second" : " seconds");
+    }
+    return std::to_string(duration.count()) + " milliseconds";
+}
+
 ControlConsentPrompt make_prompt(const ControlGrantConsentRequest& request) {
     ControlConsentPrompt prompt{
         .request = request,
@@ -91,16 +108,24 @@ ControlConsentPrompt make_prompt(const ControlGrantConsentRequest& request) {
             prompt.requested_operations_display.append(", ");
         prompt.requested_operations_display.append(capability_contract_id(capability));
     }
-    const bool gpu_health_only = request.grant.capabilities.size() == 1 &&
-                                 request.grant.capabilities.front() ==
-                                     InspectorCapability::GpuHealthRead;
+    const bool includes_gpu_health =
+        std::ranges::find(request.grant.capabilities, InspectorCapability::GpuHealthRead) !=
+        request.grant.capabilities.end();
+    const bool gpu_health_only = request.grant.capabilities.size() == 1 && includes_gpu_health;
+    const auto duration = grant_duration_display(request.grant.ttl);
+    const auto capability_count = request.grant.capabilities.size();
     prompt.primary_message = gpu_health_only
                                  ? "Read GPU startup health once for " + prompt.plugin_display
                                  : "Allow " +
-                                       std::to_string(request.grant.capabilities.size()) +
-                                       " requested operation(s) once for " +
-                                       prompt.plugin_display;
-    prompt.approve_label = gpu_health_only ? "Allow GPU Health Once" : "Allow Once";
+                                       std::to_string(capability_count) + " requested " +
+                                       (capability_count == 1 ? "capability" : "capabilities") +
+                                       " for up to " + duration + " for " +
+                                       prompt.plugin_display +
+                                       (includes_gpu_health
+                                            ? ". GPU startup health can be read once"
+                                            : "");
+    prompt.approve_label =
+        gpu_health_only ? "Allow GPU Health Once" : "Allow for " + duration;
     prompt.technical_details_display =
         "Requester executable: " + prompt.client_executable_display +
         "\nRequester publisher: " + prompt.client_publisher_display +

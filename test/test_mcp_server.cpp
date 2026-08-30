@@ -14,6 +14,13 @@
 #include <utility>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <cerrno>
+#include <csignal>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 #include "mcp_server_test_support.hpp"
 
 #include "mcp_compat.hpp"
@@ -141,6 +148,18 @@ class ScopedEnvVar {
     std::string name_;
     std::string previous_;
     bool had_previous_ = false;
+};
+
+class ScopedTraceAnalyzeProcessLimits {
+  public:
+    explicit ScopedTraceAnalyzeProcessLimits(TraceAnalyzeProcessLimits limits) {
+        configure_trace_analyze_process_limits_for_testing(limits);
+    }
+    ~ScopedTraceAnalyzeProcessLimits() {
+        configure_trace_analyze_process_limits_for_testing(std::nullopt);
+    }
+    ScopedTraceAnalyzeProcessLimits(const ScopedTraceAnalyzeProcessLimits&) = delete;
+    ScopedTraceAnalyzeProcessLimits& operator=(const ScopedTraceAnalyzeProcessLimits&) = delete;
 };
 
 // Several tests below shell out to `git -C <tempdir> …` on throwaway repos.
@@ -1182,6 +1201,86 @@ TEST_CASE("MCP trace analyzer preserves typed verdicts and closed questions",
     require_contains(freeform_sql, "invalid-arguments");
     REQUIRE(freeform_sql.find(R"JSON("structuredContent")JSON") == std::string::npos);
 }
+
+TEST_CASE("MCP trace analyzer leaves time and output headroom for CLI-owned cleanup",
+          "[mcp][tools][trace]") {
+    const auto production = trace_analyze_process_limits();
+    REQUIRE(production.timeout_ms > 122 * 1000);
+    REQUIRE(production.max_output_bytes > 4 * 1024 * 1024);
+
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+#if defined(_WIN32)
+    const auto mcp = bin / "pulp-mcp.exe";
+    const auto cli = bin / "pulp.exe";
+#else
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp";
+#endif
+    const auto result_path = bin / "trace-result.json";
+    const auto argv_path = bin / "trace-argv.txt";
+    std::filesystem::copy_file(PULP_TEST_GPU_PROBE_FAKE_CLI, cli);
+    std::ofstream(result_path)
+        << R"JSON({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-health","verdict":"pass","capture_complete":true,"capture_integrity":{},"scheduler_evidence_available":false,"cold_start_contributors":[],"steady_state_contributors":[]})JSON";
+    configure_trace_analyze_executable(mcp.string());
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", result_path.string());
+    ScopedEnvVar argv_env("PULP_TEST_GPU_PROBE_ARGV", argv_path.string());
+    ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+    ScopedEnvVar delay_env("PULP_TEST_GPU_PROBE_DELAY_MS", "150");
+    ScopedEnvVar flood_env("PULP_TEST_GPU_PROBE_STDERR_BYTES", "131072");
+    ScopedTraceAnalyzeProcessLimits scaled_limits({500, 256 * 1024});
+
+    const auto response = handle_request(tool_call(
+        "62", "pulp_trace_analyze",
+        R"JSON({"question":"gpu-health","trace":"headroom.pftrace"})JSON"));
+    require_contains(response, R"JSON("verdict":"pass")JSON");
+    REQUIRE(response.find("cli-timeout") == std::string::npos);
+    REQUIRE(response.find("cli-output-limit") == std::string::npos);
+}
+
+#if !defined(_WIN32)
+TEST_CASE("MCP trace analyzer permits CLI-owned hanging descendant cleanup",
+          "[mcp][tools][trace]") {
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp";
+    const auto result_path = bin / "trace-result.json";
+    const auto pid_path = bin / "descendant.pid";
+    std::ofstream(result_path)
+        << R"JSON({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-health","verdict":"pass","capture_complete":true,"capture_integrity":{},"scheduler_evidence_available":false,"cold_start_contributors":[],"steady_state_contributors":[]})JSON";
+    std::ofstream(cli)
+        << "#!/bin/sh\n"
+           "sleep 30 &\n"
+           "child=$!\n"
+           "printf '%s\\n' \"$child\" > \"$PULP_TEST_TRACE_DESCENDANT_PID\"\n"
+           "sleep 0.15\n"
+           "kill \"$child\"\n"
+           "wait \"$child\" 2>/dev/null || true\n"
+           "cat \"$PULP_TEST_GPU_PROBE_EVIDENCE\"\n";
+    std::filesystem::permissions(cli, std::filesystem::perms::owner_exec |
+                                          std::filesystem::perms::owner_read |
+                                          std::filesystem::perms::owner_write);
+    configure_trace_analyze_executable(mcp.string());
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", result_path.string());
+    ScopedEnvVar pid_env("PULP_TEST_TRACE_DESCENDANT_PID", pid_path.string());
+    ScopedTraceAnalyzeProcessLimits scaled_limits({500, 256 * 1024});
+
+    const auto response = handle_request(tool_call(
+        "63", "pulp_trace_analyze",
+        R"JSON({"question":"gpu-health","trace":"hanging-child.pftrace"})JSON"));
+    require_contains(response, R"JSON("verdict":"pass")JSON");
+    std::ifstream pid_file(pid_path);
+    pid_t descendant = -1;
+    pid_file >> descendant;
+    REQUIRE(descendant > 0);
+    errno = 0;
+    REQUIRE(::kill(descendant, 0) == -1);
+    REQUIRE(errno == ESRCH);
+}
+#endif
 
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
 TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][tools][timeline]") {
