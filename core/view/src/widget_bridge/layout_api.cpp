@@ -716,7 +716,7 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
 void WidgetBridge::ensure_layout() {
     const auto generation = View::layout_generation();
     if (generation == last_layout_generation_) return;
-    root_.layout_children();
+    root_.layout_children_if_needed();
     // Record the generation AFTER the pass, not the value sampled before it.
     // `layout_children()` assigns child bounds, and `set_bounds` bumps the
     // generation, so the counter reliably moves DURING a layout. Storing the
@@ -732,6 +732,7 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
     register_bridge_function(api, "layout", [&self](choc::javascript::ArgumentList) {
         self.root_.clear_layout_dirty();
         self.root_.layout_children();
+        self.root_.mark_layout_current();
         // Explicit "lay out now" still always forces — but record the
         // generation so the geometry reads that typically follow it are elided.
         self.last_layout_generation_ = View::layout_generation();

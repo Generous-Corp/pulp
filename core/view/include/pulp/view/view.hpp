@@ -301,6 +301,21 @@ public:
 
     // Perform flex layout on children (virtual so ScrollView can override)
     virtual void layout_children();
+    /// Lay out only when a geometry mutation has happened since this root's
+    /// last completed pass. This is the shared host/bridge synchronization
+    /// point: a bridge geometry read and the following GPU paint must not both
+    /// walk the same unchanged tree.
+    void layout_children_if_needed() {
+        if (layout_is_current()) return;
+        layout_children();
+        mark_layout_current();
+    }
+    bool layout_is_current() const noexcept {
+        return applied_layout_generation_ == layout_generation();
+    }
+    void mark_layout_current() noexcept {
+        applied_layout_generation_ = layout_generation();
+    }
     virtual bool owns_child_layout() const { return false; }
 
     /// Intrinsic content size (override in widgets that know their natural size).
@@ -2468,6 +2483,7 @@ private:
     bool focusable_ = false;
     bool enabled_ = true;
     bool layout_dirty_ = false;
+    std::uint64_t applied_layout_generation_ = 0;
     static std::atomic<std::uint64_t> layout_generation_;
     static std::atomic<std::uint64_t> layout_pass_count_;
     bool has_focus_ = false;

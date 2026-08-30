@@ -2277,7 +2277,7 @@ private:
 
         if (has_viewport) {
             root_.set_bounds({0, 0, design_viewport_w_, design_viewport_h_});
-            root_.layout_children();
+            root_.layout_children_if_needed();
             const int saved = canvas.save_count();
             canvas.save();
             canvas.translate(tx, ty);
@@ -2293,7 +2293,7 @@ private:
             canvas.restore_to_count(saved);
         } else {
             root_.set_bounds({0, 0, w, h});
-            root_.layout_children();
+            root_.layout_children_if_needed();
             root_.paint_all(canvas);
             View::paint_overlays(canvas, &root_);
         }

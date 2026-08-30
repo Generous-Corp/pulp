@@ -6612,6 +6612,34 @@ TEST_CASE("repeated geometry reads with no mutation cost one layout pass",
     CHECK(passes <= 1);
 }
 
+TEST_CASE("host paint reuses a layout completed by the bridge",
+          "[view][bridge][layout][perf]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('outer', '');
+        setFlex('outer', 'width', 300);
+        setFlex('outer', 'height', 200);
+        createLabel('leaf', 'Leaf', 'outer');
+        setFlex('leaf', 'height', 24);
+        layout();
+    )");
+
+    const auto before = View::layout_pass_count();
+    engine.evaluate("getLayoutRect('leaf').height");
+    root.layout_children_if_needed();
+    CHECK(View::layout_pass_count() - before == 0);
+
+    engine.evaluate("setFlex('leaf', 'height', 72)");
+    root.layout_children_if_needed();
+    engine.evaluate("getLayoutRect('leaf').height");
+    CHECK(View::layout_pass_count() - before == 1);
+}
+
 TEST_CASE("replaying an identical flex value does not dirty geometry",
           "[view][bridge][layout][perf]") {
     ScriptEngine engine;
