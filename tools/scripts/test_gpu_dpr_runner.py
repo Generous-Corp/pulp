@@ -1314,17 +1314,37 @@ def main() -> int:
             planned, manifest, manifest_path, analyzer_identity
         )
         runner.save_state(complete_run, complete_state)
-        for cell in complete_state["cells"]:
-            current = runner.load_state(complete_run)
-            attempt_nonce, _ = runner.issue_attempt(
-                complete_run, current, manifest, cell
+
+        def analyze_projection_trace(
+            identity: dict[str, str], trace_path: Path, evidence_id: str,
+        ) -> tuple[list[str], set[str], dict[str, object]]:
+            # Earlier planted cases exercise the real multi-process analyzer
+            # protocol. The 84-cell projection needs the same pinned-binary and
+            # trace-correlation checks, but replaying that subprocess matrix is
+            # redundant and pushed the enclosing 120s CTest over its bound.
+            evidence.exact_executable(identity, "runner-pinned trace analyzer")
+            if trace_path.read_bytes() != b"real-trace-bytes:" + evidence_id.encode():
+                raise evidence.EvidenceError("projection trace has the wrong correlation id")
+            return (
+                [evidence_id],
+                set(manifest["trial_contract"]["required_trace_categories"]),
+                {"evidence_id": evidence_id, "process_upid": 7, "process_pid": 42},
             )
-            receipt_path = make_receipt(
-                complete_run, current, manifest, cell,
-                analyzer=analyzer, binary=binary,
-                attempt_nonce=attempt_nonce,
-            )
-            ingest_receipt(complete_run, receipt_path)
+
+        with mock.patch.object(
+            evidence, "analyze_trace", side_effect=analyze_projection_trace,
+        ):
+            for cell in complete_state["cells"]:
+                current = runner.load_state(complete_run)
+                attempt_nonce, _ = runner.issue_attempt(
+                    complete_run, current, manifest, cell
+                )
+                receipt_path = make_receipt(
+                    complete_run, current, manifest, cell,
+                    analyzer=analyzer, binary=binary,
+                    attempt_nonce=attempt_nonce,
+                )
+                ingest_receipt(complete_run, receipt_path)
         completed = runner.load_state(complete_run)
         assert runner.status_document(completed)["complete_cells"] == 84
         readiness_observations = runner.project_result(completed)["observations"]
