@@ -7614,3 +7614,31 @@ The shape that works, and the one `timeline-fuzz.yml` uses:
 cases/sec, so the whole PR budget is well under a second and the nightly budget can be raised
 almost for free. Budget the build, not the iterations, and keep `timeout-minutes` on both jobs
 plus `-max_total_time` on libFuzzer.
+
+## A new `core/` module needs three separate registrations, revealed one at a time
+
+Landing a new subsystem under `core/` is not one edit. Four places have to agree,
+and `gates.sh` surfaces them **serially** — each run fails on the next one it
+reaches, so a fix-and-rerun loop looks like whack-a-mole unless you do all four
+up front:
+
+1. `CMakeLists.txt` — the `option()` and the `add_subdirectory()`.
+2. `tools/cmake/PulpInstallRules.cmake` — `PULP_SDK_TARGETS` and
+   `_pulp_sdk_header_subsystems`, if the module ships in the SDK.
+3. `codecov.yml` — an `individual_components` entry. Without one, every file in
+   the module matches no component and is invisible to the slicing dashboard
+   (`test_codecov_components.py`).
+4. `ci/coverage-surfaces.yaml` — the component id in the `native-default`
+   component set. A component that exists in `codecov.yml` but has no producer
+   expectation and no N/A disposition fails
+   `test_coverage_surface_contract.py` with "every configured component must
+   have a producer expectation or an N/A disposition".
+
+(3) and (4) are a pair and neither is inferable from the other: `codecov.yml`
+says the component *exists*, `coverage-surfaces.yaml` says something is expected
+to *measure* it. Fixing only the one the failure named leaves the other to fail
+on the next run.
+
+Editing either file trips a different skill-sync gate — `codecov.yml` and
+`ci/coverage-surfaces.yaml` map to different skills — so expect the skill-sync
+check to fire twice for what is conceptually one change.
