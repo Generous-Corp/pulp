@@ -223,9 +223,9 @@ class AdjudicationTests(unittest.TestCase):
         lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         fake = FakeMsvcrt()
         try:
-            with mock.patch.object(A, "fcntl", None), \
-                    mock.patch.object(A, "msvcrt", fake):
-                A._lock_exclusive_nonblocking(lock_fd)
+            with mock.patch.object(A.file_lock, "fcntl", None), \
+                    mock.patch.object(A.file_lock, "msvcrt", fake):
+                A.file_lock.exclusive_nonblocking(lock_fd)
             self.assertEqual(fake.calls, [(lock_fd, fake.LK_NBLCK, 1)])
             self.assertEqual(os.fstat(lock_fd).st_size, 1)
         finally:
@@ -242,10 +242,10 @@ class AdjudicationTests(unittest.TestCase):
         lock_path = Path(self.temp.name) / "contended.lock"
         lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
-            with mock.patch.object(A, "fcntl", None), \
-                    mock.patch.object(A, "msvcrt", ContendedMsvcrt()):
+            with mock.patch.object(A.file_lock, "fcntl", None), \
+                    mock.patch.object(A.file_lock, "msvcrt", ContendedMsvcrt()):
                 with self.assertRaises(BlockingIOError):
-                    A._lock_exclusive_nonblocking(lock_fd)
+                    A.file_lock.exclusive_nonblocking(lock_fd)
         finally:
             os.close(lock_fd)
 
@@ -432,6 +432,20 @@ class AdjudicationTests(unittest.TestCase):
         with mock.patch.object(Path, "home", return_value=self.fixture.root / "home"), \
                 mock.patch.dict("os.environ", {"RACK_PLUGIN_DIR": str(override)}):
             self.assertEqual(A._rack_plugin_roots(), [actual_plugins.resolve()])
+
+    def test_tree_identity_binds_symlink_target_bytes(self) -> None:
+        root = self.fixture.root / "symlinked-plugin"
+        root.mkdir()
+        target = self.fixture.root / "external-plugin-binary"
+        target.write_bytes(b"original bytes")
+        original_stat = target.stat()
+        (root / "plugin.dylib").symlink_to(target)
+        before = A._tree_identity(root)
+        target.write_bytes(b"tampered bytes")
+        os.utime(target, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        self.assertEqual(target.stat().st_size, original_stat.st_size)
+        self.assertEqual(target.stat().st_mtime_ns, original_stat.st_mtime_ns)
+        self.assertNotEqual(A._tree_identity(root), before)
 
     def test_resume_refuses_terminal_dsp_verdict_without_audio(self) -> None:
         context = self.fixture.context()

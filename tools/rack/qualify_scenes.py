@@ -12,7 +12,6 @@ response and run receipts already owned by that scene.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import importlib.util
 import json
@@ -22,6 +21,8 @@ import subprocess
 import sys
 from typing import Callable, Iterable
 import uuid
+
+import file_lock
 
 
 CATALOGUE_SCHEMA = "forge.modular.shipped_scene_catalog.v1"
@@ -152,7 +153,7 @@ def _acquire_scene_lock(scene_dir: Path) -> int:
     descriptor = os.open(scene_dir / ".qualification.lock", os.O_RDWR | os.O_CREAT,
                          0o600)
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        file_lock.exclusive_nonblocking(descriptor)
     except BlockingIOError as exc:
         os.close(descriptor)
         raise QualificationError(

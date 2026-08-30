@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import errno
 import hashlib
 import importlib.util
 import json
@@ -25,16 +24,7 @@ from types import ModuleType
 from typing import Callable
 
 import qualify_scenes as Q
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - exercised by the Windows CI lane
-    fcntl = None
-
-try:
-    import msvcrt
-except ImportError:  # pragma: no cover - exercised by the POSIX CI lanes
-    msvcrt = None
+import file_lock
 
 
 ADJUDICATION_SCHEMA = "forge.modular.scene_adjudication.v2"
@@ -153,24 +143,34 @@ def _load_idiom_checker(toolchain: Path) -> ModuleType:
     return module
 
 
-def _tree_identity(path: Path) -> dict | None:
+def _tree_identity(path: Path, active: set[Path] | None = None) -> dict | None:
     if not path.exists():
         return None
     resolved = path.resolve()
+    active = set() if active is None else active
+    if resolved in active:
+        return {"root": str(resolved), "cycle": True}
     if resolved.is_file():
         return {"root": str(resolved), "files": {".": Q._file_digest(resolved)}}
+    active.add(resolved)
     files: dict[str, str] = {}
-    links: dict[str, str] = {}
-    for root, directories, names in os.walk(resolved, followlinks=False):
-        root_path = Path(root)
-        for name in sorted([*directories, *names]):
-            entry = root_path / name
-            relative = str(entry.relative_to(resolved))
-            if entry.is_symlink():
-                links[relative] = os.readlink(entry)
-            elif entry.is_file():
-                files[relative] = Q._file_digest(entry)
-    return {"root": str(resolved), "files": files, "links": links}
+    links: dict[str, dict] = {}
+    try:
+        for root, directories, names in os.walk(resolved, followlinks=False):
+            root_path = Path(root)
+            for name in sorted([*directories, *names]):
+                entry = root_path / name
+                relative = str(entry.relative_to(resolved))
+                if entry.is_symlink():
+                    links[relative] = {
+                        "target": os.readlink(entry),
+                        "identity": _tree_identity(entry, active),
+                    }
+                elif entry.is_file():
+                    files[relative] = Q._file_digest(entry)
+        return {"root": str(resolved), "files": files, "links": links}
+    finally:
+        active.remove(resolved)
 
 
 def _rack_plugin_roots() -> list[Path]:
@@ -350,23 +350,6 @@ def _rack_bindings(rack_app: Path, rack_log: Path | None, artifact: Path) -> dic
         "plugin_installation": _plugin_identities(artifact),
     }
     return binding
-
-
-def _lock_exclusive_nonblocking(fd: int) -> None:
-    if fcntl is not None:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return
-    if msvcrt is None:
-        raise AdjudicationError("this platform has no supported file-lock API")
-    if os.fstat(fd).st_size == 0:
-        os.write(fd, b"\0")
-    os.lseek(fd, 0, os.SEEK_SET)
-    try:
-        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-    except OSError as exc:
-        if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-            raise BlockingIOError from exc
-        raise
 
 
 def _adjudication_bindings(context: CampaignContext, scene: dict,
@@ -588,7 +571,7 @@ def adjudicate_scene(context: CampaignContext, scene: dict, rack_app: Path,
     lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         try:
-            _lock_exclusive_nonblocking(lock_fd)
+            file_lock.exclusive_nonblocking(lock_fd)
         except BlockingIOError as exc:
             raise AdjudicationError(f"{scene['id']} has an active adjudication owner") from exc
         if receipt_path.is_file():
