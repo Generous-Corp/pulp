@@ -750,7 +750,8 @@ def main() -> int:
         receipt = a3.materialize_auto_hashes(receipt, root)
         assert receipt["implementation_head"] == PULP_REVISION
         assert receipt["source_blobs"] == template["source_blobs"]
-        assert a3.validate_receipt(receipt, root, allow_fixture_overhead=True) is True
+        assert a3._validate_v1_receipt(receipt, root, allow_fixture_overhead=True) is True
+        assert a3.validate_receipt(receipt, root, allow_fixture_overhead=True) is False
 
         ratified_output = root / "ratified-by-tool.json"
         ratified = subprocess.run(
@@ -786,14 +787,14 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="pulp-a3-partial-pass-") as partial:
             partial_root = Path(partial)
             partial_pass = make_partial_causal_fixture(partial_root, budget_fail=False)
-            assert a3.validate_receipt(
+            assert a3._validate_v1_receipt(
                 partial_pass, partial_root, allow_fixture_overhead=True,
             ) is True
 
         with tempfile.TemporaryDirectory(prefix="pulp-a3-investigation-") as partial:
             partial_root = Path(partial)
             investigation = make_partial_causal_fixture(partial_root, budget_fail=True)
-            assert a3.validate_receipt(
+            assert a3._validate_v1_receipt(
                 investigation, partial_root, allow_fixture_overhead=True,
             ) is True
 

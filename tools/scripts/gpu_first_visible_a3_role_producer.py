@@ -52,23 +52,35 @@ TRACE_ANALYZER_SOURCE_PREFIXES = (
 )
 OUTCOME_EXIT = {"pass": 0, "fail": 1, "inconclusive": 2, "skip": 3}
 ENDPOINT_BY_ROLE = {
-    "standalone": "native-compositor-presentation",
-    "headless-constrained": "headless-capture-complete",
-    "daw": "native-compositor-presentation",
-    "forge": "native-compositor-presentation",
+    "pulp-standalone": "native-compositor-presentation",
+    "forge-modular-standalone": "native-compositor-presentation",
+    "forge-modular-auv2-logic": "native-compositor-presentation",
+    "forge-modular-vst3-reaper": "native-compositor-presentation",
+    "forge-modular-clap-reaper": "native-compositor-presentation",
+    "headless-reference": "headless-capture-complete",
+    "constrained-adapter": "native-compositor-presentation",
 }
 FORMAT_BY_ROLE = {
-    "standalone": {"standalone"},
-    "headless-constrained": {"headless"},
-    "daw": {"auv2", "vst3", "clap"},
-    "forge": {"standalone"},
+    "pulp-standalone": {"standalone"},
+    "forge-modular-standalone": {"standalone"},
+    "forge-modular-auv2-logic": {"auv2"},
+    "forge-modular-vst3-reaper": {"vst3"},
+    "forge-modular-clap-reaper": {"clap"},
+    "headless-reference": {"headless"},
+    "constrained-adapter": {"standalone"},
 }
 ENV_PREFIX_BY_ROLE = {
-    "standalone": "PULP_A3_STANDALONE",
-    "headless-constrained": "PULP_A3_HEADLESS",
-    "daw": "PULP_A3_REAPER",
-    "forge": "PULP_A3_FORGE",
+    "pulp-standalone": "PULP_A3_STANDALONE",
+    "forge-modular-standalone": "PULP_A3_FORGE",
+    "forge-modular-auv2-logic": "PULP_A3_LOGIC",
+    "forge-modular-vst3-reaper": "PULP_A3_REAPER_VST3",
+    "forge-modular-clap-reaper": "PULP_A3_REAPER_CLAP",
+    "headless-reference": "PULP_A3_HEADLESS",
+    "constrained-adapter": "PULP_A3_CONSTRAINED",
 }
+FORGE_ROLES = frozenset(role for role in ENDPOINT_BY_ROLE if role.startswith("forge-modular-"))
+REAPER_ROLES = frozenset({"forge-modular-vst3-reaper", "forge-modular-clap-reaper"})
+DAW_ROLES = REAPER_ROLES | {"forge-modular-auv2-logic"}
 REQUEST_KEYS = {
     "schema", "version", "attempt_nonce", "role", "identity",
     "measurement_endpoint", "cold_trial_count", "warm_trial_count",
@@ -300,12 +312,12 @@ def validate_request(
         raise ProducerError(f"{role} producer refuses the requested product format")
     if not GIT_REVISION.fullmatch(identity["pulp_revision"]):
         raise ProducerError("campaign identity lacks an exact Pulp revision")
-    if role == "forge" and not (
+    if role in FORGE_ROLES and not (
         isinstance(identity["forge_revision"], str)
         and GIT_REVISION.fullmatch(identity["forge_revision"])
     ):
         raise ProducerError("Forge producer requires an exact Forge revision")
-    if role != "forge" and identity["forge_revision"] is not None:
+    if role not in FORGE_ROLES and identity["forge_revision"] is not None:
         raise ProducerError(f"{role} producer refuses an unrelated Forge revision")
     artifact_directory = Path(request["artifact_directory"])
     expected = request_path.parent / "adapter-output" / "artifacts"
@@ -1044,7 +1056,7 @@ def run_independent_source_build(
             "identity": request["identity"],
             "source_roots": source_roots,
             "output_directory": str(output),
-            "bundle_required": request["role"] in {"daw", "forge"},
+            "bundle_required": request["role"] in FORGE_ROLES,
         }
         atomic_json(local_request, build_request)
         (workspace / "home").mkdir()
@@ -1165,7 +1177,7 @@ def run_independent_source_build(
                 or bundle.resolve() not in product.parents
             ):
                 raise ProducerError("independent source-built bundle differs from the measured bundle")
-            if request["role"] == "forge":
+            if request["role"] == "forge-modular-standalone":
                 require_forge_bundle_identity(bundle, product, request["identity"])
             bundle_snapshot, _ = snapshot_directory(
                 bundle, artifact_directory / "identity" / "independent-source-bundle.tar",
@@ -1674,7 +1686,7 @@ def validate_health_and_trace(
         ):
             raise ProducerError(f"health trial {index} differs from its authentic raw lifecycle")
         present = trial.get("present_ms")
-        if request["role"] == "headless-constrained":
+        if request["role"] == "headless-reference":
             if present is not None:
                 raise ProducerError("headless campaign cannot claim native presentation timing")
         elif not finite_nonnegative(present):
@@ -1826,7 +1838,7 @@ def validate_driver_receipt(
             prior_process = pid_processes.setdefault(row["host_pid"], row["process_id"])
             if prior_process != row["process_id"]:
                 raise ProducerError("one OS process ID maps to multiple host process identities")
-            if request["role"] == "headless-constrained":
+            if request["role"] == "headless-reference":
                 if row["native_presented"] is not False:
                     raise ProducerError("headless lifecycle cannot claim native presentation")
             elif row["native_presented"] is not True:
@@ -1851,6 +1863,16 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         artifact_directory = validate_request(
             request, role=role, request_path=request_path, receipt_path=receipt_path,
         )
+        if role == "forge-modular-auv2-logic":
+            raise ProducerBlocked(
+                "the v2 Logic lifecycle driver is not yet installed on m5",
+                "host:logic-pro",
+            )
+        if role == "constrained-adapter":
+            raise ProducerBlocked(
+                "the v1 producer request cannot bind protected constrained-adapter authority",
+                "product-policy:required-coverage",
+            )
         prefix = ENV_PREFIX_BY_ROLE[role]
         pulp_root = configured_directory("PULP_A3_PULP_ROOT", "source:pulp-root")
         pulp_source = validate_source_root(
@@ -1862,13 +1884,22 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         source_authorities = {"pulp": (
             pulp_root, request["identity"]["pulp_revision"],
         )}
+        forge_root: Path | None = None
+        forge_source: dict[str, Any] | None = None
+        if role in FORGE_ROLES:
+            forge_root = configured_directory("PULP_A3_FORGE_ROOT", "source:forge-root")
+            forge_revision = request["identity"]["forge_revision"]
+            assert isinstance(forge_revision, str)
+            forge_source = validate_source_root(forge_root, forge_revision, "Forge")
+            source_guards.append((forge_root, forge_revision, "Forge"))
+            source_authorities["forge"] = (forge_root, forge_revision)
         product_binary = configured_file(
             f"{prefix}_PRODUCT_BIN", f"product:{role}",
         )
         host_binary = configured_file(
             f"{prefix}_HOST_BIN", f"host:{role}",
         )
-        if role != "daw" and product_binary != host_binary:
+        if role not in DAW_ROLES and product_binary != host_binary:
             raise ProducerError(
                 f"{role} product/host must resolve to the same executable"
             )
@@ -1990,7 +2021,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
         directory_guards: list[tuple[Path, str, str]] = []
         bundle_tree_digest: str | None = None
         role_context: dict[str, Any] = {"preflight": role}
-        if role == "daw":
+        if role in REAPER_ROLES:
             product_bundle = configured_directory(
                 "PULP_A3_REAPER_PLUGIN_BUNDLE", "product:daw-bundle",
             )
@@ -2039,8 +2070,8 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 "plugin_bundle": str(product_bundle),
                 "plugin_format": request["identity"]["plugin_format"],
             })
-        elif role == "forge":
-            forge_root = configured_directory("PULP_A3_FORGE_ROOT", "source:forge-root")
+        elif role == "forge-modular-standalone":
+            assert forge_root is not None and forge_source is not None
             forge_bundle = configured_directory(
                 "PULP_A3_FORGE_APP_BUNDLE", "product:forge-app-bundle",
             )
@@ -2065,15 +2096,6 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
             directory_guards.append((
                 forge_bundle, bundle_tree_digest, "Forge app bundle",
             ))
-            forge_source = validate_source_root(
-                forge_root, request["identity"]["forge_revision"], "Forge",
-            )
-            source_guards.append((
-                forge_root, request["identity"]["forge_revision"], "Forge",
-            ))
-            source_authorities["forge"] = (
-                forge_root, request["identity"]["forge_revision"],
-            )
             forge_snapshot_digest = file_sha256(
                 forge_snapshot, "Forge app bundle snapshot",
             )
@@ -2091,7 +2113,7 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 "forge_root": str(forge_root),
                 "forge_app_bundle": str(forge_bundle),
             })
-        elif role == "headless-constrained":
+        elif role == "headless-reference":
             role_context.update({
                 "host_kind": "pulp-headless",
                 "completion_source": "headless-capture-complete",
@@ -2170,8 +2192,8 @@ def run_pinned(role: str, request_path: Path, receipt_path: Path) -> int:
                 measured_paths=[
                     product_binary,
                     host_binary,
-                    *([product_bundle] if role == "daw" else []),
-                    *([forge_bundle] if role == "forge" else []),
+                    *([product_bundle] if role in REAPER_ROLES else []),
+                    *([forge_bundle] if role == "forge-modular-standalone" else []),
                 ],
             )
         )

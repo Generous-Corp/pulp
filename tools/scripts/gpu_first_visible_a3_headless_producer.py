@@ -25,4 +25,4 @@ module = types.ModuleType("pulp_a3_role_producer")
 module.__file__ = str(support)
 module.__package__ = ""
 exec(compile(source, str(support), "exec", dont_inherit=True), module.__dict__)
-raise SystemExit(module.main_entry("headless-constrained"))
+raise SystemExit(module.main_entry("headless-reference"))

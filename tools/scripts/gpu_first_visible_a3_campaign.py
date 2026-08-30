@@ -63,6 +63,19 @@ a3 = _load_local_source(
     "gpu_first_visible_a3_acceptance", "gpu_first_visible_a3_acceptance.py"
 )
 
+ROLE_SPECS = (
+    ("pulp-standalone", "standalone", "native-compositor-presentation"),
+    ("forge-modular-standalone", "standalone", "native-compositor-presentation"),
+    ("forge-modular-auv2-logic", "auv2", "native-compositor-presentation"),
+    ("forge-modular-vst3-reaper", "vst3", "native-compositor-presentation"),
+    ("forge-modular-clap-reaper", "clap", "native-compositor-presentation"),
+    ("headless-reference", "headless", "headless-capture-complete"),
+    ("constrained-adapter", "standalone", "native-compositor-presentation"),
+)
+ROLE_IDS = tuple(row[0] for row in ROLE_SPECS)
+ROLE_ENDPOINT = {row[0]: row[2] for row in ROLE_SPECS}
+FORGE_ROLES = frozenset(role for role in ROLE_IDS if role.startswith("forge-modular-"))
+
 REQUEST_SCHEMA = "pulp.gpu-first-visible-campaign-request.v1"
 ADAPTER_SCHEMA = "pulp.gpu-first-visible-campaign-adapter.v1"
 RUN_SCHEMA = "pulp.gpu-first-visible-campaign-run.v1"
@@ -168,15 +181,14 @@ def validate_identity(identity: Any, role: str) -> dict[str, Any]:
     ):
         raise CampaignError("campaign identity Forge revision is invalid")
     expected_format = {
-        "standalone": {"standalone"},
-        "headless-constrained": {"headless"},
-        "daw": {"auv2", "vst3", "clap"},
-        "forge": {"standalone"},
+        role_id: {plugin_format} for role_id, plugin_format, _endpoint in ROLE_SPECS
     }[role]
     if identity["plugin_format"] not in expected_format:
         raise CampaignError(f"{role} campaign has the wrong product/plugin format")
-    if role == "forge" and forge_revision is None:
-        raise CampaignError("Forge campaign requires an exact Forge revision")
+    if role in FORGE_ROLES and forge_revision is None:
+        raise CampaignError("Forge role requires an exact Forge revision")
+    if role not in FORGE_ROLES and forge_revision is not None:
+        raise CampaignError("non-Forge role cannot carry a Forge revision")
     return identity
 
 
@@ -314,7 +326,7 @@ def validate_adapter_receipt(
     identity = validate_identity(receipt["identity"], receipt["role"])
     if identity != request["identity"]:
         raise CampaignError("adapter receipt identity differs from the issued request")
-    endpoint = a3.MEASUREMENT_ENDPOINT_BY_ROLE[receipt["role"]]
+    endpoint = ROLE_ENDPOINT[receipt["role"]]
     if receipt["measurement_endpoint"] != endpoint:
         raise CampaignError("adapter receipt has the wrong role measurement endpoint")
     dependencies = receipt["dependencies"]
@@ -439,7 +451,7 @@ def write_logs(run_dir: Path, stdout: str, stderr: str) -> dict[str, dict[str, s
 
 
 def run_role(args: argparse.Namespace) -> int:
-    if args.role not in a3.CAMPAIGN_ROLES:
+    if args.role not in ROLE_IDS:
         raise CampaignError(f"unknown campaign role: {args.role}")
     if not math.isfinite(args.timeout_seconds) or args.timeout_seconds <= 0:
         raise CampaignError("adapter timeout must be positive and finite")
@@ -471,7 +483,7 @@ def run_role(args: argparse.Namespace) -> int:
         "attempt_nonce": attempt_nonce,
         "role": args.role,
         "identity": identity,
-        "measurement_endpoint": a3.MEASUREMENT_ENDPOINT_BY_ROLE[args.role],
+        "measurement_endpoint": ROLE_ENDPOINT[args.role],
         "cold_trial_count": 10,
         "warm_trial_count": 10,
         "cold_cache_provenance": ["fresh-process", "explicit-cache-reset"],
@@ -590,7 +602,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     run = subparsers.add_parser("run-role")
-    run.add_argument("--role", required=True, choices=sorted(a3.CAMPAIGN_ROLES))
+    run.add_argument("--role", required=True, choices=ROLE_IDS)
     run.add_argument("--identity", required=True, type=Path)
     run.add_argument("--budget-receipt", required=True, type=Path)
     run.add_argument("--budget-cold", required=True, type=Path)

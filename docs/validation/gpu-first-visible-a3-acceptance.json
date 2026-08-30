@@ -1,151 +1,45 @@
 {
-  "$schema": "../contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
+  "$schema": "../contracts/gpu-first-visible-a3-acceptance-v2.schema.json",
   "schema": "dev.pulp.gpu-first-visible-a3-acceptance",
-  "version": 1,
-  "status": "incomplete",
-  "recorded_at": "2026-08-28T07:46:19Z",
+  "version": 2,
+  "status": "blocked-product-policy",
+  "recorded_at": "2026-08-30T00:20:13Z",
   "implementation_head": null,
-  "source_blobs": null,
   "plan": {
     "document": "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md",
-    "revision": "641649b7e7fece6baae34380b6e719904506af22",
-    "sha256": "00bdb8bd55fb90fb42d98a09442d2b168505a23a4208cb5b9edb67b01de69f07"
+    "revision": "bec7fb85c6f8886d32fac0a34be491eb6821a741",
+    "lines": "949-1118",
+    "sha256": "84fbdf513d17027d86407970bbf154aef8b5dd9e91086dff03a578c54be0ccf4"
   },
-  "identity": {
-    "pulp_revision": "c6ecab06a373bdae61aea9e3b8f804fbfa1db5d2",
-    "forge_revision": "154ced5eda43848c0fb05f81a4b9daea0d943da4",
-    "build_id": "build:cf7bca05e0380033c8c95f57b8a5280e",
-    "product_id": "dev.pulp.control-standalone-host",
-    "product_name": "Pulp Control Standalone Host",
-    "plugin_format": "standalone",
-    "machine_id": "unbound",
-    "instance_id": "unbound",
-    "campaign_id": "unbound"
+  "product_policy": {
+    "status": "missing",
+    "authority": null,
+    "validation": null,
+    "required_coverage": "missing"
   },
-  "budget": {
-    "id": "pulp.editor-first-visible.v1",
-    "version": 1,
-    "status": "unratified",
-    "receipt": null,
-    "raw_cold": null,
-    "raw_warm": null
+  "protocol": {
+    "clock": "mach_continuous_time",
+    "reference_host_id": "m5",
+    "ring_mib": 128,
+    "timer_noise_pairs": 10000,
+    "warmup_trials_per_state": 5,
+    "warm_trials_per_state": 30,
+    "cold_trials_per_state": 20,
+    "states": ["baseline-tracing-off", "candidate-tracing-off", "candidate-compiled-in-idle", "candidate-active-session"],
+    "trace_categories": ["dsp", "gpu", "metadata", "render", "js", "state"],
+    "roles": [
+      {"role_id": "pulp-standalone", "host_kind": "pulp-standalone", "application_kind": "pulp-standalone-canary", "plugin_format": "standalone", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "forge-modular-standalone", "host_kind": "forge-modular-standalone", "application_kind": "forge-modular", "plugin_format": "standalone", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "forge-modular-auv2-logic", "host_kind": "logic-pro", "application_kind": "forge-modular", "plugin_format": "auv2", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "forge-modular-vst3-reaper", "host_kind": "reaper", "application_kind": "forge-modular", "plugin_format": "vst3", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "forge-modular-clap-reaper", "host_kind": "reaper", "application_kind": "forge-modular", "plugin_format": "clap", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "headless-reference", "host_kind": "headless-capture", "application_kind": "pulp-standalone-canary", "plugin_format": "headless", "measurement_endpoint": "headless-capture-complete"},
+      {"role_id": "constrained-adapter", "host_kind": "pulp-standalone", "application_kind": "pulp-standalone-canary", "plugin_format": "standalone", "measurement_endpoint": "native-compositor-presentation"}
+    ]
   },
   "campaigns": [],
-  "same_instance_a2t": {
-    "status": "blocked",
-    "campaign_id": null,
-    "instance_id": null,
-    "build_id": null,
-    "gpu_evidence_id": null,
-    "trace_evidence_id": null,
-    "a2t_receipt": null,
-    "analyzer": null,
-    "trace": null,
-    "trace_analysis": null,
-    "binding_receipt": null
-  },
-  "blank_negative": {
-    "status": "missing",
-    "diagnostic_code": null,
-    "receipt": null,
-    "executable": null,
-    "provenance": null
-  },
-  "audio_thread_exclusion": {
-    "status": "missing",
-    "receipt": null,
-    "executable": null,
-    "provenance": null
-  },
-  "trace_producer_overhead": {
-    "status": "unavailable",
-    "reason": "Final-head pre-change baseline, candidate compile-out, compiled-in idle, and active 128 MiB product builds have not run the exact 5-warmup, 30-measured, and 20-fresh-process xrun and audio-thread protocol.",
-    "receipt": null
-  },
-  "b4": {
-    "disposition": null,
-    "status": "withheld",
-    "reason": "A B4 disposition is not legal until the budget, product campaigns, same-instance causal trace, blank negative, audio-thread exclusion, and trace-producer overhead gates pass.",
-    "evidence": null
-  },
-  "observations": [
-    {
-      "id": "standalone-build-audit",
-      "status": "confirmed",
-      "detail": "The installed standalone artifact audit passed and generated-root canonicalization corrected the default macOS temporary-directory path. This build evidence does not substitute for a validated GPU startup campaign.",
-      "artifacts": []
-    },
-    {
-      "id": "headless-adapter-accumulation",
-      "status": "partial",
-      "detail": "A Release CoreGraphics fixture reused one view, provider, and adapter for 20 observations. All passed the content floor, but the run does not prove independent editor lifecycles or cold/warm cache boundaries and is not a startup campaign.",
-      "artifacts": []
-    },
-    {
-      "id": "standalone-back-buffer-capture",
-      "status": "invalidated",
-      "detail": "The installed standalone host could not capture the canonical back buffer. Responses previously classified as blank were corrected to unavailable and cannot satisfy either the positive content gate or the blank negative.",
-      "artifacts": []
-    },
-    {
-      "id": "forge-au-lifecycle",
-      "status": "partial",
-      "detail": "AU validation and REAPER editor opening reached a presentable Metal and Skia Graphite surface, but the durable proof stopped before a final acceptance receipt and captured no GPU health-read response.",
-      "artifacts": []
-    },
-    {
-      "id": "installed-host-publication-window",
-      "status": "confirmed",
-      "detail": "The broker can publish after accepting host-ready but before the installed host observes the ready response; an immediate dispatch can still be rejected by local or transport readiness gates.",
-      "artifacts": []
-    },
-    {
-      "id": "standalone-first-call-consent-latency",
-      "status": "observed",
-      "detail": "The first inspect-readonly call in fresh broker state timed out or required consent before a later call completed. No causal attribution is made without a focused trace.",
-      "artifacts": []
-    },
-    {
-      "id": "gpu-health-consent-ux",
-      "status": "confirmed",
-      "detail": "The one-shot GPU health consent prompt names the operation and target product while deriving caller, target, instance, build, artifact, selector, and process-local revocation scope from broker state. This UX proof does not satisfy a performance or capture gate.",
-      "artifacts": []
-    },
-    {
-      "id": "single-shot-adapter-negative",
-      "status": "confirmed",
-      "detail": "A planted old single-shot adapter behavior was caught by the focused adapter test. This control proves the adapter test can fail but does not prove a real product campaign.",
-      "artifacts": []
-    },
-    {
-      "id": "standalone-exact-product-health-read",
-      "status": "partial",
-      "detail": "The exact standalone product, selected through the canonical broker client by installed instance, registration, and publication, produced an authentic Metal/Dawn adapter plus completed nonblank back-buffer capture. GPU submission, startup, budget, frame lifecycle, and A2T correlation remain unverified or missing, so this is not a campaign or acceptance pass. The response and binding artifacts are gpu-first-visible-a3-standalone-product-response.json and gpu-first-visible-a3-standalone-product-binding.json.",
-      "artifacts": [
-        {
-          "path": "gpu-first-visible-a3-standalone-product-response.json",
-          "sha256": "f6ef5145ada178fd078e4affd7e91203e5afd3f9fa8f3497958ee4815cd71192"
-        },
-        {
-          "path": "gpu-first-visible-a3-standalone-product-binding.json",
-          "sha256": "2e94731d587e332be1b80b4f1cea2ea4e8dd984010ffe4e14560276de2f7ff3e"
-        }
-      ]
-    }
-  ],
-  "missing_evidence": [
-    "ratified budget receipt",
-    "budget reference-host raw cold trials",
-    "budget reference-host raw warm trials",
-    "standalone validated health campaign and artifacts",
-    "headless constrained validated health campaign and artifacts",
-    "real DAW plugin-format validated health campaign and artifacts",
-    "exact Forge shell validated health campaign and artifacts",
-    "digest-bound trace corroboration for all four product campaigns",
-    "same-instance A2T receipt digest and causal trace binding",
-    "caught real blank negative receipt",
-    "audio-thread exclusion receipt with positive control",
-    "passing four-state A3 trace-producer overhead and xrun receipt",
-    "single legal B4 disposition evidence"
-  ]
+  "publication": null,
+  "disposition": null,
+  "observations": [],
+  "blockers": ["product-policy", "required-coverage"]
 }

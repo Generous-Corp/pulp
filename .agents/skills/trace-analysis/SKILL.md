@@ -560,10 +560,16 @@ keep it separate from the health document's budget verdict. A failing analyzer
 result is terminal, and the producer may not overwrite either verdict. Final
 same-instance A2T replay and human Perfetto UI correlation
 are added only from the selected causal campaign after all role runs complete.
-Use one of the four checked-in role entry points, which also pins its lifecycle
-driver and rejects analyzer evidence IDs that differ from the exact health
-instance. The driver still owns capture; the entry point cannot manufacture a
-Perfetto file or native-present event.
+The canonical v2 matrix has exactly seven entry roles: `pulp-standalone`,
+`forge-modular-standalone`, `forge-modular-auv2-logic`,
+`forge-modular-vst3-reaper`, `forge-modular-clap-reaper`,
+`headless-reference`, and `constrained-adapter`. Each entry point pins its
+lifecycle driver and rejects analyzer evidence IDs that differ from the exact
+health instance. The driver still owns capture; the entry point cannot
+manufacture a Perfetto file or native-present event. Do not collect until the
+protected product policy binds all role thresholds and the constrained adapter,
+configuration, support matrix, and authentic A1 evidence; the current canonical
+receipt is truthfully blocked on those two inputs.
 
 The product health-transition spans are real runtime producers even though the
 macros compile out with `PULP_TRACING=OFF`. Terminal A3 separately requires the

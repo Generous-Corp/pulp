@@ -53,6 +53,10 @@ trace_producer_overhead = _load_local_source(
     "gpu_first_visible_a3_trace_producer_overhead",
     "gpu_first_visible_a3_trace_producer_overhead.py",
 )
+a3_v2 = _load_local_source(
+    "gpu_first_visible_a3_acceptance_v2",
+    "gpu_first_visible_a3_acceptance_v2.py",
+)
 
 SCHEMA_PATH = ROOT / "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json"
 HEALTH_SCHEMA_PATH = ROOT / "docs/contracts/gpu-health-read-result-v1.schema.json"
@@ -1626,7 +1630,7 @@ def validate_b4(
         raise AcceptanceError("B4 evidence does not bind the selected disposition")
 
 
-def validate_receipt(
+def _validate_v1_receipt(
     receipt: dict[str, Any], evidence_root: Path, repository: Path = ROOT,
     *, allow_fixture_overhead: bool = False,
 ) -> bool:
@@ -1662,6 +1666,32 @@ def validate_receipt(
     validate_controls(receipt, evidence_root, repository)
     validate_b4(receipt, evidence_root, campaigns, derived_analysis)
     return True
+
+
+def validate_receipt(
+    receipt: dict[str, Any], evidence_root: Path, repository: Path = ROOT,
+    *, allow_fixture_overhead: bool = False,
+) -> bool:
+    """Validate either receipt generation while making only v2 terminal.
+
+    Version 1 remains readable so historical evidence and planted-negative
+    fixtures do not become opaque.  Its former ``complete`` state is no longer
+    acceptance-terminal because it predates protected product-policy and the
+    seven-role required-coverage contract.
+    """
+    version = receipt.get("version") if isinstance(receipt, dict) else None
+    if version == 1:
+        _validate_v1_receipt(
+            receipt, evidence_root, repository,
+            allow_fixture_overhead=allow_fixture_overhead,
+        )
+        return False
+    if version == 2:
+        try:
+            return a3_v2.validate_v2(receipt, evidence_root)
+        except a3_v2.V2AcceptanceError as error:
+            raise AcceptanceError(str(error)) from error
+    raise AcceptanceError("receipt version must be historical v1 or canonical v2")
 
 
 def materialize_auto_hashes(value: Any, evidence_root: Path) -> Any:
@@ -1773,7 +1803,10 @@ def main(argv: list[str] | None = None) -> int:
     generate.add_argument("--output", required=True, type=Path)
     generate.add_argument("--evidence-root", type=Path)
     generate.add_argument("--repository", type=Path, default=ROOT)
-    ratify = subparsers.add_parser("ratify-budget")
+    ratify = subparsers.add_parser(
+        "ratify-budget",
+        help="materialize historical v1 evidence only; never product-policy authority",
+    )
     ratify.add_argument("--cold", required=True)
     ratify.add_argument("--warm", required=True)
     ratify.add_argument("--plan-revision", required=True)
@@ -1791,7 +1824,7 @@ def main(argv: list[str] | None = None) -> int:
                 pulp_revision=args.pulp_revision,
             )
             atomic_write(args.output, receipt)
-            print("A3 budget ratification: PASS")
+            print("A3 historical v1 budget materialization: PASS (NONTERMINAL)")
             return 0
         source = args.receipt if args.command == "verify" else args.template
         evidence_root = (args.evidence_root or source.parent).resolve()

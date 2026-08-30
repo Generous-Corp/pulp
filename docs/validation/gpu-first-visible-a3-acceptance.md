@@ -4,6 +4,29 @@
 GPU first-visible acceptance gate. Its schema deliberately keeps incomplete
 work representable without allowing it to become a pass.
 
+The canonical instance now uses
+`docs/contracts/gpu-first-visible-a3-acceptance-v2.schema.json`. It truthfully
+records `blocked-product-policy` with both `product-policy` and
+`required-coverage` blockers: no protected product-budget authority currently
+names the seven thresholds or the constrained-adapter assignment. Collection
+must not begin until those protected inputs exist. Version 1 remains readable
+for historical evidence, but its former `complete` state is nonterminal.
+
+V2 derives this exact ordered role vocabulary and refuses substitutions:
+
+1. `pulp-standalone`
+2. `forge-modular-standalone`
+3. `forge-modular-auv2-logic`
+4. `forge-modular-vst3-reaper`
+5. `forge-modular-clap-reaper`
+6. `headless-reference`
+7. `constrained-adapter`
+
+The protected authority, not the executor, freezes the exact M5 host identity,
+host/application/format mapping, first-visible, first-interaction, steady CPU
+and GPU thresholds, Pulp standalone canary, A4 scenario budgets, and objective
+constrained-adapter predicate/configuration with support-matrix and A1 evidence.
+
 ## Verify a receipt
 
 ```bash
@@ -16,9 +39,10 @@ The verifier returns `0` only for a terminal pass, `2` for a valid nonterminal
 receipt, and `1` for malformed, inconsistent, missing, or digest-mismatched
 evidence. A nonterminal result is never an acceptance pass.
 
-## Generate a receipt
+## Historical v1 generation and collection reference
 
-Author a template matching
+The remaining generation and product-collection commands document the
+historical v1 harness only. They cannot create terminal A3 evidence. Author a template matching
 `docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json`, using
 `"sha256": "auto"` for artifact references and the paired
 `"implementation_head": "auto"` / `"source_blobs": "auto"` markers. Then run:
@@ -37,7 +61,7 @@ and have the same relevant blobs at historical HEAD, current HEAD, and the
 working tree. The receipt is deliberately outside that set, avoiding a circular
 self-hash.
 
-## Run real product campaign roles
+## Historical v1 product campaign harness
 
 `gpu_first_visible_a3_campaign.py` is the executable boundary between the
 closed verifier and product-specific lifecycle automation. It snapshots the
@@ -61,8 +85,9 @@ must write `pulp.gpu-first-visible-campaign-adapter.v1` and keep every declared
 artifact under the supplied `artifact_directory`. Adapter outcomes map exactly
 to exit codes `pass=0`, `fail=1`, `inconclusive=2`, and `skip=3`.
 
-After ratifying the budget, run all four roles with their exact identity files
-and role-specific executables:
+The command transcript below preserves the old four-role harness for evidence
+readability. It is not the v2 seven-role campaign and cannot supply product
+policy authority:
 
 ```bash
 : "${A3_EVIDENCE:?new empty absolute evidence directory}"
@@ -781,9 +806,9 @@ role-appropriate endpoint, same-instance Perfetto/A2T
 correlation, real blank negative, audio-thread exclusion, and legal B4
 disposition remain required below.
 
-## Terminal evidence
+## Historical v1 terminal-evidence shape
 
-A complete receipt must bind the exact planning revision and digest, Pulp and
+A structurally complete v1 receipt used to bind the exact planning revision and digest, Pulp and
 Forge revisions, build, product, plugin format, machine, product instance, and
 campaign. It must also contain:
 
@@ -827,7 +852,8 @@ campaign. It must also contain:
   replayed A2T result under `pulp.b4-disposition-policy.v1`; neither the health
   provider's advisory pipeline fields nor a hand-authored disposition can select
   the result. The disposition receipt binds the derived inputs and artifact
-  digests.
+  digests. These checks preserve historical readability but never return a
+  terminal v2 acceptance result.
 
 The verifier recomputes nearest-rank p95 values, requires lossless capture for
 every available category, rejects unavailable or unverified health campaigns,
