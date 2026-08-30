@@ -407,7 +407,7 @@ class AdjudicationTests(unittest.TestCase):
         binary.write_bytes(b"fixture plugin binary")
         original_stat = binary.stat()
         context = self.fixture.context()
-        with mock.patch.dict("os.environ", {"RACK_PLUGIN_DIR": str(plugin_root)}):
+        with mock.patch.object(A, "_rack_plugin_roots", return_value=[plugin_root]):
             A.adjudicate_scene(
                 context, context.scenes[0], self.fixture.rack_app,
                 runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
@@ -422,6 +422,16 @@ class AdjudicationTests(unittest.TestCase):
                     context, context.scenes[0], self.fixture.rack_app,
                     runner=runner, idiom_loader=lambda _root: FakeChecker())
             self.assertEqual(runner.commands, [])
+
+    def test_plugin_bindings_ignore_generator_only_plugin_override(self) -> None:
+        actual_root = self.fixture.root / "home/Library/Application Support/Rack2"
+        actual_plugins = actual_root / "plugins-mac-arm64"
+        actual_plugins.mkdir(parents=True)
+        override = self.fixture.root / "generator-only-plugins"
+        override.mkdir()
+        with mock.patch.object(Path, "home", return_value=self.fixture.root / "home"), \
+                mock.patch.dict("os.environ", {"RACK_PLUGIN_DIR": str(override)}):
+            self.assertEqual(A._rack_plugin_roots(), [actual_plugins.resolve()])
 
     def test_resume_refuses_terminal_dsp_verdict_without_audio(self) -> None:
         context = self.fixture.context()

@@ -174,9 +174,6 @@ def _tree_identity(path: Path) -> dict | None:
 
 
 def _rack_plugin_roots() -> list[Path]:
-    override = os.environ.get("RACK_PLUGIN_DIR", "").strip()
-    if override:
-        return [Path(override).expanduser().resolve()]
     rack_root = Path.home() / "Library/Application Support/Rack2"
     try:
         return sorted(
