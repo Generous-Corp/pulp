@@ -8,6 +8,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -200,7 +201,21 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
                 errors = MODULE.verify(copied)
                 self.assertTrue(any(expected in error for error in errors))
 
-    def test_current_head_source_drift_fails_without_weakening_historical_check(self) -> None:
+    @staticmethod
+    def _promote_copy_to_v2(copied: Path) -> None:
+        receipt_path = copied / "receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        receipt["schema"] = "pulp.gpu-probe-acceptance-receipt.v2"
+        receipt["integration_head"] = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        receipt["source_blobs"] = MODULE._git_blobs(
+            "HEAD", MODULE.EXPECTED_SOURCE_BLOBS_V2
+        )
+        receipt_path.write_text(json.dumps(receipt))
+
+    def test_historical_v1_ignores_current_head_source_drift(self) -> None:
         target = "tools/cli/gpu_probe/src/native_recipes.cpp"
         historical = MODULE._git_blobs(
             json.loads((FIXTURE / "receipt.json").read_text())["integration_head"],
@@ -217,10 +232,28 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
 
         with mock.patch.object(MODULE, "_git_blobs", side_effect=drifted_head):
             errors = MODULE.verify(FIXTURE)
-        self.assertTrue(any(f"current HEAD source blob drift for {target}" in error for error in errors))
+        self.assertFalse(any(f"current HEAD source blob drift for {target}" in error for error in errors))
         self.assertFalse(any(f"source blob mismatch for {target}" in error for error in errors))
 
-    def test_unresolvable_current_head_blob_fails_closed(self) -> None:
+    def test_v2_current_head_source_drift_fails_closed(self) -> None:
+        target = "tools/cli/gpu_probe/src/native_recipes.cpp"
+        original = MODULE._git_blobs
+
+        def drifted_head(commit: str, paths: set[str]) -> dict[str, str]:
+            blobs = original(commit, paths)
+            if commit == "HEAD":
+                blobs[target] = "f" * 40
+            return blobs
+
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "receipt"
+            shutil.copytree(FIXTURE, copied)
+            self._promote_copy_to_v2(copied)
+            with mock.patch.object(MODULE, "_git_blobs", side_effect=drifted_head):
+                errors = MODULE.verify(copied)
+        self.assertTrue(any(f"current HEAD source blob drift for {target}" in error for error in errors))
+
+    def test_v2_unresolvable_current_head_blob_fails_closed(self) -> None:
         target = "tools/cli/gpu_probe/src/probe_result_json.cpp"
         original = MODULE._git_blobs
 
@@ -230,11 +263,15 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
                 blobs.pop(target, None)
             return blobs
 
-        with mock.patch.object(MODULE, "_git_blobs", side_effect=missing_head):
-            errors = MODULE.verify(FIXTURE)
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "receipt"
+            shutil.copytree(FIXTURE, copied)
+            self._promote_copy_to_v2(copied)
+            with mock.patch.object(MODULE, "_git_blobs", side_effect=missing_head):
+                errors = MODULE.verify(copied)
         self.assertTrue(any(f"cannot resolve {target} at current HEAD" in error for error in errors))
 
-    def test_current_checkout_source_drift_fails_closed(self) -> None:
+    def test_historical_v1_ignores_current_checkout_source_drift(self) -> None:
         target = "tools/cli/gpu_probe/src/native_acceptance.cpp"
         original = MODULE._checkout_blobs
 
@@ -245,6 +282,23 @@ class VerifyGpuProbeAcceptanceTest(unittest.TestCase):
 
         with mock.patch.object(MODULE, "_checkout_blobs", side_effect=drifted_checkout):
             errors = MODULE.verify(FIXTURE)
+        self.assertFalse(any(f"current checkout source blob drift for {target}" in error for error in errors))
+
+    def test_v2_current_checkout_source_drift_fails_closed(self) -> None:
+        target = "tools/cli/gpu_probe/src/native_acceptance.cpp"
+        original = MODULE._checkout_blobs
+
+        def drifted_checkout(paths: set[str]) -> dict[str, str]:
+            blobs = original(paths)
+            blobs[target] = "e" * 40
+            return blobs
+
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "receipt"
+            shutil.copytree(FIXTURE, copied)
+            self._promote_copy_to_v2(copied)
+            with mock.patch.object(MODULE, "_checkout_blobs", side_effect=drifted_checkout):
+                errors = MODULE.verify(copied)
         self.assertTrue(any(f"current checkout source blob drift for {target}" in error for error in errors))
 
     def test_non_object_binding_sections_fail_closed_without_crashing(self) -> None:

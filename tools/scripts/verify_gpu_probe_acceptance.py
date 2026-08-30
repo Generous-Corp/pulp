@@ -957,8 +957,11 @@ def verify(root: Path, *, require_terminal: bool = False) -> list[str]:
         if GIT_SHA.fullmatch(integration_head)
         else {}
     )
-    head_blobs = _git_blobs("HEAD", expected_source_blobs)
-    checkout_blobs = _checkout_blobs(expected_source_blobs)
+    # V1 is an immutable historical receipt: its source authority is the
+    # declared integration commit. V2 is the current-source structural
+    # contract and additionally fails closed against the live HEAD/checkout.
+    head_blobs = _git_blobs("HEAD", expected_source_blobs) if v2 else {}
+    checkout_blobs = _checkout_blobs(expected_source_blobs) if v2 else {}
     for path, declared_blob in source_blobs.items():
         if path not in expected_source_blobs:
             continue
@@ -970,16 +973,17 @@ def verify(root: Path, *, require_terminal: bool = False) -> list[str]:
             errors.append(f"cannot resolve {path} at integration_head")
         elif observed_blob != declared_blob:
             errors.append(f"source blob mismatch for {path}")
-        head_blob = head_blobs.get(path)
-        if head_blob is None:
-            errors.append(f"cannot resolve {path} at current HEAD")
-        elif head_blob != declared_blob:
-            errors.append(f"current HEAD source blob drift for {path}")
-        checkout_blob = checkout_blobs.get(path)
-        if checkout_blob is None:
-            errors.append(f"cannot hash {path} in current checkout")
-        elif checkout_blob != declared_blob:
-            errors.append(f"current checkout source blob drift for {path}")
+        if v2:
+            head_blob = head_blobs.get(path)
+            if head_blob is None:
+                errors.append(f"cannot resolve {path} at current HEAD")
+            elif head_blob != declared_blob:
+                errors.append(f"current HEAD source blob drift for {path}")
+            checkout_blob = checkout_blobs.get(path)
+            if checkout_blob is None:
+                errors.append(f"cannot hash {path} in current checkout")
+            elif checkout_blob != declared_blob:
+                errors.append(f"current checkout source blob drift for {path}")
     context = _mapping(receipt.get("execution_context"), "execution_context", errors)
     if context.get("cwd_role") != "fresh-temporary-directory-outside-any-checkout":
         errors.append("installed fronts were not recorded outside every checkout")
