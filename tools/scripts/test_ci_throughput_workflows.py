@@ -659,11 +659,15 @@ class CTestIsolationContractTests(unittest.TestCase):
             with self.subTest(suite=name):
                 registration = re.search(
                     rf"set_tests_properties\({re.escape(name)}\s+"
-                    r"PROPERTIES\s+PROCESSORS\s+8\)",
+                    r"PROPERTIES(?P<properties>[^)]*)\)",
                     quality,
                 )
                 self.assertIsNotNone(registration)
-                self.assertNotIn("RUN_SERIAL", registration.group(0))
+                properties = registration.group("properties")
+                self.assertRegex(properties, r"\bPROCESSORS\s+8\b")
+                self.assertNotIn("RUN_SERIAL", properties)
+                if name == "gpu-dpr-runner-selftest":
+                    self.assertRegex(properties, r"\bTIMEOUT\s+300\b")
 
     @staticmethod
     def _run_serial_scheduler_fixture(
