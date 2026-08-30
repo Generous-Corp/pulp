@@ -57,6 +57,9 @@ on:
       - 'tools/ci/linux_build_deps.json'
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
+      - 'tools/ci/pulp-worktree.sh'
+      - 'tools/ci/test_pulp_worktree_cache_env.py'
+      - 'tools/ci/test_pulp_worktree_gc.py'
       - 'tools/ci/build-dir-sentinel.sh'
       - 'tools/scripts/test_build_dir_sentinel.py'
       - 'tools/scripts/checkout_preflight.py'
@@ -152,6 +155,9 @@ on:
       - 'tools/ci/linux_build_deps.json'
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
+      - 'tools/ci/pulp-worktree.sh'
+      - 'tools/ci/test_pulp_worktree_cache_env.py'
+      - 'tools/ci/test_pulp_worktree_gc.py'
       - 'tools/ci/build-dir-sentinel.sh'
       - 'tools/scripts/test_build_dir_sentinel.py'
       - 'tools/scripts/checkout_preflight.py'
@@ -364,6 +370,7 @@ jobs:
           python3 tools/scripts/test_setup_shared_skia.py
           python3 tools/scripts/test_skia_cross_process_cache.py
           python3 tools/ci/test_pulp_worktree_cache_env.py
+          python3 tools/ci/test_pulp_worktree_gc.py
           python3 tools/ci/test_cache_routing_contract.py
           python3 tools/scripts/test_resolve_provider_busy_probe.py
           python3 tools/scripts/test_required_macos_alias.py
