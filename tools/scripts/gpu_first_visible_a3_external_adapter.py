@@ -3,7 +3,7 @@
 
 This adapter is deliberately product-agnostic.  The runner snapshots this
 file; this file then snapshots the role-specific producer before asking it to
-perform the real standalone, headless, DAW, or Forge lifecycle.  It does not
+perform one of the seven authority-bound A3 v2 product lifecycles.  It does not
 infer cache state, presentation, trace correlation, or product identity.  A
 producer that cannot measure those facts must return a durable non-pass result.
 
@@ -54,10 +54,13 @@ PRODUCER_KEYS = {
     "dependencies", "identity", "measurement_endpoint", "artifacts",
 }
 ROLE_PRODUCER_NAMES = {
-    "standalone": "gpu_first_visible_a3_standalone_producer.py",
-    "headless-constrained": "gpu_first_visible_a3_headless_producer.py",
-    "daw": "gpu_first_visible_a3_reaper_producer.py",
-    "forge": "gpu_first_visible_a3_forge_producer.py",
+    "pulp-standalone": "gpu_first_visible_a3_standalone_producer.py",
+    "forge-modular-standalone": "gpu_first_visible_a3_forge_producer.py",
+    "forge-modular-auv2-logic": "gpu_first_visible_a3_auv2_logic_producer.py",
+    "forge-modular-vst3-reaper": "gpu_first_visible_a3_vst3_reaper_producer.py",
+    "forge-modular-clap-reaper": "gpu_first_visible_a3_clap_reaper_producer.py",
+    "headless-reference": "gpu_first_visible_a3_headless_producer.py",
+    "constrained-adapter": "gpu_first_visible_a3_constrained_adapter_producer.py",
 }
 CONTROL_MARKER_PREFIX = b"\0PULP_A3_CONTROL_BUILD_IDENTITY_V1:"
 CONTROL_MARKER_SUFFIX = b":END_PULP_A3_CONTROL_BUILD_IDENTITY\0"
@@ -162,7 +165,7 @@ def validate_request(request: dict[str, Any], request_path: Path) -> Path:
     exact_keys(request, REQUEST_KEYS, "campaign request")
     if request["schema"] != REQUEST_SCHEMA or request["version"] != 1:
         raise AdapterError("campaign request has the wrong schema or version")
-    if request["role"] not in {"standalone", "headless-constrained", "daw", "forge"}:
+    if request["role"] not in ROLE_PRODUCER_NAMES:
         raise AdapterError("campaign request has an unknown role")
     if request["cold_trial_count"] != 10 or request["warm_trial_count"] != 10:
         raise AdapterError("campaign request does not require exactly 10 cold and 10 warm trials")

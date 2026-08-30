@@ -85,17 +85,18 @@ dependencies = ["product:unavailable"] if outcome != "pass" else []
 
 if outcome == "pass":
     role = request["role"]
+    source_role = "standalone" if role == "pulp-standalone" else role
     root = Path(request["artifact_directory"])
     root.mkdir(parents=True, exist_ok=True)
     sources = {{
-        "health_result": SOURCE / f"{{role}}-health.json",
-        "raw_cold": SOURCE / f"{{role}}-cold.json",
-        "raw_warm": SOURCE / f"{{role}}-warm.json",
-        "product_artifact": SOURCE / f"{{role}}-product.bin",
-        "host_artifact": SOURCE / f"{{role}}-host.bin",
-        "trace": SOURCE / f"{{role}}-trace.pftrace",
-        "trace_analysis": SOURCE / f"{{role}}-trace-analysis.json",
-        "measurement_producer": SOURCE / f"{{role}}-product.bin",
+        "health_result": SOURCE / f"{{source_role}}-health.json",
+        "raw_cold": SOURCE / f"{{source_role}}-cold.json",
+        "raw_warm": SOURCE / f"{{source_role}}-warm.json",
+        "product_artifact": SOURCE / f"{{source_role}}-product.bin",
+        "host_artifact": SOURCE / f"{{source_role}}-host.bin",
+        "trace": SOURCE / f"{{source_role}}-trace.pftrace",
+        "trace_analysis": SOURCE / f"{{source_role}}-trace-analysis.json",
+        "measurement_producer": SOURCE / f"{{source_role}}-product.bin",
     }}
     if request["require_controls"] and MUTATION != "missing-controls":
         sources["blank_negative"] = SOURCE / "blank.json"
@@ -176,7 +177,7 @@ def run_adapter(
     write_adapter(adapter, evidence, mutation)
     output = root / f"run-{mutation or 'pass'}-{'controls' if controls else 'plain'}"
     command = [
-        sys.executable, str(RUNNER), "run-role", "--role", "standalone",
+        sys.executable, str(RUNNER), "run-role", "--role", "pulp-standalone",
         "--identity", str(identity_path), "--budget-receipt", str(evidence / "budget.json"),
         "--budget-cold", str(evidence / "budget-cold.json"),
         "--budget-warm", str(evidence / "budget-warm.json"),
@@ -197,14 +198,15 @@ def main() -> int:
         evidence = root / "evidence"
         evidence.mkdir()
         receipt = fixture.make_fixture(evidence)
-        identity = receipt["campaigns"][0]["identity"]
+        identity = copy.deepcopy(receipt["campaigns"][0]["identity"])
+        identity["forge_revision"] = None
         identity_path = root / "identity.json"
         write_json(identity_path, identity)
 
         run, result = run_adapter(root, evidence, identity_path, "", controls=True)
         assert run.returncode == 0, run.stderr
         assert result["status"] == "pass"
-        assert result["campaign"]["role"] == "standalone"
+        assert result["campaign"]["role"] == "pulp-standalone"
         assert result["campaign"]["adapter"] == result["adapter"]
         assert result["campaign"]["measurement_producer"] == result["measurement_producer"]
         assert result["controls"]["blank_negative"] is not None
@@ -253,7 +255,7 @@ def main() -> int:
         wrong_forge["forge_revision"] = "a" * 40
         wrong_forge["plugin_format"] = "vst3"
         try:
-            campaign.validate_identity(wrong_forge, "forge")
+            campaign.validate_identity(wrong_forge, "forge-modular-standalone")
         except CampaignError as error:
             assert "wrong product/plugin format" in str(error)
         else:

@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.dev/contracts/gpu-first-visible-a3-acceptance-v2.schema.json",
+  "title": "Pulp GPU first-visible A3 acceptance receipt v2",
+  "type": "object",
+  "required": [
+    "$schema", "schema", "version", "status", "recorded_at",
+    "implementation_head", "plan", "product_policy", "protocol",
+    "campaigns", "publication", "disposition", "observations", "blockers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "../contracts/gpu-first-visible-a3-acceptance-v2.schema.json" },
+    "schema": { "const": "dev.pulp.gpu-first-visible-a3-acceptance" },
+    "version": { "const": 2 },
+    "status": {
+      "enum": ["blocked-product-policy", "blocked-required-coverage", "complete"]
+    },
+    "recorded_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+$"
+    },
+    "implementation_head": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      ]
+    },
+    "plan": {
+      "type": "object",
+      "required": ["document", "revision", "lines", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "document": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "lines": { "const": "949-1118" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "product_policy": {
+      "type": "object",
+      "required": ["status", "authority", "validation", "required_coverage"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["missing", "bound"] },
+        "authority": { "$ref": "#/$defs/nullableArtifact" },
+        "validation": { "$ref": "#/$defs/nullableArtifact" },
+        "required_coverage": {
+          "enum": ["missing", "bound"]
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "required": [
+        "clock", "reference_host_id", "ring_mib", "timer_noise_pairs",
+        "warmup_trials_per_state", "warm_trials_per_state",
+        "cold_trials_per_state", "states", "trace_categories", "roles"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "clock": { "const": "mach_continuous_time" },
+        "reference_host_id": { "const": "m5" },
+        "ring_mib": { "const": 128 },
+        "timer_noise_pairs": { "const": 10000 },
+        "warmup_trials_per_state": { "const": 5 },
+        "warm_trials_per_state": { "const": 30 },
+        "cold_trials_per_state": { "const": 20 },
+        "states": {
+          "type": "array", "minItems": 4, "maxItems": 4,
+          "items": { "type": "string" }
+        },
+        "trace_categories": {
+          "type": "array", "minItems": 6, "maxItems": 6,
+          "items": { "type": "string" }
+        },
+        "roles": {
+          "type": "array", "minItems": 7, "maxItems": 7,
+          "items": { "$ref": "#/$defs/roleSpec" }
+        }
+      }
+    },
+    "campaigns": {
+      "type": "array", "maxItems": 7, "uniqueItems": true,
+      "items": { "$ref": "#/$defs/campaign" }
+    },
+    "publication": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": [
+            "repository", "branch", "head", "receipt_blob", "protected",
+            "required_checks", "artifact_sha256s"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "const": "Generous-Corp/pulp" },
+            "branch": { "const": "main" },
+            "head": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "receipt_blob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "protected": { "const": true },
+            "required_checks": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "required": ["name", "conclusion"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+                  "conclusion": { "const": "success" }
+                }
+              }
+            },
+            "artifact_sha256s": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        }
+      ]
+    },
+    "disposition": {
+      "oneOf": [
+        { "type": "null" },
+        { "enum": ["queue-B4", "queue-B4-investigation", "no-change"] }
+      ]
+    },
+    "observations": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "detail", "artifacts"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "status": { "enum": ["observed", "partial", "invalidated", "confirmed"] },
+          "detail": { "type": "string", "minLength": 1, "maxLength": 2048 },
+          "artifacts": {
+            "type": "array", "maxItems": 16, "uniqueItems": true,
+            "items": { "$ref": "#/$defs/artifact" }
+          }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array", "maxItems": 2, "uniqueItems": true,
+      "items": { "enum": ["product-policy", "required-coverage"] }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "nullableArtifact": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/artifact" }
+      ]
+    },
+    "roleSpec": {
+      "type": "object",
+      "required": ["role_id", "host_kind", "application_kind", "plugin_format", "measurement_endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "role_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "host_kind": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "application_kind": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "plugin_format": { "enum": ["standalone", "headless", "auv2", "vst3", "clap"] },
+        "measurement_endpoint": {
+          "enum": ["native-compositor-presentation", "headless-capture-complete"]
+        }
+      }
+    },
+    "campaign": {
+      "type": "object",
+      "required": [
+        "role_id", "status", "identity", "raw_samples", "trace",
+        "trace_analysis", "causal_attribution"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "role_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "enum": ["pass", "fail", "unavailable"] },
+        "identity": {
+          "type": "object",
+          "required": [
+            "pulp_revision", "forge_revision", "machine_id", "host_kind",
+            "host_bundle_id", "host_version", "host_sha256",
+            "application_kind", "application_sha256", "plugin_format",
+            "plugin_sha256", "provider_sha256", "build_sha256",
+            "signature_sha256", "content_sha256", "adapter",
+            "display_id", "refresh_hz"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "pulp_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "forge_revision": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{40}$" }] },
+            "machine_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "host_kind": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "host_bundle_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "host_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "host_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "application_kind": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "application_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "plugin_format": { "enum": ["standalone", "headless", "auv2", "vst3", "clap"] },
+            "plugin_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "provider_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "build_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "signature_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "adapter": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "display_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "refresh_hz": { "type": "number", "minimum": 1 }
+          }
+        },
+        "raw_samples": { "$ref": "#/$defs/artifact" },
+        "trace": { "$ref": "#/$defs/artifact" },
+        "trace_analysis": { "$ref": "#/$defs/artifact" },
+        "causal_attribution": {
+          "type": "object",
+          "required": ["render_pipeline_material", "instrumentation_complete", "missing_events", "transferred_vellum_routes"],
+          "additionalProperties": false,
+          "properties": {
+            "render_pipeline_material": { "type": "boolean" },
+            "instrumentation_complete": { "type": "boolean" },
+            "missing_events": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+            "transferred_vellum_routes": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+          }
+        }
+      }
+    }
+  }
+}

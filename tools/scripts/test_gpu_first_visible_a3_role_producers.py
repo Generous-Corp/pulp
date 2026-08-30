@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Positive and planted-negative tests for the four checked-in A3 producers."""
+"""Positive, blocked, and planted-negative tests for seven A3 v2 roles."""
 
 from __future__ import annotations
 
@@ -27,10 +27,13 @@ import gpu_first_visible_a3_role_producer as producer_support  # noqa: E402
 import gpu_first_visible_a3_build_verifier as build_verifier  # noqa: E402
 
 PRODUCERS = {
-    "standalone": SCRIPT_DIR / "gpu_first_visible_a3_standalone_producer.py",
-    "headless-constrained": SCRIPT_DIR / "gpu_first_visible_a3_headless_producer.py",
-    "daw": SCRIPT_DIR / "gpu_first_visible_a3_reaper_producer.py",
-    "forge": SCRIPT_DIR / "gpu_first_visible_a3_forge_producer.py",
+    "pulp-standalone": SCRIPT_DIR / "gpu_first_visible_a3_standalone_producer.py",
+    "forge-modular-standalone": SCRIPT_DIR / "gpu_first_visible_a3_forge_producer.py",
+    "forge-modular-auv2-logic": SCRIPT_DIR / "gpu_first_visible_a3_auv2_logic_producer.py",
+    "forge-modular-vst3-reaper": SCRIPT_DIR / "gpu_first_visible_a3_vst3_reaper_producer.py",
+    "forge-modular-clap-reaper": SCRIPT_DIR / "gpu_first_visible_a3_clap_reaper_producer.py",
+    "headless-reference": SCRIPT_DIR / "gpu_first_visible_a3_headless_producer.py",
+    "constrained-adapter": SCRIPT_DIR / "gpu_first_visible_a3_constrained_adapter_producer.py",
 }
 
 
@@ -62,11 +65,25 @@ def assert_entrypoints_ignore_role_support_bytecode() -> None:
             )
             assert completed.returncode == 0, (role, completed.stdout, completed.stderr)
 PREFIX = {
-    "standalone": "PULP_A3_STANDALONE",
-    "headless-constrained": "PULP_A3_HEADLESS",
-    "daw": "PULP_A3_REAPER",
-    "forge": "PULP_A3_FORGE",
+    "pulp-standalone": "PULP_A3_STANDALONE",
+    "forge-modular-standalone": "PULP_A3_FORGE",
+    "forge-modular-auv2-logic": "PULP_A3_LOGIC",
+    "forge-modular-vst3-reaper": "PULP_A3_REAPER_VST3",
+    "forge-modular-clap-reaper": "PULP_A3_REAPER_CLAP",
+    "headless-reference": "PULP_A3_HEADLESS",
+    "constrained-adapter": "PULP_A3_CONSTRAINED",
 }
+SOURCE_ROLE = {
+    "pulp-standalone": "standalone",
+    "forge-modular-standalone": "forge",
+    "forge-modular-auv2-logic": "daw",
+    "forge-modular-vst3-reaper": "daw",
+    "forge-modular-clap-reaper": "daw",
+    "headless-reference": "headless-constrained",
+    "constrained-adapter": "standalone",
+}
+FORGE_ROLES = frozenset(role for role in PRODUCERS if role.startswith("forge-modular-"))
+REAPER_ROLES = frozenset({"forge-modular-vst3-reaper", "forge-modular-clap-reaper"})
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -93,6 +110,15 @@ source = Path(os.environ["PULP_A3_TEST_ROLE_FIXTURE"])
 root = Path(request["artifact_directory"])
 root.mkdir(parents=True, exist_ok=True)
 role = request["role"]
+source_role = {
+    "pulp-standalone": "standalone",
+    "forge-modular-standalone": "forge",
+    "forge-modular-auv2-logic": "daw",
+    "forge-modular-vst3-reaper": "daw",
+    "forge-modular-clap-reaper": "daw",
+    "headless-reference": "headless-constrained",
+    "constrained-adapter": "standalone",
+}[role]
 
 artifacts = {name: None for name in (
     "health_result", "raw_cold", "raw_warm", "trace"
@@ -103,10 +129,10 @@ dependencies = ["ui-driver:unavailable"] if outcome != "pass" else []
 
 if outcome == "pass":
     sources = {
-        "health_result": source / f"{role}-health.json",
-        "raw_cold": source / f"{role}-cold.json",
-        "raw_warm": source / f"{role}-warm.json",
-        "trace": source / f"{role}-trace.pftrace",
+        "health_result": source / f"{source_role}-health.json",
+        "raw_cold": source / f"{source_role}-cold.json",
+        "raw_warm": source / f"{source_role}-warm.json",
+        "trace": source / f"{source_role}-trace.pftrace",
     }
     for name, source_path in sources.items():
         destination = root / f"{name}{source_path.suffix}"
@@ -233,7 +259,7 @@ if outcome == "pass":
                 "prior_lifecycle_id": cold[index - 10]["lifecycle_id"] if warm_row else None,
                 "prior_process_id": row["process_id"] if warm_row else None,
                 "endpoint_observed": True,
-                "native_presented": request["role"] != "headless-constrained",
+                "native_presented": request["role"] != "headless-reference",
             })
         trace_host_pid = hosts[cold[0]["process_id"]].pid
         trace_pid_path = Path(os.environ["PULP_A3_TEST_TRACE_PROCESS_PID_FILE"])
@@ -341,10 +367,10 @@ marker = (
     + b":END_PULP_A3_BUILD_IDENTITY\0"
 )
 role = request["role"]
-if role == "daw":
-    bundle = output / "plugin.vst3"
+if role in {"forge-modular-vst3-reaper", "forge-modular-clap-reaper"}:
+    bundle = output / ("plugin.vst3" if identity["plugin_format"] == "vst3" else "plugin.clap")
     product = bundle / "Contents" / "MacOS" / "plugin-product"
-elif role == "forge":
+elif role == "forge-modular-standalone":
     bundle = output / "Forge.app"
     product = bundle / "Contents" / "MacOS" / "Forge FX"
 else:
@@ -365,7 +391,7 @@ if "source-build-network" in request["attempt_nonce"]:
 if "source-build-mismatch" in request["attempt_nonce"]:
     product.write_bytes(b"source-built bytes differ")
 product.chmod(0o755)
-if role == "forge":
+if role == "forge-modular-standalone":
     (bundle / "Contents" / "Info.plist").write_bytes(plistlib.dumps({
         "CFBundleExecutable": product.name,
         "CFBundleIdentifier": identity["product_id"],
@@ -738,23 +764,29 @@ def run_role(
     artifact_directory = run_dir / "adapter-output" / "artifacts"
     artifact_directory.mkdir(parents=True)
     source_receipt = json.loads((evidence / "fixture-receipt.json").read_text())
-    campaign = next(item for item in source_receipt["campaigns"] if item["role"] == role)
+    campaign = next(
+        item for item in source_receipt["campaigns"]
+        if item["role"] == SOURCE_ROLE[role]
+    )
     identity = dict(campaign["identity"])
+    identity["plugin_format"] = next(iter(producer_support.FORMAT_BY_ROLE[role]))
     identity["pulp_revision"] = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=pulp_root, text=True,
     ).strip()
     forge_root = root / "forge-root"
-    if role == "forge":
+    if role in FORGE_ROLES:
         identity["forge_revision"] = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=forge_root, text=True,
         ).strip()
+    else:
+        identity["forge_revision"] = None
     request = {
         "schema": "pulp.gpu-first-visible-campaign-request.v1",
         "version": 1,
         "attempt_nonce": f"attempt-{role}-{mutation or smoke}",
         "role": role,
         "identity": identity,
-        "measurement_endpoint": campaign["measurement_endpoint"],
+        "measurement_endpoint": producer_support.ENDPOINT_BY_ROLE[role],
         "cold_trial_count": 10,
         "warm_trial_count": 10,
         "cold_cache_provenance": ["fresh-process", "explicit-cache-reset"],
@@ -767,24 +799,26 @@ def run_role(
     receipt_path = artifact_directory / "producer-receipt.json"
     write_json(request_path, request)
     case_name = mutation or smoke
-    if role == "daw" and mutation != "daw-product-outside-bundle":
-        bundle = root / f"plugin-{case_name}.vst3"
+    if role in REAPER_ROLES and mutation != "daw-product-outside-bundle":
+        suffix = ".vst3" if identity["plugin_format"] == "vst3" else ".clap"
+        bundle = root / f"plugin-{case_name}{suffix}"
         (bundle / "Contents" / "MacOS").mkdir(parents=True, exist_ok=True)
         product = bundle / "Contents" / "MacOS" / "plugin-product"
-    elif role == "daw":
-        bundle = root / f"plugin-{case_name}.vst3"
+    elif role in REAPER_ROLES:
+        suffix = ".vst3" if identity["plugin_format"] == "vst3" else ".clap"
+        bundle = root / f"plugin-{case_name}{suffix}"
         (bundle / "Contents" / "MacOS").mkdir(parents=True, exist_ok=True)
         bundled_product = bundle / "Contents" / "MacOS" / "bundled-product"
         bundled_product.write_bytes(b"actual bundled product")
         bundled_product.chmod(0o755)
         product = root / "plugin-product-outside-bundle"
-    elif role == "forge":
+    elif role == "forge-modular-standalone":
         bundle = root / f"Forge-{case_name}.app"
         (bundle / "Contents" / "MacOS").mkdir(parents=True, exist_ok=True)
         product = bundle / "Contents" / "MacOS" / "Forge FX"
     else:
         product = root / f"{role}-product"
-    if role == "daw":
+    if role in REAPER_ROLES:
         host = root / "daw-host"
     elif mutation in {"forge-separate-host", "single-executable-host"}:
         host = root / f"{role}-host-outside-bundle"
@@ -806,7 +840,7 @@ def run_role(
         host.write_bytes(host_template.read_bytes())
     product.chmod(0o755)
     host.chmod(0o755)
-    if role == "forge":
+    if role == "forge-modular-standalone":
         plist_payload = {
             "CFBundleExecutable": product.name,
             "CFBundleIdentifier": identity["product_id"],
@@ -817,18 +851,18 @@ def run_role(
         (bundle / "Contents" / "Info.plist").write_bytes(
             plistlib.dumps(plist_payload, fmt=plistlib.FMT_BINARY, sort_keys=True)
         )
-    if role == "daw" and mutation == "daw-extra-executable":
+    if role in REAPER_ROLES and mutation == "daw-extra-executable":
         extra_executable = bundle / "Contents" / "MacOS" / "other-product"
         extra_executable.write_bytes(b"unrelated executable")
         extra_executable.chmod(0o755)
     driver = pulp_root / "tools/testing/a3/role-driver.py"
     analyzer = pulp_root / "tools/scripts/gpu_first_visible_a3_trace_analyzer.py"
-    health = json.loads((evidence / f"{role}-health.json").read_text(encoding="utf-8"))
+    health = json.loads((evidence / f"{SOURCE_ROLE[role]}-health.json").read_text(encoding="utf-8"))
     gpu_evidence_id = health["startup"]["correlation"]["gpu_evidence_id"]
     provenance = root / f"{role}-{case_name}-build-provenance.receipt"
     bundle_digest = (
         producer_support.directory_digest(bundle, f"{role} fixture bundle")
-        if role in {"daw", "forge"} else None
+        if role in REAPER_ROLES or role == "forge-modular-standalone" else None
     )
     provenance_payload = {
         "schema": "pulp.gpu-first-visible-local-build-provenance.v1",
@@ -916,7 +950,7 @@ def run_role(
     })
     if not omit_driver:
         environment[f"{PREFIX[role]}_DRIVER"] = str(driver)
-    if role == "daw":
+    if role in REAPER_ROLES:
         smoke_lua = (
             root / "unrelated.lua"
             if mutation == "reaper-lua-mismatch"
@@ -931,12 +965,13 @@ def run_role(
             ),
             "PULP_A3_REAPER_SMOKE_LUA": str(smoke_lua),
         })
-    if role == "forge":
+    if role in FORGE_ROLES:
         environment["PULP_A3_FORGE_ROOT"] = str(forge_root)
+    if role == "forge-modular-standalone":
         environment["PULP_A3_FORGE_APP_BUNDLE"] = str(bundle)
     untracked_forge_source = forge_root / "untracked-runtime-input.txt"
     untracked_pulp_source = pulp_root / "untracked-runtime-input.txt"
-    if role == "forge" and mutation == "forge-untracked-source":
+    if role in FORGE_ROLES and mutation == "forge-untracked-source":
         untracked_forge_source.write_text("must not be ignored\n", encoding="utf-8")
     completed = subprocess.run(
         [str(PRODUCERS[role]), "--request", str(request_path),
@@ -979,12 +1014,22 @@ def main() -> int:
 
         for role in PRODUCERS:
             completed, receipt = run_role(root, evidence, role)
+            if role == "forge-modular-auv2-logic":
+                assert completed.returncode == 2
+                assert receipt["outcome"] == "inconclusive"
+                assert receipt["dependencies"] == ["host:logic-pro"]
+                continue
+            if role == "constrained-adapter":
+                assert completed.returncode == 2
+                assert receipt["outcome"] == "inconclusive"
+                assert receipt["dependencies"] == ["product-policy:required-coverage"]
+                continue
             assert completed.returncode == 0, (role, completed.stdout, completed.stderr, receipt)
             assert receipt["outcome"] == "pass"
             assert all(receipt["artifacts"].values())
             host_archive = root / f"run-{role}-pass" / receipt["artifacts"]["host_artifact"]["path"]
             assert digest(host_archive) == receipt["artifacts"]["host_artifact"]["sha256"]
-            if role == "daw":
+            if role in REAPER_ROLES:
                 with tarfile.open(host_archive, "r:") as archive:
                     names = set(archive.getnames())
                 assert "preflight/receipt.json" in names
@@ -992,118 +1037,118 @@ def main() -> int:
             with tarfile.open(host_archive, "r:") as archive:
                 names = set(archive.getnames())
             assert "preflight/source-build-pulp-source.tar" in names
-            if role == "forge":
+            if role in FORGE_ROLES:
                 assert "preflight/source-build-forge-source.tar" in names
 
         negatives = [
-            ("standalone", "nine-cold", "pass", "20 lifecycle"),
-            ("standalone", "visible-no-present", "pass", "native presentation"),
-            ("headless-constrained", "headless-present", "pass", "cannot claim"),
-            ("standalone", "trace-id", "pass", "pinned trace replay"),
+            ("pulp-standalone", "nine-cold", "pass", "20 lifecycle"),
+            ("pulp-standalone", "visible-no-present", "pass", "native presentation"),
+            ("headless-reference", "headless-present", "pass", "cannot claim"),
+            ("pulp-standalone", "trace-id", "pass", "pinned trace replay"),
             (
-                "standalone", "trace-lifetime-id", "pass",
+                "pulp-standalone", "trace-lifetime-id", "pass",
                 "live-host challenge",
             ),
-            ("standalone", "analyzer-fail", "pass", "pinned trace replay"),
-            ("standalone", "analyzer-scope", "pass", "pinned trace replay"),
-            ("standalone", "analyzer-process", "pass", "pinned trace replay"),
+            ("pulp-standalone", "analyzer-fail", "pass", "pinned trace replay"),
+            ("pulp-standalone", "analyzer-scope", "pass", "pinned trace replay"),
+            ("pulp-standalone", "analyzer-process", "pass", "pinned trace replay"),
             (
-                "standalone", "prepared-analyzer-source", "pass",
+                "pulp-standalone", "prepared-analyzer-source", "pass",
                 "not sealed to the requested source/toolchain",
             ),
             (
-                "standalone", "prepared-analyzer-target", "pass",
+                "pulp-standalone", "prepared-analyzer-target", "pass",
                 "not sealed to the requested source/toolchain",
             ),
             (
-                "standalone", "analyzer-artifact-mutation", "pass",
+                "pulp-standalone", "analyzer-artifact-mutation", "pass",
                 "role-driver health_result changed",
             ),
             (
-                "standalone", "fresh-process-reuse", "pass",
+                "pulp-standalone", "fresh-process-reuse", "pass",
                 "reuses an earlier process identity",
             ),
-            ("standalone", "lifecycle", "pass", "reopen predecessor"),
-            ("standalone", "unknown-predecessor", "pass", "observed lifecycle"),
+            ("pulp-standalone", "lifecycle", "pass", "reopen predecessor"),
+            ("pulp-standalone", "unknown-predecessor", "pass", "observed lifecycle"),
             (
-                "standalone", "prior-process", "pass",
+                "pulp-standalone", "prior-process", "pass",
                 "same-process reopen predecessor",
             ),
-            ("standalone", "lifecycle-raw-mismatch", "pass", "raw observation"),
-            ("standalone", "product-mutation", "pass", "changed during"),
-            ("standalone", "snapshot-mutation", "pass", "changed during"),
+            ("pulp-standalone", "lifecycle-raw-mismatch", "pass", "raw observation"),
+            ("pulp-standalone", "product-mutation", "pass", "changed during"),
+            ("pulp-standalone", "snapshot-mutation", "pass", "changed during"),
             (
-                "standalone", "build-attestation", "pass",
+                "pulp-standalone", "build-attestation", "pass",
                 "does not bind the requested source/build identity",
             ),
             (
-                "standalone", "build-provenance", "pass",
+                "pulp-standalone", "build-provenance", "pass",
                 "does not bind the requested source, product, and driver",
             ),
             (
-                "standalone", "driver-provenance", "pass",
+                "pulp-standalone", "driver-provenance", "pass",
                 "does not bind the requested source, product, and driver",
             ),
             (
-                "standalone", "embedded-build-identity", "pass",
+                "pulp-standalone", "embedded-build-identity", "pass",
                 "independent source build differs",
             ),
             (
-                "standalone", "source-build-mismatch", "pass",
+                "pulp-standalone", "source-build-mismatch", "pass",
                 "independent source build differs",
             ),
             (
-                "standalone", "source-build-read-measured", "pass",
+                "pulp-standalone", "source-build-read-measured", "pass",
                 "omitted its receipt",
             ),
             (
-                "standalone", "source-build-network", "pass",
+                "pulp-standalone", "source-build-network", "pass",
                 "omitted its receipt",
             ),
             (
-                "standalone", "source-build-output-symlink", "pass",
+                "pulp-standalone", "source-build-output-symlink", "pass",
                 "output root is not a fresh directory",
             ),
             (
-                "standalone", "source-build-source-overlap", "pass",
+                "pulp-standalone", "source-build-source-overlap", "pass",
                 "source roots overlap the measured artifact directory",
             ),
             (
-                "forge", "source-build-extra-output", "pass",
+                "forge-modular-standalone", "source-build-extra-output", "pass",
                 "retained unrelated output",
             ),
             (
-                "standalone", "liveness-stale-host", "pass",
+                "pulp-standalone", "liveness-stale-host", "pass",
                 "wrong live executable",
             ),
             (
-                "standalone", "detached-host", "pass",
+                "pulp-standalone", "detached-host", "pass",
                 "owned host process IDs remain live",
             ),
             (
-                "standalone", "pulp-source-mutation", "pass",
+                "pulp-standalone", "pulp-source-mutation", "pass",
                 "tracked or untracked changes",
             ),
-            ("standalone", "driver-exit", "pass", "exit code disagrees"),
-            ("standalone", "single-executable-host", "pass", "same executable"),
-            ("daw", "daw-product-outside-bundle", "pass", "sole executable"),
-            ("daw", "daw-extra-executable", "pass", "sole executable"),
-            ("daw", "bundle-mutation", "pass", "changed during the campaign"),
+            ("pulp-standalone", "driver-exit", "pass", "exit code disagrees"),
+            ("pulp-standalone", "single-executable-host", "pass", "same executable"),
+            ("forge-modular-vst3-reaper", "daw-product-outside-bundle", "pass", "sole executable"),
+            ("forge-modular-vst3-reaper", "daw-extra-executable", "pass", "sole executable"),
+            ("forge-modular-vst3-reaper", "bundle-mutation", "pass", "changed during the campaign"),
             (
-                "daw", "reaper-lua-mismatch", "pass",
+                "forge-modular-vst3-reaper", "reaper-lua-mismatch", "pass",
                 "helper used by the smoke harness",
             ),
-            ("forge", "forge-separate-host", "pass", "same executable"),
+            ("forge-modular-standalone", "forge-separate-host", "pass", "same executable"),
             (
-                "forge", "forge-bundle-mutation", "pass",
+                "forge-modular-standalone", "forge-bundle-mutation", "pass",
                 "changed during the campaign",
             ),
             (
-                "forge", "forge-untracked-source", "pass",
+                "forge-modular-standalone", "forge-untracked-source", "pass",
                 "tracked or untracked changes",
             ),
             (
-                "forge", "forge-plist-executable", "pass",
+                "forge-modular-standalone", "forge-plist-executable", "pass",
                 "Info.plist does not bind",
             ),
         ]
@@ -1114,25 +1159,25 @@ def main() -> int:
             assert needle in receipt["reason"], (mutation, receipt["reason"])
 
         completed, receipt = run_role(
-            root, evidence, "standalone", mutation="missing-driver", omit_driver=True,
+            root, evidence, "pulp-standalone", mutation="missing-driver", omit_driver=True,
         )
         assert completed.returncode == 2
         assert receipt["outcome"] == "inconclusive"
-        assert receipt["dependencies"] == ["role-driver:standalone"]
+        assert receipt["dependencies"] == ["role-driver:pulp-standalone"]
 
-        completed, receipt = run_role(root, evidence, "standalone", mutation="driver-nonpass")
+        completed, receipt = run_role(root, evidence, "pulp-standalone", mutation="driver-nonpass")
         assert completed.returncode == 2
         assert receipt["outcome"] == "inconclusive"
         assert receipt["dependencies"] == ["ui-driver:unavailable"]
 
-        completed, receipt = run_role(root, evidence, "daw", smoke="skip")
+        completed, receipt = run_role(root, evidence, "forge-modular-vst3-reaper", smoke="skip")
         assert completed.returncode == 3
         assert receipt["outcome"] == "skip"
         assert receipt["dependencies"] == ["reaper:editor-open-smoke"]
 
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=4 planted_negatives=39 cleanup_controls=2"
+            "positive=5 blocked=2 planted_negatives=39 cleanup_controls=2"
         )
     return 0
 
