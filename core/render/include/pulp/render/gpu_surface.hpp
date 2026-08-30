@@ -41,6 +41,11 @@ public:
         bool available = false;
         bool native_bridge = false;
         AdapterType adapter_type = AdapterType::unknown;
+        /// Authoritative backend classification reported by Dawn/WebGPU.
+        /// Dawn's Null backend can also report a CPU adapter type, but it is
+        /// an API-validation backend and must never be treated as software
+        /// rendering evidence.
+        bool null_backend = false;
         std::string backend = "unavailable";
         std::string backend_type = "Unknown";
         std::string name = "Mock Dawn Adapter";

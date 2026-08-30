@@ -79,6 +79,9 @@ class ControlGpuHealthProvider final {
         bool available = false;
         bool native_bridge = false;
         Type type = Type::unknown;
+        /// Set only from the native backend enum. A Null backend remains Null
+        /// even when Dawn reports its adapter type as CPU.
+        bool null_backend = false;
         std::string backend;
         std::string name;
         std::string vendor;

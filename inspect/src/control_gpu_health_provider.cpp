@@ -25,6 +25,8 @@ bool bounded_string(std::string_view value, std::size_t maximum) {
 gh::AdapterClass classify(const ControlGpuHealthProvider::AdapterIdentity& adapter) {
     if (!adapter.available || !adapter.native_bridge)
         return gh::AdapterClass::unknown;
+    if (adapter.null_backend)
+        return gh::AdapterClass::null_adapter;
     using Type = ControlGpuHealthProvider::AdapterIdentity::Type;
     switch (adapter.type) {
         case Type::integrated_gpu:
@@ -351,13 +353,18 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
             probe.measurements.distinct_color_count = frame.distinct_color_count;
     }
     std::uint32_t sequence = 0;
-    if (adapter.status == gh::IdentityStatus::authentic) {
+    const bool usable_adapter_identity =
+        adapter.status == gh::IdentityStatus::authentic &&
+        adapter.classification != gh::AdapterClass::null_adapter;
+    if (usable_adapter_identity) {
         probe.events.push_back({sequence++, gh::Stage::adapter, gh::Verdict::pass,
                                 "gpu.adapter.pass", "native GPU adapter identity observed"});
     } else {
         probe.events.push_back({sequence++, gh::Stage::adapter, gh::Verdict::unverified,
                                 "gpu.adapter.unverified",
-                                "capture lacks an authentic native GPU adapter identity"});
+                                adapter.classification == gh::AdapterClass::null_adapter
+                                    ? "Dawn Null is an API-validation backend, not usable GPU evidence"
+                                    : "capture lacks an authentic native GPU adapter identity"});
     }
     const auto submission_verdict =
         frame.gpu_submission_observed
@@ -391,7 +398,7 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
         blank ? gh::Verdict::fail
         : capture_unavailable
             ? gh::Verdict::unavailable
-            : (adapter.status == gh::IdentityStatus::authentic
+            : (usable_adapter_identity
                    ? (frame.gpu_submission_observed ? gh::Verdict::pass : gh::Verdict::unverified)
                    : (frame.gpu_submission_observed ? gh::Verdict::unverified
                                                     : gh::Verdict::unavailable));

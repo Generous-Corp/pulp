@@ -394,6 +394,7 @@ public:
         wgpu::AdapterInfo dawn_info{};
         adapter_.GetInfo(&dawn_info);
         info.adapter_type = dawn_adapter_type(dawn_info.adapterType);
+        info.null_backend = dawn_info.backendType == wgpu::BackendType::Null;
         info.backend_type = dawn_backend_type_name(dawn_info.backendType);
         info.architecture = info.backend_type;
         info.name = "Native Dawn Adapter (" + info.backend_type + ")";
@@ -724,6 +725,7 @@ public:
             WGPUAdapterInfo adapter_info{};
             if (wgpuAdapterGetInfo(adapter_, &adapter_info) == WGPUStatus_Success) {
                 info.adapter_type = wgpu_adapter_type(adapter_info.adapterType);
+                info.null_backend = adapter_info.backendType == WGPUBackendType_Null;
                 info.backend_type = wgpu_backend_type_name(adapter_info.backendType);
                 info.architecture = info.backend_type;
                 const auto device = wgpu_string_view_to_string(adapter_info.device);
