@@ -8,8 +8,11 @@ import math
 import os
 import secrets
 import shutil
+import signal
 import stat
 import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -298,6 +301,98 @@ def _artifact_suffix(kind: str) -> str:
     return ".bin" if kind == "product" else ".json"
 
 
+def reject_issued_attempt(
+    run_dir: Path, key: str, nonce: str, reason: str,
+) -> None:
+    """Close one rejected nonce so a fresh runner attempt can be issued."""
+    state, _ = load_state(run_dir)
+    cell_state = state["cells"].get(key)
+    issued = cell_state.get("issued") if isinstance(cell_state, dict) else None
+    if not isinstance(issued, dict) or issued.get("nonce") != nonce:
+        raise V2RunnerError("cannot close a substituted or non-live runner attempt")
+    cell_state["attempts"].append({
+        "number": len(cell_state["attempts"]) + 1,
+        "nonce": nonce,
+        "outcome": "inconclusive",
+        "accepted_receipt_sha256": None,
+        "reason": reason[:512],
+    })
+    cell_state["issued"] = None
+    cell_state["status"] = "failed"
+    cell_state["accepted_receipt"] = None
+    save_state(run_dir, state)
+
+
+def _terminate_adapter(process: subprocess.Popen[bytes]) -> None:
+    """Terminate the adapter process group without collecting unbounded output."""
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.terminate()
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGKILL)
+        elif process.poll() is None:
+            process.kill()
+    except ProcessLookupError:
+        pass
+    if process.poll() is None:
+        process.wait()
+
+
+def _communicate_bounded(
+    process: subprocess.Popen[bytes], timeout_seconds: float,
+) -> tuple[bool, bool]:
+    """Drain both pipes concurrently with a strict cap per stream."""
+    buffers = [bytearray(), bytearray()]
+    exceeded = threading.Event()
+
+    def drain(index: int, stream: Any) -> None:
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                return
+            remaining = OUTPUT_CAP_BYTES - len(buffers[index])
+            buffers[index].extend(chunk[:max(remaining, 0)])
+            if len(chunk) > remaining:
+                exceeded.set()
+                return
+
+    if process.stdout is None or process.stderr is None:
+        raise V2RunnerError("v2 adapter output pipes were not created")
+    threads = [
+        threading.Thread(target=drain, args=(0, process.stdout), daemon=True),
+        threading.Thread(target=drain, args=(1, process.stderr), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + timeout_seconds
+    timed_out = False
+    while process.poll() is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            _terminate_adapter(process)
+            break
+        if exceeded.wait(min(0.05, remaining)):
+            _terminate_adapter(process)
+            break
+    for thread in threads:
+        thread.join(timeout=2)
+    if any(thread.is_alive() for thread in threads):
+        _terminate_adapter(process)
+        for thread in threads:
+            thread.join(timeout=2)
+    return timed_out, exceeded.is_set()
+
+
 def ingest_completed_attempt(
     run_dir: Path, key: str, nonce: str, producer_pid: int, exit_code: int,
 ) -> dict[str, Any]:
@@ -329,8 +424,14 @@ def ingest_completed_attempt(
     if cell.get("attempt_nonce") != nonce:
         raise V2RunnerError("cell body is not bound to the runner attempt nonce")
     identity = cell.get("identity")
-    if not isinstance(identity, dict) or identity.get("adapter_sha256") != issued["adapter_sha256"]:
-        raise V2RunnerError("cell identity differs from the executed adapter bytes")
+    if (
+        not isinstance(identity, dict)
+        or identity.get("adapter_sha256") != issued["adapter_sha256"]
+        or identity.get("producer_process_id") != producer_pid
+    ):
+        raise V2RunnerError(
+            "cell producer identity differs from the executed adapter bytes/process"
+        )
     forge_cell = cell["scenario_id"].startswith("forge-")
     expected_build = state["installed_revisions"]["forge" if forge_cell else "pulp"]
     if expected_build is None or identity.get("build_sha") != expected_build:
@@ -434,24 +535,33 @@ def run_one(
     adapter = run_dir / state["cells"][key]["issued"]["adapter_path"]
     producer_root = request_path.parent / request["output_directory"]
     producer_root.mkdir(mode=0o700)
-    process = subprocess.Popen(
-        [str(adapter), "--request", str(request_path), "--output", str(producer_root)],
-        cwd=request_path.parent, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
+    process: subprocess.Popen[bytes] | None = None
     try:
-        stdout, stderr = process.communicate(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.communicate()
-        raise V2RunnerError("v2 measurement adapter exceeded its bounded runtime")
-    if len(stdout) > OUTPUT_CAP_BYTES or len(stderr) > OUTPUT_CAP_BYTES:
-        raise V2RunnerError("v2 measurement adapter exceeded its output bound")
-    receipt, _, _ = _read_producer_receipt(producer_root)
-    expected_exit = EXIT_BY_OUTCOME.get(receipt.get("cell", {}).get("outcome"))
-    if expected_exit is None or process.returncode != expected_exit:
-        raise V2RunnerError("v2 adapter exit code differs from its receipt outcome")
-    return ingest_completed_attempt(run_dir, key, nonce, process.pid, process.returncode)
+        process = subprocess.Popen(
+            [str(adapter), "--request", str(request_path), "--output", str(producer_root)],
+            cwd=request_path.parent, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        timed_out, output_exceeded = _communicate_bounded(process, timeout_seconds)
+        if timed_out:
+            raise V2RunnerError("v2 measurement adapter exceeded its bounded runtime")
+        if output_exceeded:
+            raise V2RunnerError("v2 measurement adapter exceeded its output bound")
+        receipt, _, _ = _read_producer_receipt(producer_root)
+        expected_exit = EXIT_BY_OUTCOME.get(receipt.get("cell", {}).get("outcome"))
+        if expected_exit is None or process.returncode != expected_exit:
+            raise V2RunnerError("v2 adapter exit code differs from its receipt outcome")
+        return ingest_completed_attempt(
+            run_dir, key, nonce, process.pid, process.returncode
+        )
+    except Exception as error:
+        if process is not None and process.poll() is None:
+            _terminate_adapter(process)
+        reason = str(error) or error.__class__.__name__
+        reject_issued_attempt(run_dir, key, nonce, reason)
+        if isinstance(error, V2RunnerError):
+            raise
+        raise V2RunnerError(f"v2 measurement attempt rejected: {reason}") from error
 
 
 def _exact_json_file(
@@ -545,6 +655,9 @@ def rederive_cell(
         or isinstance(adapter.get("process_id"), bool)
         or not isinstance(adapter.get("process_id"), int)
         or adapter["process_id"] <= 0
+        or accepted.get("cell", {}).get("identity", {}).get(
+            "producer_process_id"
+        ) != adapter.get("process_id")
     ):
         raise V2RunnerError(f"accepted adapter execution identity changed: {key}")
     producer_descriptor = accepted["producer_receipt"]

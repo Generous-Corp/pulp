@@ -62,7 +62,7 @@
     },
     "identity": {
       "type": "object", "additionalProperties": false,
-      "required": ["machine_id", "provider", "adapter", "adapter_sha256", "build_sha", "host", "format", "app", "process_id", "instance_id", "product_sha256"],
+      "required": ["machine_id", "provider", "adapter", "adapter_sha256", "build_sha", "host", "format", "app", "producer_process_id", "process_id", "instance_id", "product_sha256"],
       "properties": {
         "machine_id": {"type": "string", "minLength": 1},
         "provider": {"type": "string", "minLength": 1},
@@ -72,6 +72,7 @@
         "host": {"type": "string", "minLength": 1},
         "format": {"type": "string", "minLength": 1},
         "app": {"type": "string", "minLength": 1},
+        "producer_process_id": {"type": "integer", "minimum": 1},
         "process_id": {"type": "integer", "minimum": 1},
         "instance_id": {"type": "string", "minLength": 1},
         "product_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}

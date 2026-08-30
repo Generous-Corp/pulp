@@ -214,6 +214,7 @@ def v2_cell(
             "host": scenario["required_host"],
             "format": "aggregate" if scenario["id"] == "forge-modular-daw" else "standalone",
             "app": scenario["id"],
+            "producer_process_id": pid_base + 1_000_000_000,
             "process_id": pid_base + 1_000_000,
             "instance_id": f"{campaign}:{scenario['id']}:{mode}:{requested_dpr}",
             "product_sha256": product_digest,
@@ -294,6 +295,7 @@ def complete_v2_fixture(manifest: dict[str, Any]) -> tuple[dict[str, Any], dict[
         cell["attempt_nonce"] = hashlib.sha256(
             f"repeat-attempt:{cell['scenario_id']}:{cell['mode']}:{cell['requested_dpr']}".encode()
         ).hexdigest()[:32]
+        cell["identity"]["producer_process_id"] += 10_000_000
         cell["identity"]["process_id"] += 10_000_000
         cell["identity"]["instance_id"] = "repeat:" + cell["identity"]["instance_id"]
         if cell["scenario_id"] == "super-convolver-web":

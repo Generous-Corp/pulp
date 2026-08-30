@@ -758,10 +758,12 @@ def v2_semantic_errors(
                 )
                 break
             original_processes = {
+                cell.get("identity", {}).get("producer_process_id"),
                 cell.get("identity", {}).get("process_id"),
                 *[item.get("pid") for item in cell.get("fresh_process_trials", [])],
             }
             repeat_processes = {
+                repeated.get("identity", {}).get("producer_process_id"),
                 repeated.get("identity", {}).get("process_id"),
                 *[item.get("pid") for item in repeated.get("fresh_process_trials", [])],
             }

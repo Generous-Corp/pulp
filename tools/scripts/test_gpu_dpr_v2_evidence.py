@@ -142,6 +142,7 @@ def cell_skeleton(
             "host": scenario["required_host"],
             "format": "web" if scenario["kind"] == "maintained_web_canary" else "standalone",
             "app": scenario["id"],
+            "producer_process_id": pid - 1,
             "process_id": pid,
             "instance_id": f"instance:{nonce}",
             "product_sha256": "0" * 64,
@@ -245,6 +246,7 @@ def retain_cell(
             "schema": "pulp.gpu-dpr-identity-receipt.v2", "version": 2,
             "binding_sha256": binding, "identity": cell["identity"],
             "process_ids": [
+                cell["identity"]["producer_process_id"],
                 cell["identity"]["process_id"],
                 *[item["pid"] for item in cell["fresh_process_trials"]],
             ],
@@ -356,6 +358,9 @@ def producer_main(arguments: list[str]) -> int:
         mode=expected["mode"], requested_dpr=expected["requested_dpr"],
         adapter_sha256=request["adapter"]["sha256"],
         build_sha=request["installed_revisions"]["pulp"],
+    )
+    cell["identity"]["producer_process_id"] = os.getpid() + (
+        1 if os.environ.get("PULP_A4_TEST_BAD_PRODUCER_PID") == "1" else 0
     )
     cell["attempt_nonce"] = request["attempt_nonce"]
     retain_cell(output, cell, scenario, manifest, "artifacts")
@@ -539,6 +544,50 @@ def main() -> int:
         rederived, _ = runner.rederive_cell(run_dir, loaded, key, canonical)
         assert rederived == accepted["cell"]
 
+        bad_pid_key = runner.run_cell_key(
+            "original", "super-convolver-web", "exact", 1.5
+        )
+        bad_pid_adapter = workspace / "bad-pid-adapter.sh"
+        bad_pid_adapter.write_text(
+            "#!/bin/sh\n"
+            "export PULP_A4_TEST_BAD_PRODUCER_PID=1\n"
+            f"exec {sys.executable} {Path(__file__).resolve()} --producer \"$@\"\n",
+            encoding="utf-8",
+        )
+        bad_pid_adapter.chmod(0o755)
+        try:
+            runner.run_one(run_dir, bad_pid_key, bad_pid_adapter, 30)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("self-attested producer process id passed")
+        loaded, _ = runner.load_state(run_dir)
+        rejected = loaded["cells"][bad_pid_key]
+        assert rejected["issued"] is None
+        assert rejected["attempts"][-1]["outcome"] == "inconclusive"
+        retried = runner.run_one(run_dir, bad_pid_key, adapter, 30)
+        assert retried["cell_key"] == bad_pid_key
+
+        output_key = runner.run_cell_key(
+            "original", "super-convolver-web", "exact", 2
+        )
+        output_adapter = workspace / "unbounded-output-adapter.sh"
+        output_adapter.write_text(
+            "#!/bin/sh\n"
+            f"exec {sys.executable} -c 'import sys; "
+            f"sys.stdout.buffer.write(b\"x\" * {runner.OUTPUT_CAP_BYTES + 1})'\n",
+            encoding="utf-8",
+        )
+        output_adapter.chmod(0o755)
+        try:
+            runner.run_one(run_dir, output_key, output_adapter, 30)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("adapter exceeded the bounded output cap")
+        loaded, _ = runner.load_state(run_dir)
+        assert loaded["cells"][output_key]["issued"] is None
+
         # A same-user attacker can replace the local integrity key and reseal
         # projected state.  That is not terminal authority: missing nonce-bound
         # accepted receipts still fail rederivation.
@@ -620,7 +669,8 @@ def main() -> int:
     print(
         "gpu_dpr_v2_evidence_selftest=true corpus=84+84 artifacts=8 "
         "no_file=pass digest=pass content=pass path=pass symlink=pass outside=pass "
-        "cross_cell=pass runner_process=pass forged_state_key=pass "
+        "cross_cell=pass runner_process=pass producer_pid=pass retry=pass "
+        "output_bound=pass forged_state_key=pass "
         "caller_draft=pass git_blob_type_head=pass live_receipt=pass"
     )
     return 0

@@ -3,7 +3,7 @@
 
 This module deliberately has no collection policy.  It integrity-checks the
 runner journal, confines retained artifacts to one owned root, and proves that
-the seven files named by every v2 cell contain the evidence that the cell
+the eight files named by every v2 cell contain the evidence that the cell
 projects.  The experiment module remains the authority for matrix and policy
 analysis.
 """
@@ -298,7 +298,7 @@ def binding_document(cell: dict[str, Any]) -> dict[str, Any]:
         "format": identity.get("format"),
         "instance_id": identity.get("instance_id"),
         "product_sha256": identity.get("product_sha256"),
-        "process_ids": [process_id, *fresh_pids],
+        "process_ids": [identity.get("producer_process_id"), process_id, *fresh_pids],
         "measured_trial_indices": [
             trial.get("trial_index")
             for trial in cell.get("measured_trials", [])
@@ -445,7 +445,7 @@ def _artifact_map(cell: dict[str, Any]) -> dict[str, dict[str, Any]]:
             raise V2EvidenceError(f"{kind} artifact has an invalid byte count")
         result[kind] = artifact
     if set(result) != ARTIFACT_KINDS:
-        raise V2EvidenceError("cell must retain all seven v2 artifact kinds")
+        raise V2EvidenceError("cell must retain all eight v2 artifact kinds")
     return result
 
 
@@ -453,11 +453,12 @@ def _expected_identity(cell: dict[str, Any]) -> tuple[dict[str, Any], list[int]]
     identity = cell.get("identity")
     required = {
         "machine_id", "provider", "adapter", "adapter_sha256", "build_sha",
-        "host", "format", "app", "process_id", "instance_id", "product_sha256",
+        "host", "format", "app", "producer_process_id", "process_id",
+        "instance_id", "product_sha256",
     }
     if not isinstance(identity, dict) or set(identity) != required:
         raise V2EvidenceError("cell identity differs from the closed product identity")
-    textual = required - {"process_id"}
+    textual = required - {"producer_process_id", "process_id"}
     if any(not isinstance(identity[field], str) or not identity[field] for field in textual):
         raise V2EvidenceError("cell product identity contains an empty field")
     if not _is_lower_hex(identity["build_sha"], 40):
@@ -466,9 +467,13 @@ def _expected_identity(cell: dict[str, Any]) -> tuple[dict[str, Any], list[int]]
         raise V2EvidenceError("cell product identity lacks exact bytes")
     if not _is_lower_hex(identity["adapter_sha256"], 64):
         raise V2EvidenceError("cell producer identity lacks exact adapter bytes")
+    producer_process_id = identity["producer_process_id"]
     process_id = identity["process_id"]
-    if isinstance(process_id, bool) or not isinstance(process_id, int) or process_id <= 0:
-        raise V2EvidenceError("cell product process id is invalid")
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in (producer_process_id, process_id)
+    ):
+        raise V2EvidenceError("cell producer/product process id is invalid")
     fresh = cell.get("fresh_process_trials")
     if not isinstance(fresh, list):
         raise V2EvidenceError("cell fresh-process ledger is missing")
@@ -476,10 +481,10 @@ def _expected_identity(cell: dict[str, Any]) -> tuple[dict[str, Any], list[int]]
     if (
         len(fresh_pids) != len(fresh)
         or any(isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 for pid in fresh_pids)
-        or process_id in fresh_pids or len(set(fresh_pids)) != len(fresh_pids)
+        or len({producer_process_id, process_id, *fresh_pids}) != len(fresh_pids) + 2
     ):
         raise V2EvidenceError("cell process identities are missing or reused")
-    return identity, [process_id, *fresh_pids]
+    return identity, [producer_process_id, process_id, *fresh_pids]
 
 
 def _validate_json_artifacts(
@@ -790,11 +795,11 @@ def initialize_run_key(run_dir: Path) -> None:
     try:
         descriptor = os.open(path, flags, 0o600)
     except OSError as error:
-        raise V2EvidenceError("runner authority key already exists or is unsafe") from error
+        raise V2EvidenceError("runner integrity key already exists or is unsafe") from error
     try:
         payload = secrets.token_bytes(32)
         if os.write(descriptor, payload) != len(payload):
-            raise V2EvidenceError("short write while creating runner authority key")
+            raise V2EvidenceError("short write while creating runner integrity key")
         os.fsync(descriptor)
         os.fchmod(descriptor, 0o400)
     finally:
@@ -802,18 +807,18 @@ def initialize_run_key(run_dir: Path) -> None:
 
 
 def _run_key(run_dir: Path) -> bytes:
-    path = checked_regular_path(run_dir, RUN_KEY, "runner authority key")
-    descriptor, metadata = _open_regular(path, "runner authority key")
+    path = checked_regular_path(run_dir, RUN_KEY, "runner integrity key")
+    descriptor, metadata = _open_regular(path, "runner integrity key")
     try:
         if metadata.st_mode & 0o077:
-            raise V2EvidenceError("runner authority key is accessible outside its owner")
+            raise V2EvidenceError("runner integrity key is accessible outside its owner")
         payload = os.read(descriptor, 64)
         if os.read(descriptor, 1):
-            raise V2EvidenceError("runner authority key has an invalid length")
+            raise V2EvidenceError("runner integrity key has an invalid length")
     finally:
         os.close(descriptor)
     if len(payload) != 32:
-        raise V2EvidenceError("runner authority key has an invalid length")
+        raise V2EvidenceError("runner integrity key has an invalid length")
     return payload
 
 

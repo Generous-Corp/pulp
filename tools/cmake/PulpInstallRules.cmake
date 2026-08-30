@@ -539,8 +539,11 @@ endif()
 # not a rendering policy: installed automation needs the exact contract to
 # validate trial records without a source checkout.
 set(_pulp_gpu_dpr_experiment_schemas
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-corpus-v2-template.json"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-experiment-v1.schema.json"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-experiment-v2.schema.json")
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-experiment-v2.schema.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-live-verification-v1.schema.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-vellum-package-terminal-v1.schema.json")
 foreach(_pulp_gpu_dpr_experiment_schema IN LISTS _pulp_gpu_dpr_experiment_schemas)
     if(NOT EXISTS "${_pulp_gpu_dpr_experiment_schema}")
         message(FATAL_ERROR
