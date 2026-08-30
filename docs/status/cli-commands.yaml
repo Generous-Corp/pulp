@@ -778,7 +778,7 @@ commands:
             description: Apply the recipe's seeded mutation. The GPU work must complete and the independent oracle must detect the changed result; the command exits 1 with typed failure evidence.
           - name: --json
             kind: flag
-            description: Emit the closed `pulp.gpu-probe-result.v1` result. Exit 0 is pass, exit 1 is a completed measured failure, and exit 2 is unavailable or unverified.
+            description: Emit the closed `pulp.gpu-probe-result.v1` result. Exit 0 is pass, exit 1 is only a validated completed measured failure, and exit 2 is unavailable or unverified, including recipe runtime, internal-validation, and artifact-publication failures.
       - name: recipes
         summary: Discover the four canonical recipes with an unfiltered list, filter or show a matched subset, distinguish metadata from build-callable capability, and create a bounded evidence workspace without copying implementation authority.
         subcommands:

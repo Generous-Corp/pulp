@@ -142,7 +142,10 @@ Advertise a recipe only after the native CLI can run it end to end with an
 independent oracle, bounded hash-declared artifacts, authentic adapter
 identity, and a real seeded mutation. A pinned runtime or registry row alone is
 not callable capability. Exit 0 means verified pass, exit 1 means completed
-measured failure, and exit 2 means unavailable or unverified.
+measured failure, and exit 2 means unavailable or unverified. Reserve exit 1
+for a validated completed measurement: recipe runtime exceptions, invalid
+internal results, and artifact-publication failures are typed `unverified`
+results with exit 2 when `--json` is requested.
 
 The Rust front delegates to its matched `pulp-cpp` sibling. The
 `pulp_gpu_probe` MCP tool must spawn that sibling with an argv API rather than a

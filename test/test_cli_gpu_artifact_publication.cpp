@@ -49,6 +49,18 @@ std::vector<std::uint8_t> read_bytes(const fs::path& path) {
     return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
 }
 
+TEST_CASE("Windows GPU artifact publication statically binds its retained directory",
+          "[cli][gpu][artifact-publication][windows][source-contract]") {
+    std::ifstream input(PULP_GPU_ARTIFACT_PUBLICATION_SOURCE, std::ios::binary);
+    REQUIRE(input.good());
+    const std::string source{std::istreambuf_iterator<char>{input},
+                             std::istreambuf_iterator<char>{}};
+
+    CHECK(source.find("information->RootDirectory = pinned_directory;") != std::string::npos);
+    CHECK(source.find("rename_in_place(file.get(), state_->directory_handle, relative, "
+                      "destination);") != std::string::npos);
+}
+
 TEST_CASE("GPU artifact publication creates and reuses a pinned nested directory",
           "[cli][gpu][artifact-publication]") {
     TemporaryDirectory temporary;

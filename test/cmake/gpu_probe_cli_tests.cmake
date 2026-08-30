@@ -197,6 +197,94 @@ foreach(artifact IN ITEMS input.complex-f32 expected.f32 observed.f32)
     endif()
 endforeach()
 
+file(WRITE "${ARTIFACT_ROOT}/blocked-artifact-directory" "not a directory")
+execute_process(
+    COMMAND "${PULP_CLI}" gpu probe
+        --recipe gpu-compute.magnitude.v1
+        --artifacts "${ARTIFACT_ROOT}/blocked-artifact-directory/child"
+        --json
+    RESULT_VARIABLE publication_failure_rc
+    OUTPUT_VARIABLE publication_failure_json
+    ERROR_VARIABLE publication_failure_stderr)
+if(NOT publication_failure_rc EQUAL 2)
+    message(FATAL_ERROR
+        "artifact publication failure must be unverified exit 2, got "
+        "${publication_failure_rc}: ${publication_failure_stderr}")
+endif()
+string(JSON publication_failure_schema ERROR_VARIABLE publication_failure_json_error
+    GET "${publication_failure_json}" schema)
+string(JSON publication_failure_verdict ERROR_VARIABLE publication_failure_verdict_error
+    GET "${publication_failure_json}" verdict)
+string(JSON publication_failure_code ERROR_VARIABLE publication_failure_code_error
+    GET "${publication_failure_json}" passes 0 code)
+if(publication_failure_json_error OR publication_failure_verdict_error OR
+   publication_failure_code_error OR
+   NOT publication_failure_schema STREQUAL "pulp.gpu-probe-result.v1" OR
+   NOT publication_failure_verdict STREQUAL "unverified" OR
+   NOT publication_failure_code STREQUAL "artifact_publication_failed")
+    message(FATAL_ERROR
+        "artifact publication failure did not emit typed unverified v1 evidence")
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env PULP_GPU_PROBE_TEST_FAULT=runtime
+        "${PULP_CLI}" gpu probe
+        --recipe gpu-compute.magnitude.v1
+        --artifacts "${ARTIFACT_ROOT}/runtime-failure"
+        --json
+    RESULT_VARIABLE runtime_failure_rc
+    OUTPUT_VARIABLE runtime_failure_json
+    ERROR_VARIABLE runtime_failure_stderr)
+if(NOT runtime_failure_rc EQUAL 2)
+    message(FATAL_ERROR
+        "runtime failure must be unverified exit 2, got "
+        "${runtime_failure_rc}: ${runtime_failure_stderr}")
+endif()
+string(JSON runtime_failure_schema ERROR_VARIABLE runtime_failure_schema_error
+    GET "${runtime_failure_json}" schema)
+string(JSON runtime_failure_verdict ERROR_VARIABLE runtime_failure_json_error
+    GET "${runtime_failure_json}" verdict)
+string(JSON runtime_failure_code ERROR_VARIABLE runtime_failure_code_error
+    GET "${runtime_failure_json}" passes 0 code)
+if(runtime_failure_schema_error OR runtime_failure_json_error OR runtime_failure_code_error OR
+   NOT runtime_failure_schema STREQUAL "pulp.gpu-probe-result.v1" OR
+   NOT runtime_failure_verdict STREQUAL "unverified" OR
+   NOT runtime_failure_code STREQUAL "probe_runtime_failed")
+    message(FATAL_ERROR "runtime failure did not emit typed unverified v1 evidence")
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env PULP_GPU_PROBE_TEST_FAULT=result-validation
+        "${PULP_CLI}" gpu probe
+        --recipe gpu-compute.magnitude.v1
+        --artifacts "${ARTIFACT_ROOT}/result-validation-failure"
+        --json
+    RESULT_VARIABLE result_validation_failure_rc
+    OUTPUT_VARIABLE result_validation_failure_json
+    ERROR_VARIABLE result_validation_failure_stderr)
+if(NOT result_validation_failure_rc EQUAL 2)
+    message(FATAL_ERROR
+        "result-validation failure must be unverified exit 2, got "
+        "${result_validation_failure_rc}: ${result_validation_failure_stderr}")
+endif()
+string(JSON result_validation_failure_schema
+    ERROR_VARIABLE result_validation_failure_schema_error
+    GET "${result_validation_failure_json}" schema)
+string(JSON result_validation_failure_verdict
+    ERROR_VARIABLE result_validation_failure_json_error
+    GET "${result_validation_failure_json}" verdict)
+string(JSON result_validation_failure_code
+    ERROR_VARIABLE result_validation_failure_code_error
+    GET "${result_validation_failure_json}" passes 0 code)
+if(result_validation_failure_schema_error OR result_validation_failure_json_error OR
+   result_validation_failure_code_error OR
+   NOT result_validation_failure_schema STREQUAL "pulp.gpu-probe-result.v1" OR
+   NOT result_validation_failure_verdict STREQUAL "unverified" OR
+   NOT result_validation_failure_code STREQUAL "probe_result_validation_failed")
+    message(FATAL_ERROR
+        "result-validation failure did not emit typed unverified v1 evidence")
+endif()
+
 execute_process(
     COMMAND "${PULP_CLI}" gpu probe
         --recipe gpu-compute.magnitude.v1

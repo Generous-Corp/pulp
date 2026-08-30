@@ -19,7 +19,9 @@ pulp gpu probe --recipe <recipe-id> --artifacts /tmp/pulp-gpu-evidence --json
 ```
 
 Exit 0 is a measured pass, exit 1 is a completed measured failure, and exit 2
-is unavailable or unverified. Preserve the typed JSON, `gpu_evidence_id`,
+is unavailable or unverified. Runtime, internal-validation, and artifact
+publication failures also use typed `unverified` JSON and exit 2; never read
+them as completed measurements. Preserve the typed JSON, `gpu_evidence_id`,
 adapter status/class, numeric oracle, and artifact digests. An unknown or
 unverified adapter is not an authentic hardware claim, even when the backend is
 Dawn/WebGPU. Never infer correctness from a screenshot alone.

@@ -2586,9 +2586,12 @@ Every recipe declares deterministic inputs, dimensions, clock, source and
 signature digests, semantic pass names, tolerances, adapter policy, and strict
 artifact byte/count bounds. The result uses
 [`pulp.gpu-probe-result.v1`](../contracts/gpu-probe-result-v1.schema.json) and
-includes a random 128-bit `gpu_evidence_id` for later Perfetto and control
-correlation. Numeric recipes compare real GPU readback against an independent
-CPU oracle. The Renderer3D recipe uses an exact known fingerprint only on its
+includes a 128-bit `gpu_evidence_id` for later Perfetto and control correlation.
+Execution-capable results require a freshly random identifier; if the entropy
+provider fails, the CLI emits an `unverified` exit-2 result with a
+correlation-only identifier and does not run the recipe. Numeric recipes
+compare real GPU readback against an independent CPU oracle. The Renderer3D
+recipe uses an exact known fingerprint only on its
 declared backend and a portable structural content oracle elsewhere; it never
 claims cross-backend pixel identity.
 
@@ -2616,8 +2619,13 @@ Three.js runtime, rather than installing a new delegate without its runtime.
 submission or readback. Detection is deliberately reported as a typed `fail`
 with exit 1, proving that the oracle can catch the class of error. Exit 2 means
 the requested evidence is unavailable or unverified, never that skipped work
-passed. Artifact publication validates hashes and bounds before writing,
-refuses symlinked paths, and renames bounded temporary files atomically.
+passed. Exit 1 is reserved for a validated, completed measurement; recipe
+runtime exceptions, invalid internal results, and artifact-publication failures
+return exit 2. With `--json`, those command failures remain a valid typed v1
+`unverified` result rather than masquerading as a measured failure. Artifact
+publication validates hashes and bounds before writing, refuses symlinked
+paths, and renames bounded temporary files atomically relative to a pinned
+directory identity.
 
 Use `pulp doctor gpu` first for broad environment and adapter health. Use
 `pulp gpu probe` when you need to localize a wrong value, pass, or intermediate

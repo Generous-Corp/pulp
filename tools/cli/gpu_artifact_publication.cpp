@@ -237,7 +237,8 @@ void mark_delete_on_close(HANDLE handle) noexcept {
     SetFileInformationByHandle(handle, FileDispositionInfo, &disposition, sizeof(disposition));
 }
 
-void rename_in_place(HANDLE file, const fs::path& destination_name, const fs::path& display_path) {
+std::vector<std::byte> make_rename_information(HANDLE pinned_directory,
+                                               const fs::path& destination_name) {
     const auto& native = destination_name.native();
     const auto name_bytes = native.size() * sizeof(wchar_t);
     if (name_bytes > (std::numeric_limits<DWORD>::max)() - sizeof(FILE_RENAME_INFO))
@@ -246,11 +247,18 @@ void rename_in_place(HANDLE file, const fs::path& destination_name, const fs::pa
     std::vector<std::byte> storage(sizeof(FILE_RENAME_INFO) + name_bytes, std::byte{});
     auto* information = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
     information->ReplaceIfExists = TRUE;
-    // A simple name with a null root keeps the rename in the already-open
-    // temporary file's parent. No pathname or reparse point is traversed.
-    information->RootDirectory = nullptr;
+    // Resolve the basename against the same retained directory identity used
+    // for creation. A pathname or reparse-point swap cannot redirect it.
+    information->RootDirectory = pinned_directory;
     information->FileNameLength = static_cast<DWORD>(name_bytes);
     std::memcpy(information->FileName, native.data(), name_bytes);
+    return storage;
+}
+
+void rename_in_place(HANDLE file, HANDLE pinned_directory,
+                     const fs::path& destination_name, const fs::path& display_path) {
+    auto storage = make_rename_information(pinned_directory, destination_name);
+    auto* information = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
     const auto function = nt_set_information_file();
     if (function == nullptr)
         throw_windows_error("resolve handle-relative rename", display_path, ERROR_PROC_NOT_FOUND);
@@ -439,7 +447,7 @@ void PinnedArtifactDirectory::publish(std::string_view name, std::span<const std
         }
         if (!FlushFileBuffers(file.get()))
             throw_windows_error("flush artifact", state_->path / temporary_name_path);
-        rename_in_place(file.get(), relative, destination);
+        rename_in_place(file.get(), state_->directory_handle, relative, destination);
     } catch (...) {
         mark_delete_on_close(file.get());
         throw;

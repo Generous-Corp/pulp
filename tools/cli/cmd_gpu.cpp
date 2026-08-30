@@ -4,17 +4,24 @@
 #include "json_parser.hpp"
 #include "json_writer.hpp"
 
+#include <pulp/runtime/crypto.hpp>
 #include <pulp_tooling/gpu_probe/recipes.hpp>
 #if PULP_ENABLE_PROJECT_PACKAGE
 #include <pulp/project_package/atomic_publisher.hpp>
 #endif
 
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <cstdint>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -28,6 +35,110 @@ constexpr const char* kUsage =
 using JsonValue = pulp::cli::pkg::JsonValue;
 
 bool path_chain_contains_symlink(const fs::path& path);
+
+bool gpu_probe_test_fault(std::string_view name) {
+#if PULP_CLI_GPU_PROBE_TEST_FAULTS
+    const auto* fault = std::getenv("PULP_GPU_PROBE_TEST_FAULT");
+    return fault != nullptr && name == fault;
+#else
+    (void)name;
+    return false;
+#endif
+}
+
+std::optional<std::string> secure_gpu_evidence_id() {
+    if (auto bytes = pulp::runtime::secure_random_bytes(16); bytes && bytes->size() == 16)
+        return pulp::runtime::hex_encode(*bytes);
+    return std::nullopt;
+}
+
+std::string unverified_gpu_evidence_id() {
+    // An entropy-provider failure must not erase the typed exit-2 diagnostic.
+    // This process-local nonce is correlation only and never supports a pass.
+    static std::atomic<std::uint64_t> sequence{0};
+    std::ostringstream seed;
+    seed << std::chrono::system_clock::now().time_since_epoch().count() << ':'
+         << std::chrono::steady_clock::now().time_since_epoch().count() << ':'
+         << sequence.fetch_add(1, std::memory_order_relaxed) << ':'
+         << reinterpret_cast<std::uintptr_t>(&sequence);
+    return pulp::runtime::sha256_hex(seed.str()).substr(0, 32);
+}
+
+pulp::tooling::gpu_probe::ProbeResult make_unverified_command_result(
+    const pulp::tooling::gpu_probe::RecipeDefinition& recipe, const RunOptions& options,
+    std::string_view code, std::string_view detail) {
+    using namespace pulp::tooling::gpu_probe;
+
+    ProbeResult result;
+    result.gpu_evidence_id = options.gpu_evidence_id ? *options.gpu_evidence_id
+                                                     : unverified_gpu_evidence_id();
+    result.recipe_id = std::string(recipe.id);
+    result.source_digest = pulp::runtime::sha256_hex(recipe.source_identity);
+    std::ostringstream signature;
+    signature << "pulp.gpu-probe-command-unverified.v1\n" << recipe.id << '\n'
+              << result.source_digest << '\n' << recipe.dimensions.width << 'x'
+              << recipe.dimensions.height << ':' << recipe.dimensions.work_items << '\n'
+              << recipe.seed << '\n' << recipe.clock << '\n' << recipe.input_format << '\n'
+              << recipe.output_format << '\n' << recipe.encoding << '\n'
+              << recipe.tolerance.absolute << ':' << recipe.tolerance.relative << '\n'
+              << static_cast<int>(recipe.adapter_policy) << '\n'
+              << (options.apply_negative_mutation ? recipe.negative_mutation
+                                                  : recipe.positive_control);
+    result.signature_digest = pulp::runtime::sha256_hex(signature.str());
+    result.dimensions = recipe.dimensions;
+    if (options.apply_negative_mutation && recipe.id == kRecipeIds.front())
+        result.dimensions = {32, 32, 1'024};
+    result.seed = recipe.seed;
+    result.clock = std::string(recipe.clock);
+    result.input_format = std::string(recipe.input_format);
+    result.output_format = std::string(recipe.output_format);
+    result.encoding = std::string(recipe.encoding);
+    result.tolerance = recipe.tolerance;
+    result.adapter_policy = recipe.adapter_policy;
+    if (options.apply_negative_mutation)
+        result.mutation = std::string(recipe.negative_mutation);
+    result.verdict = Verdict::unverified;
+    for (std::uint32_t index = 0; index < recipe.semantic_passes.size(); ++index) {
+        PassResult pass;
+        pass.sequence = index;
+        pass.name = std::string(recipe.semantic_passes[index]);
+        pass.verdict = Verdict::unverified;
+        pass.work_completed = false;
+        pass.code = std::string(code);
+        result.passes.push_back(std::move(pass));
+    }
+    const auto message = detail.empty()
+        ? std::string{"GPU probe command failed before evidence was verified."}
+        : std::string{detail.substr(0, 512)};
+    result.recommendations.push_back(message);
+    return result;
+}
+
+int report_probe_command_failure(bool json,
+                                 const pulp::tooling::gpu_probe::RecipeDefinition& recipe,
+                                 const RunOptions& options, std::string_view label,
+                                 std::string_view code, std::string_view detail) {
+    std::cerr << "pulp gpu probe: " << label;
+    if (!detail.empty())
+        std::cerr << ": " << detail;
+    std::cerr << '\n';
+    if (json) {
+        try {
+            const auto result = make_unverified_command_result(recipe, options, code, detail);
+            std::string validation_error;
+            if (!pulp::tooling::gpu_probe::validate(result, &validation_error)) {
+                std::cerr << "pulp gpu probe: could not encode typed command failure: "
+                          << validation_error << '\n';
+            } else {
+                std::cout << pulp::tooling::gpu_probe::to_json(result, true) << '\n';
+            }
+        } catch (const std::exception& error) {
+            std::cerr << "pulp gpu probe: could not encode typed command failure: " << error.what()
+                      << '\n';
+        }
+    }
+    return 2;
+}
 
 bool path_has_dot_component(const fs::path& path) {
     for (const auto& part : path)
@@ -359,34 +470,6 @@ RecipeRun run_recipe(const std::string& recipe_id, const RunOptions& options,
 int cmd_gpu_probe(const std::vector<std::string>& args) {
     bool json = false;
     RunOptions options;
-    const auto executable_dir = current_executable_path().parent_path();
-    const std::array runtime_candidates{
-        executable_dir / "share" / "pulp" / "threejs",
-        executable_dir.parent_path() / "share" / "pulp" / "threejs",
-    };
-    std::optional<std::string> threejs_runtime_root;
-    std::error_code runtime_path_error;
-    for (const auto& candidate : runtime_candidates) {
-        if (fs::is_directory(candidate, runtime_path_error)) {
-            threejs_runtime_root = candidate.string();
-            break;
-        }
-        runtime_path_error.clear();
-    }
-    if (!threejs_runtime_root) {
-        auto build_root = executable_dir;
-        bool build_tree_invocation = false;
-        for (int depth = 0; depth < 4 && !build_root.empty(); ++depth) {
-            if (fs::is_regular_file(build_root / "CMakeCache.txt", runtime_path_error)) {
-                build_tree_invocation = true;
-                break;
-            }
-            runtime_path_error.clear();
-            build_root = build_root.parent_path();
-        }
-        if (!build_tree_invocation)
-            threejs_runtime_root = runtime_candidates.front().string();
-    }
     std::string recipe_id;
     fs::path artifact_directory;
 
@@ -421,28 +504,75 @@ int cmd_gpu_probe(const std::vector<std::string>& args) {
         std::cerr << "pulp gpu probe: --recipe and --artifacts are required\n" << kUsage;
         return 2;
     }
-    if (!pulp::tooling::gpu_probe::find_recipe(recipe_id)) {
+    const auto* recipe = pulp::tooling::gpu_probe::find_recipe(recipe_id);
+    if (!recipe) {
         std::cerr << "pulp gpu probe: unknown recipe '" << recipe_id << "'\n";
         return 2;
     }
 
     try {
+        const auto evidence_id = secure_gpu_evidence_id();
+        if (!evidence_id) {
+            return report_probe_command_failure(
+                json, *recipe, options, "runtime failure", "gpu_evidence_id_unavailable",
+                "GPU probe could not allocate a unique evidence identifier");
+        }
+        options.gpu_evidence_id = *evidence_id;
+        if (gpu_probe_test_fault("runtime"))
+            throw std::runtime_error("injected GPU probe runtime failure");
+        const auto executable_dir = current_executable_path().parent_path();
+        const std::array runtime_candidates{
+            executable_dir / "share" / "pulp" / "threejs",
+            executable_dir.parent_path() / "share" / "pulp" / "threejs",
+        };
+        std::optional<std::string> threejs_runtime_root;
+        std::error_code runtime_path_error;
+        for (const auto& candidate : runtime_candidates) {
+            if (fs::is_directory(candidate, runtime_path_error)) {
+                threejs_runtime_root = candidate.string();
+                break;
+            }
+            runtime_path_error.clear();
+        }
+        if (!threejs_runtime_root) {
+            auto build_root = executable_dir;
+            bool build_tree_invocation = false;
+            for (int depth = 0; depth < 4 && !build_root.empty(); ++depth) {
+                if (fs::is_regular_file(build_root / "CMakeCache.txt", runtime_path_error)) {
+                    build_tree_invocation = true;
+                    break;
+                }
+                runtime_path_error.clear();
+                build_root = build_root.parent_path();
+            }
+            if (!build_tree_invocation)
+                threejs_runtime_root = runtime_candidates.front().string();
+        }
         auto run = run_recipe(recipe_id, options, threejs_runtime_root);
+        if (gpu_probe_test_fault("result-validation"))
+            run.result.schema.clear();
         std::string validation_error;
         if (!pulp::tooling::gpu_probe::validate(run, &validation_error)) {
-            std::cerr << "pulp gpu probe: internal result validation failed: " << validation_error
-                      << '\n';
-            return 1;
+            return report_probe_command_failure(json, *recipe, options,
+                                                "internal result validation failed",
+                                                "probe_result_validation_failed",
+                                                validation_error);
         }
-        write_artifacts(artifact_directory, run);
+        try {
+            write_artifacts(artifact_directory, run);
+        } catch (const std::exception& error) {
+            return report_probe_command_failure(json, *recipe, options,
+                                                "artifact publication failed",
+                                                "artifact_publication_failed", error.what());
+        }
         if (json)
             std::cout << pulp::tooling::gpu_probe::to_json(run.result, true) << '\n';
         else
             std::cout << pulp::tooling::gpu_probe::render_human(run.result);
         return pulp::tooling::gpu_probe::exit_code(run.result);
     } catch (const std::exception& error) {
-        std::cerr << "pulp gpu probe: " << error.what() << '\n';
-        return 1;
+        return report_probe_command_failure(json, *recipe, options, "runtime failure",
+                                            "probe_runtime_failed", error.what());
     }
 }
 

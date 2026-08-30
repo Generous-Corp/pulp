@@ -176,7 +176,8 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
     target_link_libraries(pulp-cli PRIVATE pulp::tool-timeline)
 endif()
 target_compile_definitions(pulp-cli PRIVATE
-    PULP_ENABLE_PROJECT_PACKAGE=$<BOOL:${PULP_ENABLE_PROJECT_PACKAGE}>)
+    PULP_ENABLE_PROJECT_PACKAGE=$<BOOL:${PULP_ENABLE_PROJECT_PACKAGE}>
+    PULP_CLI_GPU_PROBE_TEST_FAULTS=$<BOOL:${PULP_BUILD_TESTS}>)
 if(TARGET pulp::inspect-client)
     target_link_libraries(pulp-cli PRIVATE pulp::inspect-client)
     target_compile_definitions(pulp-cli PRIVATE PULP_CLI_HAS_CONTROL_HEALTH=1)
@@ -283,6 +284,8 @@ if(PULP_BUILD_TESTS)
         gpu_artifact_publication.cpp)
     target_include_directories(pulp-test-cli-gpu-artifact-publication PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(pulp-test-cli-gpu-artifact-publication PRIVATE
+        PULP_GPU_ARTIFACT_PUBLICATION_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/gpu_artifact_publication.cpp")
     target_compile_features(pulp-test-cli-gpu-artifact-publication PRIVATE cxx_std_20)
     target_link_libraries(pulp-test-cli-gpu-artifact-publication PRIVATE
         Catch2::Catch2WithMain)
