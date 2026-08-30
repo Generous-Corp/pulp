@@ -233,6 +233,7 @@ class CleanAgentHarnessTests(unittest.TestCase):
             self.assertNotIn(payload.decode(), " ".join(add_argv))
             self.assertEqual(add_input, payload + b"\n")
             self.assertTrue(record["creator_access_removed"])
+            self.assertNotIn("payload_sha256", record)
             self.assertFalse((codex_home / "auth.json").exists())
 
     def test_structural_pair_rolls_back_and_recovers_exact_staged_bundle(self) -> None:

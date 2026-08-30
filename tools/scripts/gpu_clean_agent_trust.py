@@ -603,7 +603,6 @@ def install_codex_keychain_auth(
         "account": account,
         "auth_mode": auth["auth_mode"],
         "payload_bytes": len(auth_payload),
-        "payload_sha256": sha256_bytes(auth_payload),
         "trusted_application": str(agent_bin),
         "creator_access_removed": True,
         "fallback_auth_file_absent": True,
@@ -612,7 +611,7 @@ def install_codex_keychain_auth(
 
 def remove_codex_keychain_auth(record: dict[str, Any]) -> None:
     if set(record) != {
-        "backend", "service", "account", "auth_mode", "payload_bytes", "payload_sha256",
+        "backend", "service", "account", "auth_mode", "payload_bytes",
         "trusted_application", "creator_access_removed", "fallback_auth_file_absent",
     }:
         raise TrustError("Codex keychain record does not have its closed field set")

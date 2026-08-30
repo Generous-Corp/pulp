@@ -2271,7 +2271,7 @@ def _validate_session_identity(
     keychain = _require_exact_fields(
         session["keychain_auth"],
         {
-            "backend", "service", "account", "auth_mode", "payload_bytes", "payload_sha256",
+            "backend", "service", "account", "auth_mode", "payload_bytes",
             "trusted_application", "creator_access_removed", "fallback_auth_file_absent",
             "removed_after_record",
         },
@@ -2287,8 +2287,6 @@ def _validate_session_identity(
         or keychain["auth_mode"] not in {"chatgpt", "apikey"}
         or type(keychain["payload_bytes"]) is not int
         or not 1 <= keychain["payload_bytes"] <= 1024 * 1024
-        or _require_digest(keychain["payload_sha256"], "keychain payload")
-        != keychain["payload_sha256"]
         or keychain["trusted_application"] != agent["path"]
         or keychain["creator_access_removed"] is not True
         or keychain["fallback_auth_file_absent"] is not True

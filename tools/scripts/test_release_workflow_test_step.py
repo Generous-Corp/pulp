@@ -686,22 +686,15 @@ class ReleasePathPrGateMacosRouting(unittest.TestCase):
         self.assertIn("matrix.platform == 'darwin-arm64'", self.text)
         dependencies = (REPO_ROOT / "tools/cmake/PulpDependencies.cmake").read_text(encoding="utf-8")
         match = re.search(
-            r"# three\.js .*?\n(?P<body>if\(\(PULP_BUILD_TESTS.*?\nendif\(\))",
+            r"# three\.js .*?\n(?P<body>if\(PULP_ENABLE_THREEJS_RUNTIME\).*?\nendif\(\))",
             dependencies,
             re.DOTALL,
         )
-        self.assertIsNotNone(match, "could not isolate the three.js FetchContent guard")
+        self.assertIsNotNone(match, "could not isolate the three.js runtime guard")
         guard = match.group("body")
-        self.assertIn("PULP_BUILD_EXAMPLES", guard)
-        for exclusion in (
-            "NOT ANDROID",
-            "NOT IOS",
-            "NOT PULP_IOS",
-            "NOT EMSCRIPTEN",
-            'NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten"',
-            'NOT CMAKE_SYSTEM_NAME STREQUAL "WASI"',
-        ):
-            self.assertIn(exclusion, guard)
+        self.assertIn("PULP_THREEJS_RUNTIME_DIR", guard)
+        self.assertIn("FetchContent_MakeAvailable(threejs)", guard)
+        self.assertIn("PULP_THREEJS_RUNTIME_FILES", guard)
 
 
 class ReleaseCliDualBinaryPackaging(unittest.TestCase):
