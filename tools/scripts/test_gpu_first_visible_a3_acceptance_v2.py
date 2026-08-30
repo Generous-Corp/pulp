@@ -93,8 +93,35 @@ def raw_campaign(role: str, policy_sha256: str) -> dict[str, Any]:
 
 
 def make_fixture(root: Path) -> dict[str, Any]:
-    support_ref = write_artifact(root, "policy/support-matrix.json", {"protected": True})
-    a1_ref = write_artifact(root, "policy/a1-evidence.json", {"authentic": True})
+    producer_ref = write_executable(root, "tooling/evidence-producer", f'''#!/usr/bin/env python3
+import argparse, hashlib, json, sys
+mode = sys.argv[1]
+p = argparse.ArgumentParser(); p.add_argument("--json", action="store_true")
+if mode == "verify-a3-evidence":
+ p.add_argument("--kind"); p.add_argument("--artifact"); a=p.parse_args(sys.argv[2:])
+ d=hashlib.sha256(open(a.artifact,"rb").read()).hexdigest()
+ print(json.dumps({{"schema":"pulp.gpu-first-visible-evidence-verification.v1","kind":a.kind,"artifact_sha256":d,"implementation_head":"{SHA}","valid":True}},sort_keys=True))
+else:
+ p.add_argument("--raw"); p.add_argument("--trace"); p.add_argument("--identity-sha256"); a=p.parse_args(sys.argv[2:])
+ h=lambda x: hashlib.sha256(open(x,"rb").read()).hexdigest()
+ print(json.dumps({{"schema":"pulp.gpu-first-visible-sample-verification.v2","raw_samples_sha256":h(a.raw),"trace_sha256":h(a.trace),"identity_sha256":a.identity_sha256,"valid":True}},sort_keys=True))
+''')
+    producer_provenance_ref = write_artifact(root, "tooling/evidence-producer-provenance.json", {
+        "schema": "pulp.gpu-first-visible-evidence-producer.v1", "version": 1,
+        "pulp_revision": SHA, "producer_sha256": producer_ref["sha256"],
+    })
+    support_payload = write_artifact(root, "policy/support-matrix-payload.json", {"protected": True})
+    a1_payload = write_artifact(root, "policy/a1-evidence-payload.json", {"authentic": True})
+    support_ref = write_artifact(root, "policy/support-matrix.json", {
+        "schema": "pulp.gpu-first-visible-generated-evidence.v1", "version": 1,
+        "kind": "support-matrix", "implementation_head": SHA, "producer": producer_ref,
+        "producer_provenance": producer_provenance_ref, "artifact": support_payload,
+    })
+    a1_ref = write_artifact(root, "policy/a1-evidence.json", {
+        "schema": "pulp.gpu-first-visible-generated-evidence.v1", "version": 1,
+        "kind": "a1-evidence", "implementation_head": SHA, "producer": producer_ref,
+        "producer_provenance": producer_provenance_ref, "artifact": a1_payload,
+    })
     policy = {
         "schema": "pulp.gpu-first-visible-budget-authority.v1", "version": 1,
         "budget_id": "a3-v2-test-authority",
@@ -167,7 +194,8 @@ raise SystemExit(2)
         ).hexdigest()
         sample_provenance_ref = write_artifact(root, f"campaigns/{role}-provenance.json", {
             "schema": "pulp.gpu-first-visible-a3-sample-provenance.v2", "version": 2,
-            "implementation_head": SHA, "role_id": role, "producer_sha256": DIGEST,
+            "implementation_head": SHA, "role_id": role, "producer": producer_ref,
+            "producer_provenance": producer_provenance_ref,
             "raw_samples_sha256": raw_ref["sha256"], "trace_sha256": trace_ref["sha256"],
             "identity_sha256": identity_digest,
         })
@@ -216,7 +244,11 @@ raise SystemExit(2)
         "disposition": "no-change", "observations": [], "blockers": [],
     }
     receipt["publication"]["artifact_sha256s"] = sorted(
-        set(v2.collect_artifact_sha256s(receipt)) | {support_ref["sha256"], a1_ref["sha256"]}
+        set(v2.collect_artifact_sha256s(receipt)) | {
+            support_ref["sha256"], a1_ref["sha256"], producer_ref["sha256"],
+            producer_provenance_ref["sha256"], support_payload["sha256"], a1_payload["sha256"],
+            audio_executable["sha256"],
+        }
     )
     return receipt
 
@@ -292,6 +324,7 @@ def main() -> int:
         ("xrun", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["raw_samples"], lambda raw: raw["states"][1]["warm"][0].update(xrun_count=1))),
         ("trace sidecar digest", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["trace_analysis"], lambda a: a.update(trace_sha256=DIGEST))),
         ("sample provenance", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["sample_provenance"], lambda a: a.update(raw_samples_sha256=DIGEST))),
+        ("sample producer substitution", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["sample_provenance"], lambda a: a.update(producer=write_executable(p, "tooling/forged-producer", "#!/bin/sh\nexit 0\n")))),
         ("analyzer substitution", lambda r, p: r["campaigns"][0].update(trace_analyzer=write_executable(p, "tooling/substitute", "#!/bin/sh\nexit 2\n"))),
         ("analyzer process", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["trace_analysis"], lambda a: a.update(process_pid=43))),
         ("blank negative digest", lambda r, p: rewrite_artifact(p, r["blank_negative"]["receipt"], lambda a: a.update(campaign_trace_sha256s=[]))),
@@ -300,9 +333,30 @@ def main() -> int:
     ]
     for label, mutate in negatives:
         expect_rejected(label, mutate)
+    required = {("required", 7)}
+    successful = [{
+        "id": 1, "name": "required", "app": {"id": 7}, "status": "completed",
+        "conclusion": "success", "completed_at": "2026-08-29T01:00:00Z",
+    }]
+    assert v2.required_check_result_errors(required, successful, []) == []
+    assert "missing" in v2.required_check_result_errors(required, [dict(successful[0], app={"id": 8})], [])[0]
+    ambiguous = successful + [dict(successful[0], id=2)]
+    assert "ambiguous" in v2.required_check_result_errors(required, ambiguous, [])[0]
+    pending = [dict(successful[0], status="in_progress", conclusion=None)]
+    assert "not successful" in v2.required_check_result_errors(required, pending, [])[0]
+    pages = [[{"id": index} for index in range(100)], [{"id": 100}]]
+    with mock.patch.object(v2, "_command_json", side_effect=pages):
+        assert len(v2._fetch_all_pages("ghapp", "endpoint")) == 101
+    try:
+        with mock.patch.object(v2, "_command_json", return_value={"total_count": 2, "check_runs": [{"id": 1}]}):
+            v2._fetch_all_pages("ghapp", "endpoint", object_key="check_runs")
+    except v2.V2AcceptanceError:
+        pass
+    else:
+        raise AssertionError("incomplete paginated check-runs result was accepted")
     print(
         f"gpu first-visible A3 v2 acceptance: positive=1 "
-        f"cli_outcomes=3 planted_negatives={len(negatives)}"
+        f"cli_outcomes=3 planted_negatives={len(negatives)} live_check_controls=6"
     )
     return 0
 

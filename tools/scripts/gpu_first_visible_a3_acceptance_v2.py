@@ -386,14 +386,14 @@ def validate_product_policy(
     for index, ref in enumerate(coverage["a1_evidence"]):
         exact_keys(ref, ARTIFACT_KEYS, f"required coverage A1 evidence {index}")
     nested_digests = {coverage["support_matrix"]["sha256"]}
-    resolve_artifact(
-        coverage["support_matrix"], evidence_root,
-        "required coverage support matrix", loader=lambda path: path.read_bytes(),
+    validate_generated_evidence(
+        coverage["support_matrix"], evidence_root, "support-matrix",
+        receipt["implementation_head"], nested_digests,
     )
     for index, ref in enumerate(coverage["a1_evidence"]):
-        resolve_artifact(
-            ref, evidence_root, f"required coverage A1 evidence {index}",
-            loader=lambda path: path.read_bytes(),
+        validate_generated_evidence(
+            ref, evidence_root, "a1-evidence", receipt["implementation_head"],
+            nested_digests,
         )
         nested_digests.add(ref["sha256"])
     canary = exact_keys(policy["canary"], {
@@ -419,6 +419,54 @@ def validate_product_policy(
             raise V2AcceptanceError(f"A4 scenario {row['scenario_id']} has invalid role binding")
         _positive_int(row["frame_budget_ns"], f"A4 scenario {row['scenario_id']} frame budget")
     return policy, binding["authority"]["sha256"], nested_digests
+
+
+def validate_generated_evidence(
+    wrapper_ref: dict[str, Any], evidence_root: Path, kind: str,
+    implementation_head: str, nested_digests: set[str],
+) -> None:
+    wrapper = resolve_artifact(wrapper_ref, evidence_root, f"required coverage {kind}")
+    exact_keys(wrapper, {
+        "schema", "version", "kind", "implementation_head", "producer",
+        "producer_provenance", "artifact",
+    }, f"required coverage {kind} wrapper")
+    if (
+        wrapper["schema"] != "pulp.gpu-first-visible-generated-evidence.v1"
+        or wrapper["version"] != 1 or wrapper["kind"] != kind
+        or wrapper["implementation_head"] != implementation_head
+    ):
+        raise V2AcceptanceError(f"required coverage {kind} has the wrong identity")
+    producer = resolve_artifact_path(wrapper["producer"], evidence_root, f"{kind}.producer")
+    artifact = resolve_artifact_path(wrapper["artifact"], evidence_root, f"{kind}.artifact")
+    provenance = resolve_artifact(wrapper["producer_provenance"], evidence_root, f"{kind}.producer_provenance")
+    if (
+        provenance.get("schema") != "pulp.gpu-first-visible-evidence-producer.v1"
+        or provenance.get("version") != 1
+        or provenance.get("pulp_revision") != implementation_head
+        or provenance.get("producer_sha256") != wrapper["producer"]["sha256"]
+        or not os.access(producer, os.X_OK)
+    ):
+        raise V2AcceptanceError(f"required coverage {kind} producer provenance is invalid")
+    completed = subprocess.run(
+        [str(producer), "verify-a3-evidence", "--kind", kind, "--artifact", str(artifact), "--json"],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False,
+    )
+    try:
+        result = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise V2AcceptanceError(f"required coverage {kind} producer emitted invalid JSON") from error
+    if (
+        completed.returncode != 0
+        or result != {
+            "schema": "pulp.gpu-first-visible-evidence-verification.v1",
+            "kind": kind, "artifact_sha256": wrapper["artifact"]["sha256"],
+            "implementation_head": implementation_head, "valid": True,
+        }
+    ):
+        raise V2AcceptanceError(f"required coverage {kind} was not reproduced by its pinned producer")
+    nested_digests.update(
+        wrapper[field]["sha256"] for field in ("producer", "producer_provenance", "artifact")
+    )
 
 
 def validate_sample(
@@ -537,7 +585,22 @@ def collect_artifact_sha256s(receipt: dict[str, Any]) -> list[str]:
     return sorted(digests)
 
 
-def validate_control_receipts(receipt: dict[str, Any], evidence_root: Path) -> None:
+def _nested_artifact_digests(value: Any) -> set[str]:
+    result: set[str] = set()
+    if isinstance(value, dict):
+        if set(value) == ARTIFACT_KEYS and SHA256.fullmatch(str(value.get("sha256", ""))):
+            result.add(value["sha256"])
+        else:
+            for nested in value.values():
+                result.update(_nested_artifact_digests(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            result.update(_nested_artifact_digests(nested))
+    return result
+
+
+def validate_control_receipts(receipt: dict[str, Any], evidence_root: Path) -> set[str]:
+    nested_digests: set[str] = set()
     trace_digests = sorted(campaign["trace"]["sha256"] for campaign in receipt["campaigns"])
     blank = receipt["blank_negative"]
     if blank["status"] != "pass" or blank["receipt"] is None:
@@ -569,6 +632,7 @@ def validate_control_receipts(receipt: dict[str, Any], evidence_root: Path) -> N
     }, "audio-thread exclusion receipt")
     executable = audio_payload["executable"]
     executable_path = resolve_artifact_path(executable, evidence_root, "audio_thread_exclusion.executable")
+    nested_digests.add(executable["sha256"])
     expected_entries = [
         "begin_editor_open", "record_presented_frame", "record_timeout",
         "record_instance_lost", "record_dropped_events", "snapshot",
@@ -597,15 +661,19 @@ def validate_control_receipts(receipt: dict[str, Any], evidence_root: Path) -> N
         trace_producer_overhead.validate_receipt(overhead_payload, evidence_root, require_pass=True)
     except trace_producer_overhead.OverheadError as error:
         raise V2AcceptanceError(f"four-state trace-producer overhead is invalid: {error}") from error
+    nested_digests.update(_nested_artifact_digests(overhead_payload))
+    return nested_digests
 
 
-def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, implementation_head: str) -> None:
+def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, implementation_head: str) -> set[str]:
     role_id = campaign["role_id"]
+    trace_path = resolve_artifact_path(campaign["trace"], evidence_root, f"{role_id}.trace")
     sample_provenance = resolve_artifact(
         campaign["sample_provenance"], evidence_root, f"{role_id}.sample_provenance"
     )
     exact_keys(sample_provenance, {
-        "schema", "version", "implementation_head", "role_id", "producer_sha256",
+        "schema", "version", "implementation_head", "role_id", "producer",
+        "producer_provenance",
         "raw_samples_sha256", "trace_sha256", "identity_sha256",
     }, f"{role_id} sample provenance")
     identity_digest = hashlib.sha256(
@@ -616,13 +684,41 @@ def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, impleme
         or sample_provenance["version"] != 2
         or sample_provenance["implementation_head"] != implementation_head
         or sample_provenance["role_id"] != role_id
-        or not SHA256.fullmatch(str(sample_provenance["producer_sha256"]))
         or sample_provenance["raw_samples_sha256"] != campaign["raw_samples"]["sha256"]
         or sample_provenance["trace_sha256"] != campaign["trace"]["sha256"]
         or sample_provenance["identity_sha256"] != identity_digest
     ):
         raise V2AcceptanceError(f"{role_id} samples lack exact producer and identity provenance")
-    trace_path = resolve_artifact_path(campaign["trace"], evidence_root, f"{role_id}.trace")
+    producer = resolve_artifact_path(sample_provenance["producer"], evidence_root, f"{role_id}.sample_producer")
+    producer_provenance = resolve_artifact(
+        sample_provenance["producer_provenance"], evidence_root,
+        f"{role_id}.sample_producer_provenance",
+    )
+    if (
+        producer_provenance.get("schema") != "pulp.gpu-first-visible-evidence-producer.v1"
+        or producer_provenance.get("version") != 1
+        or producer_provenance.get("pulp_revision") != implementation_head
+        or producer_provenance.get("producer_sha256") != sample_provenance["producer"]["sha256"]
+        or not os.access(producer, os.X_OK)
+    ):
+        raise V2AcceptanceError(f"{role_id} sample producer provenance is invalid")
+    raw_path = resolve_artifact_path(campaign["raw_samples"], evidence_root, f"{role_id}.raw_samples")
+    completed = subprocess.run(
+        [str(producer), "verify-a3-samples", "--raw", str(raw_path), "--trace", str(trace_path),
+         "--identity-sha256", identity_digest, "--json"],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False,
+    )
+    try:
+        producer_result = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise V2AcceptanceError(f"{role_id} sample producer emitted invalid JSON") from error
+    if completed.returncode != 0 or producer_result != {
+        "schema": "pulp.gpu-first-visible-sample-verification.v2",
+        "raw_samples_sha256": campaign["raw_samples"]["sha256"],
+        "trace_sha256": campaign["trace"]["sha256"],
+        "identity_sha256": identity_digest, "valid": True,
+    }:
+        raise V2AcceptanceError(f"{role_id} exact samples were not reproduced by their pinned producer")
     analyzer = resolve_artifact_path(campaign["trace_analyzer"], evidence_root, f"{role_id}.trace_analyzer")
     if not os.access(analyzer, os.X_OK):
         raise V2AcceptanceError(f"{role_id} trace analyzer is not executable")
@@ -686,9 +782,15 @@ def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, impleme
         or any(analysis[key] != value for key, value in expected_binding.items())
     ):
         raise V2AcceptanceError(f"{role_id} trace analysis is not bound to fresh replay and exact trace bytes")
+    return {
+        sample_provenance["producer"]["sha256"],
+        sample_provenance["producer_provenance"]["sha256"],
+    }
 
 
-def live_protected_main_errors(receipt: dict[str, Any], receipt_path: Path, repository: Path) -> list[str]:
+def live_protected_main_errors(
+    receipt: dict[str, Any], receipt_path: Path, repository: Path, evidence_root: Path,
+) -> list[str]:
     errors: list[str] = []
     ghapp = shutil.which("ghapp")
     if ghapp is None:
@@ -711,6 +813,43 @@ def live_protected_main_errors(receipt: dict[str, Any], receipt_path: Path, repo
         indexed_blob = subprocess.run(["git", "rev-parse", f"HEAD:{CANONICAL_RECEIPT}"], cwd=repository, check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         if contents.get("type") != "file" or contents.get("path") != CANONICAL_RECEIPT or contents.get("sha") != local_blob or local_blob != indexed_blob:
             errors.append("live main does not contain the exact canonical receipt blob")
+        policy = resolve_artifact(
+            receipt["product_policy"]["authority"], evidence_root,
+            "product_policy.authority",
+        )
+        source = policy["source"]
+        owner_repo = source["repository"]
+        policy_contents = _command_json([
+            ghapp, "api", f"repos/{owner_repo}/contents/{source['path']}?ref={source['revision']}",
+        ])
+        if (
+            policy_contents.get("type") != "file"
+            or policy_contents.get("path") != source["path"]
+            or policy_contents.get("sha") != source["blob"]
+        ):
+            errors.append("product policy source is not the exact live Git blob")
+        protected_heads = _fetch_all_pages(
+            ghapp, f"repos/{owner_repo}/commits/{source['revision']}/branches-where-head"
+        )
+        if not any(row.get("protected") is True for row in protected_heads):
+            errors.append("product policy revision is not the head of a protected branch")
+        approval = policy["approval"]
+        match = re.fullmatch(r"https://github\.com/([^/]+/[^/]+)/pull/([0-9]+)", approval["pr_url"])
+        if match is None or match.group(1) != owner_repo:
+            errors.append("product policy approval URL does not identify its source repository")
+        else:
+            pr_number = int(match.group(2))
+            pull = _command_json([ghapp, "api", f"repos/{owner_repo}/pulls/{pr_number}"])
+            if pull.get("head", {}).get("sha") != approval["approved_head"]:
+                errors.append("product policy approval is not bound to the exact approved head")
+            if approval["mode"] == "author":
+                if pull.get("user", {}).get("id") != 25807:
+                    errors.append("product policy author identity is not Daniel's immutable user ID")
+            else:
+                reviews = _fetch_all_pages(ghapp, f"repos/{owner_repo}/pulls/{pr_number}/reviews")
+                matching = [row for row in reviews if row.get("user", {}).get("id") == 25807 and row.get("state") == "APPROVED" and row.get("commit_id") == approval["approved_head"]]
+                if not matching:
+                    errors.append("product policy lacks Daniel's live exact-head approval")
         classic = _classic_protection(ghapp)
         rules = _fetch_all_pages(ghapp, "repos/Generous-Corp/pulp/rules/branches/main")
         required = required_check_identities(classic, rules)
@@ -788,6 +927,7 @@ def validate_v2(
     if [row.get("role_id") for row in campaigns if isinstance(row, dict)] != list(ROLE_IDS):
         raise V2AcceptanceError("complete receipt requires the exact seven ordered role campaigns")
     verdicts: dict[str, str] = {}
+    nested_artifact_digests: set[str] = set(policy_nested_digests)
     for campaign in campaigns:
         role_id = campaign["role_id"]
         spec = ROLE_BY_ID[role_id]
@@ -808,7 +948,9 @@ def validate_v2(
             raise V2AcceptanceError("constrained-adapter does not use the authority-selected adapter")
         raw = resolve_artifact(campaign["raw_samples"], evidence_root, f"{role_id}.raw_samples")
         samples = validate_raw_campaign(raw, role_id=role_id, policy_sha256=policy_sha256)
-        replay_trace_analyzer(campaign, evidence_root, receipt["implementation_head"])
+        nested_artifact_digests.update(
+            replay_trace_analyzer(campaign, evidence_root, receipt["implementation_head"])
+        )
         verdict = campaign_budget_verdict(role_id, samples, policy_roles[role_id])
         if campaign["status"] != verdict:
             raise V2AcceptanceError(f"{role_id} disposition is not derived from raw thresholds")
@@ -830,18 +972,18 @@ def validate_v2(
         derived_disposition = "no-change"
     if receipt["disposition"] != derived_disposition:
         raise V2AcceptanceError("A3 disposition is not derived from thresholds and causal evidence")
-    validate_control_receipts(receipt, evidence_root)
+    nested_artifact_digests.update(validate_control_receipts(receipt, evidence_root))
     publication = receipt["publication"]
     if publication is None:
         raise V2AcceptanceError("complete receipt lacks a terminal publication request")
     expected_artifacts = sorted(
-        set(collect_artifact_sha256s(receipt)) | policy_nested_digests
+        set(collect_artifact_sha256s(receipt)) | nested_artifact_digests
     )
     if publication["artifact_sha256s"] != expected_artifacts:
         raise V2AcceptanceError("protected-main publication does not enumerate every bound artifact digest")
     if receipt_path is None or repository is None:
         raise V2AcceptanceError("terminal publication requires live canonical-path verification")
-    live_errors = live_protected_main_errors(receipt, receipt_path, repository)
+    live_errors = live_protected_main_errors(receipt, receipt_path, repository, evidence_root)
     if live_errors:
         raise V2AcceptanceError("; ".join(live_errors))
     return True
