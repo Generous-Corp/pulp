@@ -6640,6 +6640,24 @@ TEST_CASE("host paint reuses a layout completed by the bridge",
     CHECK(View::layout_pass_count() - before == 1);
 }
 
+TEST_CASE("layout invalidation is isolated between independent view trees",
+          "[view][bridge][layout][perf]") {
+    View editor_root;
+    editor_root.set_bounds({0, 0, 400, 300});
+    editor_root.layout_children_if_needed();
+
+    View helper_root;
+    helper_root.set_bounds({0, 0, 32, 32});
+
+    const auto before = View::layout_pass_count();
+    helper_root.invalidate_layout();
+    editor_root.layout_children_if_needed();
+
+    // A process-wide generation makes the editor pay for the helper tree's
+    // mutation. Per-tree generations keep the already-current editor intact.
+    CHECK(View::layout_pass_count() - before == 0);
+}
+
 TEST_CASE("live text in an explicitly sized label does not relayout the root",
           "[view][bridge][layout][perf][text]") {
     ScriptEngine engine;

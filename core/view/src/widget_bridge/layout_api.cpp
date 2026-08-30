@@ -714,7 +714,7 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
 }
 
 void WidgetBridge::ensure_layout() {
-    const auto generation = View::layout_generation();
+    const auto generation = root_.tree_layout_generation();
     if (generation == last_layout_generation_) return;
     root_.layout_children_if_needed();
     // Record the generation AFTER the pass, not the value sampled before it.
@@ -723,7 +723,7 @@ void WidgetBridge::ensure_layout() {
     // pre-pass value would leave generation != last on every subsequent read
     // and elide nothing — the optimisation would silently do nothing while
     // still looking correct.
-    last_layout_generation_ = View::layout_generation();
+    last_layout_generation_ = root_.tree_layout_generation();
 }
 
 void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
@@ -735,7 +735,7 @@ void BridgeRegistrars::register_layout_query_api(WidgetBridge& self) {
         self.root_.mark_layout_current();
         // Explicit "lay out now" still always forces — but record the
         // generation so the geometry reads that typically follow it are elided.
-        self.last_layout_generation_ = View::layout_generation();
+        self.last_layout_generation_ = self.root_.tree_layout_generation();
         self.request_repaint();
         return choc::value::Value();
     });

@@ -311,11 +311,16 @@ public:
         mark_layout_current();
     }
     bool layout_is_current() const noexcept {
-        return applied_layout_generation_ == layout_generation();
+        return applied_layout_generation_ == tree_layout_generation();
     }
     void mark_layout_current() noexcept {
-        applied_layout_generation_ = layout_generation();
+        applied_layout_generation_ = tree_layout_generation();
     }
+    /// Geometry generation scoped to this View's attached tree. The public
+    /// process-wide counter remains available as a diagnostic/test seam, but
+    /// must not be used to decide whether this root needs layout: activity in
+    /// another editor or helper tree is irrelevant to this one.
+    std::uint64_t tree_layout_generation() const noexcept;
     virtual bool owns_child_layout() const { return false; }
 
     /// Intrinsic content size (override in widgets that know their natural size).
@@ -689,7 +694,7 @@ public:
     /// Mark layout as needing recalculation (auto-invalidation)
     void invalidate_layout() {
         layout_dirty_ = true;
-        bump_layout_generation();
+        note_layout_mutation();
     }
     bool layout_dirty() const { return layout_dirty_; }
     void clear_layout_dirty() { layout_dirty_ = false; }
@@ -2308,6 +2313,8 @@ private:
     friend class ScrollView;
     friend Point point_to_local(Point root_pos, View* target, View* root);
 
+    void note_layout_mutation() noexcept;
+
     /// Invert this view's scalar and explicit affine paint transforms for
     /// hit-testing/pointer localization. The historical name remains ABI/source
     /// compatible; the contract now covers the complete 2D transform surface.
@@ -2484,6 +2491,7 @@ private:
     bool enabled_ = true;
     bool layout_dirty_ = false;
     std::uint64_t applied_layout_generation_ = 0;
+    std::uint64_t tree_layout_generation_ = 1;
     static std::atomic<std::uint64_t> layout_generation_;
     static std::atomic<std::uint64_t> layout_pass_count_;
     bool has_focus_ = false;
