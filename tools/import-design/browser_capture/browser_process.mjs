@@ -88,7 +88,12 @@ function identityHash(identity) {
 }
 
 function identityOwnsProfile(identity, profileDir) {
-  return identity.includes(`--user-data-dir=${profileDir}`);
+  const argument = `--user-data-dir=${profileDir}`;
+  const nextArgument = "--disable-background-networking";
+  return identity.endsWith(argument) ||
+    identity.endsWith(`"${argument}"`) ||
+    identity.includes(`${argument} ${nextArgument}`) ||
+    identity.includes(`"${argument}" ${nextArgument}`);
 }
 
 async function terminateOwnedBrowserPid(pid) {
@@ -306,7 +311,9 @@ async function waitForDevToolsPort(profileDir, child, timeoutMs) {
 export async function terminateBrowser(child) {
   if (!child) return;
   if (child.exitCode !== null) {
-    await terminateOwnedBrowserPid(child.pid);
+    // Once the leader has exited its numeric PID is no longer an identity.
+    // The guardian established custody while that identity was live, so only
+    // it may terminate a surviving renderer process group.
     await stopBrowserGuardian(child);
     return;
   }

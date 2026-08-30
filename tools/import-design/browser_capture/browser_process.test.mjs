@@ -192,6 +192,40 @@ test("stale recovery refuses a browser whose identity does not match",
     }
   });
 
+test("stale recovery requires an exact browser profile argument",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-owned");
+    const otherProfile = `${profile}-extra`;
+    let browser;
+    try {
+      await createEmptyProfile(profile);
+      browser = spawn(
+        "/bin/sh", ["-c", "while :; do sleep 1; done", "--",
+          `--user-data-dir=${otherProfile}`],
+        { detached: true, stdio: "ignore" });
+      await waitFor(() => processExists(browser.pid));
+      const identity = await browserProcessIdentity(browser.pid);
+      await writeFile(path.join(profile, ".pulp-browser-owner-v1.json"),
+        `${JSON.stringify({
+          schema: "pulp-browser-owner-v1",
+          owner_pid: 2147483647,
+          owner_identity_sha256: "0".repeat(64),
+          browser_pid: browser.pid,
+          browser_identity_sha256:
+            createHash("sha256").update(identity).digest("hex"),
+        })}\n`, "utf8");
+
+      assert.equal(await recoverStaleBrowserProfiles(root), 0);
+      assert.equal(processExists(browser.pid), true);
+    } finally {
+      if (browser?.pid && processExists(browser.pid)) {
+        try { process.kill(-browser.pid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("stale recovery reaches an exact owner beyond 64 unrecoverable profiles",
   { skip: process.platform === "win32" }, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
