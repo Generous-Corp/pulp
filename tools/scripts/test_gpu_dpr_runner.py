@@ -1118,12 +1118,30 @@ def main() -> int:
         native_state = runner.load_state(native_run)
         native_cell = native_state["cells"][dense]
         assert native_cell["status"] == "inconclusive"
-        assert "native-capture:dense-text-thin-strokes" in native_cell["dependencies"]
+        required_native_dependencies = {
+            "a2t:correlated-cell-trace",
+            "a3:ratified-budget-receipt",
+            "dpr-metrics:dense-text-thin-strokes",
+            "logical-input-oracle:dense-text-thin-strokes",
+            "reference-fidelity-oracle:dense-text-thin-strokes",
+            "small-text-legibility-oracle:dense-text-thin-strokes",
+            "thin-stroke-oracle:dense-text-thin-strokes",
+        }
+        assert required_native_dependencies <= set(native_cell["dependencies"])
+        assert set(native_cell["dependencies"]) <= required_native_dependencies | {
+            "native-capture:dense-text-thin-strokes"
+        }
         native_attempt = native_cell["attempts"][-1]
         native_receipt = runner.load_json(Path(native_attempt["receipt"]))
         assert native_attempt["reason"] == native_receipt["reason"]
         assert native_attempt["dependencies"] == native_receipt["dependencies"]
         assert native_attempt["nonce"] == native_receipt["attempt_nonce"]
+        if "native-capture:dense-text-thin-strokes" not in native_cell["dependencies"]:
+            native_preflight = runner.load_json(
+                runner.cell_directory(native_run, dense) / "preflight.json"
+            )
+            assert native_preflight["status"] == "capture-complete-measurement-incomplete"
+            assert native_preflight["scenario_id"] == "dense-text-thin-strokes"
 
         # Missing adapters are explicit resumable dependencies, not fake samples.
         missing_run = root / "missing-run"

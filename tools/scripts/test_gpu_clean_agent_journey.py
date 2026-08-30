@@ -680,6 +680,9 @@ class CleanAgentHarnessTests(unittest.TestCase):
             install_script = build / "tools/cli/cmake_install.cmake"
             install_script.parent.mkdir(parents=True)
             install_lines = [
+                'if(NOT CMAKE_INSTALL_CONFIG_NAME STREQUAL "Release")\n'
+                '  message(FATAL_ERROR "fixture requires explicit Release install")\n'
+                'endif()\n',
                 f'file(INSTALL DESTINATION "${{CMAKE_INSTALL_PREFIX}}/bin" TYPE PROGRAM '
                 f'FILES "{built}")\n'
             ]
@@ -702,6 +705,24 @@ class CleanAgentHarnessTests(unittest.TestCase):
             )
             self.assertEqual(installed["sha256"], trust.sha256_bytes(b"exact-installed-cli"))
             self.assertEqual(build_identity["build_info"]["kGitSha"], revision[:7])
+            cache = build / "CMakeCache.txt"
+            cache.write_text(
+                f"CMAKE_HOME_DIRECTORY:INTERNAL={source}\n"
+                "CMAKE_BUILD_TYPE:STRING=Debug\n"
+                f"CMAKE_COMMAND:INTERNAL={shutil.which('cmake')}\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(trust.TrustError, "exact Release configuration"):
+                trust.build_install_identity(
+                    source=source_identity, build_root=build, install_script=install_script,
+                    installed_prefix=prefix, installed_pulp=prefix / "bin/pulp", timeout=30.0,
+                )
+            cache.write_text(
+                f"CMAKE_HOME_DIRECTORY:INTERNAL={source}\n"
+                "CMAKE_BUILD_TYPE:STRING=Release\n"
+                f"CMAKE_COMMAND:INTERNAL={shutil.which('cmake')}\n",
+                encoding="utf-8",
+            )
             (prefix / "bin/pulp").write_bytes(b"tampered")
             with self.assertRaisesRegex(trust.TrustError, "exact copy"):
                 trust.build_install_identity(

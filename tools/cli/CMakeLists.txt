@@ -411,6 +411,7 @@ if(PULP_BUILD_TESTS)
                 COMMAND ${CMAKE_COMMAND}
                     -DPULP_CLI=$<TARGET_FILE:pulp-cli>
                     -DCLI_INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake
+                    -DBUILD_CONFIGURATION=$<CONFIG>
                     -DV8_RUNTIME_LIBRARY=${V8_RUNTIME_LIBRARY}
                     -DWEBGPU_RUNTIME_LIB=${WEBGPU_RUNTIME_LIB}
                     -DPYTHON=${Python3_EXECUTABLE}

@@ -30,7 +30,7 @@ NON_PROTOCOL_LITERALS = {
     "Compressor.vst3", "DBusObjectPathVTable.message", "DEPENDENCIES.md",
     "DESIGN.md", "Date.now", "Foo.vst3", "GainStage.tsx", "HANDOFF.md",
     "HEAD.lock", "Info.plist", "JSON.h", "JSON.stringify", "KEYS.len", "KeyboardEvent.key", "LICENSE.md",
-    "Math.random", "My.clap", "MyPlugin.component", "NOTICE.md", "ObjBase.h",
+    "Math.abs", "Math.random", "Math.sin", "My.clap", "MyPlugin.component", "NOTICE.md", "ObjBase.h",
     "Number.isFinite", "Object.create", "Object.defineProperty", "Object.prototype",
     "Promise.resolve", "Promise.then",
     "PulpAccessibility.kt", "PulpConfig.cmake", "PulpDelay.lv2", "PulpGain.clap",
@@ -163,6 +163,13 @@ def self_test() -> int:
             print("self-test allowed a protocol-looking filename suffix", file=sys.stderr)
             return 1
         cpp_client_source.write_text('auto method = "Known.method";\n', encoding="utf-8")
+        source.write_text(
+            'auto script = R"JS(Math.abs(-1); Math.sin(0); Known.method)JS";\n',
+            encoding="utf-8",
+        )
+        if unmapped_literals(root, registry):
+            print("self-test rejected standard-library JavaScript names", file=sys.stderr)
+            return 1
         same_named_source.write_text(
             'auto method = "PhaseEight.sameNamedHeader";\n', encoding="utf-8"
         )

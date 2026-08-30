@@ -1242,6 +1242,11 @@ aggregate trials without reconstructing the originating agent. A receipt is
 alone does not prove both suites found the same failure. Receipt publication
 fsyncs both the file and containing directory.
 
+The checked-in macOS Debug inventory currently binds 20,958 filtered CTest
+registrations (20,899 unique names). Any topology change must regenerate the
+canonical multiset contract and update the matching policy count together;
+editing only the count cannot satisfy the digest check.
+
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes

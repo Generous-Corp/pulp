@@ -1,4 +1,5 @@
 if(NOT DEFINED PULP_CLI OR NOT DEFINED CLI_INSTALL_SCRIPT OR
+   NOT DEFINED BUILD_CONFIGURATION OR
    NOT DEFINED WEBGPU_RUNTIME_LIB OR
    NOT DEFINED PYTHON OR NOT DEFINED JOURNEY_SCRIPT OR NOT DEFINED SOURCE_ROOT OR
    NOT DEFINED BUILD_ROOT)
@@ -27,6 +28,7 @@ file(REMOVE_RECURSE "${test_root}")
 file(MAKE_DIRECTORY "${test_root}/installed/lib")
 execute_process(
     COMMAND "${CMAKE_COMMAND}" "-DCMAKE_INSTALL_PREFIX=${test_root}/installed"
+        "-DCMAKE_INSTALL_CONFIG_NAME=${BUILD_CONFIGURATION}"
         -P "${CLI_INSTALL_SCRIPT}"
     RESULT_VARIABLE install_rc
     ERROR_VARIABLE install_stderr)
@@ -96,6 +98,20 @@ execute_process(
     RESULT_VARIABLE prepare_rc
     OUTPUT_VARIABLE prepare_json
     ERROR_VARIABLE prepare_stderr)
+if(NOT BUILD_CONFIGURATION STREQUAL "Release")
+    if(prepare_rc EQUAL 0 OR
+       NOT prepare_stderr MATCHES
+           "build tree does not expose an exact Release configuration")
+        message(FATAL_ERROR
+            "non-Release clean-agent preparer did not fail closed (${prepare_rc}): "
+            "${prepare_stderr}")
+    endif()
+    file(REMOVE_RECURSE "${test_root}")
+    message(STATUS
+        "gpu_clean_agent_preparer_nonrelease_rejected=true "
+        "configuration=${BUILD_CONFIGURATION}")
+    return()
+endif()
 if(NOT prepare_rc EQUAL 0)
     message(FATAL_ERROR "clean-agent preparer contract failed (${prepare_rc}): ${prepare_stderr}")
 endif()

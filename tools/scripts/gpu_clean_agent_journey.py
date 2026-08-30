@@ -1215,6 +1215,12 @@ def prepare_case(
     if plan_document_path.resolve(strict=True) != plan_document_path:
         raise JourneyError("--plan-document must not traverse a symlink")
 
+    # Check the Release-only build boundary before source cleanliness. The
+    # required macOS gate is intentionally Debug and uses this ordering to
+    # prove configuration rejection independently of checkout state.
+    trust.require_release_build_configuration(
+        build_root=build_root, source_root=source_root
+    )
     source = trust.git_repository_identity(
         source_root, expected_repository="Generous-Corp/pulp"
     )

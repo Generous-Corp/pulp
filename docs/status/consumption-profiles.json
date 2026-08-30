@@ -35,15 +35,15 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "OFF"
+        "PULP_BUILD_EXAMPLES": "ON"
       },
       "summary": {
-        "installed_target_count": 65,
+        "installed_target_count": 66,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 87,
-            "public_header_count": 68
+            "closure_node_count": 88,
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::host",
@@ -53,7 +53,7 @@
           {
             "exported_as": "Pulp::inspect-offline-runtime",
             "closure_node_count": 81,
-            "public_header_count": 68
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::sequence",
@@ -76,29 +76,29 @@
             "public_header_count": 3
           },
           {
+            "exported_as": "Pulp::inspect",
+            "closure_node_count": 79,
+            "public_header_count": 71
+          },
+          {
             "exported_as": "Pulp::format",
             "closure_node_count": 78,
             "public_header_count": 133
           },
           {
-            "exported_as": "Pulp::inspect",
-            "closure_node_count": 78,
-            "public_header_count": 68
-          },
-          {
             "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 76,
-            "public_header_count": 68
+            "closure_node_count": 77,
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
             "closure_node_count": 73,
-            "public_header_count": 68
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::inspect-telemetry",
             "closure_node_count": 72,
-            "public_header_count": 68
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::view",
@@ -157,13 +157,13 @@
           },
           {
             "exported_as": "Pulp::inspect-runtime",
-            "closure_node_count": 24,
-            "public_header_count": 68
+            "closure_node_count": 25,
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::inspect-client",
             "closure_node_count": 22,
-            "public_header_count": 68
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::osc",
@@ -178,7 +178,7 @@
           {
             "exported_as": "Pulp::inspect-control",
             "closure_node_count": 21,
-            "public_header_count": 68
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::smf-interchange",
@@ -263,12 +263,12 @@
           {
             "exported_as": "Pulp::inspect-authoring",
             "closure_node_count": 16,
-            "public_header_count": 68
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::inspect-protocol",
             "closure_node_count": 16,
-            "public_header_count": 68
+            "public_header_count": 71
           },
           {
             "exported_as": "Pulp::sample-bank-manifest",
@@ -349,6 +349,11 @@
             "exported_as": "Pulp::sdl3-headers",
             "closure_node_count": 1,
             "public_header_count": 0
+          },
+          {
+            "exported_as": "Pulp::tool-gpu-health-model",
+            "closure_node_count": 1,
+            "public_header_count": 3
           },
           {
             "exported_as": "Pulp::vst3-sdk",
@@ -1603,7 +1608,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 78,
+            "node_count": 79,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -1618,6 +1623,7 @@
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
+              "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
               "pulp-view-script"
@@ -1721,7 +1727,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -1787,7 +1793,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -1854,7 +1860,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -1919,7 +1925,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -2061,7 +2067,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -2121,7 +2127,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -2137,13 +2143,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 24,
+            "node_count": 25,
             "pulp_targets": [
               "pulp-events",
               "pulp-platform",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
-              "pulp-state"
+              "pulp-state",
+              "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
               "everest",
@@ -2190,7 +2197,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -2200,7 +2207,8 @@
             "pulp-events",
             "pulp-inspect-control",
             "pulp-inspect-protocol",
-            "pulp-state"
+            "pulp-state",
+            "pulp-tool-gpu-health-model"
           ]
         },
         "inspect-runtime-eval": {
@@ -2317,7 +2325,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -2333,7 +2341,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 87,
+            "node_count": 88,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -2351,6 +2359,7 @@
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
+              "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
               "pulp-view-script"
@@ -2466,7 +2475,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -2593,7 +2602,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -2610,7 +2619,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 76,
+            "node_count": 77,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -2625,6 +2634,7 @@
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
+              "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
               "pulp-view-script"
@@ -2724,7 +2734,7 @@
             ]
           },
           "public_headers": {
-            "count": 68,
+            "count": 71,
             "roots": [
               "inspect/include"
             ],
@@ -4735,6 +4745,35 @@
             "pulp-timebase",
             "pulp-timeline"
           ]
+        },
+        "tool-gpu-health-model": {
+          "target": "pulp-tool-gpu-health-model",
+          "exported_as": "Pulp::tool-gpu-health-model",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "tools/cli/gpu_health",
+          "closure": {
+            "node_count": 1,
+            "pulp_targets": [
+              "pulp-tool-gpu-health-model"
+            ],
+            "third_party_targets": []
+          },
+          "external_dependencies": {
+            "count": 0,
+            "third_party_targets": [],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [],
+            "system_libraries": []
+          },
+          "public_headers": {
+            "count": 3,
+            "roots": [
+              "tools/cli/gpu_health/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": []
         },
         "view": {
           "target": "pulp-view",

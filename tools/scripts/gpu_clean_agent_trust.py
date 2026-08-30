@@ -307,27 +307,55 @@ def _find_release_build_info(build_root: pathlib.Path) -> pathlib.Path:
     return release[0]
 
 
-def build_install_identity(
-    *, source: dict[str, Any], build_root: pathlib.Path, install_script: pathlib.Path,
-    installed_prefix: pathlib.Path, installed_pulp: pathlib.Path, timeout: float,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+def require_release_build_configuration(
+    *, build_root: pathlib.Path, source_root: pathlib.Path
+) -> tuple[pathlib.Path, pathlib.Path, str, str | None, str | None]:
+    """Validate and return the exact build-configuration trust inputs.
+
+    This deliberately runs before repository-cleanliness validation in the
+    clean-agent preparer so the always-Debug required macOS lane can prove the
+    Release-only boundary without weakening source provenance.
+    """
+
     build_root = require_real_directory(build_root)
-    installed_prefix = require_real_directory(installed_prefix)
-    install_script = install_script.resolve(strict=True)
-    if install_script != build_root / "tools/cli/cmake_install.cmake":
-        raise TrustError("CLI install script must be the generated script inside the build tree")
     cache_path = build_root / "CMakeCache.txt"
     cache_payload = read_regular(cache_path, 4 * 1024 * 1024).decode("utf-8")
     configured_source = _cache_value(cache_payload, "CMAKE_HOME_DIRECTORY")
     build_type = _cache_value(cache_payload, "CMAKE_BUILD_TYPE")
     configurations = _cache_value(cache_payload, "CMAKE_CONFIGURATION_TYPES")
     configured_cmake = _cache_value(cache_payload, "CMAKE_COMMAND")
-    if configured_source != source["root"]:
+    if configured_source != str(source_root):
         raise TrustError("build CMake home does not match the exact source repository")
     if build_type != "Release" and (
         configurations is None or "Release" not in configurations.split(";")
     ):
         raise TrustError("build tree does not expose an exact Release configuration")
+    return (
+        build_root,
+        cache_path,
+        configured_source,
+        build_type,
+        configured_cmake,
+    )
+
+
+def build_install_identity(
+    *, source: dict[str, Any], build_root: pathlib.Path, install_script: pathlib.Path,
+    installed_prefix: pathlib.Path, installed_pulp: pathlib.Path, timeout: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    (
+        build_root,
+        cache_path,
+        configured_source,
+        build_type,
+        configured_cmake,
+    ) = require_release_build_configuration(
+        build_root=build_root, source_root=pathlib.Path(source["root"])
+    )
+    installed_prefix = require_real_directory(installed_prefix)
+    install_script = install_script.resolve(strict=True)
+    if install_script != build_root / "tools/cli/cmake_install.cmake":
+        raise TrustError("CLI install script must be the generated script inside the build tree")
     if not configured_cmake or not pathlib.Path(configured_cmake).is_absolute():
         raise TrustError("build tree does not record the configuring CMake executable")
     cmake = pathlib.Path(configured_cmake).resolve(strict=True)
@@ -374,7 +402,13 @@ def build_install_identity(
     with tempfile.TemporaryDirectory(prefix="pulp-a5-install-replay-") as raw_stage:
         stage = pathlib.Path(raw_stage).resolve()
         _run_bytes(
-            [str(cmake), f"-DCMAKE_INSTALL_PREFIX={stage}", "-P", str(install_script)],
+            [
+                str(cmake),
+                f"-DCMAKE_INSTALL_PREFIX={stage}",
+                "-DCMAKE_INSTALL_CONFIG_NAME=Release",
+                "-P",
+                str(install_script),
+            ],
             timeout=timeout,
         )
         staged_cpp = stage / "bin" / "pulp-cpp"

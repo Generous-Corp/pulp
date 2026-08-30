@@ -3114,3 +3114,11 @@ hold the line: one compares the C++ list against the on-disk manifest, the
 other resolves the installed graph.
 
 The A3 v2 verifier is fail-closed evidence tooling: its terminal result requires the canonical receipt on fresh protected `main`; caller-supplied head, protection, or check assertions are invalid input, not an offline mode.
+
+The A5 clean-agent preparer has an exact Release-provenance boundary, while
+Pulp's required macOS gate intentionally configures Debug. Its CTest contract
+must therefore prove that a non-Release tree is rejected and run the complete
+preparer journey only from a Release configuration. Do not relax the journey's
+Release check to make the Debug gate green; pass the selected CTest configuration
+through to the install replay, and keep Release replay explicit for multi-config
+generators.
