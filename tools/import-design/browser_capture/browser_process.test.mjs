@@ -34,6 +34,21 @@ async function waitFor(predicate, timeoutMs = 5000) {
   throw new Error("timed out waiting for browser lifecycle condition");
 }
 
+async function processGroupId(pid) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn("/bin/ps", ["-p", String(pid), "-o", "pgid="], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let output = "";
+    child.stdout.on("data", (chunk) => { output += String(chunk); });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code !== 0) reject(new Error(`ps exited ${code}`));
+      else resolve(Number(output.trim()));
+    });
+  });
+}
+
 test("browser guardian closes an exact detached tree after abrupt owner death",
   { skip: process.platform === "win32" }, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
@@ -57,7 +72,7 @@ printf '9222\\n/devtools/browser/test\\n' > "$profile/DevToolsActivePort"
 printf '%s\\n' "$$" > "$profile/browser.pid"
 /bin/sh -c 'trap "" TERM; while :; do sleep 1; done' &
 printf '%s\\n' "$!" > "$profile/renderer.pid"
-while :; do sleep 1; done
+while :; do printf 'browser diagnostic\n' >&2; sleep 0.05; done
 `, "utf8");
       await chmod(fakeBrowser, 0o700);
 
@@ -81,6 +96,7 @@ setInterval(() => {}, 1000);
       await waitFor(async () => {
         try {
           await readFile(ready);
+          await readFile(path.join(profile, "renderer.pid"));
           return true;
         } catch {
           return false;
@@ -105,6 +121,52 @@ setInterval(() => {}, 1000);
       owner?.kill("SIGKILL");
       if (browserPid) {
         try { process.kill(-browserPid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("browser guardian starts without inheriting a caller home",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-no-home");
+    const fakeBrowser = path.join(root, "fake-browser.sh");
+    let launched;
+    let browserPid = 0;
+    const previous = new Map([
+      ["HOME", process.env.HOME],
+      ["XDG_CACHE_HOME", process.env.XDG_CACHE_HOME],
+      ["XDG_CONFIG_HOME", process.env.XDG_CONFIG_HOME],
+      ["XDG_DATA_HOME", process.env.XDG_DATA_HOME],
+    ]);
+    try {
+      await writeFile(fakeBrowser, `#!/bin/sh
+profile=""
+for arg in "$@"; do
+  case "$arg" in
+    --user-data-dir=*) profile="\${arg#--user-data-dir=}" ;;
+  esac
+done
+test -n "$profile" || exit 64
+test -n "$HOME" || exit 65
+case "$HOME" in "$profile"/*) ;; *) exit 66 ;; esac
+test -d "$XDG_CACHE_HOME" || exit 67
+printf '9222\\n/devtools/browser/test\\n' > "$profile/DevToolsActivePort"
+printf '%s\\n' "$$" > "$profile/browser.pid"
+while :; do sleep 1; done
+`, "utf8");
+      await chmod(fakeBrowser, 0o700);
+      for (const key of previous.keys()) delete process.env[key];
+      await createEmptyProfile(profile);
+      launched = await launchBrowser(fakeBrowser, profile, 2000);
+      browserPid = Number((await readFile(
+        path.join(profile, "browser.pid"), "utf8")).trim());
+      assert.equal(processExists(browserPid), true);
+    } finally {
+      if (launched?.child) await terminateBrowser(launched.child);
+      for (const [key, value] of previous) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
       }
       await rm(root, { recursive: true, force: true });
     }
@@ -140,20 +202,70 @@ while :; do sleep 1; done
         path.join(profile, "browser.pid"), "utf8")).trim());
       rendererPid = Number((await readFile(
         path.join(profile, "renderer.pid"), "utf8")).trim());
-      assert.equal(browserPid, launched.child.pid);
+      assert.notEqual(browserPid, launched.child.pid);
+      assert.equal(processExists(launched.child.pid), true);
+      assert.equal(await processGroupId(launched.child.pid), launched.child.pid);
+      assert.equal(await processGroupId(browserPid), launched.child.pid);
+      assert.equal(await processGroupId(rendererPid), launched.child.pid);
 
-      // Reproduce the mutation: the group leader exits promptly while a
-      // renderer ignores SIGTERM. Cleanup must inspect the group, not return
-      // merely because the ChildProcess leader has an exit code.
-      process.kill(browserPid, "SIGKILL");
+      // Reproduce the mutation: the group receives its grace signal, Chromium
+      // exits, and a renderer ignores it. The stable custody anchor deliberately
+      // survives until verified cleanup escalates for the complete group.
+      process.kill(-launched.child.pid, "SIGTERM");
       await waitFor(() => !processExists(browserPid));
       assert.equal(processExists(rendererPid), true);
+      assert.equal(processExists(launched.child.pid), true);
       await terminateBrowser(launched.child);
-      await waitFor(() => !processExists(browserPid) && !processExists(rendererPid));
+      await waitFor(() => !processExists(launched.child.pid) &&
+        !processExists(browserPid) && !processExists(rendererPid));
     } finally {
       if (launched?.child) await terminateBrowser(launched.child);
-      if (browserPid) {
-        try { process.kill(-browserPid, "SIGKILL"); } catch {}
+      if (launched?.child?.pid) {
+        try { process.kill(-launched.child.pid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("pre-ready browser exit preserves custody of a surviving helper",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-pre-ready-exit");
+    const fakeBrowser = path.join(root, "fake-browser.sh");
+    let anchorPid = 0;
+    let browserPid = 0;
+    let helperPid = 0;
+    try {
+      await writeFile(fakeBrowser, `#!/bin/sh
+profile=""
+for arg in "$@"; do
+  case "$arg" in
+    --user-data-dir=*) profile="\${arg#--user-data-dir=}" ;;
+  esac
+done
+test -n "$profile" || exit 64
+printf '%s\\n' "$$" > "$profile/browser.pid"
+/bin/sh -c 'trap "" TERM; while :; do sleep 1; done' &
+printf '%s\\n' "$!" > "$profile/helper.pid"
+exit 72
+`, "utf8");
+      await chmod(fakeBrowser, 0o700);
+      await createEmptyProfile(profile);
+      await assert.rejects(
+        launchBrowser(fakeBrowser, profile, 2000, (child) => {
+          anchorPid = child.pid;
+        }),
+        /browser exited before CDP was ready/);
+      browserPid = Number((await readFile(
+        path.join(profile, "browser.pid"), "utf8")).trim());
+      helperPid = Number((await readFile(
+        path.join(profile, "helper.pid"), "utf8")).trim());
+      assert.equal(processExists(anchorPid), false);
+      assert.equal(processExists(browserPid), false);
+      assert.equal(processExists(helperPid), false);
+    } finally {
+      if (anchorPid) {
+        try { process.kill(-anchorPid, "SIGKILL"); } catch {}
       }
       await rm(root, { recursive: true, force: true });
     }
@@ -205,7 +317,11 @@ test("stale recovery requires an exact browser profile argument",
           `--user-data-dir=${otherProfile}`],
         { detached: true, stdio: "ignore" });
       await waitFor(() => processExists(browser.pid));
-      const identity = await browserProcessIdentity(browser.pid);
+      let identity = "";
+      await waitFor(async () => {
+        identity = await browserProcessIdentity(browser.pid);
+        return identity.includes("--user-data-dir=");
+      });
       await writeFile(path.join(profile, ".pulp-browser-owner-v1.json"),
         `${JSON.stringify({
           schema: "pulp-browser-owner-v1",
@@ -242,8 +358,11 @@ test("stale recovery reaches an exact owner beyond 64 unrecoverable profiles",
           `--user-data-dir=${profile}`],
         { detached: true, stdio: "ignore" });
       await waitFor(() => processExists(browser.pid));
-      const identity = await browserProcessIdentity(browser.pid);
-      assert.match(identity, /--user-data-dir=/);
+      let identity = "";
+      await waitFor(async () => {
+        identity = await browserProcessIdentity(browser.pid);
+        return identity.includes("--user-data-dir=");
+      });
       await writeFile(path.join(profile, ".pulp-browser-owner-v1.json"),
         `${JSON.stringify({
           schema: "pulp-browser-owner-v1",

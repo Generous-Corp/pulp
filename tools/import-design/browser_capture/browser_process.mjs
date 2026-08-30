@@ -21,7 +21,36 @@ function delay(milliseconds) {
 
 const OWNER_MARKER = ".pulp-browser-owner-v1.json";
 const GUARDIAN_READY = ".pulp-browser-guardian-ready";
+const ANCHOR_FAILURE = ".pulp-browser-anchor-failure";
+const RUNTIME_HOME = ".pulp-browser-runtime-home";
 const guardians = new WeakMap();
+
+async function browserRuntimeEnvironment(profileDir) {
+  const environment = browserEnvironment();
+  if (process.platform === "win32") return environment;
+
+  // Do not forward the caller's HOME or XDG paths into Chromium or the
+  // detached guardian. Some hosted Node installations still require a home
+  // directory during process startup, while Chromium and Fontconfig use it for
+  // mutable caches. Keep that state inside the already-owned disposable
+  // profile instead of exposing the user's real home or falling back to `/`.
+  const home = path.join(profileDir, RUNTIME_HOME);
+  const cache = path.join(home, ".cache");
+  const config = path.join(home, ".config");
+  const data = path.join(home, ".local", "share");
+  await Promise.all([
+    mkdir(cache, { recursive: true }),
+    mkdir(config, { recursive: true }),
+    mkdir(data, { recursive: true }),
+  ]);
+  return {
+    ...environment,
+    HOME: home,
+    XDG_CACHE_HOME: cache,
+    XDG_CONFIG_HOME: config,
+    XDG_DATA_HOME: data,
+  };
+}
 
 function processExists(pid) {
   try {
@@ -96,9 +125,18 @@ function identityOwnsProfile(identity, profileDir) {
     identity.includes(`"${argument}" ${nextArgument}`);
 }
 
-async function terminateOwnedBrowserPid(pid) {
+async function processIdentityMatches(pid, expectedIdentityHash, profileDir) {
+  const identity = await browserProcessIdentity(pid);
+  return Boolean(identity && identityHash(identity) === expectedIdentityHash &&
+    identityOwnsProfile(identity, profileDir));
+}
+
+async function terminateOwnedBrowserPid(
+  pid, expectedIdentityHash, profileDir) {
+  if (!await processIdentityMatches(pid, expectedIdentityHash, profileDir)) {
+    return false;
+  }
   if (process.platform === "win32") {
-    if (!processExists(pid)) return;
     const treeKill = spawn(
       "taskkill.exe", ["/pid", String(pid), "/T", "/F"],
       { stdio: "ignore", windowsHide: true });
@@ -109,17 +147,21 @@ async function terminateOwnedBrowserPid(pid) {
       }),
       delay(1500),
     ]);
-    return;
+    return true;
   }
-  if (!processGroupExists(pid)) return;
   try {
+    // No await or separate existence probe may sit between the exact identity
+    // recheck above and this signal: a numeric PID/PGID is not an identity.
     process.kill(-pid, "SIGTERM");
   } catch {
-    return;
+    return !processGroupExists(pid);
   }
   const deadline = Date.now() + 1500;
   while (Date.now() < deadline && processGroupExists(pid)) await delay(25);
-  if (!processGroupExists(pid)) return;
+  if (!processGroupExists(pid)) return true;
+  if (!await processIdentityMatches(pid, expectedIdentityHash, profileDir)) {
+    return false;
+  }
   try {
     process.kill(-pid, "SIGKILL");
   } catch {
@@ -127,6 +169,7 @@ async function terminateOwnedBrowserPid(pid) {
   }
   const killDeadline = Date.now() + 1000;
   while (Date.now() < killDeadline && processGroupExists(pid)) await delay(25);
+  return !processGroupExists(pid);
 }
 
 async function writeOwnershipMarker(profileDir, browserPid, browserIdentity) {
@@ -174,7 +217,8 @@ async function recoverStaleBrowserProfile(profileDir) {
         !identityOwnsProfile(browserIdentity, profileDir)) {
       return false;
     }
-    await terminateOwnedBrowserPid(marker.browser_pid);
+    await terminateOwnedBrowserPid(
+      marker.browser_pid, marker.browser_identity_sha256, profileDir);
     if (processGroupExists(marker.browser_pid)) return false;
   } else if (processGroupExists(marker.browser_pid)) {
     // The recorded leader is gone, so its process-start identity can no longer
@@ -211,6 +255,12 @@ async function startBrowserGuardian(child, profileDir) {
     throw new Error("browser launch identity did not match its owned profile");
   }
   await writeOwnershipMarker(profileDir, child.pid, browserIdentity);
+  const custody = {
+    guardian: null,
+    profileDir,
+    expectedIdentityHash: identityHash(browserIdentity),
+  };
+  guardians.set(child, custody);
 
   const guardian = spawn(
     process.execPath,
@@ -218,7 +268,7 @@ async function startBrowserGuardian(child, profileDir) {
       identityHash(browserIdentity)],
     {
       detached: true,
-      env: browserEnvironment(),
+      env: await browserRuntimeEnvironment(profileDir),
       stdio: ["pipe", "ignore", "ignore"],
       windowsHide: true,
     });
@@ -226,7 +276,7 @@ async function startBrowserGuardian(child, profileDir) {
     guardian.once("spawn", resolve);
     guardian.once("error", reject);
   });
-  guardians.set(child, guardian);
+  custody.guardian = guardian;
   guardian.unref();
   guardian.stdin?.unref?.();
   const readyPath = path.join(profileDir, GUARDIAN_READY);
@@ -247,12 +297,15 @@ async function startBrowserGuardian(child, profileDir) {
 }
 
 async function stopBrowserGuardian(child) {
-  const guardian = guardians.get(child);
+  const custody = guardians.get(child);
   guardians.delete(child);
-  if (!guardian) return;
+  const guardian = custody?.guardian;
+  if (!guardian) return custody ?? null;
+  if (guardian.exitCode !== null) return custody;
   const exited = new Promise((resolve) => guardian.once("exit", resolve));
   guardian.stdin?.end();
   await Promise.race([exited, delay(6000)]);
+  return custody;
 }
 
 async function runGuardian(browserPid, profileDir, expectedIdentityHash) {
@@ -272,10 +325,10 @@ async function runGuardian(browserPid, profileDir, expectedIdentityHash) {
   });
   const currentIdentity = await browserProcessIdentity(browserPid);
   if (!currentIdentity) {
-    // The browser leader may exit before a SIGTERM-resistant renderer. This
-    // guardian established custody while the leader identity was live, so the
-    // still-existing process group remains the exact group it owns.
-    await terminateOwnedBrowserPid(browserPid);
+    // A missing group leader has no reusable identity with which to authorize
+    // a signal. The POSIX launch path keeps a custody anchor alive precisely so
+    // normal cleanup never reaches this fail-closed branch.
+    process.exitCode = 3;
     return;
   }
   if (identityHash(currentIdentity) !== expectedIdentityHash ||
@@ -283,16 +336,77 @@ async function runGuardian(browserPid, profileDir, expectedIdentityHash) {
     process.exitCode = 3;
     return;
   }
-  await terminateOwnedBrowserPid(browserPid);
+  if (!await terminateOwnedBrowserPid(
+    browserPid, expectedIdentityHash, profileDir)) {
+    process.exitCode = 3;
+  }
+}
+
+async function runBrowserAnchor(browserPath, browserArgs) {
+  // The detached anchor is the process-group leader whose exact start identity
+  // the guardian records. Chromium may exit before a renderer, but this anchor
+  // deliberately remains alive until the owner or guardian signals the whole
+  // group, so cleanup never authorizes a signal from a reusable PGID alone.
+  // SIGTERM is the group's grace signal. Chromium and its helpers receive it,
+  // while the anchor stays available for an identity recheck before any
+  // SIGKILL escalation.
+  process.on("SIGTERM", () => {});
+  process.stderr.on("error", () => {});
+  const profileArgument = browserArgs.find(
+    (argument) => argument.startsWith("--user-data-dir="));
+  const profileDir = profileArgument?.slice("--user-data-dir=".length) ?? "";
+  const publishFailure = async (message) => {
+    if (!profileDir) return;
+    try {
+      await writeFile(path.join(profileDir, ANCHOR_FAILURE), `${message}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+    } catch {}
+  };
+  const browser = spawn(browserPath, browserArgs, {
+    detached: false,
+    env: process.env,
+    stdio: ["ignore", "ignore", "pipe"],
+    windowsHide: true,
+  });
+  let forwardedBytes = 0;
+  browser.stderr?.on("data", (chunk) => {
+    if (forwardedBytes >= 256 * 1024 || process.stderr.destroyed) return;
+    const remaining = 256 * 1024 - forwardedBytes;
+    const output = chunk.subarray(0, remaining);
+    forwardedBytes += output.length;
+    try { process.stderr.write(output); } catch {}
+  });
+  browser.once("error", async (error) => {
+    process.stderr.write(
+      `browser child launch failed (${error?.code ?? "spawn-error"})\n`);
+    await publishFailure(`spawn ${error?.code ?? "error"}`);
+  });
+  browser.once("exit", async (code, signal) => {
+    process.stderr.write(
+      `browser child exited (${signal ?? code ?? "unknown"})\n`);
+    await publishFailure(`exit ${signal ?? code ?? "unknown"}`);
+  });
+  setInterval(() => {}, 60 * 60 * 1000);
 }
 
 async function waitForDevToolsPort(profileDir, child, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   const activePortFile = path.join(profileDir, "DevToolsActivePort");
+  const anchorFailureFile = path.join(profileDir, ANCHOR_FAILURE);
   let lastError = "";
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`browser exited before CDP was ready (${child.exitCode})`);
+    }
+    try {
+      const failure = (await readFile(anchorFailureFile, "utf8")).trim();
+      if (failure) {
+        throw new Error(`browser exited before CDP was ready (${failure})`);
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
     }
     try {
       const content = await readFile(activePortFile, "utf8");
@@ -349,9 +463,16 @@ export async function terminateBrowser(child) {
     await stopBrowserGuardian(child);
     return;
   }
-  await terminateOwnedBrowserPid(child.pid);
+  // The guardian is the POSIX signal authority: closing its control pipe makes
+  // it re-verify the stable custody anchor before signalling the group. If the
+  // guardian itself failed after custody was recorded, one final local
+  // identity check provides the same fail-closed cleanup boundary.
+  const custody = await stopBrowserGuardian(child);
+  if (processGroupExists(child.pid) && custody) {
+    await terminateOwnedBrowserPid(
+      child.pid, custody.expectedIdentityHash, custody.profileDir);
+  }
   await Promise.race([exited, delay(1000)]);
-  await stopBrowserGuardian(child);
 }
 
 export async function createEmptyProfile(profileArg) {
@@ -401,9 +522,14 @@ export async function launchBrowser(
     ...extraArgs,
     "about:blank",
   ];
-  const child = spawn(browserPath, args, {
+  const environment = await browserRuntimeEnvironment(profileDir);
+  const executable = process.platform === "win32" ? browserPath : process.execPath;
+  const launchArgs = process.platform === "win32" ? args : [
+    fileURLToPath(import.meta.url), "anchor", browserPath, ...args,
+  ];
+  const child = spawn(executable, launchArgs, {
     detached: process.platform !== "win32",
-    env: browserEnvironment(),
+    env: environment,
     stdio: ["ignore", "ignore", "pipe"],
     windowsHide: true,
   });
@@ -429,16 +555,26 @@ export async function launchBrowser(
 }
 
 if (process.argv[1] &&
-    import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href &&
-    process.argv[2] === "guard") {
-  const browserPid = Number(process.argv[3]);
-  const profileDir = process.argv[4] ?? "";
-  const expectedIdentityHash = process.argv[5] ?? "";
-  if (!Number.isInteger(browserPid) || browserPid <= 0 || !profileDir ||
-      !/^[0-9a-f]{64}$/.test(expectedIdentityHash)) {
-    process.exitCode = 64;
-  } else {
-    await runGuardian(browserPid, profileDir, expectedIdentityHash);
+    import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  if (process.argv[2] === "guard") {
+    const browserPid = Number(process.argv[3]);
+    const profileDir = process.argv[4] ?? "";
+    const expectedIdentityHash = process.argv[5] ?? "";
+    if (!Number.isInteger(browserPid) || browserPid <= 0 || !profileDir ||
+        !/^[0-9a-f]{64}$/.test(expectedIdentityHash)) {
+      process.exitCode = 64;
+    } else {
+      await runGuardian(browserPid, profileDir, expectedIdentityHash);
+    }
+  } else if (process.argv[2] === "anchor") {
+    const browserPath = process.argv[3] ?? "";
+    const browserArgs = process.argv.slice(4);
+    if (!browserPath || !browserArgs.some(
+      (argument) => argument.startsWith("--user-data-dir="))) {
+      process.exitCode = 64;
+    } else {
+      await runBrowserAnchor(browserPath, browserArgs);
+    }
   }
 }
 
