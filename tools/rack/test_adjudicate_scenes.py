@@ -447,7 +447,7 @@ class AdjudicationTests(unittest.TestCase):
         self.assertEqual(target.stat().st_mtime_ns, original_stat.st_mtime_ns)
         self.assertNotEqual(A._tree_identity(root), before)
 
-    def test_resume_refuses_changed_rack_license_inputs(self) -> None:
+    def test_receipt_preserves_rack_inputs_without_requiring_mutable_state(self) -> None:
         home = self.fixture.root / "licensed-home"
         rack_root = home / "Library/Application Support/Rack2"
         rack_root.mkdir(parents=True)
@@ -456,17 +456,39 @@ class AdjudicationTests(unittest.TestCase):
         original_stat = settings.stat()
         context = self.fixture.context()
         with mock.patch.object(Path, "home", return_value=home):
-            A.adjudicate_scene(
+            receipt = A.adjudicate_scene(
                 context, context.scenes[0], self.fixture.rack_app,
                 runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
+            expected = A._tree_identity(settings)
+            self.assertEqual(receipt["checks"]["rack_load"]["user_inputs"]["settings.json"], expected)
+            self.assertEqual(receipt["checks"]["dsp_and_audio"]["user_inputs"]["settings.json"], expected)
             settings.write_bytes(b'{"token":"two"}')
             os.utime(settings, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
             self.assertEqual(settings.stat().st_size, original_stat.st_size)
             self.assertEqual(settings.stat().st_mtime_ns, original_stat.st_mtime_ns)
-            with self.assertRaisesRegex(A.AdjudicationError, "evidence changed"):
+            runner = FakeRunner()
+            self.assertEqual(
                 A.adjudicate_scene(
                     context, context.scenes[0], self.fixture.rack_app,
-                    runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
+                    runner=runner, idiom_loader=lambda _root: FakeChecker()),
+                receipt)
+            self.assertEqual(runner.commands, [])
+
+    def test_non_list_modules_defer_to_patch_verifier(self) -> None:
+        artifact = self.fixture.run_root / "P05-S01/artifact.vcv"
+        artifact.write_text('{"modules":null}\n', encoding="utf-8")
+        self.assertEqual(A._plugin_identities(artifact)["plugins"], {})
+
+    def test_fidelity_platform_is_bound_and_normalized(self) -> None:
+        context = self.fixture.context()
+        with mock.patch.dict("os.environ", {"FORGE_RACK_PLATFORM": "mac-x64"}):
+            receipt = A.adjudicate_scene(
+                context, context.scenes[0], self.fixture.rack_app,
+                runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
+        self.assertEqual(receipt["bindings"]["rack"]["fidelity_platform"], "mac-x64")
+        self.assertEqual(
+            receipt["checks"]["dsp_and_audio"]["environment"]["FORGE_RACK_PLATFORM"],
+            "mac-x64")
 
     def test_resume_refuses_terminal_dsp_verdict_without_audio(self) -> None:
         context = self.fixture.context()

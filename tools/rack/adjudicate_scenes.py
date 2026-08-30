@@ -190,8 +190,11 @@ def _rack_plugin_roots() -> list[Path]:
 
 def _plugin_identities(artifact: Path) -> dict:
     document = _read_object(artifact, "generated Rack patch")
+    modules = document.get("modules")
+    if not isinstance(modules, list):
+        modules = []
     plugins = sorted({
-        module.get("plugin") for module in document.get("modules", [])
+        module.get("plugin") for module in modules
         if isinstance(module, dict) and isinstance(module.get("plugin"), str)
         and module.get("plugin") != "Core"
     })
@@ -352,12 +355,19 @@ def _rack_bindings(rack_app: Path, rack_log: Path | None, artifact: Path) -> dic
         "app_bundle": _tree_identity(app),
         "rack_log": str(rack_log.resolve()) if rack_log is not None else None,
         "plugin_installation": _plugin_identities(artifact),
-        "user_inputs": {
-            name: _tree_identity(_rack_user_root() / name)
-            for name in ("settings.json", "licenses")
-        },
+        "fidelity_platform": (
+            os.environ.get("FORGE_RACK_PLATFORM")
+            if os.environ.get("FORGE_RACK_PLATFORM") in {"mac-arm64", "mac-x64"}
+            else None),
     }
     return binding
+
+
+def _rack_user_inputs() -> dict:
+    return {
+        name: _tree_identity(_rack_user_root() / name)
+        for name in ("settings.json", "licenses")
+    }
 
 
 def _adjudication_bindings(context: CampaignContext, scene: dict,
@@ -607,7 +617,9 @@ def adjudicate_scene(context: CampaignContext, scene: dict, rack_app: Path,
                 "error": f"Rack executable is unavailable: {bindings['rack']['binary']}",
             }
         else:
+            rack_user_inputs = _rack_user_inputs()
             checks["rack_load"] = _run(rack_command, runner, {0: "PASS", 1: "FAIL"})
+            checks["rack_load"]["user_inputs"] = rack_user_inputs
 
         try:
             patch = _read_object(artifact, "generated Rack patch")
@@ -629,10 +641,16 @@ def adjudicate_scene(context: CampaignContext, scene: dict, rack_app: Path,
                 python, str(context.toolchain / "fidelity.py"), str(artifact),
                 "--wav", str(temporary_audio),
             ]
+            fidelity_environment = {
+                "FORGE_RACK_BIN": bindings["rack"]["binary"],
+                "FORGE_RACK_PLATFORM": bindings["rack"]["fidelity_platform"] or "",
+            }
+            fidelity_user_inputs = _rack_user_inputs()
             checks["dsp_and_audio"] = _run(
                 fidelity_command, runner,
                 {0: "PASS", 1: "FAIL", 2: "WITHHOLD"},
-                {"FORGE_RACK_BIN": bindings["rack"]["binary"]})
+                fidelity_environment)
+            checks["dsp_and_audio"]["user_inputs"] = fidelity_user_inputs
             audio = None
             if (checks["dsp_and_audio"]["status"] in {"PASS", "FAIL"} and
                     (not temporary_audio.is_file() or
