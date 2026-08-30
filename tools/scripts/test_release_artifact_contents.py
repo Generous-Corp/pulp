@@ -778,6 +778,20 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.819.0"),
         )
 
+    def test_gpu_trace_human_review_contract_is_required_from_its_release_floor(self) -> None:
+        member = (
+            "pulp-sdk/share/pulp/contracts/"
+            "gpu-trace-human-review-v1.schema.json"
+        )
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.819.0"),
+        )
+
     def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
         legacy = {"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.dylib"}
         self.assertEqual(
@@ -1607,6 +1621,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["threejs_runtime_floor"]
             del document["gpu_health_read_contract_floor"]
             del document["gpu_dpr_experiment_contract_floor"]
+            del document["gpu_trace_human_review_contract_floor"]
             del document["inspector_sdk_floor"]
             del document["control_broker_floor"]
             del document["control_standalone_host_floor"]
@@ -1624,6 +1639,9 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             )
             self.assertEqual(
                 historical.gpu_dpr_experiment_contract_floor, "999999.0.0"
+            )
+            self.assertEqual(
+                historical.gpu_trace_human_review_contract_floor, "999999.0.0"
             )
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertEqual(historical.control_broker_floor, "999999.0.0")

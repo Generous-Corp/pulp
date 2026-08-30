@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import copy
 import json
 import os
 import py_compile
@@ -95,6 +96,41 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             semantic_result=self.semantic_result(),
         )
         self.assertEqual(result, document)
+
+    def test_human_review_schema_is_closed_and_matches_valid_document(self):
+        schema = json.loads(MODULE.HUMAN_REVIEW_SCHEMA_PATH.read_text(encoding="utf-8"))
+        document = self.human_review_document()
+        self.assertEqual(
+            MODULE.json_schema_lite.validate(document, schema), []
+        )
+        mutations = []
+
+        missing = copy.deepcopy(document)
+        del missing["delivery"]
+        mutations.append(missing)
+
+        extra = copy.deepcopy(document)
+        extra["terminal_status"] = "pass"
+        mutations.append(extra)
+
+        wrong_authority = copy.deepcopy(document)
+        wrong_authority["review_authority"]["reviewer_kind"] = "agent"
+        mutations.append(wrong_authority)
+
+        wrong_health = copy.deepcopy(document)
+        wrong_health["observed_spans"][0]["health_state"] = "mystery"
+        mutations.append(wrong_health)
+
+        boolean_integer = copy.deepcopy(document)
+        boolean_integer["observed_spans"][0]["frame_index"] = False
+        mutations.append(boolean_integer)
+
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                self.assertTrue(
+                    MODULE.json_schema_lite.validate(mutation, schema),
+                    "schema mutation unexpectedly remained valid",
+                )
 
     def test_mcp_response_timeout_terminates_the_child(self):
         session = MODULE.McpSession(Path("/bin/cat"), {})

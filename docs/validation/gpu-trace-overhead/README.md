@@ -199,7 +199,8 @@ Regenerating analyzer timings does not repeat or silently manufacture visual
 acceptance. For a `gpu-startup` rerun, pass a dedicated document at
 `docs/validation/gpu-trace-overhead/human-reviews/<trace-sha256>.json` with
 `--human-review-document`. Its schema is
-`pulp.gpu-trace-human-review.v1`; it binds the question, artifact SHA-256,
+`pulp.gpu-trace-human-review.v1`, closed and installed from
+`docs/contracts/gpu-trace-human-review-v1.schema.json`; it binds the question, artifact SHA-256,
 review date, Perfetto UI revision/delivery, exact observed spans, and a bounded
 review authority object naming the person and Git author. The document's
 last-touch commit must be a prior single-parent commit that changes exactly that

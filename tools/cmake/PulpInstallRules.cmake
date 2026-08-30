@@ -463,6 +463,18 @@ install(FILES ${_pulp_gpu_health_contracts}
 unset(_pulp_gpu_health_contract)
 unset(_pulp_gpu_health_contracts)
 
+# Closed schema for independently authored same-trace Perfetto UI review.
+# This is a structural evidence contract, not terminal acceptance authority.
+set(_pulp_gpu_trace_human_review_schema
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-trace-human-review-v1.schema.json")
+if(NOT EXISTS "${_pulp_gpu_trace_human_review_schema}")
+    message(FATAL_ERROR
+        "Required GPU trace human-review schema is missing: ${_pulp_gpu_trace_human_review_schema}")
+endif()
+install(FILES "${_pulp_gpu_trace_human_review_schema}"
+    DESTINATION "share/pulp/contracts")
+unset(_pulp_gpu_trace_human_review_schema)
+
 # Stable machine-readable numeric GPU probe result contract. Keep this next to
 # the health contract so installed CLI/MCP consumers can validate evidence
 # without a Pulp source checkout.

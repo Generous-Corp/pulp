@@ -51,7 +51,7 @@ def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
     return module
 
 
-_load_local_source("json_schema_lite", "json_schema_lite.py")
+json_schema_lite = _load_local_source("json_schema_lite", "json_schema_lite.py")
 _load_local_source("sdk_capability_handoff", "sdk_capability_handoff.py")
 sdk_provenance = _load_local_source("sdk_provenance", "sdk_provenance.py")
 
@@ -69,6 +69,7 @@ NON_HUMAN_IDENTITY_PHRASES = frozenset({
     "artificialintelligence", "reasoningsystem",
 })
 A2T_EXECUTING_SOURCE_PATHS = frozenset({
+    "docs/contracts/gpu-trace-human-review-v1.schema.json",
     "tools/scripts/gpu_trace_overhead_acceptance.py",
     "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
     "tools/scripts/json_schema_lite.py",
@@ -77,6 +78,7 @@ A2T_EXECUTING_SOURCE_PATHS = frozenset({
 })
 A2T_ANALYZER_SOURCE_PATHS = {
     "CMakeLists.txt",
+    "docs/contracts/gpu-trace-human-review-v1.schema.json",
     ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
     ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
     ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
@@ -241,6 +243,9 @@ FIXTURE_SOURCE_PATHS = {
 }
 PLAN_PATH = "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md"
 HUMAN_REVIEW_SCHEMA = "pulp.gpu-trace-human-review.v1"
+HUMAN_REVIEW_SCHEMA_PATH = (
+    SCRIPT_DIR.parents[1] / "docs/contracts/gpu-trace-human-review-v1.schema.json"
+)
 HUMAN_REVIEW_PATH_PREFIX = "docs/validation/gpu-trace-overhead/human-reviews/"
 HUMAN_REVIEW_MAX_BYTES = 256 * 1024
 PROVIDER_MANIFEST_PATH = "tools/deps/manifest.json"
@@ -253,6 +258,23 @@ V8_PROVIDER_TOP_LEVEL = frozenset({
     "VERSION", "VERSION.md", "bin", "data", "icudtl.dat", "include",
     "jniLibs", "lib", "share", "snapshot_blob.bin",
 })
+
+
+def _load_human_review_schema() -> dict[str, Any]:
+    try:
+        schema = json.loads(HUMAN_REVIEW_SCHEMA_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"cannot load independent human-review schema: {error}"
+        ) from error
+    # Preflight every keyword now so unsupported constraints can never become
+    # decorative. An empty object is intentionally invalid; only the loud
+    # unsupported-keyword behavior matters for this load-time check.
+    json_schema_lite.validate({}, schema)
+    return schema
+
+
+HUMAN_REVIEW_DOCUMENT_SCHEMA = _load_human_review_schema()
 SKIA_GPU_PLATFORM_DIRECTORY = re.compile(
     r"^(?:mac|win|linux|android(?:-x86_64)?|ios|wasm)-gpu$"
 )
@@ -3780,6 +3802,14 @@ def validate_independent_human_review_document(
                     f"independent human review disagrees with current {contributor['stage']} "
                     f"{semantic_field}"
                 )
+    schema_problems = json_schema_lite.validate(
+        review_document, HUMAN_REVIEW_DOCUMENT_SCHEMA
+    )
+    if schema_problems:
+        raise ValueError(
+            "independent human-review document violates its closed schema: "
+            + "; ".join(schema_problems)
+        )
     return review_document
 
 

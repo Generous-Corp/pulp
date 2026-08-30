@@ -16,6 +16,7 @@
   "threejs_runtime_floor": "0.819.0",
   "gpu_health_read_contract_floor": "0.819.0",
   "gpu_dpr_experiment_contract_floor": "0.819.0",
+  "gpu_trace_human_review_contract_floor": "0.819.0",
   "platforms": [
     "darwin-arm64",
     "darwin-x64",

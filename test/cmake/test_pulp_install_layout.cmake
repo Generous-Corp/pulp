@@ -99,6 +99,25 @@ if(NOT _gpu_health_schema_compare_rc EQUAL 0)
         "Installed GPU health result schema differs from the source contract.")
 endif()
 
+set(_installed_gpu_trace_human_review_schema
+    "${_prefix}/share/pulp/contracts/gpu-trace-human-review-v1.schema.json")
+if(NOT EXISTS "${_installed_gpu_trace_human_review_schema}")
+    message(FATAL_ERROR
+        "GPU trace human-review schema is missing from the installed SDK:\n"
+        "${_installed_gpu_trace_human_review_schema}")
+endif()
+set(_source_gpu_trace_human_review_schema
+    "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-trace-human-review-v1.schema.json")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${_source_gpu_trace_human_review_schema}"
+            "${_installed_gpu_trace_human_review_schema}"
+    RESULT_VARIABLE _gpu_trace_human_review_schema_compare_rc)
+if(NOT _gpu_trace_human_review_schema_compare_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed GPU trace human-review schema differs from the source contract.")
+endif()
+
 set(_installed_gpu_probe_schema
     "${_prefix}/share/pulp/contracts/gpu-probe-result-v1.schema.json")
 if(NOT EXISTS "${_installed_gpu_probe_schema}")
