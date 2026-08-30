@@ -281,6 +281,12 @@ fn terminate_processor_group(child: &mut command_group::GroupChild, tp_path: &Pa
     }
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static DISCONNECTED_PROCESSOR_POLL_PACE_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 fn pace_disconnected_processor_poll(
     readers_disconnected: bool,
     child_running: bool,
@@ -291,6 +297,8 @@ fn pace_disconnected_processor_poll(
     // Disconnected immediately. Keep the child-status poll on the same bounded
     // cadence that recv_timeout provided, but do not delay an observed exit.
     if readers_disconnected && child_running {
+        #[cfg(test)]
+        DISCONNECTED_PROCESSOR_POLL_PACE_COUNT.with(|count| count.set(count.get() + 1));
         sleep(wait);
     }
 }

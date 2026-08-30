@@ -413,6 +413,39 @@ fn disconnected_readers_keep_live_child_polling_bounded_without_delaying_exit() 
 }
 
 #[cfg(unix)]
+#[test]
+fn bounded_processor_wires_disconnected_readers_to_poll_pacing() {
+    let root = tempfile::tempdir().unwrap();
+    let processor = executable_script(
+        root.path(),
+        "closed-stream-processor.sh",
+        "#!/bin/sh\nexec 1>&- 2>&-\nsleep 0.2\nexit 0\n",
+    );
+    let sql = root.path().join("query.sql");
+    let trace = root.path().join("trace.pftrace");
+    std::fs::write(&sql, b"SELECT 1;").unwrap();
+    std::fs::write(&trace, b"trace").unwrap();
+
+    DISCONNECTED_PROCESSOR_POLL_PACE_COUNT.with(|count| count.set(0));
+    let output = run_processor_bounded(
+        &processor,
+        &sql,
+        &trace,
+        ProcessorLimits {
+            deadline: Duration::from_secs(2),
+            max_output_bytes: 1024,
+        },
+    )
+    .unwrap();
+    assert!(output.status.success());
+    let paced_polls = DISCONNECTED_PROCESSOR_POLL_PACE_COUNT.with(|count| count.get());
+    assert!(
+        paced_polls > 0,
+        "the production collector skipped pacing after both readers disconnected"
+    );
+}
+
+#[cfg(unix)]
 fn executable_script(root: &Path, name: &str, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
