@@ -31,6 +31,11 @@ SHA_A = "a" * 40
 SHA_B = "b" * 40
 SHA_C = "c" * 40
 SHA_D = "d" * 40
+A3_DOCUMENT = {
+    "schema": "pulp.gpu-vellum-package-terminal.v1",
+    "version": 1,
+    "package": "a3-pulp-dpr-product-policy",
+}
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -80,6 +85,13 @@ def small_manifest() -> tuple[dict[str, Any], dict[str, Any]]:
         },
         "trial_contract": {
             "required_trace_categories": ["render", "gpu", "text", "js", "layout"],
+            "gpu_timer_calibration_trials": 5,
+            "gpu_timer_extra_work_multiplier": 8,
+        },
+        "v2_protocol": {
+            "product_policy": {
+                "a3_receipt_sha256": evidence.canonical_sha256(A3_DOCUMENT)
+            },
         },
         "scenarios": [scenario],
     }
@@ -197,6 +209,27 @@ def retain_cell(
         "logical_input_exact": True,
         "identity": True,
     }
+    retained_trials = []
+    for trial in cell["measured_trials"]:
+        count = trial["frame_count"]
+        samples = {
+            "gpu_ns": [trial["gpu_p95_ns"]] * count,
+            "cpu_ns": [trial["cpu_median_ns"]] * count,
+            "first_frame_ns": [trial["first_frame_median_ns"]] * count,
+            "interaction_ns": [trial["interaction_median_ns"]] * count,
+            "render_target_bytes": [trial["render_target_p95_bytes"]] * count,
+            "resident_bytes": [trial["resident_p95_bytes"]] * count,
+            "upload_bytes": [trial["upload_p95_bytes"]] * count,
+            "frame_missed": [False] * count,
+            "xruns": [0] * count,
+        }
+        trial["sequence_sha256"] = evidence.canonical_sha256(samples)
+        retained_trials.append({
+            "trial_index": trial["trial_index"],
+            "mode_order": trial["mode_order"],
+            "frame_samples": samples,
+            "sequence_sha256": trial["sequence_sha256"],
+        })
     binding = evidence.binding_sha256(cell)
     product_path = root / prefix / "product.bin"
     product_path.write_bytes(product)
@@ -208,6 +241,63 @@ def retain_cell(
         "dur": 1,
     } for category in manifest["trial_contract"]["required_trace_categories"]]
     trace = {"traceEvents": trace_events}
+    daw_documents = []
+    daw_projections = []
+    for index, projection in enumerate(cell["daw_subreceipts"]):
+        daw_root = root / prefix / "daw" / str(index)
+        a3_path = daw_root / "a3-evidence.json"
+        host_path = daw_root / "host.bin"
+        lifecycle_path = daw_root / "lifecycle.json"
+        write_json(a3_path, A3_DOCUMENT)
+        host_path.write_bytes(product)
+        host_path.chmod(0o755)
+        def reference(path: Path) -> dict[str, Any]:
+            payload = path.read_bytes()
+            return {
+                "path": path.relative_to(root).as_posix(),
+                "sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload),
+            }
+        a3_reference = reference(a3_path)
+        product_reference = reference(product_path)
+        host_reference = reference(host_path)
+        lifecycle = {
+            "schema": "pulp.gpu-dpr-daw-lifecycle.v2", "version": 2,
+            "binding_sha256": binding,
+            "a3_receipt_sha256": manifest["v2_protocol"]["product_policy"]["a3_receipt_sha256"],
+            "product_sha256": product_sha,
+            "host_executable_sha256": host_reference["sha256"],
+            "format": projection["format"], "host": projection["host"],
+            "a3_role": projection["a3_role"],
+            "lifecycle_id": f"lifecycle:{cell['attempt_nonce']}:{index}",
+            "process_start_identity": f"start:{cell['attempt_nonce']}:{index}",
+        }
+        write_json(lifecycle_path, lifecycle)
+        lifecycle_reference = reference(lifecycle_path)
+        retained_identity = {
+            "a3_receipt_sha256": manifest["v2_protocol"]["product_policy"]["a3_receipt_sha256"],
+            "product_sha256": product_sha,
+            "host_executable_sha256": host_reference["sha256"],
+            "process_start_identity": lifecycle["process_start_identity"],
+            "lifecycle_id": lifecycle["lifecycle_id"],
+            "format": projection["format"],
+            "host": projection["host"],
+            "a3_role": projection["a3_role"],
+        }
+        document = {
+            "schema": "pulp.gpu-dpr-daw-subreceipt.v2", "version": 2,
+            "binding_sha256": binding,
+            "format": projection["format"], "host": projection["host"],
+            "a3_role": projection["a3_role"],
+            "outcome": projection["outcome"],
+            "gates_passed": projection["gates_passed"],
+            "a3_evidence": a3_reference, "product": product_reference,
+            "host_product": host_reference, "lifecycle": lifecycle_reference,
+        }
+        projection["identity_sha256"] = evidence.canonical_sha256(retained_identity)
+        projection["receipt_sha256"] = evidence.canonical_sha256(document)
+        daw_documents.append(document)
+        daw_projections.append(projection)
+    cell["daw_subreceipts"] = daw_projections
     json_documents = {
         "raw_trials": {
             "schema": "pulp.gpu-dpr-raw-trials.v2", "version": 2,
@@ -216,10 +306,18 @@ def retain_cell(
         "frame_sequences": {
             "schema": "pulp.gpu-dpr-frame-sequences.v2", "version": 2,
             "binding_sha256": binding,
-            "measured": [{
-                "trial_index": item["trial_index"], "mode_order": item["mode_order"],
-                "sequence_sha256": item["sequence_sha256"],
-            } for item in cell["measured_trials"]],
+            "gpu_timer_calibration": {
+                "schema": "pulp.gpu-dpr-timer-calibration.v2", "version": 2,
+                "clock": {
+                    "Dawn/WebGPU": "dawn-gpu-timestamp",
+                    "WebGL2": "webgl2-timer-query",
+                }[scenario["required_provider"]],
+                "resolution_ns": 1,
+                "baseline_samples_ns": [10] * 5,
+                "extra_work_samples_ns": [20] * 5,
+                "extra_work_multiplier": 8, "control_detected": True,
+            },
+            "measured": retained_trials,
             "fresh": [{
                 "trial_index": item["trial_index"], "pid": item["pid"],
                 "sequence_sha256": item["sequence_sha256"],
@@ -231,15 +329,23 @@ def retain_cell(
             "physical_size": cell["physical_size"],
             "physical_dimensions_verified": True, "logical_input_exact": True,
             "event": {
-                "logical_point": scenario["logical_input_oracle"]["point"],
-                "physical_point": [
+                "requested_logical_point": scenario["logical_input_oracle"]["point"],
+                "requested_physical_point": [
+                    round(value * cell["observed_dpr"], 6)
+                    for value in scenario["logical_input_oracle"]["point"]
+                ],
+                "observed_physical_point": [
                     round(value * cell["observed_dpr"])
                     for value in scenario["logical_input_oracle"]["point"]
                 ],
+                "observed_logical_point": [
+                    round(value * cell["observed_dpr"]) / cell["observed_dpr"]
+                    for value in scenario["logical_input_oracle"]["point"]
+                ],
+                "event_received": True,
                 "expected_target": scenario["logical_input_oracle"]["target"],
                 "observed_target": scenario["logical_input_oracle"]["target"],
                 "process_id": cell["identity"]["process_id"],
-                "hit_test_passed": True,
             },
         },
         "identity_receipt": {
@@ -255,8 +361,8 @@ def retain_cell(
                 "app": cell["identity"]["app"], "format": cell["identity"]["format"],
                 "host": cell["identity"]["host"], "provider": cell["identity"]["provider"],
             },
-            "daw_subreceipts": cell["daw_subreceipts"],
-            "daw_receipt_documents": [],
+            "daw_subreceipts": daw_projections,
+            "daw_receipt_documents": daw_documents,
         },
     }
     sources: dict[str, Path] = {
@@ -292,9 +398,32 @@ def analyzer_identity() -> dict[str, str]:
 
 def expect_artifact_failure(
     result: dict[str, Any], manifest: dict[str, Any], root: Path, label: str,
+    *, contains: str | None = None,
 ) -> None:
-    if not evidence.result_artifact_errors(result, manifest, root, analyzer_identity()):
+    errors = evidence.result_artifact_errors(result, manifest, root, analyzer_identity())
+    if not errors:
         raise AssertionError(f"planted A4 artifact negative passed: {label}")
+    if contains is not None and not any(contains in error for error in errors):
+        raise AssertionError(
+            f"planted A4 artifact negative failed for the wrong reason: {label}: {errors[:3]}"
+        )
+
+
+def rewrite_json_artifact(root: Path, cell: dict[str, Any], kind: str, value: Any) -> None:
+    descriptor = next(item for item in cell["artifacts"] if item["kind"] == kind)
+    path = root / descriptor["path"]
+    write_json(path, value)
+    payload = path.read_bytes()
+    descriptor["sha256"] = hashlib.sha256(payload).hexdigest()
+    descriptor["bytes"] = len(payload)
+
+
+def retained_documents(root: Path, cell: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        item["kind"]: json.loads((root / item["path"]).read_text(encoding="utf-8"))
+        for item in cell["artifacts"]
+        if item["kind"] in evidence.JSON_ARTIFACT_KINDS
+    }
 
 
 def local_runner_state(
@@ -502,6 +631,196 @@ def main() -> int:
         )
         expect_artifact_failure(cross_binding, manifest, root, "cross-cell binding")
 
+        invented_summary = copy.deepcopy(result)
+        invented_cell = invented_summary["cells"][0]
+        invented_cell["measured_trials"][0]["gpu_p95_ns"] += 10_000
+        raw_descriptor = next(
+            item for item in invented_cell["artifacts"] if item["kind"] == "raw_trials"
+        )
+        raw_document = json.loads(
+            (root / raw_descriptor["path"]).read_text(encoding="utf-8")
+        )
+        raw_document["cell"] = evidence.cell_payload(invented_cell)
+        rewrite_json_artifact(root, invented_cell, "raw_trials", raw_document)
+        expect_artifact_failure(
+            invented_summary, manifest, root,
+            "producer summary not derived from retained frame samples",
+            contains="gpu_p95_ns differs from retained frames",
+        )
+        rewrite_json_artifact(root, cells[0], "raw_trials", {
+            "schema": "pulp.gpu-dpr-raw-trials.v2", "version": 2,
+            "binding_sha256": evidence.binding_sha256(cells[0]),
+            "cell": evidence.cell_payload(cells[0]),
+        })
+
+        fake_calibration = copy.deepcopy(result)
+        calibration_cell = fake_calibration["cells"][0]
+        sequence_descriptor = next(
+            item for item in calibration_cell["artifacts"]
+            if item["kind"] == "frame_sequences"
+        )
+        sequence_document = json.loads(
+            (root / sequence_descriptor["path"]).read_text(encoding="utf-8")
+        )
+        sequence_document["gpu_timer_calibration"]["extra_work_samples_ns"] = [10] * 5
+        rewrite_json_artifact(root, calibration_cell, "frame_sequences", sequence_document)
+        expect_artifact_failure(
+            fake_calibration, manifest, root, "GPU known-extra-work control not detected",
+            contains="known-extra-work control was not detected",
+        )
+        # Restore the valid calibration bytes before exercising later controls.
+        cell_zero_sequence = retained_documents(root, cells[0])["frame_sequences"]
+        cell_zero_sequence["gpu_timer_calibration"]["extra_work_samples_ns"] = [20] * 5
+        rewrite_json_artifact(root, cells[0], "frame_sequences", cell_zero_sequence)
+
+        foreign_clock = copy.deepcopy(result)
+        calibration_cell = foreign_clock["cells"][0]
+        sequence_document = retained_documents(root, calibration_cell)["frame_sequences"]
+        sequence_document["gpu_timer_calibration"]["clock"] = "dawn-gpu-timestamp"
+        rewrite_json_artifact(root, calibration_cell, "frame_sequences", sequence_document)
+        expect_artifact_failure(
+            foreign_clock, manifest, root, "foreign GPU timer clock",
+            contains="clock does not match scenario provider",
+        )
+        sequence_document["gpu_timer_calibration"]["clock"] = "webgl2-timer-query"
+        rewrite_json_artifact(root, cells[0], "frame_sequences", sequence_document)
+
+        false_input = copy.deepcopy(result)
+        input_cell = false_input["cells"][0]
+        input_document = retained_documents(root, input_cell)["input_receipt"]
+        input_document["event"]["observed_target"] = "invented-target"
+        input_document["logical_input_exact"] = True
+        rewrite_json_artifact(root, input_cell, "input_receipt", input_document)
+        expect_artifact_failure(
+            false_input, manifest, root, "self-attested input success",
+            contains="not derived from runtime coordinates/event/target",
+        )
+        valid_input = retained_documents(root, cells[1])["input_receipt"]
+        valid_input["binding_sha256"] = evidence.binding_sha256(cells[0])
+        valid_input["logical_size"] = cells[0]["logical_size"]
+        valid_input["physical_size"] = cells[0]["physical_size"]
+        valid_input["event"]["process_id"] = cells[0]["identity"]["process_id"]
+        rewrite_json_artifact(root, cells[0], "input_receipt", valid_input)
+
+        near_miss_input = copy.deepcopy(result)
+        input_cell = near_miss_input["cells"][0]
+        input_document = retained_documents(root, input_cell)["input_receipt"]
+        input_document["event"]["observed_physical_point"] = [2.49, 3]
+        input_document["event"]["observed_logical_point"] = [2.49, 3]
+        rewrite_json_artifact(root, input_cell, "input_receipt", input_document)
+        expect_artifact_failure(
+            near_miss_input, manifest, root, "near-miss logical input coordinates",
+            contains="not derived from runtime coordinates/event/target",
+        )
+        rewrite_json_artifact(root, cells[0], "input_receipt", valid_input)
+
+        missing_event_input = copy.deepcopy(result)
+        input_cell = missing_event_input["cells"][0]
+        input_document = retained_documents(root, input_cell)["input_receipt"]
+        input_document["event"]["event_received"] = False
+        rewrite_json_artifact(root, input_cell, "input_receipt", input_document)
+        expect_artifact_failure(
+            missing_event_input, manifest, root, "logical input event not received",
+            contains="not derived from runtime coordinates/event/target",
+        )
+        rewrite_json_artifact(root, cells[0], "input_receipt", valid_input)
+
+        daw_scenario = copy.deepcopy(scenario)
+        daw_scenario.update({
+            "id": "forge-modular-daw", "kind": "external_forge_daw_canary",
+            "required_provider": "Dawn/WebGPU", "required_host": "logic-and-reaper-aggregate",
+        })
+        daw_manifest = copy.deepcopy(manifest)
+        daw_manifest["scenarios"] = [daw_scenario]
+        daw_cell = cell_skeleton(daw_scenario, daw_manifest, "original", 999)
+        daw_cell["daw_subreceipts"] = [{
+            "format": "auv2", "host": "logic", "a3_role": "forge-modular-auv2-logic",
+            "outcome": "pass", "gates_passed": True,
+            "identity_sha256": "0" * 64, "receipt_sha256": "0" * 64,
+        }]
+        retain_cell(root, daw_cell, daw_scenario, daw_manifest, "daw-cell")
+        daw_artifacts = evidence._artifact_map(daw_cell)
+        daw_documents = retained_documents(root, daw_cell)
+        evidence._validate_json_artifacts(
+            daw_cell, daw_documents, daw_artifacts, daw_manifest,
+            evidence.binding_sha256(daw_cell),
+        )
+        evidence._validate_daw_subreceipts(
+            daw_cell, daw_documents["identity_receipt"], daw_artifacts,
+            daw_manifest, evidence.binding_sha256(daw_cell), root,
+        )
+        all_failed_cell = copy.deepcopy(daw_cell)
+        all_failed_documents = copy.deepcopy(daw_documents)
+        all_failed_projection = all_failed_cell["daw_subreceipts"][0]
+        all_failed_document = all_failed_documents["identity_receipt"][
+            "daw_receipt_documents"
+        ][0]
+        all_failed_projection["outcome"] = "fail"
+        all_failed_projection["gates_passed"] = False
+        all_failed_document["outcome"] = "fail"
+        all_failed_document["gates_passed"] = False
+        all_failed_projection["receipt_sha256"] = evidence.canonical_sha256(
+            all_failed_document
+        )
+        try:
+            evidence._validate_daw_subreceipts(
+                all_failed_cell, all_failed_documents["identity_receipt"], daw_artifacts,
+                daw_manifest, evidence.binding_sha256(all_failed_cell), root,
+            )
+        except evidence.V2EvidenceError as error:
+            if "required DAW subreceipt did not pass" not in str(error):
+                raise AssertionError(
+                    f"all-failed DAW control failed incorrectly: {error}"
+                ) from error
+        else:
+            raise AssertionError("all-failed DAW subreceipt passed retained validation")
+        substituted_a3 = copy.deepcopy(daw_documents)
+        substituted_a3_document = {**A3_DOCUMENT, "package": "substituted"}
+        a3_reference = substituted_a3["identity_receipt"]["daw_receipt_documents"][0][
+            "a3_evidence"
+        ]
+        a3_path = root / a3_reference["path"]
+        write_json(a3_path, substituted_a3_document)
+        a3_payload = a3_path.read_bytes()
+        a3_reference["sha256"] = hashlib.sha256(a3_payload).hexdigest()
+        a3_reference["bytes"] = len(a3_payload)
+        try:
+            evidence._validate_daw_subreceipts(
+                daw_cell, substituted_a3["identity_receipt"], daw_artifacts,
+                daw_manifest, evidence.binding_sha256(daw_cell), root,
+            )
+        except evidence.V2EvidenceError as error:
+            if "fixed A3 authority" not in str(error):
+                raise AssertionError(f"substituted A3 control failed incorrectly: {error}") from error
+        else:
+            raise AssertionError("DAW subreceipt with substituted fixed A3 evidence passed")
+        write_json(a3_path, A3_DOCUMENT)
+        substituted_lifecycle = copy.deepcopy(daw_documents)
+        lifecycle_reference = substituted_lifecycle["identity_receipt"][
+            "daw_receipt_documents"
+        ][0]["lifecycle"]
+        lifecycle_path = root / lifecycle_reference["path"]
+        lifecycle_document = json.loads(lifecycle_path.read_text(encoding="utf-8"))
+        valid_lifecycle = copy.deepcopy(lifecycle_document)
+        lifecycle_document["lifecycle_id"] = ""
+        write_json(lifecycle_path, lifecycle_document)
+        lifecycle_payload = lifecycle_path.read_bytes()
+        lifecycle_reference["sha256"] = hashlib.sha256(lifecycle_payload).hexdigest()
+        lifecycle_reference["bytes"] = len(lifecycle_payload)
+        try:
+            evidence._validate_daw_subreceipts(
+                daw_cell, substituted_lifecycle["identity_receipt"], daw_artifacts,
+                daw_manifest, evidence.binding_sha256(daw_cell), root,
+            )
+        except evidence.V2EvidenceError as error:
+            if "fixed A3/product/host/lifecycle" not in str(error):
+                raise AssertionError(
+                    f"missing lifecycle control failed incorrectly: {error}"
+                ) from error
+        else:
+            raise AssertionError("DAW subreceipt without retained lifecycle identity passed")
+        write_json(lifecycle_path, valid_lifecycle)
+
         symlink_result = copy.deepcopy(result)
         symlink_artifact = root / symlink_result["cells"][0]["artifacts"][1]["path"]
         symlink_payload = symlink_artifact.read_bytes()
@@ -671,7 +990,9 @@ def main() -> int:
         "no_file=pass digest=pass content=pass path=pass symlink=pass outside=pass "
         "cross_cell=pass runner_process=pass producer_pid=pass retry=pass "
         "output_bound=pass forged_state_key=pass "
-        "caller_draft=pass git_blob_type_head=pass live_receipt=pass"
+        "frame_rederive=pass gpu_calibration=pass runtime_input=pass "
+        "fixed_a3_daw_identity=pass caller_draft=pass "
+        "git_blob_type_head=pass live_receipt=pass"
     )
     return 0
 

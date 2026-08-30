@@ -17,6 +17,7 @@ import math
 import os
 import secrets
 import stat
+import statistics
 import struct
 import tempfile
 import zlib
@@ -487,6 +488,198 @@ def _expected_identity(cell: dict[str, Any]) -> tuple[dict[str, Any], list[int]]
     return identity, [producer_process_id, process_id, *fresh_pids]
 
 
+def _numeric_samples(
+    value: Any, count: int, label: str, *, integer: bool = True,
+) -> list[int | float]:
+    if not isinstance(value, list) or len(value) != count:
+        raise V2EvidenceError(f"{label} does not contain exactly {count} frame samples")
+    expected_type = int if integer else (int, float)
+    if any(
+        isinstance(sample, bool)
+        or not isinstance(sample, expected_type)
+        or not math.isfinite(float(sample))
+        or sample < 0
+        for sample in value
+    ):
+        raise V2EvidenceError(f"{label} contains an invalid frame sample")
+    return value
+
+
+def _nearest_rank(values: list[int | float], quantile: float) -> int | float:
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(quantile * len(ordered)) - 1)]
+
+
+def _validate_gpu_calibration(
+    value: Any, manifest: dict[str, Any], scenario: dict[str, Any],
+) -> None:
+    required = {
+        "schema", "version", "clock", "resolution_ns", "baseline_samples_ns",
+        "extra_work_samples_ns", "extra_work_multiplier", "control_detected",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise V2EvidenceError("retained GPU timer calibration is missing or malformed")
+    contract = manifest.get("trial_contract", {})
+    count = contract.get("gpu_timer_calibration_trials")
+    multiplier = contract.get("gpu_timer_extra_work_multiplier")
+    expected_clock = {
+        "Dawn/WebGPU": "dawn-gpu-timestamp",
+        "WebGL2": "webgl2-timer-query",
+    }.get(scenario.get("required_provider"))
+    if expected_clock is None:
+        raise V2EvidenceError("GPU timer calibration provider authority is invalid")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 3:
+        raise V2EvidenceError("GPU timer calibration trial authority is invalid")
+    baseline = _numeric_samples(
+        value.get("baseline_samples_ns"), count, "GPU calibration baseline"
+    )
+    extra = _numeric_samples(
+        value.get("extra_work_samples_ns"), count, "GPU calibration extra-work control"
+    )
+    resolution = value.get("resolution_ns")
+    if value.get("clock") != expected_clock:
+        raise V2EvidenceError(
+            "retained GPU timer calibration clock does not match scenario provider"
+        )
+    if (
+        value.get("schema") != "pulp.gpu-dpr-timer-calibration.v2"
+        or value.get("version") != 2
+        or value.get("extra_work_multiplier") != multiplier
+        or value.get("control_detected") is not True
+        or isinstance(resolution, bool)
+        or not isinstance(resolution, int)
+        or resolution <= 0
+    ):
+        raise V2EvidenceError("retained GPU timer calibration contract is invalid")
+    detectable = max(float(resolution) * 2.0, statistics.median(baseline) * 0.10)
+    if statistics.median(extra) < statistics.median(baseline) + detectable:
+        raise V2EvidenceError("retained GPU timer known-extra-work control was not detected")
+
+
+def _rederived_trial(document: Any) -> dict[str, Any]:
+    required = {"trial_index", "mode_order", "frame_samples", "sequence_sha256"}
+    if not isinstance(document, dict) or set(document) != required:
+        raise V2EvidenceError("retained measured trial has an invalid contract")
+    samples = document.get("frame_samples")
+    sample_fields = {
+        "gpu_ns", "cpu_ns", "first_frame_ns", "interaction_ns",
+        "render_target_bytes", "resident_bytes", "upload_bytes",
+        "frame_missed", "xruns",
+    }
+    if not isinstance(samples, dict) or set(samples) != sample_fields:
+        raise V2EvidenceError("retained measured trial lacks exact frame-level samples")
+    frame_count = len(samples.get("gpu_ns", [])) if isinstance(samples.get("gpu_ns"), list) else 0
+    if frame_count < 240:
+        raise V2EvidenceError("retained measured trial has fewer than 240 frames")
+    numeric = {
+        field: _numeric_samples(samples.get(field), frame_count, f"retained {field}")
+        for field in sample_fields - {"frame_missed"}
+    }
+    misses = samples.get("frame_missed")
+    if (
+        not isinstance(misses, list)
+        or len(misses) != frame_count
+        or any(not isinstance(value, bool) for value in misses)
+    ):
+        raise V2EvidenceError("retained frame-miss samples are malformed")
+    if document.get("sequence_sha256") != canonical_sha256(samples):
+        raise V2EvidenceError("retained frame sequence digest differs from its samples")
+    return {
+        "trial_index": document.get("trial_index"),
+        "mode_order": document.get("mode_order"),
+        "frame_count": frame_count,
+        "gpu_p95_ns": _nearest_rank(numeric["gpu_ns"], 0.95),
+        "cpu_median_ns": statistics.median(numeric["cpu_ns"]),
+        "cpu_p95_ns": _nearest_rank(numeric["cpu_ns"], 0.95),
+        "first_frame_median_ns": statistics.median(numeric["first_frame_ns"]),
+        "first_frame_p95_ns": _nearest_rank(numeric["first_frame_ns"], 0.95),
+        "interaction_median_ns": statistics.median(numeric["interaction_ns"]),
+        "interaction_p95_ns": _nearest_rank(numeric["interaction_ns"], 0.95),
+        "render_target_p95_bytes": _nearest_rank(numeric["render_target_bytes"], 0.95),
+        "resident_p95_bytes": _nearest_rank(numeric["resident_bytes"], 0.95),
+        "upload_p95_bytes": _nearest_rank(numeric["upload_bytes"], 0.95),
+        "frame_misses": sum(misses),
+        "xruns": sum(numeric["xruns"]),
+        "sequence_sha256": document.get("sequence_sha256"),
+    }
+
+
+def _validate_input_receipt(
+    cell: dict[str, Any], receipt: Any, scenario: dict[str, Any], binding: str,
+    process_id: int,
+) -> None:
+    required = {
+        "schema", "version", "binding_sha256", "logical_size", "physical_size",
+        "physical_dimensions_verified", "logical_input_exact", "event",
+    }
+    if not isinstance(receipt, dict) or set(receipt) != required:
+        raise V2EvidenceError("input receipt differs from the closed runtime observation contract")
+    event = receipt.get("event")
+    event_fields = {
+        "requested_logical_point", "requested_physical_point",
+        "observed_logical_point", "observed_physical_point", "event_received",
+        "expected_target", "observed_target", "process_id",
+    }
+    oracle = scenario.get("logical_input_oracle", {})
+    expected_logical = oracle.get("point")
+    expected_target = oracle.get("target")
+    observed_dpr = float(cell.get("observed_dpr", 0))
+    if (
+        not isinstance(expected_logical, list)
+        or len(expected_logical) != 2
+        or not math.isfinite(observed_dpr)
+        or observed_dpr <= 0
+    ):
+        raise V2EvidenceError("input receipt has invalid oracle/DPR authority")
+    expected_requested_physical = [
+        float(value) * observed_dpr for value in expected_logical
+    ]
+    expected_observed_physical = [
+        round(float(value) * observed_dpr) for value in expected_logical
+    ]
+    expected_observed_logical = [
+        value / observed_dpr for value in expected_observed_physical
+    ]
+    if not isinstance(event, dict) or set(event) != event_fields:
+        raise V2EvidenceError("input receipt lacks exact runtime event observations")
+    coordinate_fields = (
+        "requested_logical_point", "requested_physical_point",
+        "observed_logical_point", "observed_physical_point",
+    )
+    if any(
+        not isinstance(event.get(field), list)
+        or len(event[field]) != 2
+        or any(
+            isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            for value in event[field]
+        )
+        for field in coordinate_fields
+    ):
+        raise V2EvidenceError("input receipt contains malformed runtime coordinates")
+    exact = bool(
+        event["requested_logical_point"] == expected_logical
+        and event["requested_physical_point"] == expected_requested_physical
+        and event["observed_physical_point"] == expected_observed_physical
+        and event["observed_logical_point"] == expected_observed_logical
+        and event["event_received"] is True
+        and event["expected_target"] == expected_target
+        and event["observed_target"] == expected_target
+        and event["process_id"] == process_id
+    )
+    if (
+        receipt["schema"] != "pulp.gpu-dpr-input-receipt.v2"
+        or receipt["version"] != 2
+        or receipt["binding_sha256"] != binding
+        or receipt["logical_size"] != cell.get("logical_size")
+        or receipt["physical_size"] != cell.get("physical_size")
+        or receipt["physical_dimensions_verified"] is not cell.get("physical_dimensions_verified")
+        or receipt["logical_input_exact"] is not exact
+        or cell.get("fidelity", {}).get("logical_input_exact") is not exact
+    ):
+        raise V2EvidenceError("input receipt result is not derived from runtime coordinates/event/target")
+
+
 def _validate_json_artifacts(
     cell: dict[str, Any], documents: dict[str, dict[str, Any]],
     artifacts: dict[str, dict[str, Any]], manifest: dict[str, Any], binding: str,
@@ -504,60 +697,48 @@ def _validate_json_artifacts(
     measured = cell.get("measured_trials", [])
     fresh = cell.get("fresh_process_trials", [])
     sequences = documents["frame_sequences"]
-    expected_sequences = {
-        "schema": "pulp.gpu-dpr-frame-sequences.v2",
-        "version": 2,
-        "binding_sha256": binding,
-        "measured": [
-            {
-                "trial_index": trial.get("trial_index"),
-                "mode_order": trial.get("mode_order"),
-                "sequence_sha256": trial.get("sequence_sha256"),
-            }
-            for trial in measured if isinstance(trial, dict)
-        ],
-        "fresh": [
+    if not isinstance(sequences, dict) or set(sequences) != {
+        "schema", "version", "binding_sha256", "gpu_timer_calibration",
+        "measured", "fresh",
+    }:
+        raise V2EvidenceError("frame-sequences artifact differs from the closed sample contract")
+    scenario = next(
+        item for item in manifest["scenarios"]
+        if item["id"] == cell.get("scenario_id")
+    )
+    _validate_gpu_calibration(
+        sequences["gpu_timer_calibration"], manifest, scenario
+    )
+    retained_trials = sequences.get("measured")
+    if not isinstance(retained_trials, list) or len(retained_trials) != len(measured):
+        raise V2EvidenceError("frame-sequences artifact lacks all measured trials")
+    for summary, retained in zip(measured, retained_trials):
+        rederived = _rederived_trial(retained)
+        for field, value in rederived.items():
+            if not isinstance(summary, dict) or summary.get(field) != value:
+                raise V2EvidenceError(
+                    f"measured trial {rederived.get('trial_index')} {field} differs from retained frames"
+                )
+    expected_fresh = [
             {
                 "trial_index": trial.get("trial_index"),
                 "pid": trial.get("pid"),
                 "sequence_sha256": trial.get("sequence_sha256"),
             }
             for trial in fresh if isinstance(trial, dict)
-        ],
-    }
-    if sequences != expected_sequences:
+        ]
+    if (
+        sequences.get("schema") != "pulp.gpu-dpr-frame-sequences.v2"
+        or sequences.get("version") != 2
+        or sequences.get("binding_sha256") != binding
+        or sequences.get("fresh") != expected_fresh
+    ):
         raise V2EvidenceError("frame-sequences artifact differs from the cell trials")
 
     identity, process_ids = _expected_identity(cell)
-    scenario = next(
-        item for item in manifest["scenarios"]
-        if item["id"] == cell.get("scenario_id")
+    _validate_input_receipt(
+        cell, documents["input_receipt"], scenario, binding, identity["process_id"]
     )
-    oracle = scenario.get("logical_input_oracle", {})
-    point = oracle.get("point", [])
-    physical_point = [
-        round(float(coordinate) * float(cell.get("observed_dpr", 0)))
-        for coordinate in point
-    ]
-    input_receipt = documents["input_receipt"]
-    if input_receipt != {
-        "schema": "pulp.gpu-dpr-input-receipt.v2",
-        "version": 2,
-        "binding_sha256": binding,
-        "logical_size": cell.get("logical_size"),
-        "physical_size": cell.get("physical_size"),
-        "physical_dimensions_verified": cell.get("physical_dimensions_verified"),
-        "logical_input_exact": cell.get("fidelity", {}).get("logical_input_exact"),
-        "event": {
-            "logical_point": point,
-            "physical_point": physical_point,
-            "expected_target": oracle.get("target"),
-            "observed_target": oracle.get("target"),
-            "process_id": identity["process_id"],
-            "hit_test_passed": True,
-        },
-    }:
-        raise V2EvidenceError("input receipt is not bound to the cell dimensions/input")
 
     identity_receipt = documents["identity_receipt"]
     product = identity_receipt.get("product") if isinstance(identity_receipt, dict) else None
@@ -595,22 +776,133 @@ def _validate_json_artifacts(
     daw = cell.get("daw_subreceipts")
     if not isinstance(daw, list) or not isinstance(daw_documents, list) or len(daw_documents) != len(daw):
         raise V2EvidenceError("identity receipt lacks exact DAW subreceipt documents")
-    for projection, document in zip(daw, daw_documents):
-        expected_document = {
-            "schema": "pulp.gpu-dpr-daw-subreceipt.v2",
-            "version": 2,
-            "binding_sha256": binding,
-            "format": projection.get("format"),
-            "host": projection.get("host"),
+
+
+def _retained_reference(
+    root: Path, value: Any, label: str, *, max_bytes: int, executable: bool = False,
+) -> tuple[Path, str, int, bytes | None]:
+    if not isinstance(value, dict) or set(value) != {"path", "sha256", "bytes"}:
+        raise V2EvidenceError(f"{label} reference is malformed")
+    if (
+        not _is_lower_hex(value.get("sha256"), 64)
+        or isinstance(value.get("bytes"), bool)
+        or not isinstance(value.get("bytes"), int)
+        or value["bytes"] <= 0
+    ):
+        raise V2EvidenceError(f"{label} reference lacks an exact digest/length")
+    path = checked_regular_path(root, value["path"], label)
+    digest, byte_count, payload = file_identity(
+        path, label, max_bytes=max_bytes, retain=True,
+    )
+    if digest != value["sha256"] or byte_count != value["bytes"]:
+        raise V2EvidenceError(f"{label} reference differs from retained bytes")
+    if executable and (not os.lstat(path).st_mode & 0o111 or _file_format(payload or b"") is None):
+        raise V2EvidenceError(f"{label} is not a retained executable product")
+    return path.resolve(), digest, byte_count, payload
+
+
+def _validate_daw_subreceipts(
+    cell: dict[str, Any], identity_receipt: dict[str, Any],
+    artifacts: dict[str, dict[str, Any]], manifest: dict[str, Any], binding: str,
+    evidence_root: Path,
+) -> list[Path]:
+    projections = cell.get("daw_subreceipts")
+    documents = identity_receipt.get("daw_receipt_documents")
+    if not isinstance(projections, list) or not isinstance(documents, list):
+        raise V2EvidenceError("identity receipt lacks exact DAW subreceipt documents")
+    if len(projections) != len(documents):
+        raise V2EvidenceError("identity receipt lacks exact DAW subreceipt documents")
+    authority = manifest.get("v2_protocol", {}).get("product_policy", {}).get(
+        "a3_receipt_sha256"
+    )
+    if projections and not _is_lower_hex(authority, 64):
+        raise V2EvidenceError("DAW subreceipts lack fixed A3 authority")
+    retained: list[Path] = []
+    for projection, document in zip(projections, documents):
+        if not isinstance(projection, dict) or not isinstance(document, dict):
+            raise V2EvidenceError("DAW subreceipt projection/document is malformed")
+        if projection.get("outcome") != "pass" or projection.get("gates_passed") is not True:
+            raise V2EvidenceError("required DAW subreceipt did not pass")
+        expected_fields = {
+            "schema", "version", "binding_sha256", "format", "host", "a3_role",
+            "outcome", "gates_passed", "a3_evidence", "product", "host_product",
+            "lifecycle",
+        }
+        if set(document) != expected_fields:
+            raise V2EvidenceError("DAW subreceipt differs from the retained-evidence contract")
+        a3_path, _, _, a3_payload = _retained_reference(
+            evidence_root, document["a3_evidence"], "DAW fixed A3 evidence",
+            max_bytes=MAX_JSON_BYTES,
+        )
+        try:
+            a3_document = json.loads((a3_payload or b"").decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise V2EvidenceError("DAW fixed A3 evidence is not UTF-8 JSON") from error
+        if not isinstance(a3_document, dict) or canonical_sha256(a3_document) != authority:
+            raise V2EvidenceError("DAW evidence differs from the fixed A3 authority")
+        product_path, product_sha, _, _ = _retained_reference(
+            evidence_root, document["product"], "DAW measured product",
+            max_bytes=MAX_PRODUCT_BYTES, executable=True,
+        )
+        top_product = artifacts["product"]
+        if document["product"] != {
+            "path": top_product["path"], "sha256": top_product["sha256"],
+            "bytes": top_product["bytes"],
+        }:
+            raise V2EvidenceError("DAW subreceipt product differs from the measured cell product")
+        host_path, host_sha, _, _ = _retained_reference(
+            evidence_root, document["host_product"], "DAW host product",
+            max_bytes=MAX_PRODUCT_BYTES, executable=True,
+        )
+        lifecycle_path, _, _, lifecycle_payload = _retained_reference(
+            evidence_root, document["lifecycle"], "DAW lifecycle evidence",
+            max_bytes=MAX_JSON_BYTES,
+        )
+        try:
+            lifecycle = json.loads((lifecycle_payload or b"").decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise V2EvidenceError("DAW lifecycle evidence is not UTF-8 JSON") from error
+        lifecycle_id = lifecycle.get("lifecycle_id") if isinstance(lifecycle, dict) else None
+        process_start = (
+            lifecycle.get("process_start_identity") if isinstance(lifecycle, dict) else None
+        )
+        expected_lifecycle = {
+            "schema": "pulp.gpu-dpr-daw-lifecycle.v2", "version": 2,
+            "binding_sha256": binding, "a3_receipt_sha256": authority,
+            "product_sha256": product_sha, "host_executable_sha256": host_sha,
+            "format": projection.get("format"), "host": projection.get("host"),
+            "a3_role": projection.get("a3_role"), "lifecycle_id": lifecycle_id,
+            "process_start_identity": process_start,
+        }
+        retained_identity = {
+            "a3_receipt_sha256": authority, "product_sha256": product_sha,
+            "host_executable_sha256": host_sha,
+            "process_start_identity": process_start, "lifecycle_id": lifecycle_id,
+            "format": projection.get("format"), "host": projection.get("host"),
             "a3_role": projection.get("a3_role"),
+        }
+        expected_document = {
+            "schema": "pulp.gpu-dpr-daw-subreceipt.v2", "version": 2,
+            "binding_sha256": binding, "format": projection.get("format"),
+            "host": projection.get("host"), "a3_role": projection.get("a3_role"),
             "outcome": projection.get("outcome"),
             "gates_passed": projection.get("gates_passed"),
-            "identity_sha256": projection.get("identity_sha256"),
+            "a3_evidence": document["a3_evidence"], "product": document["product"],
+            "host_product": document["host_product"], "lifecycle": document["lifecycle"],
         }
-        if document != expected_document or canonical_sha256(document) != projection.get(
-            "receipt_sha256"
+        if (
+            not isinstance(lifecycle_id, str) or not lifecycle_id
+            or not isinstance(process_start, str) or not process_start
+            or lifecycle != expected_lifecycle
+            or document != expected_document
+            or canonical_sha256(retained_identity) != projection.get("identity_sha256")
+            or canonical_sha256(document) != projection.get("receipt_sha256")
         ):
-            raise V2EvidenceError("DAW subreceipt projection differs from retained identity bytes")
+            raise V2EvidenceError(
+                "DAW subreceipt is not bound to fixed A3/product/host/lifecycle evidence"
+            )
+        retained.extend((a3_path, host_path, lifecycle_path))
+    return retained
 
 def validate_cell_artifacts(
     cell: dict[str, Any], manifest: dict[str, Any], evidence_root: Path,
@@ -678,6 +970,10 @@ def validate_cell_artifacts(
             if file_format is None or file_format != declared:
                 raise V2EvidenceError("product artifact bytes differ from the declared file format")
     _validate_json_artifacts(cell, documents, artifacts, manifest, expected_binding)
+    paths.extend(_validate_daw_subreceipts(
+        cell, documents["identity_receipt"], artifacts, manifest, expected_binding,
+        evidence_root,
+    ))
     try:
         import gpu_dpr_evidence as v1_evidence
 
@@ -769,9 +1065,13 @@ def result_artifact_errors(
                 seen_files[file_identity_key] = label
         except (OSError, TypeError, ValueError, V2EvidenceError) as error:
             errors.append(f"{label}: {error}")
-    if len(cells) == 168 and len(seen_paths) != 168 * len(ARTIFACT_KINDS):
+    expected_paths = sum(
+        len(ARTIFACT_KINDS) + 3 * len(cell.get("daw_subreceipts", []))
+        for cell in cells
+    )
+    if len(cells) == 168 and len(seen_paths) != expected_paths:
         errors.append(
-            f"v2 retained artifact inventory is not exactly 168 x {len(ARTIFACT_KINDS)} unique files"
+            f"v2 retained artifact inventory is not exactly {expected_paths} unique files"
         )
     return errors
 
