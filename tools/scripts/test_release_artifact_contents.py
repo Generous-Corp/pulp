@@ -7,6 +7,7 @@ import importlib.util
 import hashlib
 import io
 import json
+import pathlib
 import os
 import re
 import tarfile
@@ -146,6 +147,25 @@ def interface_library_targets_from_text(text: str) -> set[str]:
     )
 
 
+def _is_generated(path: pathlib.Path) -> bool:
+    """True for a file inside a build tree rather than the source tree.
+
+    Several tests generate throwaway CMake projects under the build directory —
+    `test/inspector-shipping-scanner/public-control-source/CMakeLists.txt`
+    declares `pulp-format` as an INTERFACE library, because that is what the
+    fixture needs to be. Walking those makes a real STATIC library look like an
+    interface one and silently drops it from the archive set.
+
+    That is not hypothetical: it made this test report drift between
+    `PULP_SDK_TARGETS` and the release matrix that did not exist, on a checkout
+    whose only difference from CI was having been built once. CI passes because
+    it starts clean, so the failure appears only on the machine where someone is
+    trying to verify a fix.
+    """
+    parts = path.relative_to(ROOT).parts
+    return bool(parts) and (parts[0] == "build" or parts[0].startswith("build-"))
+
+
 def interface_library_targets() -> set[str]:
     targets: set[str] = set()
     definition_files = [
@@ -154,6 +174,8 @@ def interface_library_targets() -> set[str]:
         *(ROOT / "tools" / "cmake").rglob("*.cmake"),
     ]
     for path in definition_files:
+        if _is_generated(path):
+            continue
         text = path.read_text(encoding="utf-8")
         targets.update(interface_library_targets_from_text(text))
     return targets
