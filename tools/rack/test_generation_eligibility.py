@@ -129,6 +129,38 @@ def dub_inventory() -> dict:
 
 
 class FreshGenerationEligibilityTest(unittest.TestCase):
+    def test_complete_authoring_surface_requires_known_ports_and_params(self) -> None:
+        self.assertTrue(P.complete_authoring_surface({
+            "inputs": ["Audio"], "outputs": ["Audio"], "params": []}))
+        self.assertFalse(P.complete_authoring_surface({
+            "inputs": None, "outputs": None, "params": None}))
+        self.assertFalse(P.complete_authoring_surface({
+            "inputs": [], "outputs": [], "params": []}))
+
+    def test_required_tags_augment_only_an_existing_shortlist(self) -> None:
+        required = {("Library", "Dynamics")}
+        unrestricted: set[tuple[str, str]] = set()
+        P.augment_required_tag_shortlist(unrestricted, required)
+        self.assertEqual(set(), unrestricted)
+
+        structural = {("Library", "Clock")}
+        P.augment_required_tag_shortlist(structural, required)
+        self.assertEqual({("Library", "Clock"),
+                          ("Library", "Dynamics")}, structural)
+
+    def test_metadata_completeness_is_strict_only_for_narrowed_tags(self) -> None:
+        inv = {"Library": {"version": "1", "modules": {
+            "Unknown": {"tags": ["Dynamics"]},
+            "Known": {"tags": ["Dynamics"], "inputs": ["Audio"],
+                      "outputs": ["Audio"], "params": []},
+        }}}
+        self.assertEqual(
+            {("Library", "Unknown"), ("Library", "Known")},
+            P.required_tag_candidate_allowlist(inv, narrowed=False))
+        self.assertEqual(
+            {("Library", "Known")},
+            P.required_tag_candidate_allowlist(inv, narrowed=True))
+
     def test_exact_unsupported_version_is_hidden_from_generation(self) -> None:
         inv = inventory()
         rendered = P.render_inventory(inv)
