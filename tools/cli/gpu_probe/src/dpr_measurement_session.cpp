@@ -18,6 +18,7 @@
 #include "include/gpu/graphite/Context.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -433,15 +434,54 @@ struct Session {
     return true;
 }
 
+bool normalize_handshake_fd(int& descriptor) {
+    if (descriptor >= STDERR_FILENO + 1) return true;
+    int replacement = -1;
+    do {
+        replacement = fcntl(descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    } while (replacement < 0 && errno == EINTR);
+    if (replacement < 0) return false;
+    close(descriptor);
+    descriptor = replacement;
+    return true;
+}
+
 [[maybe_unused]] std::optional<choc::value::Value> run_first_frame_child(
     const DprMeasurementRequest& request,
     const std::filesystem::path& request_path,
     const std::filesystem::path& producer_path,
     const std::filesystem::path& output_path,
     std::string& error) {
+    int acknowledgement_pipe[2]{-1, -1};
+    int release_pipe[2]{-1, -1};
+    if (pipe(acknowledgement_pipe) != 0 || pipe(release_pipe) != 0) {
+        if (acknowledgement_pipe[0] >= 0) close(acknowledgement_pipe[0]);
+        if (acknowledgement_pipe[1] >= 0) close(acknowledgement_pipe[1]);
+        if (release_pipe[0] >= 0) close(release_pipe[0]);
+        if (release_pipe[1] >= 0) close(release_pipe[1]);
+        error = "could not create the fresh-process handshake channels";
+        return std::nullopt;
+    }
+    if (!normalize_handshake_fd(acknowledgement_pipe[0]) ||
+        !normalize_handshake_fd(acknowledgement_pipe[1]) ||
+        !normalize_handshake_fd(release_pipe[0]) ||
+        !normalize_handshake_fd(release_pipe[1])) {
+        close(acknowledgement_pipe[0]);
+        close(acknowledgement_pipe[1]);
+        close(release_pipe[0]);
+        close(release_pipe[1]);
+        error = "could not isolate the fresh-process handshake channels from stdio";
+        return std::nullopt;
+    }
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
-    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_adddup2(
+        &actions, acknowledgement_pipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, release_pipe[0], STDIN_FILENO);
+    posix_spawn_file_actions_addclose(&actions, acknowledgement_pipe[0]);
+    posix_spawn_file_actions_addclose(&actions, acknowledgement_pipe[1]);
+    posix_spawn_file_actions_addclose(&actions, release_pipe[0]);
+    posix_spawn_file_actions_addclose(&actions, release_pipe[1]);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
     std::vector<std::string> storage{
         producer_path.string(), "--request", request_path.string(),
@@ -450,22 +490,54 @@ struct Session {
     std::vector<char*> arguments;
     for (auto& item : storage) arguments.push_back(item.data());
     arguments.push_back(nullptr);
+    std::error_code remove_error;
+    (void)std::filesystem::remove(output_path, remove_error);
+    if (remove_error) {
+        close(acknowledgement_pipe[0]);
+        close(acknowledgement_pipe[1]);
+        close(release_pipe[0]);
+        close(release_pipe[1]);
+        posix_spawn_file_actions_destroy(&actions);
+        error = "could not clear the fresh-process trial ledger path";
+        return std::nullopt;
+    }
     pid_t pid = 0;
     const auto launched_at = Clock::now();
     const int spawned = posix_spawn(&pid, producer_path.c_str(), &actions, nullptr,
                                     arguments.data(), environ);
     posix_spawn_file_actions_destroy(&actions);
+    close(acknowledgement_pipe[1]);
+    close(release_pipe[0]);
     if (spawned != 0) {
+        close(acknowledgement_pipe[0]);
+        close(release_pipe[1]);
         error = "could not launch a fresh-process first-frame trial";
         return std::nullopt;
     }
+    char acknowledgement = 0;
+    ssize_t acknowledgement_bytes = -1;
+    do {
+        acknowledgement_bytes = read(
+            acknowledgement_pipe[0], &acknowledgement, sizeof(acknowledgement));
+    } while (acknowledgement_bytes < 0 && errno == EINTR);
+    const auto acknowledged_at = Clock::now();
+    close(acknowledgement_pipe[0]);
+    // The child cannot begin ledger serialization or teardown until the
+    // parent has captured the acknowledgement timestamp.
+    close(release_pipe[1]);
     int status = 0;
-    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status) ||
-        WEXITSTATUS(status) != 0) {
+    if (waitpid(pid, &status, 0) != pid) {
+        error = "fresh-process first-frame trial could not be reaped";
+        return std::nullopt;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         error = "fresh-process first-frame trial failed";
         return std::nullopt;
     }
-    const auto acknowledged_at = Clock::now();
+    if (acknowledgement_bytes != 1 || acknowledgement != 'R') {
+        error = "fresh-process frame/readback acknowledgement is missing";
+        return std::nullopt;
+    }
     const auto text = read_text(output_path);
     if (!text) {
         error = "fresh-process trial ledger entry is missing";
@@ -479,9 +551,8 @@ struct Session {
             error = "fresh-process trial pid or attempt nonce is unbound";
             return std::nullopt;
         }
-        // The child ledger acknowledges that frame zero reached readback. The
-        // metric itself belongs to the parent so process launch cannot vanish
-        // behind a child-local clock origin or a child-supplied value.
+        // The pipe byte is the child's frame-zero/readback acknowledgement.
+        // Reaping and ledger validation happen afterward and are not timed.
         value.setMember(
             "first_frame_time_ms",
             std::chrono::duration<double, std::milli>(acknowledged_at - launched_at).count());
@@ -508,11 +579,15 @@ std::optional<double> run_first_frame_child_time_for_test(
     const DprMeasurementRequest& request,
     const std::filesystem::path& request_path,
     const std::filesystem::path& producer_path,
-    const std::filesystem::path& output_path) {
-    std::string error;
+    const std::filesystem::path& output_path,
+    std::string* error) {
+    std::string message;
     const auto entry = run_first_frame_child(
-        request, request_path, producer_path, output_path, error);
-    if (!entry) return std::nullopt;
+        request, request_path, producer_path, output_path, message);
+    if (!entry) {
+        if (error) *error = std::move(message);
+        return std::nullopt;
+    }
     return (*entry)["first_frame_time_ms"].getFloat64();
 }
 
@@ -542,6 +617,25 @@ int run_dpr_first_frame_trial(const DprMeasurementRequest& request,
     double cpu = 0.0, gpu = 0.0;
     if (!session.frame(request, 0, true, cpu, gpu)) {
         if (error) *error = "first GPU frame or timestamp query did not complete";
+        return 3;
+    }
+    const char acknowledgement = 'R';
+    ssize_t acknowledgement_bytes = -1;
+    do {
+        acknowledgement_bytes = write(
+            STDOUT_FILENO, &acknowledgement, sizeof(acknowledgement));
+    } while (acknowledgement_bytes < 0 && errno == EINTR);
+    if (acknowledgement_bytes != 1) {
+        if (error) *error = "could not acknowledge first GPU frame/readback";
+        return 3;
+    }
+    char release = 0;
+    ssize_t release_bytes = -1;
+    do {
+        release_bytes = read(STDIN_FILENO, &release, sizeof(release));
+    } while (release_bytes < 0 && errno == EINTR);
+    if (release_bytes != 0) {
+        if (error) *error = "first GPU frame/readback acknowledgement was not released";
         return 3;
     }
     auto root = choc::value::createObject("");

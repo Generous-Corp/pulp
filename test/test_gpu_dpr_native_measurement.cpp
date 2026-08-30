@@ -2,9 +2,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace pulp::tooling::gpu_probe::testing {
@@ -13,7 +15,8 @@ std::optional<double> run_first_frame_child_time_for_test(
     const DprMeasurementRequest& request,
     const std::filesystem::path& request_path,
     const std::filesystem::path& producer_path,
-    const std::filesystem::path& output_path);
+    const std::filesystem::path& output_path,
+    std::string* error);
 
 } // namespace pulp::tooling::gpu_probe::testing
 
@@ -97,7 +100,7 @@ TEST_CASE("native DPR measurement rejects forged requests",
     CHECK(error.find("(0, 4]") != std::string::npos);
 }
 
-TEST_CASE("fresh-process timing starts in the parent before launch",
+TEST_CASE("fresh-process timing spans launch through acknowledgement but excludes teardown",
           "[gpu][dpr][measurement]") {
     const auto root = std::filesystem::temp_directory_path() /
         ("pulp-dpr-parent-timing-" + std::to_string(getpid()));
@@ -112,7 +115,52 @@ TEST_CASE("fresh-process timing starts in the parent before launch",
     const auto request_path = root / "request.json";
     std::ofstream(producer, std::ios::trunc)
         << "#!/bin/sh\n"
-           "sleep 0.12\n"
+           "sleep 0.08\n"
+           "printf R\n"
+           "cat >/dev/null\n"
+           "printf '%s\\n' "
+           "'{\"attempt_nonce\":\"11111111111111111111111111111111\","
+           "\"attempt_number\":1,\"pid\":'\"$$\"',"
+           "\"first_frame_time_ms\":0.001}' > \"$4\"\n"
+           "sleep 0.40\n";
+    std::filesystem::permissions(
+        producer,
+        std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write |
+            std::filesystem::perms::owner_exec,
+        std::filesystem::perm_options::replace);
+
+    const auto parsed = probe::parse_dpr_measurement_request(request());
+    REQUIRE(parsed);
+    std::string error;
+    const auto wall_started = std::chrono::steady_clock::now();
+    const auto measured = probe::testing::run_first_frame_child_time_for_test(
+        *parsed, request_path, producer, output, &error);
+    const auto wall_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - wall_started).count();
+    INFO(error);
+    REQUIRE(measured);
+    CHECK(*measured >= 50.0);
+    CHECK(wall_ms - *measured >= 250.0);
+}
+
+TEST_CASE("fresh-process handshake survives closed parent stdio",
+          "[gpu][dpr][measurement]") {
+    const auto root = std::filesystem::temp_directory_path() /
+        ("pulp-dpr-closed-stdio-" + std::to_string(getpid()));
+    std::filesystem::create_directories(root);
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{root};
+
+    const auto producer = root / "first-frame.sh";
+    const auto output = root / "first-frame.json";
+    const auto request_path = root / "request.json";
+    std::ofstream(producer, std::ios::trunc)
+        << "#!/bin/sh\n"
+           "printf R\n"
+           "cat >/dev/null\n"
            "printf '%s\\n' "
            "'{\"attempt_nonce\":\"11111111111111111111111111111111\","
            "\"attempt_number\":1,\"pid\":'\"$$\"',"
@@ -124,10 +172,33 @@ TEST_CASE("fresh-process timing starts in the parent before launch",
             std::filesystem::perms::owner_exec,
         std::filesystem::perm_options::replace);
 
-    const auto parsed = probe::parse_dpr_measurement_request(request());
-    REQUIRE(parsed);
-    const auto measured = probe::testing::run_first_frame_child_time_for_test(
-        *parsed, request_path, producer, output);
-    REQUIRE(measured);
-    CHECK(*measured >= 100.0);
+    int result_pipe[2]{-1, -1};
+    REQUIRE(pipe(result_pipe) == 0);
+    const auto child = fork();
+    REQUIRE(child >= 0);
+    if (child == 0) {
+        close(result_pipe[0]);
+        close(STDIN_FILENO);
+        close(STDOUT_FILENO);
+        const auto parsed = probe::parse_dpr_measurement_request(request());
+        std::string error;
+        const auto measured = parsed
+            ? probe::testing::run_first_frame_child_time_for_test(
+                  *parsed, request_path, producer, output, &error)
+            : std::nullopt;
+        const char outcome = measured ? 'P' : 'F';
+        (void)write(result_pipe[1], &outcome, sizeof(outcome));
+        close(result_pipe[1]);
+        _exit(measured ? 0 : 1);
+    }
+    close(result_pipe[1]);
+    char outcome = 0;
+    const auto bytes = read(result_pipe[0], &outcome, sizeof(outcome));
+    close(result_pipe[0]);
+    int status = 0;
+    REQUIRE(waitpid(child, &status, 0) == child);
+    REQUIRE(bytes == 1);
+    CHECK(outcome == 'P');
+    CHECK(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 0);
 }

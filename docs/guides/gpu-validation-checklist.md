@@ -111,6 +111,11 @@ a v1 measurement producer for the three frozen native fixtures. Build the
 producer with benchmark counters and tracing enabled, then point the adapter at
 that exact executable:
 
+The native DPR measurement producer and its process/IPC tests are currently
+POSIX-desktop-only (macOS and Linux). Windows and Emscripten builds retain GPU
+recipe discovery and the portable probe model, but do not configure the native
+process/session producer until it has an equivalent platform implementation.
+
 ```bash
 cmake -S . -B build-dpr -DCMAKE_BUILD_TYPE=Release \
   -DPULP_BENCHMARK=ON -DPULP_TRACING=ON

@@ -42,34 +42,36 @@ else()
 endif()
 
 if(PULP_ENABLE_GPU)
-    add_library(pulp-tool-gpu-dpr-measurement STATIC
-        src/dpr_measurement.cpp
-        src/dpr_measurement_session.cpp)
-    target_compile_features(pulp-tool-gpu-dpr-measurement PUBLIC cxx_std_20)
-    target_include_directories(pulp-tool-gpu-dpr-measurement
-        PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        PRIVATE $<BUILD_INTERFACE:${choc_SOURCE_DIR}>)
-    target_link_libraries(pulp-tool-gpu-dpr-measurement
-        PUBLIC pulp::render pulp::runtime pulp::state pulp::view)
-    if(PULP_HAS_THREEJS)
-        file(SHA256 "${threejs_SOURCE_DIR}/build/three.webgpu.js"
-            PULP_DPR_THREEJS_WEBGPU_SHA256)
-        file(SHA256 "${threejs_SOURCE_DIR}/build/three.core.js"
-            PULP_DPR_THREEJS_CORE_SHA256)
-        target_compile_definitions(pulp-tool-gpu-dpr-measurement PRIVATE
-            PULP_DPR_HAS_THREEJS=1
-            PULP_DPR_THREEJS_SOURCE_DIR="${threejs_SOURCE_DIR}"
-            PULP_DPR_THREEJS_WEBGPU_SHA256="${PULP_DPR_THREEJS_WEBGPU_SHA256}"
-            PULP_DPR_THREEJS_CORE_SHA256="${PULP_DPR_THREEJS_CORE_SHA256}")
-    else()
-        target_compile_definitions(pulp-tool-gpu-dpr-measurement PRIVATE
-            PULP_DPR_HAS_THREEJS=0)
-    endif()
+    if(UNIX AND NOT EMSCRIPTEN)
+        add_library(pulp-tool-gpu-dpr-measurement STATIC
+            src/dpr_measurement.cpp
+            src/dpr_measurement_session.cpp)
+        target_compile_features(pulp-tool-gpu-dpr-measurement PUBLIC cxx_std_20)
+        target_include_directories(pulp-tool-gpu-dpr-measurement
+            PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            PRIVATE $<BUILD_INTERFACE:${choc_SOURCE_DIR}>)
+        target_link_libraries(pulp-tool-gpu-dpr-measurement
+            PUBLIC pulp::render pulp::runtime pulp::state pulp::view)
+        if(PULP_HAS_THREEJS)
+            file(SHA256 "${threejs_SOURCE_DIR}/build/three.webgpu.js"
+                PULP_DPR_THREEJS_WEBGPU_SHA256)
+            file(SHA256 "${threejs_SOURCE_DIR}/build/three.core.js"
+                PULP_DPR_THREEJS_CORE_SHA256)
+            target_compile_definitions(pulp-tool-gpu-dpr-measurement PRIVATE
+                PULP_DPR_HAS_THREEJS=1
+                PULP_DPR_THREEJS_SOURCE_DIR="${threejs_SOURCE_DIR}"
+                PULP_DPR_THREEJS_WEBGPU_SHA256="${PULP_DPR_THREEJS_WEBGPU_SHA256}"
+                PULP_DPR_THREEJS_CORE_SHA256="${PULP_DPR_THREEJS_CORE_SHA256}")
+        else()
+            target_compile_definitions(pulp-tool-gpu-dpr-measurement PRIVATE
+                PULP_DPR_HAS_THREEJS=0)
+        endif()
 
-    add_executable(pulp-gpu-dpr-native-measurement EXCLUDE_FROM_ALL
-        src/dpr_measurement_main.cpp)
-    target_link_libraries(pulp-gpu-dpr-native-measurement PRIVATE
-        pulp-tool-gpu-dpr-measurement)
+        add_executable(pulp-gpu-dpr-native-measurement EXCLUDE_FROM_ALL
+            src/dpr_measurement_main.cpp)
+        target_link_libraries(pulp-gpu-dpr-native-measurement PRIVATE
+            pulp-tool-gpu-dpr-measurement)
+    endif()
 
     file(SHA256 "${CMAKE_SOURCE_DIR}/core/render/src/renderer3d.cpp"
         PULP_RENDERER3D_TRANSLATION_UNIT_SHA256)
@@ -129,14 +131,16 @@ if(PULP_BUILD_TESTS)
         pulp::tool-gpu-probe-model Catch2::Catch2WithMain)
     add_test(NAME gpu-probe-result COMMAND pulp-test-gpu-probe-result)
 
-    if(PULP_ENABLE_GPU)
+    if(PULP_ENABLE_GPU AND UNIX AND NOT EMSCRIPTEN)
         add_executable(pulp-test-gpu-dpr-native-measurement
             ${CMAKE_SOURCE_DIR}/test/test_gpu_dpr_native_measurement.cpp)
         target_link_libraries(pulp-test-gpu-dpr-native-measurement PRIVATE
             pulp-tool-gpu-dpr-measurement Catch2::Catch2WithMain)
         add_test(NAME gpu-dpr-native-measurement
             COMMAND pulp-test-gpu-dpr-native-measurement)
+    endif()
 
+    if(PULP_ENABLE_GPU)
         add_executable(pulp-test-gpu-probe-native-recipes
             ${CMAKE_SOURCE_DIR}/test/test_gpu_probe_native_recipes.cpp)
         target_link_libraries(pulp-test-gpu-probe-native-recipes PRIVATE
