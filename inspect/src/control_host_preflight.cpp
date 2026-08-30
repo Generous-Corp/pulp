@@ -236,6 +236,28 @@ preflight_control_host(platform::ChildProcessInputChannel channel, std::int64_t 
                         "the verified bootstrap frame could not be sent");
         return std::nullopt;
     }
+    // send_message() completes the kernel write, not the peer's read. Keep the
+    // private rendezvous alive until the exact child confirms that it received
+    // this complete nonce-bound frame; otherwise teardown can discard a
+    // just-written frame before the child's reader thread receives it.
+    auto receipt = receive_until(inbox, deadline);
+    if (!receipt.message) {
+        set_diagnostics(diagnostics, receive_failure_status(receipt.status),
+                        "the host did not confirm the verified bootstrap frame");
+        return std::nullopt;
+    }
+    if (!control_envelope_allowed(*receipt.message, ControlEnvelopeDirection::HostToLauncher)) {
+        set_diagnostics(diagnostics, ControlHostPreflightStatus::DirectionMismatch,
+                        "the host sent a role-incompatible bootstrap receipt");
+        return std::nullopt;
+    }
+    const auto* confirmed =
+        std::get_if<ControlHostPreflightReceiptEnvelope>(&receipt.message->payload);
+    if (!confirmed || confirmed->nonce != *nonce) {
+        set_diagnostics(diagnostics, ControlHostPreflightStatus::NonceMismatch,
+                        "the host did not confirm this preflight bootstrap");
+        return std::nullopt;
+    }
     set_diagnostics(diagnostics, ControlHostPreflightStatus::Accepted, {});
     return verified;
 }
@@ -318,6 +340,24 @@ receive_control_host_preflight(ControlHostBootstrapHandle handle, std::chrono::m
     if (!bytes || bytes->size() > kControlHostBootstrapMaximumBytes) {
         set_diagnostics(diagnostics, ControlHostPreflightStatus::BootstrapInvalid,
                         "the bootstrap frame is invalid or oversized");
+        return std::nullopt;
+    }
+    if (!send(connection,
+              ControlEnvelope{.payload =
+                                  ControlHostPreflightReceiptEnvelope{request->nonce}})) {
+        runtime::secure_zero_memory(bytes->data(), bytes->size());
+        set_diagnostics(diagnostics, ControlHostPreflightStatus::SendFailed,
+                        "the verified bootstrap receipt could not be sent");
+        return std::nullopt;
+    }
+    // The launcher keeps its endpoint open while waiting for the receipt. Do
+    // not tear down this endpoint until it has consumed the receipt, because a
+    // full-duplex shutdown may discard unread bytes on the peer.
+    const auto launcher_closed = receive_until(inbox, deadline);
+    if (launcher_closed.status != ReceiveStatus::Disconnected) {
+        runtime::secure_zero_memory(bytes->data(), bytes->size());
+        set_diagnostics(diagnostics, receive_failure_status(launcher_closed.status),
+                        "the launcher did not close the completed preflight rendezvous");
         return std::nullopt;
     }
     ControlHostBootstrapDiagnostics bootstrap_diagnostics;

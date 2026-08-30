@@ -191,13 +191,14 @@ bool is_host_control_kind(std::string_view kind) {
 
 bool is_host_preflight_kind(std::string_view kind) {
     return kind == "host-preflight-challenge" || kind == "host-preflight-response" ||
-           kind == "host-preflight-bootstrap";
+           kind == "host-preflight-bootstrap" || kind == "host-preflight-receipt";
 }
 
 std::optional<ControlEnvelopePayload>
 decode_host_preflight_payload(std::string_view kind, ValueView payload,
                               ControlProtocolDiagnostics& error) {
-    if (kind == "host-preflight-challenge" || kind == "host-preflight-response") {
+    if (kind == "host-preflight-challenge" || kind == "host-preflight-response" ||
+        kind == "host-preflight-receipt") {
         if (!only_fields(payload, {"nonce"}, error))
             return std::nullopt;
         std::string nonce;
@@ -207,6 +208,8 @@ decode_host_preflight_payload(std::string_view kind, ValueView payload,
         }
         if (kind == "host-preflight-challenge")
             return ControlHostPreflightChallengeEnvelope{std::move(nonce)};
+        if (kind == "host-preflight-receipt")
+            return ControlHostPreflightReceiptEnvelope{std::move(nonce)};
         return ControlHostPreflightResponseEnvelope{std::move(nonce)};
     }
     if (!only_fields(payload, {"bootstrap_base64", "nonce"}, error))
