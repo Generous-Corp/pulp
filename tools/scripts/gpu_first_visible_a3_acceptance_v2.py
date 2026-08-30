@@ -140,7 +140,10 @@ def _command_json(command: list[str]) -> Any:
 def _fetch_all_pages(ghapp: str, endpoint: str, *, object_key: str | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for page in range(1, 21):
-        payload = _command_json([ghapp, "api", endpoint, "-f", "per_page=100", "-f", f"page={page}"])
+        payload = _command_json([
+            ghapp, "api", "--method", "GET", endpoint,
+            "-f", "per_page=100", "-f", f"page={page}",
+        ])
         batch = payload.get(object_key) if object_key and isinstance(payload, dict) else payload
         if not isinstance(batch, list):
             raise V2AcceptanceError(f"paginated endpoint returned the wrong shape: {endpoint}")
@@ -439,14 +442,12 @@ def validate_generated_evidence(
     producer = resolve_artifact_path(wrapper["producer"], evidence_root, f"{kind}.producer")
     artifact = resolve_artifact_path(wrapper["artifact"], evidence_root, f"{kind}.artifact")
     provenance = resolve_artifact(wrapper["producer_provenance"], evidence_root, f"{kind}.producer_provenance")
-    if (
-        provenance.get("schema") != "pulp.gpu-first-visible-evidence-producer.v1"
-        or provenance.get("version") != 1
-        or provenance.get("pulp_revision") != implementation_head
-        or provenance.get("producer_sha256") != wrapper["producer"]["sha256"]
-        or not os.access(producer, os.X_OK)
-    ):
-        raise V2AcceptanceError(f"required coverage {kind} producer provenance is invalid")
+    validate_existing_build_proof(
+        provenance, wrapper["producer"], evidence_root, implementation_head,
+        f"required coverage {kind} producer",
+    )
+    if not os.access(producer, os.X_OK):
+        raise V2AcceptanceError(f"required coverage {kind} producer is not executable")
     completed = subprocess.run(
         [str(producer), "verify-a3-evidence", "--kind", kind, "--artifact", str(artifact), "--json"],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False,
@@ -467,6 +468,57 @@ def validate_generated_evidence(
     nested_digests.update(
         wrapper[field]["sha256"] for field in ("producer", "producer_provenance", "artifact")
     )
+    nested_digests.update(
+        provenance[field]["sha256"]
+        for field in ("build_verifier_receipt", "source_build_receipt")
+    )
+
+
+def validate_existing_build_proof(
+    provenance: Any, producer_ref: dict[str, Any], evidence_root: Path,
+    implementation_head: str, label: str,
+) -> None:
+    exact_keys(provenance, {
+        "schema", "version", "pulp_revision", "producer_sha256",
+        "build_verifier_receipt", "source_build_receipt",
+    }, f"{label} provenance")
+    if (
+        provenance["schema"] != "pulp.gpu-first-visible-evidence-producer.v1"
+        or provenance["version"] != 1
+        or provenance["pulp_revision"] != implementation_head
+        or provenance["producer_sha256"] != producer_ref["sha256"]
+    ):
+        raise V2AcceptanceError(f"{label} provenance is invalid")
+    embedded = resolve_artifact(
+        provenance["build_verifier_receipt"], evidence_root,
+        f"{label}.build_verifier_receipt",
+    )
+    source_build = resolve_artifact(
+        provenance["source_build_receipt"], evidence_root,
+        f"{label}.source_build_receipt",
+    )
+    if (
+        embedded.get("schema") != "pulp.gpu-first-visible-build-verification-receipt.v1"
+        or embedded.get("version") != 1
+        or embedded.get("outcome") != "pass"
+        or embedded.get("verification_method") != "embedded-canonical-build-identity"
+        or embedded.get("product_sha256") != producer_ref["sha256"]
+        or embedded.get("observed_product_sha256") != producer_ref["sha256"]
+        or embedded.get("reason") is not None
+        or not SHA256.fullmatch(str(embedded.get("marker_sha256", "")))
+    ):
+        raise V2AcceptanceError(f"{label} lacks a passing existing embedded build-verifier receipt")
+    revisions = source_build.get("source_revisions")
+    if (
+        source_build.get("schema") != "pulp.gpu-first-visible-source-build-receipt.v1"
+        or source_build.get("version") != 1
+        or source_build.get("outcome") != "pass"
+        or source_build.get("reason") is not None
+        or not isinstance(revisions, dict)
+        or revisions.get("pulp") != implementation_head
+        or source_build.get("product_sha256") != producer_ref["sha256"]
+    ):
+        raise V2AcceptanceError(f"{label} lacks a passing existing exact-source rebuild receipt")
 
 
 def validate_sample(
@@ -694,14 +746,12 @@ def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, impleme
         sample_provenance["producer_provenance"], evidence_root,
         f"{role_id}.sample_producer_provenance",
     )
-    if (
-        producer_provenance.get("schema") != "pulp.gpu-first-visible-evidence-producer.v1"
-        or producer_provenance.get("version") != 1
-        or producer_provenance.get("pulp_revision") != implementation_head
-        or producer_provenance.get("producer_sha256") != sample_provenance["producer"]["sha256"]
-        or not os.access(producer, os.X_OK)
-    ):
-        raise V2AcceptanceError(f"{role_id} sample producer provenance is invalid")
+    validate_existing_build_proof(
+        producer_provenance, sample_provenance["producer"], evidence_root,
+        implementation_head, f"{role_id} sample producer",
+    )
+    if not os.access(producer, os.X_OK):
+        raise V2AcceptanceError(f"{role_id} sample producer is not executable")
     raw_path = resolve_artifact_path(campaign["raw_samples"], evidence_root, f"{role_id}.raw_samples")
     completed = subprocess.run(
         [str(producer), "verify-a3-samples", "--raw", str(raw_path), "--trace", str(trace_path),
@@ -785,6 +835,8 @@ def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, impleme
     return {
         sample_provenance["producer"]["sha256"],
         sample_provenance["producer_provenance"]["sha256"],
+        producer_provenance["build_verifier_receipt"]["sha256"],
+        producer_provenance["source_build_receipt"]["sha256"],
     }
 
 

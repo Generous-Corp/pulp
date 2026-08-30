@@ -53,9 +53,11 @@ The same live pass resolves the product-policy source to its exact Git blob,
 requires its revision at a protected branch head, and verifies Daniel's stable
 GitHub user ID as exact-head author or approver. Support-matrix and A1 inputs
 are not accepted as bare JSON claims: each is a digest-bound wrapper whose
-source-bound executable producer is rerun against the exact payload. Campaign
-samples use the same rule, with producer output bound to raw-sample, trace, and
-canonical identity digests.
+source-bound executable producer is rerun against the exact payload. Producer
+identity reuses the existing passing embedded build-verifier and independent
+exact-source rebuild receipts; a new self-attestation protocol is not accepted.
+Campaign samples use the same rule, with producer output bound to raw-sample,
+trace, and canonical identity digests.
 
 Every terminal campaign retains the exact raw samples, trace, sample-producer
 provenance, prepared analyzer and analyzer provenance, and a closed binding for

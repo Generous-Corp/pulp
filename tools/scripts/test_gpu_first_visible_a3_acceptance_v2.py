@@ -106,9 +106,23 @@ else:
  h=lambda x: hashlib.sha256(open(x,"rb").read()).hexdigest()
  print(json.dumps({{"schema":"pulp.gpu-first-visible-sample-verification.v2","raw_samples_sha256":h(a.raw),"trace_sha256":h(a.trace),"identity_sha256":a.identity_sha256,"valid":True}},sort_keys=True))
 ''')
+    embedded_build_ref = write_artifact(root, "tooling/evidence-producer-build-verifier.json", {
+        "schema": "pulp.gpu-first-visible-build-verification-receipt.v1", "version": 1,
+        "outcome": "pass", "reason": None,
+        "verification_method": "embedded-canonical-build-identity",
+        "product_sha256": producer_ref["sha256"],
+        "observed_product_sha256": producer_ref["sha256"], "marker_sha256": DIGEST,
+    })
+    source_build_ref = write_artifact(root, "tooling/evidence-producer-source-build.json", {
+        "schema": "pulp.gpu-first-visible-source-build-receipt.v1", "version": 1,
+        "outcome": "pass", "reason": None, "source_revisions": {"pulp": SHA},
+        "product_sha256": producer_ref["sha256"],
+    })
     producer_provenance_ref = write_artifact(root, "tooling/evidence-producer-provenance.json", {
         "schema": "pulp.gpu-first-visible-evidence-producer.v1", "version": 1,
         "pulp_revision": SHA, "producer_sha256": producer_ref["sha256"],
+        "build_verifier_receipt": embedded_build_ref,
+        "source_build_receipt": source_build_ref,
     })
     support_payload = write_artifact(root, "policy/support-matrix-payload.json", {"protected": True})
     a1_payload = write_artifact(root, "policy/a1-evidence-payload.json", {"authentic": True})
@@ -247,7 +261,7 @@ raise SystemExit(2)
         set(v2.collect_artifact_sha256s(receipt)) | {
             support_ref["sha256"], a1_ref["sha256"], producer_ref["sha256"],
             producer_provenance_ref["sha256"], support_payload["sha256"], a1_payload["sha256"],
-            audio_executable["sha256"],
+            audio_executable["sha256"], embedded_build_ref["sha256"], source_build_ref["sha256"],
         }
     )
     return receipt
@@ -325,6 +339,7 @@ def main() -> int:
         ("trace sidecar digest", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["trace_analysis"], lambda a: a.update(trace_sha256=DIGEST))),
         ("sample provenance", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["sample_provenance"], lambda a: a.update(raw_samples_sha256=DIGEST))),
         ("sample producer substitution", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["sample_provenance"], lambda a: a.update(producer=write_executable(p, "tooling/forged-producer", "#!/bin/sh\nexit 0\n")))),
+        ("producer build proof", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["sample_provenance"], lambda a: a.update(producer_provenance=write_artifact(p, "tooling/forged-provenance.json", {"schema": "caller-attested"})))),
         ("analyzer substitution", lambda r, p: r["campaigns"][0].update(trace_analyzer=write_executable(p, "tooling/substitute", "#!/bin/sh\nexit 2\n"))),
         ("analyzer process", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["trace_analysis"], lambda a: a.update(process_pid=43))),
         ("blank negative digest", lambda r, p: rewrite_artifact(p, r["blank_negative"]["receipt"], lambda a: a.update(campaign_trace_sha256s=[]))),
