@@ -390,6 +390,46 @@ class AdjudicationTests(unittest.TestCase):
                 context, context.scenes[0], self.fixture.rack_app,
                 runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
 
+    def test_resume_refuses_edited_check_classifications(self) -> None:
+        for check_name in A.CHECK_NAMES:
+            with self.subTest(check_name=check_name):
+                fixture = Fixture(Path(self.temp.name) / f"tamper-{check_name}")
+                context = fixture.context()
+                A.adjudicate_scene(
+                    context, context.scenes[0], fixture.rack_app,
+                    runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
+                path = fixture.run_root / "P05-S01" / "adjudication.json"
+                receipt = json.loads(path.read_text())
+                receipt["checks"][check_name]["status"] = "FAIL"
+                receipt["status"] = A._status(receipt["checks"])
+                path.write_text(json.dumps(receipt) + "\n", encoding="utf-8")
+                runner = FakeRunner()
+                with self.assertRaisesRegex(
+                        A.AdjudicationError,
+                        f"{check_name} classification does not match its evidence"):
+                    A.adjudicate_scene(
+                        context, context.scenes[0], fixture.rack_app,
+                        runner=runner, idiom_loader=lambda _root: FakeChecker())
+                self.assertEqual(runner.commands, [])
+
+    def test_summary_refuses_failed_receipts_edited_to_pass(self) -> None:
+        self.assertEqual(A.adjudicate_campaign(
+            catalogue=self.fixture.catalogue, run_root=self.fixture.run_root,
+            rack_app=self.fixture.rack_app, runner=FakeRunner(fidelity_code=1),
+            idiom_loader=lambda _root: FakeChecker()), 1)
+        (self.fixture.run_root / "qualification-summary.json").unlink()
+        for scene_id in Q.SCENE_IDS:
+            path = self.fixture.run_root / scene_id / "adjudication.json"
+            receipt = json.loads(path.read_text())
+            receipt["checks"]["dsp_and_audio"]["status"] = "PASS"
+            receipt["status"] = "PASS"
+            path.write_text(json.dumps(receipt) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(
+                A.AdjudicationError,
+                "dsp_and_audio classification does not match its evidence"):
+            A.write_summary(
+                self.fixture.context(), self.fixture.rack_app)
+
     def test_interrupted_receipt_publication_can_rerun_fidelity(self) -> None:
         context = self.fixture.context()
         with mock.patch.object(

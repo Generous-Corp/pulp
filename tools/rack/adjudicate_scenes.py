@@ -467,6 +467,54 @@ def _strict_idiom_and_control(checker: ModuleType, patch: dict, inventory: dict,
     }
 
 
+def _recorded_command_status(check: dict, expected: dict[int, str]) -> str:
+    exit_code = check.get("exit_code")
+    if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+        stdout = check.get("stdout")
+        stderr = check.get("stderr")
+        if not isinstance(stdout, str) or not isinstance(stderr, str) or \
+                check.get("stdout_sha256") != hashlib.sha256(stdout.encode()).hexdigest() or \
+                check.get("stderr_sha256") != hashlib.sha256(stderr.encode()).hexdigest():
+            raise AdjudicationError("recorded command output evidence is malformed")
+        crashed = exit_code < 0 or "Traceback (most recent call last)" in stderr
+        return "WITHHOLD" if crashed else expected.get(exit_code, "WITHHOLD")
+    if isinstance(check.get("error"), str):
+        return "WITHHOLD"
+    raise AdjudicationError("recorded command verdict has no execution evidence")
+
+
+def _recorded_check_status(name: str, check: dict, has_audio: bool) -> str:
+    if name == "module_availability":
+        return _recorded_command_status(check, {0: "PASS", 1: "FAIL"})
+    if name == "rack_load":
+        return _recorded_command_status(check, {0: "PASS", 1: "FAIL"})
+    if name == "dsp_and_audio":
+        status = _recorded_command_status(
+            check, {0: "PASS", 1: "FAIL", 2: "WITHHOLD"})
+        if (status in {"PASS", "FAIL"} and not has_audio and
+                check.get("error") ==
+                "fidelity returned a verdict without a non-empty WAV artifact"):
+            return "WITHHOLD"
+        return status
+    if name == "idiom_contract":
+        findings = check.get("findings")
+        unchecked = check.get("unchecked")
+        if isinstance(findings, list) and isinstance(unchecked, list):
+            return "FAIL" if findings else "WITHHOLD" if unchecked else "PASS"
+    elif name == "causal_witness":
+        original = check.get("original_sha256")
+        mutated = check.get("mutated_sha256")
+        if isinstance(original, str) and isinstance(mutated, str):
+            return "PASS" if original != mutated else "WITHHOLD"
+    elif name == "negative_control":
+        findings = check.get("findings")
+        if isinstance(findings, list):
+            return "PASS" if findings else "FAIL"
+    if isinstance(check.get("error"), str):
+        return "WITHHOLD"
+    raise AdjudicationError(f"recorded {name} verdict evidence is malformed")
+
+
 def _validate_existing(path: Path, scene_id: str, bindings: dict) -> dict:
     receipt = _read_object(path, "scene adjudication")
     if receipt.get("schema") != ADJUDICATION_SCHEMA or receipt.get("scene_id") != scene_id:
@@ -479,6 +527,12 @@ def _validate_existing(path: Path, scene_id: str, bindings: dict) -> dict:
     if any(not isinstance(checks[name], dict) or
            checks[name].get("status") not in STATUSES for name in CHECK_NAMES):
         raise AdjudicationError(f"{scene_id} adjudication has an invalid check status")
+    has_audio = isinstance(receipt.get("audio"), dict)
+    for name in CHECK_NAMES:
+        if checks[name]["status"] != _recorded_check_status(
+                name, checks[name], has_audio):
+            raise AdjudicationError(
+                f"{scene_id} {name} classification does not match its evidence")
     if receipt.get("status") != _status(checks):
         raise AdjudicationError(f"{scene_id} adjudication aggregate status is invalid")
     audio = receipt.get("audio")
