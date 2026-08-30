@@ -185,6 +185,11 @@ class FakeRunner:
         code = 0
         if name == "fidelity.py":
             code = self.fidelity_code
+            probe = (Path(command[command.index("--preserve-probe") + 1]) /
+                     "ForgeProbe")
+            probe.mkdir(parents=True, exist_ok=True)
+            (probe / "plugin.dylib").write_bytes(b"fixture probe binary")
+            (probe / "plugin.json").write_text("{}\n", encoding="utf-8")
             if code in {0, 1} and self.write_audio:
                 Path(command[command.index("--wav") + 1]).write_bytes(b"RIFFfixture")
         return subprocess.CompletedProcess(command, code, "fixture stdout\n", "")
@@ -489,6 +494,35 @@ class AdjudicationTests(unittest.TestCase):
         self.assertEqual(
             receipt["checks"]["dsp_and_audio"]["environment"]["FORGE_RACK_PLATFORM"],
             "mac-x64")
+
+    def test_fidelity_command_preserves_the_executed_probe(self) -> None:
+        context = self.fixture.context()
+        runner = FakeRunner()
+        receipt = A.adjudicate_scene(
+            context, context.scenes[0], self.fixture.rack_app,
+            runner=runner, idiom_loader=lambda _root: FakeChecker())
+        fidelity_argv = next(
+            argv for argv in runner.commands if argv[1].endswith("fidelity.py"))
+        self.assertIn("--preserve-probe", fidelity_argv)
+        self.assertIsNotNone(receipt["checks"]["dsp_and_audio"]["probe"])
+
+    def test_resume_refuses_changed_preserved_probe_bytes(self) -> None:
+        context = self.fixture.context()
+        A.adjudicate_scene(
+            context, context.scenes[0], self.fixture.rack_app,
+            runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
+        binary = (self.fixture.run_root /
+                  "P05-S01/fidelity-probe/ForgeProbe/plugin.dylib")
+        original_stat = binary.stat()
+        binary.write_bytes(b"changed probe binary")
+        os.utime(binary, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        self.assertEqual(binary.stat().st_size, original_stat.st_size)
+        self.assertEqual(binary.stat().st_mtime_ns, original_stat.st_mtime_ns)
+        with self.assertRaisesRegex(
+                A.AdjudicationError, "preserved fidelity probe is missing or changed"):
+            A.adjudicate_scene(
+                context, context.scenes[0], self.fixture.rack_app,
+                runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
 
     def test_resume_refuses_terminal_dsp_verdict_without_audio(self) -> None:
         context = self.fixture.context()

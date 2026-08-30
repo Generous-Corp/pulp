@@ -366,7 +366,7 @@ def _rack_bindings(rack_app: Path, rack_log: Path | None, artifact: Path) -> dic
 def _rack_user_inputs() -> dict:
     return {
         name: _tree_identity(_rack_user_root() / name)
-        for name in ("settings.json", "licenses")
+        for name in ("settings.json", "licenses", "forge-portmap.json")
     }
 
 
@@ -513,6 +513,10 @@ def _recorded_check_status(name: str, check: dict, has_audio: bool) -> str:
     if name == "dsp_and_audio":
         status = _recorded_command_status(
             check, {0: "PASS", 1: "FAIL", 2: "WITHHOLD"})
+        if (status in {"PASS", "FAIL"} and check.get("probe") is None and
+                check.get("error") ==
+                "fidelity returned a verdict without preserved probe evidence"):
+            return "WITHHOLD"
         if (status in {"PASS", "FAIL"} and not has_audio and
                 check.get("error") ==
                 "fidelity returned a verdict without a non-empty WAV artifact"):
@@ -566,6 +570,15 @@ def _validate_existing(path: Path, scene_id: str, bindings: dict) -> dict:
     if checks["dsp_and_audio"]["status"] in {"PASS", "FAIL"} and audio is None:
         raise AdjudicationError(
             f"{scene_id} DSP/audio verdict has no preserved WAV evidence")
+    if (checks["dsp_and_audio"]["status"] in {"PASS", "FAIL"} and
+            checks["dsp_and_audio"].get("probe") is None):
+        raise AdjudicationError(
+            f"{scene_id} DSP/audio verdict has no preserved probe evidence")
+    probe = checks["dsp_and_audio"].get("probe")
+    probe_path = path.parent / "fidelity-probe/ForgeProbe"
+    if probe is not None and probe != _tree_identity(probe_path):
+        raise AdjudicationError(
+            f"{scene_id} preserved fidelity probe is missing or changed")
     if audio is not None:
         relative = audio.get("path") if isinstance(audio, dict) else None
         expected_name = (f"audio-{audio.get('sha256')}.wav"
@@ -637,9 +650,11 @@ def adjudicate_scene(context: CampaignContext, scene: dict, rack_app: Path,
 
         with tempfile.TemporaryDirectory(prefix="scene-audio-", dir=scene_dir) as tmp:
             temporary_audio = Path(tmp) / "audio.wav"
+            probe_root = scene_dir / "fidelity-probe"
             fidelity_command = [
                 python, str(context.toolchain / "fidelity.py"), str(artifact),
                 "--wav", str(temporary_audio),
+                "--preserve-probe", str(probe_root),
             ]
             fidelity_environment = {
                 "FORGE_RACK_BIN": bindings["rack"]["binary"],
@@ -651,6 +666,13 @@ def adjudicate_scene(context: CampaignContext, scene: dict, rack_app: Path,
                 {0: "PASS", 1: "FAIL", 2: "WITHHOLD"},
                 fidelity_environment)
             checks["dsp_and_audio"]["user_inputs"] = fidelity_user_inputs
+            checks["dsp_and_audio"]["probe"] = _tree_identity(
+                probe_root / "ForgeProbe")
+            if (checks["dsp_and_audio"]["status"] in {"PASS", "FAIL"} and
+                    checks["dsp_and_audio"]["probe"] is None):
+                checks["dsp_and_audio"]["status"] = "WITHHOLD"
+                checks["dsp_and_audio"]["error"] = (
+                    "fidelity returned a verdict without preserved probe evidence")
             audio = None
             if (checks["dsp_and_audio"]["status"] in {"PASS", "FAIL"} and
                     (not temporary_audio.is_file() or

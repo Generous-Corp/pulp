@@ -900,6 +900,7 @@ def judge(given: dict, got: Run, taps: list[tuple],
 def check(patch_path: str, seconds: float = 4.0,
           taps: list[tuple] | None = None,
           probe_dir: str | None = None,
+          probe_root: str | None = None,
           wav_out: str | None = None) -> tuple[int, list[str]]:
     """Run both checks against one patch. Returns (exit code, report lines)."""
     rack = mr.rack_binary()
@@ -911,7 +912,7 @@ def check(patch_path: str, seconds: float = 4.0,
     stage = tempfile.mkdtemp(prefix="fidelity-")
     portmap = read_portmap()
     try:
-        probe = probe_dir or build_probe(stage)
+        probe = probe_dir or build_probe(probe_root or stage)
         given, used = instrument(original, taps)
         if not used:
             return 2, ["nothing to listen to: the patch feeds no audio "
@@ -962,10 +963,19 @@ def main(argv: list[str]) -> int:
             return 2
         wav_out = argv[at]
         args = [a for a in args if a != wav_out]
+    probe_root = None
+    if "--preserve-probe" in argv:
+        at = argv.index("--preserve-probe") + 1
+        if at >= len(argv):
+            print("--preserve-probe needs an output directory")
+            return 2
+        probe_root = argv[at]
+        args = [a for a in args if a != probe_root]
     if not args:
         print(__doc__.split("\n\n")[1].strip("\n"))
         return 2
-    code, lines = check(args[0], seconds, wav_out=wav_out)
+    code, lines = check(
+        args[0], seconds, probe_root=probe_root, wav_out=wav_out)
     for line in lines:
         print(line)
     return code
