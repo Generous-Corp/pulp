@@ -153,6 +153,8 @@ EXPECTED_SOURCE_BLOBS_V2 = EXPECTED_SOURCE_BLOBS | {
     "experimental/pulp-rs/src/main.rs",
     "tools/cli/CMakeLists.txt",
     "tools/cli/cmd_gpu.cpp",
+    "tools/cli/gpu_artifact_publication.cpp",
+    "tools/cli/gpu_artifact_publication.hpp",
     "tools/cli/gpu_probe/CMakeLists.txt",
     "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
     "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp",

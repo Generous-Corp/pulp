@@ -1,5 +1,6 @@
 #include "atomic_text_file.hpp"
 #include "cli_common.hpp"
+#include "gpu_artifact_publication.hpp"
 #include "json_parser.hpp"
 #include "json_writer.hpp"
 
@@ -8,8 +9,6 @@
 #include <pulp/project_package/atomic_publisher.hpp>
 #endif
 
-#include <chrono>
-#include <fstream>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -20,7 +19,6 @@
 
 namespace {
 
-using pulp::tooling::gpu_probe::ArtifactPayload;
 using pulp::tooling::gpu_probe::RecipeRun;
 using pulp::tooling::gpu_probe::RunOptions;
 
@@ -334,63 +332,10 @@ bool path_chain_contains_symlink(const fs::path& path) {
     return false;
 }
 
-void write_payload(const fs::path& directory, const std::string& evidence_id,
-                   const ArtifactPayload& payload) {
-    const fs::path relative{payload.artifact.name};
-    if (relative.empty() || relative.is_absolute() || relative.has_parent_path() ||
-        relative.filename() != relative) {
-        throw std::runtime_error("probe returned an unsafe artifact name");
-    }
-
-    const auto destination = directory / relative;
-    std::error_code ec;
-    if (fs::is_symlink(fs::symlink_status(destination, ec))) {
-        throw std::runtime_error("refusing to replace symlink artifact: " + destination.string());
-    }
-    if (ec && ec != std::errc::no_such_file_or_directory) {
-        throw fs::filesystem_error("inspect artifact destination", destination, ec);
-    }
-
-    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto temporary =
-        directory / ("." + relative.string() + ".tmp." + evidence_id + "." + std::to_string(nonce));
-    struct TempCleanup {
-        fs::path path;
-        ~TempCleanup() {
-            std::error_code ignored;
-            fs::remove(path, ignored);
-        }
-    } cleanup{temporary};
-
-    std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-    if (!stream)
-        throw std::runtime_error("cannot create artifact: " + temporary.string());
-    stream.write(reinterpret_cast<const char*>(payload.bytes.data()),
-                 static_cast<std::streamsize>(payload.bytes.size()));
-    stream.close();
-    if (!stream)
-        throw std::runtime_error("cannot write artifact: " + temporary.string());
-
-    fs::rename(temporary, destination, ec);
-    if (ec)
-        throw fs::filesystem_error("publish artifact", temporary, destination, ec);
-    cleanup.path.clear();
-}
-
 void write_artifacts(const fs::path& directory, const RecipeRun& run) {
-    if (path_chain_contains_symlink(directory)) {
-        throw std::runtime_error("artifact directory or parent is a symlink");
-    }
-    std::error_code ec;
-    fs::create_directories(directory, ec);
-    if (ec)
-        throw fs::filesystem_error("create artifact directory", directory, ec);
-    if (!fs::is_directory(directory)) {
-        throw std::runtime_error("artifact path is not a directory: " + directory.string());
-    }
-    for (const auto& payload : run.payloads) {
-        write_payload(directory, run.result.gpu_evidence_id, payload);
-    }
+    auto pinned = pulp::cli::gpu_artifacts::PinnedArtifactDirectory::open_or_create(directory);
+    for (const auto& payload : run.payloads)
+        pinned.publish(payload.artifact.name, payload.bytes);
 }
 
 RecipeRun run_recipe(const std::string& recipe_id, const RunOptions& options,

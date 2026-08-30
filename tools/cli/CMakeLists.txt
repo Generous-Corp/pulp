@@ -78,6 +78,7 @@ add_executable(pulp-cli
     cmd_doctor.cpp
     cmd_doctor_gpu.cpp
     cmd_gpu.cpp
+    gpu_artifact_publication.cpp
     cmd_docs.cpp
     cmd_authority.cpp
     authority_navigation.cpp
@@ -277,6 +278,19 @@ install(FILES "${CMAKE_SOURCE_DIR}/docs/reference/cli.md"
 
 # Integration tests for CLI commands
 if(PULP_BUILD_TESTS)
+    add_executable(pulp-test-cli-gpu-artifact-publication
+        ${CMAKE_SOURCE_DIR}/test/test_cli_gpu_artifact_publication.cpp
+        gpu_artifact_publication.cpp)
+    target_include_directories(pulp-test-cli-gpu-artifact-publication PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(pulp-test-cli-gpu-artifact-publication PRIVATE cxx_std_20)
+    target_link_libraries(pulp-test-cli-gpu-artifact-publication PRIVATE
+        Catch2::Catch2WithMain)
+    add_test(NAME pulp-test-cli-gpu-artifact-publication
+        COMMAND pulp-test-cli-gpu-artifact-publication)
+    set_tests_properties(pulp-test-cli-gpu-artifact-publication PROPERTIES
+        LABELS "gpu;gpu-probe;cli")
+
     add_executable(pulp-test-cli-au-info-plist
         ${CMAKE_SOURCE_DIR}/test/test_cli_au_info_plist.cpp
         au_info_plist.cpp)

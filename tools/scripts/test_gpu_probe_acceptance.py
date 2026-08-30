@@ -447,6 +447,49 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 f"current checkout source blob drift for {helper}", errors
             )
 
+    def test_v2_source_binding_includes_artifact_publication_boundary(self):
+        boundary = {
+            "tools/cli/gpu_artifact_publication.cpp",
+            "tools/cli/gpu_artifact_publication.hpp",
+        }
+        self.assertTrue(boundary.issubset(VERIFIER.EXPECTED_SOURCE_BLOBS_V2))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original = VERIFIER._checkout_blobs
+
+            def checkout_as_revision(_revision, paths):
+                return original(paths)
+
+            # The boundary may still be uncommitted when this focused mutation
+            # test runs locally. Model the pending integration revision from the
+            # live checkout; the verifier's checkout-drift assertion remains the
+            # behavior under test below.
+            with mock.patch.object(
+                VERIFIER, "_git_blobs", side_effect=checkout_as_revision
+            ):
+                self.v2_fixture(root)
+
+            def drifted_checkout(paths):
+                blobs = original(paths)
+                for path in boundary:
+                    blobs[path] = "f" * 40
+                return blobs
+
+            with (
+                mock.patch.object(
+                    VERIFIER, "_git_blobs", side_effect=checkout_as_revision
+                ),
+                mock.patch.object(
+                    VERIFIER, "_checkout_blobs", side_effect=drifted_checkout
+                ),
+            ):
+                errors = VERIFIER.verify(root)
+            for path in boundary:
+                self.assertIn(
+                    f"current checkout source blob drift for {path}", errors
+                )
+
     def test_v2_rejects_missing_mcp_recipe_and_direct_binary_role(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
