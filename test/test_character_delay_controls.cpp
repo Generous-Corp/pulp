@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/signal/character_delay/diffusion.hpp>
+#include <pulp/signal/character_delay/reverse.hpp>
 
 #include "support/character_delay_fixture.hpp"
 
@@ -339,4 +340,44 @@ TEST_CASE("live diffusion amount automation does not step tank tap positions",
     CHECK(automated_boundary_step < 1.2 * automated_between_step);
     CHECK(error_boundary_step < 1.2 * error_between_step);
     CHECK(error_boundary_rms < 1.2 * error_between_rms);
+}
+
+// The reverse segmenter starts every segment at two fade widths, independent of
+// the capacity it was prepared with. A caller that prepared a smaller buffer
+// therefore ran off the end of it, and could not query the floor to avoid that
+// because it was private.
+TEST_CASE("reverse segmenter publishes its capacity floor", "[character-delay][reverse]") {
+    using pulp::signal::chardelay::ReverseSegmenter;
+    STATIC_REQUIRE(ReverseSegmenter::minimum_capacity_samples()
+                   == static_cast<std::size_t>(2 * pulp::signal::chardelay::kReverseFadeSamples));
+}
+
+TEST_CASE("reverse segmenter prepared below its floor still spans a full segment",
+          "[character-delay][reverse]") {
+    using pulp::signal::chardelay::ReverseSegmenter;
+    const auto floor_samples = ReverseSegmenter::minimum_capacity_samples();
+
+    ReverseSegmenter segmenter;
+    segmenter.prepare(1); // far below the floor
+
+    // The first segment always starts at the floor length, so it reaches unity
+    // whether or not the capacity honors that floor. The defect only shows from
+    // the second segment on, where the latched length is clamped against the
+    // prepared capacity: a capacity below the floor latches a segment shorter
+    // than two fade widths, which never leaves the raised-cosine ramp and so
+    // collapses the boundary gain toward zero. Skip the first segment and
+    // measure the ones that follow.
+    for (std::size_t n = 0; n < floor_samples; ++n) {
+        REQUIRE(std::isfinite(segmenter.process(1.0, 5000.0, 0.0)));
+    }
+
+    double peak = 0.0;
+    for (std::size_t n = 0; n < 3 * floor_samples; ++n) {
+        const double y = segmenter.process(1.0, 5000.0, 0.0);
+        REQUIRE(std::isfinite(y));
+        peak = std::max(peak, std::abs(y));
+    }
+    INFO("peak boundary-windowed output after the first segment: " << peak);
+    CHECK(peak > 0.5);
+    CHECK(peak <= 1.0 + 1e-6);
 }

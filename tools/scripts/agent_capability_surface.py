@@ -22,9 +22,9 @@ LEGACY_BASELINE = pathlib.Path(
 SURFACE_SCHEMA_FILE = pathlib.Path(
     "docs/status/agent-capability-surface.schema.json"
 )
-FROZEN_LEGACY_COUNT = 338
+FROZEN_LEGACY_COUNT = 337
 FROZEN_LEGACY_DIGEST = (
-    "sha256:c0739388ee0662998961374a53e5c803be0f4e2e16d8b105e8011c4d126cae1c"
+    "sha256:1763b6d191d6a9aa0904f80abcb0b68f935c4910b3379eb96c802bf5b0361a30"
 )
 
 PUBLIC_ROOTS = (

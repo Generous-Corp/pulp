@@ -32,9 +32,24 @@ namespace pulp::signal::chardelay {
 
 class ReverseSegmenter {
 public:
+    /// Smallest capacity this segmenter can be prepared with.
+    ///
+    /// A segment carries a raised-cosine fade at each end, so it cannot be
+    /// shorter than two fade widths. `reset()` starts the segment at exactly
+    /// this length, which means a smaller buffer would be overrun on the first
+    /// block. Callers sizing their own buffer must respect this floor; it is
+    /// public so the precondition is knowable rather than implied.
+    static constexpr std::size_t minimum_capacity_samples() noexcept {
+        return static_cast<std::size_t>(2 * kReverseFadeSamples);
+    }
+
     /// Allocates both buffers. Control thread only.
+    ///
+    /// A request below `minimum_capacity_samples()` is raised to it rather than
+    /// honored: the segment length is independent of the requested capacity, so
+    /// a shorter buffer would be written and read past its end.
     void prepare(std::size_t capacity_samples) {
-        capacity_ = std::max<std::size_t>(capacity_samples, 8u);
+        capacity_ = std::max(capacity_samples, minimum_capacity_samples());
         capture_.assign(capacity_, 0.0f);
         playback_.assign(capacity_, 0.0f);
         reset();
@@ -44,8 +59,8 @@ public:
         std::fill(capture_.begin(), capture_.end(), 0.0f);
         std::fill(playback_.begin(), playback_.end(), 0.0f);
         position_ = 0;
-        capture_length_ = min_segment();
-        playback_length_ = min_segment();
+        capture_length_ = minimum_capacity_samples();
+        playback_length_ = minimum_capacity_samples();
     }
 
     /// One sample of capture-forward / play-backward.
@@ -54,7 +69,7 @@ public:
     /// `mod_offset_samples` displaces the read head (tape instability).
     double process(double x, double segment_samples, double mod_offset_samples) noexcept {
         const auto requested = static_cast<std::size_t>(
-            std::clamp(segment_samples, static_cast<double>(min_segment()),
+            std::clamp(segment_samples, static_cast<double>(minimum_capacity_samples()),
                        static_cast<double>(capacity_)));
 
         capture_[position_] = static_cast<float>(x);
@@ -77,10 +92,6 @@ public:
     }
 
 private:
-    std::size_t min_segment() const noexcept {
-        return static_cast<std::size_t>(2 * kReverseFadeSamples);
-    }
-
     /// Raised-cosine ramp over the fade zone at each end of the segment.
     double boundary_gain() const noexcept {
         const auto fade = static_cast<std::size_t>(kReverseFadeSamples);
@@ -121,7 +132,7 @@ private:
 
     std::vector<float> capture_;
     std::vector<float> playback_;
-    std::size_t capacity_ = 8;
+    std::size_t capacity_ = minimum_capacity_samples();
     std::size_t position_ = 0;
     std::size_t capture_length_ = 1;
     std::size_t playback_length_ = 1;

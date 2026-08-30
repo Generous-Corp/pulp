@@ -407,6 +407,63 @@ are adding a function to a header that already backs a capability, expect the
 existing key to stay at its current version and the change to be absorbed by
 the two counters.
 
+## Editing a frozen `legacy_unreviewed` header is a capability transaction
+
+Any edit to a public header sitting in the frozen legacy bucket fails
+`--write`/`--check` with `public header fingerprint changed`, and you cannot fix
+it by updating the fingerprint in
+`tools/agent-capabilities/legacy-unreviewed-baseline.json`: the next error is
+`legacy baseline digest changed; the frozen legacy_unreviewed set may only shrink
+through explicit reviewed classifications`. That is deliberate. The frozen set is
+content-pinned so headers in it cannot be edited silently.
+
+The sanctioned path is to classify the header OUT of the bucket, which means all
+of these in one change:
+
+1. add it to `REVIEWED_HEADERS` in `tools/scripts/agent_capability_registry.py`
+   with its NEW fingerprint, a disposition, and a rationale;
+2. delete its entry from the baseline, decrement `frozen_count`, and recompute
+   `entries_digest` with `agent_capability_surface.canonical_digest(entries)`;
+3. update BOTH `FROZEN_LEGACY_COUNT` and `FROZEN_LEGACY_DIGEST` in
+   `tools/scripts/agent_capability_surface.py` to match; and
+4. run `python3 tools/scripts/agent_capability_rederive.py`, not a hand-edit, to
+   move the counters. Editing `manifest_revision` / `inventory_version` directly
+   in the generated JSON does nothing: they are projected from
+   `MANIFEST_REVISION` / `SURFACE_INVENTORY_VERSION` constants, so `--write`
+   regenerates them and still reports `changed without a revision increase`.
+
+Only classify a header when the classification is already defensible from a
+written decision. Inventing one to unblock an edit converts a safety gate into
+paperwork.
+
+## A same-size constant edit can be masked by a stale `__pycache__`
+
+`FROZEN_LEGACY_COUNT = 338` to `337`, and one 64-hex digest to another, both
+leave the source file byte size UNCHANGED. CPython invalidates bytecode on
+`(source mtime, source size)`, so a `.pyc` written moments earlier can survive an
+edit that changed neither, and the interpreter keeps executing the OLD constant.
+
+The symptom is a contradiction that looks impossible: `python3
+tools/scripts/agent_capability_manifest.py --check` prints `fresh`, while the
+identical `agent-capability-manifest-check` ctest fails against the pre-edit
+value. The two ran DIFFERENT interpreters (`ctest` uses the CMake-resolved
+`Python3_EXECUTABLE`, often a specific `python3.N`), each with its own
+`cpython-3N.pyc`, and only one cache was stale.
+
+Before believing either result, reproduce with the interpreter the test actually
+uses:
+
+```sh
+PY=$(grep -m1 "Python3_EXECUTABLE:" build/CMakeCache.txt | cut -d= -f2)
+"$PY" tools/scripts/agent_capability_manifest.py --check
+```
+
+and clear the caches when a constant edit did not change file size:
+
+```sh
+find tools -name __pycache__ -type d -exec rm -rf {} +
+```
+
 ## A STALE verdict on a tree you did not touch is a base problem, not a you problem
 
 If `--check` reports these on a clean checkout whose diff touches no capability
