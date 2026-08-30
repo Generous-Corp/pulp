@@ -148,6 +148,24 @@ def lock_text_for(target: str, manifest: Path) -> str:
 
 
 class GpuResourceLockTests(unittest.TestCase):
+    def test_standalone_product_stages_the_exact_trusted_client(self) -> None:
+        manifest = (MANIFEST_DIR / "gpu_health_tests.cmake").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "find_program(_pulp_gpu_health_test_codesign codesign REQUIRED)",
+            manifest,
+        )
+        self.assertIn(
+            'COMMAND "${_pulp_gpu_health_test_codesign}" --force --sign -',
+            manifest,
+        )
+        self.assertIn(
+            '"$<TARGET_FILE_DIR:pulp-test-control-gpu-health-standalone-product>/pulp"',
+            manifest,
+        )
+        self.assertNotIn("if(_pulp_control_host_codesign)", manifest)
+
     def test_device_creating_suites_take_the_gpu_lock(self) -> None:
         sources = gpu_device_sources()
         self.assertTrue(sources, "no GPU-device test sources found — detector broke")

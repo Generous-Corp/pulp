@@ -87,6 +87,11 @@ catch_discover_tests(pulp-test-control-gpu-health-provider
 
 if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
         TARGET pulp-inspect-standalone-runtime)
+    # This manifest is included before the top-level control-shipping helper
+    # discovers its private codesign variable. Resolve the test tool here so
+    # the exact copied client is always present for the broker's identity gate.
+    find_program(_pulp_gpu_health_test_codesign codesign REQUIRED)
+
     add_executable(pulp-control-gpu-health-standalone-product-fixture
         fixtures/control_gpu_health_standalone_product_fixture.cpp)
     target_link_libraries(pulp-control-gpu-health-standalone-product-fixture PRIVATE
@@ -104,18 +109,16 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
     _pulp_attach_control_shipping(
         pulp-control-gpu-health-standalone-product-fixture
         pulp-control-gpu-health-standalone-product-fixture Standalone)
-    if(_pulp_control_host_codesign)
-        add_custom_command(
-            TARGET pulp-control-gpu-health-standalone-product-fixture POST_BUILD
-            COMMAND "${_pulp_control_host_codesign}" --force --sign - --options library
-                    "$<TARGET_FILE:pulp-control-gpu-health-standalone-product-fixture>"
-            COMMAND /bin/chmod 0700
-                    "$<TARGET_FILE:pulp-control-gpu-health-standalone-product-fixture>"
-            COMMAND /bin/chmod 0600
-                    "$<TARGET_FILE:pulp-control-gpu-health-standalone-product-fixture>.inspector-capabilities.json"
-            COMMENT "Ad-hoc signing GPU health Standalone product fixture"
-            VERBATIM)
-    endif()
+    add_custom_command(
+        TARGET pulp-control-gpu-health-standalone-product-fixture POST_BUILD
+        COMMAND "${_pulp_gpu_health_test_codesign}" --force --sign - --options library
+                "$<TARGET_FILE:pulp-control-gpu-health-standalone-product-fixture>"
+        COMMAND /bin/chmod 0700
+                "$<TARGET_FILE:pulp-control-gpu-health-standalone-product-fixture>"
+        COMMAND /bin/chmod 0600
+                "$<TARGET_FILE:pulp-control-gpu-health-standalone-product-fixture>.inspector-capabilities.json"
+        COMMENT "Ad-hoc signing GPU health Standalone product fixture"
+        VERBATIM)
 
     add_executable(pulp-test-control-gpu-health-standalone-product
         test_control_gpu_health_standalone_product.cpp
@@ -135,17 +138,15 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
         $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
     add_dependencies(pulp-test-control-gpu-health-standalone-product
         pulp-control-gpu-health-standalone-product-fixture)
-    if(_pulp_control_host_codesign)
-        add_custom_command(
-            TARGET pulp-test-control-gpu-health-standalone-product POST_BUILD
-            COMMAND "${_pulp_control_host_codesign}" --force --sign -
-                    "$<TARGET_FILE:pulp-test-control-gpu-health-standalone-product>"
-            COMMAND "${CMAKE_COMMAND}" -E copy
-                    "$<TARGET_FILE:pulp-test-control-gpu-health-standalone-product>"
-                    "$<TARGET_FILE_DIR:pulp-test-control-gpu-health-standalone-product>/pulp"
-            COMMENT "Ad-hoc signing GPU health Standalone product test"
-            VERBATIM)
-    endif()
+    add_custom_command(
+        TARGET pulp-test-control-gpu-health-standalone-product POST_BUILD
+        COMMAND "${_pulp_gpu_health_test_codesign}" --force --sign -
+                "$<TARGET_FILE:pulp-test-control-gpu-health-standalone-product>"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "$<TARGET_FILE:pulp-test-control-gpu-health-standalone-product>"
+                "$<TARGET_FILE_DIR:pulp-test-control-gpu-health-standalone-product>/pulp"
+        COMMENT "Ad-hoc signing and staging GPU health Standalone product test"
+        VERBATIM)
     catch_discover_tests(pulp-test-control-gpu-health-standalone-product
         PROPERTIES
             RESOURCE_LOCK pulp_gpu
