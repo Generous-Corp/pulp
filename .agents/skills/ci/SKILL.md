@@ -7642,3 +7642,30 @@ on the next run.
 Editing either file trips a different skill-sync gate — `codecov.yml` and
 `ci/coverage-surfaces.yaml` map to different skills — so expect the skill-sync
 check to fire twice for what is conceptually one change.
+
+## The fifth registration, and why `gates.sh` cannot warn you about it
+
+The four registrations above are what a new `core/` module needs to *build and
+be measured*. Shipping it needs a fifth, and this one is invisible locally:
+
+5. `tools/scripts/release_product_matrix.json` — add the target to
+   `pulp_library_stems`, alphabetically. STATIC libraries only; an INTERFACE
+   library must NOT be listed.
+
+`gates.sh` does not run `test_release_artifact_contents.py`, so a branch goes
+green locally and then fails in CI's workflow-lint job with `PULP_SDK_TARGETS
+archives and release_product_matrix.json drifted`. Run it yourself:
+
+```sh
+python3 tools/scripts/test_release_artifact_contents.py
+```
+
+**And treat a second, different drift from that test with suspicion on a built
+checkout.** Its interface-library scan used to walk build trees, where
+`test/inspector-shipping-scanner` generates a fixture `CMakeLists.txt` declaring
+`pulp-format` as an INTERFACE library — so a real STATIC library looked like an
+interface one and vanished from the archive set. CI never saw it (clean
+checkout); it appeared only on a machine that had built once, which is exactly
+the machine verifying the fix. That is fixed now, but the shape is worth
+remembering: when a local run disagrees with CI, suspect the local *tree* before
+the local *change*.
