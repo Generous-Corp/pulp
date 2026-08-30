@@ -35,10 +35,10 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "OFF"
+        "PULP_BUILD_EXAMPLES": "ON"
       },
       "summary": {
-        "installed_target_count": 65,
+        "installed_target_count": 66,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -149,6 +149,11 @@
             "exported_as": "Pulp::audio-analysis",
             "closure_node_count": 32,
             "public_header_count": 8
+          },
+          {
+            "exported_as": "Pulp::authoring-capsule",
+            "closure_node_count": 32,
+            "public_header_count": 12
           },
           {
             "exported_as": "Pulp::audio",
@@ -560,6 +565,81 @@
             "framework:AudioToolbox",
             "framework:CoreAudio",
             "framework:CoreFoundation"
+          ]
+        },
+        "authoring-capsule": {
+          "target": "pulp-authoring-capsule",
+          "exported_as": "Pulp::authoring-capsule",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "core/authoring_capsule",
+          "closure": {
+            "node_count": 32,
+            "pulp_targets": [
+              "pulp-audio",
+              "pulp-authoring-capsule",
+              "pulp-events",
+              "pulp-midi",
+              "pulp-music",
+              "pulp-platform",
+              "pulp-runtime",
+              "pulp-sample-bank-manifest",
+              "pulp-signal",
+              "pulp-state",
+              "pulp-timebase"
+            ],
+            "third_party_targets": [
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing"
+            ]
+          },
+          "external_dependencies": {
+            "count": 21,
+            "third_party_targets": [
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing"
+            ],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [
+              "Accelerate",
+              "AudioToolbox",
+              "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
+              "CoreFoundation",
+              "CoreMIDI",
+              "CoreServices",
+              "Foundation",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "bsm"
+            ]
+          },
+          "public_headers": {
+            "count": 12,
+            "roots": [
+              "core/authoring_capsule/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "pulp-audio",
+            "pulp-runtime"
           ]
         },
         "bundled-fonts": {

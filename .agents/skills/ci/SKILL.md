@@ -7692,6 +7692,35 @@ Editing either file trips a different skill-sync gate — `codecov.yml` and
 `ci/coverage-surfaces.yaml` map to different skills — so expect the skill-sync
 check to fire twice for what is conceptually one change.
 
+## A job's green says nothing about a step that was skipped inside it
+
+Reading a job's conclusion as evidence about a step inside it is wrong whenever
+the step is `if:`-guarded, and it is the easiest mistake to make because the
+green is real — it is just green about something else.
+
+Concretely: `Release-path build (linux-x64)` passes while never fetching V8,
+because the fetch is guarded `if: matrix.platform == 'darwin-arm64'`
+(`.github/workflows/release-path-pr-gate.yml`). Reading that pass as "linux's V8
+digest matches" produced a confident, wrong conclusion about a supply-chain
+drift.
+
+Ask the run about the STEP, not the job:
+
+```sh
+ghapp api "repos/Generous-Corp/pulp/actions/runs/$RUN/jobs" \
+  --jq '.jobs[] | select(.name|test("<leg>")) | .steps[]
+        | select(.name|test("<step>")) | "\(.conclusion)  \(.name)"'
+```
+
+It returns `skipped`, `success`, or `failure` per step. Pair it with a leg you
+expect to have RUN the step: if the two legs return the same thing, the query is
+wrong, not the world.
+
+Related but not the same: `tools/scripts/required_gate_liveness.py` already
+asserts every *required context* actually ran for a merged commit. That covers a
+gate vanishing entirely; it does not cover a step being conditionally skipped
+inside a gate that reports success.
+
 ## The fifth registration, and why `gates.sh` cannot warn you about it
 
 The four registrations above are what a new `core/` module needs to *build and
@@ -7700,6 +7729,14 @@ be measured*. Shipping it needs a fifth, and this one is invisible locally:
 5. `tools/scripts/release_product_matrix.json` — add the target to
    `pulp_library_stems`, alphabetically. STATIC libraries only; an INTERFACE
    library must NOT be listed.
+6. `docs/status/consumption-profiles.json` — regenerate with
+   `python3 tools/scripts/consumption_census.py --write`. Missing this fails the
+   **required** `macos` gate on `consumption-census-drift` after a ~40-minute
+   run, which is the most expensive way to discover any of these.
+
+Six, not four, and they surface one at a time in roughly increasing cost:
+`gates.sh` catches the first four in seconds, CI's workflow-lint catches the
+fifth in two minutes, and the required macOS gate catches the sixth in forty.
 
 `gates.sh` does not run `test_release_artifact_contents.py`, so a branch goes
 green locally and then fails in CI's workflow-lint job with `PULP_SDK_TARGETS
