@@ -557,9 +557,15 @@ TEST_CASE("external harness observes every GPU health entry point off a register
             std::min(std::max<std::uint64_t>(hashed, 1),
                      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
         registered.set_value();
-        release_future.wait();
+        (void)release_future.wait_for(10s);
     });
-    registered_future.wait();
+    const bool audio_thread_registered =
+        registered_future.wait_for(10s) == std::future_status::ready;
+    if (!audio_thread_registered) {
+        release.set_value();
+        audio_thread.join();
+        FAIL("audio thread did not register before the progress deadline");
+    }
 
     Provider frame_provider({.pulp_build_id = "non-audio-frame-positive"});
     const bool frame_begin = frame_provider.begin_editor_open(Provider::CacheState::cold, {});
