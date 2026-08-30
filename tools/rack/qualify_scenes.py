@@ -12,11 +12,15 @@ response and run receipts already owned by that scene.
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 from typing import Callable, Iterable
@@ -31,6 +35,8 @@ INVENTORY_SCHEMA = "forge.modular.inventory_receipt.v1"
 CAMPAIGN_SCHEMA = "forge.modular.qualification_campaign.v1"
 RESULT_SCHEMA = "forge.modular.scene_qualification_result.v1"
 SCENE_IDS = tuple(f"P05-S{index:02d}" for index in range(1, 13))
+HEX40 = re.compile(r"[0-9a-f]{40}")
+HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
 class QualificationError(RuntimeError):
@@ -266,6 +272,223 @@ def snapshot_inventory(toolchain: Path) -> dict:
     if not isinstance(inventory, dict) or not inventory:
         raise QualificationError("executing Rack inventory is empty")
     return inventory
+
+
+def _load_build_info(path: Path) -> dict[str, str]:
+    """Read the candidate bundle's exact, duplicate-free build identity."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise QualificationError(
+            f"cannot read Forge build identity {path}: {exc}") from exc
+    fields: dict[str, str] = {}
+    for number, line in enumerate(lines, 1):
+        if not line or "=" not in line:
+            raise QualificationError(
+                f"Forge build identity line {number} is not key=value")
+        key, value = line.split("=", 1)
+        if not key or not value:
+            raise QualificationError(
+                f"Forge build identity line {number} has an empty key or value")
+        if key in fields:
+            raise QualificationError(
+                f"Forge build identity repeats field {key!r}")
+        fields[key] = value
+    required = {
+        "schema": "1",
+        "product": "Forge Modular",
+        "product_id": "com.generous.forge.modular",
+        "role": "Rack module and patch generator",
+        "format": "Standalone application",
+        "source_git_dirty": "false",
+    }
+    for key, expected in required.items():
+        if fields.get(key) != expected:
+            raise QualificationError(
+                f"Forge build identity {key} must be {expected!r}")
+    if fields.get("build") not in {
+            "Release · darwin-arm64", "Release · darwin-x64"}:
+        raise QualificationError(
+            "Forge build identity must name a supported Release build")
+    if not fields.get("version"):
+        raise QualificationError("Forge build identity has no version")
+    if not HEX40.fullmatch(fields.get("source_git_head", "")):
+        raise QualificationError(
+            "Forge build identity must name one exact source_git_head")
+    if not HEX64.fullmatch(fields.get("source_snapshot_sha256", "")):
+        raise QualificationError(
+            "Forge build identity must name one exact source_snapshot_sha256")
+    pulp_parts = fields.get("pulp_sdk", "").rsplit(" · ", 1)
+    if (len(pulp_parts) != 2 or not pulp_parts[0] or
+            not HEX40.fullmatch(pulp_parts[1])):
+        raise QualificationError(
+            "Forge build identity pulp_sdk must name a version and exact revision")
+    if ("expected_pulp_sdk_ref" in fields and
+            fields["expected_pulp_sdk_ref"] != pulp_parts[1]):
+        raise QualificationError(
+            "Forge build identity expected_pulp_sdk_ref does not match pulp_sdk")
+    return fields
+
+
+def _stamp_identity(stamp: str) -> tuple[str, str, str | None]:
+    lines = stamp.splitlines()
+    if (len(lines) not in {3, 4} or not lines[0] or not lines[1] or
+            not lines[2].startswith("pulp ")):
+        raise QualificationError(
+            "FORGE_TOOLCHAIN_STAMP must contain version, date, Pulp revision, "
+            "and at most one decoder identity")
+    revision = lines[2].removeprefix("pulp ")
+    if not HEX40.fullmatch(revision):
+        raise QualificationError(
+            "FORGE_TOOLCHAIN_STAMP must name one exact Pulp revision")
+    decoder_identity = None
+    if len(lines) == 4:
+        decoder = lines[3].split()
+        if (len(decoder) != 2 or decoder[0] != "rack_patch_decode" or
+                not HEX64.fullmatch(decoder[1])):
+            raise QualificationError(
+                "FORGE_TOOLCHAIN_STAMP must name one exact decoder identity")
+        decoder_identity = decoder[1]
+    return lines[0], revision, decoder_identity
+
+
+def _rename_directory_exclusive(source: Path, destination: Path) -> None:
+    """Atomically publish one directory without replacing an existing name."""
+    if sys.platform == "darwin":
+        function = ctypes.CDLL(None, use_errno=True).renameatx_np
+        function.argtypes = (
+            ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+            ctypes.c_uint)
+        function.restype = ctypes.c_int
+        result = function(-2, os.fsencode(source), -2, os.fsencode(destination), 4)
+    elif sys.platform.startswith("linux"):
+        library = ctypes.CDLL(None, use_errno=True)
+        function = getattr(library, "renameat2", None)
+        if function is None:
+            raise QualificationError(
+                "this platform cannot publish qualification inputs without replace")
+        function.argtypes = (
+            ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+            ctypes.c_uint)
+        function.restype = ctypes.c_int
+        result = function(
+            -100, os.fsencode(source), -100, os.fsencode(destination), 1)
+    elif os.name == "nt":
+        # Windows rename fails when the destination already exists.
+        os.rename(source, destination)
+        return
+    else:
+        raise QualificationError(
+            "this platform cannot publish qualification inputs without replace")
+    if result != 0:
+        error = ctypes.get_errno()
+        if error == errno.EEXIST:
+            raise FileExistsError(error, os.strerror(error), destination)
+        raise OSError(error, os.strerror(error), destination)
+
+
+def prepare_inputs(*, toolchain: Path, settings: Path, build_info: Path,
+                   expected_pulp_ref: str, output_dir: Path,
+                   inventory_loader: Callable[[Path], dict] = snapshot_inventory,
+                   selection_loader: Callable[[Path, Path], dict] = load_model_selection,
+                   ) -> tuple[Path, Path]:
+    """Atomically author the two provider-free campaign input receipts."""
+    toolchain = toolchain.resolve()
+    settings = settings.resolve()
+    build_info = build_info.resolve()
+    output_dir = output_dir.expanduser().absolute()
+    if not HEX40.fullmatch(expected_pulp_ref):
+        raise QualificationError(
+            "expected Pulp SDK authority must be one exact revision")
+    fields = _load_build_info(build_info)
+    toolchain_snapshot = _toolchain_identity(toolchain)
+    pulp_revision = fields["pulp_sdk"].rsplit(" · ", 1)[1]
+    if pulp_revision != expected_pulp_ref:
+        raise QualificationError(
+            "Forge build identity does not match the expected Pulp SDK authority")
+    stamp_version, stamp_pulp_revision, stamped_decoder = _stamp_identity(
+        toolchain_snapshot["stamp"])
+    if stamp_version != fields["version"]:
+        raise QualificationError(
+            "Forge build identity and FORGE_TOOLCHAIN_STAMP name different "
+            "versions")
+    if stamp_pulp_revision != pulp_revision:
+        raise QualificationError(
+            "Forge build identity and FORGE_TOOLCHAIN_STAMP name different "
+            "Pulp revisions")
+    decoder = build_info.parent / "build" / "rack_patch_decode"
+    if not decoder.is_file() or not os.access(decoder, os.X_OK):
+        raise QualificationError(
+            f"Forge Modular Rack saved-patch decoder is not executable: {decoder}")
+    decoder_identity = _file_digest(decoder)
+    executing_decoder = toolchain / "rack_patch_decode"
+    if (not executing_decoder.is_file() or
+            not os.access(executing_decoder, os.X_OK)):
+        raise QualificationError(
+            "executing Rack saved-patch decoder is missing or not executable: "
+            f"{executing_decoder}")
+    if _file_digest(executing_decoder) != decoder_identity:
+        raise QualificationError(
+            "executing Rack saved-patch decoder does not match the candidate "
+            "executable")
+    if stamped_decoder is not None and stamped_decoder != decoder_identity:
+        raise QualificationError(
+            "FORGE_TOOLCHAIN_STAMP decoder identity does not match the "
+            "candidate executable")
+    selected_model = selection_loader(toolchain, settings)
+    inventory = inventory_loader(toolchain)
+    if not isinstance(inventory, dict) or not inventory:
+        raise QualificationError("executing Rack inventory is empty")
+    identity_document = {
+        "schema": IDENTITY_SCHEMA,
+        "identity": {
+            "forge_revision": fields["source_git_head"],
+            "pulp_revision": pulp_revision,
+            "source_snapshot_sha256": fields["source_snapshot_sha256"],
+            "rack_patch_decode_sha256": decoder_identity,
+            **selected_model,
+            "toolchain": {
+                "stamp": toolchain_snapshot["stamp"],
+                "files": toolchain_snapshot["files"],
+            },
+        },
+    }
+    inventory_document = {"schema": INVENTORY_SCHEMA, "inventory": inventory}
+    expected = {
+        "identity.json": identity_document,
+        "inventory.json": inventory_document,
+    }
+    def existing_pair() -> tuple[Path, Path]:
+        if not output_dir.is_dir() or output_dir.is_symlink():
+            raise QualificationError(
+                f"qualification input destination is not a directory: {output_dir}")
+        for name, document in expected.items():
+            path = output_dir / name
+            if not path.is_file() or _read_object(path, name) != document:
+                raise QualificationError(
+                    f"qualification inputs are incomplete or owned by different "
+                    f"inputs: {output_dir}")
+        return output_dir / "identity.json", output_dir / "inventory.json"
+
+    if output_dir.exists() or output_dir.is_symlink():
+        return existing_pair()
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_dir.with_name(
+        f".{output_dir.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    temporary.mkdir(mode=0o700)
+    try:
+        for name, document in expected.items():
+            _write_exclusive(temporary / name, document)
+        try:
+            _rename_directory_exclusive(temporary, output_dir)
+        except FileExistsError:
+            shutil.rmtree(temporary)
+            return existing_pair()
+        _fsync_directory(output_dir.parent)
+    except BaseException:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+    return output_dir / "identity.json", output_dir / "inventory.json"
 
 
 def _selected(scenes: list[dict], requested: Iterable[str]) -> list[dict]:
@@ -669,9 +892,32 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
+def parse_prepare_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="qualify_scenes.py prepare",
+        description="Author provider-free Forge Modular qualification inputs.")
+    parser.add_argument("--toolchain-root", type=Path, required=True)
+    parser.add_argument("--settings", type=Path, required=True)
+    parser.add_argument("--build-info", type=Path, required=True)
+    parser.add_argument("--expected-pulp-ref", required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    return parser.parse_args(argv)
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    raw = sys.argv[1:] if argv is None else argv
     try:
+        if raw and raw[0] == "prepare":
+            args = parse_prepare_args(raw[1:])
+            identity, inventory = prepare_inputs(
+                toolchain=args.toolchain_root, settings=args.settings,
+                build_info=args.build_info,
+                expected_pulp_ref=args.expected_pulp_ref,
+                output_dir=args.output_dir)
+            print(identity)
+            print(inventory)
+            return 0
+        args = parse_args(raw)
         if args.list:
             for scene in load_catalogue(args.catalogue):
                 print(json.dumps(scene, sort_keys=True))
