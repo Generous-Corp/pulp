@@ -86,6 +86,21 @@ functions:
       - VERSION
     docs: reference/cmake.md#pulp_add_app
 
+  - name: pulp_declare_standalone_document_type
+    status: usable
+    summary: Declare a macOS document type and exported UTType on an app or standalone target so it can be launched by double-clicking its own files.
+    required:
+      - target
+      - UTI
+      - EXTENSION
+    optional:
+      - DESCRIPTION
+      - MIME
+      - CONFORMS_TO
+      - ROLE
+      - RANK
+    docs: reference/cmake.md#pulp_declare_standalone_document_type
+
   - name: pulp_app_icon
     status: usable
     summary: Attach app icon assets to a standalone application or generated app bundle target.

@@ -704,11 +704,23 @@ fi
 PROFRAW_DIR="${BUILD_DIR}/profraw"
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
-# Use LLVM's `%Nm` merge pool, sized to the bounded CTest concurrency above.
-# Plain `%m` is a one-file pool; parallel exits corrupted that sole file on
-# Linux. A pool preserves online merging without the unbounded file count and
-# PID-reuse risk of `%p`.
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${DIFF_COVER_TEST_JOBS}m.profraw"
+# One profile per PROCESS, with a merge pool inside it.
+#
+# `%m` alone is a ONE-file pool, and parallel exits corrupted that sole file on
+# Linux — which is why it was abandoned. `%Nm` was the replacement, but an
+# N-file pool is shared by every binary that writes into the directory, and
+# profiles with different counter layouts cannot merge into one file. ctest runs
+# hundreds of DIFFERENT test binaries, so all but a handful of their profiles
+# were silently discarded: a full run left SEVEN profraw files, and the gate
+# reported 71% where the same tests run serially measured 91%. Nothing failed —
+# the number was simply wrong, and it went DOWN when coverage was added, which
+# is how it was noticed.
+#
+# `%p-%m` gives each process its own file and keeps online merging inside it, so
+# the original one-shared-file corruption cannot recur and cross-binary
+# collision is gone. The file count is the ordinary LLVM workflow; the merge
+# step below already handles thousands of shards and says so.
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 
 echo "=== Running tests ==="
 run_coverage_ctest "${BUILD_DIR}" "${PULP_DIFF_COVER_CTEST_REGEX:-}" || \
