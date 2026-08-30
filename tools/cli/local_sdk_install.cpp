@@ -8,8 +8,10 @@
 #include "tartci_lease.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -367,8 +369,45 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
         return {};
     }
 
-    auto configure_args =
-        local_sdk::configure_arguments(snapshot.path(), active_build_dir, staging_prefix, identity);
+    // Design import stages a self-contained Node runtime beside
+    // `pulp-import-design` to interpret its browser-capture scripts. Without
+    // it the SDK ships those scripts with no interpreter, and a Forge
+    // configure against this SDK fails outright on the missing payload — which
+    // makes the documented local-iteration path unusable rather than merely
+    // degraded. The release lane prepares the same pinned runtime through the
+    // same script, so a development SDK gets the same bytes.
+    std::optional<fs::path> node_runtime;
+    if (const char* provided = std::getenv("PULP_NODE_RUNTIME_EXECUTABLE");
+        provided != nullptr && *provided != '\0') {
+        node_runtime = fs::path(provided);
+        if (!fs::exists(*node_runtime)) {
+            std::cerr << "Error: PULP_NODE_RUNTIME_EXECUTABLE does not exist: "
+                      << node_runtime->string() << "\n";
+            remove_staging(staging_prefix, active_build_dir);
+            return {};
+        }
+    } else {
+        const fs::path script = snapshot.path() / "tools" / "scripts" / "prepare_node_runtime.py";
+        const fs::path output = active_build_dir / "node-runtime" / "node";
+        if (!fs::exists(output)) {
+            fs::create_directories(output.parent_path(), ec);
+            const std::string command = "python3 " + shell_quote(script.string()) + " --platform " +
+                                        shell_quote(identity.platform) + " --output " +
+                                        shell_quote(output.string());
+            if (run_with_spinner(command, "Preparing pinned Node runtime") != 0) {
+                std::cerr << "Error: could not prepare the pinned Node runtime for "
+                          << identity.platform << ".\n"
+                          << "       Set PULP_NODE_RUNTIME_EXECUTABLE to a self-contained Node "
+                             "binary to skip the download.\n";
+                remove_staging(staging_prefix, active_build_dir);
+                return {};
+            }
+        }
+        node_runtime = output;
+    }
+
+    auto configure_args = local_sdk::configure_arguments(snapshot.path(), active_build_dir,
+                                                         staging_prefix, identity, node_runtime);
     configure_args.insert(configure_args.begin() + 1, {"-G", identity.generator});
     if (run_with_spinner(command_from_args(configure_args), "Configuring forge-dev SDK") != 0) {
         remove_staging(staging_prefix, active_build_dir);
