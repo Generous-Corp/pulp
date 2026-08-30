@@ -173,8 +173,12 @@ def _tree_identity(path: Path, active: set[Path] | None = None) -> dict | None:
         active.remove(resolved)
 
 
+def _rack_user_root() -> Path:
+    return Path.home() / "Library/Application Support/Rack2"
+
+
 def _rack_plugin_roots() -> list[Path]:
-    rack_root = Path.home() / "Library/Application Support/Rack2"
+    rack_root = _rack_user_root()
     try:
         return sorted(
             (path.resolve() for path in rack_root.iterdir()
@@ -348,6 +352,10 @@ def _rack_bindings(rack_app: Path, rack_log: Path | None, artifact: Path) -> dic
         "app_bundle": _tree_identity(app),
         "rack_log": str(rack_log.resolve()) if rack_log is not None else None,
         "plugin_installation": _plugin_identities(artifact),
+        "user_inputs": {
+            name: _tree_identity(_rack_user_root() / name)
+            for name in ("settings.json", "licenses")
+        },
     }
     return binding
 

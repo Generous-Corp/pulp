@@ -447,6 +447,27 @@ class AdjudicationTests(unittest.TestCase):
         self.assertEqual(target.stat().st_mtime_ns, original_stat.st_mtime_ns)
         self.assertNotEqual(A._tree_identity(root), before)
 
+    def test_resume_refuses_changed_rack_license_inputs(self) -> None:
+        home = self.fixture.root / "licensed-home"
+        rack_root = home / "Library/Application Support/Rack2"
+        rack_root.mkdir(parents=True)
+        settings = rack_root / "settings.json"
+        settings.write_bytes(b'{"token":"one"}')
+        original_stat = settings.stat()
+        context = self.fixture.context()
+        with mock.patch.object(Path, "home", return_value=home):
+            A.adjudicate_scene(
+                context, context.scenes[0], self.fixture.rack_app,
+                runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
+            settings.write_bytes(b'{"token":"two"}')
+            os.utime(settings, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+            self.assertEqual(settings.stat().st_size, original_stat.st_size)
+            self.assertEqual(settings.stat().st_mtime_ns, original_stat.st_mtime_ns)
+            with self.assertRaisesRegex(A.AdjudicationError, "evidence changed"):
+                A.adjudicate_scene(
+                    context, context.scenes[0], self.fixture.rack_app,
+                    runner=FakeRunner(), idiom_loader=lambda _root: FakeChecker())
+
     def test_resume_refuses_terminal_dsp_verdict_without_audio(self) -> None:
         context = self.fixture.context()
         A.adjudicate_scene(
