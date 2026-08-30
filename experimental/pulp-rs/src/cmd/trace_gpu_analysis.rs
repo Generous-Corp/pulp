@@ -1,6 +1,6 @@
 //! Closed GPU questions over checked-in PerfettoSQL definitions.
 
-use std::fs::OpenOptions;
+use std::fs::{File, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -204,6 +204,159 @@ struct BoundedOutput {
     status: ExitStatus,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct TraceInputSnapshot {
+    path: PathBuf,
+    bytes: u64,
+}
+
+impl Drop for TraceInputSnapshot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn create_exclusive_snapshot(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+fn same_file_identity(left: &Metadata, right: &Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return left.dev() == right.dev() && left.ino() == right.ino();
+    }
+    #[cfg(not(unix))]
+    {
+        // Rust 1.79 does not expose a portable Windows file identifier. Size
+        // and timestamps still make the path-replacement check fail closed for
+        // normal atomic replacement, while the opened handle below remains the
+        // authority for the bytes copied into the private snapshot.
+        left.len() == right.len()
+            && left.modified().ok() == right.modified().ok()
+            && left.created().ok() == right.created().ok()
+    }
+}
+
+fn snapshot_trace_input_with_hook(
+    path: &Path,
+    max_bytes: u64,
+    after_open: impl FnOnce(),
+) -> Result<TraceInputSnapshot> {
+    let path_metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            CliError::BadUsage(format!(
+                "pulp trace: trace file not found: {}",
+                path.display()
+            ))
+        } else {
+            CliError::io(path, error)
+        }
+    })?;
+    if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
+        return Err(CliError::BadUsage(format!(
+            "pulp trace: trace input must be a non-symlink regular file: {}",
+            path.display()
+        )));
+    }
+
+    let mut source = File::open(path).map_err(|error| CliError::io(path, error))?;
+    let opened_metadata = source
+        .metadata()
+        .map_err(|error| CliError::io(path, error))?;
+    if !opened_metadata.is_file() || !same_file_identity(&path_metadata, &opened_metadata) {
+        return Err(CliError::BadUsage(format!(
+            "pulp trace: trace input changed while it was being opened: {}",
+            path.display()
+        )));
+    }
+    if opened_metadata.len() > max_bytes {
+        return Err(CliError::BadUsage(format!(
+            "pulp trace: trace is {} bytes; maximum supported analysis input is {} bytes",
+            opened_metadata.len(),
+            max_bytes
+        )));
+    }
+
+    after_open();
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SNAPSHOT_SEQ: AtomicU64 = AtomicU64::new(0);
+    let mut reserved = None;
+    for _ in 0..128 {
+        let n = SNAPSHOT_SEQ.fetch_add(1, Ordering::Relaxed);
+        let snapshot_path = std::env::temp_dir().join(format!(
+            "pulp-trace-gpu-input-{}-{n}.pftrace",
+            std::process::id()
+        ));
+        match create_exclusive_snapshot(&snapshot_path) {
+            Ok(file) => {
+                reserved = Some((snapshot_path, file));
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(CliError::io(&snapshot_path, error)),
+        }
+    }
+    let (snapshot_path, mut snapshot) = reserved.ok_or_else(|| {
+        CliError::Other(
+            "pulp trace: could not reserve an exclusive GPU-analysis trace snapshot".to_owned(),
+        )
+    })?;
+    let mut retained = TraceInputSnapshot {
+        path: snapshot_path,
+        bytes: 0,
+    };
+
+    let copied = io::copy(&mut Read::take(&mut source, max_bytes + 1), &mut snapshot)
+        .map_err(|error| CliError::io(&retained.path, error))?;
+    if copied > max_bytes {
+        return Err(CliError::BadUsage(format!(
+            "pulp trace: trace exceeded the {} byte analysis limit while being snapshotted",
+            max_bytes
+        )));
+    }
+
+    let final_opened_metadata = source
+        .metadata()
+        .map_err(|error| CliError::io(path, error))?;
+    let final_path_metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        CliError::BadUsage(format!(
+            "pulp trace: trace input changed while it was being snapshotted ({}): {error}",
+            path.display()
+        ))
+    })?;
+    if final_path_metadata.file_type().is_symlink()
+        || !final_path_metadata.is_file()
+        || !same_file_identity(&opened_metadata, &final_opened_metadata)
+        || !same_file_identity(&opened_metadata, &final_path_metadata)
+        || final_opened_metadata.len() != opened_metadata.len()
+        || copied != opened_metadata.len()
+    {
+        return Err(CliError::BadUsage(format!(
+            "pulp trace: trace input changed while it was being snapshotted: {}",
+            path.display()
+        )));
+    }
+    snapshot
+        .flush()
+        .map_err(|error| CliError::io(&retained.path, error))?;
+    drop(snapshot);
+    retained.bytes = copied;
+    Ok(retained)
+}
+
+fn snapshot_trace_input(path: &Path) -> Result<TraceInputSnapshot> {
+    snapshot_trace_input_with_hook(path, MAX_TRACE_BYTES, || {})
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1084,25 +1237,8 @@ pub(crate) fn run_gpu_analysis_with_processor(
     json: bool,
     out: &mut impl Write,
 ) -> Result<TraceCommandStatus> {
-    if !args.trace.is_file() {
-        return Err(CliError::BadUsage(format!(
-            "pulp trace {}: trace file not found: {}",
-            args.question.as_str(),
-            args.trace.display()
-        )));
-    }
-    let trace_bytes = std::fs::metadata(&args.trace)
-        .map_err(|error| CliError::io(&args.trace, error))?
-        .len();
-    if trace_bytes > MAX_TRACE_BYTES {
-        return Err(CliError::BadUsage(format!(
-            "pulp trace {}: trace is {} bytes; maximum supported analysis input is {} bytes",
-            args.question.as_str(),
-            trace_bytes,
-            MAX_TRACE_BYTES
-        )));
-    }
-    if trace_bytes == 0 {
+    let trace_snapshot = snapshot_trace_input(&args.trace)?;
+    if trace_snapshot.bytes == 0 {
         return write_result(
             &result_from_rows_and_categories(
                 args.question,
@@ -1133,7 +1269,7 @@ pub(crate) fn run_gpu_analysis_with_processor(
     let output = run_processor_bounded(
         tp_path,
         &sql_path,
-        &args.trace,
+        &trace_snapshot.path,
         ProcessorLimits {
             deadline: PROCESSOR_DEADLINE,
             max_output_bytes: MAX_PROCESSOR_OUTPUT_BYTES,

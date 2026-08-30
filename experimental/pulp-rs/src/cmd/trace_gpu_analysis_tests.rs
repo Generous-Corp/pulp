@@ -387,6 +387,92 @@ fn oversized_trace_is_rejected_before_processor_launch() {
     assert!(message.contains(&MAX_TRACE_BYTES.to_string()));
 }
 
+#[cfg(unix)]
+#[test]
+fn trace_replacement_during_snapshot_is_rejected_before_processor_launch() {
+    let root = tempfile::tempdir().unwrap();
+    let trace = root.path().join("trace.pftrace");
+    let replacement = root.path().join("replacement.pftrace");
+    std::fs::write(&trace, b"original-trace").unwrap();
+    std::fs::write(&replacement, b"replacement-trace").unwrap();
+
+    let error = snapshot_trace_input_with_hook(&trace, MAX_TRACE_BYTES, || {
+        std::fs::rename(&replacement, &trace).unwrap();
+    })
+    .unwrap_err();
+
+    assert!(format!("{error}").contains("changed while it was being snapshotted"));
+}
+
+#[cfg(unix)]
+#[test]
+fn processor_receives_only_the_private_trace_snapshot() {
+    let root = tempfile::tempdir().unwrap();
+    let trace = root.path().join("caller-trace.pftrace");
+    let observed_path = root.path().join("processor-path");
+    let observed_bytes = root.path().join("processor-bytes");
+    let processor = executable_script(
+        root.path(),
+        "snapshot-observer.sh",
+        &format!(
+            "#!/bin/sh\nprintf '%s' \"$3\" > {}\ncat \"$3\" > {}\n",
+            shell_quote(&observed_path.to_string_lossy()),
+            shell_quote(&observed_bytes.to_string_lossy()),
+        ),
+    );
+    std::fs::write(&trace, b"caller-owned-trace").unwrap();
+    let args = GpuAnalysisArgs {
+        question: GpuQuestion::GpuHealth,
+        trace: trace.clone(),
+    };
+    let tp = TraceProcessorStatus {
+        path: Some(processor),
+        source: TraceProcessorSource::Env,
+    };
+
+    let status = run_gpu_analysis_with_processor(&args, &tp, true, &mut Vec::new()).unwrap();
+    assert_eq!(status, TraceCommandStatus::Unavailable);
+    let processor_path = PathBuf::from(std::fs::read_to_string(&observed_path).unwrap());
+    assert_ne!(processor_path, trace);
+    assert_eq!(
+        std::fs::read(&observed_bytes).unwrap(),
+        b"caller-owned-trace"
+    );
+    assert!(
+        !processor_path.exists(),
+        "the private trace snapshot survived analysis"
+    );
+}
+
+#[test]
+fn trace_growth_during_snapshot_is_rejected_at_the_copy_boundary() {
+    let trace = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(trace.path(), b"tiny").unwrap();
+
+    let error = snapshot_trace_input_with_hook(trace.path(), 8, || {
+        let writer = OpenOptions::new().append(true).open(trace.path()).unwrap();
+        writer.set_len(9).unwrap();
+    })
+    .unwrap_err();
+
+    assert!(format!("{error}").contains("exceeded the 8 byte analysis limit"));
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_trace_input_is_rejected() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target.pftrace");
+    let link = root.path().join("trace.pftrace");
+    std::fs::write(&target, b"trace").unwrap();
+    symlink(&target, &link).unwrap();
+
+    let error = snapshot_trace_input(&link).unwrap_err();
+    assert!(format!("{error}").contains("non-symlink regular file"));
+}
+
 #[test]
 fn production_processor_limits_are_explicit() {
     assert_eq!(MAX_TRACE_BYTES, 512 * 1024 * 1024);
@@ -403,9 +489,7 @@ fn disconnected_readers_keep_live_child_polling_bounded_without_delaying_exit() 
     // The injected sleeper makes the cadence proof deterministic: each poll
     // consumes exactly one wait interval instead of relying on wall-clock timing.
     for _ in 0..3 {
-        pace_disconnected_processor_poll(true, true, wait, |duration| {
-            sleeps.push(duration)
-        });
+        pace_disconnected_processor_poll(true, true, wait, |duration| sleeps.push(duration));
     }
     assert_eq!(sleeps, vec![wait; 3]);
 

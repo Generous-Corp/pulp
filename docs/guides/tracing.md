@@ -53,8 +53,11 @@ untagged tooling span makes correlation unavailable even when another tagged
 row is healthy. Generic untagged backend spans remain allowed.
 
 The named GPU analyzer has explicit resource limits: traces larger than
-512 MiB are rejected before `trace_processor` launches; processing has one
-120-second wall-clock deadline; and retained stdout plus stderr is capped at
+512 MiB are rejected before `trace_processor` launches. An opened non-symlink
+regular trace is copied into an exclusive private snapshot (mode 0600 on Unix);
+replacement or growth during that copy is rejected, and the processor receives
+only the snapshot path. Processing has one 120-second wall-clock deadline, and
+retained stdout plus stderr is capped at
 4 MiB. Deadline, output-overflow, and pipe-read failures terminate the complete
 processor tree on both Unix and Windows. If a legitimate capture hits a limit,
 shorten or narrow the capture, or divide the investigation into focused L2

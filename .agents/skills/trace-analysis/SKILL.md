@@ -151,6 +151,11 @@ Windows Job Object, including descendants. Do not replace this runner with
 trace hits a limit, narrow or shorten the capture first; use L2 offline queries
 to split a genuinely large investigation. Treat repeated limit failures as an
 actionable processor/query problem, not as evidence that rendering is slow.
+Before launch, the named analyzer copies an opened non-symlink regular trace
+into an exclusive private snapshot (mode 0600 on Unix) and rechecks that the
+source was neither replaced nor resized. The processor receives only that
+snapshot pathname; do not restore a stat-then-reopen flow over the
+caller-controlled path.
 
 ---
 
