@@ -1303,4 +1303,23 @@ TEST_CASE("note delay retrigger still ends the first attack's echoes",
     REQUIRE(echo_attacks == 4);
     REQUIRE(ledger.balanced());
     REQUIRE(delay.empty());
+
+    // The lengths are the real claim. The first press was held 3'000 samples
+    // before being retriggered and the second only 500, so the echoes of each
+    // press must carry their OWN press's length. A kernel that simply left the
+    // first press's echoes armed would hand them the second press's 500 and
+    // still look perfectly balanced here.
+    std::vector<std::int64_t> lengths;
+    std::vector<std::int64_t> open_at;
+    for (const auto& event : out) {
+        if (event.event.note() != 64)
+            continue; // the first echo of each press
+        if (event.attack()) {
+            open_at.push_back(event.sample);
+        } else if (!open_at.empty()) {
+            lengths.push_back(event.sample - open_at.front());
+            open_at.erase(open_at.begin());
+        }
+    }
+    REQUIRE(lengths == std::vector<std::int64_t>{3'000, 500});
 }
