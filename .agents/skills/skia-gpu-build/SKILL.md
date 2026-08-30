@@ -167,6 +167,12 @@ shipping artifact.
   the target's `INTERFACE_COMPILE_DEFINITIONS` before changing `sk_sp`
   ownership or destruction order. `tools/scripts/test_findskia_arch_assert.py`
   guards this imported-target ABI contract.
+- **Generation receipts must use archive-path ordering, not host `Path`
+  ordering.** Windows compares path case-insensitively while ZIP/POSIX member
+  ordering is case-sensitive. A direct comparison can therefore report payload
+  drift even when every extracted path, SHA-256, and byte count matches. Receipt
+  sealing must canonicalize both projections by the serialized archive path; do
+  not weaken the underlying path/hash/size identity checks.
 - **Graphite drops any raster `SkImage` it is handed — it never uploads one on
   its own.** When Graphite meets a non-GPU-backed image while building a paint
   key it asks `Recorder::clientImageProvider()->findOrCreate()`, and Skia's

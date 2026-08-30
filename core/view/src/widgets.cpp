@@ -408,6 +408,19 @@ void Knob::paint(canvas::Canvas& canvas) {
     float cy = b.height * 0.5f;
     float radius = std::min(cx, cy) * 0.8f;
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
+    bool captured_indicator_drawn = false;
+    const auto draw_captured_indicator = [&](float pointer_radius) {
+        const auto color = ind_color_authored_
+            ? ind_color_
+            : resolve_color("knob.thumb", ind_color_);
+        draw_knob_captured_pointer(
+            canvas, cx, cy,
+            ind_r_in_ * pointer_radius,
+            ind_r_out_ * pointer_radius,
+            std::max(1.5f, ind_width_ * pointer_radius),
+            color, value_, ind_phase_rad_);
+        captured_indicator_drawn = true;
+    };
 
     // ── Sprite strip path: designer-created filmstrip ─────────────────────
     if (sprite_strip_ && sprite_strip_->loaded()) {
@@ -494,15 +507,11 @@ void Knob::paint(canvas::Canvas& canvas) {
         // get no overlay.
         if (sprite_strip_->frame_count() == 1) {
             if (has_captured_indicator_) {
-                float r_out = ind_r_out_ * notch_r;
-                float r_in  = ind_r_in_  * notch_r;
-                float w = std::max(1.5f, ind_width_ * notch_r);
                 // The disc art's BAKED indicator (a stuck second line at the rest
                 // angle) is erased at import — clean_baked_knob_indicator rewrites
                 // the disc PNG — so here we just draw the design's own rotating
                 // pointer over the now-clean disc.
-                draw_knob_captured_pointer(canvas, cx, cy, r_in, r_out, w,
-                                           ind_color_, value_, ind_phase_rad_);
+                draw_captured_indicator(notch_r);
             } else {
                 draw_knob_indicator_notch(canvas, cx, cy, notch_r, notch_r, value_);
             }
@@ -621,7 +630,8 @@ void Knob::paint(canvas::Canvas& canvas) {
         // 5. Indicator notch — the rotating pointer (shared with the
         //    single-frame sprite-body path). Extent rides the inner radius;
         //    stroke widths scale from the chrome body radius.
-        draw_knob_indicator_notch(canvas, cx, cy, inner_r, body_r, value_);
+        if (!has_captured_indicator_)
+            draw_knob_indicator_notch(canvas, cx, cy, inner_r, body_r, value_);
     } else {
         // ── Default C++ paint path — Ink & Signal knob ───────────────────
         // Solid raised body disc + full track ring + thick value arc + a
@@ -677,9 +687,11 @@ void Knob::paint(canvas::Canvas& canvas) {
         float dot_rad = body_r - dot_r - 2.0f;
         float dot_x = cx + dot_rad * std::cos(value_angle);
         float dot_y = cy + dot_rad * std::sin(value_angle);
-        auto thumb_color = resolve_color("knob.thumb", canvas::Color::rgba8(230, 230, 230));
-        canvas.set_fill_color(thumb_color);
-        canvas.fill_circle(dot_x, dot_y, dot_r);
+        if (!has_captured_indicator_) {
+            auto thumb_color = resolve_color("knob.thumb", canvas::Color::rgba8(230, 230, 230));
+            canvas.set_fill_color(thumb_color);
+            canvas.fill_circle(dot_x, dot_y, dot_r);
+        }
 
         // Modulation rings (Saturn) — one thin per-source arc outside the main
         // arc. The arc shows the modulation RANGE centered on the base value
@@ -722,6 +734,14 @@ void Knob::paint(canvas::Canvas& canvas) {
             }
         }
     }
+
+    // Durable browser/Figma pointer geometry remains live after a portable
+    // project prunes the importer-time body sprite. A multi-frame strip still
+    // owns its own animated pointer; every sprite-less body gets the recovered
+    // pointer as a final overlay instead of silently reverting to stock chrome.
+    const bool loaded_sprite = sprite_strip_ && sprite_strip_->loaded();
+    if (has_captured_indicator_ && !captured_indicator_drawn && !loaded_sprite)
+        draw_captured_indicator(std::min(b.width, b.height) * 0.5f);
 
     // Label below (always drawn, even with shader)
     if (show_label_ && !label_.empty()) {
@@ -936,7 +956,11 @@ void Fader::paint(canvas::Canvas& canvas) {
         // static screenshot.
         auto thumb_color = has_skin_thumb_
             ? thumb_color_
-            : resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
+            : resolve_color(
+                  "control.thumb",
+                  has_skin_thumb_fallback_
+                      ? thumb_fallback_color_
+                      : canvas::Color::rgba8(220, 220, 220));
         canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
 
         if (!has_captured_indicator_art() &&

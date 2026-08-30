@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 43,
+  "manifest_revision": 44,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -17,7 +17,7 @@
     "domains": {
       "audio": {
         "state": "partial",
-        "capabilities": 7
+        "capabilities": 8
       },
       "midi": {
         "state": "partial",
@@ -287,6 +287,66 @@
         }
       },
       "contract_digest": "sha256:c69415e2c27509e094ec93c4fc3906aee852718d55fa1263d165b34fd0279e64"
+    },
+    {
+      "key": "audio.voice-modulation-sources",
+      "domain": "audio",
+      "summary": "Prepared fixed-memory bank of per-voice LFO and AHDSR envelope sources with free-running or retriggered phase policy and per-voice unison phase spread, feeding constant or audio-rate voice modulation lanes.",
+      "rt_class": "audio",
+      "lifecycle": {
+        "construction": "none",
+        "prepare": "control: fixed scratch and per-voice sources",
+        "process": "audio",
+        "reset": "audio: every voice to a fresh start",
+        "release": "control"
+      },
+      "state_model": "The bank owns per-voice LFO phase/lifecycle and envelope stage state; reset() is the only reseeding point. Lane publication is delegated to the caller's VoiceModulationBuffer; constant-rate lanes publish the first sample of the block.",
+      "seed_model": "public uint32 base seed; voice i derives seed + i",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "fixed_partition_only",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "voice lifecycle events, source configuration, and lane target/rate selection",
+      "output_domain": "constant or audio-rate voice modulation lanes",
+      "units": [
+        "hertz",
+        "frames",
+        "voice index"
+      ],
+      "latency": "zero",
+      "tail": "envelope release tail owned by the caller's lane consumer",
+      "scheduling": "per voice per audio block",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/audio/voice_modulation_sources.hpp",
+          "qualified_name": "pulp::audio::VoiceModulationSources<4>",
+          "target": "Pulp::audio",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:702c13e6b8c4d4b26a252c0161e4ce3cbb9d2fa8a49f013f87ec6b3cf252a2e8"
     },
     {
       "key": "audio.voice-note-modulation",
@@ -6597,9 +6657,9 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 93,
+    "total": 94,
     "by_domain": {
-      "audio": 7,
+      "audio": 8,
       "midi": 10,
       "music": 7,
       "offline": 0,

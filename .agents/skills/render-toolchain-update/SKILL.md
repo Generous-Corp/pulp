@@ -222,6 +222,12 @@ retain those fields in the PR/landing evidence.
 - Keep release-fetch progress output ASCII-safe. Windows release runners can use a
   cp1252 console, where decorative Unicode arrows raise `UnicodeEncodeError` before
   an asset download starts; exercise the full Windows fetch path with cp1252 stdout.
+- Compare extracted-generation receipts in a host-independent canonical path order.
+  Windows `Path` ordering is case-insensitive while ZIP member names use POSIX,
+  case-sensitive ordering; directly comparing those sorted lists can reject an
+  otherwise byte-identical authenticated archive (for example `SkBlendMode.h` and
+  `SkBlender.h`). Keep path/hash/size integrity checks exact, but canonicalize both
+  projections by their serialized archive path before comparing them.
 - JS-engine wording in `tools/deps/manifest.json`, `tools/deps/min_os.json`, and
   `tools/cmake/FindV8.cmake` describes a *selection contract*, not just prose.
   The contract is: `auto`/`quickjs` compile QuickJS only; `jsc` additionally

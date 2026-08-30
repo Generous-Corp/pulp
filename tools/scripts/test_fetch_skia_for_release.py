@@ -373,6 +373,33 @@ class ImmutableKeyedCache(unittest.TestCase):
                 {entry["path"] for entry in payload},
             )
 
+    def test_generation_receipt_order_is_host_independent(self):
+        entries = [
+            {"path": "build/include/core/SkBlender.h", "sha256": "b", "size": 1},
+            {"path": "build/include/core/SkBlendMode.h", "sha256": "a", "size": 1},
+        ]
+        windows_order = sorted(
+            entries,
+            key=lambda item: pathlib.PureWindowsPath(str(item["path"])),
+        )
+        self.assertEqual(
+            [str(item["path"]) for item in windows_order],
+            [
+                "build/include/core/SkBlender.h",
+                "build/include/core/SkBlendMode.h",
+            ],
+        )
+
+        canonical = fetch_skia._canonical_generation_payload(windows_order)
+
+        self.assertEqual(
+            [str(item["path"]) for item in canonical],
+            [
+                "build/include/core/SkBlendMode.h",
+                "build/include/core/SkBlender.h",
+            ],
+        )
+
     def test_generation_rejects_missing_dawn_archive(self):
         with _in_tempdir() as td:
             sha = "a" * 64
@@ -729,6 +756,10 @@ class ArchSubdirLayoutFlattens(unittest.TestCase):
             payload = {
                 "build/win-gpu/lib/Release/x64/skia.lib": b"windows-skia",
                 "build/win-gpu/lib/Release/x64/skparagraph.lib": b"windows-para",
+                # WindowsPath sorts these case-insensitively, unlike ZIP member
+                # strings. The receipt must still match after x64 flattening.
+                "build/include/include/core/SkBlendMode.h": b"blend-mode",
+                "build/include/include/core/SkBlender.h": b"blender",
             }
             sha = _make_zip(zip_path, payload)
             _write_manifest(

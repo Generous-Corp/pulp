@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <pulp/view/css_gradient.hpp>
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/design_tokens.hpp>
 
@@ -10,6 +11,30 @@
 #include <vector>
 
 using namespace pulp::view;
+
+TEST_CASE("CSS color syntax validation rejects malformed authored precedence tokens",
+          "[design][tokens][color]") {
+    for (const auto* token : {
+             "#fff", "#112233", "#11223344", "transparent",
+             "rgb(1 2 3)", "rgb(1 2 3 / 50%)", "rgba(1, 2, 3, 0.5)",
+             "hsl(0 100% 50%)", "hsl(0deg 100% 50% / 0.5)",
+             "hsla(0, 100%, 50%, 0.5)", "oklab(0.5 0 0)",
+             "oklab(50% none none / 50%)", "oklch(50% 0.1 30deg / 0.5)"}) {
+        INFO(token);
+        CHECK(css_color_syntax_supported(token));
+    }
+
+    for (const auto* token : {
+             "", "#12", "#xyz", "rgb(nope)", "rgb(1 2)",
+             "rgb(1 2 3 4)", "rgb(1, 2 3)", "rgb(1, 2, 3 / 0.5)",
+             "hsl(0 100 50)", "hsl(0% 100% 50%)",
+             "hsl(0deg 100% 50% 0.5)", "hsl(0, 100%, 50%, 0.5)",
+             "oklab(0 0 0 1)", "oklab(0deg 0 0)",
+             "oklch(50% 0.1 30%)", "oklch(50% 0.1 30deg /)"}) {
+        INFO(token);
+        CHECK_FALSE(css_color_syntax_supported(token));
+    }
+}
 
 TEST_CASE("a design's accent reaches its controls", "[design][tokens]") {
     // Tokens are copied into the theme by NAME, so a design that names
