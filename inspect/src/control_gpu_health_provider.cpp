@@ -427,17 +427,16 @@ bool ControlGpuHealthProvider::record_presented_frame(const FrameObservation& fr
     trial.visible_state = capture_unavailable
                               ? gh::VisibleState::unknown
                               : (blank ? gh::VisibleState::fallback : gh::VisibleState::prepared);
-    const bool valid_trace_id =
+    const bool configured_trace_identity = impl_->has_trace_identity();
+    const bool valid_frame_trace_identity =
         frame.trace_evidence_id && bounded_string(*frame.trace_evidence_id, 128);
-    bool trace_identity_consistent = valid_trace_id;
-    if (valid_trace_id) {
-        if (!result->startup.correlation.trace_evidence_id) {
-            result->startup.correlation.trace_evidence_id = frame.trace_evidence_id;
-        } else if (result->startup.correlation.trace_evidence_id != frame.trace_evidence_id) {
-            trace_identity_consistent = false;
-            add_missing_category(result->startup.capture, "a2t_correlation");
-        }
-    }
+    const bool trace_identity_consistent =
+        configured_trace_identity && valid_frame_trace_identity &&
+        frame.trace_evidence_id == impl_->config.trace_evidence_id;
+    if (configured_trace_identity)
+        result->startup.correlation.trace_evidence_id = impl_->config.trace_evidence_id;
+    if (!trace_identity_consistent)
+        add_missing_category(result->startup.capture, "a2t_correlation");
     const bool trace_complete = trace_identity_consistent && frame.missing_trace_categories.empty();
     if (!trace_complete) {
         impl_->all_trace_observations_complete = false;

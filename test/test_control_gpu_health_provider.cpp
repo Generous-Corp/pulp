@@ -57,6 +57,7 @@ pulp::inspect::ControlGpuHealthProvider::Config ratified_campaign_config() {
         .pulp_build_id = "test-build",
         .campaign_id = "campaign-native-lifecycle",
         .gpu_evidence_id = "0123456789abcdef0123456789abcdef",
+        .trace_evidence_id = "trace-native-lifecycle",
         .budget_ratified = true,
         .threshold_ms = 20.0,
         .threshold_source = "receipt:reference-host-campaign",
@@ -223,8 +224,51 @@ TEST_CASE("GPU health provider can complete a ratified native lifecycle campaign
     }
 }
 
+TEST_CASE("GPU health provider requires the emitted trace identity on every frame") {
+    for (const auto configured_trace_id :
+         {std::optional<std::string>{}, std::optional<std::string>{"trace-configured"}}) {
+        CAPTURE(configured_trace_id);
+        auto config = ratified_campaign_config();
+        config.trace_evidence_id = configured_trace_id;
+        pulp::inspect::ControlGpuHealthProvider provider(std::move(config));
+
+        const auto requested_at = std::chrono::steady_clock::time_point{};
+        REQUIRE(provider.begin_editor_open(
+            pulp::inspect::ControlGpuHealthProvider::CacheState::cold, requested_at));
+        auto observed = frame(true);
+        observed.lifecycle_id = "trace-identity-negative";
+        observed.observed_cache_state =
+            pulp::inspect::ControlGpuHealthProvider::CacheState::cold;
+        observed.cache_provenance =
+            pulp::inspect::ControlGpuHealthProvider::CacheProvenance::fresh_process;
+        observed.native_present_observed = true;
+        observed.native_presented_at = requested_at + 10ms;
+        observed.interaction_hitch_ms = 1.0;
+        observed.trace_evidence_id = "trace-frame-only";
+        observed.observed_at = requested_at + 10ms;
+        REQUIRE(provider.record_presented_frame(observed));
+
+        require_valid(provider);
+        const auto snapshot = provider.snapshot();
+        REQUIRE(snapshot->startup.status == gh::MeasurementStatus::incomplete);
+        REQUIRE(snapshot->startup.verdict == gh::Verdict::unverified);
+        REQUIRE(snapshot->startup.trials.back().verdict == gh::Verdict::unverified);
+        REQUIRE(snapshot->startup.trials.back().diagnostic_code ==
+                "gpu.startup.trace_incomplete");
+        REQUIRE(std::ranges::find(snapshot->startup.capture.missing_trace_categories,
+                                  "a2t_correlation") !=
+                snapshot->startup.capture.missing_trace_categories.end());
+        if (configured_trace_id) {
+            REQUIRE(snapshot->startup.correlation.trace_evidence_id == configured_trace_id);
+        } else {
+            REQUIRE_FALSE(snapshot->startup.correlation.trace_evidence_id);
+        }
+    }
+}
+
 TEST_CASE("GPU health provider completes explicit headless capture with causal gaps") {
     auto config = ratified_campaign_config();
+    config.trace_evidence_id = "trace-headless-capture";
     config.measurement_endpoint =
         pulp::inspect::ControlGpuHealthProvider::MeasurementEndpoint::headless_capture_complete;
     config.source_signature_sha256.reset();

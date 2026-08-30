@@ -47,7 +47,8 @@ class ControlGpuHealthProvider final {
         /// A2T trace. Required before a startup trial can claim pass/fail.
         std::optional<std::string> gpu_evidence_id;
         /// Bounded same-instance trace identity emitted beside gpu_evidence_id.
-        /// It is deliberately distinct from the GPU evidence identifier.
+        /// It is deliberately distinct from the GPU evidence identifier and
+        /// is the authority every frame observation must match.
         std::optional<std::string> trace_evidence_id;
         std::string budget_id{"pulp.editor-first-visible.v1"};
         std::uint32_t budget_version = 1;
@@ -103,6 +104,9 @@ class ControlGpuHealthProvider final {
         std::optional<double> upload_ms;
         std::optional<double> hidden_frame_ms;
         std::optional<double> present_ms;
+        /// Must exactly match Config::trace_evidence_id, the identity emitted
+        /// by the provider spans for this campaign. A frame-local identity
+        /// cannot establish correlation on its own.
         std::optional<std::string> trace_evidence_id;
         /// Required categories that the exact same-instance trace could not
         /// prove for this observation. These are instrumentation coverage
