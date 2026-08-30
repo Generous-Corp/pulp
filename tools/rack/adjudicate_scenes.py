@@ -539,6 +539,9 @@ def _validate_existing(path: Path, scene_id: str, bindings: dict) -> dict:
     if any(not isinstance(checks[name], dict) or
            checks[name].get("status") not in STATUSES for name in CHECK_NAMES):
         raise AdjudicationError(f"{scene_id} adjudication has an invalid check status")
+    # This detects corruption and uncoordinated edits inside one local trust
+    # principal; it is not authentication against that principal.  Durable
+    # authenticity begins when CI archives the receipt outside this run root.
     if receipt.get("check_evidence_sha256") != _check_evidence_digest(checks):
         raise AdjudicationError(f"{scene_id} recorded check evidence changed")
     has_audio = isinstance(receipt.get("audio"), dict)
