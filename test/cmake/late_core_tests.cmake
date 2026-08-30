@@ -53,6 +53,9 @@ pulp_add_test_suite(pulp-test-midi-step-player
 pulp_add_test_suite(pulp-test-midi-voice-modulation-adapter
     SOURCES test_midi_voice_modulation_adapter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-voice-modulation-sources
+    SOURCES test_voice_modulation_sources.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
 
 # Wavetable oscillator
 pulp_add_test_suite(pulp-test-wavetable LIBRARIES pulp::signal)
