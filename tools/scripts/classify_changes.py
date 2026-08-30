@@ -79,6 +79,9 @@ SKIP_SAFE_EXACT = {
     ".gitignore",
     ".gitattributes",
     "CODEOWNERS",
+    # Pure-Python regression coverage for the skip-safe .githooks supervisor.
+    # Keep this exact: neighboring tools/scripts files can affect native builds.
+    "tools/scripts/test_prepush_gate_supervisor.py",
 }
 
 # Paths that LOOK skip-safe (e.g. a `.md` file under `docs/`) but are in
