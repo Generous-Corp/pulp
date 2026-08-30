@@ -77,6 +77,7 @@ struct ImportedWidgetSemantics {
     // Lives on the shared model so runtime materialization and baked C++ build
     // the same ComboBox instead of each scraping the tree their own way.
     std::vector<std::string> combo_items;
+    int combo_selected_index = 0;
 
     // A stepper's grid, declared by the author. 1 is the count case (voices,
     // octaves) and the only sensible default; a fractional grid has to be
@@ -120,6 +121,11 @@ double imported_stepper_step(const IRNode& node) noexcept;
 // Convert an IR control's declared plain default into the normalized parameter
 // domain consumed by native widgets and discrete value mappings.
 float normalized_audio_default(const IRNode& node);
+
+// Prefer the authored/current normalized value when capture supplied one,
+// falling back to the normalized default. Output lanes must use this for the
+// widget's initial state so restored designs do not reopen at their default.
+float normalized_audio_value(const IRNode& node);
 
 // On-screen box (and optional absolute offset) for an imported image node,
 // derived from the PNG's natural size, its art-core rect, or its bleed aspect.

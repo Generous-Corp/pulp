@@ -6561,6 +6561,16 @@ state, or a failed semantic match must fail closed. Validate the home state and
 every accepted atlas state independently against its own same-transaction
 browser frame.
 
+A semantic browser `<select>` remains a collapsed native `ComboBox`; never
+lower its `<option>` children as ordinary visible text rows. Preserve the
+browser-selected index after normalized-value resolution and keep the control
+live in every consumer: native materialization, baked C++, `bridge_native_js`,
+and `web_compat`. Host automation must update the selected item, UI selection
+must write the normalized value back, and each user edit must emit one balanced
+begin/end gesture pair. Native embedders receive this through the optional
+`NativeImportComboBoxBindingContext` capability; legacy binding contexts must
+fail closed without an ABI-breaking virtual-table change.
+
 Under `--visual-authority native`, add `materialized_document` to each state
 entry and point it at that state's captured
 `pulp-materialized-browser-document-v1` sidecar. The native runtime then keeps

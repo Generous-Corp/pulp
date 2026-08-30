@@ -575,7 +575,13 @@ int lower_semantic_controls(const fs::path& path,
         }
 
         pulp::view::IRNode control;
-        control.type = "frame";
+        // Preserve the presentation contract the semantic pass already
+        // resolved. A `select` is a collapsed dropdown; a `tab` is a row of
+        // simultaneously visible alternatives. Collapsing both to an
+        // anonymous frame loses that distinction, and the native resolver can
+        // only rebuild both as SegmentedControl -- which paints every option
+        // inline over Chromium's closed select.
+        control.type = kind == "select" ? "select" : "frame";
         control.name = string_member(candidate, "name");
         control.audio_widget = widget;
         // A single captured frame cannot prove that an apparently uniform

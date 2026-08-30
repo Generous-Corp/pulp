@@ -5656,12 +5656,14 @@ TEST_CASE("WidgetBridge creates Ink & Signal design-system widgets from JS",
 
 TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callbacks",
           "[view][bridge][design-system][discrete][gesture][lifetime]") {
-    struct Variant { const char* name; const char* create; bool segmented; };
+    struct Variant { const char* name; const char* create; int kind; };
     for (const auto variant : {
-             Variant{"factory stepper", "createStepper('control', '');", false},
-             Variant{"DOM stepper", "__domAppend('', 'control', 'stepper');", false},
-             Variant{"factory segmented", "createSegmented('control', ''); setSegments('control', ['A','B','C']);", true},
-             Variant{"DOM segmented", "__domAppend('', 'control', 'segmented'); setSegments('control', ['A','B','C']);", true}}) {
+             Variant{"factory stepper", "createStepper('control', '');", 0},
+             Variant{"DOM stepper", "__domAppend('', 'control', 'stepper');", 0},
+             Variant{"factory segmented", "createSegmented('control', ''); setSegments('control', ['A','B','C']);", 1},
+             Variant{"DOM segmented", "__domAppend('', 'control', 'segmented'); setSegments('control', ['A','B','C']);", 1},
+             Variant{"factory combo", "createCombo('control', ''); setItems('control', ['A','B','C']);", 2},
+             Variant{"DOM combo", "__domAppend('', 'control', 'select'); setItems('control', ['A','B','C']);", 2}}) {
         DYNAMIC_SECTION(variant.name) {
             ScriptEngine engine;
             View root;
@@ -5680,8 +5682,13 @@ TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callb
             bridge.load_script(std::string(variant.create) +
                                "bindWidgetToParam('control', 'choice');");
 
-            if (variant.segmented) {
+            if (variant.kind == 1) {
                 auto* control = dynamic_cast<SegmentedControl*>(bridge.widget("control"));
+                REQUIRE(control != nullptr);
+                REQUIRE(control->on_change);
+                control->on_change(1);
+            } else if (variant.kind == 2) {
+                auto* control = dynamic_cast<ComboBox*>(bridge.widget("control"));
                 REQUIRE(control != nullptr);
                 REQUIRE(control->on_change);
                 control->on_change(1);
@@ -5700,10 +5707,12 @@ TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callb
     // A JS handler may tear down the bridge during dispatch. The callback must
     // not touch its destroyed `this` while closing the instantaneous gesture.
     for (const auto variant : {
-             Variant{"teardown factory stepper", "createStepper('control', '');", false},
-             Variant{"teardown DOM stepper", "__domAppend('', 'control', 'stepper');", false},
-             Variant{"teardown factory segmented", "createSegmented('control', '');", true},
-             Variant{"teardown DOM segmented", "__domAppend('', 'control', 'segmented');", true}}) {
+             Variant{"teardown factory stepper", "createStepper('control', '');", 0},
+             Variant{"teardown DOM stepper", "__domAppend('', 'control', 'stepper');", 0},
+             Variant{"teardown factory segmented", "createSegmented('control', '');", 1},
+             Variant{"teardown DOM segmented", "__domAppend('', 'control', 'segmented');", 1},
+             Variant{"teardown factory combo", "createCombo('control', '');", 2},
+             Variant{"teardown DOM combo", "__domAppend('', 'control', 'select');", 2}}) {
         DYNAMIC_SECTION(variant.name) {
             ScriptEngine engine;
             View root;
@@ -5716,11 +5725,15 @@ TEST_CASE("WidgetBridge discrete factories and DOM tags share gesture-safe callb
                 });
             bridge = std::make_unique<WidgetBridge>(engine, root, store);
             bridge->load_script(std::string(variant.create) +
-                "on('control', '" + (variant.segmented ? "select" : "change") +
+                "on('control', '" + (variant.kind == 0 ? "change" : "select") +
                 "', function() { __destroyDiscreteBridge(); });");
 
-            if (variant.segmented) {
+            if (variant.kind == 1) {
                 auto callback = dynamic_cast<SegmentedControl*>(
+                    bridge->widget("control"))->on_change;
+                REQUIRE_NOTHROW(callback(1));
+            } else if (variant.kind == 2) {
+                auto callback = dynamic_cast<ComboBox*>(
                     bridge->widget("control"))->on_change;
                 REQUIRE_NOTHROW(callback(1));
             } else {

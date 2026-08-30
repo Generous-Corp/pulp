@@ -144,6 +144,33 @@ TEST_CASE("generate_pulp_cpp bakes a dropdown as a ComboBox, not a bare View",
     REQUIRE(result.source.find("Stereo") != std::string::npos);
 }
 
+TEST_CASE("generate_pulp_cpp preserves a bound browser select as a ComboBox",
+          "[view][import][cpp-codegen][dropdown][binding]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode select;
+    select.type = "select";
+    select.audio_widget = AudioWidgetType::selector;
+    select.audio_default = 0.5f;
+    select.attributes["pulpChoices"] = "Major|Minor|Dorian";
+    select.attributes["binding"] = "scale";
+    select.attributes["pulpParamKey"] = "scale";
+    select.attributes["pulpRouteId"] = "capture:scale:0";
+    select.stable_anchor_id = "capture:scale:0";
+    ir.root.children.push_back(std::move(select));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    INFO(result.source);
+    CHECK(result.source.find("std::make_unique<pulp::view::ComboBox>()") !=
+          std::string::npos);
+    CHECK(result.source.find("->set_items(std::vector<std::string>{\"Major\", \"Minor\", \"Dorian\"});") !=
+          std::string::npos);
+    CHECK(result.source.find("->set_selected_silent(1);") !=
+          std::string::npos);
+    CHECK(result.source.find("combo_ctx->bind_combo_box(") != std::string::npos);
+    CHECK(result.source.find("ctx.bind_segmented(") == std::string::npos);
+}
+
 TEST_CASE("generate_pulp_cpp emits clip radii beside the clip rect",
           "[view][import][cpp-codegen]") {
     // The radii are half of the clip, not decoration on it. The runtime
