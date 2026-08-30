@@ -167,6 +167,7 @@ def run_case(
     producer_mutation: str = "", control_mutation: str = "",
     configure_producer: bool = True, configure_controls: bool = True,
     pulp_root: Path | None = None,
+    control_source_root: Path | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
     output = root / f"run-{label}"
     command = [
@@ -198,7 +199,9 @@ def run_case(
     if controls and configure_controls:
         environment["PULP_A3_BLANK_CONTROL_BIN"] = str(blank.resolve())
         environment["PULP_A3_AUDIO_CONTROL_BIN"] = str(audio.resolve())
-        environment["PULP_A3_CONTROL_SOURCE_ROOT"] = str(fixture.ROOT.resolve())
+        environment["PULP_A3_CONTROL_SOURCE_ROOT"] = str(
+            (control_source_root or fixture.ROOT).resolve()
+        )
     if producer_mutation:
         environment["PULP_A3_TEST_PRODUCER_MUTATION"] = producer_mutation
     if control_mutation:
@@ -231,10 +234,27 @@ def main() -> int:
         write_producer(producer, evidence)
         write_control(blank, evidence, "blank")
         write_control(audio, evidence, "audio")
+        # Other CTests deliberately mutate the shared checkout. Validate the
+        # strict clean-source control contract in an exact-head private clone,
+        # so parallel scheduling cannot make this self-test observe their
+        # temporary dirt while the production adapter remains fail-closed.
+        control_source_root = root / "clean-control-source"
+        subprocess.run(
+            [
+                "git", "clone", "--quiet", "--no-local", "--depth=1",
+                f"file://{fixture.ROOT.resolve()}", str(control_source_root),
+            ],
+            check=True,
+        )
+        clone_head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=control_source_root, text=True,
+        ).strip()
+        assert clone_head == fixture.PULP_REVISION
 
         completed, result = run_case(
             root, evidence, identity_path, producer, blank, audio,
             "pass-controls", controls=True,
+            control_source_root=control_source_root,
         )
         assert completed.returncode == 0, (completed.stdout, completed.stderr, result)
         assert result["status"] == "pass"
@@ -285,6 +305,7 @@ def main() -> int:
         completed, result = run_case(
             root, evidence, identity_path, producer, blank, audio,
             "missing-controls", controls=True, configure_controls=False,
+            control_source_root=control_source_root,
         )
         assert completed.returncode == 2
         assert result["status"] == "incomplete"
@@ -293,6 +314,7 @@ def main() -> int:
         completed, result = run_case(
             root, evidence, identity_path, producer, blank, audio,
             "failed-audio-control", controls=True, control_mutation="audio",
+            control_source_root=control_source_root,
         )
         assert completed.returncode == 1
         assert result["status"] == "fail"
@@ -305,6 +327,7 @@ def main() -> int:
         completed, result = run_case(
             root, evidence, identity_path, producer, fake_blank, fake_audio,
             "copy-only-controls", controls=True,
+            control_source_root=control_source_root,
         )
         assert completed.returncode == 1
         assert result["status"] == "fail"

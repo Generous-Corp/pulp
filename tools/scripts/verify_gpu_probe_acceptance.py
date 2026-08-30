@@ -179,6 +179,8 @@ EXPECTED_PLAN_BLOB = "2d1c461d3ea640f75786a72c312d074f68f59028"
 EXPECTED_FORGE_REVISION = "0750a88dea3af7fca927a8c02887e071109407ae"
 EXPECTED_FORGE_ROOT_TREE = "b31fb3effd109b30381007f43de208f81d6926a7"
 EXPECTED_FORGE_PULP_REF_BLOB = "3e54500140a1dc5de0dbefaab29612916f257ecd"
+EXPECTED_HISTORICAL_V1_HEAD = "146716041f20e9cd5e599f11f4697369d3218519"
+EXPECTED_HISTORICAL_V1_EQUIVALENT_HEAD = "a63e3741d6b8db8c98f749d27a618dc832acb115"
 OFFLINE_STRUCTURAL_STATUS = "nonterminal-offline-structural-evidence"
 OFFLINE_TERMINAL_ERROR = (
     "standalone GPU-probe verification and recording are structural-only; "
@@ -948,13 +950,21 @@ def verify(root: Path, *, require_terminal: bool = False) -> list[str]:
     integration_head = str(receipt.get("integration_head", ""))
     if not GIT_SHA.fullmatch(integration_head):
         errors.append("integration_head must be an exact Git SHA")
+    historical_revision = integration_head
+    if not v2:
+        equivalent = receipt.get("verification_equivalent_head")
+        if integration_head != EXPECTED_HISTORICAL_V1_HEAD:
+            errors.append("historical receipt changed its recorded integration_head")
+        if equivalent != EXPECTED_HISTORICAL_V1_EQUIVALENT_HEAD:
+            errors.append("historical receipt changed its verification-equivalent head")
+        historical_revision = str(equivalent or "")
     source_blobs = _mapping(receipt.get("source_blobs"), "source_blobs", errors)
     expected_source_blobs = EXPECTED_SOURCE_BLOBS_V2 if v2 else EXPECTED_SOURCE_BLOBS
     if set(source_blobs) != expected_source_blobs:
         errors.append("source_blobs does not bind the exact recipe source set")
     historical_blobs = (
-        _git_blobs(integration_head, expected_source_blobs)
-        if GIT_SHA.fullmatch(integration_head)
+        _git_blobs(historical_revision, expected_source_blobs)
+        if GIT_SHA.fullmatch(historical_revision)
         else {}
     )
     # V1 is an immutable historical receipt: its source authority is the

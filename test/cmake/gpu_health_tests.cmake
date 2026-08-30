@@ -147,6 +147,8 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
             VERBATIM)
     endif()
     catch_discover_tests(pulp-test-control-gpu-health-standalone-product
-        PROPERTIES LABELS "inspect;control;gpu;standalone;product")
+        PROPERTIES
+            LABELS "inspect;control;gpu;standalone;product"
+            RESOURCE_LOCK pulp_gpu)
 endif()
 endif()

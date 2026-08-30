@@ -109,6 +109,17 @@ def result(evidence_id: str, contents: dict[str, bytes], *, failed: bool = False
     }
 
 
+def test_adapter_result(*, vendor: str = "apple", name: str = "Apple M3 Ultra",
+                        architecture: str = "metal-3",
+                        device: str | None = "vendor=0x106b,device=0x0") -> dict:
+    value = result("a", {"samples.bin": b"x"})
+    value["adapter"].update({
+        "vendor": vendor, "name": name, "architecture": architecture,
+        "device": device,
+    })
+    return value
+
+
 def codex_rollout(*, originator: str = "codex_exec", nonce: str = NONCE) -> bytes:
     events = [
         {
@@ -145,6 +156,26 @@ def codex_rollout(*, originator: str = "codex_exec", nonce: str = NONCE) -> byte
 
 
 class CleanAgentHarnessTests(unittest.TestCase):
+    def test_apple_metal_zero_device_id_is_authentic(self) -> None:
+        identity = journey._authentic_adapter(test_adapter_result())
+        self.assertEqual(identity["device"], "vendor=0x106b,device=0x0")
+
+    def test_apple_metal_missing_device_id_is_authentic(self) -> None:
+        self.assertIsNone(journey._authentic_adapter(test_adapter_result(device=None))["device"])
+
+    def test_zero_device_id_does_not_weaken_metal_identity(self) -> None:
+        cases = (
+            {"vendor": "generic"},
+            {"name": "Generic GPU"},
+            {"architecture": "unknown"},
+            {"device": "vendor=0x0,device=0x0"},
+            {"device": "malformed"},
+        )
+        for mutation in cases:
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(journey.JourneyError):
+                    journey._authentic_adapter(test_adapter_result(**mutation))
+
     def test_cmake_contract_distinguishes_single_and_multi_config_debug(self) -> None:
         cmake = shutil.which("cmake")
         self.assertIsNotNone(cmake)

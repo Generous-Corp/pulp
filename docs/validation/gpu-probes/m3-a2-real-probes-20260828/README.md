@@ -49,7 +49,13 @@ python3 tools/scripts/test_verify_gpu_probe_acceptance.py
 ```
 
 The 2026-08-28 GPU-side negative-control refresh was rebuilt and replayed from
-exact source commit `146716041f20e9cd5e599f11f4697369d3218519` after the final source rebase.
+exact source commit `146716041f20e9cd5e599f11f4697369d3218519`.
+That pre-rebase measurement authority remains `integration_head` in the
+receipt. Its separately named `verification_equivalent_head`
+`a63e3741d6b8db8c98f749d27a618dc832acb115` is the durable rebased commit at
+which the verifier proves the same exact recipe-source blob set. This lets a
+fresh checkout validate the historical measurement without silently rewriting
+the commit on which it was recorded or relying on an unadvertised Git object.
 `receipt.json` binds that commit, the installed Rust/C++/MCP binary digests, all
 13 newly replayed raw results, recipe blob
 `ecdcf9505e02ba4134ded2bb6b8bbdb21de933eb`, and model blob

@@ -5403,6 +5403,17 @@ fetch. `test_workflow_build_dirs.py` pins the workflow wiring and proves the
 missing-base negative control plus the event-pinned repair with local shallow
 repositories.
 
+**GPU provenance checks need connected event ancestry, not detached objects.**
+The GPU handoff and historical receipts intentionally validate old
+`revision:path` identities and ancestor/last-owner relationships. Fetching each
+SHA with `--depth=1` makes the objects readable but leaves them disconnected,
+so it cannot satisfy those checks. The native `build.yml` job runs
+`hydrate_gpu_provenance_commits.py`: it caps the checked-in Pulp revision set,
+unshallows only the exact `GITHUB_REF` event history when required, and then
+fails closed unless every named revision is a commit and an ancestor of HEAD.
+Do not replace that step with a fixed deepen count, a full all-refs clone, or
+detached per-SHA fetches.
+
 **macOS builds with the Ninja generator.** `build.yml`'s Configure step
 passes `-G Ninja` on macOS only (Linux/Windows keep their default
 generator). Ninja schedules parallelism better and is faster on the

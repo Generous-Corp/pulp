@@ -211,7 +211,8 @@ def noisy_adapter_script(root: Path) -> Path:
     script.write_text(
         "#!/usr/bin/env python3\n"
         "import os, time\n"
-        "os.write(1, b'x' * (1024 * 1024 + 65536))\n"
+        "for _ in range(68):\n"
+        "    os.write(1, b'x' * 16384)\n"
         "time.sleep(30)\n",
         encoding="utf-8",
     )

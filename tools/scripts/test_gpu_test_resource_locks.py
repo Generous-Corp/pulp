@@ -35,6 +35,9 @@ DEVICE_MARKERS = (
     "run_gpu_compute_magnitude_recipe",
     "run_gpu_audio_stft_recipe",
     "run_threejs_multi_pass_recipe",
+    # Indirect launcher: this suite starts the signed Standalone fixture, which
+    # creates the real Dawn/Metal device outside the test process.
+    "PULP_CONTROL_GPU_HEALTH_STANDALONE_PRODUCT_FIXTURE",
 )
 
 # Deliberately NOT a marker: the bare word "Dawn". It appears in prose — one
@@ -182,6 +185,7 @@ class GpuResourceLockTests(unittest.TestCase):
             "test_plugin_editor_headless_gpu.cpp",
             "test_font_rendering_goldens_gpu.cpp",
             "test_gpu_probe_native_recipes.cpp",
+            "test_control_gpu_health_standalone_product.cpp",
         ):
             with self.subTest(source=name):
                 self.assertIn(name, sources)

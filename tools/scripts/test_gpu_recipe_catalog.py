@@ -541,7 +541,12 @@ class CatalogContract(unittest.TestCase):
             for row in entry["pulp_paths"]
             if row["path"] == "tools/scripts/gpu_recipe_catalog.py"
         )
-        row["revision"] = catalog.HANDOFF_AUTHORITIES["pulp"]["revision"]
+        # Use a real, durable Pulp revision that contains this path. The
+        # reviewed handoff-authority commit predates the file and is not a
+        # valid fixture for a planted blob-drift test.
+        row["revision"] = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=catalog.ROOT, text=True,
+        ).strip()
         row["object_id"] = subprocess.check_output(
             ["git", "rev-parse", f"{row['revision']}:{row['path']}"],
             cwd=catalog.ROOT, text=True,

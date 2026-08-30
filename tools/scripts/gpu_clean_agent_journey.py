@@ -883,27 +883,46 @@ def _validate_evidence(
 def _authentic_adapter(evidence: dict[str, Any]) -> dict[str, Any]:
     adapter = evidence.get("adapter")
     fields = ("status", "class", "backend", "name", "vendor", "architecture", "device")
+    identity_fields = ("status", "class", "backend", "name", "vendor", "architecture")
     placeholders = {"unknown", "generic", "n/a", "none", "null", "unavailable"}
     if (
         evidence.get("adapter_policy") != "hardware-required"
         or not isinstance(adapter, dict) or adapter.get("status") != "authentic"
         or adapter.get("class") != "hardware"
-        or any(not isinstance(adapter.get(field), str) or not adapter[field] for field in fields)
-        or any(adapter[field].strip().casefold() in placeholders for field in fields)
+        or any(
+            not isinstance(adapter.get(field), str) or not adapter[field]
+            for field in identity_fields
+        )
+        or any(adapter[field].strip().casefold() in placeholders for field in identity_fields)
     ):
         raise JourneyError("acceptance requires authentic hardware adapter evidence")
     if adapter["backend"] == "Metal":
-        device_match = re.fullmatch(
-            r"vendor=0x([0-9a-f]+),device=0x([0-9a-f]+)", adapter["device"]
+        raw_device = adapter.get("device")
+        device_match = (
+            re.fullmatch(r"vendor=0x([0-9a-f]+),device=0x([0-9a-f]+)", raw_device)
+            if isinstance(raw_device, str) and raw_device.strip().casefold() not in placeholders
+            else None
         )
         if (
             adapter["vendor"].casefold() != "apple"
             or re.fullmatch(r"Apple (?:M|A)[1-9][0-9]*(?: Pro| Max| Ultra)?", adapter["name"])
             is None
             or re.fullmatch(r"metal-[1-9][0-9]*", adapter["architecture"]) is None
-            or device_match is None or int(device_match.group(1), 16) == 0
+            or (device_match is not None and int(device_match.group(1), 16) == 0)
+            or (
+                raw_device not in (None, "")
+                and isinstance(raw_device, str)
+                and raw_device.strip().casefold() not in placeholders
+                and device_match is None
+            )
         ):
             raise JourneyError("Metal adapter evidence has no concrete Apple identity")
+    elif (
+        not isinstance(adapter.get("device"), str)
+        or not adapter["device"]
+        or adapter["device"].strip().casefold() in placeholders
+    ):
+        raise JourneyError("non-Metal adapter evidence has no concrete device identity")
     return {key: adapter[key] for key in fields}
 
 
