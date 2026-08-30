@@ -1511,6 +1511,16 @@ dialog. The prompt-safe path is the dedicated keychain, full partition list,
 identity hash, and real timestamped probe maintained by
 `tools/scripts/ensure_signing_ready.sh`.
 
+For a current Forge Modular release, use
+`examples/forge-modular/release-package.sh` against a clean detached Forge
+checkout and the Release build configured from it. The script verifies all
+four bundles share one exact Forge snapshot and one exact bundled Pulp
+toolchain, requires `tools/rack/rack_patch_decode`, checks
+AU/VST3/CLAP/Standalone and bundled-helper architecture, invokes the shared
+signed/notarized installer primitive, and verifies the expanded PKG contains no
+sibling Forge products. `forge-seam/patches/BASE` remains historical seam
+reconstruction input and is never product provenance for this release path.
+
 ## A module's WIDTH is knowable from its artwork, and from nowhere else
 
 Four things could say how wide a third-party module is and, for a plugin

@@ -288,6 +288,11 @@ if(Python3_Interpreter_FOUND)
     if(APPLE)
         add_test(NAME combined-installer-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_combined_installer.py")
+        # Product projection over the shared recipe: a current exact Forge
+        # build contributes only Modular AU/VST3/CLAP/Standalone, and the
+        # expanded-package check rejects sibling Forge product bundles.
+        add_test(NAME forge-modular-release-package-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/examples/forge-modular/test_release_package.py")
     endif()
 
     # An Info.plist template reachable by a format helper but absent from the
