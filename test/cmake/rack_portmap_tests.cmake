@@ -42,6 +42,7 @@ if(Python3_Interpreter_FOUND)
         TIMEOUT 60)
 
     foreach(_rack_safety_test IN ITEMS
+            adjudicate-scenes
             acid-preflight
             acid-runtime-gate
             capability-lessons
