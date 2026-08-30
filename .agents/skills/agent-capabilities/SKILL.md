@@ -115,6 +115,13 @@ request in addition to taking the exact function pointer. This preserves the
 contract's proof that the published binding is operational rather than merely
 type-visible.
 
+For a bounded event-domain MIDI player such as `midi.linear-step-player`
+(`pulp/midi/step_player.hpp`), follow the `midi.arpeggiator` row shape: one
+`cpp_type` binding on the template entrypoint with a `member_call` probe that
+default-constructs it and invokes a const query, and add the new key to the
+`capability_keys` list of each support header the kernel actually includes
+(e.g. `utility_contract.hpp`), not to every MIDI support header.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
