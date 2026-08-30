@@ -1670,7 +1670,7 @@ def _validate_v1_receipt(
 
 def validate_receipt(
     receipt: dict[str, Any], evidence_root: Path, repository: Path = ROOT,
-    *, allow_fixture_overhead: bool = False,
+    *, allow_fixture_overhead: bool = False, receipt_path: Path | None = None,
 ) -> bool:
     """Validate either receipt generation while making only v2 terminal.
 
@@ -1688,7 +1688,9 @@ def validate_receipt(
         return False
     if version == 2:
         try:
-            return a3_v2.validate_v2(receipt, evidence_root)
+            return a3_v2.validate_v2(
+                receipt, evidence_root, receipt_path=receipt_path, repository=repository,
+            )
         except a3_v2.V2AcceptanceError as error:
             raise AcceptanceError(str(error)) from error
     raise AcceptanceError("receipt version must be historical v1 or canonical v2")
@@ -1834,7 +1836,10 @@ def main(argv: list[str] | None = None) -> int:
                 receipt, args.repository.resolve()
             )
             receipt = materialize_auto_hashes(receipt, evidence_root)
-        terminal = validate_receipt(receipt, evidence_root, args.repository.resolve())
+        terminal = validate_receipt(
+            receipt, evidence_root, args.repository.resolve(),
+            receipt_path=source.resolve() if args.command == "verify" else args.output.resolve(),
+        )
         if args.command == "generate":
             atomic_write(args.output, receipt)
         print("A3 acceptance: PASS" if terminal else "A3 acceptance: NONTERMINAL")

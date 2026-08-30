@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,6 +30,12 @@ def write_artifact(root: Path, name: str, value: Any, *, raw: bool = False) -> d
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return {"path": name, "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def write_executable(root: Path, name: str, source: str) -> dict[str, str]:
+    ref = write_artifact(root, name, source.encode(), raw=True)
+    (root / name).chmod(0o755)
+    return ref
 
 
 def rewrite_artifact(root: Path, ref: dict[str, str], mutate: Callable[[Any], None]) -> None:
@@ -121,6 +128,17 @@ def make_fixture(root: Path) -> dict[str, Any]:
         "github_user_id": 25807, "approved_head": SHA,
     })
     campaigns = []
+    analyzer_ref = write_executable(root, "tooling/pulp-analyzer", '''#!/usr/bin/env python3
+import json
+print(json.dumps({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-startup","verdict":"unverified","capture_complete":True,"evidence_ids":["gpu-evidence"],"category_scope":{"evidence_id":"gpu-evidence","process_upid":7,"process_pid":42}}))
+raise SystemExit(2)
+''')
+    analyzer_provenance_ref = write_artifact(root, "tooling/analyzer-provenance.json", {
+        "schema": "pulp.gpu-first-visible-prepared-trace-analyzer.v1", "version": 1,
+        "pulp_revision": SHA, "source_files": [], "source_snapshot_sha256": DIGEST,
+        "cargo": {}, "rustc": {}, "cargo_home_mode": "fresh-config-free-linked-locked-cache",
+        "target_directory_fresh": True, "analyzer_sha256": analyzer_ref["sha256"],
+    })
     for role, host, application, plugin_format, _endpoint in v2.ROLE_SPECS:
         raw_ref = write_artifact(root, f"campaigns/{role}-raw.json", raw_campaign(role, policy_ref["sha256"]))
         trace_ref = write_artifact(root, f"campaigns/{role}.pftrace", b"fixture-trace", raw=True)
@@ -128,10 +146,12 @@ def make_fixture(root: Path) -> dict[str, Any]:
             "schema": "pulp.gpu-first-visible-a3-trace-analysis.v2", "version": 2,
             "role_id": role, "categories": list(v2.TRACE_CATEGORIES),
             "trace_complete": True, "dropped_events": 0, "flush_complete": True,
+            "trace_sha256": trace_ref["sha256"], "campaign_id": f"campaign-{role}",
+            "instance_id": f"instance-{role}", "build_id": f"build-{role}",
+            "gpu_evidence_id": "gpu-evidence", "trace_evidence_id": f"trace-{role}",
+            "process_pid": 42, "process_upid": 7,
         })
-        campaigns.append({
-            "role_id": role, "status": "pass",
-            "identity": {
+        identity = {
                 "pulp_revision": SHA, "forge_revision": FORGE_SHA if role in v2.FORGE_ROLES else None,
                 "machine_id": "fleet-m5", "host_kind": host,
                 "host_bundle_id": "fixture.host", "host_version": "1", "host_sha256": DIGEST,
@@ -141,10 +161,46 @@ def make_fixture(root: Path) -> dict[str, Any]:
                 "signature_sha256": DIGEST, "content_sha256": DIGEST,
                 "adapter": "authority-metal-constrained" if role == "constrained-adapter" else "metal",
                 "display_id": "main", "refresh_hz": 60,
-            },
+        }
+        identity_digest = hashlib.sha256(
+            (json.dumps(identity, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        ).hexdigest()
+        sample_provenance_ref = write_artifact(root, f"campaigns/{role}-provenance.json", {
+            "schema": "pulp.gpu-first-visible-a3-sample-provenance.v2", "version": 2,
+            "implementation_head": SHA, "role_id": role, "producer_sha256": DIGEST,
+            "raw_samples_sha256": raw_ref["sha256"], "trace_sha256": trace_ref["sha256"],
+            "identity_sha256": identity_digest,
+        })
+        campaigns.append({
+            "role_id": role, "status": "pass", "identity": identity,
             "raw_samples": raw_ref, "trace": trace_ref, "trace_analysis": analysis_ref,
+            "sample_provenance": sample_provenance_ref,
+            "trace_analyzer": analyzer_ref,
+            "trace_analyzer_provenance": analyzer_provenance_ref,
+            "trace_binding": {
+                "campaign_id": f"campaign-{role}", "instance_id": f"instance-{role}",
+                "build_id": f"build-{role}", "gpu_evidence_id": "gpu-evidence",
+                "trace_evidence_id": f"trace-{role}", "process_pid": 42, "process_upid": 7,
+            },
             "causal_attribution": {"render_pipeline_material": False, "instrumentation_complete": True, "missing_events": [], "transferred_vellum_routes": []},
         })
+    trace_digests = sorted(campaign["trace"]["sha256"] for campaign in campaigns)
+    blank_ref = write_artifact(root, "controls/blank.json", {
+        "schema": "pulp.gpu-first-visible-blank-negative.v2", "version": 2,
+        "implementation_head": SHA, "campaign_trace_sha256s": trace_digests,
+        "injected_blank_sha256": DIGEST, "diagnostic_code": "gpu.startup.blank", "detected": True,
+    })
+    audio_executable = write_executable(root, "controls/audio-harness", "#!/bin/sh\nexit 0\n")
+    audio_ref = write_artifact(root, "controls/audio.json", {
+        "schema": "pulp.gpu-first-visible-audio-thread-exclusion.v2", "version": 2,
+        "implementation_head": SHA, "campaign_trace_sha256s": trace_digests,
+        "executable": audio_executable, "scope": "external-instrumented-harness",
+        "provider_entry_points": ["begin_editor_open", "record_presented_frame", "record_timeout", "record_instance_lost", "record_dropped_events", "snapshot"],
+        "audio_thread_events": 0, "non_audio_thread_events": 6,
+    })
+    overhead_ref = write_artifact(root, "controls/overhead.json", {
+        "candidate_revision": SHA, "verdict": "pass", "states": list(v2.STATES),
+    })
     receipt = {
         "$schema": "../contracts/gpu-first-visible-a3-acceptance-v2.schema.json",
         "schema": "dev.pulp.gpu-first-visible-a3-acceptance", "version": 2,
@@ -153,7 +209,10 @@ def make_fixture(root: Path) -> dict[str, Any]:
         "plan": {"document": "research/plan.md", "revision": SHA, "lines": "949-1118", "sha256": DIGEST},
         "product_policy": {"status": "bound", "authority": policy_ref, "validation": validation_ref, "required_coverage": "bound"},
         "protocol": v2.canonical_protocol(), "campaigns": campaigns,
-        "publication": {"repository": "Generous-Corp/pulp", "branch": "main", "head": SHA, "receipt_blob": BLOB, "protected": True, "required_checks": [{"name": "A3 v2", "conclusion": "success"}], "artifact_sha256s": []},
+        "blank_negative": {"status": "pass", "receipt": blank_ref},
+        "audio_thread_exclusion": {"status": "pass", "receipt": audio_ref},
+        "trace_producer_overhead": {"status": "pass", "reason": None, "receipt": overhead_ref},
+        "publication": {"repository": "Generous-Corp/pulp", "branch": "main", "receipt_path": "docs/validation/gpu-first-visible-a3-acceptance.json", "artifact_sha256s": []},
         "disposition": "no-change", "observations": [], "blockers": [],
     }
     receipt["publication"]["artifact_sha256s"] = sorted(
@@ -168,7 +227,10 @@ def expect_rejected(label: str, mutate: Callable[[dict[str, Any], Path], None]) 
         receipt = make_fixture(root)
         mutate(receipt, root)
         try:
-            v2.validate_v2(receipt, root)
+            with mock.patch.object(v2, "live_protected_main_errors", return_value=[]), mock.patch.object(
+                v2.trace_producer_overhead, "validate_receipt", return_value=None
+            ):
+                v2.validate_v2(receipt, root, receipt_path=root / "canonical.json", repository=root)
         except v2.V2AcceptanceError:
             return
         raise AssertionError(f"planted negative was accepted: {label}")
@@ -178,7 +240,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         receipt = make_fixture(root)
-        assert v2.validate_v2(receipt, root) is True
+        with mock.patch.object(v2, "live_protected_main_errors", return_value=[]), mock.patch.object(
+            v2.trace_producer_overhead, "validate_receipt", return_value=None
+        ):
+            assert v2.validate_v2(receipt, root, receipt_path=root / "canonical.json", repository=root) is True
         terminal_path = root / "terminal.json"
         terminal_path.write_text(json.dumps(receipt), encoding="utf-8")
         terminal = subprocess.run(
@@ -186,8 +251,8 @@ def main() -> int:
              "--evidence-root", str(root)],
             text=True, capture_output=True, check=False,
         )
-        assert terminal.returncode == 0, (terminal.stdout, terminal.stderr)
-        assert "PASS terminal=true" in terminal.stdout
+        assert terminal.returncode == 1, (terminal.stdout, terminal.stderr)
+        assert "A3 v2 acceptance: FAIL:" in terminal.stderr
 
         invalid = copy.deepcopy(receipt)
         invalid["protocol"]["ring_mib"] = 64
@@ -216,7 +281,7 @@ def main() -> int:
         ("substituted host", lambda r, _p: r["campaigns"][0]["identity"].update(host_kind="substitute")),
         ("false unavailable", lambda r, _p: r["campaigns"][0].update(status="unavailable")),
         ("executor disposition", lambda r, _p: r.update(disposition="queue-B4")),
-        ("open result", lambda r, _p: r["publication"].update(protected=False)),
+        ("caller self-attestation", lambda r, _p: r["publication"].update(protected=True, head=SHA, required_checks=[])),
         ("wrong policy head", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy["source"].update(revision="9" * 40))),
         ("missing steady budget", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy["roles"][0].pop("steady_gpu_frame_p95_ns"))),
         ("short samples", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["raw_samples"], lambda raw: raw["states"][0]["warm"].pop())),
@@ -225,6 +290,13 @@ def main() -> int:
         ("blank bypass", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["raw_samples"], lambda raw: raw["states"][1]["warm"][0].update(blank=True))),
         ("audio thread work", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["raw_samples"], lambda raw: raw["states"][1]["warm"][0].update(audio_thread_work_events=1))),
         ("xrun", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["raw_samples"], lambda raw: raw["states"][1]["warm"][0].update(xrun_count=1))),
+        ("trace sidecar digest", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["trace_analysis"], lambda a: a.update(trace_sha256=DIGEST))),
+        ("sample provenance", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["sample_provenance"], lambda a: a.update(raw_samples_sha256=DIGEST))),
+        ("analyzer substitution", lambda r, p: r["campaigns"][0].update(trace_analyzer=write_executable(p, "tooling/substitute", "#!/bin/sh\nexit 2\n"))),
+        ("analyzer process", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["trace_analysis"], lambda a: a.update(process_pid=43))),
+        ("blank negative digest", lambda r, p: rewrite_artifact(p, r["blank_negative"]["receipt"], lambda a: a.update(campaign_trace_sha256s=[]))),
+        ("external audio events", lambda r, p: rewrite_artifact(p, r["audio_thread_exclusion"]["receipt"], lambda a: a.update(audio_thread_events=1))),
+        ("overhead wrong head", lambda r, p: rewrite_artifact(p, r["trace_producer_overhead"]["receipt"], lambda a: a.update(candidate_revision="9" * 40))),
     ]
     for label, mutate in negatives:
         expect_rejected(label, mutate)

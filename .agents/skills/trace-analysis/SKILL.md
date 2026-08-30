@@ -621,3 +621,5 @@ retained-cover lifetime caused the symptom. Finish with real product proof,
 such as a 60 fps recording plus interaction/feel validation. Report those as
 three distinct links: trace localization, platform-race proof, and product
 acceptance. Never describe Perfetto alone as having found the root cause.
+
+For A3 v2, do not validate a submitted analysis sidecar in isolation. Rehash the exact `.pftrace`, verify prepared-analyzer provenance, run that analyzer, and require its evidence/process scope and capture completeness to agree with the digest-bound campaign, category set, and sidecar bindings.

@@ -591,3 +591,5 @@ signature, and render wait over the exact 10-cold/10-warm workload; keep work
 off the audio thread and bound executor ownership, lifetime, and shutdown. Ship
 only a causal, material improvement, otherwise record `no-change`. A generic
 Vellum-installed `SkLogHandler` is a later diagnostic producer, not Horizon A.
+
+A3 v2 terminal proof also requires digest-bound blank-frame and external audio-thread controls plus the derived four-state trace-producer overhead receipt. Keep the checked-in receipt blocked until all controls, seven campaigns, pinned trace replays, and fresh protected-main publication verification pass.

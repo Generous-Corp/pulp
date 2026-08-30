@@ -474,3 +474,5 @@ ambient build output, or network, then byte-compares the rebuilt executable and
 checks its tracing sentinel. Retain source archive, closed build
 request/receipt, product, logs, and toolchain snapshots; a pre-existing Forge
 bundle cannot satisfy this proof.
+
+Forge A3 v2 campaigns must retain producer/sample provenance and exact trace/analyzer artifacts. Terminal validation reruns the prepared analyzer and binds the result to the Forge revision, role, host process, evidence cohort, categories, and capture completeness.
