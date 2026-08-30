@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import errno
 import json
 import os
 from pathlib import Path
@@ -207,6 +208,46 @@ class AdjudicationTests(unittest.TestCase):
         return A.adjudicate_scene(
             context, context.scenes[0], self.fixture.rack_app,
             runner=runner or FakeRunner(), idiom_loader=lambda _root: checker)
+
+    def test_windows_lock_fallback_is_nonblocking_and_owns_one_byte(self) -> None:
+        class FakeMsvcrt:
+            LK_NBLCK = 17
+
+            def __init__(self) -> None:
+                self.calls: list[tuple[int, int, int]] = []
+
+            def locking(self, fd: int, mode: int, length: int) -> None:
+                self.calls.append((fd, mode, length))
+
+        lock_path = Path(self.temp.name) / "windows.lock"
+        lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        fake = FakeMsvcrt()
+        try:
+            with mock.patch.object(A, "fcntl", None), \
+                    mock.patch.object(A, "msvcrt", fake):
+                A._lock_exclusive_nonblocking(lock_fd)
+            self.assertEqual(fake.calls, [(lock_fd, fake.LK_NBLCK, 1)])
+            self.assertEqual(os.fstat(lock_fd).st_size, 1)
+        finally:
+            os.close(lock_fd)
+
+    def test_windows_lock_contention_maps_to_blocking_io(self) -> None:
+        class ContendedMsvcrt:
+            LK_NBLCK = 17
+
+            @staticmethod
+            def locking(_fd: int, _mode: int, _length: int) -> None:
+                raise OSError(errno.EACCES, "lock is already owned")
+
+        lock_path = Path(self.temp.name) / "contended.lock"
+        lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            with mock.patch.object(A, "fcntl", None), \
+                    mock.patch.object(A, "msvcrt", ContendedMsvcrt()):
+                with self.assertRaises(BlockingIOError):
+                    A._lock_exclusive_nonblocking(lock_fd)
+        finally:
+            os.close(lock_fd)
 
     def test_all_twelve_pass_and_use_exact_rack_argv(self) -> None:
         before = {

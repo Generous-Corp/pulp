@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import fcntl
+import errno
 import hashlib
 import importlib.util
 import json
@@ -26,6 +26,16 @@ from typing import Callable
 
 import qualify_scenes as Q
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised by the Windows CI lane
+    fcntl = None
+
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - exercised by the POSIX CI lanes
+    msvcrt = None
+
 
 ADJUDICATION_SCHEMA = "forge.modular.scene_adjudication.v2"
 SUMMARY_SCHEMA = "forge.modular.qualification_summary.v1"
@@ -34,6 +44,8 @@ CHECK_NAMES = (
     "causal_witness", "negative_control", "dsp_and_audio",
 )
 STATUSES = {"PASS", "FAIL", "WITHHOLD"}
+
+
 class AdjudicationError(RuntimeError):
     """A fail-closed provenance, execution, or receipt error."""
 
@@ -343,6 +355,23 @@ def _rack_bindings(rack_app: Path, rack_log: Path | None, artifact: Path) -> dic
     return binding
 
 
+def _lock_exclusive_nonblocking(fd: int) -> None:
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return
+    if msvcrt is None:
+        raise AdjudicationError("this platform has no supported file-lock API")
+    if os.fstat(fd).st_size == 0:
+        os.write(fd, b"\0")
+    os.lseek(fd, 0, os.SEEK_SET)
+    try:
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    except OSError as exc:
+        if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+            raise BlockingIOError from exc
+        raise
+
+
 def _adjudication_bindings(context: CampaignContext, scene: dict,
                            rack_app: Path, rack_log: Path | None
                            ) -> tuple[dict, Path]:
@@ -562,7 +591,7 @@ def adjudicate_scene(context: CampaignContext, scene: dict, rack_app: Path,
     lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_exclusive_nonblocking(lock_fd)
         except BlockingIOError as exc:
             raise AdjudicationError(f"{scene['id']} has an active adjudication owner") from exc
         if receipt_path.is_file():
