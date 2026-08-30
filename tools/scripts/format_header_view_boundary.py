@@ -6,6 +6,15 @@ That rule only holds if no header a core consumer can reach drags pulp/view in,
 so this walks the transitive include closure of every header under
 core/format/include and classifies it.
 
+This gate covers HEADERS only, and that scope is deliberate but not the whole
+rule. pulp-format-core links without the view layer, and every core-classified
+header is view-free -- but one core SOURCE, format.cpp, does include
+pulp/view/view.hpp, because libstdc++ needs view::View complete to instantiate
+~unique_ptr<View> in Processor::create_view()'s return path. That include adds
+no view symbol to the archive, so the link property this split exists for is
+unaffected; the core-only link proof (pulp-test-format-core-only-consumer) is
+what enforces it.
+
 A header is view-coupled if its closure touches pulp/view, pulp/canvas or
 pulp/render. Those headers are listed in VIEW_HEADERS below; every other header
 must stay view-free. A header that starts reaching view without being added to

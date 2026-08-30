@@ -15,22 +15,38 @@
 //     pulp-format-core alongside this one; classifying either into
 //     pulp-format-view would leave the core vtable unresolvable.
 //
-// The body returns nullptr and never names a complete view::View, so
-// processor.hpp's forward declaration is sufficient and no pulp/view header
-// is included here. That is what keeps pulp-format-core free of the view
-// layer.
+// This TU includes pulp/view/view.hpp, and that include is COMPILE-ONLY: it
+// adds no view symbol to pulp-format-core's link closure. Both halves of that
+// matter, and both are measured.
 //
-// One upstream property this depends on: view::View's destructor is virtual
-// (pulp/view/view.hpp). Destroying through unique_ptr<view::View> therefore
-// dispatches through the vtable instead of naming ~View, so this TU carries no
-// undefined view symbol. If ~View were ever made non-virtual, this file would
-// grow a direct reference to it and pulp-format-core would stop linking
-// without the view layer.
+// Why the include is required, and why a forward declaration is not enough:
+// create_view() returns std::unique_ptr<view::View> by value, and libstdc++
+// instantiates ~unique_ptr<View> in the return path, which needs sizeof(View).
+// GCC therefore rejects this file against a forward declaration alone --
+//   unique_ptr.h: invalid application of 'sizeof' to incomplete type
+//     'pulp::view::View'
+// -- while Apple Clang with libc++ accepts it, because it does not instantiate
+// the destructor there. Defining and calling have different completeness
+// requirements, and the requirement is also toolchain-dependent; do not
+// re-derive it from one compiler.
 //
-// The SettingsSection special members DO need view::View complete
+// Why it costs nothing at link: view::View's destructor is virtual, so
+// destroying through unique_ptr<view::View> dispatches through the vptr rather
+// than naming ~View. This object file carries ZERO undefined pulp::view::
+// symbols, so pulp-format-core still links with no view archive and consumers
+// inherit none. If ~View were ever made non-virtual, that would stop being
+// true and this file would drag the view layer into every core consumer.
+//
+// The consequence for the split is narrow and worth stating plainly:
+// pulp-format-core LINKS without the view layer, but does not COMPILE without
+// view headers. The Skia/Dawn closure the split exists to remove stays
+// removed; only this one translation unit needs the headers, privately.
+//
+// The SettingsSection special members ALSO need view::View complete
 // (SettingsSection owns a unique_ptr<view::View>), so they live in
 // settings_section.cpp on the view side of the split.
 #include <pulp/format/format.hpp>
+#include <pulp/view/view.hpp>
 
 namespace pulp::format {
 
