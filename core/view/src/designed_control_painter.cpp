@@ -57,7 +57,13 @@ public:
         // built-in accent that belongs to no one.
         style.track = source.resolve_color("control.track", skin_.track);
         style.ring = source.resolve_color("control.fill", skin_.accent);
-        style.indicator = source.resolve_color("control.thumb", skin_.indicator);
+        // A per-control `knob_ind_color` must not be repainted by the broader
+        // theme — doing so can make a white pointer black-on-black. In its
+        // absence, `design_indicator` remains only a fallback and the theme's
+        // `knob.thumb` retains precedence.
+        style.indicator = skin_.indicator_authored
+                              ? skin_.indicator
+                              : source.resolve_color("knob.thumb", skin_.indicator);
         style.ring_width = skin_.ring_width;
         style.indicator_width = skin_.indicator_width;
         // The design's body fills the node box, so the ring rides just inside
@@ -78,7 +84,11 @@ public:
         style.horizontal = state.horizontal;
         style.track = source.resolve_color("control.track", skin_.track);
         style.fill = source.resolve_color("control.fill", skin_.accent);
-        style.thumb = source.resolve_color("control.thumb", skin_.indicator);
+        // As for the rotary pointer, the designed skin owns this per-control
+        // color. The inherited theme remains available to stock faders.
+        style.thumb = skin_.indicator_authored
+                          ? skin_.indicator
+                          : source.resolve_color("control.thumb", skin_.indicator);
         const float travel = std::abs(state.track_max - state.track_min);
         const float position =
             travel > 0.0f ? std::clamp((state.thumb_pos - state.track_min) /

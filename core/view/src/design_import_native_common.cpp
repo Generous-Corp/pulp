@@ -1416,6 +1416,14 @@ static std::optional<Color> parse_any_css_color(const std::string& value) {
     return std::nullopt;
 }
 
+// Indicator provenance changes theme precedence, so a parser fallback must
+// never turn malformed authored text into an authoritative colour. Keep this
+// validation identical to the generated-JS/WidgetBridge path.
+static std::optional<Color> parse_indicator_css_color(const std::string& value) {
+    if (!css_color_syntax_supported(value)) return std::nullopt;
+    return parse_any_css_color(value);
+}
+
 void apply_visual_style(View& view, const IRStyle& style,
                         bool skip_border = false,
                         bool skip_box_shadow = false) {
@@ -1968,7 +1976,17 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
     if (const auto hex = attr(node, "design_track"); hex && !hex->empty())
         skin.track = parse_css_color(*hex);
     if (const auto hex = attr(node, "design_indicator"); hex && !hex->empty())
-        skin.indicator = parse_css_color(*hex);
+        if (const auto parsed = parse_indicator_css_color(*hex))
+            skin.indicator = *parsed;
+    // Browser capture can isolate a fader's authored thumb even when the
+    // static thumb asset is pruned before persistence. Preserve that durable
+    // per-control color over the broader design token, just as
+    // `knob_ind_color` below preserves a captured knob pointer.
+    if (const auto hex = attr(node, "fader_ind_color"); hex && !hex->empty())
+        if (const auto parsed = parse_indicator_css_color(*hex)) {
+            skin.indicator = *parsed;
+            skin.indicator_authored = true;
+        }
 
     // Where the value ring rides.
     //
@@ -2053,7 +2071,10 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
         if (const auto w = attr_float(node, "knob_ind_w"); w && *w > 0.0f && box > 0.0f)
             skin.indicator_width = std::max(1.0f, *w * 0.5f * box);
         if (const auto hex = attr(node, "knob_ind_color"); hex && !hex->empty())
-            if (auto parsed = parse_any_css_color(*hex)) skin.indicator = *parsed;
+            if (auto parsed = parse_indicator_css_color(*hex)) {
+                skin.indicator = *parsed;
+                skin.indicator_authored = true;
+            }
     }
 
     apply_designed_control_skin(control, skin);
@@ -2086,21 +2107,51 @@ void apply_captured_art_knob_skin(
     if (cw > 0.0f && ch > 0.0f)
         knob.set_sprite_core(attr_float(node, "art_core_x").value_or(0.0f),
                              attr_float(node, "art_core_y").value_or(0.0f), cw, ch);
+}
+
+void apply_durable_knob_indicator(Knob& knob, const IRNode& node) {
     // Design's own pointer geometry (Figma "Vector 7"), captured by
     // hoist_captured_art_knobs as fractions of the disc half-extent. When
-    // present, Knob::paint draws THIS pointer over the static disc — pivoting at
-    // the disc core center on the value arc — instead of the synthetic notch, so
-    // it rides the disc's baked min/center/max reference ticks.
-    if (auto r_out = attr_float(node, "knob_ind_r_out")) {
-        const float r_in = attr_float(node, "knob_ind_r_in").value_or(0.0f);
-        const float w = attr_float(node, "knob_ind_w").value_or(0.0f);
+    // present, Knob::paint draws THIS pointer over either the captured static
+    // disc or its sprite-less procedural body. This metadata is durable and
+    // must not be gated on importer-scratch asset paths surviving persistence.
+    if (const auto r_out = attr_float(node, "knob_ind_r_out");
+        r_out && std::isfinite(*r_out) && *r_out > 0.0f) {
+        const auto finite_or = [&](std::string_view key, float fallback) {
+            const auto value = attr_float(node, key);
+            return value && std::isfinite(*value) ? *value : fallback;
+        };
+        const float r_in = finite_or("knob_ind_r_in", 0.0f);
+        const float w = finite_or("knob_ind_w", 0.0f);
         Color color = Color::rgba(0.92f, 0.92f, 0.92f, 1.0f);
+        bool color_authored = false;
+        if (auto hex = attr(node, "design_indicator"))
+            if (auto parsed = parse_indicator_css_color(*hex)) color = *parsed;
         if (auto hex = attr(node, "knob_ind_color"))
-            if (auto parsed = parse_any_css_color(*hex)) color = *parsed;
+            if (auto parsed = parse_indicator_css_color(*hex)) {
+                color = *parsed;
+                color_authored = true;
+            }
         knob.set_captured_indicator(
             r_in, *r_out, w, color,
-            attr_float(node, "knob_ind_phase_rad").value_or(0.0f));
+            finite_or("knob_ind_phase_rad", 0.0f),
+            color_authored);
     }
+}
+
+void apply_durable_fader_indicator(Fader& fader, const IRNode& node) {
+    // The panel-wide indicator is a fallback, not per-control authorship. Keep
+    // it on ordinary procedural faders too so native materialization matches
+    // the generated-JS path when no designed body or captured art survived.
+    if (const auto hex = attr(node, "design_indicator"); hex && !hex->empty())
+        if (const auto color = parse_indicator_css_color(*hex))
+            fader.set_skin_thumb_fallback_color(*color);
+
+    // The isolated thumb colour is durable control provenance and therefore
+    // replaces the fallback regardless of whether captured art survived.
+    if (const auto hex = attr(node, "fader_ind_color"); hex && !hex->empty())
+        if (const auto color = parse_indicator_css_color(*hex))
+            fader.set_skin_thumb_color(*color);
 }
 
 void apply_captured_art_fader_skin(
@@ -2328,6 +2379,9 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             // Captured-art skin (design's disc + native notch overlay): keeps the
             // knob design-faithful AND interactive. See hoist_captured_art_knobs.
             apply_captured_art_knob_skin(*knob, node, options);
+            // Pointer geometry/color outlives the optional sprite body and is
+            // therefore installed exactly once on every native knob path.
+            apply_durable_knob_indicator(*knob, node);
             apply_designed_body_skin(*knob, node);
             return knob;
         }
@@ -2369,11 +2423,12 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                     if (const auto color = parse_any_css_color(*hex))
                         fader->set_skin_fill_color(*color);
                 if (const auto hex = attr(node, "design_indicator"))
-                    if (const auto color = parse_any_css_color(*hex))
-                        fader->set_skin_thumb_color(*color);
+                    if (const auto color = parse_indicator_css_color(*hex))
+                        fader->set_skin_thumb_fallback_color(*color);
             } else {
                 apply_designed_body_skin(*fader, node);
             }
+            apply_durable_fader_indicator(*fader, node);
             return fader;
         }
         case NativeWidgetKind::meter: {
