@@ -199,6 +199,14 @@ retain those fields in the PR/landing evidence.
     revision and fail before copying output unless the built Skia checkout HEAD
     equals the manifest's immutable `skia_commit`; a milestone branch name alone
     is never sufficient provenance.
+13. Treat any provider release marked `release_immutable: false` as mutable until
+    its publishing workflow is terminal. Record the exact publisher run and
+    release `updated_at`, collect every asset ID/digest plus metadata and pair
+    digests, then re-query the same release immediately before publication. If
+    any asset, metadata, pair field, or release timestamp changed, invalidate the
+    prior validation, repin the complete platform set, and rerun the provider and
+    cache gates. A successful earlier fetch proves only the bytes that existed at
+    that time; it does not authorize landing after the release was replaced.
 
 ## Common traps
 
