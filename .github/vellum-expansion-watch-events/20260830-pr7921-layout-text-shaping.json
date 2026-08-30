@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260830-pr7921-layout-text-shaping",
+  "created_at": "2026-08-30T08:48:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned layout-generation reuse, state-only rendering elision, live-text geometry updates, tracing attribution, and malformed UTF-8 hardening used by native Spectr rendering. The change preserves the accepted expansion boundary and does not transfer additional implementation authority.",
+  "tests": [
+    "pulp-test-label-perf",
+    "pulp-test-text-shaper",
+    "pulp-test-widget-bridge",
+    "test_vellum_freeze_check.py",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
