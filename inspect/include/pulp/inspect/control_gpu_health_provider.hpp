@@ -127,7 +127,7 @@ class ControlGpuHealthProvider final {
     /// Arms one bounded editor-open trial. Only one trial may be in flight.
     bool begin_editor_open(CacheState cache_state,
                            std::chrono::steady_clock::time_point requested_at) noexcept;
-    /// Records bounded raw product evidence. A positive live snapshot is not
+    /// Records bounded raw product evidence. A positive live snapshot does not
     /// establish end-to-end startup readiness; validation also binds the
     /// budget, raw samples, product artifacts, trace, and audio-thread exclusion.
     bool record_presented_frame(const FrameObservation& frame) noexcept;
