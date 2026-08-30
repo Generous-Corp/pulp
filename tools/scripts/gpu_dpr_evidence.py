@@ -126,12 +126,17 @@ def decode_png_rgba(path: Path) -> tuple[int, int, bytes]:
             else: raise EvidenceError("PNG fidelity filter is unsupported")
             row[index] = (value + predictor) & 0xff
         rows.append(row)
+    # Color type 6 rows are already RGBA.  Joining them directly is both
+    # byte-exact and important for the dependency-free path used by CI: the
+    # per-pixel slice loop below can take minutes on large evidence captures.
+    if channels == 4:
+        return width, height, b"".join(rows)
     rgba = bytearray(width * height * 4)
     out = 0
     for row in rows:
         for index in range(0, stride, channels):
             rgba[out:out + 3] = row[index:index + 3]
-            rgba[out + 3] = row[index + 3] if channels == 4 else 255
+            rgba[out + 3] = 255
             out += 4
     return width, height, bytes(rgba)
 

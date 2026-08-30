@@ -1584,9 +1584,13 @@ def main() -> int:
         else:
             raise AssertionError("synthetic terminal-shaped A3 receipt was accepted")
 
+        structural_validation_calls = 0
+
         def validate_structural_a3_fixture(
             receipt: dict[str, object], evidence_root: Path,
         ) -> bool:
+            nonlocal structural_validation_calls
+            structural_validation_calls += 1
             # A4 still needs a terminal-shaped dependency to exercise its own
             # digest, machine, budget, and plan bindings.  Validate the full
             # historical shape explicitly, then override only its deliberately
@@ -1599,14 +1603,27 @@ def main() -> int:
 
         def finalize_structural(
             disposition: str, a2t: str, budget: str, a3: str,
+            *, validate_a3: bool = False,
         ) -> dict[str, object]:
+            validator = (
+                validate_structural_a3_fixture
+                if validate_a3 else mock.Mock(return_value=True)
+            )
             with mock.patch.object(
                 a3_acceptance, "validate_receipt",
-                side_effect=validate_structural_a3_fixture,
+                side_effect=validator,
             ):
                 return runner.finalize(
                     complete_run, disposition, a2t, budget, a3,
                 )
+
+        # Prove the shared historical A3 fixture once.  The A4 planted-negative
+        # calls below exercise A4's own snapshot, digest, plan, and artifact
+        # bindings; re-running the full A3 validator for each one spawned
+        # hundreds of identical analyzer subprocesses and exceeded the required
+        # three-core macOS gate's timeout.  Cases that intentionally mutate A3
+        # still opt back into the real validator explicitly.
+        validate_structural_a3_fixture(runner.load_json(a3_receipt), root)
 
         try:
             finalize_structural(
@@ -1631,7 +1648,7 @@ def main() -> int:
         try:
             finalize_structural(
                 "adaptive-candidate", str(a2t_receipt),
-                budget_id, str(unratified_a3),
+                budget_id, str(unratified_a3), validate_a3=True,
             )
         except runner.EvidenceError:
             planted += 1
@@ -1674,7 +1691,7 @@ def main() -> int:
         try:
             finalize_structural(
                 "adaptive-candidate", str(a2t_receipt),
-                budget_id, str(a3_receipt),
+                budget_id, str(a3_receipt), validate_a3=True,
             )
         except runner.EvidenceError:
             planted += 1
@@ -1857,6 +1874,7 @@ def main() -> int:
         )
         assert b5["status"] == "cancelled-no-change"
         assert b5["authorizes_policy_change"] is False
+        assert structural_validation_calls == 3
 
     print(
         "gpu_dpr_runner_selftest=true matrix_cells=84 "
