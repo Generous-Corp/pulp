@@ -8,7 +8,7 @@
   "authorities": {
     "plan": {
       "repo": "danielraffel/pulp-planning",
-      "revision": "25e574d7f229bf50948b0b8ddbbdff9e89543c05",
+      "revision": "bec7fb85c6f8886d32fac0a34be491eb6821a741",
       "path": "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md"
     },
     "pulp": {
@@ -29,35 +29,43 @@
       "node_id": "I_kwDOTgkcHM8AAAABOw9JNg",
       "url": "https://github.com/Generous-Corp/vellum/issues/26"
     },
-    "current_comment_id": 5462803929,
+    "current_comment_id": 5464003821,
     "comments": [
       {
         "id": 5461645539,
         "node_id": "IC_kwDOTgkcHM8AAAABRYoY4w",
         "url": "https://github.com/Generous-Corp/vellum/issues/26#issuecomment-5461645539",
         "status": "superseded",
-        "superseded_by": 5462803929
+        "superseded_by": 5464003821
       },
       {
         "id": 5462069172,
         "node_id": "IC_kwDOTgkcHM8AAAABRZCPtA",
         "url": "https://github.com/Generous-Corp/vellum/issues/26#issuecomment-5462069172",
         "status": "superseded",
-        "superseded_by": 5462803929
+        "superseded_by": 5464003821
       },
       {
         "id": 5462803929,
         "node_id": "IC_kwDOTgkcHM8AAAABRZvF2Q",
         "url": "https://github.com/Generous-Corp/vellum/issues/26#issuecomment-5462803929",
+        "status": "superseded",
+        "superseded_by": 5464003821
+      },
+      {
+        "id": 5464003821,
+        "node_id": "IC_kwDOTgkcHM8AAAABRa4U7Q",
+        "url": "https://github.com/Generous-Corp/vellum/issues/26#issuecomment-5464003821",
         "status": "current",
         "supersedes": [
           5461645539,
-          5462069172
+          5462069172,
+          5462803929
         ]
       }
     ]
   },
-  "cutover_trigger": "The reviewed adoption owner records an adopted Vellum revision, refreshes every v2 path object in B0, and receives explicit authority to continue at the Vellum horizon.",
+  "cutover_trigger": "Begin B0 only after the foundational Vellum cutover is merged on protected Pulp main, the authoritative ownership declaration names the adopted Vellum revision, installed Vellum headers and libraries are available to the clean consumer, the complete A5 protected bundle is terminal, every v2 path object is refreshed, and the reviewed adoption owner records explicit authority to continue at the Vellum horizon.",
   "required_package_ids": [
     "a2-pulp-product-probes",
     "a2t-pulp-trace-analysis",
@@ -2012,8 +2020,8 @@
     },
     {
       "id": "b4-vellum-observability-executor",
-      "phase": "B4 typed pipeline observability and bounded Graphite executor experiment",
-      "trigger": "Start only from terminal A3 queue-B4 or queue-B4-investigation after B0 refresh.",
+      "phase": "B4 mandatory typed pipeline observability plus conditional bounded Graphite executor experiment",
+      "trigger": "After B0, install and prove every missing B0-owned pipeline, queue, compile, and upload producer regardless of the A3 optimization disposition. Run the bounded Graphite executor experiment only from terminal A3 queue-B4 or queue-B4-investigation.",
       "pulp_paths": [
         {
           "repo": "Generous-Corp/pulp",
@@ -2244,9 +2252,9 @@
         "inspect/src/control_gpu_health_provider.cpp"
       ],
       "terminal_result": {
-        "pass": "background_bounded only after causal material benefit and every correctness/RT/performance gate.",
-        "no_change": "Keep synchronous and retain useful observability.",
-        "nonterminal": "Missing A3 queue trigger, m153 proof, bounds, trace, or host campaign remains open."
+        "pass": "Installed Vellum observability is complete and protected; background_bounded is additionally selected only after causal material benefit and every correctness/RT/performance gate.",
+        "no_change": "Not accepted for the mandatory observability package; absence of an A3 optimization trigger keeps the executor synchronous without waiving producer proof.",
+        "nonterminal": "Missing installed producer proof, m153 identity, bounds, trace overhead, xrun evidence, or protected attestation remains open; missing A3 queue evidence blocks only the optional executor experiment."
       },
       "delete_paths": [],
       "deletion_gate": {
@@ -2260,7 +2268,6 @@
         "b1-vellum-gpu-runtime"
       ],
       "accepted_dispositions": [
-        "no-change",
         "pass"
       ],
       "input_receipts": [
@@ -2276,7 +2283,8 @@
       "terminal_evidence": {
         "required": [
           "b4-vellum-observability-executor output receipt binds exact installed revisions and terminal disposition",
-          "background_bounded only after causal material benefit and every correctness/RT/performance gate."
+          "installed Vellum pipeline, queue, compile, and upload producers pass typed fixtures, compile-out, idle, active-overhead, and xrun gates",
+          "optional background_bounded selection is recorded only after causal material benefit and every correctness/RT/performance gate"
         ],
         "planted": [
           "Executor-before-context destruction, wrong instance, saturation, lost trace, and old policy controls fail distinctly.",
