@@ -1,6 +1,6 @@
 //! Closed GPU questions over checked-in PerfettoSQL definitions.
 
-use std::fs::{File, Metadata, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -229,22 +229,195 @@ fn create_exclusive_snapshot(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
-fn same_file_identity(left: &Metadata, right: &Metadata) -> bool {
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TraceFileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TraceFileIdentity {
+    volume_serial: u64,
+    file_id: [u8; 16],
+}
+
+#[cfg(not(any(unix, windows)))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TraceFileIdentity;
+
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+#[cfg(windows)]
+const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+#[cfg(windows)]
+const FILE_FLAG_SEQUENTIAL_SCAN: u32 = 0x0800_0000;
+#[cfg(windows)]
+const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
+#[cfg(windows)]
+const SECURITY_SQOS_PRESENT: u32 = 0x0010_0000;
+
+#[cfg(windows)]
+#[repr(C)]
+#[allow(non_snake_case)]
+struct FileIdInfo {
+    VolumeSerialNumber: u64,
+    FileId: [u8; 16],
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[allow(non_snake_case)]
+struct FileAttributeTagInfo {
+    FileAttributes: u32,
+    ReparseTag: u32,
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetFileInformationByHandleEx(
+        file: *mut std::ffi::c_void,
+        information_class: i32,
+        information: *mut std::ffi::c_void,
+        buffer_size: u32,
+    ) -> i32;
+    fn GetFileType(file: *mut std::ffi::c_void) -> u32;
+}
+
+#[cfg(unix)]
+fn trace_file_state(file: &File) -> io::Result<(TraceFileIdentity, u64, bool)> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+    let metadata = file.metadata()?;
+    let is_non_regular = !metadata.file_type().is_file()
+        || metadata.file_type().is_fifo()
+        || metadata.file_type().is_socket();
+    Ok((
+        TraceFileIdentity {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        },
+        metadata.len(),
+        is_non_regular,
+    ))
+}
+
+#[cfg(windows)]
+fn trace_file_state(file: &File) -> io::Result<(TraceFileIdentity, u64, bool)> {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle;
+
+    const FILE_TYPE_DISK: u32 = 1;
+    const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
+    const FILE_ID_INFO_CLASS: i32 = 18;
+    let handle = file.as_raw_handle().cast();
+    if unsafe { GetFileType(handle) } != FILE_TYPE_DISK {
+        return Ok((
+            TraceFileIdentity {
+                volume_serial: 0,
+                file_id: [0; 16],
+            },
+            0,
+            true,
+        ));
+    }
+    let mut identity = MaybeUninit::<FileIdInfo>::uninit();
+    let identity_ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FILE_ID_INFO_CLASS,
+            identity.as_mut_ptr().cast(),
+            std::mem::size_of::<FileIdInfo>() as u32,
+        )
+    };
+    if identity_ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut attributes = MaybeUninit::<FileAttributeTagInfo>::uninit();
+    let attributes_ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FILE_ATTRIBUTE_TAG_INFO_CLASS,
+            attributes.as_mut_ptr().cast(),
+            std::mem::size_of::<FileAttributeTagInfo>() as u32,
+        )
+    };
+    if attributes_ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let identity = unsafe { identity.assume_init() };
+    let attributes = unsafe { attributes.assume_init() };
+    let metadata = file.metadata()?;
+    let sentinel_identity = identity.VolumeSerialNumber == 0
+        || identity.FileId == [0; 16]
+        || identity.FileId == [0xff; 16];
+    let is_reparse =
+        attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || attributes.ReparseTag != 0;
+    Ok((
+        TraceFileIdentity {
+            volume_serial: identity.VolumeSerialNumber,
+            file_id: identity.FileId,
+        },
+        metadata.len(),
+        !metadata.is_file() || is_reparse || sentinel_identity,
+    ))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn trace_file_state(_file: &File) -> io::Result<(TraceFileIdentity, u64, bool)> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "secure trace input snapshots are unsupported on this platform",
+    ))
+}
+
+fn open_trace_source(path: &Path) -> io::Result<(File, TraceFileIdentity, u64)> {
+    let mut options = OpenOptions::new();
+    options.read(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::MetadataExt;
-        return left.dev() == right.dev() && left.ino() == right.ino();
+        use std::os::unix::fs::OpenOptionsExt;
+        // Opening first with both flags is the security boundary: O_NOFOLLOW
+        // rejects a symlink at the final component, while O_NONBLOCK prevents
+        // a FIFO/device replacement from hanging before fstat can reject it.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        // Rust 1.79 does not expose a portable Windows file identifier. Size
-        // and timestamps still make the path-replacement check fail closed for
-        // normal atomic replacement, while the opened handle below remains the
-        // authority for the bytes copied into the private snapshot.
-        left.len() == right.len()
-            && left.modified().ok() == right.modified().ok()
-            && left.created().ok() == right.created().ok()
+        use std::os::windows::fs::OpenOptionsExt;
+        // Open the reparse point itself, never its target. By-handle attributes
+        // then reject every reparse tag before any bytes are read.
+        options
+            .custom_flags(
+                FILE_FLAG_OPEN_REPARSE_POINT
+                    | FILE_FLAG_BACKUP_SEMANTICS
+                    | FILE_FLAG_SEQUENTIAL_SCAN,
+            )
+            .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION);
     }
+    let file = options.open(path)?;
+    let (identity, len, is_non_regular_or_reparse) = trace_file_state(&file)?;
+    if is_non_regular_or_reparse {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "trace input is not a non-symlink regular file",
+        ));
+    }
+    Ok((file, identity, len))
+}
+
+#[cfg(unix)]
+fn is_symlink_loop(error: &io::Error) -> bool {
+    error.raw_os_error() == Some(libc::ELOOP)
+}
+
+#[cfg(not(unix))]
+fn is_symlink_loop(_error: &io::Error) -> bool {
+    false
 }
 
 fn snapshot_trace_input_with_hook(
@@ -252,38 +425,25 @@ fn snapshot_trace_input_with_hook(
     max_bytes: u64,
     after_open: impl FnOnce(),
 ) -> Result<TraceInputSnapshot> {
-    let path_metadata = std::fs::symlink_metadata(path).map_err(|error| {
+    let (mut source, opened_identity, opened_len) = open_trace_source(path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
             CliError::BadUsage(format!(
                 "pulp trace: trace file not found: {}",
+                path.display()
+            ))
+        } else if error.kind() == io::ErrorKind::InvalidInput || is_symlink_loop(&error) {
+            CliError::BadUsage(format!(
+                "pulp trace: trace input must be a non-symlink regular file: {}",
                 path.display()
             ))
         } else {
             CliError::io(path, error)
         }
     })?;
-    if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
-        return Err(CliError::BadUsage(format!(
-            "pulp trace: trace input must be a non-symlink regular file: {}",
-            path.display()
-        )));
-    }
-
-    let mut source = File::open(path).map_err(|error| CliError::io(path, error))?;
-    let opened_metadata = source
-        .metadata()
-        .map_err(|error| CliError::io(path, error))?;
-    if !opened_metadata.is_file() || !same_file_identity(&path_metadata, &opened_metadata) {
-        return Err(CliError::BadUsage(format!(
-            "pulp trace: trace input changed while it was being opened: {}",
-            path.display()
-        )));
-    }
-    if opened_metadata.len() > max_bytes {
+    if opened_len > max_bytes {
         return Err(CliError::BadUsage(format!(
             "pulp trace: trace is {} bytes; maximum supported analysis input is {} bytes",
-            opened_metadata.len(),
-            max_bytes
+            opened_len, max_bytes
         )));
     }
 
@@ -326,21 +486,20 @@ fn snapshot_trace_input_with_hook(
         )));
     }
 
-    let final_opened_metadata = source
-        .metadata()
-        .map_err(|error| CliError::io(path, error))?;
-    let final_path_metadata = std::fs::symlink_metadata(path).map_err(|error| {
+    let (final_opened_identity, final_opened_len, final_opened_invalid) =
+        trace_file_state(&source).map_err(|error| CliError::io(path, error))?;
+    let (_, final_path_identity, final_path_len) = open_trace_source(path).map_err(|error| {
         CliError::BadUsage(format!(
             "pulp trace: trace input changed while it was being snapshotted ({}): {error}",
             path.display()
         ))
     })?;
-    if final_path_metadata.file_type().is_symlink()
-        || !final_path_metadata.is_file()
-        || !same_file_identity(&opened_metadata, &final_opened_metadata)
-        || !same_file_identity(&opened_metadata, &final_path_metadata)
-        || final_opened_metadata.len() != opened_metadata.len()
-        || copied != opened_metadata.len()
+    if final_opened_invalid
+        || opened_identity != final_opened_identity
+        || opened_identity != final_path_identity
+        || final_opened_len != opened_len
+        || final_path_len != opened_len
+        || copied != opened_len
     {
         return Err(CliError::BadUsage(format!(
             "pulp trace: trace input changed while it was being snapshotted: {}",

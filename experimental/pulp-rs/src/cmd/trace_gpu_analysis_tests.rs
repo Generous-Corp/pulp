@@ -473,6 +473,91 @@ fn symlinked_trace_input_is_rejected() {
     assert!(format!("{error}").contains("non-symlink regular file"));
 }
 
+#[cfg(unix)]
+#[test]
+fn fifo_trace_input_is_rejected_without_blocking_before_fstat() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::sync::mpsc;
+
+    let root = tempfile::tempdir().unwrap();
+    let fifo = root.path().join("trace.pftrace");
+    let fifo_c = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
+
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        sender
+            .send(snapshot_trace_input(&fifo).map(|_| ()))
+            .unwrap();
+    });
+    let result = receiver
+        .recv_timeout(Duration::from_secs(1))
+        .expect("opening a FIFO must remain nonblocking");
+    assert!(format!("{}", result.unwrap_err()).contains("non-symlink regular file"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_trace_open_source_contract_opens_nofollow_nonblocking_before_fstat() {
+    let source = include_str!("trace_gpu_analysis.rs");
+    assert!(source.contains("libc::O_NOFOLLOW | libc::O_NONBLOCK"));
+    assert!(source.contains("let file = options.open(path)?;\n    let (identity, len"));
+    assert!(!source.contains("std::fs::symlink_metadata(path)"));
+    assert!(!source.contains("File::open(path)"));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_trace_file_ids_distinguish_same_sized_regular_files() {
+    let root = tempfile::tempdir().unwrap();
+    let first = root.path().join("first.pftrace");
+    let second = root.path().join("second.pftrace");
+    std::fs::write(&first, b"same").unwrap();
+    std::fs::write(&second, b"same").unwrap();
+
+    let (_, first_identity, first_len) = open_trace_source(&first).unwrap();
+    let (_, second_identity, second_len) = open_trace_source(&second).unwrap();
+    assert_eq!(first_len, second_len);
+    assert_ne!(first_identity, second_identity);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_reparse_trace_input_is_rejected_when_symlinks_are_available() {
+    use std::os::windows::fs::symlink_file;
+
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target.pftrace");
+    let link = root.path().join("link.pftrace");
+    std::fs::write(&target, b"trace").unwrap();
+    if symlink_file(&target, &link).is_err() {
+        return;
+    }
+
+    let error = snapshot_trace_input(&link).unwrap_err();
+    assert!(format!("{error}").contains("non-symlink regular file"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn windows_trace_open_source_contract_is_handle_identity_and_reparse_safe() {
+    let source = include_str!("trace_gpu_analysis.rs");
+    assert!(source.contains("FILE_FLAG_OPEN_REPARSE_POINT"));
+    assert!(source.contains("FILE_FLAG_BACKUP_SEMANTICS"));
+    assert!(source.contains("FILE_FLAG_SEQUENTIAL_SCAN"));
+    assert!(source.contains("security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)"));
+    assert!(source.contains("FILE_ATTRIBUTE_REPARSE_POINT"));
+    assert!(source.contains("GetFileInformationByHandleEx"));
+    assert!(source.contains("FILE_ID_INFO_CLASS"));
+    assert!(source.contains("FILE_ATTRIBUTE_TAG_INFO_CLASS"));
+    assert!(source.contains("VolumeSerialNumber"));
+    assert!(source.contains("file_id: identity.FileId"));
+    assert!(source.contains("identity.FileId == [0xff; 16]"));
+    assert!(source.contains("opened_identity != final_path_identity"));
+    assert!(!source.contains("left.modified().ok() == right.modified().ok()"));
+}
+
 #[test]
 fn production_processor_limits_are_explicit() {
     assert_eq!(MAX_TRACE_BYTES, 512 * 1024 * 1024);

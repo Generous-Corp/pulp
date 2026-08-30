@@ -91,10 +91,12 @@ reduce its columns/rows or shorten the capture; never weaken the runner to make
 an accidentally unbounded query appear successful. Free-form `trace query`
 does not yet inherit these same bounds and must be treated as a follow-up
 hardening surface rather than proof of the named analyzer's safety contract.
-The named analyzer snapshots the opened non-symlink regular trace into an
-exclusive private file (mode 0600 on Unix) before launch, rejects replacement
-or growth during that copy, and passes only the snapshot path to
-`trace_processor`.
+The named analyzer opens without following the final symlink/reparse point and
+without blocking on a Unix FIFO/device replacement, verifies a regular-file
+handle, then snapshots those bytes into an exclusive private file (mode 0600
+on Unix). It rejects replacement or growth using handle-derived filesystem
+identity (device/inode on Unix, volume/file ID on Windows) and passes only the
+snapshot path to `trace_processor`.
 
 ---
 
