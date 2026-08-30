@@ -124,6 +124,34 @@ TEST_CASE("Free-running LFO ignores note-on entirely", "[audio][voice-mod-source
     REQUIRE(second == control_second);
 }
 
+TEST_CASE("Reset restores source state and out-of-range voice events are no-ops",
+          "[audio][voice-mod-sources]") {
+    auto config = sine_config(500.0, 1.0f, VoiceLfoPhasePolicy::Retrigger, false);
+    config.envelope.enabled = true;
+    config.envelope.envelope.attack_seconds = 0.001;
+    config.envelope.envelope.release_seconds = 0.002;
+
+    VoiceModulationSources<2> sources;
+    REQUIRE(sources.prepare(config));
+    sources.note_on(0);
+    const auto initial = render_audio_rate_lfo(sources, 0, 16);
+    static_cast<void>(render_audio_rate_lfo(sources, 0, 8));
+
+    sources.reset();
+    sources.note_on(0);
+    REQUIRE(render_audio_rate_lfo(sources, 0, 16) == initial);
+
+    VoiceModulationSources<2> control;
+    REQUIRE(control.prepare(config));
+    control.note_on(0);
+    sources.reset();
+    sources.note_on(0);
+    sources.note_on(2);
+    sources.note_off(2);
+    REQUIRE(render_audio_rate_lfo(sources, 0, 16) ==
+            render_audio_rate_lfo(control, 0, 16));
+}
+
 TEST_CASE("Zero depth leaves the lane exactly constant at zero", "[audio][voice-mod-sources]") {
     VoiceModulationSources<2> sources;
     REQUIRE(sources.prepare(sine_config(500.0, 0.0f, VoiceLfoPhasePolicy::Retrigger, false)));
@@ -302,6 +330,11 @@ TEST_CASE("Failure contract refuses invalid calls without touching state",
                                                  VoiceModulationRate::Constant, 8);
         REQUIRE(result.status == VoiceModulationStatus::NotPrepared);
         REQUIRE_FALSE(result.ok);
+
+        result = unprepared.append_envelope_lane(0, buffer, VoiceModulationTarget::Gain,
+                                                 VoiceModulationRate::Constant, 8);
+        REQUIRE(result.status == VoiceModulationStatus::NotPrepared);
+        REQUIRE_FALSE(result.ok);
     }
 
     VoiceModulationSources<2> sources;
@@ -311,11 +344,20 @@ TEST_CASE("Failure contract refuses invalid calls without touching state",
         auto result = sources.append_lfo_lane(2, buffer, VoiceModulationTarget::Aux0,
                                               VoiceModulationRate::Constant, 8);
         REQUIRE(result.status == VoiceModulationStatus::InvalidTarget);
+
+        result = sources.append_envelope_lane(2, buffer, VoiceModulationTarget::Gain,
+                                              VoiceModulationRate::Constant, 8);
+        REQUIRE(result.status == VoiceModulationStatus::InvalidTarget);
     }
 
     SECTION("unprepared buffer") {
         VoiceModulationBuffer unprepared_buffer;
         auto result = sources.append_lfo_lane(0, unprepared_buffer, VoiceModulationTarget::Aux0,
+                                              VoiceModulationRate::Constant, 8);
+        REQUIRE(result.status == VoiceModulationStatus::NotPrepared);
+
+        result = sources.append_envelope_lane(0, unprepared_buffer,
+                                              VoiceModulationTarget::Gain,
                                               VoiceModulationRate::Constant, 8);
         REQUIRE(result.status == VoiceModulationStatus::NotPrepared);
     }
@@ -324,18 +366,70 @@ TEST_CASE("Failure contract refuses invalid calls without touching state",
         auto result = sources.append_lfo_lane(0, buffer, VoiceModulationTarget::Aux0,
                                               VoiceModulationRate::Constant, 0);
         REQUIRE(result.status == VoiceModulationStatus::InvalidFrameCount);
+
+        result = sources.append_envelope_lane(0, buffer, VoiceModulationTarget::Gain,
+                                              VoiceModulationRate::Constant, 0);
+        REQUIRE(result.status == VoiceModulationStatus::InvalidFrameCount);
     }
 
     SECTION("frame count above buffer capacity") {
         auto result = sources.append_lfo_lane(0, buffer, VoiceModulationTarget::Aux0,
                                               VoiceModulationRate::Constant, 17);
         REQUIRE(result.status == VoiceModulationStatus::InvalidFrameCount);
+
+        result = sources.append_envelope_lane(0, buffer, VoiceModulationTarget::Gain,
+                                              VoiceModulationRate::Constant, 17);
+        REQUIRE(result.status == VoiceModulationStatus::InvalidFrameCount);
+    }
+
+    SECTION("disabled LFO source") {
+        VoiceModulationSourcesConfig envelope_only;
+        envelope_only.sample_rate = kSampleRate;
+        envelope_only.max_frames = 16;
+        envelope_only.envelope.enabled = true;
+        VoiceModulationSources<2> envelope_sources;
+        REQUIRE(envelope_sources.prepare(envelope_only));
+        auto result = envelope_sources.append_lfo_lane(
+            0, buffer, VoiceModulationTarget::Aux0, VoiceModulationRate::Constant, 8);
+        REQUIRE(result.status == VoiceModulationStatus::InvalidTarget);
     }
 
     SECTION("disabled envelope source") {
         auto result = sources.append_envelope_lane(0, buffer, VoiceModulationTarget::Gain,
                                                    VoiceModulationRate::Constant, 8);
         REQUIRE(result.status == VoiceModulationStatus::InvalidTarget);
+    }
+
+    SECTION("audio-rate reservations preserve an existing target lane") {
+        auto both = sine_config(100.0, 0.5f, VoiceLfoPhasePolicy::Retrigger, false);
+        both.envelope.enabled = true;
+        VoiceModulationSources<2> full;
+        REQUIRE(full.prepare(both));
+
+        VoiceModulationBuffer lfo_collision;
+        REQUIRE(lfo_collision.prepare({.max_lanes = 2, .max_frames = 16}));
+        REQUIRE(lfo_collision.begin_block(8).ok);
+        REQUIRE(lfo_collision.add_constant(VoiceModulationTarget::Aux0, 0.25f).ok);
+        auto result = full.append_lfo_lane(0, lfo_collision, VoiceModulationTarget::Aux0,
+                                           VoiceModulationRate::AudioRate, 8);
+        REQUIRE(result.status == VoiceModulationStatus::DuplicateTarget);
+        const auto* lfo_lane = lfo_collision.block().find(VoiceModulationTarget::Aux0);
+        REQUIRE(lfo_lane != nullptr);
+        REQUIRE(lfo_lane->rate == VoiceModulationRate::Constant);
+        REQUIRE(lfo_lane->constant_value == 0.25f);
+
+        VoiceModulationBuffer envelope_collision;
+        REQUIRE(envelope_collision.prepare({.max_lanes = 2, .max_frames = 16}));
+        REQUIRE(envelope_collision.begin_block(8).ok);
+        REQUIRE(envelope_collision.add_constant(VoiceModulationTarget::Gain, 0.75f).ok);
+        result = full.append_envelope_lane(0, envelope_collision, VoiceModulationTarget::Gain,
+                                           VoiceModulationRate::AudioRate, 8);
+        REQUIRE(result.status == VoiceModulationStatus::DuplicateTarget);
+        const auto* envelope_lane =
+            envelope_collision.block().find(VoiceModulationTarget::Gain);
+        REQUIRE(envelope_lane != nullptr);
+        REQUIRE(envelope_lane->rate == VoiceModulationRate::Constant);
+        REQUIRE(envelope_lane->constant_value == 0.75f);
     }
 
     SECTION("write_voice with a disabled source") {
