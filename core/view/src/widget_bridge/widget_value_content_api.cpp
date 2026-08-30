@@ -6,7 +6,9 @@
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/runtime/trace.hpp>
 
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -67,9 +69,28 @@ void BridgeRegistrars::register_widget_value_content_api(WidgetBridge& self) {
 
     register_bridge_function(api, "setText", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto t = args.get<std::string>(1, "");
+        PULP_TRACE_SCOPE_NAMED_ARGS(
+            "js", "setText_target",
+            "widget_id", ::perfetto::DynamicString{id},
+            "text_length", static_cast<std::int64_t>(t.size()));
         auto* v = self.widget(id);
         if (auto* e = dynamic_cast<TextEditor*>(v)) e->set_text(t);
-        else if (auto* l = dynamic_cast<Label*>(v)) l->set_text(t);
+        else if (auto* l = dynamic_cast<Label*>(v)) {
+            const auto& style = l->flex();
+            PULP_TRACE_SCOPE_NAMED_ARGS(
+                "js", "setText_label_state",
+                "widget_id", ::perfetto::DynamicString{id},
+                "preferred_width", style.preferred_width,
+                "preferred_height", style.preferred_height,
+                "dim_width", style.dim_width.value,
+                "dim_height", style.dim_height.value,
+                "dim_width_unit", static_cast<std::int64_t>(style.dim_width.unit),
+                "dim_height_unit", static_cast<std::int64_t>(style.dim_height.unit),
+                "multi_line", l->multi_line(),
+                "captured_wrap", l->captured_wrap_fallback(),
+                "attributed", l->has_attributed_string());
+            l->set_text(t);
+        }
         else if (auto* b = dynamic_cast<Badge*>(v)) b->set_text(t);
         return choc::value::Value();
     });
