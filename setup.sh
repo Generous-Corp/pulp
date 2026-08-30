@@ -1045,12 +1045,12 @@ assert_vst3_license_is_mit "$VST3_DIR" || true
 
 # AudioUnit SDK (macOS only)
 if [ "$PLATFORM" = "macOS" ]; then
-    # Pinned to 1.3.0 — the 1.4.0 release started including <expected>
-    # (C++23) in its headers, but the AppleClang/libc++ shipping on
-    # GitHub-hosted macOS-14 runners doesn't yet expose std::expected
-    # even at -std=c++23. 1.3.0 is the last C++17/20-friendly tag;
-    # bump to 1.4.x when AppleClang catches up. See issue #155.
-    AU_SDK_REF="AudioUnitSDK-1.3.0"
+    # 1.4 headers include <expected> and use std::expected / std::unexpected
+    # (C++23), which Apple clang exposes only to a TU compiled at
+    # -std=c++23. The tree stays at C++20; pulp-format and every generated
+    # ${target}_AU target pin CXX_STANDARD / OBJCXX_STANDARD 23 so the AU
+    # translation units can parse these headers.
+    AU_SDK_REF="AudioUnitSDK-1.4.0"
     AU_SHARED_DIR="$FETCHCONTENT_CACHE_ROOT/$(fetchcontent_cache_dir_name "AudioUnitSDK" "$AU_SDK_REF")"
     ensure_shared_git_source_with_retry "AudioUnitSDK" "https://github.com/apple/AudioUnitSDK.git" \
         "$AU_SDK_REF" "$(fetchcontent_cache_dir_name "AudioUnitSDK" "$AU_SDK_REF")"
