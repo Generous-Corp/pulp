@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -12,9 +14,9 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <winternl.h>
 #else
 #include <cerrno>
-#include <cstring>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -53,38 +55,211 @@ fs::path checked_artifact_name(std::string_view name) {
 
 #if defined(_WIN32)
 
+using NtCreateFileFunction = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
+                                              PIO_STATUS_BLOCK, PLARGE_INTEGER, ULONG, ULONG, ULONG,
+                                              ULONG, PVOID, ULONG);
+using NtSetInformationFileFunction = NTSTATUS(NTAPI*)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG,
+                                                      FILE_INFORMATION_CLASS);
+using RtlNtStatusToDosErrorFunction = ULONG(WINAPI*)(NTSTATUS);
+
+constexpr ULONG object_dont_reparse = 0x00001000L;
+
+NtCreateFileFunction nt_create_file() noexcept {
+    static const auto function = reinterpret_cast<NtCreateFileFunction>(
+        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtCreateFile"));
+    return function;
+}
+
+NtSetInformationFileFunction nt_set_information_file() noexcept {
+    static const auto function = reinterpret_cast<NtSetInformationFileFunction>(
+        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetInformationFile"));
+    return function;
+}
+
+DWORD windows_error_from_status(NTSTATUS status) noexcept {
+    static const auto function = reinterpret_cast<RtlNtStatusToDosErrorFunction>(
+        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlNtStatusToDosError"));
+    return function != nullptr ? function(status) : ERROR_GEN_FAILURE;
+}
+
 [[noreturn]] void throw_windows_error(const char* operation, const fs::path& path,
                                       DWORD error = GetLastError()) {
     throw fs::filesystem_error(operation, path,
                                std::error_code(static_cast<int>(error), std::system_category()));
 }
 
-HANDLE open_locked_directory(const fs::path& path) {
+void close_handle(HANDLE handle) noexcept {
+    if (handle != nullptr && handle != INVALID_HANDLE_VALUE)
+        CloseHandle(handle);
+}
+
+class UniqueHandle {
+  public:
+    explicit UniqueHandle(HANDLE handle = INVALID_HANDLE_VALUE) noexcept : handle_(handle) {}
+    ~UniqueHandle() {
+        close_handle(handle_);
+    }
+    UniqueHandle(UniqueHandle&& other) noexcept
+        : handle_(std::exchange(other.handle_, INVALID_HANDLE_VALUE)) {}
+    UniqueHandle& operator=(UniqueHandle&& other) noexcept {
+        if (this != &other) {
+            close_handle(handle_);
+            handle_ = std::exchange(other.handle_, INVALID_HANDLE_VALUE);
+        }
+        return *this;
+    }
+    UniqueHandle(const UniqueHandle&) = delete;
+    UniqueHandle& operator=(const UniqueHandle&) = delete;
+
+    HANDLE get() const noexcept {
+        return handle_;
+    }
+    HANDLE release() noexcept {
+        return std::exchange(handle_, INVALID_HANDLE_VALUE);
+    }
+
+  private:
+    HANDLE handle_;
+};
+
+HANDLE open_root_directory(const fs::path& path) {
     const HANDLE handle = CreateFileW(
-        path.c_str(), FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        path.c_str(), FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (handle == INVALID_HANDLE_VALUE)
-        throw_windows_error("pin artifact directory", path);
+        throw_windows_error("pin artifact root", path);
 
     FILE_ATTRIBUTE_TAG_INFO information{};
     if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &information,
                                       sizeof(information))) {
         const auto error = GetLastError();
         CloseHandle(handle);
-        throw_windows_error("inspect pinned artifact directory", path, error);
+        throw_windows_error("inspect pinned artifact root", path, error);
+    }
+    if ((information.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+        (information.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        CloseHandle(handle);
+        throw std::runtime_error("artifact root is not a real directory: " + path.string());
+    }
+    return handle;
+}
+
+HANDLE open_relative(HANDLE parent, const fs::path& name, ACCESS_MASK access, ULONG share,
+                     ULONG disposition, ULONG options, ULONG object_attributes,
+                     DWORD& error) noexcept {
+    const auto& native = name.native();
+    if (native.empty() || native.size() > (std::numeric_limits<USHORT>::max)() / sizeof(wchar_t)) {
+        error = ERROR_INVALID_NAME;
+        return INVALID_HANDLE_VALUE;
+    }
+
+    UNICODE_STRING unicode_name{};
+    unicode_name.Buffer = const_cast<PWSTR>(native.data());
+    unicode_name.Length = static_cast<USHORT>(native.size() * sizeof(wchar_t));
+    unicode_name.MaximumLength = unicode_name.Length;
+    OBJECT_ATTRIBUTES attributes{};
+    attributes.Length = sizeof(attributes);
+    attributes.RootDirectory = parent;
+    attributes.ObjectName = &unicode_name;
+    attributes.Attributes = OBJ_CASE_INSENSITIVE | object_attributes;
+    IO_STATUS_BLOCK status_block{};
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    const auto function = nt_create_file();
+    if (function == nullptr) {
+        error = ERROR_PROC_NOT_FOUND;
+        return INVALID_HANDLE_VALUE;
+    }
+    const auto status = function(&handle, access, &attributes, &status_block, nullptr,
+                                 FILE_ATTRIBUTE_NORMAL, share, disposition, options, nullptr, 0);
+    if (status < 0) {
+        error = windows_error_from_status(status);
+        return INVALID_HANDLE_VALUE;
+    }
+    error = ERROR_SUCCESS;
+    return handle;
+}
+
+HANDLE open_or_create_directory_relative(HANDLE parent, const fs::path& component,
+                                         const fs::path& display_path) {
+    DWORD error = ERROR_SUCCESS;
+    const HANDLE handle = open_relative(
+        parent, component, FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_OPEN_IF,
+        FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT | FILE_DIRECTORY_FILE,
+        object_dont_reparse, error);
+    if (handle == INVALID_HANDLE_VALUE)
+        throw_windows_error("open or create artifact directory", display_path, error);
+
+    FILE_ATTRIBUTE_TAG_INFO information{};
+    if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &information,
+                                      sizeof(information))) {
+        const auto inspect_error = GetLastError();
+        CloseHandle(handle);
+        throw_windows_error("inspect artifact directory", display_path, inspect_error);
     }
     if ((information.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
         (information.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
         CloseHandle(handle);
         throw std::runtime_error("artifact directory or parent is not a real directory: " +
-                                 path.string());
+                                 display_path.string());
     }
     return handle;
 }
 
-void close_handle(HANDLE handle) noexcept {
-    if (handle != nullptr && handle != INVALID_HANDLE_VALUE)
-        CloseHandle(handle);
+void inspect_destination_relative(HANDLE parent, const fs::path& name,
+                                  const fs::path& display_path) {
+    DWORD error = ERROR_SUCCESS;
+    UniqueHandle handle{
+        open_relative(parent, name, FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_OPEN,
+                      FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT, 0, error)};
+    if (handle.get() == INVALID_HANDLE_VALUE) {
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+            return;
+        throw_windows_error("inspect artifact destination", display_path, error);
+    }
+
+    FILE_ATTRIBUTE_TAG_INFO information{};
+    if (!GetFileInformationByHandleEx(handle.get(), FileAttributeTagInfo, &information,
+                                      sizeof(information))) {
+        throw_windows_error("inspect artifact destination", display_path);
+    }
+    if ((information.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        throw std::runtime_error("refusing to replace reparse-point artifact: " +
+                                 display_path.string());
+    }
+}
+
+void mark_delete_on_close(HANDLE handle) noexcept {
+    FILE_DISPOSITION_INFO disposition{};
+    disposition.DeleteFile = TRUE;
+    SetFileInformationByHandle(handle, FileDispositionInfo, &disposition, sizeof(disposition));
+}
+
+void rename_in_place(HANDLE file, const fs::path& destination_name, const fs::path& display_path) {
+    const auto& native = destination_name.native();
+    const auto name_bytes = native.size() * sizeof(wchar_t);
+    if (name_bytes > (std::numeric_limits<DWORD>::max)() - sizeof(FILE_RENAME_INFO))
+        throw std::runtime_error("artifact destination name is too long");
+
+    std::vector<std::byte> storage(sizeof(FILE_RENAME_INFO) + name_bytes, std::byte{});
+    auto* information = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
+    information->ReplaceIfExists = TRUE;
+    // A simple name with a null root keeps the rename in the already-open
+    // temporary file's parent. No pathname or reparse point is traversed.
+    information->RootDirectory = nullptr;
+    information->FileNameLength = static_cast<DWORD>(name_bytes);
+    std::memcpy(information->FileName, native.data(), name_bytes);
+    const auto function = nt_set_information_file();
+    if (function == nullptr)
+        throw_windows_error("resolve handle-relative rename", display_path, ERROR_PROC_NOT_FOUND);
+    IO_STATUS_BLOCK status_block{};
+    const auto status =
+        function(file, &status_block, information, static_cast<ULONG>(storage.size()),
+                 static_cast<FILE_INFORMATION_CLASS>(10));
+    if (status < 0)
+        throw_windows_error("publish artifact", display_path, windows_error_from_status(status));
 }
 
 #else
@@ -164,17 +339,14 @@ void write_all(int fd, std::span<const std::uint8_t> bytes, const fs::path& path
 struct PinnedArtifactDirectory::State {
     fs::path path;
 #if defined(_WIN32)
-    std::vector<HANDLE> directory_locks;
+    HANDLE directory_handle{INVALID_HANDLE_VALUE};
 #else
     int directory_fd{-1};
 #endif
 
     ~State() {
 #if defined(_WIN32)
-        for (auto iterator = directory_locks.rbegin(); iterator != directory_locks.rend();
-             ++iterator) {
-            close_handle(*iterator);
-        }
+        close_handle(directory_handle);
 #else
         if (directory_fd >= 0)
             ::close(directory_fd);
@@ -198,23 +370,15 @@ PinnedArtifactDirectory PinnedArtifactDirectory::open_or_create(const fs::path& 
     state->path = absolute;
 
 #if defined(_WIN32)
+    UniqueHandle current{open_root_directory(absolute.root_path())};
     fs::path cursor = absolute.root_path();
     for (const auto& component : absolute.relative_path()) {
         if (component.empty() || component == ".")
             continue;
         cursor /= component;
-        const auto attributes = GetFileAttributesW(cursor.c_str());
-        if (attributes == INVALID_FILE_ATTRIBUTES) {
-            const auto error = GetLastError();
-            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
-                throw_windows_error("inspect artifact directory", cursor, error);
-            if (!CreateDirectoryW(cursor.c_str(), nullptr) &&
-                GetLastError() != ERROR_ALREADY_EXISTS) {
-                throw_windows_error("create artifact directory", cursor);
-            }
-        }
-        state->directory_locks.push_back(open_locked_directory(cursor));
+        current = UniqueHandle{open_or_create_directory_relative(current.get(), component, cursor)};
     }
+    state->directory_handle = current.release();
 #else
     UniqueFd current{
         ::open(absolute.root_path().c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)};
@@ -240,59 +404,44 @@ void PinnedArtifactDirectory::publish(std::string_view name, std::span<const std
 
 #if defined(_WIN32)
     const auto destination = state_->path / relative;
-    const auto attributes = GetFileAttributesW(destination.c_str());
-    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        throw std::runtime_error("refusing to replace reparse-point artifact: " +
-                                 destination.string());
-    }
-    if (attributes == INVALID_FILE_ATTRIBUTES) {
-        const auto error = GetLastError();
-        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
-            throw_windows_error("inspect artifact destination", destination, error);
-    }
+    inspect_destination_relative(state_->directory_handle, relative, destination);
 
-    fs::path temporary;
-    HANDLE file = INVALID_HANDLE_VALUE;
+    fs::path temporary_name_path;
+    UniqueHandle file;
     for (int attempt = 0; attempt < 64; ++attempt) {
-        temporary = state_->path / fs::path{temporary_name()};
-        file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
-                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT |
-                               FILE_FLAG_WRITE_THROUGH,
-                           nullptr);
-        if (file != INVALID_HANDLE_VALUE)
+        temporary_name_path = fs::path{temporary_name()};
+        DWORD error = ERROR_SUCCESS;
+        file = UniqueHandle{open_relative(state_->directory_handle, temporary_name_path,
+                                          GENERIC_WRITE | DELETE | SYNCHRONIZE, 0, FILE_CREATE,
+                                          FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT |
+                                              FILE_NON_DIRECTORY_FILE | FILE_WRITE_THROUGH,
+                                          object_dont_reparse, error)};
+        if (file.get() != INVALID_HANDLE_VALUE)
             break;
-        if (GetLastError() != ERROR_FILE_EXISTS && GetLastError() != ERROR_ALREADY_EXISTS)
-            throw_windows_error("create temporary artifact", temporary);
+        if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS)
+            throw_windows_error("create temporary artifact", state_->path / temporary_name_path,
+                                error);
     }
-    if (file == INVALID_HANDLE_VALUE)
+    if (file.get() == INVALID_HANDLE_VALUE)
         throw std::runtime_error("cannot reserve a unique temporary artifact");
 
-    bool published = false;
     try {
         std::size_t offset = 0;
         while (offset < bytes.size()) {
             const auto chunk = static_cast<DWORD>(
-                std::min<std::size_t>(bytes.size() - offset, std::numeric_limits<DWORD>::max()));
+                std::min<std::size_t>(bytes.size() - offset, (std::numeric_limits<DWORD>::max)()));
             DWORD written = 0;
-            if (!WriteFile(file, bytes.data() + offset, chunk, &written, nullptr) || written == 0) {
-                throw_windows_error("write artifact", temporary);
+            if (!WriteFile(file.get(), bytes.data() + offset, chunk, &written, nullptr) ||
+                written == 0) {
+                throw_windows_error("write artifact", state_->path / temporary_name_path);
             }
             offset += written;
         }
-        if (!FlushFileBuffers(file))
-            throw_windows_error("flush artifact", temporary);
-        if (!CloseHandle(file))
-            throw_windows_error("close artifact", temporary);
-        file = INVALID_HANDLE_VALUE;
-        if (!MoveFileExW(temporary.c_str(), destination.c_str(),
-                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-            throw_windows_error("publish artifact", destination);
-        }
-        published = true;
+        if (!FlushFileBuffers(file.get()))
+            throw_windows_error("flush artifact", state_->path / temporary_name_path);
+        rename_in_place(file.get(), relative, destination);
     } catch (...) {
-        close_handle(file);
-        if (!published)
-            DeleteFileW(temporary.c_str());
+        mark_delete_on_close(file.get());
         throw;
     }
 #else
@@ -311,7 +460,7 @@ void PinnedArtifactDirectory::publish(std::string_view name, std::span<const std
     for (int attempt = 0; attempt < 64; ++attempt) {
         temporary = temporary_name();
         const int fd = ::openat(state_->directory_fd, temporary.c_str(),
-                                O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+                                O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
         if (fd >= 0) {
             file = UniqueFd{fd};
             break;

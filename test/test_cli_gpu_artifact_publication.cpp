@@ -5,15 +5,19 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <winioctl.h>
 #endif
 
 namespace {
@@ -97,30 +101,75 @@ TEST_CASE("GPU artifact publication never follows an existing artifact symlink",
     CHECK(read_bytes(outside) == sentinel);
 }
 #else
-TEST_CASE("GPU artifact publication pins the Windows directory chain against replacement",
-          "[cli][gpu][artifact-publication]") {
+struct MountPointReparseData {
+    DWORD tag;
+    WORD data_length;
+    WORD reserved;
+    WORD substitute_name_offset;
+    WORD substitute_name_length;
+    WORD print_name_offset;
+    WORD print_name_length;
+    WCHAR path_buffer[1];
+};
+
+static_assert(offsetof(MountPointReparseData, path_buffer) == 16);
+
+std::wstring nt_mount_point_target(const fs::path& target) {
+    const auto native = fs::absolute(target).native();
+    if (native.starts_with(L"\\\\"))
+        return L"\\??\\UNC\\" + native.substr(2);
+    return L"\\??\\" + native;
+}
+
+TEST_CASE("GPU artifact publication confines a Windows in-place reparse mutation",
+          "[cli][gpu][artifact-publication][reparse]") {
     TemporaryDirectory temporary;
     const auto artifacts = temporary.path / "artifacts";
-    const auto moved = temporary.path / "moved";
+    const auto escape = temporary.path / "escape";
+    fs::create_directory(escape);
     auto pinned = PinnedArtifactDirectory::open_or_create(artifacts);
 
-    std::error_code rename_error;
-    fs::rename(artifacts, moved, rename_error);
-    REQUIRE(rename_error);
-
     const HANDLE reparse_mutator =
-        CreateFileW(artifacts.c_str(), FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES,
+        CreateFileW(artifacts.c_str(), FILE_WRITE_ATTRIBUTES,
                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
                     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    const DWORD reparse_open_error =
-        reparse_mutator == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
-    CHECK(reparse_mutator == INVALID_HANDLE_VALUE);
-    CHECK(reparse_open_error == ERROR_SHARING_VIOLATION);
-    if (reparse_mutator != INVALID_HANDLE_VALUE)
-        CloseHandle(reparse_mutator);
+    REQUIRE(reparse_mutator != INVALID_HANDLE_VALUE);
+
+    const auto substitute = nt_mount_point_target(escape);
+    const auto print = fs::absolute(escape).native();
+    const auto path_bytes = (substitute.size() + 1 + print.size() + 1) * sizeof(wchar_t);
+    REQUIRE(path_bytes + sizeof(WORD) * 4 <= (std::numeric_limits<WORD>::max)());
+    std::vector<std::byte> storage(offsetof(MountPointReparseData, path_buffer) + path_bytes);
+    auto* reparse = reinterpret_cast<MountPointReparseData*>(storage.data());
+    reparse->tag = IO_REPARSE_TAG_MOUNT_POINT;
+    reparse->data_length = static_cast<WORD>(sizeof(WORD) * 4 + path_bytes);
+    reparse->reserved = 0;
+    reparse->substitute_name_offset = 0;
+    reparse->substitute_name_length = static_cast<WORD>(substitute.size() * sizeof(wchar_t));
+    reparse->print_name_offset = static_cast<WORD>((substitute.size() + 1) * sizeof(wchar_t));
+    reparse->print_name_length = static_cast<WORD>(print.size() * sizeof(wchar_t));
+    std::memcpy(reparse->path_buffer, substitute.c_str(),
+                (substitute.size() + 1) * sizeof(wchar_t));
+    std::memcpy(reinterpret_cast<std::byte*>(reparse->path_buffer) + reparse->print_name_offset,
+                print.c_str(), (print.size() + 1) * sizeof(wchar_t));
+
+    DWORD returned = 0;
+    REQUIRE(DeviceIoControl(reparse_mutator, FSCTL_SET_REPARSE_POINT, reparse,
+                            static_cast<DWORD>(storage.size()), nullptr, 0, &returned, nullptr));
+    REQUIRE((GetFileAttributesW(artifacts.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0);
 
     const std::vector<std::uint8_t> evidence{'p', 'i', 'n', 'n', 'e', 'd'};
     pinned.publish("observed.bin", evidence);
+    CHECK_FALSE(fs::exists(escape / "observed.bin"));
+
+    struct {
+        DWORD tag{IO_REPARSE_TAG_MOUNT_POINT};
+        WORD data_length{0};
+        WORD reserved{0};
+    } deletion;
+    REQUIRE(DeviceIoControl(reparse_mutator, FSCTL_DELETE_REPARSE_POINT, &deletion,
+                            sizeof(deletion), nullptr, 0, &returned, nullptr));
+    REQUIRE(CloseHandle(reparse_mutator));
     CHECK(read_bytes(artifacts / "observed.bin") == evidence);
 }
 #endif

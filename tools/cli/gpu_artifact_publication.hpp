@@ -9,8 +9,8 @@
 namespace pulp::cli::gpu_artifacts {
 
 // Owns an artifact directory identity for the complete publication window.
-// POSIX writes are descriptor-relative; Windows retains non-write/non-delete-
-// sharing handles for the directory chain while path-based publication runs.
+// Publication is relative to the pinned identity on both POSIX and Windows, so
+// replacing or turning its pathname into a reparse point cannot redirect bytes.
 class PinnedArtifactDirectory {
   public:
     static PinnedArtifactDirectory open_or_create(const std::filesystem::path& path);
