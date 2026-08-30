@@ -287,6 +287,81 @@ Creates a basic executable target with compile definitions for the app name and 
 On Apple platforms the target is created as a bundle-capable executable so it
 can accept `pulp_app_icon(...)`.
 
+## pulp_declare_standalone_document_type
+
+**Status**: usable
+
+Declare a file type an app owns, so macOS can launch it by double-clicking one
+of its documents.
+
+Call it **after** the target exists — after `pulp_add_plugin(... FORMATS
+standalone)` or `pulp_add_app()` — and name the app target itself
+(`MyPlugin_Standalone`, not `MyPlugin`).
+
+```cmake
+pulp_add_plugin(MyApp
+    FORMATS standalone
+    PLUGIN_NAME "MyApp"
+    BUNDLE_ID "com.example.myapp"
+)
+
+pulp_declare_standalone_document_type(MyApp_Standalone
+    UTI            com.example.myapp.project
+    EXTENSION      myproj
+    MIME           application/vnd.example.myapp+zip
+    DESCRIPTION    "MyApp Project"
+    CONFORMS_TO    public.data public.archive com.pkware.zip-archive
+    ROLE           Editor
+    RANK           Owner
+)
+```
+
+### Parameters
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `UTI` | Yes | -- | Reverse-DNS uniform type identifier for the file type |
+| `EXTENSION` | Yes | -- | One or more bare filename extensions; a leading `.` is normalized away |
+| `DESCRIPTION` | No | the `UTI` | Human-readable type name shown in Finder and Open panels |
+| `MIME` | No | -- | One or more MIME types published in the exported declaration |
+| `CONFORMS_TO` | No | `public.data` | UTIs this type conforms to |
+| `ROLE` | No | `Editor` | `Editor`, `Viewer`, `Shell`, or `None` |
+| `RANK` | No | `Owner` | `Owner`, `Default`, `Alternate`, or `None` |
+
+`RANK None` is the shape a helper or secondary app needs: it can open the type
+but must never become the system's default handler for it.
+
+### What it emits
+
+Each call adds one entry to **both** `CFBundleDocumentTypes` (the types this app
+opens) and `UTExportedTypeDeclarations` (this app *defines* the type). The pair
+is not separable here: an app that declares a document type for a UTI nothing
+exports gets no document icon and unreliable Launch Services routing.
+
+Call it more than once on one target to declare more than one file type; the
+declarations accumulate. Declaring the *same* UTI twice is an error — pass every
+extension of a single type in one call (`EXTENSION proj projx`).
+
+### Behavior notes
+
+- **Apple only.** On Windows, Linux, and Android the call validates its
+  arguments and then does nothing, so a cross-platform `CMakeLists.txt` needs no
+  `if(APPLE)` guard. Argument checking still runs on every platform, so a typo
+  fails the same way everywhere.
+- **It fails configure rather than dropping a declaration.** A missing `UTI` or
+  `EXTENSION`, a non-reverse-DNS `UTI`, an unknown `ROLE`/`RANK`, a target that
+  is not a macOS application bundle, and a duplicate `UTI` are all
+  `FATAL_ERROR`s — a silently ignored document type builds, installs, and then
+  simply does nothing on double-click.
+- CMake cannot append keys to the `Info.plist` it synthesizes, so the function
+  points `MACOSX_BUNDLE_INFO_PLIST` at a generated plist built from
+  `PulpInfoPlist.standalone.in`. That template carries CMake's default key set
+  unchanged, still as `${MACOSX_BUNDLE_*}` placeholders, so every existing
+  bundle value — including the icon file `pulp_app_icon()` sets, in either call
+  order — is preserved. An app that never calls this function is untouched.
+- If the target already has a hand-authored `MACOSX_BUNDLE_INFO_PLIST`, the
+  call fails rather than overwriting it.
+
 ## pulp_app_icon
 
 **Status**: usable

@@ -79,13 +79,17 @@ def _has_tag(module: dict, tag: str) -> bool:
 
 
 def candidates(references: list[TagReference], inv: dict,
-               limit: int = 6) -> dict[str, list[tuple[str, str, dict]]]:
+               limit: int = 6,
+               allowed: set[tuple[str, str]] | None = None
+               ) -> dict[str, list[tuple[str, str, dict]]]:
     """Installed, usable examples for each requested or inferred tag."""
     out: dict[str, list[tuple[str, str, dict]]] = {}
     for reference in references:
         rows = []
         for plugin, package in inv.items():
             for model, module in (package.get("modules") or {}).items():
+                if allowed is not None and (plugin, model) not in allowed:
+                    continue
                 if _has_tag(module, reference.tag):
                     rank = next((index for index, tag in enumerate(module.get("tags") or [])
                                  if _tag_matches(str(tag), reference.tag)), 99)
@@ -94,6 +98,36 @@ def candidates(references: list[TagReference], inv: dict,
         out[reference.tag] = [(plugin, model, module)
                               for _, plugin, model, module in rows[:limit]]
     return out
+
+
+def add_required_candidates(references: list[TagReference], inv: dict,
+                            selected: set[tuple[str, str]],
+                            allowed: set[tuple[str, str]] | None = None,
+                            limit: int = 6
+                            ) -> dict[str, list[tuple[str, str, dict]]]:
+    """Keep explicit-tag choices inside a narrowed model inventory.
+
+    Structural idioms compile their own small, port-complete shortlist.  An
+    explicit tag is an independent hard requirement, so its legal choices
+    must join that shortlist before the full inventory is narrowed.  Failing
+    here is intentionally pre-provider: telling a model that a tag is both
+    required and unavailable can only spend a call on a patch final lint will
+    reject.
+    """
+    required = [reference for reference in references if reference.explicit]
+    choices = candidates(required, inv, limit=limit, allowed=allowed)
+    missing = [reference.tag for reference in required
+               if not choices.get(reference.tag)]
+    if missing:
+        labels = ", ".join(f"#{tag}" for tag in missing)
+        raise ValueError(
+            "the requested explicit tag has no permitted, "
+            f"fresh-generation-safe installed module: {labels}")
+    selected.update(
+        (plugin, model)
+        for rows in choices.values()
+        for plugin, model, _ in rows)
+    return choices
 
 
 def render_tag_context(references: list[TagReference], inv: dict) -> str:
@@ -133,6 +167,14 @@ def required_tag_errors(patch: dict, inv: dict,
             errors.append(
                 f"required #{reference.tag} tag has no matching module in the patch")
     return errors
+
+
+def unsatisfied_explicit_references(references: list[TagReference],
+                                    patch: dict, inv: dict
+                                    ) -> list[TagReference]:
+    """Explicit tags a valid existing patch does not already satisfy."""
+    return [reference for reference in references if reference.explicit and
+            required_tag_errors(patch, inv, [reference])]
 
 
 def exclusive_maker_errors(patch: dict, mentions: dict) -> list[str]:

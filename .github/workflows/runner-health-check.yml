@@ -1,6 +1,6 @@
 name: Runner health check
 
-# Off-fleet queue-age watchdog for the CI runner lanes.
+# Off-fleet queue-age watchdog for CI dispatch and runner lanes.
 #
 # Runs on ubuntu-latest ON PURPOSE. A guard that lives on the fleet dies with
 # the fleet: routing this to the self-hosted macOS lanes would mean the exact
@@ -33,6 +33,13 @@ name: Runner health check
 # Analysis + thresholds live in tools/scripts/queue_age_watchdog.py, tested by
 # tools/scripts/test_queue_age_watchdog.py (which pins the measured baseline
 # above as a must-stay-quiet regression case).
+#
+# A pull-request Build and Test run can also stall before job expansion, while
+# its jobs API remains empty and no requested labels exist to compare. The same
+# age thresholds cover that scheduler/concurrency-layer symptom independently
+# of lane liveness; a stable exact-run reread plus a successful empty jobs
+# response is the required evidence. Push, dispatch, and merge-group runs are
+# deliberately outside this watchdog's pre-expansion surface.
 #
 # Issue lifecycle mirrors auto-release-watchdog.yml / release-cadence-check.yml:
 # one tracking issue, edited in place each sweep, closed automatically on
@@ -71,12 +78,13 @@ jobs:
   check:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
-    name: Check queue age against lane liveness
+    name: Check dispatch and queue age
 
     env:
       WARN_MINUTES: ${{ github.event.inputs.warn_minutes || '30' }}
       ALARM_MINUTES: ${{ github.event.inputs.alarm_minutes || '45' }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      # Keep the established title so recurrence reopens the existing tracker.
       TRACKING_TITLE: 'CI queue stall: jobs waiting with no live runner'
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -102,11 +110,14 @@ jobs:
               | tee scan.log
 
           count=$(python3 -c "import json; print(sum(1 for f in json.load(open('findings.json')) if f['level'] == 'alarm'))")
+          degraded=$(python3 -c "import json; s=json.load(open('snapshot.json')); print('true' if s.get('errors') or s.get('truncated') else 'false')")
           echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "degraded=${degraded}" >> "$GITHUB_OUTPUT"
           echo "Alarm count: ${count}"
+          echo "Degraded: ${degraded}"
 
       - name: Maintain tracking issue
-        if: env.DRY_RUN != 'true'
+        if: env.DRY_RUN != 'true' && steps.scan.outputs.degraded != 'true'
         shell: bash
         env:
           COUNT: ${{ steps.scan.outputs.count }}
@@ -130,9 +141,9 @@ jobs:
 
           if [ "$COUNT" -eq 0 ]; then
               if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
-                  echo "Queues drained — closing tracker #${existing}."
+                  echo "Dispatch and queues recovered — closing tracker #${existing}."
                   gh api -X POST "/repos/${repo}/issues/${existing}/comments" \
-                      -f body="Sweep on $(date -u '+%Y-%m-%d %H:%M UTC') found no lane stalled: every queued job is either under the threshold or has a live runner. Closing. (${run_url})"
+                      -f body="Sweep on $(date -u '+%Y-%m-%d %H:%M UTC') found no dispatch or lane stall: every queued job/run is either under the threshold or advancing. Closing. (${run_url})"
                   gh api -X PATCH "/repos/${repo}/issues/${existing}" \
                       -f state=closed \
                       -f state_reason=completed

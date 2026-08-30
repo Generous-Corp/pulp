@@ -133,14 +133,28 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/signal/character_delay/reverse.hpp",
+        "fingerprint": "sha256:8ffe9c4341a734e18aeae9900554cb042acfc3dd0982b243cde8705067140c91",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Character Delay's internal reverse segmenter, specialized for continuously "
+            "slewed window lengths and modulated fractional reads. docs/reference/"
+            "reverse-buffer.md records the decision to keep it internal and to expose "
+            "ReverseBufferT as the public reverse primitive, so it makes no installed "
+            "agent capability claim of its own."
+        ),
+    },
+    {
         "include": "pulp/signal/reverse_buffer.hpp",
         "fingerprint": "sha256:cf64121f3ebd0bf931a60baf60860c8562c3d0dd7c4b2c866da07c38e72e5db8",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
             "Prepared fixed-capacity streaming window reversal with explicit boundary "
-            "shaping and a finite tail; it is a bounded buffering surface reused by "
-            "effects rather than an advertised generator DSP claim."
+            "shaping and a finite tail; it is a bounded buffering primitive intended for "
+            "composition inside effects rather than an advertised generator DSP claim. "
+            "It has no in-tree consumer today beyond the signal umbrella header."
         ),
     },
     {
@@ -150,8 +164,9 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "capability_keys": [],
         "rationale": (
             "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo "
-            "range; it is a bounded conversion surface reused by delay kernels rather "
-            "than an advertised generator DSP claim."
+            "range; it is a bounded conversion primitive intended for composition inside "
+            "delay kernels rather than an advertised generator DSP claim. It has no "
+            "in-tree consumer today beyond the signal umbrella header."
         ),
     },
     {

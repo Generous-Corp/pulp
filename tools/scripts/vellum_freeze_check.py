@@ -622,7 +622,10 @@ def validate_event(
 
 
 def load_new_events(
-    repo: pathlib.Path, head: str, entries: list[DiffEntry]
+    repo: pathlib.Path,
+    head: str,
+    entries: list[DiffEntry],
+    source_head: str | None = None,
 ) -> list[tuple[str, dict[str, Any]]]:
     event_changes = [
         entry for entry in entries
@@ -635,7 +638,10 @@ def load_new_events(
         raise FreezeError(
             f"a change may add at most {MAX_EVENTS_PER_CHANGE} Vellum events"
         )
-    commit_time_raw = _git(repo, "show", "-s", "--format=%cI", head).decode().strip()
+    commit_time_ref = source_head or head
+    commit_time_raw = _git(
+        repo, "show", "-s", "--format=%cI", commit_time_ref
+    ).decode().strip()
     try:
         commit_time = dt.datetime.fromisoformat(commit_time_raw)
     except ValueError as exc:
@@ -1306,7 +1312,7 @@ def main(argv: list[str] | None = None) -> int:
         affected = affected_slices(
             [mapping for mapping in (base_map, head_map) if mapping is not None], paths
         )
-        events = load_new_events(repo, args.head, entries)
+        events = load_new_events(repo, args.head, entries, args.source_head)
         authority_commit = head_map["activation"].get("vellum_authority_commit")
         _validate_event_coverage(
             events,
