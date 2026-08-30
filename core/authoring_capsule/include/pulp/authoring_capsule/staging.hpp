@@ -94,4 +94,19 @@ runtime::Result<void, CapsuleError> extract_declared(const CapsuleArchive& archi
 runtime::Result<std::vector<std::uint8_t>, CapsuleError>
 read_staged_member(const StagingArea& staging, const FileEntry& entry);
 
+/// Reads a declared member from a staging root the caller does not own.
+///
+/// `ProfileValidator::validate_staged()` receives the staging root as a path
+/// rather than as a `StagingArea`, and a `StagingArea` cannot be adopted from
+/// an existing tree — `create()` makes a new one. Without this overload the
+/// entry point that exists so a consumer never joins an untrusted member path
+/// to a directory by hand is unreachable from the one place every consumer
+/// needs exactly that, and each profile hand-rolls the join instead.
+///
+/// Identical to the overload above in every respect: the same admission, the
+/// same directory-identity checks before and after the read, the same errors.
+/// The `StagingArea` is only ever read for its root.
+runtime::Result<std::vector<std::uint8_t>, CapsuleError>
+read_staged_member(const std::filesystem::path& staging_root, const FileEntry& entry);
+
 }  // namespace pulp::authoring_capsule

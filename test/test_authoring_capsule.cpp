@@ -3487,6 +3487,57 @@ TEST_CASE("read_staged_member joins the path inside the layer that owns admissio
     }
 }
 
+TEST_CASE("a staging root reaches the same read as the staging area that owns it",
+          "[authoring-capsule][staging]") {
+    // `ProfileValidator::validate_staged()` is handed the root as a path, and a
+    // `StagingArea` cannot be adopted from an existing tree. A profile that
+    // cannot reach this entry point joins the untrusted member path to the root
+    // itself, which is the duplication the join exists to prevent.
+    TempDir temp;
+    auto fixture = open_fixture_capsule(temp.path() / "fixture.capsule");
+    auto staging = StagingArea::create(temp.path());
+    REQUIRE(staging.has_value());
+    REQUIRE(extract_declared(fixture.archive, fixture.preview.manifest, *staging).has_value());
+
+    const std::filesystem::path root = staging->root();
+
+    for (const FileEntry& entry : fixture.preview.manifest.files) {
+        INFO(entry.path);
+        const auto owned = read_staged_member(*staging, entry);
+        const auto by_root = read_staged_member(root, entry);
+        REQUIRE(owned.has_value());
+        REQUIRE(by_root.has_value());
+        CHECK(*by_root == *owned);
+        CHECK(pulp::runtime::sha256_hex(by_root->data(), by_root->size()) == entry.sha256);
+    }
+
+    SECTION("the admission travels with the root, not with the staging area") {
+        const FileEntry& audio = fixture.preview.manifest.files[0];
+
+        FileEntry escaping = audio;
+        escaping.path = "../render.pcm";
+        const auto refused = read_staged_member(root, escaping);
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().status == CapsuleStatus::path_rejected);
+        CHECK(refused.error().required == "no-dot-component");
+
+        FileEntry oversized = audio;
+        oversized.bytes = audio.bytes + 1;
+        const auto mismatched = read_staged_member(root, oversized);
+        REQUIRE_FALSE(mismatched.has_value());
+        CHECK(mismatched.error().status == CapsuleStatus::staging_failed);
+        CHECK(mismatched.error().required == std::to_string(audio.bytes + 1));
+        CHECK(mismatched.error().found == std::to_string(audio.bytes));
+    }
+
+    SECTION("an empty root is refused rather than resolved against the process directory") {
+        const auto refused = read_staged_member(std::filesystem::path{},
+                                                fixture.preview.manifest.files[0]);
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().status == CapsuleStatus::staging_failed);
+    }
+}
+
 TEST_CASE("a FLAC source decodes, and to the same samples as the WAV of that content",
           "[authoring-capsule][canonical-pcm]") {
     // The control the FLAC refusal cases have been missing: without a stream

@@ -963,7 +963,7 @@ runtime::Result<void, CapsuleError> extract_declared(const CapsuleArchive& archi
 }
 
 runtime::Result<std::vector<std::uint8_t>, CapsuleError>
-read_staged_member(const StagingArea& staging, const FileEntry& entry) {
+read_staged_member(const std::filesystem::path& staging_root, const FileEntry& entry) {
     using Result = runtime::Result<std::vector<std::uint8_t>, CapsuleError>;
     const auto reject = [](CapsuleStatus status, std::string subject, std::string required = {},
                            std::string found = {}) {
@@ -971,7 +971,7 @@ read_staged_member(const StagingArea& staging, const FileEntry& entry) {
             CapsuleError{status, std::move(subject), std::move(required), std::move(found)}));
     };
 
-    const auto& root = staging.root();
+    const auto& root = staging_root;
     if (root.empty())
         return reject(CapsuleStatus::staging_failed, {});
     auto root_handle = DirectoryHandle::open(root);
@@ -1005,6 +1005,11 @@ read_staged_member(const StagingArea& staging, const FileEntry& entry) {
         return reject(CapsuleStatus::staging_failed, path_to_utf8(root));
 
     return Result(runtime::Ok(std::move(bytes)));
+}
+
+runtime::Result<std::vector<std::uint8_t>, CapsuleError>
+read_staged_member(const StagingArea& staging, const FileEntry& entry) {
+    return read_staged_member(staging.root(), entry);
 }
 
 }  // namespace pulp::authoring_capsule
