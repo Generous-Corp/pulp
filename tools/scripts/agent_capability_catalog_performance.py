@@ -571,7 +571,7 @@ EXPORTS = [
             include="pulp/midi/note_delay.hpp",
             qualified_name="pulp::midi::NoteDelay<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:a40fff6bb8e925908aa919c5e772c279daf41f4ea8aab4df9f3c328bf039d29c",
+            header_fingerprint="sha256:c3cdd5ca2c4b7d82efbb46f2740d42a4987796403cdb950ba2c96dc9bca3c731",
         )],
         _link_probes=[{
             "role": "entrypoint",
