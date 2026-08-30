@@ -342,6 +342,54 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="midi.linear-step-player",
+        domain="midi",
+        summary=(
+            "Bounded sample-accurate linear multi-lane step player with per-step gate, pitch "
+            "offset, velocity, probability, ratchet, tie/slide, and per-lane direction modes."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "reserve output and ledgers on control",
+            "process": "audio",
+            "reset": "audio with prepared output",
+            "release": "none",
+        },
+        state_model=(
+            "Fixed lane, sounding-note, and release ledgers retain per-lane playheads and "
+            "choke resolution without allocation."
+        ),
+        seed_model="explicit spec random_seed indexed by grid coordinate",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="lane specifications, step grid, absolute sample block, tempo map, and transport event",
+        output_domain="owned note-on and note-off MIDI event stream",
+        units=["ticks", "samples", "MIDI note", "velocity", "percent", "semitones"],
+        latency="sample-scheduled within the supplied block",
+        tail="owned note releases and bounded release debt",
+        scheduling="absolute-sample transport-aware",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/midi/step_player.hpp",
+            qualified_name="pulp::midi::StepPlayer<>",
+            target="Pulp::midi",
+            header_fingerprint="sha256:840cc4783c205d1e0416d1115c74a1a2ac3dd15fbea9185cdcbfb679a9898cd7",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::midi::StepPlayer<>",
+            "operation": "member_call",
+            "member": "valid",
+            "arguments": "",
+        }],
+    ),
+    capability(
         key="midi.controller-mapping",
         domain="midi",
         summary="Fixed-capacity controller remapping with bounded physical-domain smoothing.",

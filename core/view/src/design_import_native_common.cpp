@@ -275,6 +275,22 @@ bool bind_imported_view(View& view,
                                    static_cast<int>(segmented->segments().size())});
         return true;
     }
+    if (auto* combo = dynamic_cast<ComboBox*>(&view);
+        combo && has_text(md.param_key)) {
+        if (auto* combo_ctx =
+                dynamic_cast<NativeImportComboBoxBindingContext*>(&ctx)) {
+            combo_ctx->bind_combo_box(
+                *combo,
+                NativeImportSegmentedBindingDescriptor{
+                    .route_id = text_or_empty(md.route_id),
+                    .param_key = text_or_empty(md.param_key),
+                    .binding_module = text_or_empty(md.binding_module),
+                    .binding_param = text_or_empty(md.binding_param),
+                    .segment_count = static_cast<int>(combo->items().size())});
+            return true;
+        }
+        return false;
+    }
     if (auto* pad = dynamic_cast<XYPad*>(&view);
         pad && has_text(md.x_param_key) && has_text(md.y_param_key)) {
         ctx.bind_xy_pad(*pad,
@@ -354,7 +370,9 @@ bool bind_imported_view(View& view,
     return false;
 }
 
-bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
+bool can_bind_imported_view(View& view,
+                            const NativeBindingMetadata& md,
+                            NativeImportBindingContext& ctx) {
     if (dynamic_cast<Knob*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<Fader*>(&view) && has_text(md.param_key))
@@ -363,6 +381,8 @@ bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
         return true;
     if (dynamic_cast<SegmentedControl*>(&view) && has_text(md.param_key))
         return true;
+    if (dynamic_cast<ComboBox*>(&view) && has_text(md.param_key))
+        return dynamic_cast<NativeImportComboBoxBindingContext*>(&ctx) != nullptr;
     if (dynamic_cast<Stepper*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
@@ -417,7 +437,7 @@ void bind_imported_node_by_anchor(View& root,
                         "' matched multiple materialized native views, so no binding callback was installed",
                     "stable_anchor_id");
             } else if (matches.first != nullptr) {
-                if (!can_bind_imported_view(*matches.first, md)) {
+                if (!can_bind_imported_view(*matches.first, md, ctx)) {
                     append_binding_diagnostic(
                         diagnostics,
                         node,
@@ -762,7 +782,14 @@ ResolvedNativeNode resolve_node(const IRNode& node,
                                 std::string_view path,
                                 const AssetIndex& assets) {
     ResolvedNativeNode out;
-    if (auto audio_kind = kind_from_audio(node.audio_widget)) {
+    // Browser capture carries both the live parameter role (audio_widget) and
+    // the authored presentation (type). A select is collapsed; a tab remains
+    // segmented. Respect the more specific presentation before the generic
+    // selector audio role can erase it.
+    if (node.audio_widget == AudioWidgetType::selector &&
+        lower_copy(node.type) == "select") {
+        out.kind = NativeWidgetKind::combo_box;
+    } else if (auto audio_kind = kind_from_audio(node.audio_widget)) {
         out.kind = *audio_kind;
     } else if (auto name_kind = kind_from_name(node)) {
         out.kind = *name_kind;
@@ -908,7 +935,7 @@ float normalized_audio_default_impl(const IRNode& node) {
     return std::clamp(node.audio_default, 0.0f, 1.0f);
 }
 
-float normalized_audio_value(const IRNode& node) {
+float normalized_audio_value_impl(const IRNode& node) {
     if (auto value = attr_float(node, "value")) return std::clamp(*value, 0.0f, 1.0f);
     return normalized_audio_default_impl(node);
 }
@@ -2209,7 +2236,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             // builds the identical control from the identical list.
             auto combo = std::make_unique<ComboBox>();
             combo->set_items(semantics.combo_items);
-            combo->set_selected_silent(0);
+            combo->set_selected_silent(semantics.combo_selected_index);
             return combo;
         }
         case NativeWidgetKind::checkbox: {
@@ -2564,6 +2591,10 @@ float normalized_audio_default(const IRNode& node) {
     return normalized_audio_default_impl(node);
 }
 
+float normalized_audio_value(const IRNode& node) {
+    return normalized_audio_value_impl(node);
+}
+
 // Exported (design_import_native_common.hpp). Defined in the named namespace so
 // both the runtime materializer and the C++ codegen size an imported image and
 // resolve hit ownership from one definition. Call the attr/lower helpers from
@@ -2808,6 +2839,10 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
             out.text_value = out.text;
     }
 
+    out.normalized_value = normalized_audio_value_impl(node);
+    out.normalized_default = normalized_audio_default(node);
+    out.peak_value = attr_float(node, "peak").value_or(out.normalized_value);
+
     // `pulpChoices` is a pipe-separated list, because a segment label may
     // legitimately contain a comma ("1, 2 & 4") and a comma-separated list
     // would silently split it into two segments.
@@ -2825,12 +2860,19 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
     // binding descriptor's count.
     if (resolved.kind == NativeWidgetKind::segmented && out.segments.empty())
         out.segments.push_back(out.text.empty() ? std::string("1") : out.text);
-    // A dropdown's shown value is its only real option in a static design.
-    // Resolved here, in the shared model, so the runtime materializer and the
-    // baked C++ lane build the same ComboBox from the same list.
+    // A browser-authored dropdown carries the full declared choice table;
+    // static design-system dropdowns carry only their shown text. Resolve both
+    // here so runtime materialization and baked C++ build the same ComboBox.
     if (resolved.kind == NativeWidgetKind::combo_box) {
-        std::string selected = first_text_descendant(node).value_or(out.text);
-        if (!selected.empty()) out.combo_items.push_back(std::move(selected));
+        if (!out.segments.empty()) {
+            out.combo_items = out.segments;
+            out.combo_selected_index = selector_segment_index(
+                out.normalized_value,
+                static_cast<int>(out.combo_items.size()));
+        } else {
+            std::string selected = first_text_descendant(node).value_or(out.text);
+            if (!selected.empty()) out.combo_items.push_back(std::move(selected));
+        }
     }
     out.stepper_step = imported_stepper_step(node);
     out.checked = attr_bool(node, "checked");
@@ -2843,10 +2885,6 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
     out.toggle_off_border_color = non_empty(md.off_border_color);
     out.toggle_corner_radius = md.corner_radius_value();
     out.toggle_font_size = md.font_size_value();
-
-    out.normalized_value = normalized_audio_value(node);
-    out.normalized_default = normalized_audio_default(node);
-    out.peak_value = attr_float(node, "peak").value_or(out.normalized_value);
 
     if (resolved.kind == NativeWidgetKind::fader) {
         if (auto orientation = attr(node, "orientation");

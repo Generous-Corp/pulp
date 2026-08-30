@@ -105,10 +105,16 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
     } else if (auto* c = dynamic_cast<ComboBox*>(w)) {
         // Mirror createCombo's inline wiring so a `<combo>`/`<select>` tag
         // routed through __domAppend dispatches the same `select` event as the
-        // factory path.
-        c->on_change = [alive, engine, id](int idx) {
+        // factory path. A selection is an instantaneous parameter edit, so
+        // bracket it like SegmentedControl to keep host automation balanced.
+        wire_parameter_gestures(id, w);
+        c->on_change = [this, alive, engine, id](int idx) {
             BridgeCallbackScope scope(alive);
+            if (!alive || !alive->load(std::memory_order_acquire)) return;
+            begin_param_gesture(id);
             dispatch_event(alive, engine, id, "select", std::to_string(idx));
+            if (alive && alive->load(std::memory_order_acquire))
+                end_param_gesture(id);
         };
     } else if (auto* cb = dynamic_cast<Checkbox*>(w)) {
         // Mirror createCheckbox's inline `change` wiring.

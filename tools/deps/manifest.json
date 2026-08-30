@@ -1135,10 +1135,10 @@
         "skia_release_tag": "chrome/m153",
         "built_revision": "26cef0256b0e37363dd84d4714bce4cd3689817f",
         "release_metadata_url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/release-metadata.json",
-        "release_metadata_sha256": "44861260f5e1249175d3716c57fd108667e0734817c43632a110232c7356f5aa",
+        "release_metadata_sha256": "03a3690bedefd77b73ccf444dd640c2b042b6e6ecffebd0685018a44482a694f",
         "release_immutable": false,
-        "pair_manifest_sha256": "58b81d79f1dfc70f73d5d7554e588c72e80d1189f22599cea29b1b315e5e9906",
-        "chromium_revision": "c819b97c4a49e91ce684e6e19b65b58a25bb3e8b",
+        "pair_manifest_sha256": "f7831fe7626654719fa3c64ea2dbeda64e4d6f9f0160be51a7f77d054036f330",
+        "chromium_revision": "818aa77f91b88555c95377abdad8e0bcadd08d93",
         "chromium_deps_blob": "5382a7740f7185ebf3d4de20f98f283d3769f924",
         "chromium_branch": "8010",
         "chromium_skia": "9d07e5bad9e3e21da2426946e589daa647218271",
@@ -1150,35 +1150,35 @@
         "release_assets": {
           "mac-arm64": {
             "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-mac-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "ee172d7b4b7141978dc8617f7dc95fa6c37c9e9f81e248fd095d148cc002428b"
+            "sha256": "54c82625b96a9c1b15a6ab3ba0e407ea5fc6ba565bb770c32769c035569019a2"
           },
           "mac-x86_64": {
             "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-mac-x86_64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "6a67e1877fdf8d8f4df1916fe7926b9ea8eece6dac14d80cc3cf1086ff8cf0cc"
+            "sha256": "c4c525be3f061d397f2facf25038222ea6ecf1c444a7f082ee98c78647299060"
           },
           "linux-x64": {
             "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-linux-x64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "d2d8ae0ee04eaf9a2e1c6e5ae5c38aa548ca285db360234a08e1f460386f9fd3"
+            "sha256": "e3558bad6684f30f12849c9fabfc8f8e5fd9a2f99c2f532b953a6754a6d5eb58"
           },
           "linux-arm64": {
             "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-linux-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "1a01be309cd4618ce290922b3c6315b82429d51c455b53ca0a3c50b0d119bc43"
+            "sha256": "6c5cde373628c16b34832b8739b9de137f28bf50a1c3dc6b41f452462e18631a"
           },
           "win-x64": {
             "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-win-x64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "3bc0eb7f3802e15b04acac647d4ffd23aa0e86f5e097ad899478da44f0f416d5"
+            "sha256": "d8dceac57a4b614cd2171e47d2f6fc76853f0412a32eb51c92e6c1394ff14c78"
           },
           "win-arm64": {
             "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-win-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "f775d2d08c733670656d70960bce24d45a68957562f49d5c475438cd169cadaf"
+            "sha256": "fe37083683a125678421ca683a8cef830805f6f61aff807331863ef9bf5c790b"
           },
           "android-arm64": {
             "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-android-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "78a92e0603109a3ad6198bb9b27230bcf510eeec487da76c818bc3bbb2681b0d"
+            "sha256": "53e63224d89104eb064f14336a5800f65174ce1b35dc16753255ba0a86cec2e0"
           },
           "ios-simulator-arm64": {
             "url": "https://github.com/danielraffel/v8-builder/releases/download/v8-m153-15.3.76.5-26cef0256b0e/v8-ios-simulator-arm64-m153-15.3.76.5-26cef0256b0e.zip",
-            "sha256": "242f8a654871c7b26924acbe1dd2322f9a5a2a89fc8df4796d3e460f7972a49c",
+            "sha256": "46eef1d81a1fd5193ef0404ac6c131151b110b2dcf04f93e1b04962c9dbbf206",
             "library": false
           }
         }

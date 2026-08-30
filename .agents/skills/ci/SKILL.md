@@ -544,10 +544,13 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    bare `--paginate` concatenates page documents and breaks its single-document
    JSON decoding past 100 check runs.
 3. **Only THEN consider capacity — and verify, don't assume.** Same-repository
-   self-hosted PR and merge-group `macos` gates run on the M1/M3/M5 local JIT VM
-   pool, selected by the mutually exclusive `pulp-build-pr-head` and
-   `pulp-build-merge-group` event classes. Fork, hosted, workflow-dispatch, and
-   operator selectors retain their separately resolved shapes.
+   self-hosted PR and merge-group `macos` gates target the event-class-v2 local
+   JIT VM pool, selected by the mutually exclusive `pulp-build-pr-head` and
+   `pulp-build-merge-group` event classes. M1, M3, and M5 have compatible
+   profiles, but a checked-in profile is not live capacity: only a host whose
+   matching Pulp gate supervisors are enabled and healthy is participating.
+   Fork, hosted, workflow-dispatch, and operator selectors retain their
+   separately resolved shapes.
    Confirm currently registered runners with:
    ```bash
    ghapp api repos/Generous-Corp/pulp/actions/runners \
@@ -555,10 +558,13 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    ```
    A zero-runner result is consistent with healthy idle but proves neither
    health nor failure; use queue age plus host-side supervisor/lease/VM
-   evidence. What DOES
-   queue independently is the **GitHub-hosted advisory lanes** (Linux, Windows,
-   sanitizers, coverage, android) on GitHub's shared pool; those are advisory, not
-   the required gate, so a long queue there does not block merge.
+   evidence and exact job-to-runner assignment. At the 2026-08-30 incident
+   boundary M1 and M5 participate while M3's two compatible profiles are
+   intentionally disabled pending the admission-fix canary. Re-check live
+   supervisor state rather than carrying that incident snapshot forward. What
+   does queue independently is the **GitHub-hosted advisory lanes** (Linux,
+   Windows, sanitizers, coverage, android) on GitHub's shared pool; those are
+   advisory, not the required gate, so a long queue there does not block merge.
 4. **Is `shipyard run/ship` failing at `stage=configure` with `D
    external/skia-build/build`?** That's the Skia symlink loop (a tracked
    machine-specific absolute symlink autofetch deletes at configure → tree-drift),
