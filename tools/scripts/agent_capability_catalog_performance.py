@@ -390,6 +390,294 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="midi.chord-memory",
+        domain="midi",
+        summary=(
+            "Bounded chord memory that captures a chord as an interval shape and replays it from "
+            "single notes in parallel, per-key, and scale-degree modes, optionally revoiced by "
+            "minimum-motion voice leading."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "reserve output and ledgers on control",
+            "process": "audio",
+            "reset": "audio with prepared output",
+            "release": "none",
+        },
+        state_model=(
+            "Fixed capture slots and a bounded active-trigger table retain each sounding chord's "
+            "owned notes without allocation."
+        ),
+        seed_model="none; voicing selection is deterministic",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="captured interval shapes and a MIDI event stream",
+        output_domain="owned note-on and note-off MIDI event stream",
+        units=["MIDI note", "semitones", "velocity", "scale degree"],
+        latency="none; chords are emitted at the trigger's own sample offset",
+        tail="owned chord releases",
+        scheduling="input-offset",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/midi/chord_memory.hpp",
+            qualified_name="pulp::midi::ChordMemory<>",
+            target="Pulp::midi",
+            header_fingerprint="sha256:c4a16dd5ed9038b56ae43f22e1ba3f5f2bdcd784823868304a6eaed118123ebf",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::midi::ChordMemory<>",
+            "operation": "member_call",
+            "member": "valid",
+            "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.humanize",
+        domain="midi",
+        summary=(
+            "Seeded timing and velocity jitter over note attacks, with forward-only timing so the "
+            "kernel stays causal and its latency equals the declared bound."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "reserve output and ledgers on control",
+            "process": "audio",
+            "reset": "audio with prepared output",
+            "release": "none",
+        },
+        state_model=(
+            "One pending attack per key in a fixed key-space table; no allocation on any path."
+        ),
+        seed_model="explicit spec seed indexed by the event's absolute sample coordinate",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="MIDI event stream with absolute block position",
+        output_domain="timing- and velocity-jittered MIDI event stream",
+        units=["samples", "MIDI note", "velocity"],
+        latency="up to the declared timing jitter bound",
+        tail="pending attacks released on flush",
+        scheduling="absolute-sample",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/midi/humanize.hpp",
+            qualified_name="pulp::midi::Humanize",
+            target="Pulp::midi",
+            header_fingerprint="sha256:4c0cd54d149e705b17334f3d0c5770386626f9beb0505f86dadfb3ec1b93d077",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::midi::Humanize",
+            "operation": "member_call",
+            "member": "valid",
+            "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.latch",
+        domain="midi",
+        summary=(
+            "Hold and toggle note retention with depth-counted balanced releases, so repeated "
+            "attacks on one key never leak or double-release."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "reserve output and ledgers on control",
+            "process": "audio",
+            "reset": "audio with prepared output",
+            "release": "none",
+        },
+        state_model=(
+            "Retention and physical-key depth counters over the whole 16x128 key space, so retention "
+            "cannot overflow and needs no allocation."
+        ),
+        seed_model="none; the kernel is fully deterministic",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="MIDI event stream",
+        output_domain="retained note-on and note-off MIDI event stream",
+        units=["MIDI note", "velocity"],
+        latency="none; events are emitted at their own sample offset",
+        tail="retained notes released on flush",
+        scheduling="input-offset",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/midi/latch.hpp",
+            qualified_name="pulp::midi::Latch",
+            target="Pulp::midi",
+            header_fingerprint="sha256:29bf8438081f5838c6f34d3783c4f43836a5f51b06cb575140e94abc1ce39e78",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::midi::Latch",
+            "operation": "member_call",
+            "member": "valid",
+            "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.note-delay",
+        domain="midi",
+        summary=(
+            "Bounded MIDI note delay on a tempo division or millisecond clock, with velocity decay "
+            "and cumulative per-repeat transposition. The dry note passes through, so it is a send."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "reserve output and ledgers on control",
+            "process": "audio",
+            "reset": "audio with prepared output",
+            "release": "none",
+        },
+        state_model=(
+            "A fixed scheduled-note queue plus a per-key armed-source table; an echo's length is "
+            "rolled back once the authored release reveals how long the source note was held."
+        ),
+        seed_model="none; echo placement is deterministic",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="MIDI event stream, absolute sample block, and tempo map or constant tempo",
+        output_domain="dry MIDI event stream plus owned echo note-on and note-off events",
+        units=["ticks", "samples", "milliseconds", "MIDI note", "velocity", "semitones", "percent"],
+        latency="sample-scheduled at the authored delay",
+        tail="owned echo releases",
+        scheduling="absolute-sample transport-aware",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/midi/note_delay.hpp",
+            qualified_name="pulp::midi::NoteDelay<>",
+            target="Pulp::midi",
+            header_fingerprint="sha256:d5bdecf2a384369ea0abae41b8c13eba627ffc0e6a62b39be80195766b3ce3d8",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::midi::NoteDelay<>",
+            "operation": "member_call",
+            "member": "valid",
+            "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.note-repeat",
+        domain="midi",
+        summary=(
+            "Bounded clock-divided note repeat with per-hit probability, velocity decay, and gate. "
+            "Releasing the key cancels hits that have not started while a sounding hit keeps its gate."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "reserve output and ledgers on control",
+            "process": "audio",
+            "reset": "audio with prepared output",
+            "release": "none",
+        },
+        state_model=(
+            "A fixed scheduled-note queue where each slot owns one note's whole lifecycle, so "
+            "cancelling an unstarted hit discards its attack and release together."
+        ),
+        seed_model="explicit spec seed indexed by the attack coordinate and hit index",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="MIDI event stream, absolute sample block, and tempo map or constant tempo",
+        output_domain="owned note-on and note-off MIDI event stream",
+        units=["ticks", "samples", "MIDI note", "velocity", "percent"],
+        latency="sample-scheduled within the repeat series",
+        tail="owned repeat releases",
+        scheduling="absolute-sample transport-aware",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/midi/note_repeat.hpp",
+            qualified_name="pulp::midi::NoteRepeat<>",
+            target="Pulp::midi",
+            header_fingerprint="sha256:8c00626a60e2ac1813d8ac117f0ce13e0931040107c8383b9265038d932ef763",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::midi::NoteRepeat<>",
+            "operation": "member_call",
+            "member": "valid",
+            "arguments": "",
+        }],
+    ),
+    capability(
+        key="midi.strum-spread",
+        domain="midi",
+        summary=(
+            "Bounded strum and spread over a near-simultaneous cluster, with direction orders, an "
+            "integer shape curve, division or millisecond spacing, and seeded jitter."
+        ),
+        rt_class="audio",
+        lifecycle={
+            "construction": "control",
+            "prepare": "reserve output and ledgers on control",
+            "process": "audio",
+            "reset": "audio with prepared output",
+            "release": "none",
+        },
+        state_model=(
+            "A fixed cluster buffer holds the notes of one chord until its window closes, which is "
+            "the first moment the cluster is known to be complete."
+        ),
+        seed_model="explicit spec seed indexed by the note's arrival coordinate",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "input",
+        },
+        input_domain="MIDI event stream, absolute sample block, and tempo map or constant tempo",
+        output_domain="time-spread MIDI event stream",
+        units=["ticks", "samples", "milliseconds", "MIDI note", "velocity"],
+        latency="one cluster window",
+        tail="buffered cluster notes released on flush",
+        scheduling="absolute-sample transport-aware",
+        bindings=[binding(
+            role="entrypoint",
+            kind="cpp_type",
+            include="pulp/midi/strum.hpp",
+            qualified_name="pulp::midi::Strum<>",
+            target="Pulp::midi",
+            header_fingerprint="sha256:bb5df51eb73e754c6493881a22103f6a43ba0957982e590f606052134f5dda75",
+        )],
+        _link_probes=[{
+            "role": "entrypoint",
+            "binding": "pulp::midi::Strum<>",
+            "operation": "member_call",
+            "member": "valid",
+            "arguments": "",
+        }],
+    ),
+    capability(
         key="midi.controller-mapping",
         domain="midi",
         summary="Fixed-capacity controller remapping with bounded physical-domain smoothing.",
