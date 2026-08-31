@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260831-pr7975-scene3d-manifest-repair",
+  "created_at": "2026-08-31T08:43:25Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Record repair of Pulp-owned Scene3D CTest manifests and their renderer-golden manifest verifier call sites after the test manifest split left four files syntactically incomplete. The visual-proof-harness family is affected because two watched tools/**/*golden* verifier paths now read the split renderer3d probe manifest instead of the former monolithic test/CMakeLists.txt. Their validation policy and expected renderer evidence are unchanged. The accompanying parser checks cover every test/cmake manifest, including off-by-default Scene3D registrations, and include malformed-manifest negative controls. This is watch-only Pulp test infrastructure maintenance: no Vellum source, transferred slice, rendering behavior, golden baseline, acceptance artifact, or authority boundary changes.",
+  "tests": [
+    "cmake test-manifest parse check across 96 manifests",
+    "cmake test-manifest parser negative-control self-test",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
