@@ -646,7 +646,11 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
             -DBASE_RUNTIME=$<TARGET_FILE:pulp-inspect-runtime>
             -DBASE_PROTOCOL=$<TARGET_FILE:pulp-inspect-protocol>
             -DBASE_CLIENT=$<TARGET_FILE:pulp-inspect-client>
-            -DBASE_FORMAT=$<TARGET_FILE:pulp-format>
+            # The two halves, not the pulp-format umbrella: the umbrella's
+            # archive is a placeholder object with no code in it, so scanning
+            # it would pass while inspecting nothing.
+            -DBASE_FORMAT_CORE=$<TARGET_FILE:pulp-format-core>
+            -DBASE_FORMAT_VIEW=$<TARGET_FILE:pulp-format-view>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/inspect_runtime_eval_archive_check.cmake)
 
     add_executable(pulp-test-inspector-hook-lifecycle

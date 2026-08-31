@@ -1,8 +1,9 @@
 # Layout Model
 
-Pulp's layout engine is [Yoga](https://www.yogalayout.dev/), Facebook's
-cross-platform Flexbox implementation. Pulp supports the layout primitives
-Yoga supports — **CSS Flexbox and CSS Grid** — and nothing else.
+Pulp supports **CSS Flexbox and CSS Grid** and nothing else. Flexbox comes from
+[Yoga](https://www.yogalayout.dev/), Facebook's cross-platform Flexbox
+implementation; Grid is Pulp's own engine, because Yoga does not implement grid
+track sizing. A grid subtree is laid out by Pulp and never handed to Yoga.
 
 This is intentional, not aspirational.
 
@@ -60,11 +61,12 @@ They're marked `wontfix` in `compat.json`.
 
 ## Why
 
-1. **Yoga is the engine.** Pulp uses Yoga directly. Yoga doesn't implement
-   block flow, table layout, multi-column, or floats. Adding those would
-   require either running a different layout engine alongside Yoga (double
-   maintenance) or reimplementing block/table/columns on top of Yoga
-   (massive refactor — likely an architectural rewrite).
+1. **Two engines is already the ceiling.** Pulp uses Yoga directly for flex and
+   maintains its own grid engine beside it. Neither implements block flow, table
+   layout, multi-column, or floats, and adding them means either a third layout
+   engine or reimplementing block/table/columns (massive refactor — likely an
+   architectural rewrite). Carrying a second engine for Grid is what that cost
+   looks like when it is worth paying; it is not an invitation to a third.
 
 2. **React Native parity.** React Native is also flex-and-grid-only. Pulp's
    `@pulp/react` package and JS-bridge component model are intentionally

@@ -50,6 +50,8 @@
     "pulp-dawproject-import",
     "pulp-events",
     "pulp-format",
+    "pulp-format-core",
+    "pulp-format-view",
     "pulp-gpu-audio",
     "pulp-graph",
     "pulp-host",

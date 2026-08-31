@@ -17,6 +17,9 @@ import json
 import subprocess
 import sys
 import tempfile
+import unittest.mock
+import urllib.error
+import urllib.request
 import textwrap
 import unittest
 from pathlib import Path
@@ -517,6 +520,86 @@ class LicenseVerificationTests(unittest.TestCase):
         (tree / "LICENSE.txt").write_text("MIT License\n")
         found = audit.find_license_files(tree)
         self.assertEqual(len(found), 1)
+
+
+class UpstreamLatestDetectionTests(unittest.TestCase):
+    """The audit once reported every dependency as current while sixteen had
+    drifted. Each test here pins one of the reasons it could say that."""
+
+    def test_ls_remote_options_precede_the_repository(self) -> None:
+        """`git ls-remote <repo> --tags` treats --tags as a ref pattern and
+        matches nothing, so every repository looked tagless and therefore
+        current. The flag has to come before the URL."""
+        seen: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003
+            seen.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with unittest.mock.patch.object(subprocess, "run", fake_run):
+            audit.run_git_ls_remote("https://example.invalid/x.git", "refs/tags/*",
+                                    options=("--tags",))
+        self.assertLess(seen[0].index("--tags"), seen[0].index("https://example.invalid/x.git"))
+
+    def test_two_component_tags_are_versions(self) -> None:
+        """pugixml ships `1.14`. Requiring a patch component made those tags
+        invisible, which read as "no releases" rather than "behind"."""
+        self.assertIsNotNone(audit.SEMVER_RE.search("1.14"))
+        self.assertEqual(audit.SEMVER_RE.search("v3.16.0").groups(), ("3", "16", "0"))
+
+    def test_date_shaped_tags_never_win(self) -> None:
+        """Yoga's `v2017.02.07.00` parses as (2017, 2, 7) and outranks its real
+        latest `v3.2.1` forever — a drift signal someone might act on."""
+        self.assertEqual(
+            audit.latest_semver_tag_from_refs(
+                ["refs/tags/v2017.02.07.00", "refs/tags/v3.2.1", "refs/tags/v3.1.0"]),
+            "v3.2.1")
+
+    def test_highest_real_release_wins(self) -> None:
+        self.assertEqual(
+            audit.latest_semver_tag_from_refs(
+                ["refs/tags/1.14", "refs/tags/v1.16", "refs/tags/v1.9"]),
+            "v1.16")
+
+    def test_no_version_shaped_tags_reports_nothing_rather_than_guessing(self) -> None:
+        self.assertIsNone(audit.latest_semver_tag_from_refs(["refs/tags/nightly", ""]))
+
+    def test_prereleases_are_not_latest(self) -> None:
+        """A release candidate sorts above the release it precedes, so an
+        unfiltered scan recommends upgrading to software not yet shipped."""
+        self.assertEqual(
+            audit.latest_semver_tag_from_refs(
+                ["refs/tags/v4.2.0", "refs/tags/v4.3.0-rc1", "refs/tags/v4.3.0-beta"]),
+            "v4.2.0")
+        for tag in ("v4.2.0", "mbedtls-4.2.0", "1.14"):
+            self.assertNotRegex(tag, audit.PRERELEASE_RE)
+
+    def test_repo_regex_handles_the_url_forms_in_the_manifest(self) -> None:
+        for url in ("https://github.com/facebook/yoga.git",
+                    "https://github.com/facebook/yoga",
+                    "git@github.com:facebook/yoga.git"):
+            match = audit.GITHUB_REPO_RE.search(url)
+            self.assertIsNotNone(match, url)
+            self.assertEqual(match.groups(), ("facebook", "yoga"))
+
+    def test_no_releases_falls_back_quietly(self) -> None:
+        """CLAP publishes tags but not releases. That is a real answer, so the
+        tag heuristic takes over with no caveat."""
+        def fake_open(*_args, **_kwargs):
+            raise urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+
+        with unittest.mock.patch.object(urllib.request, "urlopen", fake_open):
+            self.assertIsNone(audit.github_latest_release("https://github.com/free-audio/clap.git"))
+
+    def test_rate_limit_is_never_silently_a_clean_bill(self) -> None:
+        """Unauthenticated GitHub 403s after ~60 requests. Swallowing that and
+        printing the tag guess as fact is how a stale audit looks green."""
+        def fake_open(*_args, **_kwargs):
+            raise urllib.error.HTTPError("u", 403, "rate limit exceeded", {}, None)
+
+        with unittest.mock.patch.object(urllib.request, "urlopen", fake_open):
+            with self.assertRaises(audit.ReleaseLookupUnavailable):
+                audit.github_latest_release("https://github.com/catchorg/Catch2.git")
 
 
 if __name__ == "__main__":
