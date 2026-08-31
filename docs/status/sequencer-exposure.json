@@ -1882,7 +1882,7 @@
     },
     {
       "id": "imp-092-linear-step-player",
-      "title": "Linear multi-lane step player kernel (survey entry 092)",
+      "title": "Linear multi-lane step player kernel with per-step micro-timing (survey entry 092)",
       "classification": "public_sdk",
       "delivery_state": "pending",
       "claim_id": "8bed1566-ea24-4ae5-a9b7-3bf860b28be5",
@@ -1898,20 +1898,22 @@
           "needles": [
             "class StepPlayer {",
             "MidiUtilityProcessReport process(const MidiBuffer& input, MidiBuffer& output,",
-            "MidiUtilityProcessReport flush_transport(MidiBuffer& output) noexcept"
+            "MidiUtilityProcessReport flush_transport(MidiBuffer& output) noexcept",
+            "std::int32_t timing_offset_ticks = 0;"
           ]
         }
       ],
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding.",
+          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid \u2014 swing, a groove table or a per-step nudge \u2014 without running its own scheduler beside the kernel.",
           "evidence": [
             {
               "kind": "sdk_header",
               "path": "core/midi/include/pulp/midi/step_player.hpp",
               "needles": [
-                "class StepPlayer {"
+                "class StepPlayer {",
+                "std::int32_t timing_offset_ticks = 0;"
               ]
             }
           ]

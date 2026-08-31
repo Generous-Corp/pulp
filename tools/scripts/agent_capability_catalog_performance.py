@@ -429,7 +429,7 @@ EXPORTS = [
             include="pulp/midi/step_player.hpp",
             qualified_name="pulp::midi::StepPlayer<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:840cc4783c205d1e0416d1115c74a1a2ac3dd15fbea9185cdcbfb679a9898cd7",
+            header_fingerprint="sha256:cf6c0351ed35ac6f18c1e8cd0885de8c077779e40356aafa7f211a30bfd29913",
         )],
         _link_probes=[{
             "role": "entrypoint",
