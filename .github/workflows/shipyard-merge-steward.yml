@@ -303,6 +303,9 @@ jobs:
           while IFS= read -r candidate; do
             run_id=$(jq -r '.run_id' <<<"$candidate")
             head=$(jq -r '.head_sha' <<<"$candidate")
+            workflow_id=$(jq -r '.workflow_id' <<<"$candidate")
+            workflow_name=$(jq -r '.workflow' <<<"$candidate")
+            workflow_path=$(jq -r '.workflow_path' <<<"$candidate")
 
             # Re-read every open PR immediately before cancellation. A head
             # that became current again, including on a different PR, wins.
@@ -320,8 +323,17 @@ jobs:
               > "$RUNNER_TEMP/pull-request-run.json"
             jq -e \
               --argjson run_id "$run_id" \
+              --argjson workflow_id "$workflow_id" \
               --arg head "$head" \
-              '.id == $run_id and .event == "pull_request" and .head_sha == $head' \
+              --arg workflow_name "$workflow_name" \
+              --arg workflow_path "$workflow_path" \
+              '.id == $run_id and .event == "pull_request" and .head_sha == $head
+               and .workflow_id == $workflow_id
+               and .name == $workflow_name
+               and .path == $workflow_path
+               and .path != ".github/workflows/build.yml"
+               and .workflow_id != 256999733
+               and .name != "Build and Test"' \
               "$RUNNER_TEMP/pull-request-run.json" >/dev/null
             status=$(jq -r '.status' "$RUNNER_TEMP/pull-request-run.json")
             if [ "$status" = completed ]; then

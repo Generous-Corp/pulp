@@ -15,7 +15,12 @@ from pathlib import Path
 
 
 MODULE_FLOORS = {
-    "timebase": {"timebase", "platform", "runtime"},
+    # `platform` is gone because the closure no longer reaches it: timebase links
+    # pulp::foundation, which carries the header-only Result/queue primitives and
+    # nothing else. `runtime` stays only so the sources may keep including
+    # pulp/runtime/result.hpp, which is where that header lives; the link half of
+    # that permission is withdrawn by FORBIDDEN_LINKS below.
+    "timebase": {"timebase", "runtime", "foundation"},
     # The document model. `timeline_editor` is absent, and that absence is load
     # bearing rather than incidental: it is what stops a reducer, a migration, or
     # a serializer from reaching for the editor's gesture verbs. A document model
@@ -196,6 +201,34 @@ ENGINE_CONSUMERS = {
                   "a wide floor as a contract. Same call as smf, deferred for "
                   "the same reason.",
 }
+
+# Modules whose build file must not LINK a module, whether or not their sources
+# may include its headers. A floor row cannot express that on its own: one set
+# governs both includes and links, so admitting pulp/runtime/result.hpp would
+# also re-admit linking pulp::runtime. Two of the three rows below do include
+# runtime headers; music does not, and is here because it sits between signal
+# and timebase in the DSP closure, so a link added there re-contaminates signal.
+#
+# That distinction is the whole reason pulp::foundation exists. libpulp-runtime.a
+# compiles an HTTP client, a WebSocket channel and an HTTPS model downloader, so
+# it links mbedTLS, and PRIVATE on a static library still reaches the consumer's
+# link line. The runtime headers the DSP layers actually use — Result,
+# TripleBuffer, SeqLock, Slot — are templates with no object code behind them,
+# so the include costs nothing while the link costs a TLS stack. Naming
+# pulp::foundation keeps the headers and drops the archives.
+#
+# An entry is checked against the module's own build file, which is what catches
+# a restored link at review time, and it reports a missing build file rather
+# than passing quietly so it cannot outlive its subject. The installed-SDK
+# closure those links produce is measured end to end by the clean-consumer
+# fixture, which is the wider instrument and the slower one.
+FORBIDDEN_LINKS = {
+    "signal": {"runtime"},
+    "music": {"runtime"},
+    "timebase": {"runtime"},
+}
+
+
 INCLUDE_RE = re.compile(r"^\s*#\s*include\s*[<\"]pulp/([^/]+)/", re.MULTILINE)
 LINK_RE = re.compile(r"\bpulp(?:::|-)([a-zA-Z0-9_-]+)\b")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".mm"}
@@ -419,7 +452,30 @@ def verify(repo_root: Path) -> list[str]:
                 f"pulp::{dependency} link via " + " -> ".join(path)
             )
 
+    errors.extend(verify_forbidden_links(repo_root))
     errors.extend(verify_engine_consumers(repo_root))
+    return errors
+
+
+def verify_forbidden_links(repo_root: Path) -> list[str]:
+    """Reject a link a module's floor admits only as an include.
+
+    Reports a missing build file rather than passing quietly, so an entry that
+    names a module which no longer exists fails instead of scoring clean.
+    """
+    errors: list[str] = []
+    for module, forbidden in sorted(FORBIDDEN_LINKS.items()):
+        cmake = repo_root / "core" / module / "CMakeLists.txt"
+        if not cmake.is_file():
+            errors.append(f"missing {module} build file: {cmake}")
+            continue
+        for dependency in link_dependencies(cmake.read_text(errors="replace")):
+            if module_key(dependency) in forbidden:
+                errors.append(
+                    f"{cmake.relative_to(repo_root)}: {module} must not link "
+                    f"pulp::{dependency} (its headers are admitted, its object "
+                    f"code and link items are not)"
+                )
     return errors
 
 
@@ -475,6 +531,17 @@ def verify_engine_consumers(repo_root: Path) -> list[str]:
     return errors
 
 
+def linkable_floor_names(module: str, allowed: set[str]) -> list[str]:
+    """The floor names a module is allowed to LINK, which is not all of them.
+
+    A name admitted for includes only would make the otherwise-valid fixture
+    below fail, so the fixture generator and the assertions have to agree with
+    verify() about which half of the permission each name carries.
+    """
+    forbidden = FORBIDDEN_LINKS.get(module, set())
+    return sorted(name for name in allowed if module_key(name) not in forbidden)
+
+
 def run_selftest() -> int:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
@@ -492,7 +559,9 @@ def run_selftest() -> int:
             )
             cmake.write_text(
                 f"target_link_libraries(pulp-{module} PUBLIC "
-                + " ".join(f"pulp::{name}" for name in sorted(allowed))
+                + " ".join(
+                    f"pulp::{name}"
+                    for name in linkable_floor_names(module, allowed))
                 + ")\n"
             )
             fixtures[module] = (source, cmake)
@@ -514,6 +583,34 @@ def run_selftest() -> int:
 
         if verify(root):
             print("selftest valid fixture was rejected")
+            return 1
+
+        # A module may include a header from a module it must not link. The
+        # fixture above is the include-only half and it passes; restoring the
+        # link is the half that has to fail, or FORBIDDEN_LINKS is decoration.
+        for module in sorted(FORBIDDEN_LINKS):
+            cmake = (
+                fixtures[module][1] if module in fixtures
+                else consumer_cmakes[module]
+            )
+            intact = cmake.read_text()
+            for forbidden in sorted(FORBIDDEN_LINKS[module]):
+                cmake.write_text(
+                    intact
+                    + f"target_link_libraries(pulp-{module.replace('_', '-')} "
+                    + f"PUBLIC pulp::{forbidden})\n"
+                )
+                if not any(
+                    f"{module} must not link pulp::{forbidden}" in error
+                    for error in verify(root)
+                ):
+                    print(
+                        f"selftest missed {module} forbidden pulp::{forbidden}"
+                        " link")
+                    return 1
+            cmake.write_text(intact)
+        if verify(root):
+            print("selftest rejected the restored include-only fixture")
             return 1
 
         # The concrete view target is the view module, not a separate floor.
@@ -618,7 +715,9 @@ def run_selftest() -> int:
             allowed = MODULE_FLOORS[module]
             cmake.write_text(
                 f"target_link_libraries(pulp-{module} PUBLIC "
-                + " ".join(f"pulp::{name}" for name in sorted(allowed))
+                + " ".join(
+                    f"pulp::{name}"
+                    for name in linkable_floor_names(module, allowed))
                 + ")\n"
             )
 

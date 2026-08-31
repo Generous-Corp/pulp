@@ -542,11 +542,17 @@ jobs:
           # the dynamic eligibility/base selector; this makes the required
           # event label the exclusive assignment discriminator after the
           # existing fork, operator, capacity, and overflow decisions finish.
-          # Hosted selectors and workflow_dispatch retain their old shape.
+          # Hosted selectors and explicit workflow_dispatch overrides retain
+          # their exact shape. A default workflow_dispatch is Shipyard's PR
+          # validation path, so it shares the PR-head assignment class; leaving
+          # it on the legacy base selector requests `pulp-gate-fast`, which
+          # event-class-v2 profiles intentionally omit and no host can serve.
           event_class_label = {
               "merge_group": "pulp-build-merge-group",
               "pull_request": "pulp-build-pr-head",
           }.get(EVENT_NAME)
+          if EVENT_NAME == "workflow_dispatch" and not workflow_dispatch_selector:
+              event_class_label = "pulp-build-pr-head"
           if event_class_label and chosen_macos_selector:
               try:
                   parsed_macos_selector = json.loads(chosen_macos_selector)

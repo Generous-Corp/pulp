@@ -173,9 +173,16 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
 `setup.sh` is the shared bootstrap implementation, but the supported Windows entrypoint is `setup.ps1`. The wrapper imports the Visual Studio C++ environment, uses Git Bash from Git for Windows, and temporarily maps the repo to a short drive alias so first-time dependency bootstrap does not trip Windows path-length limits.
 
+`setup.sh` bootstraps dependencies and then configures and builds **Release
+without the example projects** — the same configure the required CI gate uses.
+Both are opt-in if you want them.
+
 Options:
 - `./setup.sh --ci` — non-interactive mode for CI/automation
 - `./setup.sh --deps-only` — bootstrap SDKs and dependencies without configuring/building
+- `./setup.sh --debug` — configure and build Debug instead of Release
+- `./setup.sh --examples` — also build the example projects (a long first build)
+- `./setup.sh --print-plan` — print the resolved configure/build plan and exit
 - `./setup.sh --dry-run` — show what would be done without doing it
 - `powershell -ExecutionPolicy Bypass -File .\setup.ps1 --ci` — Windows non-interactive bootstrap
 - `powershell -ExecutionPolicy Bypass -File .\setup.ps1 --deps-only` — Windows dependency-only bootstrap

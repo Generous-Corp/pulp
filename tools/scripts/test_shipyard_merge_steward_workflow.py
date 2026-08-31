@@ -192,6 +192,7 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("PR head ${head} is current again", self.text)
         self.assertIn('.event == "pull_request"', self.text)
         self.assertIn(".head_sha == $head", self.text)
+        self.assertIn('.path != ".github/workflows/build.yml"', self.text)
         self.assertIn("actions/runs/${run_id}/cancel", self.text)
         self.assertIn("env.STEWARD_APPLY == 'true' && steps.pull_request_cleanup_plan.outcome", self.text)
         self.assertIn("steps.pull_request_cleanup_apply.outcome", self.text)
@@ -208,6 +209,28 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn('[ "${#labels[@]}" -gt 1 ] || continue', self.text)
         self.assertIn("env.STEWARD_APPLY == 'true' && steps.provenance_label_plan.outcome", self.text)
         self.assertIn("steps.provenance_label_apply.outcome", self.text)
+
+
+class StaleRunReaperWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = (ROOT / ".github/workflows/stale-run-reaper.yml").read_text(
+            encoding="utf-8"
+        )
+
+    def test_queued_empty_started_at_cannot_shift_workflow_path(self) -> None:
+        self.assertIn(".workflow_runs[] | @base64", self.text)
+        self.assertIn("base64 --decode", self.text)
+        self.assertIn(".run_started_at // \"\"", self.text)
+        self.assertNotIn("| @tsv", self.text)
+
+    def test_build_path_and_missing_path_fail_closed_before_cancel(self) -> None:
+        build_guard = self.text.index('[ "$path" = ".github/workflows/build.yml" ]')
+        missing_guard = self.text.index("malformed run identity (refusing broad cancellation)")
+        cancel = self.text.index("/actions/runs/${run_id}/cancel")
+        self.assertLess(build_guard, cancel)
+        self.assertLess(missing_guard, cancel)
+        self.assertIn(".path | select(type == \"string\" and length > 0)", self.text)
 
 
 if __name__ == "__main__":

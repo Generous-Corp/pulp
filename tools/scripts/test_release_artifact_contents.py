@@ -7,9 +7,9 @@ import importlib.util
 import hashlib
 import io
 import json
-import pathlib
 import os
 import re
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -19,6 +19,10 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from repo_source_scan import iter_sources  # noqa: E402
 
 SCRIPT = Path(__file__).with_name("release_artifact_contents.py")
 spec = importlib.util.spec_from_file_location("release_artifact_contents", SCRIPT)
@@ -147,35 +151,27 @@ def interface_library_targets_from_text(text: str) -> set[str]:
     )
 
 
-def _is_generated(path: pathlib.Path) -> bool:
-    """True for a file inside a build tree rather than the source tree.
-
-    Several tests generate throwaway CMake projects under the build directory —
-    `test/inspector-shipping-scanner/public-control-source/CMakeLists.txt`
-    declares `pulp-format` as an INTERFACE library, because that is what the
-    fixture needs to be. Walking those makes a real STATIC library look like an
-    interface one and silently drops it from the archive set.
-
-    That is not hypothetical: it made this test report drift between
-    `PULP_SDK_TARGETS` and the release matrix that did not exist, on a checkout
-    whose only difference from CI was having been built once. CI passes because
-    it starts clean, so the failure appears only on the machine where someone is
-    trying to verify a fix.
-    """
-    parts = path.relative_to(ROOT).parts
-    return bool(parts) and (parts[0] == "build" or parts[0].startswith("build-"))
+# Source directories the root build installs SDK library targets from. The
+# traversal is an explicit allowlist rather than a repo-wide walk: a walk from
+# the repository root also descends into build directories, fetched dependency
+# sources, and nested checkouts, so generated files there decide whether a
+# target counts as header-only. A source directory missing from this list fails
+# closed - its targets stay in the archive set and the release-matrix
+# comparison reports the drift.
+INTERFACE_TARGET_SOURCE_DIRS = ("core", "inspect", "ship", "tools")
 
 
-def interface_library_targets() -> set[str]:
+def interface_target_definition_files(root: Path = ROOT) -> list[Path]:
+    files = [root / "CMakeLists.txt"]
+    for name in INTERFACE_TARGET_SOURCE_DIRS:
+        files.extend(iter_sources(root / name, ("CMakeLists.txt",)))
+    files.extend(iter_sources(root / "tools" / "cmake", ("*.cmake",)))
+    return files
+
+
+def interface_library_targets(root: Path = ROOT) -> set[str]:
     targets: set[str] = set()
-    definition_files = [
-        ROOT / "CMakeLists.txt",
-        *ROOT.rglob("CMakeLists.txt"),
-        *(ROOT / "tools" / "cmake").rglob("*.cmake"),
-    ]
-    for path in definition_files:
-        if _is_generated(path):
-            continue
+    for path in interface_target_definition_files(root):
         text = path.read_text(encoding="utf-8")
         targets.update(interface_library_targets_from_text(text))
     return targets
@@ -582,6 +578,78 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 """
             ),
             {"pulp-live"},
+        )
+
+    def test_interface_target_scan_ignores_generated_trees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            planted = {
+                "CMakeLists.txt": "add_library(pulp-root INTERFACE)",
+                "core/signal/CMakeLists.txt": "add_library(pulp-source INTERFACE)",
+                "tools/cmake/PulpThing.cmake": "add_library(pulp-module INTERFACE)",
+                "build/_deps/dep-src/CMakeLists.txt": (
+                    "add_library(pulp-build-decoy INTERFACE)"
+                ),
+                "build-cov/CMakeLists.txt": "add_library(pulp-cov-decoy INTERFACE)",
+                "external/vendored/CMakeLists.txt": (
+                    "add_library(pulp-vendor-decoy INTERFACE)"
+                ),
+                ".claude/worktrees/agent-0/core/signal/CMakeLists.txt": (
+                    "add_library(pulp-nested-checkout-decoy INTERFACE)"
+                ),
+                "examples/demo/CMakeLists.txt": (
+                    "add_library(pulp-example-decoy INTERFACE)"
+                ),
+                "core/build-cov/CMakeLists.txt": (
+                    "add_library(pulp-nested-build-decoy INTERFACE)"
+                ),
+                "tools/.claude/worktrees/agent-0/cmake/Stale.cmake": (
+                    "add_library(pulp-nested-dot-decoy INTERFACE)"
+                ),
+            }
+            for relative, text in planted.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            self.assertEqual(
+                interface_library_targets(root),
+                {"pulp-root", "pulp-source", "pulp-module"},
+            )
+
+    def test_interface_target_source_dirs_cover_every_tracked_declaration(
+        self,
+    ) -> None:
+        for name in INTERFACE_TARGET_SOURCE_DIRS:
+            self.assertTrue(
+                (ROOT / name).is_dir(),
+                f"allowlisted source directory {name} does not exist",
+            )
+        try:
+            tracked = subprocess.run(
+                ["git", "-C", str(ROOT), "ls-files", "-z", "--", "*CMakeLists.txt"],
+                capture_output=True,
+            )
+        except OSError:
+            self.skipTest("git is unavailable")
+        if tracked.returncode != 0:
+            self.skipTest("not a git checkout")
+        allowed = {ROOT / "CMakeLists.txt", *interface_target_definition_files()}
+        missing = set()
+        for name in tracked.stdout.decode().split("\0"):
+            if not name:
+                continue
+            path = ROOT / name
+            if path in allowed or not path.exists():
+                continue
+            if interface_library_targets_from_text(
+                path.read_text(encoding="utf-8")
+            ):
+                missing.add(name)
+        self.assertEqual(
+            missing,
+            set(),
+            "INTERFACE_TARGET_SOURCE_DIRS misses a source tree that declares "
+            "pulp-* INTERFACE libraries",
         )
 
     def test_sdk_target_parser_accepts_whitespace_and_multiline_appends(self) -> None:
