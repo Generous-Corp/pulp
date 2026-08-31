@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -141,13 +142,15 @@ class ModularReleasePackageTest(unittest.TestCase):
         (resources / "FORGE_BUILD_INFO").write_text(
             "".join(f"{key}={value}\n" for key, value in fields.items())
         )
-        (resources / "tools" / "rack" / "FORGE_TOOLCHAIN_STAMP").write_text(
-            f"{self.version}\n2026-08-30\npulp {self.pulp_ref}\n"
-        )
-        (resources / "tools" / "rack" / "patch.py").write_text("# exact toolchain\n")
-        decoder = resources / "tools" / "rack" / "rack_patch_decode"
+        decoder = resources / "build" / "rack_patch_decode"
         decoder.write_bytes(b"Mach-O decoder fixture")
         decoder.chmod(0o755)
+        decoder_identity = hashlib.sha256(decoder.read_bytes()).hexdigest()
+        (resources / "tools" / "rack" / "FORGE_TOOLCHAIN_STAMP").write_text(
+            f"{self.version}\n2026-08-30\npulp {self.pulp_ref}\n"
+            f"rack_patch_decode {decoder_identity}\n"
+        )
+        (resources / "tools" / "rack" / "patch.py").write_text("# exact toolchain\n")
         (resources / "tools" / "dsp_vocabulary.py").write_text("# vocabulary\n")
         (resources / "docs" / "status" / "agent-capabilities.json").write_text("{}\n")
         (resources / "external" / "fonts" / "Inter-Regular.ttf").write_bytes(b"font")
@@ -288,12 +291,36 @@ class ModularReleasePackageTest(unittest.TestCase):
     def test_missing_rack_decoder_fails_before_recipe(self) -> None:
         decoder = (
             self.build / "AU" / "Forge Modular.component" / "Contents" /
-            "Resources" / "tools" / "rack" / "rack_patch_decode"
+            "Resources" / "build" / "rack_patch_decode"
         )
         decoder.unlink()
         completed = run(*self._command(), env=self._env())
         self.assertEqual(2, completed.returncode)
         self.assertIn("Rack saved-patch decoder is not executable", completed.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_mismatched_rack_decoder_stamp_fails_before_recipe(self) -> None:
+        stamp = (
+            self.build / "AU" / "Forge Modular.component" / "Contents" /
+            "Resources" / "tools" / "rack" / "FORGE_TOOLCHAIN_STAMP"
+        )
+        lines = stamp.read_text().splitlines()
+        lines[-1] = "rack_patch_decode " + "0" * 64
+        stamp.write_text("\n".join(lines) + "\n")
+        completed = run(*self._command(), env=self._env())
+        self.assertEqual(2, completed.returncode)
+        self.assertIn("does not match its toolchain stamp", completed.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_missing_rack_decoder_stamp_identity_fails_before_recipe(self) -> None:
+        stamp = (
+            self.build / "AU" / "Forge Modular.component" / "Contents" /
+            "Resources" / "tools" / "rack" / "FORGE_TOOLCHAIN_STAMP"
+        )
+        stamp.write_text(f"{self.version}\n2026-08-30\npulp {self.pulp_ref}\n")
+        completed = run(*self._command(), env=self._env())
+        self.assertEqual(2, completed.returncode)
+        self.assertIn("toolchain stamp is not exact", completed.stderr)
         self.assertFalse(self.capture.exists())
 
 

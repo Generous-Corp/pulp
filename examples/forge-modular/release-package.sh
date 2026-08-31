@@ -78,7 +78,7 @@ for artifact in "$AU" "$VST3" "$CLAP" "$APP"; do
 done
 "$ARCH_CHECK" "$APP/Contents/Resources/build/shape_text" \
     --archs "$ARCHITECTURE" --strict --no-verify-signature
-"$ARCH_CHECK" "$APP/Contents/Resources/tools/rack/rack_patch_decode" \
+"$ARCH_CHECK" "$APP/Contents/Resources/build/rack_patch_decode" \
     --archs "$ARCHITECTURE" --strict --no-verify-signature
 
 if [[ -f "$HOME/.config/pulp/secrets/keychain.env" ]]; then
