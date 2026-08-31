@@ -64,7 +64,8 @@ def _resolver_source() -> str:
 
 
 def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
-                   event: str = "pull_request") -> Any | None:
+                   event: str = "pull_request",
+                   dispatch_selector: str = "") -> Any | None:
     """Run the real resolver and return the macOS leg's runs-on, if any."""
     env = dict(os.environ)
     env.update(
@@ -72,6 +73,7 @@ def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
         GITHUB_REPOSITORY="Generous-Corp/pulp",
         LOCAL_MACOS_RUNS_ON_JSON=SELF_HOSTED,
         OVERFLOW_MACOS_RUNS_ON_JSON=overflow,
+        WORKFLOW_DISPATCH_MACOS_SELECTOR=dispatch_selector,
         LOCAL_MAC_OVERFLOW_THRESHOLD="0",
         GITHUB_WORKSPACE=str(REPO_ROOT),
     )
@@ -135,11 +137,24 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
         self.assertNotIn(PR_HEAD_LABEL, got["labels"])
         self.assertNotIn(LEGACY_SHARED_LABEL, got["labels"])
 
-    def test_non_pull_request_events_are_untouched(self):
+    def test_default_workflow_dispatch_uses_pr_head_event_class(self):
         got = _macos_runs_on(None, event="workflow_dispatch")
         self.assertIn("self-hosted", got)
         self.assertNotIn(MERGE_GROUP_LABEL, got)
-        self.assertNotIn(PR_HEAD_LABEL, got)
+        self.assertIn(PR_HEAD_LABEL, got)
+        self.assertNotIn(LEGACY_SHARED_LABEL, got)
+
+    def test_explicit_workflow_dispatch_selector_is_unchanged(self):
+        selector = (
+            '["self-hosted","macOS","ARM64","pulp-build-vm",'
+            '"operator-proof"]'
+        )
+        got = _macos_runs_on(
+            None,
+            event="workflow_dispatch",
+            dispatch_selector=selector,
+        )
+        self.assertEqual(got, json.loads(selector))
 
 
 if __name__ == "__main__":

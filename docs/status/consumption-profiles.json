@@ -8,7 +8,7 @@
     "build_time_derived": true,
     "closure_definition": "Nodes reachable from the target through INTERFACE_LINK_LIBRARIES, the target itself included. This is what a consumer inherits from target_link_libraries(app PRIVATE Pulp::<name>); a static library's PRIVATE dependencies are part of it, because CMake records them for consumers as $<LINK_ONLY:...>.",
     "limitations": [
-      "Each profile is one configured build tree: one platform, one feature set. A tree that disagrees with a profile's features is measuring a different SDK, and the drift gate skips rather than compares it.",
+      "Each profile is one configured build tree: one platform, one feature set, and its key names both. A tree whose feature set the census has not measured is a profile it does not record, so the drift gate skips rather than comparing it against another configuration's numbers. A tree that defines different feature SWITCHES than the census records is not an unmeasured configuration but a stale census, and fails.",
       "$<INSTALL_INTERFACE:...> dependencies are dropped and $<BUILD_INTERFACE:...> kept, so the graph is the build tree's. Where the two name the same library under different aliases (Pulp::yogacore vs yogacore) the build-tree name is recorded.",
       "Closure counts declared link dependencies, not symbols. It is the weight a consumer inherits on the link line, not the weight the linker keeps after dead-stripping; link_probe measures the latter.",
       "Object libraries absorbed as $<TARGET_OBJECTS:...> and build-order dependencies from add_dependencies() are deliberately not closure members: neither reaches a consumer's link line.",
@@ -17,8 +17,8 @@
     ]
   },
   "profiles": {
-    "darwin-arm64": {
-      "key": "darwin-arm64",
+    "darwin-arm64-ausdk+clap+design-import+inspector+js+lv2+skia+vst3": {
+      "key": "darwin-arm64-ausdk+clap+design-import+inspector+js+lv2+skia+vst3",
       "system_name": "Darwin",
       "system_processor": "arm64",
       "features": {

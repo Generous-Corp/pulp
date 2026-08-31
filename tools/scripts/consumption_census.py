@@ -367,10 +367,56 @@ def count_headers(source_root: Path, roots: list[str]) -> int:
 # ── census ──────────────────────────────────────────────────────────────────
 
 
+# Prefixes a feature switch's name carries for CMake's benefit rather than the
+# census's. Stripping them keys a profile on what the switch turns on, so the
+# key stays short enough to read in a diff.
+FEATURE_NAME_PREFIXES = ("PULP_HAS_", "PULP_ENABLE_", "PULP_BUILD_", "PULP_")
+
+
+def feature_token(name: str) -> str:
+    for prefix in FEATURE_NAME_PREFIXES:
+        if name.startswith(prefix):
+            return name[len(prefix):].lower().replace("_", "-")
+    return name.lower().replace("_", "-")
+
+
+def feature_suffix(features: dict) -> str:
+    """The enabled feature set, as the readable half of a profile key.
+
+    Only the switches that are ON appear: the census records a fixed set of
+    switches, so naming the enabled ones states the whole configuration. Two
+    switches that abbreviate to one token would make two configurations share a
+    key, which is the collision this suffix exists to prevent, so that is an
+    error rather than a key the census cannot tell apart.
+    """
+    tokens: dict[str, str] = {}
+    enabled = []
+    for name in sorted(features):
+        if name in BUILD_SCOPE_FEATURES:
+            continue
+        token = feature_token(name)
+        if token in tokens:
+            raise CensusError(
+                f"feature switches {tokens[token]} and {name} both shorten to {token!r}; "
+                "a profile key must name each switch it records exactly once"
+            )
+        tokens[token] = name
+        if features[name] == "ON":
+            enabled.append(token)
+    return "+".join(sorted(enabled)) or "none"
+
+
 def profile_key(facts: dict) -> str:
+    """The identity of one configured build tree: its platform AND its features.
+
+    Keying on the platform alone lets a tree configured with different switches
+    overwrite a profile it never measured. The two closures genuinely differ, so
+    the census would carry one configuration's numbers under another's name with
+    nothing recorded to say they disagree.
+    """
     system = facts["system_name"].lower()
     processor = facts["system_processor"].lower()
-    return f"{system}-{processor}"
+    return f"{system}-{processor}-{feature_suffix(facts['features'])}"
 
 
 def build_profile(build_dir: Path, source_root: Path) -> dict:
@@ -474,9 +520,11 @@ DERIVATION = {
         "$<LINK_ONLY:...>."
     ),
     "limitations": [
-        "Each profile is one configured build tree: one platform, one feature set. A tree "
-        "that disagrees with a profile's features is measuring a different SDK, and the "
-        "drift gate skips rather than compares it.",
+        "Each profile is one configured build tree: one platform, one feature set, and its "
+        "key names both. A tree whose feature set the census has not measured is a profile it "
+        "does not record, so the drift gate skips rather than comparing it against another "
+        "configuration's numbers. A tree that defines different feature SWITCHES than the "
+        "census records is not an unmeasured configuration but a stale census, and fails.",
         "$<INSTALL_INTERFACE:...> dependencies are dropped and $<BUILD_INTERFACE:...> kept, "
         "so the graph is the build tree's. Where the two name the same library under "
         "different aliases (Pulp::yogacore vs yogacore) the build-tree name is recorded.",
@@ -812,8 +860,14 @@ def load_document(census_path: Path, schema_path: Path) -> dict:
     document = json.loads(census_path.read_text())
     problems = validate_schema(document, schema_path)
     if problems:
+        # Name the repair. The most common way to reach this is a census
+        # written before a schema change, where the violation describes a
+        # committed file the reader did not touch and the fix is not obvious
+        # from the violation alone.
         raise CensusError(
             f"{census_path} violates its schema: " + "; ".join(problems[:5])
+            + "; if it was generated before the schema changed, regenerate it with: "
+            "python3 tools/scripts/consumption_census.py --build-dir <build-dir> --write"
         )
     return document
 
@@ -870,26 +924,67 @@ def check_profile_recorded(build_dir: Path, census_path: Path, schema_path: Path
     except CensusError as error:
         print(f"consumption_census: {error}", file=sys.stderr)
         return 1
-    recorded = document["profiles"].get(key)
-    if recorded is None:
-        print(
-            f"consumption_census_skipped reason=profile-not-recorded host={key} "
-            f"recorded={','.join(sorted(document['profiles']))}"
-        )
-        return 77
     features = {
         name: value
         for name, value in facts["features"].items()
         if name not in BUILD_SCOPE_FEATURES
     }
+    recorded = document["profiles"].get(key)
+    if recorded is None:
+        # A key the census does not record is normally a configuration nobody
+        # has measured, which is a skip. But a census whose profiles all name a
+        # DIFFERENT set of switches predates this tree's feature list, so it
+        # describes no configuration of this tree at all. Skipping that would
+        # retire the gate the moment someone adds a switch defaulting ON, which
+        # moves every key at once and would otherwise read as an unmeasured
+        # configuration rather than a census that needs regenerating.
+        rosters = [set(profile["features"]) for profile in document["profiles"].values()]
+        if rosters and not any(roster == set(features) for roster in rosters):
+            unmeasured = sorted(set(features).difference(*rosters))
+            retired = sorted(set().union(*rosters) - set(features))
+            print(
+                "consumption_census: the census records a different set of feature "
+                "switches than this build tree defines",
+                file=sys.stderr,
+            )
+            if unmeasured:
+                print(f"  switches no profile records: {', '.join(unmeasured)}", file=sys.stderr)
+            if retired:
+                print(f"  switches the tree no longer defines: {', '.join(retired)}", file=sys.stderr)
+            print(
+                "  regenerate with: python3 tools/scripts/consumption_census.py "
+                f"--build-dir {build_dir} --write",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"consumption_census_skipped reason=profile-not-recorded host={key} "
+            f"recorded={','.join(sorted(document['profiles']))}"
+        )
+        return 77
+    # The key already names the enabled feature set, so a profile found under
+    # this tree's key that disagrees about its features is an inconsistent
+    # artifact rather than a different configuration — the two halves of the
+    # census contradict each other. That is a broken file, and reporting it as
+    # "nothing to compare" would retire the gate on the very lane it covers.
     if recorded["features"] != features:
         differing = sorted(
             name
             for name in set(recorded["features"]) | set(features)
             if recorded["features"].get(name) != features.get(name)
         )
-        print(f"consumption_census_skipped reason=features differing={','.join(differing)}")
-        return 77
+        print(
+            f"consumption_census: profile {key} records a feature set its own key "
+            "does not describe",
+            file=sys.stderr,
+        )
+        print(f"  disagreeing switches: {', '.join(differing)}", file=sys.stderr)
+        print(
+            "  regenerate with: python3 tools/scripts/consumption_census.py "
+            f"--build-dir {build_dir} --write",
+            file=sys.stderr,
+        )
+        return 1
     return None
 
 
