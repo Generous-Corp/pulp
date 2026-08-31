@@ -242,7 +242,7 @@ raise SystemExit(2)
         })
         identity = {
                 "pulp_revision": SHA, "forge_revision": FORGE_SHA if role in v2.FORGE_ROLES else None,
-                "machine_id": "fleet-m5", "host_kind": host,
+                "machine_id": "fleet-m5", "hardware": "M5", "os": "macOS", "host_kind": host,
                 "host_bundle_id": "fixture.host", "host_version": "1", "host_sha256": DIGEST,
                 "application_kind": application, "application_sha256": DIGEST,
                 "plugin_format": plugin_format, "plugin_sha256": DIGEST,
@@ -359,6 +359,8 @@ def policy_publication_errors(
     author_id: int = 7, author_type: str = "User",
     review_id: int = 25807, review_type: str = "User",
     reviews: list[tuple[str, str]] | None = None,
+    created_at: str = "2026-08-29T00:00:00Z",
+    merged_at: str = "2026-08-29T01:00:00Z",
 ) -> list[str]:
     expected_blob = validation["blob"]
 
@@ -383,7 +385,7 @@ def policy_publication_errors(
             }
         if endpoint.endswith("/pulls/1"):
             return {
-                "state": "closed", "merged_at": "2026-08-29T01:00:00Z",
+                "state": "closed", "created_at": created_at, "merged_at": merged_at,
                 "merge_commit_sha": merge_commit, "base": {"ref": base_ref},
                 "head": {"sha": pr_head},
                 "user": {"id": author_id, "type": author_type},
@@ -487,6 +489,24 @@ def main() -> int:
                 reviews=[("APPROVED", "2026-08-29T01:30:00Z")],
             )
         )
+        assert any(
+            "effective pre-merge exact-head" in error
+            for error in policy_publication_errors(
+                validation, policy_bytes,
+                reviews=[("APPROVED", "2026-08-28T23:59:59Z")],
+            )
+        )
+        for approval_mode in ("approval", "author"):
+            chronology_validation = dict(validation, approval_mode=approval_mode)
+            assert any(
+                "does not postdate PR creation" in error
+                for error in policy_publication_errors(
+                    chronology_validation, policy_bytes,
+                    created_at="2026-08-29T01:00:00Z",
+                    merged_at="2026-08-29T01:00:00Z",
+                    author_id=25807,
+                )
+            )
         assert any(
             "live protected branch" in error
             for error in policy_publication_errors(validation, policy_bytes, protected=False)
@@ -630,12 +650,15 @@ def main() -> int:
         ("omitted role", lambda r, _p: r["campaigns"].pop()),
         ("extra role", lambda r, _p: r["campaigns"].append(copy.deepcopy(r["campaigns"][0]))),
         ("substituted host", lambda r, _p: r["campaigns"][0]["identity"].update(host_kind="substitute")),
+        ("substituted hardware", lambda r, _p: r["campaigns"][0]["identity"].update(hardware="OtherHardware")),
+        ("substituted OS", lambda r, _p: r["campaigns"][0]["identity"].update(os="OtherOS")),
         ("substituted display", lambda r, _p: r["campaigns"][0]["identity"].update(display_id="other-display")),
         ("substituted refresh", lambda r, _p: r["campaigns"][0]["identity"].update(refresh_hz=120)),
         ("standalone canary binary", lambda r, _p: r["campaigns"][0]["identity"].update(application_sha256="8" * 64)),
         ("constrained canary content", lambda r, _p: r["campaigns"][6]["identity"].update(content_sha256="8" * 64)),
         ("constrained canary signature", lambda r, _p: r["campaigns"][6]["identity"].update(signature_sha256="8" * 64)),
         ("standalone lifecycle", lambda r, _p: r["campaigns"][0]["identity"].update(interaction_lifecycle="substitute")),
+        ("canary editor-open origin mismatch", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy["canary"].update(editor_open_origin="easier-origin"))),
         ("constrained workload", lambda r, _p: r["campaigns"][6]["identity"].update(steady_state_workload="easier")),
         ("constrained predicate", lambda r, _p: r["campaigns"][6]["identity"].update(adapter_predicate="executor-selected")),
         ("constrained configuration", lambda r, _p: r["campaigns"][6]["identity"].update(adapter_configuration="executor-selected")),

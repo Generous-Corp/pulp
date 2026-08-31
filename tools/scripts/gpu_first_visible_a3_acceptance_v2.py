@@ -420,6 +420,8 @@ def validate_product_policy(
     for field in ("editor_open_origin", "interaction_lifecycle", "steady_state_workload"):
         if not isinstance(canary[field], str) or not canary[field]:
             raise V2AcceptanceError(f"product policy canary.{field} is missing")
+    if canary["editor_open_origin"] != policy["editor_open_origin"]:
+        raise V2AcceptanceError("product policy canary editor-open origin differs from measurement authority")
     scenarios = policy["a4_scenario_budgets"]
     if not isinstance(scenarios, list) or [
         row.get("scenario_id") for row in scenarios if isinstance(row, dict)
@@ -941,14 +943,21 @@ def product_policy_publication_errors(
         return errors
     pr_number = int(match.group(2))
     pull = _command_json([ghapp, "api", f"repos/{repository}/pulls/{pr_number}"])
+    created_at = pull.get("created_at")
     merged_at = pull.get("merged_at")
     if (
         pull.get("state") != "closed"
+        or not isinstance(created_at, str)
         or not isinstance(merged_at, str)
         or pull.get("merge_commit_sha") != publication
         or pull.get("base", {}).get("ref") != "main"
     ):
         errors.append("product policy publication is not the recorded merged main PR")
+        return errors
+    created_time = _github_time(created_at, "product policy PR created_at")
+    merged_time = _github_time(merged_at, "product policy PR merged_at")
+    if created_time >= merged_time:
+        errors.append("product policy PR merge does not postdate PR creation")
         return errors
     if pull.get("head", {}).get("sha") != approved_head:
         errors.append("product policy approval is not bound to the exact approved head")
@@ -961,7 +970,6 @@ def product_policy_publication_errors(
             errors.append("product policy author identity is not Daniel's immutable user ID")
         return errors
 
-    merged_time = _github_time(merged_at, "product policy PR merged_at")
     reviews = _fetch_all_pages(ghapp, f"repos/{repository}/pulls/{pr_number}/reviews")
     effective: tuple[dt.datetime, int, dict[str, Any]] | None = None
     for review in reviews:
@@ -978,7 +986,7 @@ def product_policy_publication_errors(
             except V2AcceptanceError:
                 continue
             review_id = review.get("id")
-            if submitted <= merged_time and isinstance(review_id, int):
+            if created_time <= submitted <= merged_time and isinstance(review_id, int):
                 candidate = (submitted, review_id, review)
                 if effective is None or candidate[:2] > effective[:2]:
                     effective = candidate
@@ -1182,6 +1190,8 @@ def validate_v2(
         if (
             identity["pulp_revision"] != receipt["implementation_head"]
             or identity["machine_id"] != policy["reference_host"]["machine_id"]
+            or identity["hardware"] != policy["reference_host"]["hardware"]
+            or identity["os"] != policy["reference_host"]["os"]
             or identity["display_id"] != policy["reference_host"]["display"]
             or identity["refresh_hz"] != policy["reference_host"]["refresh_hz"]
             or identity["host_kind"] != spec[1]

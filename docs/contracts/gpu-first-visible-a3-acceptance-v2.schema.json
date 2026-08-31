@@ -197,7 +197,7 @@
         "identity": {
           "type": "object",
           "required": [
-            "pulp_revision", "forge_revision", "machine_id", "host_kind",
+            "pulp_revision", "forge_revision", "machine_id", "hardware", "os", "host_kind",
             "host_bundle_id", "host_version", "host_sha256",
             "application_kind", "application_sha256", "plugin_format",
             "plugin_sha256", "provider_sha256", "build_sha256",
@@ -209,6 +209,8 @@
             "pulp_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
             "forge_revision": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{40}$" }] },
             "machine_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "hardware": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "os": { "type": "string", "minLength": 1, "maxLength": 256 },
             "host_kind": { "type": "string", "minLength": 1, "maxLength": 128 },
             "host_bundle_id": { "type": "string", "minLength": 1, "maxLength": 256 },
             "host_version": { "type": "string", "minLength": 1, "maxLength": 128 },
