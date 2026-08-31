@@ -13,6 +13,7 @@
 #import <objc/runtime.h>
 
 #include <cmath>
+#include <cstdlib>
 
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
@@ -138,6 +139,106 @@ struct PulpAUEditorOwnership {
 @end
 
 static const char kOwnershipKey = 0;
+
+namespace {
+
+bool pulp_auv2_resize_trace_enabled() {
+    const char* value = std::getenv("PULP_AUV2_RESIZE_TRACE");
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
+void pulp_trace_auv2_resize_hierarchy(NSView* editor_view, const char* phase) {
+    if (!pulp_auv2_resize_trace_enabled()) return;
+
+    NSLog(@"[pulp-auv2-resize] %s editor=%@ window=%@ window-frame=%@ content=%@",
+          phase, editor_view, [editor_view window],
+          NSStringFromRect([[editor_view window] frame]),
+          [[editor_view window] contentView]);
+    NSUInteger depth = 0;
+    for (NSView* view = editor_view; view; view = [view superview], ++depth) {
+        NSLog(@"[pulp-auv2-resize] %s ancestor[%lu] class=%@ frame=%@ bounds=%@ "
+               "autoresizing=%lu translates-mask=%d",
+              phase, static_cast<unsigned long>(depth),
+              NSStringFromClass([view class]), NSStringFromRect([view frame]),
+              NSStringFromRect([view bounds]),
+              static_cast<unsigned long>([view autoresizingMask]),
+              [view translatesAutoresizingMaskIntoConstraints]);
+    }
+}
+
+bool pulp_resize_logic_auv2_editor(NSView* editor_view,
+                                   pulp::view::PluginViewHost& editor_host,
+                                   uint32_t next_w, uint32_t next_h) {
+    if (![NSThread isMainThread] || !editor_view) return false;
+
+    NSView* container = [editor_view superview];
+    NSWindow* window = [editor_view window];
+    if (!container || !window) return false;
+
+    const NSSize previous_view = [editor_view frame].size;
+    const NSSize previous_container = [container frame].size;
+    const NSRect previous_window = [window frame];
+    const NSSize requested = NSMakeSize(next_w, next_h);
+    // Logic does not reliably observe an immediate-container frame mutation.
+    // The old transaction therefore returned success after shrinking only the
+    // AU content while the visible plug-in window stayed put. Resize the
+    // enclosing window by the same delta and keep its top-left corner fixed;
+    // this preserves Logic's own header/chrome instead of assuming the AU view
+    // equals the content size.
+    const auto next_window =
+        pulp::format::au::editor_resize_detail::resize_window_preserving_top_left(
+            {previous_window.origin.x, previous_window.origin.y,
+             previous_window.size.width, previous_window.size.height},
+            previous_view.width, previous_view.height, requested.width,
+            requested.height);
+    const NSRect requested_window = NSMakeRect(
+        next_window.x, next_window.y, next_window.width, next_window.height);
+
+    pulp_trace_auv2_resize_hierarchy(editor_view, "before");
+    [NSAnimationContext beginGrouping];
+    [[NSAnimationContext currentContext] setDuration:0.0];
+    [container setFrameSize:requested];
+    editor_host.set_size(next_w, next_h);
+    [window setFrame:requested_window display:YES animate:NO];
+    [[window contentView] layoutSubtreeIfNeeded];
+    [container layoutSubtreeIfNeeded];
+    [NSAnimationContext endGrouping];
+    pulp_trace_auv2_resize_hierarchy(editor_view, "after");
+
+    const NSSize applied_view = [editor_view frame].size;
+    const NSSize applied_container = [container frame].size;
+    const NSRect applied_window = [window frame];
+    const auto exact_size = [](NSSize actual, NSSize expected) {
+        return std::fabs(actual.width - expected.width) < 0.5 &&
+               std::fabs(actual.height - expected.height) < 0.5;
+    };
+    const auto exact_rect = [&exact_size](NSRect actual, NSRect expected) {
+        return std::fabs(actual.origin.x - expected.origin.x) < 0.5 &&
+               std::fabs(actual.origin.y - expected.origin.y) < 0.5 &&
+               exact_size(actual.size, expected.size);
+    };
+    if (exact_size(applied_view, requested) &&
+        exact_size(applied_container, requested) &&
+        exact_rect(applied_window, requested_window)) {
+        return true;
+    }
+
+    // Fail closed. A partial native resize is worse than a refusal because it
+    // leaves the editor and the host window disagreeing about hit coordinates.
+    [NSAnimationContext beginGrouping];
+    [[NSAnimationContext currentContext] setDuration:0.0];
+    [window setFrame:previous_window display:YES animate:NO];
+    [container setFrameSize:previous_container];
+    editor_host.set_size(
+        static_cast<uint32_t>(std::lround(previous_view.width)),
+        static_cast<uint32_t>(std::lround(previous_view.height)));
+    [[window contentView] layoutSubtreeIfNeeded];
+    [NSAnimationContext endGrouping];
+    pulp_trace_auv2_resize_hierarchy(editor_view, "rollback");
+    return false;
+}
+
+}  // namespace
 
 // ── Cocoa View Factory ─────────────────────────────────────────────────
 
@@ -265,35 +366,8 @@ static const char kOwnershipKey = 0;
                 !resize_logic_container) {
                 return false;
             }
-            NSView* container = [resize_view superview];
-            if (!container || ![resize_view window]) return false;
-
-            const NSSize previous_view = [resize_view frame].size;
-            const NSSize previous_container = [container frame].size;
-            const NSSize requested = NSMakeSize(next_w, next_h);
-
-            [NSAnimationContext beginGrouping];
-            [[NSAnimationContext currentContext] setDuration:0.0];
-            [container setFrameSize:requested];
-            resize_host->set_size(next_w, next_h);
-            [container layoutSubtreeIfNeeded];
-            [NSAnimationContext endGrouping];
-
-            const NSSize applied_view = [resize_view frame].size;
-            const NSSize applied_container = [container frame].size;
-            const auto exact = [requested](NSSize size) {
-                return NSEqualSizes(size, requested);
-            };
-            if (exact(applied_view) && exact(applied_container)) return true;
-
-            [NSAnimationContext beginGrouping];
-            [[NSAnimationContext currentContext] setDuration:0.0];
-            [container setFrameSize:previous_container];
-            resize_host->set_size(
-                static_cast<uint32_t>(std::lround(previous_view.width)),
-                static_cast<uint32_t>(std::lround(previous_view.height)));
-            [NSAnimationContext endGrouping];
-            return false;
+            return pulp_resize_logic_auv2_editor(
+                resize_view, *resize_host, next_w, next_h);
         },
         [resize_host, resize_bridge](uint32_t next_w, uint32_t next_h) {
             format::commit_editor_requested_viewport(

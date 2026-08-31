@@ -2115,6 +2115,34 @@ TEST_CASE("AU v2 editor resize commits only an exact native Cocoa size",
 }
 
 // ── Toggle parameter gestures ───────────────────────────────────────────────
+TEST_CASE("AU v2 Logic resize preserves host chrome and top-left",
+          "[view_bridge][editor-resize][auv2]") {
+    using namespace format::au::editor_resize_detail;
+
+    const WindowFrame original{100.0, 200.0, 900.0, 700.0};
+    const auto grown = resize_window_preserving_top_left(
+        original, 800.0, 600.0, 1000.0, 750.0);
+    CHECK(grown.x == Catch::Approx(100.0));
+    CHECK(grown.y == Catch::Approx(50.0));
+    CHECK(grown.width == Catch::Approx(1100.0));
+    CHECK(grown.height == Catch::Approx(850.0));
+    CHECK(grown.y + grown.height == Catch::Approx(900.0));
+
+    const auto shrunk = resize_window_preserving_top_left(
+        grown, 1000.0, 750.0, 640.0, 480.0);
+    CHECK(shrunk.x == Catch::Approx(100.0));
+    CHECK(shrunk.y == Catch::Approx(320.0));
+    CHECK(shrunk.width == Catch::Approx(740.0));
+    CHECK(shrunk.height == Catch::Approx(580.0));
+    CHECK(shrunk.y + shrunk.height == Catch::Approx(900.0));
+
+    // The 100x100 host chrome survives both directions; the host window never
+    // accidentally adopts the raw editor size.
+    CHECK(shrunk.width - 640.0 == Catch::Approx(100.0));
+    CHECK(shrunk.height - 480.0 == Catch::Approx(100.0));
+}
+
+// ── AU v2 editor geometry ────────────────────────────────────────────────
 //
 // A Toggle was the one interactive widget wire_callbacks() never handed to
 // wire_parameter_gestures(): Knob, Fader and RangeSlider all did, Toggle did
