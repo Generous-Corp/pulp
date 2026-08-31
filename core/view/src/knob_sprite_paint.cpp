@@ -39,18 +39,37 @@ void draw_knob_indicator_notch(canvas::Canvas& canvas,
 // Same [-135°,+135°] value→angle arc as the synthetic notch, but the radii, width
 // and color come from the imported art, and it pivots at the disc core center
 // (cx, cy) — so the line rides the disc's baked min/center/max reference ticks
-// instead of a guessed sweep. A faint dark backing keeps a hairline legible on a
-// bright metallic face without reading as a second line.
+// instead of a guessed sweep. Captured HTML borders are reproduced as an
+// optional outer stroke; pointers without one retain the legacy dark backing.
 void draw_knob_captured_pointer(canvas::Canvas& canvas,
                                 float cx, float cy,
                                 float r_in, float r_out, float width,
                                 canvas::Color color, float value,
-                                float phase_rad) {
+                                float phase_rad,
+                                canvas::Color outline_color,
+                                float outline_width) {
     float angle = -1.5707963f + (value - 0.5f) * 4.7123890f + phase_rad;
     float ox = cx + r_out * std::cos(angle);
     float oy = cy + r_out * std::sin(angle);
     float ix = cx + r_in  * std::cos(angle);
     float iy = cy + r_in  * std::sin(angle);
+    if (outline_width > 0.0f) {
+        // `width` is the captured CSS border-box extent. Paint its authored
+        // outline at that extent, then inset the fill from both sides. This is
+        // materially different from the historical synthetic shadow: a white
+        // 4px pointer with a 1px black CSS border is a black 4px stroke with a
+        // white 2px core, not a white 4px stroke over a translucent backing.
+        canvas.set_stroke_color(outline_color);
+        canvas.set_line_width(width);
+        canvas.stroke_line(ix, iy, ox, oy);
+        const float fill_width = std::max(0.0f, width - 2.0f * outline_width);
+        if (fill_width > 0.0f) {
+            canvas.set_stroke_color(color);
+            canvas.set_line_width(fill_width);
+            canvas.stroke_line(ix, iy, ox, oy);
+        }
+        return;
+    }
     canvas.set_stroke_color(canvas::Color::rgba(0.10f, 0.11f, 0.13f, 0.45f));
     canvas.set_line_width(width + 1.25f);
     canvas.stroke_line(ix, iy, ox, oy);

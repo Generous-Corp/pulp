@@ -576,6 +576,13 @@ TEST_CASE("scripted indicator provenance keeps live theme precedence",
         "setFaderSkin('level', '', '', '#ffffff', '', 0, 0, 0, true);");
     CHECK(fader->has_skin_thumb_color());
     CHECK(last_thumb_color(*fader) == white);
+
+    // The generated bridge declaration's optional outline arguments must reach
+    // the runtime rather than being silently ignored after the seventh arg.
+    bridge.load_script(
+        "setKnobCapturedIndicator('dial', 0.55, 0.9, 0.04, '#ffffff', 0, true, '#010203', 1.25);");
+    CHECK(knob->captured_indicator_outline_width() == Catch::Approx(1.25f));
+    CHECK(knob->captured_indicator_outline_color() == pulp::canvas::Color::rgba8(1, 2, 3));
 }
 
 TEST_CASE("setFaderSkin track-only styling preserves authored thumb geometry",

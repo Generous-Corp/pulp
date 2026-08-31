@@ -101,6 +101,27 @@ run_coverage_build() {
     "${GOVERNED_BUILD}" cmake --build "$@"
 }
 
+# Merge every profile written by this gate in one llvm-profdata invocation.
+#
+# --input-files accepts one input per line, avoiding ARG_MAX without the
+# overwrite hazard of xargs batches.  Its entries can optionally begin with a
+# weight followed by a comma, however, so absolute paths are not safe when a
+# worktree name contains a comma.  Run from the controlled profile directory
+# and write only our generated relative names; the list itself, output, and
+# log remain absolute paths and may safely contain arbitrary characters.
+merge_coverage_profiles() {
+    local profraw_dir="$1"
+    local profile_list="$2"
+    local profdata="$3"
+    local merge_log="$4"
+    (
+        cd "${profraw_dir}"
+        find . -maxdepth 1 -type f -name 'pulp-*.profraw' -print | LC_ALL=C sort > "${profile_list}"
+        llvm-profdata merge -sparse --failure-mode=all \
+            --input-files="${profile_list}" -o "${profdata}" 2>"${merge_log}"
+    )
+}
+
 # The report lives beside the coverage data it describes, under this
 # worktree's build-cov. $TMPDIR is per-USER, not per-worktree, so a fixed
 # filename under it is a shared mailbox: concurrent runs from other worktrees
@@ -911,14 +932,19 @@ PROFDATA="${BUILD_DIR}/coverage/pulp.profdata"
 mkdir -p "${BUILD_DIR}/coverage"
 echo "=== Merging profiles ==="
 MERGE_LOG="${BUILD_DIR}/coverage/llvm-profdata-merge.log"
-PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -name '*.profraw' -type f | wc -l | tr -d ' ')
+PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -maxdepth 1 -name 'pulp-*.profraw' -type f | wc -l | tr -d ' ')
 if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
     echo "[local_diff_cover] no raw profile shards were produced" >&2
     exit 1
 fi
-if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -print0 \
-    | xargs -0 llvm-profdata merge -sparse --failure-mode=all \
-        -o "${PROFDATA}" 2>"${MERGE_LOG}"; then
+# Do not pipe this through xargs. A full suite creates far more profile paths
+# than one argv can hold; xargs then invokes llvm-profdata repeatedly and every
+# invocation overwrites the same output, silently retaining only its final
+# batch. llvm-profdata's native input-file list makes this one merge over every
+# shard. Generate controlled relative entries inside PROFRAW_DIR because a
+# comma in an absolute worktree path is parsed as a profile weight delimiter.
+PROFILE_LIST="${BUILD_DIR}/coverage/profraw-files.txt"
+if ! merge_coverage_profiles "${PROFRAW_DIR}" "${PROFILE_LIST}" "${PROFDATA}" "${MERGE_LOG}"; then
     cat "${MERGE_LOG}" >&2
     exit 1
 fi

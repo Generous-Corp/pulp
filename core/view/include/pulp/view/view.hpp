@@ -908,6 +908,29 @@ public:
     bool has_background_color() const { return has_bg_; }
     Color background_color() const { return bg_color_; }
 
+    /// Browser-compatible device-space paint rectangle for this box's own
+    /// background/border paint. It deliberately does not alter layout, hit
+    /// testing, child placement, or widget/text paint.
+    ///
+    /// The importer records the CSS-edge snapping contract verified against
+    /// Chromium, not a generic renderer rounding heuristic. Keeping both
+    /// edges matters: an integer origin can still have a fractional far edge.
+    void set_captured_box_paint_rect(float left, float top, float right,
+                                     float bottom, float device_scale) {
+        captured_box_paint_left_ = left;
+        captured_box_paint_top_ = top;
+        captured_box_paint_right_ = right;
+        captured_box_paint_bottom_ = bottom;
+        captured_box_paint_scale_ = device_scale > 0.0f ? device_scale : 0.0f;
+    }
+    bool has_captured_box_paint_rect() const {
+        return captured_box_paint_scale_ > 0.0f;
+    }
+    float captured_box_paint_left() const { return captured_box_paint_left_; }
+    float captured_box_paint_top() const { return captured_box_paint_top_; }
+    float captured_box_paint_right() const { return captured_box_paint_right_; }
+    float captured_box_paint_bottom() const { return captured_box_paint_bottom_; }
+
     /// CSS `background-repeat` keyword. Storage-only at the View level:
     /// paint() of solid-color backgrounds is a no-op for repeat semantics, but
     /// the value is preserved so image/gradient background paint can honor it
@@ -1852,11 +1875,9 @@ public:
 
     /// CSS background-position / background-size.
     ///
-    /// `background-size` IS read at paint wherever the layer repeats — it sizes
-    /// the gradient tile. `background-position` is still storage-only, as is
-    /// `background-size` on a non-repeating layer, because the remaining cases
-    /// only matter for url()/image-set() raster backgrounds and there is no
-    /// image paint pass yet.
+    /// `background-size` and `background-position` are read at paint for
+    /// repeating gradient layers. Raster backgrounds and a sized non-repeating
+    /// image remain storage-only until their own image paint pass exists.
     ///
     /// Storing a keyword nothing reads is a deliberate strategy here, but it
     /// carries a cost worth naming: the compat entry for `background-origin`
@@ -2037,6 +2058,10 @@ public:
     /// one layer, which is what every caller that predates layering wants.
     struct BackgroundGradient {
         int type = 0;  // 0=none, 1=linear, 2=radial, 3=conic
+        // Index in the AUTHOR'S background-image list.  `none` entries do
+        // not paint and are intentionally absent from bg_gradients_, but they
+        // still consume a background-size/repeat/position list slot.
+        std::size_t css_image_layer_index = 0;
         float x0 = 0, y0 = 0, x1 = 0, y1 = 1;
         float radius = 0.7071f;     // radial: fraction of max(w,h)
         float angle = 0.0f;         // conic: start angle in radians
@@ -2084,10 +2109,9 @@ public:
 
         /// True when `positions` still hold raw `px` LENGTHS rather than 0..1
         /// parameters, because every stop named one. The divisor is the
-        /// gradient LINE, whose length is a function of the laid-out box — and
-        /// of the `background-size` TILE when the layer is tiled — so the
-        /// division belongs at paint, beside `linear_repeat_unit`, which
-        /// carries its band's unit forward for the same reason.
+        /// gradient line (linear) or horizontal radius (radial), each a
+        /// function of the laid-out box — and of the `background-size` TILE
+        /// when the layer is tiled — so the division belongs at paint.
         ///
         /// `linear-gradient(<colour> 1px, transparent 1px)` under
         /// `background-size: 100% 32px` is a scanline every 32px. Read as
@@ -2419,7 +2443,8 @@ private:
     // process-global counter when no view anywhere has caching enabled.
     void invalidate_subtree_caches_up();
     void paint_outset_shadows(canvas::Canvas& canvas);
-    void apply_overflow_and_clip_path(canvas::Canvas& canvas);
+    void apply_overflow_clip(canvas::Canvas& canvas);
+    void apply_clip_path(canvas::Canvas& canvas);
     void paint_background_and_border(canvas::Canvas& canvas);
     /// Builds the per-corner outline for a box of the given size and four
     /// corner radii, dispatching between circular corners and the `continuous`
@@ -2428,7 +2453,7 @@ private:
     using CornerPathBuilder =
         std::function<void(float w, float h, float tl, float tr,
                            float bl, float br)>;
-    void paint_border(canvas::Canvas& canvas,
+    void paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
                       bool use_per_corner,
                       const CornerPathBuilder& build_corner_path,
                       float eff_r, float eff_tl, float eff_tr,
@@ -2646,7 +2671,7 @@ private:
         std::string background_attachment;  // noop today
         std::string background_clip;        // partial (text deferred)
         std::string background_origin;      // noop today
-        std::string background_position;    // storage-only (raster bg deferred)
+        std::string background_position;    // repeating gradient tile phase; raster bg deferred
         std::string background_size;        // storage-only (raster bg deferred)
     };
     std::unique_ptr<ViewStyleExtras> style_extras_;
@@ -2699,6 +2724,11 @@ private:
     // Background-image layers, first on top (CSS paint order).
     std::vector<BackgroundGradient> bg_gradients_;
     std::string background_repeat_;  ///< CSS background-repeat keyword (storage-only)
+    float captured_box_paint_left_ = 0.0f;
+    float captured_box_paint_top_ = 0.0f;
+    float captured_box_paint_right_ = 0.0f;
+    float captured_box_paint_bottom_ = 0.0f;
+    float captured_box_paint_scale_ = 0.0f;
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;
     WhiteSpaceMode white_space_mode_ = WhiteSpaceMode::normal;

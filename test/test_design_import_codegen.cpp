@@ -4835,7 +4835,7 @@ TEST_CASE("selector emitters keep a usable fallback segment",
 // Order is load-bearing. The `background` shorthand RESETS `background-size`,
 // so the size has to be written after it; emitted first, it is silently
 // discarded and this test would pass against markup that still renders wrong.
-TEST_CASE("the JS emitter carries background-size, after the shorthand",
+TEST_CASE("the JS emitter carries tiled background size and position after the shorthand",
           "[view][import][codegen][background-size]") {
     DesignIR ir;
     ir.root.type = "frame";
@@ -4844,9 +4844,252 @@ TEST_CASE("the JS emitter carries background-size, after the shorthand",
     grid.type = "frame";
     grid.name = "grid-x";
     grid.style.background_gradient =
-        "linear-gradient(90deg, rgb(36, 38, 84) 1px, rgba(0, 0, 0, 0) 1px)";
-    grid.style.background_size = "12.5% 100%";
+        "linear-gradient(90deg, rgb(36, 38, 84) 1px, rgba(0, 0, 0, 0) 1px), "
+        "linear-gradient(0deg, rgb(36, 38, 84) 1px, rgba(0, 0, 0, 0) 1px)";
+    grid.style.background_size = "12.5% 100%, 100% 12.5%";
+    grid.style.background_position = "0 0, 2px 2px";
+    grid.attributes["browser_box_paint_dpr"] = "2";
+    grid.attributes["browser_box_paint_left_px"] = "10";
+    grid.attributes["browser_box_paint_top_px"] = "12";
+    grid.attributes["browser_box_paint_right_px"] = "210";
+    grid.attributes["browser_box_paint_bottom_px"] = "112";
     ir.root.children.push_back(std::move(grid));
+
+    // Position is inert on a single, unsized full-box gradient, including both
+    // Chromium's computed `0% 0%` and authored offsets. None may become a
+    // Swift strict-fidelity failure merely because the field was captured.
+    DesignIR full_box_ir;
+    full_box_ir.root.type = "frame";
+    IRNode full_box_gradient;
+    full_box_gradient.type = "frame";
+    full_box_gradient.style.background_gradient =
+        "linear-gradient(to right, #123456, #654321)";
+    full_box_ir.root.children.push_back(std::move(full_box_gradient));
+    for (const char* position : {"0% 0%", "0.0% 0.0%", "0 0", "50% 50%", "0px 50%", "50% 0px"}) {
+        full_box_ir.root.children.front().style.background_position = position;
+        std::vector<FidelityIssue> inert_issues;
+        SwiftExportOptions inert_options;
+        inert_options.fidelity_report = &inert_issues;
+        (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, inert_options);
+        INFO("inert full-box background-position: " << position);
+        CHECK_FALSE(std::any_of(inert_issues.begin(), inert_issues.end(),
+                                [](const FidelityIssue& issue) {
+                                    return issue.kind == "swiftui-background-position" &&
+                                        !issue.informational;
+                                }));
+    }
+    full_box_ir.root.children.front().style.background_position = "0% 0%, 0% 0%";
+    std::vector<FidelityIssue> layered_default_issues;
+    SwiftExportOptions layered_default_options;
+    layered_default_options.fidelity_report = &layered_default_issues;
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
+                              layered_default_options);
+    CHECK_FALSE(std::any_of(layered_default_issues.begin(), layered_default_issues.end(),
+                            [](const FidelityIssue& issue) {
+                                return issue.kind == "swiftui-background-position" &&
+                                    !issue.informational;
+                            }));
+
+    // Unlike percentage positions, a non-zero absolute offset changes the
+    // repeated CSS gradient's visible tile phase even at its default size.
+    for (const char* position : {"2px 2px", "-0.5px 0px", "calc(2px + 0%) 0px"}) {
+        full_box_ir.root.children.front().style.background_position = position;
+        std::vector<FidelityIssue> absolute_offset_issues;
+        SwiftExportOptions absolute_offset_options;
+        absolute_offset_options.fidelity_report = &absolute_offset_issues;
+        (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
+                                  absolute_offset_options);
+        INFO("material full-box background-position: " << position);
+        CHECK(std::any_of(absolute_offset_issues.begin(), absolute_offset_issues.end(),
+                          [](const FidelityIssue& issue) {
+                              return issue.kind == "swiftui-background-position" &&
+                                  !issue.informational;
+                          }));
+    }
+
+    // Background-size has the same per-layer default rule. Browser capture
+    // can retain either axis spelling or a comma-separated default list; none
+    // changes a gradient with no intrinsic dimensions.
+    full_box_ir.root.children.front().style.background_position.reset();
+    for (const char* size : {"auto, auto", "100% auto", "auto 100%", "100.0% 100%", "contain", "cover"}) {
+        full_box_ir.root.children.front().style.background_size = size;
+        std::vector<FidelityIssue> default_size_issues;
+        SwiftExportOptions default_size_options;
+        default_size_options.fidelity_report = &default_size_issues;
+        (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
+                                  default_size_options);
+        INFO("inert full-box background-size: " << size);
+        CHECK_FALSE(std::any_of(default_size_issues.begin(), default_size_issues.end(),
+                                [](const FidelityIssue& issue) {
+                                    return issue.kind == "swiftui-background-size" &&
+                                        !issue.informational;
+                                }));
+    }
+
+    // CSS cycles lists only across image layers. Surplus values and values on
+    // a flat color cannot create a Swift strict-fidelity divergence.
+    full_box_ir.root.children.front().style.background_size = "auto, 12px 100%";
+    full_box_ir.root.children.front().style.background_position = "0% 0%, 2px 2px";
+    std::vector<FidelityIssue> surplus_issues;
+    SwiftExportOptions surplus_options;
+    surplus_options.fidelity_report = &surplus_issues;
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, surplus_options);
+    CHECK_FALSE(std::any_of(surplus_issues.begin(), surplus_issues.end(),
+                            [](const FidelityIssue& issue) { return !issue.informational; }));
+
+    DesignIR flat_ir;
+    flat_ir.root.type = "frame";
+    IRNode flat;
+    flat.type = "frame";
+    flat.style.background_color = "#123456";
+    flat.style.background_size = "12px 100%";
+    flat.style.background_position = "2px 2px";
+    flat_ir.root.children.push_back(std::move(flat));
+    std::vector<FidelityIssue> flat_issues;
+    SwiftExportOptions flat_options;
+    flat_options.fidelity_report = &flat_issues;
+    (void)generate_pulp_swift(flat_ir, flat_ir.asset_manifest, flat_options);
+    CHECK_FALSE(std::any_of(flat_issues.begin(), flat_issues.end(),
+                            [](const FidelityIssue& issue) { return !issue.informational; }));
+
+    // Axis materiality is independent: a vertical percentage offset does
+    // nothing when only the horizontal gradient tile is smaller than its box.
+    full_box_ir.root.children.front().style.background_size = "12px 100%";
+    full_box_ir.root.children.front().style.background_position = "0% 50%";
+    std::vector<FidelityIssue> inert_axis_issues;
+    SwiftExportOptions inert_axis_options;
+    inert_axis_options.fidelity_report = &inert_axis_issues;
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, inert_axis_options);
+    CHECK_FALSE(std::any_of(inert_axis_issues.begin(), inert_axis_issues.end(),
+                            [](const FidelityIssue& issue) {
+                                return issue.kind == "swiftui-background-position" &&
+                                    !issue.informational;
+                            }));
+    full_box_ir.root.children.front().style.background_position = "50% 0%";
+    std::vector<FidelityIssue> material_axis_issues;
+    SwiftExportOptions material_axis_options;
+    material_axis_options.fidelity_report = &material_axis_issues;
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, material_axis_options);
+    CHECK(std::any_of(material_axis_issues.begin(), material_axis_issues.end(),
+                      [](const FidelityIssue& issue) {
+                          return issue.kind == "swiftui-background-position" &&
+                              !issue.informational;
+                      }));
+
+    // Even default size/position cannot make a second actual CSS image layer
+    // representable by one SwiftUI LinearGradient.
+    full_box_ir.root.children.front().style.background_size = "auto, auto";
+    full_box_ir.root.children.front().style.background_position = "0% 0%, 0% 0%";
+    full_box_ir.root.children.front().style.background_gradient =
+        "linear-gradient(to right, #123456, #654321), "
+        "linear-gradient(to bottom, #abcdef, #fedcba)";
+    std::vector<FidelityIssue> multiple_layer_issues;
+    SwiftExportOptions multiple_layer_options;
+    multiple_layer_options.fidelity_report = &multiple_layer_issues;
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, multiple_layer_options);
+    CHECK(std::any_of(multiple_layer_issues.begin(), multiple_layer_issues.end(),
+                      [](const FidelityIssue& issue) {
+                          return issue.kind == "swiftui-background-layers" &&
+                              !issue.informational;
+                      }));
+
+    // The image-layer count is not a gradient-only count: a URL under/over a
+    // linear gradient is still an independently painted CSS layer that Swift
+    // cannot silently drop.
+    full_box_ir.root.children.front().style.background_gradient =
+        "url(texture.png), linear-gradient(to right, #123456, #654321)";
+    full_box_ir.root.children.front().style.background_size = "auto, auto";
+    full_box_ir.root.children.front().style.background_position = "0% 0%, 0% 0%";
+    std::vector<FidelityIssue> mixed_layer_issues;
+    SwiftExportOptions mixed_layer_options;
+    mixed_layer_options.fidelity_report = &mixed_layer_issues;
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, mixed_layer_options);
+    CHECK(std::any_of(mixed_layer_issues.begin(), mixed_layer_issues.end(),
+                      [](const FidelityIssue& issue) {
+                          return issue.kind == "swiftui-background-layers" &&
+                              !issue.informational;
+                      }));
+
+    // A single unsupported CSS gradient is also a hard divergence: accepting
+    // it only as an informational note would export a flat fill in strict mode.
+    for (const char* gradient : {
+             "radial-gradient(circle, #123456, #654321)",
+             "repeating-linear-gradient(to right, #123456 0 2px, #654321 2px 4px)",
+             "cross-fade(linear-gradient(to right, #123456, #654321), #000000)",
+             "linear-gradient(#123456, 50%, #654321)",
+         }) {
+        full_box_ir.root.children.front().style.background_gradient = gradient;
+        full_box_ir.root.children.front().style.background_size.reset();
+        full_box_ir.root.children.front().style.background_position.reset();
+        std::vector<FidelityIssue> unsupported_gradient_issues;
+        SwiftExportOptions unsupported_gradient_options;
+        unsupported_gradient_options.fidelity_report = &unsupported_gradient_issues;
+        (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
+                                  unsupported_gradient_options);
+        INFO("unsupported Swift gradient: " << gradient);
+        CHECK(std::any_of(unsupported_gradient_issues.begin(),
+                          unsupported_gradient_issues.end(),
+                          [](const FidelityIssue& issue) {
+                              return issue.kind == "swiftui-gradient" &&
+                                  !issue.informational;
+                          }));
+    }
+
+    // `none` has no pixels but still occupies its declared CSS image-list
+    // index. The second image must consult size/position entry 1, not entry 0.
+    full_box_ir.root.children.front().style.background_gradient =
+        "none, linear-gradient(to right, #123456, #654321)";
+    full_box_ir.root.children.front().style.background_size = "12px 100%, auto";
+    full_box_ir.root.children.front().style.background_position = "50% 0%, 0% 0%";
+    std::vector<FidelityIssue> none_then_linear_inert_issues;
+    SwiftExportOptions none_then_linear_inert_options;
+    none_then_linear_inert_options.fidelity_report = &none_then_linear_inert_issues;
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
+                              none_then_linear_inert_options);
+    CHECK_FALSE(std::any_of(none_then_linear_inert_issues.begin(),
+                            none_then_linear_inert_issues.end(),
+                            [](const FidelityIssue& issue) {
+                                return (issue.kind == "swiftui-background-size" ||
+                                        issue.kind == "swiftui-background-position") &&
+                                    !issue.informational;
+                            }));
+    full_box_ir.root.children.front().style.background_size = "auto, 12px 100%";
+    full_box_ir.root.children.front().style.background_position = "0% 0%, 50% 0%";
+    std::vector<FidelityIssue> none_then_linear_material_issues;
+    SwiftExportOptions none_then_linear_material_options;
+    none_then_linear_material_options.fidelity_report = &none_then_linear_material_issues;
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
+                              none_then_linear_material_options);
+    CHECK(std::any_of(none_then_linear_material_issues.begin(),
+                      none_then_linear_material_issues.end(),
+                      [](const FidelityIssue& issue) {
+                          return issue.kind == "swiftui-background-size" &&
+                              !issue.informational;
+                      }));
+    CHECK(std::any_of(none_then_linear_material_issues.begin(),
+                      none_then_linear_material_issues.end(),
+                      [](const FidelityIssue& issue) {
+                          return issue.kind == "swiftui-background-position" &&
+                              !issue.informational;
+                      }));
+
+    // A non-default size is material even without a position: SwiftUI's
+    // full-box LinearGradient cannot reproduce CSS's gradient tile geometry.
+    full_box_ir.root.children.front().style.background_position.reset();
+    full_box_ir.root.children.front().style.background_size = "12.5% 100%";
+    std::vector<FidelityIssue> size_only_issues;
+    SwiftExportOptions size_only_options;
+    size_only_options.fidelity_report = &size_only_issues;
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
+                              size_only_options);
+    CHECK(std::any_of(size_only_issues.begin(), size_only_issues.end(),
+                      [](const FidelityIssue& issue) {
+                          return issue.kind == "swiftui-background-size" &&
+                              !issue.informational;
+                      }));
+
+    // Unlike the unsized full-box controls, this is a real two-layer tiled
+    // checkerboard phase. SwiftUI must disclose that it cannot represent it.
 
     // web_compat, not bridge_native_js: this is the document.createElement +
     // el.style lane, which is what a generated panel's ui.js actually uses.
@@ -4856,12 +5099,114 @@ TEST_CASE("the JS emitter carries background-size, after the shorthand",
 
     const auto gradient_at = js.find(".style.background = ");
     const auto size_at = js.find(".style.backgroundSize = ");
+    const auto position_at = js.find(".style.backgroundPosition = ");
     REQUIRE(gradient_at != std::string::npos);
     REQUIRE(size_at != std::string::npos);
-    CHECK(js.find("12.5% 100%") != std::string::npos);
+    REQUIRE(position_at != std::string::npos);
+    CHECK(js.find("12.5% 100%, 100% 12.5%") != std::string::npos);
     // The shorthand resets the size, so anything else here ships a tile that
     // never tiles.
     CHECK(gradient_at < size_at);
+    CHECK(size_at < position_at);
+
+    const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    CHECK(cpp.source.find("set_background_position(\"0 0, 2px 2px\")") !=
+          std::string::npos);
+    CHECK(cpp.source.find("set_captured_box_paint_rect(5.0f, 6.0f, 105.0f, 56.0f, 2.0f)") !=
+          std::string::npos);
+
+    std::vector<FidelityIssue> painted_box_swift_issues;
+    SwiftExportOptions painted_box_swift_options;
+    painted_box_swift_options.fidelity_report = &painted_box_swift_issues;
+    (void)generate_pulp_swift(ir, ir.asset_manifest, painted_box_swift_options);
+    CHECK(std::any_of(painted_box_swift_issues.begin(), painted_box_swift_issues.end(),
+                      [](const FidelityIssue& issue) {
+                          return issue.kind == "swiftui-browser-box-paint-rect" &&
+                              !issue.informational;
+                      }));
+
+    // Browser capture records the same tuple on transparent layout/text
+    // carriers. Native View never consumes it without a background, gradient,
+    // or painted border, so it cannot change exported SwiftUI pixels.
+    DesignIR inert_box_ir;
+    inert_box_ir.root.type = "frame";
+    IRNode inert_box;
+    inert_box.type = "frame";
+    inert_box.attributes["browser_box_paint_dpr"] = "2";
+    inert_box.attributes["browser_box_paint_left_px"] = "10";
+    inert_box.attributes["browser_box_paint_top_px"] = "12";
+    inert_box.attributes["browser_box_paint_right_px"] = "210";
+    inert_box.attributes["browser_box_paint_bottom_px"] = "112";
+    inert_box_ir.root.children.push_back(std::move(inert_box));
+    std::vector<FidelityIssue> inert_box_swift_issues;
+    SwiftExportOptions inert_box_swift_options;
+    inert_box_swift_options.fidelity_report = &inert_box_swift_issues;
+    (void)generate_pulp_swift(inert_box_ir, inert_box_ir.asset_manifest,
+                              inert_box_swift_options);
+    CHECK_FALSE(std::any_of(inert_box_swift_issues.begin(), inert_box_swift_issues.end(),
+                            [](const FidelityIssue& issue) {
+                                return issue.kind == "swiftui-browser-box-paint-rect" &&
+                                    !issue.informational;
+                            }));
+
+    DesignIR raster_ir;
+    raster_ir.root.type = "frame";
+    IRNode captured_knob;
+    captured_knob.type = "knob";
+    captured_knob.name = "Captured knob";
+    captured_knob.audio_widget = AudioWidgetType::knob;
+    captured_knob.attributes["captured_raster_dpr"] = "2";
+    captured_knob.attributes["captured_raster_origin_x_px"] = "12";
+    captured_knob.attributes["captured_raster_origin_y_px"] = "18";
+    captured_knob.attributes["browser_box_paint_dpr"] = "2";
+    captured_knob.attributes["browser_box_paint_left_px"] = "12";
+    captured_knob.attributes["browser_box_paint_top_px"] = "18";
+    captured_knob.attributes["browser_box_paint_right_px"] = "112";
+    captured_knob.attributes["browser_box_paint_bottom_px"] = "118";
+    captured_knob.attributes["knob_ind_r_in"] = "0.2";
+    captured_knob.attributes["knob_ind_r_out"] = "0.8";
+    captured_knob.attributes["knob_ind_w"] = "0.04";
+    captured_knob.attributes["knob_ind_color"] = "#ffffff";
+    captured_knob.attributes["knob_ind_outline_color"] = "#000000";
+    captured_knob.attributes["knob_ind_outline_w"] = "1";
+    raster_ir.root.children.push_back(std::move(captured_knob));
+    const auto raster_cpp = generate_pulp_cpp(raster_ir, raster_ir.asset_manifest, {});
+    CHECK(raster_cpp.source.find("set_captured_raster_origin(6.0f, 9.0f, 2.0f)") !=
+          std::string::npos);
+    CHECK(raster_cpp.source.find("set_captured_indicator(") != std::string::npos);
+    CHECK(raster_cpp.source.find("set_captured_indicator_outline(") != std::string::npos);
+
+    // A recovered pointer can be geometric evidence without an authored paint
+    // color. Generated C++ must leave that fallback theme-resolvable rather
+    // than introducing a second hardcoded widget color.
+    raster_ir.root.children[0].attributes.erase("knob_ind_color");
+    const auto tokenized_pointer_cpp =
+        generate_pulp_cpp(raster_ir, raster_ir.asset_manifest, {});
+    CHECK(tokenized_pointer_cpp.source.find(
+              "resolve_color(\"knob.thumb\", pulp::canvas::Color::rgba8(235, 235, 235))") !=
+          std::string::npos);
+    std::vector<FidelityIssue> raster_swift_issues;
+    SwiftExportOptions raster_swift_options;
+    raster_swift_options.fidelity_report = &raster_swift_issues;
+    (void)generate_pulp_swift(raster_ir, raster_ir.asset_manifest, raster_swift_options);
+    for (const char* kind : {"swiftui-captured-raster-origin",
+                             "swiftui-knob-captured-indicator"}) {
+        CHECK(std::any_of(raster_swift_issues.begin(), raster_swift_issues.end(),
+                          [kind](const FidelityIssue& issue) {
+                              return issue.kind == kind && !issue.informational;
+                          }));
+    }
+
+    std::vector<FidelityIssue> swift_issues;
+    SwiftExportOptions swift_options;
+    swift_options.fidelity_report = &swift_issues;
+    (void)generate_pulp_swift(ir, ir.asset_manifest, swift_options);
+    REQUIRE_FALSE(swift_issues.empty());
+    CHECK(std::any_of(swift_issues.begin(), swift_issues.end(),
+                      [](const FidelityIssue& issue) {
+                          return issue.kind == "swiftui-background-position" &&
+                              issue.detail.find("0 0, 2px 2px") != std::string::npos;
+                      }));
 }
 
 TEST_CASE("the web-compat JS emitter carries white-space nowrap",
@@ -4987,6 +5332,10 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
         knob.attributes["knob_ind_w"] = "0.04";
         if (per_control)
             knob.attributes["knob_ind_color"] = "#ffffffff";
+        if (per_control) {
+            knob.attributes["knob_ind_outline_color"] = "#000000ff";
+            knob.attributes["knob_ind_outline_w"] = "1";
+        }
         if (panel_fallback)
             knob.attributes["design_indicator"] = "#ff0000ff";
         // Deliberately no asset_path: portable/self-contained persistence may
@@ -5025,8 +5374,10 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
         const auto fader_stmt = authored.substr(
             fader_at, authored.find('\n', fader_at) - fader_at);
         CHECK(knob_stmt.find("#ffffffff") != std::string::npos);
+        CHECK(knob_stmt.find("#000000ff") != std::string::npos);
+        CHECK(knob_stmt.find(", 1)") != std::string::npos);
         CHECK(fader_stmt.find("#28dcf0ff") != std::string::npos);
-        CHECK(knob_stmt.find(", true)") != std::string::npos);
+        CHECK(knob_stmt.find(", true,") != std::string::npos);
         CHECK(fader_stmt.find(", true)") != std::string::npos);
         CHECK(knob_stmt.find("#ff0000ff") == std::string::npos);
         CHECK(fader_stmt.find("#ff0000ff") == std::string::npos);
@@ -5048,7 +5399,7 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
             invalid_fader_at, invalid.find('\n', invalid_fader_at) - invalid_fader_at);
         CHECK(invalid_knob_stmt.find("#ff0000ff") != std::string::npos);
         CHECK(invalid_fader_stmt.find("#ff0000ff") != std::string::npos);
-        CHECK(invalid_knob_stmt.find(", false)") != std::string::npos);
+        CHECK(invalid_knob_stmt.find(", false,") != std::string::npos);
         CHECK(invalid_fader_stmt.find(", false)") != std::string::npos);
 
         const auto panel = generate_pulp_js(make_ir(false, true), opts);
@@ -5064,7 +5415,7 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
             panel_knob_at, panel.find('\n', panel_knob_at) - panel_knob_at);
         const auto panel_fader_stmt = panel.substr(
             panel_fader_at, panel.find('\n', panel_fader_at) - panel_fader_at);
-        CHECK(panel_knob_stmt.find(", false)") != std::string::npos);
+        CHECK(panel_knob_stmt.find(", false,") != std::string::npos);
         CHECK(panel_fader_stmt.find("#ff0000ff") != std::string::npos);
         CHECK(panel_fader_stmt.find(", false)") != std::string::npos);
 
@@ -5077,7 +5428,7 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
                   .find(", '', ") != std::string::npos);
         CHECK(themed.substr(themed_knob_at,
                             themed.find('\n', themed_knob_at) - themed_knob_at)
-                  .find(", false)") != std::string::npos);
+                  .find(", false,") != std::string::npos);
         // No authored track/fill/thumb means no synthetic fader skin: the
         // runtime's control.thumb/theme remains the authority.
         CHECK(themed.find("setFaderSkin(") == std::string::npos);

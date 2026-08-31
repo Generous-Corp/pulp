@@ -5,6 +5,7 @@
 #include "design_ir_helpers.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <sstream>
@@ -19,6 +20,70 @@ bool body_is_painted_beneath(const IRNode& node) {
     const auto it = node.attributes.find("designed_body");
     return it != node.attributes.end() &&
            (it->second == "underlay" || it->second == "capture");
+}
+
+void emit_captured_raster_origin(std::ostringstream& out,
+                                 int depth,
+                                 const EmitContext& ctx,
+                                 std::string_view var,
+                                 const IRNode& node,
+                                 const ResolvedNativeNode& resolved) {
+    if (resolved.kind != NativeWidgetKind::knob && resolved.kind != NativeWidgetKind::fader)
+        return;
+    const auto dpr = attr_float(node, "captured_raster_dpr");
+    const auto x_px = attr_float(node, "captured_raster_origin_x_px");
+    const auto y_px = attr_float(node, "captured_raster_origin_y_px");
+    if (!dpr || !x_px || !y_px || !std::isfinite(*dpr) || !std::isfinite(*x_px) ||
+        !std::isfinite(*y_px) || *dpr <= 0.0f)
+        return;
+    emit_line(out, depth, ctx.opts.indent_spaces,
+              std::string(var) + "->set_captured_raster_origin(" +
+              float_expr(ctx, *x_px / *dpr) + ", " +
+              float_expr(ctx, *y_px / *dpr) + ", " +
+              float_expr(ctx, *dpr) + ");");
+}
+
+void emit_captured_knob_indicator(std::ostringstream& out,
+                                  int depth,
+                                  const EmitContext& ctx,
+                                  std::string_view var,
+                                  const IRNode& node,
+                                  const ResolvedNativeNode& resolved) {
+    if (resolved.kind != NativeWidgetKind::knob) return;
+    const auto r_out = attr_float(node, "knob_ind_r_out");
+    if (!r_out || !std::isfinite(*r_out) || *r_out <= 0.0f) return;
+    const auto r_in = attr_float(node, "knob_ind_r_in").value_or(0.0f);
+    const auto width = attr_float(node, "knob_ind_w").value_or(0.0f);
+    const auto phase = attr_float(node, "knob_ind_phase_rad").value_or(0.0f);
+    const auto color_attr = attr(node, "knob_ind_color");
+    const auto color = color_attr ? color_expr(ctx, *color_attr) : std::string{};
+    const bool authored = !color.empty();
+    // Keep an unauthored pointer reskinnable in generated C++ too. Knob::paint
+    // resolves this token again while color_authored is false; the emitted
+    // lookup supplies the same light fallback if the generated tree is painted
+    // before a theme is attached.
+    const auto emitted_color = authored
+        ? color
+        : std::string(var) +
+            "->resolve_color(\"knob.thumb\", pulp::canvas::Color::rgba8(235, 235, 235))";
+    emit_line(out, depth, ctx.opts.indent_spaces,
+              std::string(var) + "->set_captured_indicator(" +
+              float_expr(ctx, std::isfinite(r_in) ? r_in : 0.0f) + ", " +
+              float_expr(ctx, *r_out) + ", " +
+              float_expr(ctx, std::isfinite(width) ? width : 0.0f) + ", " +
+              emitted_color + ", " +
+              float_expr(ctx, std::isfinite(phase) ? phase : 0.0f) + ", " +
+              (authored ? "true" : "false") + ");");
+    const auto outline_width = attr_float(node, "knob_ind_outline_w");
+    const auto outline_color = attr(node, "knob_ind_outline_color");
+    if (outline_width && std::isfinite(*outline_width) && *outline_width > 0.0f &&
+        outline_color) {
+        if (const auto color_expr_value = color_expr(ctx, *outline_color);
+            !color_expr_value.empty())
+            emit_line(out, depth, ctx.opts.indent_spaces,
+                      std::string(var) + "->set_captured_indicator_outline(" +
+                      color_expr_value + ", " + float_expr(ctx, *outline_width) + ");");
+    }
 }
 
 std::string widget_make_expr(const IRNode& node,
@@ -730,6 +795,8 @@ void emit_node(std::ostringstream& out,
     if (!faithful) {
         emit_visual_style(out, depth, ctx, var, node, node.style);
         emit_widget_specific(out, depth, ctx, var, node, resolved, ctx.manifest);
+        emit_captured_raster_origin(out, depth, ctx, var, node, resolved);
+        emit_captured_knob_indicator(out, depth, ctx, var, node, resolved);
     }
 
     const auto count = faithful ? std::size_t{0}

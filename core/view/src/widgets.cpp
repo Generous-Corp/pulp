@@ -70,6 +70,39 @@ KnobModGeom knob_mod_geom(const Rect& b, size_t ring_count) {
 float knob_value_to_angle(float v) {
     return Knob::start_angle + std::clamp(v, 0.0f, 1.0f) * (Knob::end_angle - Knob::start_angle);
 }
+
+// Browser capture crops are raster images at a known scale (normally DPR 2).
+// Layout remains fractional for sibling placement and hit testing, but drawing
+// an already-rasterized crop at a half-device-pixel translation resamples it.
+// Walk the ordinary paint translation chain and restore only that draw
+// destination to the durable crop origin. Imported controls on this path have
+// no transform; transformed art keeps the normal unsnapped draw contract.
+float captured_raster_snap_offset(const View& view, bool horizontal,
+                                  float captured_origin, float scale) {
+    if (!(scale > 0.0f) || !std::isfinite(scale)) return 0.0f;
+    float origin = horizontal ? view.bounds().x : view.bounds().y;
+    for (const View* parent = view.parent(); parent != nullptr;
+         parent = parent->parent()) {
+        origin += horizontal ? parent->bounds().x : parent->bounds().y;
+    }
+    return captured_origin - origin;
+}
+
+template <typename Draw>
+void draw_captured_raster(canvas::Canvas& canvas, const View& view,
+                          float captured_origin_x, float captured_origin_y,
+                          float scale,
+                          Draw&& draw) {
+    if (!(scale > 0.0f)) {
+        draw();
+        return;
+    }
+    canvas.save();
+    canvas.translate(captured_raster_snap_offset(view, true, captured_origin_x, scale),
+                     captured_raster_snap_offset(view, false, captured_origin_y, scale));
+    draw();
+    canvas.restore();
+}
 }  // namespace
 
 void Knob::on_mouse_enter() {
@@ -418,7 +451,8 @@ void Knob::paint(canvas::Canvas& canvas) {
             ind_r_in_ * pointer_radius,
             ind_r_out_ * pointer_radius,
             std::max(1.5f, ind_width_ * pointer_radius),
-            color, value_, ind_phase_rad_);
+            color, value_, ind_phase_rad_,
+            ind_outline_color_, ind_outline_width_);
         captured_indicator_drawn = true;
     };
 
@@ -453,10 +487,13 @@ void Knob::paint(canvas::Canvas& canvas) {
                 float dst_x = -sprite_core_x_ * s + pad_x;
                 float dst_y = -sprite_core_y_ * s + pad_y;
                 notch_r = std::min(core_box_w, core_box_h) * 0.5f;
-                canvas.draw_image_from_file_rect(
-                    sprite_strip_->path(),
-                    static_cast<float>(fx), static_cast<float>(fy), fw, fh,
-                    dst_x, dst_y, dst_w, dst_h);
+                draw_captured_raster(canvas, *this, captured_raster_origin_x_,
+                                     captured_raster_origin_y_, captured_raster_scale_, [&] {
+                    canvas.draw_image_from_file_rect(
+                        sprite_strip_->path(),
+                        static_cast<float>(fx), static_cast<float>(fy), fw, fh,
+                        dst_x, dst_y, dst_w, dst_h);
+                });
             } else {
                 // Legacy fallback (no recovered core): render the frame at its
                 // NATURAL logical size centered on the layout box. Figma's PNG
@@ -472,10 +509,13 @@ void Knob::paint(canvas::Canvas& canvas) {
                 float dst_h = fh / kExportScale;
                 float dst_x = (b.width  - dst_w) * 0.5f;
                 float dst_y = (b.height - dst_h) * 0.5f;
-                canvas.draw_image_from_file_rect(
-                    sprite_strip_->path(),
-                    static_cast<float>(fx), static_cast<float>(fy), fw, fh,
-                    dst_x, dst_y, dst_w, dst_h);
+                draw_captured_raster(canvas, *this, captured_raster_origin_x_,
+                                     captured_raster_origin_y_, captured_raster_scale_, [&] {
+                    canvas.draw_image_from_file_rect(
+                        sprite_strip_->path(),
+                        static_cast<float>(fx), static_cast<float>(fy), fw, fh,
+                        dst_x, dst_y, dst_w, dst_h);
+                });
             }
         } else {
             // Legacy raw-RGBA path. NOTE: SkiaCanvas::draw_image_from_data
@@ -786,14 +826,18 @@ void Fader::paint(canvas::Canvas& canvas) {
             : static_cast<float>(captured_body_->frame_height());
         const float body_scale_x = b.width / natural_w;
         const float body_scale_y = b.height / natural_h;
-        canvas.draw_image_from_file_rect(
-            captured_body_->path(), 0.0f, 0.0f,
-            static_cast<float>(captured_body_->frame_width()),
-            static_cast<float>(captured_body_->frame_height()),
-            captured_body_origin_x_ * body_scale_x,
-            captured_body_origin_y_ * body_scale_y,
-            captured_body_->frame_width() * body_scale_x,
-            captured_body_->frame_height() * body_scale_y);
+        const float body_x = captured_body_origin_x_ * body_scale_x;
+        const float body_y = captured_body_origin_y_ * body_scale_y;
+        draw_captured_raster(canvas, *this, captured_raster_origin_x_,
+                             captured_raster_origin_y_, captured_raster_scale_, [&] {
+            canvas.draw_image_from_file_rect(
+                captured_body_->path(), 0.0f, 0.0f,
+                static_cast<float>(captured_body_->frame_width()),
+                static_cast<float>(captured_body_->frame_height()),
+                body_x, body_y,
+                captured_body_->frame_width() * body_scale_x,
+                captured_body_->frame_height() * body_scale_y);
+        });
     }
 
     // A paint delegate installed on this fader or on any ancestor gets first
@@ -1060,11 +1104,14 @@ void Fader::paint(canvas::Canvas& canvas) {
                                    : axis_center - thumb_w * 0.5f;
         const float thumb_y = vert ? axis_center - thumb_h * 0.5f
                                    : cross_center - thumb_h * 0.5f;
-        canvas.draw_image_from_file_rect(
-            captured_indicator_->path(), 0.0f, 0.0f,
-            static_cast<float>(captured_indicator_->frame_width()),
-            static_cast<float>(captured_indicator_->frame_height()),
-            thumb_x, thumb_y, thumb_w, thumb_h);
+        draw_captured_raster(canvas, *this, captured_raster_origin_x_,
+                             captured_raster_origin_y_, captured_raster_scale_, [&] {
+            canvas.draw_image_from_file_rect(
+                captured_indicator_->path(), 0.0f, 0.0f,
+                static_cast<float>(captured_indicator_->frame_width()),
+                static_cast<float>(captured_indicator_->frame_height()),
+                thumb_x, thumb_y, thumb_w, thumb_h);
+        });
     }
 
     // Label

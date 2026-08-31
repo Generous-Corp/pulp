@@ -318,6 +318,7 @@ test("a declared knob indicator is carried into the candidate", () => {
   assert.match(expression, /data-pulp-indicator/);
   assert.match(expression, /indicator_bounds: indicatorBox\(element\)/);
   assert.match(expression, /indicator_color: indicatorColor\(element\)/);
+  assert.match(expression, /indicator_border: indicatorBorder\(element\)/);
   // Page coordinates, matching bounds and paint_bounds, so a consumer can
   // relate the pointer to its dial without a second coordinate system.
   assert.match(expression, /left: box.left \+ window.scrollX/);
@@ -325,6 +326,25 @@ test("a declared knob indicator is carried into the candidate", () => {
   // override for a pointer no single computed colour describes.
   assert.match(expression, /opaque\(style.backgroundColor\)/);
   assert.match(expression, /if \(declared\) return declared;/);
+});
+
+test("a bordered HTML indicator keeps its fill and outline as separate paints", () => {
+  const candidates = runSemanticExpression([
+    element({
+      attrs: { "aria-label": "Bordered", "data-pulp-kind": "knob" },
+      children: [element({
+        attrs: { "data-pulp-indicator": "" },
+        style: {
+          backgroundColor: "rgb(255, 255, 255)",
+          borderTopColor: "rgb(0, 0, 0)",
+          borderTopWidth: "1px",
+        },
+      })],
+    }),
+  ]);
+  const bordered = candidates.find(candidate => candidate.name === "Bordered");
+  assert.equal(bordered.indicator_color, "rgb(255, 255, 255)");
+  assert.deepEqual(bordered.indicator_border, { color: "rgb(0, 0, 0)", width: 1 });
 });
 
 test("the pointer is described in its own space as well as on the page", () => {
