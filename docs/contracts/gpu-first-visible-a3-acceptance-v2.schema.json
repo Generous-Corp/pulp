@@ -227,6 +227,10 @@
             "editor_open_origin": { "type": "string", "minLength": 1, "maxLength": 1024 },
             "interaction_lifecycle": { "type": "string", "minLength": 1, "maxLength": 1024 },
             "steady_state_workload": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "interaction_origin": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "interaction_stimulus": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "interaction_expected_state": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "interaction_measurement_endpoint": { "type": "string", "minLength": 1, "maxLength": 1024 },
             "display_id": { "type": "string", "minLength": 1, "maxLength": 256 },
             "refresh_hz": { "type": "number", "minimum": 1 }
           }

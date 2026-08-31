@@ -394,16 +394,17 @@ def validate_product_policy(
     for index, ref in enumerate(coverage["a1_evidence"]):
         exact_keys(ref, ARTIFACT_KEYS, f"required coverage A1 evidence {index}")
     nested_digests = {coverage["support_matrix"]["sha256"]}
+    policy_pulp_revision = policy["first_applicable_pulp_revision"]
     support_matrix_path = validate_generated_evidence(
         coverage["support_matrix"], evidence_root, "support-matrix",
-        receipt["implementation_head"], nested_digests,
+        policy_pulp_revision, nested_digests,
     )
     if support_matrix_path != SUPPORT_MATRIX:
         raise V2AcceptanceError("required coverage is not bound to the protected support matrix")
     a1_paths: set[str] = set()
     for index, ref in enumerate(coverage["a1_evidence"]):
         a1_paths.add(validate_generated_evidence(
-            ref, evidence_root, "a1-evidence", receipt["implementation_head"],
+            ref, evidence_root, "a1-evidence", policy_pulp_revision,
             nested_digests,
         ))
         nested_digests.add(ref["sha256"])
@@ -590,10 +591,11 @@ def validate_sample(
 
 def validate_raw_campaign(
     raw: Any, *, role_id: str, policy_sha256: str,
+    policy_interaction: dict[str, Any],
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
     raw = exact_keys(raw, {
         "schema", "version", "role_id", "manifest_seed", "trial_order",
-        "timer_noise_samples_ns", "states",
+        "interaction_authority", "timer_noise_samples_ns", "states",
     }, f"{role_id} raw samples")
     if raw["schema"] != "pulp.gpu-first-visible-a3-role-samples.v2" or raw["version"] != 2 or raw["role_id"] != role_id:
         raise V2AcceptanceError(f"{role_id} raw samples have the wrong identity")
@@ -601,6 +603,16 @@ def validate_raw_campaign(
     order = derived_trial_order(policy_sha256, role_id)
     if raw["manifest_seed"] != seed or raw["trial_order"] != order:
         raise V2AcceptanceError(f"{role_id} raw samples have the wrong pairing order or seed")
+    expected_interaction = None
+    if role_id in VISIBLE_ROLES:
+        expected_interaction = {
+            "origin": policy_interaction["origin"],
+            "stimulus": policy_interaction["stimulus"],
+            "expected_state": policy_interaction["expected_state_change"],
+            "measurement_endpoint": policy_interaction["endpoint"],
+        }
+    if raw["interaction_authority"] != expected_interaction:
+        raise V2AcceptanceError(f"{role_id} raw samples do not bind exact interaction authority")
     timer = raw["timer_noise_samples_ns"]
     if not isinstance(timer, list) or len(timer) != 10000 or any(
         not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in timer
@@ -982,6 +994,19 @@ def protected_required_coverage_errors(
     coverage = policy["required_coverage"]
     refs = [coverage["support_matrix"], *coverage["a1_evidence"]]
     errors: list[str] = []
+    policy_revision = policy["first_applicable_pulp_revision"]
+    comparison = _command_json([
+        ghapp, "api", f"repos/Generous-Corp/pulp/compare/{policy_revision}...{pulp_head}",
+    ])
+    if (
+        comparison.get("base_commit", {}).get("sha") != policy_revision
+        or comparison.get("merge_base_commit", {}).get("sha") != policy_revision
+        or comparison.get("status") != "ahead"
+        or not isinstance(comparison.get("ahead_by"), int)
+        or comparison["ahead_by"] <= 0
+        or comparison.get("behind_by") != 0
+    ):
+        errors.append("product policy first-applicable Pulp revision is not strict protected-main ancestry")
     for ref in refs:
         wrapper = resolve_artifact(ref, evidence_root, "required coverage live wrapper")
         artifact = resolve_artifact_path(
@@ -1157,6 +1182,8 @@ def validate_v2(
         if (
             identity["pulp_revision"] != receipt["implementation_head"]
             or identity["machine_id"] != policy["reference_host"]["machine_id"]
+            or identity["display_id"] != policy["reference_host"]["display"]
+            or identity["refresh_hz"] != policy["reference_host"]["refresh_hz"]
             or identity["host_kind"] != spec[1]
             or identity["application_kind"] != spec[2]
             or identity["plugin_format"] != spec[3]
@@ -1168,8 +1195,24 @@ def validate_v2(
             raise V2AcceptanceError(f"{role_id} carries an unrelated Forge revision")
         if role_id == "constrained-adapter" and identity["adapter"] != policy["required_coverage"]["adapter"]:
             raise V2AcceptanceError("constrained-adapter does not use the authority-selected adapter")
+        policy_interaction = policy_roles[role_id]["first_interaction"]
+        interaction_fields = {
+            "interaction_origin": "origin",
+            "interaction_stimulus": "stimulus",
+            "interaction_expected_state": "expected_state_change",
+            "interaction_measurement_endpoint": "endpoint",
+        }
+        if role_id in VISIBLE_ROLES:
+            if any(identity.get(field) != policy_interaction[policy_field]
+                   for field, policy_field in interaction_fields.items()):
+                raise V2AcceptanceError(f"{role_id} campaign does not bind exact interaction authority")
+        elif any(field in identity for field in interaction_fields):
+            raise V2AcceptanceError("headless-reference cannot carry visible interaction authority")
         raw = resolve_artifact(campaign["raw_samples"], evidence_root, f"{role_id}.raw_samples")
-        samples = validate_raw_campaign(raw, role_id=role_id, policy_sha256=policy_sha256)
+        samples = validate_raw_campaign(
+            raw, role_id=role_id, policy_sha256=policy_sha256,
+            policy_interaction=policy_interaction,
+        )
         nested_artifact_digests.update(
             replay_trace_analyzer(campaign, evidence_root, receipt["implementation_head"])
         )

@@ -18,6 +18,7 @@ import gpu_first_visible_a3_acceptance as a3
 v2 = a3.a3_v2
 SHA = "1" * 40
 FORGE_SHA = "2" * 40
+POLICY_PULP_SHA = "3" * 40
 DIGEST = "4" * 64
 PUBLICATION_SHA = "5" * 40
 APPROVED_SHA = "6" * 40
@@ -92,6 +93,12 @@ def raw_campaign(role: str, policy_sha256: str) -> dict[str, Any]:
     return {
         "schema": "pulp.gpu-first-visible-a3-role-samples.v2", "version": 2,
         "role_id": role, "manifest_seed": seed, "trial_order": order,
+        "interaction_authority": None if role == "headless-reference" else {
+            "origin": interaction(role)["origin"],
+            "stimulus": interaction(role)["stimulus"],
+            "expected_state": interaction(role)["expected_state_change"],
+            "measurement_endpoint": interaction(role)["endpoint"],
+        },
         "timer_noise_samples_ns": [1] * 10000, "states": states,
     }
 
@@ -104,7 +111,7 @@ p = argparse.ArgumentParser(); p.add_argument("--json", action="store_true")
 if mode == "verify-a3-evidence":
  p.add_argument("--kind"); p.add_argument("--artifact"); a=p.parse_args(sys.argv[2:])
  d=hashlib.sha256(open(a.artifact,"rb").read()).hexdigest()
- print(json.dumps({{"schema":"pulp.gpu-first-visible-evidence-verification.v1","kind":a.kind,"artifact_sha256":d,"implementation_head":"{SHA}","valid":True}},sort_keys=True))
+ print(json.dumps({{"schema":"pulp.gpu-first-visible-evidence-verification.v1","kind":a.kind,"artifact_sha256":d,"implementation_head":"{POLICY_PULP_SHA}","valid":True}},sort_keys=True))
 else:
  p.add_argument("--raw"); p.add_argument("--trace"); p.add_argument("--identity-sha256"); a=p.parse_args(sys.argv[2:])
  h=lambda x: hashlib.sha256(open(x,"rb").read()).hexdigest()
@@ -139,24 +146,49 @@ else:
         "build_verifier_receipt": embedded_build_ref,
         "source_build_receipt": source_build_ref,
     })
+    coverage_identity = dict(producer_identity, pulp_revision=POLICY_PULP_SHA)
+    coverage_embedded_ref = write_artifact(root, "tooling/coverage-producer-build-verifier.json", {
+        "schema": "pulp.gpu-first-visible-build-verification-receipt.v1", "version": 1,
+        "attempt_nonce": "coverage-attempt", "control": "real", "outcome": "pass", "reason": None,
+        "verification_method": "embedded-canonical-build-identity",
+        "product_identity": coverage_identity, "product_sha256": producer_ref["sha256"],
+        "observed_product_sha256": producer_ref["sha256"], "marker_sha256": DIGEST,
+    })
+    coverage_source_ref = write_artifact(root, "tooling/coverage-producer-source-build.json", {
+        "schema": "pulp.gpu-first-visible-source-build-receipt.v1", "version": 1,
+        "attempt_nonce": "coverage-attempt", "role": "a3-evidence-producer", "outcome": "pass",
+        "reason": None, "identity": coverage_identity,
+        "source_revisions": {"pulp": POLICY_PULP_SHA},
+        "build_command": ["build-evidence-producer"], "builder_id": "fixture-builder",
+        "build_started_utc": "2026-08-28T00:00:00Z", "build_finished_utc": "2026-08-28T00:00:01Z",
+        "driver_sha256": DIGEST, "product_path": "evidence-producer",
+        "product_sha256": producer_ref["sha256"], "bundle_path": None,
+        "bundle_tree_sha256": None,
+    })
+    coverage_provenance_ref = write_artifact(root, "tooling/coverage-producer-provenance.json", {
+        "schema": "pulp.gpu-first-visible-evidence-producer.v1", "version": 1,
+        "pulp_revision": POLICY_PULP_SHA, "producer_sha256": producer_ref["sha256"],
+        "build_verifier_receipt": coverage_embedded_ref,
+        "source_build_receipt": coverage_source_ref,
+    })
     support_payload = write_artifact(root, v2.SUPPORT_MATRIX, {"protected": True})
     a1_payload = write_artifact(root, v2.A0_GPU_BASELINE, {"authentic_a1": True})
     support_ref = write_artifact(root, "policy/support-matrix.json", {
         "schema": "pulp.gpu-first-visible-generated-evidence.v1", "version": 1,
-        "kind": "support-matrix", "implementation_head": SHA, "producer": producer_ref,
-        "producer_provenance": producer_provenance_ref, "artifact": support_payload,
+        "kind": "support-matrix", "implementation_head": POLICY_PULP_SHA, "producer": producer_ref,
+        "producer_provenance": coverage_provenance_ref, "artifact": support_payload,
     })
     a1_ref = write_artifact(root, "policy/a1-evidence.json", {
         "schema": "pulp.gpu-first-visible-generated-evidence.v1", "version": 1,
-        "kind": "a1-evidence", "implementation_head": SHA, "producer": producer_ref,
-        "producer_provenance": producer_provenance_ref, "artifact": a1_payload,
+        "kind": "a1-evidence", "implementation_head": POLICY_PULP_SHA, "producer": producer_ref,
+        "producer_provenance": coverage_provenance_ref, "artifact": a1_payload,
     })
     policy = {
         "schema": "pulp.gpu-first-visible-budget-authority.v1", "version": 1,
         "budget_id": "a3-v2-test-authority",
         "clock": "mach_continuous_time", "editor_open_origin": "editor-open-requested",
         "first_nonblank_endpoint": "first-nonblank-presented-frame", "statistic": "p95",
-        "first_applicable_pulp_revision": SHA,
+        "first_applicable_pulp_revision": POLICY_PULP_SHA,
         "first_applicable_forge_revision": FORGE_SHA,
         "reference_host": {"host_id": "m5", "machine_id": "fleet-m5", "hardware": "M5", "os": "macOS", "display": "main", "refresh_hz": 60},
         "roles": [
@@ -230,6 +262,14 @@ raise SystemExit(2)
             })
         if role == "constrained-adapter":
             identity["adapter_predicate"] = "supported-constrained-metal-adapter"
+        if role != "headless-reference":
+            role_interaction = interaction(role)
+            identity.update({
+                "interaction_origin": role_interaction["origin"],
+                "interaction_stimulus": role_interaction["stimulus"],
+                "interaction_expected_state": role_interaction["expected_state_change"],
+                "interaction_measurement_endpoint": role_interaction["endpoint"],
+            })
         identity_digest = hashlib.sha256(
             (json.dumps(identity, sort_keys=True, separators=(",", ":")) + "\n").encode()
         ).hexdigest()
@@ -288,6 +328,8 @@ raise SystemExit(2)
         set(v2.collect_artifact_sha256s(receipt)) | {
             support_ref["sha256"], a1_ref["sha256"], producer_ref["sha256"],
             producer_provenance_ref["sha256"], support_payload["sha256"], a1_payload["sha256"],
+            coverage_provenance_ref["sha256"], coverage_embedded_ref["sha256"],
+            coverage_source_ref["sha256"],
             audio_executable["sha256"], embedded_build_ref["sha256"], source_build_ref["sha256"],
         }
     )
@@ -502,6 +544,12 @@ def main() -> int:
 
         def protected_content(command: list[str]) -> dict[str, Any]:
             endpoint = command[2]
+            if "/compare/" in endpoint:
+                return {
+                    "base_commit": {"sha": POLICY_PULP_SHA},
+                    "merge_base_commit": {"sha": POLICY_PULP_SHA},
+                    "status": "ahead", "ahead_by": 1, "behind_by": 0,
+                }
             path = endpoint.split("/contents/", 1)[1].split("?ref=", 1)[0]
             return {"type": "file", "path": path, "sha": protected_blobs[path]}
 
@@ -509,13 +557,44 @@ def main() -> int:
             assert v2.protected_required_coverage_errors(
                 policy, root, SHA, "ghapp",
             ) == []
+        def nonancestor(command: list[str]) -> dict[str, Any]:
+            endpoint = command[2]
+            if "/compare/" in endpoint:
+                return {
+                    "base_commit": {"sha": POLICY_PULP_SHA},
+                    "merge_base_commit": {"sha": "9" * 40},
+                    "status": "diverged", "ahead_by": 1, "behind_by": 1,
+                }
+            path = endpoint.split("/contents/", 1)[1].split("?ref=", 1)[0]
+            return {"type": "file", "path": path, "sha": protected_blobs[path]}
+        with mock.patch.object(v2, "_command_json", side_effect=nonancestor):
+            assert "not strict protected-main ancestry" in v2.protected_required_coverage_errors(
+                policy, root, SHA, "ghapp",
+            )[0]
+        def identical_revision(command: list[str]) -> dict[str, Any]:
+            endpoint = command[2]
+            if "/compare/" in endpoint:
+                return {
+                    "base_commit": {"sha": POLICY_PULP_SHA},
+                    "merge_base_commit": {"sha": POLICY_PULP_SHA},
+                    "status": "identical", "ahead_by": 0, "behind_by": 0,
+                }
+            path = endpoint.split("/contents/", 1)[1].split("?ref=", 1)[0]
+            return {"type": "file", "path": path, "sha": protected_blobs[path]}
+        with mock.patch.object(v2, "_command_json", side_effect=identical_revision):
+            assert "not strict protected-main ancestry" in v2.protected_required_coverage_errors(
+                policy, root, POLICY_PULP_SHA, "ghapp",
+            )[0]
         with mock.patch.object(
             v2, "_command_json",
             return_value={"type": "file", "path": v2.SUPPORT_MATRIX, "sha": "9" * 40},
         ):
-            assert "exact protected Pulp blob" in v2.protected_required_coverage_errors(
-                policy, root, SHA, "ghapp",
-            )[0]
+            assert any(
+                "exact protected Pulp blob" in error
+                for error in v2.protected_required_coverage_errors(
+                    policy, root, SHA, "ghapp",
+                )
+            )
         terminal_path = root / "terminal.json"
         terminal_path.write_text(json.dumps(receipt), encoding="utf-8")
         terminal = subprocess.run(
@@ -551,6 +630,8 @@ def main() -> int:
         ("omitted role", lambda r, _p: r["campaigns"].pop()),
         ("extra role", lambda r, _p: r["campaigns"].append(copy.deepcopy(r["campaigns"][0]))),
         ("substituted host", lambda r, _p: r["campaigns"][0]["identity"].update(host_kind="substitute")),
+        ("substituted display", lambda r, _p: r["campaigns"][0]["identity"].update(display_id="other-display")),
+        ("substituted refresh", lambda r, _p: r["campaigns"][0]["identity"].update(refresh_hz=120)),
         ("standalone canary binary", lambda r, _p: r["campaigns"][0]["identity"].update(application_sha256="8" * 64)),
         ("constrained canary content", lambda r, _p: r["campaigns"][6]["identity"].update(content_sha256="8" * 64)),
         ("constrained canary signature", lambda r, _p: r["campaigns"][6]["identity"].update(signature_sha256="8" * 64)),
@@ -560,12 +641,21 @@ def main() -> int:
         ("constrained configuration", lambda r, _p: r["campaigns"][6]["identity"].update(adapter_configuration="executor-selected")),
         ("missing standalone configuration", lambda r, _p: r["campaigns"][0]["identity"].pop("adapter_configuration")),
         ("constrained product substitution", lambda r, _p: r["campaigns"][6]["identity"].update(build_sha256="8" * 64)),
+        ("campaign interaction origin", lambda r, _p: r["campaigns"][0]["identity"].update(interaction_origin="easier-origin")),
+        ("campaign interaction stimulus", lambda r, _p: r["campaigns"][1]["identity"].update(interaction_stimulus="easier-stimulus")),
+        ("campaign interaction expected state", lambda r, _p: r["campaigns"][2]["identity"].update(interaction_expected_state="no-op")),
+        ("campaign interaction endpoint", lambda r, _p: r["campaigns"][3]["identity"].update(interaction_measurement_endpoint="earlier-endpoint")),
+        ("raw interaction origin", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["raw_samples"], lambda raw: raw["interaction_authority"].update(origin="easier-origin"))),
+        ("raw interaction stimulus", lambda r, p: rewrite_artifact(p, r["campaigns"][1]["raw_samples"], lambda raw: raw["interaction_authority"].update(stimulus="easier-stimulus"))),
+        ("raw interaction expected state", lambda r, p: rewrite_artifact(p, r["campaigns"][2]["raw_samples"], lambda raw: raw["interaction_authority"].update(expected_state="no-op"))),
+        ("raw interaction endpoint", lambda r, p: rewrite_artifact(p, r["campaigns"][3]["raw_samples"], lambda raw: raw["interaction_authority"].update(measurement_endpoint="earlier-endpoint"))),
         ("false unavailable", lambda r, _p: r["campaigns"][0].update(status="unavailable")),
         ("executor disposition", lambda r, _p: r.update(disposition="queue-B4")),
         ("caller self-attestation", lambda r, _p: r["publication"].update(protected=True, head=SHA, required_checks=[])),
         ("old policy self-provenance", plant_old_policy_self_provenance),
         ("old validation self-provenance", plant_old_validation_self_provenance),
         ("malformed publication commit", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(publication_commit="bad"))),
+        ("wrong policy P", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy.update(first_applicable_pulp_revision="9" * 40))),
         ("wrong planning policy path", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(path=f"{v2.PLANNING_POLICY_DIRECTORY}/other.product-policy.json"))),
         ("unavailable Pulp policy source", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(repository="Generous-Corp/pulp", pr_url="https://github.com/Generous-Corp/pulp/pull/1"))),
         ("unavailable Forge policy source", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(repository="Generous-Corp/forge", pr_url="https://github.com/Generous-Corp/forge/pull/1"))),
@@ -614,7 +704,7 @@ def main() -> int:
         raise AssertionError("incomplete paginated check-runs result was accepted")
     print(
         f"gpu first-visible A3 v2 acceptance: positive=1 "
-        f"cli_outcomes=3 planted_negatives={len(negatives)} live_check_controls=24"
+        f"cli_outcomes=3 planted_negatives={len(negatives)} live_check_controls=26"
     )
     return 0
 
