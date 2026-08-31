@@ -132,8 +132,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_recipe_catalog.py",
           "state": "pulp-owned-retained",
-          "revision": "e6af0d582f5dc8f3745d55afd092a8d74867b6d8",
-          "object_id": "f1a0b2fab03a0d3df8ae4f4922d2ea776d1a179d",
+          "revision": "5ffd9142671bf3d72fd2c396efd2618465bf211a",
+          "object_id": "08383bd7a9c5a4b52e0bc054ac16c19fc285dd2a",
           "object_type": "blob"
         },
         {
@@ -1316,8 +1316,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_recipe_catalog.py",
           "state": "pulp-owned-retained",
-          "revision": "e6af0d582f5dc8f3745d55afd092a8d74867b6d8",
-          "object_id": "f1a0b2fab03a0d3df8ae4f4922d2ea776d1a179d",
+          "revision": "5ffd9142671bf3d72fd2c396efd2618465bf211a",
+          "object_id": "08383bd7a9c5a4b52e0bc054ac16c19fc285dd2a",
           "object_type": "blob"
         }
       ],
