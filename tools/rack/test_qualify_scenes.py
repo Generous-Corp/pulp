@@ -18,10 +18,13 @@ import qualify_scenes as Q
 
 
 def macho(code: bytes, signature: bytes) -> bytes:
-    header = struct.pack("<IiiIIIII", 0xFEEDFACF, 0, 0, 2, 1, 16, 0, 0)
-    signature_offset = len(header) + 16 + len(code)
+    header = struct.pack("<IiiIIIII", 0xFEEDFACF, 0, 0, 2, 2, 88, 0, 0)
+    signature_offset = len(header) + 72 + 16 + len(code)
+    segment = struct.pack(
+        "<II16sQQQQIIII", 0x19, 72, b"__TEXT", 0, signature_offset,
+        0, signature_offset, 7, 5, 0, 0)
     command = struct.pack("<IIII", 0x1D, 16, signature_offset, len(signature))
-    return header + command + code + signature
+    return header + segment + command + code + signature
 
 
 class Fixture:
@@ -435,6 +438,35 @@ class QualificationTests(unittest.TestCase):
                                     "executing.*does not match"):
             Q.prepare_inputs(**kwargs)
         self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_binary_identity_rejects_signature_covering_executable_bytes(
+            self) -> None:
+        candidate = self.fixture.root / "forged-signature-offset"
+        data = bytearray(macho(b"executable code", b"signature"))
+        signature_command = 32 + 72
+        forged_offset = signature_command + 16
+        struct.pack_into("<II", data, signature_command + 8,
+                         forged_offset, len(data) - forged_offset)
+        candidate.write_bytes(data)
+
+        with self.assertRaisesRegex(Q.QualificationError,
+                                    "file-backed executable data"):
+            Q._binary_identity(self.fixture.root, candidate)
+
+    def test_reviewer_identity_matches_release_identity_authority(self) -> None:
+        authority = (Path(Q.__file__).resolve().parents[2] /
+                     "examples/forge-modular/binary_identity.py")
+        for name, contents in (
+                ("plain", b"ordinary helper bytes"),
+                ("signed", macho(b"executable code", b"signature"))):
+            with self.subTest(name=name):
+                candidate = self.fixture.root / f"identity-{name}"
+                candidate.write_bytes(contents)
+                expected = subprocess.check_output(
+                    [sys.executable, str(authority), str(candidate)],
+                    text=True).strip()
+                self.assertEqual(
+                    expected, Q._binary_identity(self.fixture.root, candidate))
 
     def test_prepare_requires_explicit_sdk_authority_and_checks_optional_stamp(self) -> None:
         kwargs = self.prepare_kwargs()
