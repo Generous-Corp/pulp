@@ -743,3 +743,109 @@ TEST_CASE("StepPlayer process path allocates nothing after capacity preparation"
     CHECK_FALSE(allocations.saw_allocation());
     CHECK(report.complete);
 }
+
+TEST_CASE("StepPlayer nudges a step off the grid by its timing offset",
+          "[midi][step-player][grid][oracle]") {
+    // The offset is what lets a caller express swing, a groove table or a
+    // per-step nudge without running its own scheduler. A quarter is 705'600
+    // ticks and a sixteenth step is 176'400, which is exactly 6'000 samples at
+    // 120 bpm / 48 kHz, so a nudge of kStepTicks/4 is exactly 1'500 samples.
+    constexpr std::int32_t kNudgeTicks = static_cast<std::int32_t>(kStepTicks / 4);
+    constexpr std::int64_t kNudgeSamples = kStepSamples / 4;
+    STATIC_REQUIRE(kNudgeTicks == 44'100);
+
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(1);
+    auto player = fixture.make();
+    // Alternate steps are pushed late, which is the shape swing has.
+    for (std::size_t index = 0; index < 4; ++index) {
+        auto step = basic_step();
+        step.timing_offset_ticks = (index % 2 == 1) ? kNudgeTicks : 0;
+        REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+    }
+
+    const std::array partitions{std::int32_t{24'000}};
+    const auto events = render(player, map, 24'000, partitions);
+    const auto attacks = attacks_of(events);
+    REQUIRE(attacks.size() == 4);
+    for (std::size_t index = 0; index < 4; ++index) {
+        const std::int64_t grid = static_cast<std::int64_t>(index) * kStepSamples;
+        const std::int64_t expected = grid + (index % 2 == 1 ? kNudgeSamples : 0);
+        CHECK(attacks[index].sample == expected);
+    }
+    // Sensitivity control: the nudged steps really did move off the grid, so a
+    // kernel that ignored the field could not satisfy the assertions above.
+    CHECK(attacks[1].sample != 1 * kStepSamples);
+    CHECK(attacks[3].sample != 3 * kStepSamples);
+}
+
+TEST_CASE("StepPlayer keeps a nudged step's gate length", "[midi][step-player][grid]") {
+    // The release moves with the attack. A step nudged late must not be
+    // shortened into the next step's boundary.
+    constexpr std::int32_t kNudgeTicks = static_cast<std::int32_t>(kStepTicks / 4);
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(1);
+    fixture.spec.lanes[0].step_count = 2;
+    auto player = fixture.make();
+    for (std::size_t index = 0; index < 2; ++index) {
+        auto step = basic_step();
+        step.gate_percent = 50;
+        step.timing_offset_ticks = kNudgeTicks;
+        REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+    }
+    const std::array partitions{std::int32_t{12'000}};
+    const auto events = render(player, map, 12'000, partitions);
+    const auto attacks = attacks_of(events);
+    const auto releases = releases_of(events);
+    REQUIRE(attacks.size() >= 1);
+    REQUIRE(releases.size() >= 1);
+    // A 50% gate on a 6'000-sample step is 3'000 samples, regardless of nudge.
+    CHECK(releases[0].sample - attacks[0].sample == kStepSamples / 2);
+}
+
+TEST_CASE("StepPlayer rejects a timing offset beyond its declared bound",
+          "[midi][step-player][parity]") {
+    PlayerFixture<> fixture(1);
+    auto player = fixture.make();
+    auto step = basic_step();
+
+    step.timing_offset_ticks = midi::StepPlayer<>::kMaximumTimingOffsetTicks;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::None);
+    step.timing_offset_ticks = -midi::StepPlayer<>::kMaximumTimingOffsetTicks;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::None);
+
+    // One past the bound is refused rather than silently honoured, because a
+    // nudge that large reorders the grid against itself.
+    step.timing_offset_ticks = midi::StepPlayer<>::kMaximumTimingOffsetTicks + 1;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
+
+    // The bound must be wide enough to express swing on a sixteenth grid, which
+    // a 16-bit field could not: it would cap at 32'767 of the 176'400 ticks a
+    // sixteenth spans.
+    STATIC_REQUIRE(midi::StepPlayer<>::kMaximumTimingOffsetTicks > kStepTicks / 2);
+}
+
+TEST_CASE("StepPlayer with a zero timing offset is unchanged", "[midi][step-player][parity]") {
+    // The bypass identity: adding the field must not move anything that does
+    // not ask to be moved.
+    const auto map = constant_tempo_map();
+    auto run = [&](bool set_offset) {
+        PlayerFixture<> fixture(1);
+        auto player = fixture.make();
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            if (set_offset)
+                step.timing_offset_ticks = 0;
+            player.set_step(0, index, step);
+        }
+        const std::array partitions{std::int32_t{24'000}};
+        return attacks_of(render(player, map, 24'000, partitions));
+    };
+    const auto without = run(false);
+    const auto with_zero = run(true);
+    REQUIRE(without.size() == with_zero.size());
+    for (std::size_t index = 0; index < without.size(); ++index)
+        CHECK(without[index].sample == with_zero[index].sample);
+    for (std::size_t index = 0; index < without.size(); ++index)
+        CHECK(without[index].sample == static_cast<std::int64_t>(index) * kStepSamples);
+}

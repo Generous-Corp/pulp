@@ -42,6 +42,7 @@ enum class StepPlayerError : std::uint8_t {
     InvalidProbability,
     InvalidRatchetCount,
     InvalidPitchOffset,
+    InvalidTimingOffset,
 };
 
 /// The authored data at one lane and step coordinate.
@@ -58,6 +59,20 @@ struct StepPlayerStep {
     std::uint8_t gate_percent = 100;
     std::uint8_t probability_percent = 100;
     std::uint8_t ratchet_count = 1;
+    /// Signed micro-timing nudge in ticks, applied to this step's hits and to
+    /// their releases together so the gate length is preserved.
+    ///
+    /// This is what lets a caller place a hit off the grid. Swing, a groove
+    /// table and a per-step nudge are all deterministic functions of the step's
+    /// position, so a caller folds them into one offset and the kernel keeps
+    /// owning the clocks, the sounding-note ledger and the releases. Without it
+    /// a caller wanting swing has to run its own scheduler, which is the
+    /// duplication this kernel exists to remove.
+    ///
+    /// Keep it smaller than the step interval. A nudge larger than the interval
+    /// reorders steps against each other, which the kernel does not attempt to
+    /// resolve.
+    std::int32_t timing_offset_ticks = 0;
     bool tie = false;
     bool slide = false;
     constexpr auto operator<=>(const StepPlayerStep&) const = default;
@@ -226,6 +241,15 @@ class StepPlayer {
     /// A lane can hold one ratchet burst plus one note kept overlapping by a
     /// slide, so the ledger never needs more than this to avoid stranding.
     static constexpr std::size_t kMaximumSoundingNotes = MaxLanes * (MaxRatchetHits + 1);
+    /// A micro-timing nudge is bounded to one quarter note: far wider than any
+    /// swing or groove needs, and narrow enough that a value which would
+    /// reorder the grid wholesale is refused rather than silently honoured.
+    ///
+    /// The field is 32-bit deliberately. A quarter is 705'600 ticks, so a
+    /// 16-bit offset would cap at 32'767 — under a fifth of a single sixteenth
+    /// step, which cannot express swing at all.
+    static constexpr std::int32_t kMaximumTimingOffsetTicks =
+        static_cast<std::int32_t>(timebase::kTicksPerQuarter);
 
     struct Spec {
         std::size_t lane_count = 0;
@@ -291,6 +315,9 @@ class StepPlayer {
             return StepPlayerError::InvalidRatchetCount;
         if (step.pitch_offset < -48 || step.pitch_offset > 48)
             return StepPlayerError::InvalidPitchOffset;
+        if (step.timing_offset_ticks < -kMaximumTimingOffsetTicks ||
+            step.timing_offset_ticks > kMaximumTimingOffsetTicks)
+            return StepPlayerError::InvalidTimingOffset;
         return StepPlayerError::None;
     }
 
@@ -789,11 +816,19 @@ class StepPlayer {
             std::max<std::int64_t>(1, gate_ticks / static_cast<std::int64_t>(hit_count));
 
         for (std::size_t hit = clock.hits_done; hit < hit_count; ++hit) {
-            const auto hit_tick = hits[hit];
+            // The nudge moves the attack and its release by the same amount,
+            // so a step keeps the gate length it was authored with.
+            const auto nudge = static_cast<std::int64_t>(step.timing_offset_ticks);
+            const auto hit_tick = timebase::TickPosition{
+                utility_detail::saturating_sample_add(hits[hit].value, nudge)};
             auto release_tick = timebase::TickPosition{utility_detail::saturating_sample_add(
                 hit_tick.value, hit_gate_ticks)};
-            if (hit + 1 < hit_count && hits[hit + 1].value <= release_tick.value)
-                release_tick = {std::max(hits[hit + 1].value - 1, hit_tick.value)};
+            if (hit + 1 < hit_count) {
+                const auto next_tick =
+                    utility_detail::saturating_sample_add(hits[hit + 1].value, nudge);
+                if (next_tick <= release_tick.value)
+                    release_tick = {std::max(next_tick - 1, hit_tick.value)};
+            }
             const auto hit_sample = sample_for_tick(hit_tick);
             // A hit past the render limit belongs to a later render call or
             // block; it is re-projected from its tick, never clamped into this
