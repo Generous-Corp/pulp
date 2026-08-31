@@ -117,8 +117,11 @@ more. Fairness under contention comes from the lease, not from this fallback.
 
 `tools/scripts/build_parallelism_guard.py` (a ctest and a Shipyard gate) rejects
 a bare `cmake --build … --parallel` (unbounded `make -j`) *everywhere*, and an
-explicit-but-whole-machine core-count expansion on the shared-host surfaces
-agents copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`). It
+explicit-but-whole-machine core-count expansion on the surfaces it can classify
+as shared: the ones agents copy from (`CLAUDE.md`, `.shipyard/config.toml`,
+`.agents/skills/**`) plus `setup.sh`, the bootstrap every fresh worktree runs on
+the box. It resolves one hop of variable indirection there, so assigning
+`JOBS=$(sysctl -n hw.ncpu)` and passing `-j"$JOBS"` is caught too. It
 does NOT scan `.github/workflows/**` for whole-machine — **not** because those
 runners never share a box, but because a workflow's `runs-on` is resolved
 dynamically (e.g. `${{ fromJSON(matrix.runs_on_json) }}`) and a static scan
@@ -1999,9 +2002,10 @@ live on m3/m5/m1, layered in tiers:
 Every build path is bounded — the CLI (Tier 0), the shipyard-local wrapper, and
 the VM runners (Tier 1 leases). `pulp status` prints a `Build governance: Tier N
 (…)` line reporting which layer bounds the current host. A bare
-`--parallel`/`-j` anywhere in the repo — and, on the shared-host surfaces agents
-copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`), an
-explicit-but-whole-machine core-count expansion (`-j$(nproc)` and friends) — is
+`--parallel`/`-j` anywhere in the repo — and, on the surfaces it can classify as
+shared (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`, `setup.sh`),
+an explicit-but-whole-machine core-count expansion (`-j$(nproc)` and friends,
+including one laundered through a variable the same file assigns) — is
 rejected by `tools/scripts/build_parallelism_guard.py`. The guard does not scan
 `.github/workflows/**` for whole-machine, because a workflow's `runs-on` is
 dynamic and may itself resolve to a shared self-hosted runner — so bounding a

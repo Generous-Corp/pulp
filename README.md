@@ -167,10 +167,8 @@ Three commands from zero to a working native plugin for your platform.
 ```bash
 git clone https://github.com/Generous-Corp/pulp.git
 cd pulp
-./setup.sh                                    # macOS / Linux bootstrap
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  # configure
-cmake --build build                            # build
-ctest --test-dir build --output-on-failure    # test
+./setup.sh                                    # macOS / Linux bootstrap; Release, no examples
+./setup.sh --examples                         # ... or include the example projects
 ```
 
 On Windows, use the supported PowerShell bootstrap before configuring/building:

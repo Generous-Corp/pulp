@@ -23,6 +23,12 @@ import time
 # ten times per second throughout a legitimate multi-minute coverage build.
 POLL_SECONDS = 1.0
 TERMINATION_GRACE_SECONDS = 3.0
+# Interactive shells and process managers commonly escalate a cancelled hook
+# group to SIGKILL after roughly one second.  The supervisor lives in that hook
+# group while the gate is intentionally isolated, so its signal path must
+# finish before that external escalation can kill the supervisor and strand
+# the gate under PID 1.
+SIGNAL_TERMINATION_GRACE_SECONDS = 0.25
 
 
 def parent_pid(pid: int) -> int | None:
@@ -101,16 +107,27 @@ def main(argv: list[str]) -> int:
         print("[pre-push] gate supervisor could not identify its caller", file=sys.stderr)
         return 2
     pending_signal: int | None = None
+    process: subprocess.Popen[bytes] | None = None
 
     def remember_signal(signum: int, _frame: object) -> None:
         nonlocal pending_signal
         pending_signal = signum
+        # Python may restart time.sleep() after a handled signal. Do the
+        # bounded teardown in the handler once the gate exists so an external
+        # TERM->KILL escalation cannot kill this supervisor during that sleep
+        # and strand the isolated gate group.
+        if process is not None:
+            terminate_group(
+                process,
+                signal.Signals(signum),
+                grace_seconds=SIGNAL_TERMINATION_GRACE_SECONDS,
+            )
+            raise SystemExit(128 + signum)
 
     for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, remember_signal)
 
     log_path = Path(args.log)
-    process: subprocess.Popen[bytes] | None = None
     try:
         with log_path.open("wb") as gate_log:
             try:
@@ -130,7 +147,11 @@ def main(argv: list[str]) -> int:
             while process.poll() is None:
                 if pending_signal is not None:
                     forwarded = signal.Signals(pending_signal)
-                    terminate_group(process, forwarded)
+                    terminate_group(
+                        process,
+                        forwarded,
+                        grace_seconds=SIGNAL_TERMINATION_GRACE_SECONDS,
+                    )
                     return 128 + pending_signal
 
                 # os.getppid() catches the hook itself disappearing. Checking
