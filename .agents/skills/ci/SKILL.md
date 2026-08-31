@@ -6963,8 +6963,11 @@ Key facts:
   Skipping is the optimization; running is the safe default.
 - The skip-safe set is a deliberately small allowlist (`*.md` anywhere,
   `docs/`, `planning/`, `.githooks/`, `.shipyard/`, `.shipyard.local/`,
-  a few exact files). Everything else — including `core/**`, all
-  `CMakeLists.txt`, `tools/cmake/**`, `tools/scripts/**`,
+  a few exact files). The pure-Python
+  `tools/scripts/test_prepush_gate_supervisor.py` regression is one exact
+  exception because it only exercises the skip-safe `.githooks/` supervisor;
+  do not generalize that exception to neighboring scripts. Everything else —
+  including `core/**`, all `CMakeLists.txt`, `tools/cmake/**`, `tools/scripts/**`,
   `.github/workflows/**`, and the classifier itself — forces the
   native build.
 - **Deny-list exception: `docs/migrations/*.md` forces the build.**

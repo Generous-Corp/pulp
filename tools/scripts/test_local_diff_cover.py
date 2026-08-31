@@ -744,6 +744,103 @@ class NativeDiffPreflightTests(unittest.TestCase):
                 subprocess.run(["git", "reset", "-q", "--", relative], cwd=self.root, check=True)
                 path.unlink()
 
+    def _write_rack_registration_cmake(self, *, command: str) -> pathlib.Path:
+        path = self.root / "test" / "cmake" / "rack_portmap_tests.cmake"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "if(Python3_Interpreter_FOUND)\n"
+            "    foreach(_rack_safety_test IN ITEMS\n"
+            "            source-index)\n"
+            "        string(REPLACE \"-\" \"_\" _rack_safety_file "
+            "\"${_rack_safety_test}\")\n"
+            "        add_test(NAME rack-${_rack_safety_test}\n"
+            f"            COMMAND {command}\n"
+            "                    ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/"
+            "test_${_rack_safety_file}.py)\n"
+            "        set_tests_properties(rack-${_rack_safety_test} PROPERTIES\n"
+            "            LABELS \"rack;safety\"\n"
+            "            TIMEOUT 60)\n"
+            "    endforeach()\n"
+            "endif()\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_registration_only_python_cmake_change_skips_native_coverage(self) -> None:
+        path = self._write_rack_registration_cmake(command="${Python3_EXECUTABLE}")
+        subprocess.run(["git", "add", str(path.relative_to(self.root))], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "add rack registrations"], cwd=self.root, check=True)
+        subprocess.run(["git", "branch", "-f", "base", "HEAD"], cwd=self.root, check=True)
+
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("            source-index)",
+                                     "            adjudicate-scenes\n"
+                                     "            source-index)"), encoding="utf-8")
+        result = self._preflight()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("registration-only Python CTest", result.stderr)
+
+    def test_real_rack_registrar_accepts_a_python_test_registration(self) -> None:
+        path = self.root / "test" / "cmake" / "rack_portmap_tests.cmake"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            (REPO_ROOT / "test" / "cmake" / "rack_portmap_tests.cmake").read_text(
+                encoding="utf-8"
+            ),
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", str(path.relative_to(self.root))], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "add real rack registrar"], cwd=self.root, check=True)
+        subprocess.run(["git", "branch", "-f", "base", "HEAD"], cwd=self.root, check=True)
+
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("            source-index)", text)
+        path.write_text(text.replace("            source-index)",
+                                     "            adjudicate-scenes\n"
+                                     "            source-index)"), encoding="utf-8")
+        result = self._preflight()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("registration-only Python CTest", result.stderr)
+
+    def test_native_command_mutation_in_rack_registration_retains_coverage(self) -> None:
+        path = self._write_rack_registration_cmake(command="${Python3_EXECUTABLE}")
+        subprocess.run(["git", "add", str(path.relative_to(self.root))], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "add rack registrations"], cwd=self.root, check=True)
+        subprocess.run(["git", "branch", "-f", "base", "HEAD"], cwd=self.root, check=True)
+
+        self._write_rack_registration_cmake(command="$<TARGET_FILE:pulp-test-state>")
+        result = self._preflight()
+        self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
+        self.assertIn("not safely registration-only", result.stderr)
+
+    def test_build_command_in_rack_registration_retains_coverage(self) -> None:
+        path = self._write_rack_registration_cmake(command="${Python3_EXECUTABLE}")
+        subprocess.run(["git", "add", str(path.relative_to(self.root))], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "add rack registrations"], cwd=self.root, check=True)
+        subprocess.run(["git", "branch", "-f", "base", "HEAD"], cwd=self.root, check=True)
+
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("add_executable(hidden_native hidden.cpp)\n")
+        result = self._preflight()
+        self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
+        self.assertIn("not safely registration-only", result.stderr)
+
+    def test_unstaged_safe_restore_cannot_hide_committed_native_cmake(self) -> None:
+        path = self._write_rack_registration_cmake(command="${Python3_EXECUTABLE}")
+        subprocess.run(["git", "add", str(path.relative_to(self.root))], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "add rack registrations"], cwd=self.root, check=True)
+        subprocess.run(["git", "branch", "-f", "base", "HEAD"], cwd=self.root, check=True)
+
+        safe = path.read_text(encoding="utf-8")
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("add_executable(hidden_native hidden.cpp)\n")
+        subprocess.run(["git", "commit", "-qam", "add native build command"], cwd=self.root, check=True)
+        path.write_text(safe, encoding="utf-8")
+
+        result = self._preflight()
+        self.assertEqual(result.returncode, 10, result.stdout + result.stderr)
+        self.assertIn("committed path", result.stderr)
+
     def test_unstaged_restore_cannot_hide_committed_native_change(self) -> None:
         native = self.root / "core" / "existing.cpp"
         native.parent.mkdir(parents=True, exist_ok=True)

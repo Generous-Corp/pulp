@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260829-pr7905-format-authoring-view-split",
+  "created_at": "2026-08-29T17:07:16Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Splitting pulp-format into an authoring half and a view-coupled half touches test/cmake/view_widget_bridge_tests.cmake for one reason: that file registers the inspect_runtime_eval_archive_check site, which scans base archives for the runtime-eval marker. The split leaves the pulp-format umbrella holding only a placeholder object, so the existing scan would have passed while inspecting nothing; the change repoints it at pulp-format-core and pulp-format-view and adds a positive control so a code-free archive fails loudly. It registers two new tests in that manifest's sibling format manifest and adds no visual-proof, screenshot, golden-image, capture, or harness behaviour of any kind, and changes no existing visual-proof assertion, fixture, or baseline. Vellum source authority is unaffected.",
+  "tests": [
+    "pulp-inspect-runtime-eval-archive-boundary, proven red on a code-free archive and on a genuine marker leak, and green on real archives",
+    "format-header-view-boundary, proven red four ways and green when restored",
+    "pulp-format-core-only-consumer, linking pulp::format-core alone",
+    "full ctest, 21093 of 21095 passing with both failures reproduced on pristine origin/main",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

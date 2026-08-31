@@ -532,3 +532,50 @@ add_executable(pulp-test-nsis-installer test_nsis_installer.cpp
 )
 target_link_libraries(pulp-test-nsis-installer PRIVATE pulp::ship Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-nsis-installer)
+
+# Enforces the pulp-format-core / pulp-format-view header boundary: no header
+# classified to the core half may reach pulp/view, pulp/canvas or pulp/render at
+# any include depth. Static analysis, so it needs no build artifacts and cannot
+# be defeated by dead stripping. Reports INCONCLUSIVE rather than a verdict when
+# it cannot resolve the include graph, so a broken resolver never reads as a
+# clean tree.
+add_test(NAME format-header-view-boundary
+    COMMAND ${CMAKE_COMMAND} -E env python3
+        ${CMAKE_SOURCE_DIR}/tools/scripts/format_header_view_boundary.py
+        --repo ${CMAKE_SOURCE_DIR})
+
+# Core-only link proof: a Processor authored, constructed, exercised and
+# destroyed against pulp::format-core with no view layer in the link at all.
+#
+# This is the split's central promise and nothing else in the tree exercises it.
+# Every other test executable reaches pulp::format transitively, so a residual
+# undefined symbol in a core-only link would first surface for an out-of-tree
+# consumer building just the DSP against the SDK. It also catches what a
+# filtered nm sweep structurally cannot: a core object referencing a
+# pulp::format-namespaced symbol that is DEFINED on the view side, such as
+# pulp::format::ViewBridge::~ViewBridge, is invisible to a `pulp::view::`
+# pattern and fully visible to the linker.
+#
+# Links pulp::format-core and nothing else, on purpose. Adding pulp::format or
+# pulp::format-view here would make the link succeed for the wrong reason and
+# silently retire the proof.
+add_executable(pulp-test-format-core-only-consumer
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/format_core_only_consumer/main.cpp)
+target_link_libraries(pulp-test-format-core-only-consumer PRIVATE pulp::format-core)
+add_test(NAME pulp-format-core-only-consumer
+    COMMAND pulp-test-format-core-only-consumer)
+
+# Guards the guard: if someone adds the umbrella or the view half to the target
+# above, the link proof still passes but proves nothing. Assert the link
+# interface stays clean at configure time.
+get_target_property(_pulp_core_only_links
+    pulp-test-format-core-only-consumer LINK_LIBRARIES)
+if("${_pulp_core_only_links}" MATCHES "pulp(::|-)format-view"
+   OR "${_pulp_core_only_links}" MATCHES "pulp(::|-)format$"
+   OR "${_pulp_core_only_links}" MATCHES "pulp(::|-)view")
+    message(FATAL_ERROR
+        "pulp-test-format-core-only-consumer must link ONLY pulp::format-core; "
+        "linking the umbrella or the view half voids the proof: "
+        "${_pulp_core_only_links}")
+endif()
+unset(_pulp_core_only_links)
