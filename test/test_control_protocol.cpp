@@ -972,6 +972,7 @@ TEST_CASE("host preflight frames use the canonical codec and strict directions",
     const ControlEnvelope response{.payload = ControlHostPreflightResponseEnvelope{nonce}};
     const ControlEnvelope bootstrap{
         .payload = ControlHostPreflightBootstrapEnvelope{nonce, "Ym9vdHN0cmFw"}};
+    const ControlEnvelope receipt{.payload = ControlHostPreflightReceiptEnvelope{nonce}};
 
     CHECK(round_trip(std::get<ControlHostPreflightChallengeEnvelope>(challenge.payload)).nonce ==
           nonce);
@@ -979,12 +980,16 @@ TEST_CASE("host preflight frames use the canonical codec and strict directions",
           nonce);
     CHECK(round_trip(std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload)) ==
           std::get<ControlHostPreflightBootstrapEnvelope>(bootstrap.payload));
+    CHECK(round_trip(std::get<ControlHostPreflightReceiptEnvelope>(receipt.payload)).nonce ==
+          nonce);
 
     CHECK(control_envelope_allowed(challenge, ControlEnvelopeDirection::LauncherToHost));
     CHECK(control_envelope_allowed(bootstrap, ControlEnvelopeDirection::LauncherToHost));
     CHECK_FALSE(control_envelope_allowed(challenge, ControlEnvelopeDirection::HostToLauncher));
     CHECK(control_envelope_allowed(response, ControlEnvelopeDirection::HostToLauncher));
+    CHECK(control_envelope_allowed(receipt, ControlEnvelopeDirection::HostToLauncher));
     CHECK_FALSE(control_envelope_allowed(response, ControlEnvelopeDirection::LauncherToHost));
+    CHECK_FALSE(control_envelope_allowed(receipt, ControlEnvelopeDirection::LauncherToHost));
 
     ControlProtocolDiagnostics diagnostics;
     auto encoded = encode_control_envelope(bootstrap);

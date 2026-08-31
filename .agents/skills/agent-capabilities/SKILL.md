@@ -433,6 +433,32 @@ are adding a function to a header that already backs a capability, expect the
 existing key to stay at its current version and the change to be absorbed by
 the two counters.
 
+## Two capabilities can pin the SAME header fingerprint
+
+`--write` / `--check` verify each binding's `header_fingerprint` against the
+file's real bytes, and several capabilities may bind into one header. Adding a
+second entry point to an existing header therefore breaks the FIRST capability's
+fingerprint too, and the failure names the header rather than the capability, so
+it is easy to scope the fix too narrowly:
+
+```
+capability bindings disagree on fingerprint: pulp/signal/fir_design.hpp
+public header fingerprint changed: pulp/signal/fir_design.hpp; expected <old>, got <new>
+```
+
+Refresh EVERY binding that pins that header, not only the one you added. Compute
+the value from the post-edit bytes:
+
+```sh
+python3 -c "import hashlib;print('sha256:'+hashlib.sha256(open('<header>','rb').read()).hexdigest())"
+```
+
+Then run `tools/scripts/agent_capability_rederive.py`. It decides the counters
+LAST and refuses to run while the surface has unresolved problems, saying so
+explicitly. That ordering is deliberate: fix fingerprints first, derive counters
+second. Never hand-edit `manifest_revision` / `inventory_version` in the
+generated JSON; they are projected from source constants and are regenerated.
+
 ## Editing a frozen `legacy_unreviewed` header is a capability transaction
 
 Any edit to a public header sitting in the frozen legacy bucket fails
@@ -489,7 +515,6 @@ and clear the caches when a constant edit did not change file size:
 ```sh
 find tools -name __pycache__ -type d -exec rm -rf {} +
 ```
-
 ## A STALE verdict on a tree you did not touch is a base problem, not a you problem
 
 If `--check` reports these on a clean checkout whose diff touches no capability
