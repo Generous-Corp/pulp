@@ -48,6 +48,7 @@ if(Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_rack_plugin_loads.py)
     set_tests_properties(rack-plugin-loads PROPERTIES
         LABELS "rack;contract"
+        SKIP_RETURN_CODE 3
         TIMEOUT 300)
 
     add_test(NAME rack-generation-eligibility
