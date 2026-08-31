@@ -37,6 +37,26 @@ on:
         description: "Expected PR branch/ref (canonical retarget concurrency identity)"
         required: true
         type: string
+      expected_head_sha:
+        description: "Optional exact PR head expected by an automated recovery controller"
+        required: false
+        default: ""
+        type: string
+      source_run_id:
+        description: "Zero-job Build and Test run being recovered (recovery mode only)"
+        required: false
+        default: ""
+        type: string
+      source_run_attempt:
+        description: "Exact attempt of the zero-job source run (recovery mode only)"
+        required: false
+        default: ""
+        type: string
+      recovery:
+        description: "Require trusted revalidation of one exact zero-job pull_request run"
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -44,12 +64,14 @@ concurrency:
   # Independent of build.yml's `build-${{ github.ref }}` group so a manual
   # retarget doesn't cancel the matrix workflow_run, and vice versa.
   group: build-macos-${{ inputs.target_ref }}
-  cancel-in-progress: true
+  # A recovery must queue behind an accepted retarget, never cancel it.
+  cancel-in-progress: ${{ !inputs.recovery }}
 
 jobs:
   resolve-runner:
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       pull-requests: read
     outputs:
@@ -107,6 +129,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INPUT_PR_NUMBER: ${{ inputs.pr_number }}
           TARGET_REF: ${{ inputs.target_ref }}
+          INPUT_EXPECTED_HEAD: ${{ inputs.expected_head_sha }}
+          INPUT_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          INPUT_SOURCE_RUN_ATTEMPT: ${{ inputs.source_run_attempt }}
+          INPUT_RECOVERY: ${{ inputs.recovery }}
           WORKFLOW_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -164,10 +190,101 @@ jobs:
           case "$head" in
             *[!0-9a-f]*|'') echo "PR #$number returned an invalid head SHA" >&2; exit 1 ;;
           esac
+          if [ -n "$INPUT_EXPECTED_HEAD" ]; then
+            case "$INPUT_EXPECTED_HEAD" in
+              *[!0-9a-f]*|'') echo "expected_head_sha is not a full lowercase SHA" >&2; exit 1 ;;
+            esac
+            if [ "${#INPUT_EXPECTED_HEAD}" -ne 40 ] || [ "$head" != "$INPUT_EXPECTED_HEAD" ]; then
+              echo "PR #$number head changed before retarget dispatch: expected $INPUT_EXPECTED_HEAD, got $head" >&2
+              exit 1
+            fi
+          fi
           if [ "${#base}" -ne 40 ] || [ "${#head}" -ne 40 ]; then
             echo "PR #$number did not return full 40-character base/head SHAs" >&2
             exit 1
           fi
+
+          case "$INPUT_RECOVERY" in
+            false)
+              if [ -n "$INPUT_SOURCE_RUN_ID" ] || [ -n "$INPUT_SOURCE_RUN_ATTEMPT" ]; then
+                echo "source_run_id/source_run_attempt require recovery=true" >&2
+                exit 1
+              fi
+              ;;
+            true)
+              for value_name in INPUT_SOURCE_RUN_ID INPUT_SOURCE_RUN_ATTEMPT; do
+                value="${!value_name}"
+                case "$value" in
+                  ''|*[!0-9]*)
+                    echo "$value_name must be a positive decimal integer in recovery mode" >&2
+                    exit 1
+                    ;;
+                esac
+                [ "$value" -gt 0 ] || {
+                  echo "$value_name must be positive in recovery mode" >&2
+                  exit 1
+                }
+              done
+              if [ -z "$INPUT_EXPECTED_HEAD" ]; then
+                echo "expected_head_sha is required in recovery mode" >&2
+                exit 1
+              fi
+
+              source_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$INPUT_SOURCE_RUN_ID")"
+              source_workflow_id="$(printf '%s' "$source_run" | jq -r .workflow_id)"
+              source_event="$(printf '%s' "$source_run" | jq -r .event)"
+              source_status="$(printf '%s' "$source_run" | jq -r .status)"
+              source_conclusion_is_null="$(printf '%s' "$source_run" | jq -r \
+                'has("conclusion") and .conclusion == null')"
+              source_attempt="$(printf '%s' "$source_run" | jq -r .run_attempt)"
+              source_head="$(printf '%s' "$source_run" | jq -r .head_sha)"
+              source_ref="$(printf '%s' "$source_run" | jq -r .head_branch)"
+              source_repository="$(printf '%s' "$source_run" | jq -r .head_repository.full_name)"
+              source_path="$(printf '%s' "$source_run" | jq -r .path)"
+              if [ "$source_workflow_id" != 256999733 ] || \
+                 [ "$source_event" != pull_request ] || \
+                 { [ "$source_status" != queued ] && [ "$source_status" != pending ]; } || \
+                 [ "$source_conclusion_is_null" != true ] || \
+                 [ "$source_attempt" != "$INPUT_SOURCE_RUN_ATTEMPT" ] || \
+                 [ "$source_head" != "$head" ] || \
+                 [ "$source_ref" != "$head_ref" ] || \
+                 [ "$source_repository" != "$GITHUB_REPOSITORY" ]; then
+                echo "source run no longer matches the exact pending Build and Test recovery candidate" >&2
+                exit 1
+              fi
+              if [ "$source_path" != .github/workflows/build.yml ]; then
+                echo "source run does not use the exact .github/workflows/build.yml path" >&2
+                exit 1
+              fi
+
+              source_jobs="$(gh api --paginate --slurp \
+                "repos/$GITHUB_REPOSITORY/actions/runs/$INPUT_SOURCE_RUN_ID/jobs?filter=all&per_page=100")"
+              if ! printf '%s' "$source_jobs" | jq -e \
+                'length == 1 and .[0].total_count == 0 and (.[0].jobs | length) == 0' \
+                >/dev/null; then
+                echo "source run is no longer an exhaustive zero-job run" >&2
+                exit 1
+              fi
+
+              existing_checks="$(gh api --paginate --slurp \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100")"
+              if ! printf '%s' "$existing_checks" | jq -e '
+                length >= 1 and
+                ([.[].total_count] | unique | length) == 1 and
+                ([.[].check_runs[]] as $runs |
+                  .[0].total_count == ($runs | length) and
+                  all($runs[]; .name != "macos"))
+              ' >/dev/null; then
+                echo "a macos check appeared before recovery retarget publication" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "recovery must be exactly true or false" >&2
+              exit 1
+              ;;
+          esac
           {
             echo "number=$number"
             echo "base_sha=$base"
@@ -182,6 +299,7 @@ jobs:
     needs: resolve-runner
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       checks: write
       pull-requests: read
     outputs:
@@ -223,6 +341,9 @@ jobs:
           EXPECTED_BASE: ${{ needs.resolve-runner.outputs.base_sha }}
           EXPECTED_HEAD: ${{ needs.resolve-runner.outputs.head_sha }}
           EXPECTED_HEAD_REF: ${{ needs.resolve-runner.outputs.head_ref }}
+          INPUT_RECOVERY: ${{ inputs.recovery }}
+          INPUT_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          INPUT_SOURCE_RUN_ATTEMPT: ${{ inputs.source_run_attempt }}
           CHECK_EXTERNAL_ID: retarget-${{ github.run_id }}-${{ github.run_attempt }}
           DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -251,6 +372,48 @@ jobs:
             echo "PR #$EXPECTED_PR identity changed before retarget; refusing pending check" >&2
             exit 1
           }
+          if [ "$INPUT_RECOVERY" = true ]; then
+            source_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$INPUT_SOURCE_RUN_ID")"
+            if ! printf '%s' "$source_run" | jq -e \
+              --argjson run_id "$INPUT_SOURCE_RUN_ID" \
+              --argjson attempt "$INPUT_SOURCE_RUN_ATTEMPT" \
+              --arg head "$EXPECTED_HEAD" \
+              --arg head_ref "$EXPECTED_HEAD_REF" \
+              --arg repository "$GITHUB_REPOSITORY" '
+                .id == $run_id and .workflow_id == 256999733 and
+                .event == "pull_request" and
+                (.status == "queued" or .status == "pending") and
+                has("conclusion") and .conclusion == null and
+                .run_attempt == $attempt and .head_sha == $head and
+                .head_branch == $head_ref and
+                .head_repository.full_name == $repository and
+                .path == ".github/workflows/build.yml"
+              ' >/dev/null; then
+              echo "source run changed before pending check publication" >&2
+              exit 1
+            fi
+            source_jobs="$(gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$INPUT_SOURCE_RUN_ID/jobs?filter=all&per_page=100")"
+            if ! printf '%s' "$source_jobs" | jq -e \
+              'length == 1 and .[0].total_count == 0 and (.[0].jobs | length) == 0' \
+              >/dev/null; then
+              echo "source run materialized jobs before pending check publication" >&2
+              exit 1
+            fi
+            existing_checks="$(gh api --paginate --slurp \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_HEAD/check-runs?filter=all&per_page=100")"
+            if ! printf '%s' "$existing_checks" | jq -e '
+              length >= 1 and
+              ([.[].total_count] | unique | length) == 1 and
+              ([.[].check_runs[]] as $runs |
+                .[0].total_count == ($runs | length) and
+                all($runs[]; .name != "macos"))
+            ' >/dev/null; then
+              echo "a macos check appeared before pending check publication" >&2
+              exit 1
+            fi
+          fi
           terminalize_orphan_on_exit() {
             for delay in 1 2 4; do
               orphan_id="$(gh api \
@@ -319,11 +482,13 @@ jobs:
           # PR code runs as another uid with an empty, explicit environment, so
           # it cannot read the runner process environment or receive any
           # ACTIONS_*, GITHUB_*, token, credential, or command-file variable.
+          cd "$PULP_UNTRUSTED_HOME"
           exec sudo -u nobody /usr/bin/env -i \
             HOME="$PULP_UNTRUSTED_HOME" \
             TMPDIR="$PULP_UNTRUSTED_TMPDIR" \
             PATH="$PULP_TRUSTED_PATH" \
             CI=1 \
+            PULP_UNTRUSTED_SOURCE="$PULP_UNTRUSTED_SOURCE" \
             PULP_BUILD_DIR="$PULP_BUILD_DIR" \
             PULP_TRUSTED_CHECKOUT="$PULP_TRUSTED_CHECKOUT" \
             PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$PULP_SHARED_FETCHCONTENT_SOURCE_DIR" \
