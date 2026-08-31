@@ -107,7 +107,7 @@
                 --tools-dir
                 "${CMAKE_SOURCE_DIR}/tools/scene3d"
                 --ctest-file
-                "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_route_tests.cmake")
         set_tests_properties(scene3d-renderer-probe-route-inventory-contract
             PROPERTIES
             PASS_REGULAR_EXPRESSION
@@ -123,7 +123,7 @@
                 --tools-dir
                 "${CMAKE_SOURCE_DIR}/tools/scene3d"
                 --ctest-file
-                "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_route_tests.cmake")
         set_tests_properties(scene3d-renderer-probe-route-inventory-negative-contract
             PROPERTIES
             PASS_REGULAR_EXPRESSION
@@ -135,7 +135,17 @@
                 --repo-root
                 "${CMAKE_SOURCE_DIR}"
                 --ctest-file
-                "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/quality_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_contract_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/scene3d_sidecar_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/scene3d_preflight_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/scene3d_boundary_golden_tests.cmake"
                 --doc-file
                 "${CMAKE_SOURCE_DIR}/docs/analysis/threejs-gltf-bake-native-slice.md"
                 --plan-file
@@ -153,7 +163,17 @@
                 --repo-root
                 "${CMAKE_SOURCE_DIR}"
                 --ctest-file
-                "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/quality_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_contract_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/scene3d_sidecar_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/scene3d_preflight_tests.cmake"
+                --ctest-file
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/scene3d_boundary_golden_tests.cmake"
                 --doc-file
                 "${CMAKE_SOURCE_DIR}/docs/analysis/threejs-gltf-bake-native-slice.md")
         set_tests_properties(scene3d-native-slice-handoff-negative-contract
