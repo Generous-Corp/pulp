@@ -117,8 +117,11 @@ more. Fairness under contention comes from the lease, not from this fallback.
 
 `tools/scripts/build_parallelism_guard.py` (a ctest and a Shipyard gate) rejects
 a bare `cmake --build … --parallel` (unbounded `make -j`) *everywhere*, and an
-explicit-but-whole-machine core-count expansion on the shared-host surfaces
-agents copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`). It
+explicit-but-whole-machine core-count expansion on the surfaces it can classify
+as shared: the ones agents copy from (`CLAUDE.md`, `.shipyard/config.toml`,
+`.agents/skills/**`) plus `setup.sh`, the bootstrap every fresh worktree runs on
+the box. It resolves one hop of variable indirection there, so assigning
+`JOBS=$(sysctl -n hw.ncpu)` and passing `-j"$JOBS"` is caught too. It
 does NOT scan `.github/workflows/**` for whole-machine — **not** because those
 runners never share a box, but because a workflow's `runs-on` is resolved
 dynamically (e.g. `${{ fromJSON(matrix.runs_on_json) }}`) and a static scan
@@ -410,9 +413,9 @@ Pulp uses a PreText-inspired text layout architecture (measure once, reflow fore
 
 ### Layout Model — Flex + Grid only (deliberate)
 
-Pulp's layout engine is **Yoga** (`external/yoga/`), so the layout primitives are exactly what Yoga supports: **CSS Flexbox + CSS Grid** (Grid landed in Yoga 3.0, wired in PR #1509). CSS block flow, table layout, multi-column, floats, and print pagination are **out of scope by design**.
+Pulp's layout primitives are **CSS Flexbox + CSS Grid**, carried by two engines: flex comes from **Yoga** (pinned `v3.2.1` via FetchContent in `tools/cmake/PulpDependencies.cmake`, not vendored under `external/`), and Grid is **Pulp's own** `core/view/src/grid_layout.cpp` — `yoga_layout.cpp` routes a `LayoutMode::grid` subtree away from Yoga entirely, because the pinned Yoga ships no grid track-sizing algorithm. CSS block flow, table layout, multi-column, floats, and print pagination are **out of scope by design**.
 
-When implementing a feature or assessing a compat gap, **don't reach for non-Yoga layout primitives**. If a property in `compat.json` is marked `wontfix` because it requires block/inline/table/multi-column/float/print primitives, that's the architectural ceiling — not a bug to fix. Reasons:
+When implementing a feature or assessing a compat gap, **don't reach for layout primitives outside flex and grid**. If a property in `compat.json` is marked `wontfix` because it requires block/inline/table/multi-column/float/print primitives, that's the architectural ceiling — not a bug to fix. Reasons:
 
 1. **Yoga is the engine.** Adding non-Yoga layout means either a parallel layout engine (double maintenance) or block/table/columns reimplemented over Yoga (massive refactor).
 2. **React Native parity.** RN is also flex+grid-only. `@pulp/react` and the JS bridge depend on this contract.
@@ -1997,9 +2000,10 @@ live on m3/m5/m1, layered in tiers:
 Every build path is bounded — the CLI (Tier 0), the shipyard-local wrapper, and
 the VM runners (Tier 1 leases). `pulp status` prints a `Build governance: Tier N
 (…)` line reporting which layer bounds the current host. A bare
-`--parallel`/`-j` anywhere in the repo — and, on the shared-host surfaces agents
-copy from (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`), an
-explicit-but-whole-machine core-count expansion (`-j$(nproc)` and friends) — is
+`--parallel`/`-j` anywhere in the repo — and, on the surfaces it can classify as
+shared (`CLAUDE.md`, `.shipyard/config.toml`, `.agents/skills/**`, `setup.sh`),
+an explicit-but-whole-machine core-count expansion (`-j$(nproc)` and friends,
+including one laundered through a variable the same file assigns) — is
 rejected by `tools/scripts/build_parallelism_guard.py`. The guard does not scan
 `.github/workflows/**` for whole-machine, because a workflow's `runs-on` is
 dynamic and may itself resolve to a shared self-hosted runner — so bounding a

@@ -43,7 +43,10 @@ class SkipSafeTests(unittest.TestCase):
             self.assertTrue(classify.is_skip_safe(path), path)
 
     def test_skip_safe_exact(self) -> None:
-        for path in (".gitignore", ".gitattributes", "CODEOWNERS"):
+        for path in (
+            ".gitignore", ".gitattributes", "CODEOWNERS",
+            "tools/scripts/test_prepush_gate_supervisor.py",
+        ):
             self.assertTrue(classify.is_skip_safe(path), path)
 
     def test_docs_migrations_md_is_NOT_skip_safe(self) -> None:
@@ -123,10 +126,17 @@ class NativeBuildRequiredTests(unittest.TestCase):
             ["tools/scripts/classify_changes.py"]))
 
     def test_tools_scripts_not_skip_safe(self) -> None:
-        # tools/scripts/** is intentionally NOT skip-safe in v1 — some
-        # scripts are build-coupled. Conservative > clever.
+        # Apart from reviewed exact exceptions, tools/scripts/** remains
+        # build-forcing because neighboring scripts can be build-coupled.
         self.assertTrue(classify.native_build_required(
             ["tools/scripts/source_tree_pollution_check.py"]))
+
+    def test_gate_supervisor_regression_slice_skips_native_build(self) -> None:
+        self.assertFalse(classify.native_build_required([
+            ".githooks/lib/gate-supervisor.py",
+            "tools/scripts/test_prepush_gate_supervisor.py",
+            ".agents/skills/ci/SKILL.md",
+        ]))
 
 
 class AgentCapabilityInstalledSdkRequiredTests(unittest.TestCase):

@@ -11,7 +11,9 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::import_design {
@@ -379,6 +381,110 @@ void isolate_fader_indicator_from_static(
     }
 }
 
+/// Preserve a useful authored colour when the exact thumb sprite cannot travel
+/// with the DesignIR. Forge's faithful-capture projects intentionally discard
+/// importer-scratch sprite paths once the complete browser underlay has been
+/// embedded. The live fader still needs a value-dependent thumb after reopen,
+/// so carry a representative authored colour as a durable per-control
+/// fallback. A centre sample is insufficient for a hollow thumb, while the
+/// first non-transparent pixel can be only an antialiased/background blend.
+/// Score exact authored colours across the isolated sprite, weighting opaque
+/// pixels and locally supported runs. The solid face or outline therefore
+/// wins over a one-pixel fringe without averaging the authored colour into the
+/// background.
+std::optional<std::string> representative_indicator_color(
+    const ImportPngImage& indicator) {
+    if (!indicator.valid()) return std::nullopt;
+
+    struct Candidate {
+        std::array<std::uint8_t, 4> rgba{};
+        std::uint64_t score = 0;
+        std::size_t count = 0;
+        std::int64_t nearest_center_distance =
+            std::numeric_limits<std::int64_t>::max();
+        std::uint32_t packed = 0;
+    };
+    std::unordered_map<std::uint32_t, Candidate> candidates;
+    const auto pixel_at = [&](int x, int y) {
+        return &indicator.rgba[
+            (static_cast<std::size_t>(y) * indicator.width + x) * 4];
+    };
+    const auto pack = [](const std::uint8_t* pixel) {
+        return (static_cast<std::uint32_t>(pixel[0]) << 24) |
+               (static_cast<std::uint32_t>(pixel[1]) << 16) |
+               (static_cast<std::uint32_t>(pixel[2]) << 8) |
+               static_cast<std::uint32_t>(pixel[3]);
+    };
+
+    for (int y = 0; y < indicator.height; ++y) {
+        for (int x = 0; x < indicator.width; ++x) {
+            const auto* pixel = pixel_at(x, y);
+            if (pixel[3] == 0) continue;
+
+            int local_support = 1;  // the pixel itself
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    if ((dx == 0 && dy == 0) || x + dx < 0 || y + dy < 0 ||
+                        x + dx >= indicator.width || y + dy >= indicator.height)
+                        continue;
+                    const auto* neighbor = pixel_at(x + dx, y + dy);
+                    if (std::equal(pixel, pixel + 4, neighbor)) ++local_support;
+                }
+            }
+
+            const auto key = pack(pixel);
+            auto& candidate = candidates[key];
+            candidate.rgba = {pixel[0], pixel[1], pixel[2], pixel[3]};
+            candidate.packed = key;
+            candidate.score +=
+                static_cast<std::uint64_t>(pixel[3]) * local_support;
+            ++candidate.count;
+            const std::int64_t doubled_dx =
+                2 * static_cast<std::int64_t>(x) + 1 - indicator.width;
+            const std::int64_t doubled_dy =
+                2 * static_cast<std::int64_t>(y) + 1 - indicator.height;
+            candidate.nearest_center_distance = std::min(
+                candidate.nearest_center_distance,
+                doubled_dx * doubled_dx + doubled_dy * doubled_dy);
+        }
+    }
+
+    const Candidate* chosen = nullptr;
+    for (const auto& [key, candidate] : candidates) {
+        (void)key;
+        if (chosen == nullptr || candidate.score > chosen->score ||
+            (candidate.score == chosen->score &&
+             candidate.rgba[3] > chosen->rgba[3]) ||
+            (candidate.score == chosen->score &&
+             candidate.rgba[3] == chosen->rgba[3] &&
+             candidate.count > chosen->count) ||
+            (candidate.score == chosen->score &&
+             candidate.rgba[3] == chosen->rgba[3] &&
+             candidate.count == chosen->count &&
+             candidate.nearest_center_distance <
+                 chosen->nearest_center_distance) ||
+            (candidate.score == chosen->score &&
+             candidate.rgba[3] == chosen->rgba[3] &&
+             candidate.count == chosen->count &&
+             candidate.nearest_center_distance ==
+                 chosen->nearest_center_distance &&
+             candidate.packed < chosen->packed))
+            chosen = &candidate;
+    }
+    if (chosen == nullptr) return std::nullopt;
+
+    const auto byte_to_hex = [](std::uint8_t value, char& high, char& low) {
+        constexpr char hex[] = "0123456789abcdef";
+        high = hex[value >> 4];
+        low = hex[value & 0x0f];
+    };
+    std::string color = "#00000000";
+    for (int channel = 0; channel < 4; ++channel)
+        byte_to_hex(chosen->rgba[channel], color[1 + channel * 2],
+                    color[2 + channel * 2]);
+    return color;
+}
+
 bool write_bytes(const fs::path& path, const std::vector<std::uint8_t>& bytes) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) return false;
@@ -565,6 +671,8 @@ int apply_browser_capture_control_sprites(
             else if (!clean_panel.valid())
                 isolate_fader_indicator(
                     indicator, panel, *indicator_rect, horizontal);
+            if (const auto color = representative_indicator_color(indicator))
+                node->attributes["fader_ind_color"] = *color;
             const auto indicator_encoded = encode_png_rgba(indicator);
             if (indicator_encoded.empty())
                 return fail("could not encode the fader indicator for control " +

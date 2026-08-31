@@ -878,16 +878,22 @@ public:
     /// core center on the [-135°,+135°] arc — and skips the synthetic notch, so
     /// the moving line rides the disc's baked min/center/max reference ticks.
     void set_captured_indicator(float r_in, float r_out, float width_px,
-                                canvas::Color color, float phase_rad = 0.0f) {
+                                canvas::Color color, float phase_rad = 0.0f,
+                                bool color_authored = true) {
         ind_r_in_ = r_in; ind_r_out_ = r_out;
         ind_width_ = width_px; ind_color_ = color;
         ind_phase_rad_ = phase_rad;
+        ind_color_authored_ = color_authored;
         has_captured_indicator_ = true;
+        request_repaint();
     }
     bool has_captured_indicator() const { return has_captured_indicator_; }
     float captured_indicator_r_in() const { return ind_r_in_; }
     float captured_indicator_r_out() const { return ind_r_out_; }
     float captured_indicator_phase_rad() const { return ind_phase_rad_; }
+    bool captured_indicator_color_authored() const {
+        return ind_color_authored_;
+    }
 
 private:
     std::shared_ptr<SpriteStrip> sprite_strip_;
@@ -901,6 +907,7 @@ private:
     float ind_width_ = 0.0f;
     float ind_phase_rad_ = 0.0f;
     canvas::Color ind_color_ = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
+    bool ind_color_authored_ = true;
 };
 
 // ── Fader ────────────────────────────────────────────────────────────────────
@@ -1059,6 +1066,11 @@ private:
     float thumb_width_ = 0.0f;
     float thumb_height_ = 0.0f;
     float thumb_corner_radius_ = 0.0f;
+    bool has_skin_thumb_style_ = false;
+    ThumbShape pre_skin_thumb_shape_ = ThumbShape::rectangle;
+    float pre_skin_thumb_width_ = 0.0f;
+    float pre_skin_thumb_height_ = 0.0f;
+    float pre_skin_thumb_corner_radius_ = 0.0f;
     std::string label_;
     ValueAnimation hover_thumb_scale_{1.0f};
     bool dragging_ = false;
@@ -1113,6 +1125,51 @@ public:
     void set_skin_track_color(canvas::Color c) { track_color_ = c; has_skin_track_ = true; request_repaint(); }
     void set_skin_fill_color(canvas::Color c)  { fill_color_  = c; has_skin_fill_  = true; request_repaint(); }
     void set_skin_thumb_color(canvas::Color c) { thumb_color_ = c; has_skin_thumb_ = true; request_repaint(); }
+    /// Snapshot the non-skin thumb geometry before a scripted skin takes
+    /// ownership. Repeated authored updates share the same baseline so a later
+    /// fallback restores the host/application geometry rather than whichever
+    /// authored update happened to run last.
+    void begin_skin_thumb_style() {
+        if (has_skin_thumb_style_) return;
+        pre_skin_thumb_shape_ = thumb_shape_;
+        pre_skin_thumb_width_ = thumb_width_;
+        pre_skin_thumb_height_ = thumb_height_;
+        pre_skin_thumb_corner_radius_ = thumb_corner_radius_;
+        has_skin_thumb_style_ = true;
+    }
+    /// Panel-wide fallback for a thumb. Unlike a per-control authored colour,
+    /// this remains subordinate to a live `control.thumb` theme token.
+    void set_skin_thumb_fallback_color(canvas::Color c) {
+        thumb_fallback_color_ = c;
+        has_skin_thumb_fallback_ = true;
+        // A later panel/theme fallback is a provenance transition, not merely
+        // another stored palette value. Retire any older per-control override
+        // so paint can resolve the live control.thumb token again.
+        has_skin_thumb_ = false;
+        request_repaint();
+    }
+    /// Return thumb colour authority entirely to the live theme. This is
+    /// distinct from clear_skin(): track/fill styling may remain authored.
+    void clear_skin_thumb_colors() {
+        has_skin_thumb_ = false;
+        has_skin_thumb_fallback_ = false;
+        request_repaint();
+    }
+    /// Retire every scripted thumb-specific override while leaving authored
+    /// track/fill styling intact. This is the inverse of begin_skin_thumb_style
+    /// and is used when replay changes thumb authority back to the live theme.
+    void clear_skin_thumb_style() {
+        clear_skin_thumb_colors();
+        has_skin_thumb_border_ = false;
+        if (has_skin_thumb_style_) {
+            thumb_shape_ = pre_skin_thumb_shape_;
+            thumb_width_ = pre_skin_thumb_width_;
+            thumb_height_ = pre_skin_thumb_height_;
+            thumb_corner_radius_ = pre_skin_thumb_corner_radius_;
+            has_skin_thumb_style_ = false;
+        }
+        request_repaint();
+    }
     void set_skin_thumb_border_color(canvas::Color c) { thumb_border_color_ = c; has_skin_thumb_border_ = true; request_repaint(); }
     // Outline of the empty track: the lighter edge the captured art draws
     // around the dark channel. When set, the skinned fader strokes the track
@@ -1127,7 +1184,8 @@ public:
     float skin_track_width() const { return skin_track_width_; }
     bool has_skin_track_width() const { return has_skin_track_width_; }
     void clear_skin() {
-        has_skin_track_ = has_skin_fill_ = has_skin_thumb_ = has_skin_thumb_border_ = false;
+        clear_skin_thumb_style();
+        has_skin_track_ = has_skin_fill_ = false;
         has_skin_track_border_ = false;
         has_skin_track_width_ = false;
         request_repaint();
@@ -1139,11 +1197,17 @@ public:
     bool has_skin_track_color() const { return has_skin_track_; }
     bool has_skin_fill_color() const { return has_skin_fill_; }
     bool has_skin_thumb_color() const { return has_skin_thumb_; }
+    bool has_skin_thumb_fallback_color() const {
+        return has_skin_thumb_fallback_;
+    }
     bool has_skin_thumb_border_color() const { return has_skin_thumb_border_; }
     bool has_skin_track_border_color() const { return has_skin_track_border_; }
     canvas::Color skin_track_color() const { return track_color_; }
     canvas::Color skin_fill_color() const { return fill_color_; }
     canvas::Color skin_thumb_color() const { return thumb_color_; }
+    canvas::Color skin_thumb_fallback_color() const {
+        return thumb_fallback_color_;
+    }
     canvas::Color skin_thumb_border_color() const { return thumb_border_color_; }
     canvas::Color skin_track_border_color() const { return track_border_color_; }
 
@@ -1160,11 +1224,13 @@ private:
     canvas::Color track_color_{};
     canvas::Color fill_color_{};
     canvas::Color thumb_color_{};
+    canvas::Color thumb_fallback_color_{};
     canvas::Color thumb_border_color_{};
     canvas::Color track_border_color_{};
     bool has_skin_track_ = false;
     bool has_skin_fill_ = false;
     bool has_skin_thumb_ = false;
+    bool has_skin_thumb_fallback_ = false;
     bool has_skin_thumb_border_ = false;
     bool has_skin_track_border_ = false;
     float skin_track_width_ = 0.0f;

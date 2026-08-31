@@ -646,3 +646,42 @@ the bypass trailer by reflex:
   honest record is a line in this skill saying so, not a `Skill-Update: skip`.
   A note costs the same as the trailer and leaves the next person something to
   read.
+
+## Splitting an exported target means exporting BOTH halves
+
+`tools/cmake/PulpInstallRules.cmake` holds `PULP_SDK_TARGETS`, the list
+`cmake --install` exports. If you split a target that appears in that list into
+an umbrella plus its halves, **every half must be added to the list too**, not
+just kept behind the umbrella name.
+
+The trap is that the umbrella still installs fine on its own. What breaks is
+the consumer: the exported umbrella's `INTERFACE_LINK_LIBRARIES` names the
+halves, so a downstream `find_package(Pulp)` resolves a target whose interface
+references targets the export set never defined, and fails there rather than at
+install time. The symptom appears in someone else's build, one step removed
+from the change that caused it.
+
+`pulp-format` is the worked example: it exports as `pulp-format`,
+`pulp-format-core` and `pulp-format-view`. Note also that the umbrella must
+stay a real STATIC library rather than INTERFACE, because the export set
+expects an archive artifact.
+
+## Adding a target to `PULP_SDK_TARGETS` is public surface
+
+`PULP_SDK_TARGETS` in `tools/cmake/PulpInstallRules.cmake` is the export set, so
+appending a target publishes a new `Pulp::<name>` that outside projects can name
+in `target_link_libraries` and `find_package(Pulp COMPONENTS ...)`. It carries
+the ordinary compatibility weight even when the target is INTERFACE-only and
+ships no archive.
+
+Anything already in an exported target's link interface MUST be in that set:
+CMake refuses to export a target whose interface names one that is not. So an
+INTERFACE target introduced to narrow another target's link line is not optional
+to export, it is required by the export that motivated it.
+
+A target defined under `core/<x>/` but not owning a `core/` directory of its own
+draws a `module '<x>': CMake links pulp-<name> but modules.yaml doesn't list it`
+warning from `tools/check-docs.sh`. That warning is correct and unfixable from
+`modules.yaml`, whose entries are validated against `core/<name>/` existing;
+adding a row would convert a warning into a hard failure. `pulp-tracing`,
+`pulp-perfetto` and `pulp-cpp` sit in the same position.

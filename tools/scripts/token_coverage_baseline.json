@@ -30,10 +30,10 @@
   "core/view/src/widget_bridge/outline_api.cpp": 1,
   "core/view/src/widget_bridge/style_effects_api.cpp": 1,
   "core/view/src/widget_bridge/style_rn_compat_api.cpp": 1,
-  "core/view/src/widget_bridge/widget_assets_api.cpp": 1,
+  "core/view/src/widget_bridge/widget_assets_api.cpp": 2,
   "core/view/src/widget_bridge/widget_value_controls_api.cpp": 1,
   "core/view/src/widget_schema.cpp": 1,
   "core/view/src/widget_skin_derive.cpp": 2,
-  "core/view/src/widgets.cpp": 22,
+  "core/view/src/widgets.cpp": 23,
   "core/view/src/widgets/visualizers.cpp": 18
 }

@@ -3307,6 +3307,13 @@ So the browser lane declares it, exactly as it already declares the paint box:
   indicator erasure uses exactly the declared moving footprint. Undeclared
   faders stay live. Apart from that declared footprint, a declared static
   body's crop is byte-identical to the capture.
+- The fader's isolated moving crop also supplies a durable
+  `fader_ind_color`. Colour selection is paint-aware: it ranks exact source
+  colours by local support instead of taking the first opaque or centre pixel,
+  so a hollow/ring thumb keeps its authored outline rather than an
+  antialiased/background blend. This attribute survives even when
+  `fader_indicator_asset_path` is later pruned for self-contained persistence.
+  `knob_ind_color` has the same durable, per-control role for knobs.
 - The baked pointer is **erased by rotational median**: a dial face is
   rotationally symmetric about its centre except for the pointer, so each erased
   pixel takes the median of the same radius under 8 rotations (samples landing
@@ -3341,18 +3348,46 @@ Gotchas:
   values and asserts the drawn geometry MOVED. A one-frame similarity score
   cannot tell a live indicator from a frozen one.
 
-**Both consumers now receive the pointer.** `knob_ind_*` used to reach only the
-native materializer, so the same import rendered the design's pointer when
-materialized (`build_native_view_tree`, `--emit cpp`, embedders) and the generic
-white notch when scripted (`--emit js`, the CLI default). `design_codegen` now
-emits `setKnobCapturedIndicator(id, rIn, rOut, width, color)` beside
-`setKnobSpriteCore`, and the bridge registers it in the `widget_assets` group
-(so `reload_autocaps` gates it as Filesystem, like its siblings). Two traps:
-- **The bridge parses `#rrggbb` only** and silently substitutes near-white for
-  anything else, while the materializer parses any CSS colour. The browser lane
-  normalizes computed `rgb()` to hex at production for this reason. A Figma-lane
-  pointer whose colour came off a demoted stroke as `rgba(...)` still loses its
-  colour on the scripted path.
+- **Indicator colour precedence is provenance, not merely a palette lookup.**
+  A valid per-control `knob_ind_color` / `fader_ind_color` is authored evidence
+  and wins. `design_indicator` is only the panel-wide fallback and MUST NOT mark
+  the control as individually authored. With neither attribute present, the
+  stock widget theme remains in authority (`knob.thumb` for a captured knob
+  pointer and `control.thumb` for a fader thumb). Never gate
+  these durable attributes on a sprite path: project
+  packing may intentionally remove importer-time paths while preserving the
+  control contract.
+
+**Every consumer must receive the same authored indicator contract.**
+`knob_ind_*` and `fader_ind_color` must stay in lockstep across the native
+materializer and BOTH generated-JS arms (`bridge_native_js` and `web_compat`).
+The generated knob call is
+`setKnobCapturedIndicator(id, rIn, rOut, width, color, phase, authored)` and the
+generated fader skin passes the selected thumb colour plus its authored flag to
+`setFaderSkin`; neither emission
+may sit inside a sprite/captured-art-path branch. Generated-output regressions
+must exercise absent sprite paths and conflicting per-control versus
+`design_indicator` colours in both modes. The bridge registers these setters in
+the `widget_assets` group (so `reload_autocaps` gates them as Filesystem, like
+their siblings). Two traps:
+- **Fallback provenance stays live at paint time.** `authored=false` stores
+  `design_indicator` only as the fallback passed to the widget's normal theme
+  token (`knob.thumb` or `control.thumb`); it must not snapshot the current
+  theme during the bridge call. A later host theme change still wins.
+  `authored=true` belongs to per-control evidence: `knob_ind_color`,
+  `fader_ind_color`, and the older per-control `skin_thumb_color` sampled from
+  that control's captured PNG. The newer isolated `fader_ind_color` is applied
+  last when both fader forms exist. Authored colors remain fixed over the
+  theme. A later `authored=false` fader call must clear any stale authored
+  thumb override so the live theme can regain authority; a later
+  `authored=true` call takes authority back. A sprite-less knob must
+  also draw the recovered pointer geometry; merely retaining metadata that only
+  the sprite branch reads is not portable-project support.
+- **Keep colour parsing shared.** The bridge setters use the same
+  `parse_css_color` family as the materializer and accept `#rgb`, `#rrggbb`,
+  `#rrggbbaa` and supported CSS functional forms. Do not reintroduce a local
+  hex-only parser in either lane; browser-computed and Figma-demoted pointer
+  colours otherwise diverge between scripted and materialized panels.
 - **Emit nothing when there is no recovered pointer.** The call installs a
   captured indicator unconditionally, and a zero-length one suppresses the
   synthetic notch — leaving an imported knob with no visible indicator at all.
@@ -3847,6 +3882,21 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `pulp config set import_design.browser {auto,managed,system}` picks the mode;
   `managed-browser-unavailable` fires only when `managed` is selected
   explicitly and nothing is installed.
+- **The Node capture tests do NOT share the C++ discovery order above.**
+  `browser_capture/capture.integration.test.mjs` carries its own
+  `installedBrowser()` resolver, and it is the only browser resolution in the
+  repository written in JavaScript. Whatever the C++ probe learns about managed
+  browsers, `current.json`, or config modes is invisible to it, so a provisioned
+  browser reaches the Node suite only through the environment. Hand it
+  `PULP_DESIGN_BROWSER`, the same variable `collect_browser_candidates` reads.
+  Anything else falls through to the hardcoded system installations, which
+  silently substitutes an unpinned host Chrome for the version the caller
+  verified. The macOS gate provisions exactly this way: it downloads a
+  checksum-pinned Chrome for Testing and publishes `PULP_DESIGN_BROWSER` to
+  `$GITHUB_ENV` for the `pulp-browser-capture-node-integration` ctest. When you
+  add a browser-driven `.mjs` test, read that variable rather than growing a
+  second candidate list, and remember that on a host with no system Chrome the
+  cost of getting this wrong is a silent skip rather than a failure.
 - **"Could not read the version" is not "wrong version".** Reading `--version`
   has been observed to fail once and then succeed moments later on the same
   browser, and it used to surface as "too old or incompatible" — a message that
@@ -6442,7 +6492,13 @@ already-working controls did not move.
 Reuse `browser_process.mjs` rather than spawning Chrome directly: it already
 spawns detached with an owned profile directory, and `terminateBrowser` signals
 the process GROUP. Chrome forks renderer and GPU helpers, so killing the parent
-alone orphans them.
+alone orphans them. The launcher also holds a private pipe to a detached
+guardian: if the importing Node process is killed before its `finally` block can
+run, pipe closure makes the guardian terminate only the browser whose process
+identity and `--user-data-dir` match the owned profile. A later capture removes
+an abandoned `pulp-browser-capture-*` profile only when its ownership marker
+proves the recorded owner is gone; mismatched or ambiguous processes and
+profiles are preserved fail-closed.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 

@@ -26,6 +26,12 @@ using CssColorParser = std::function<canvas::Color(const std::string&)>;
 /// can resolve `rgba(...)` strokes that `parse_hex_color` does not cover.
 canvas::Color parse_css_color(const std::string& token);
 
+/// True when `token` uses one of the CSS color syntaxes understood by
+/// parse_css_color(). This separates recognition from that parser's historical
+/// opaque-white fallback so callers can preserve a better authored fallback
+/// when a stale or hand-written token is invalid.
+bool css_color_syntax_supported(std::string_view token);
+
 /// Parse a CSS `linear-gradient(...)`, `radial-gradient(...)`, or
 /// `conic-gradient(...)` string and apply it to `v`'s background via the
 /// View::set_background_gradient_* API. Returns true iff a gradient was

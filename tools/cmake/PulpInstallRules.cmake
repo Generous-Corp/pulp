@@ -26,17 +26,25 @@ include(GNUInstallDirs)
 # `pulp-render`, are optional in smoke or non-GPU builds, so only export targets
 # that were actually configured in this build tree.
 set(PULP_SDK_TARGETS
-    pulp-platform pulp-runtime pulp-music pulp-timebase pulp-timeline
+    pulp-platform pulp-foundation pulp-runtime pulp-music pulp-timebase
+    pulp-timeline
 )
 if(TARGET pulp-project-package)
     list(APPEND PULP_SDK_TARGETS pulp-project-package)
 endif()
+# pulp-format is an umbrella over pulp-format-core and pulp-format-view.
+# All three are exported: the umbrella's interface names the two halves, so a
+# consumer resolving Pulp::format from an installed SDK would otherwise find a
+# target referencing targets the export set never defined. Keep the list below
+# free of inline comments -- test_release_artifact_contents.py parses it and
+# requires literal target names only.
 list(APPEND PULP_SDK_TARGETS
     pulp-timeline-agent-view pulp-timeline-editor
     pulp-playback pulp-events
     pulp-sample-bank-manifest pulp-state
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
-    pulp-audio pulp-midi pulp-signal pulp-graph pulp-format pulp-sequence
+    pulp-audio pulp-midi pulp-signal pulp-graph
+    pulp-format pulp-format-core pulp-format-view pulp-sequence
     pulp-osc pulp-canvas pulp-view-core pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
 )

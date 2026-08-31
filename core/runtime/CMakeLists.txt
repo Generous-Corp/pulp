@@ -239,3 +239,39 @@ target_include_directories(pulp-runtime PUBLIC
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>
 )
+
+# ── pulp::foundation ────────────────────────────────────────────────────────
+#
+# The header-only primitives the DSP, timebase and music layers are built on:
+# Result, TripleBuffer, SeqLock, Slot, and the SpscQueue wrapper over CHOC's
+# FIFO. Every one is a template with no translation unit behind it, so a target
+# that uses only these needs runtime's headers and none of its object code.
+#
+# libpulp-runtime.a also compiles an HTTPS model downloader, an HTTP client, a
+# WebSocket channel and a socket layer, so pulp-runtime links mbedTLS. A static
+# library's PRIVATE link items still reach the consumer as $<LINK_ONLY:...>,
+# which is how a biquad came to name libmbedcrypto.a, libmbedtls.a,
+# libmbedx509.a, libeverest.a and libp256m.a on its link command. Depending on
+# this target instead of pulp::runtime is what cuts that.
+#
+# It carries runtime's whole include directory, because the headers do not move
+# and CMake cannot export part of one. So this is a LINK-scope boundary, not a
+# header partition: a consumer can still reach `#include <pulp/runtime/http.hpp>`
+# through it and will then fail at link time. Partitioning the headers is a
+# separate change; this one buys the link line, which is what a consumer has to
+# acquire at configure time.
+add_library(pulp-foundation INTERFACE)
+add_library(pulp::foundation ALIAS pulp-foundation)
+
+target_compile_features(pulp-foundation INTERFACE cxx_std_20)
+
+target_include_directories(pulp-foundation
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+        $<INSTALL_INTERFACE:include>
+)
+
+# Every existing consumer of pulp::runtime keeps resolving these headers by the
+# same include paths, so the split is invisible from above.
+target_link_libraries(pulp-runtime PUBLIC pulp::foundation)

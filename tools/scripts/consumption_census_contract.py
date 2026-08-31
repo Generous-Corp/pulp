@@ -5,14 +5,18 @@ A gate nobody has watched go red is a decoration. This driver feeds
 `consumption_census.py --check` a census that has drifted, a census that
 violates its schema, a build tree whose facts are missing, and a build tree
 whose graph contains something the generator must refuse to guess at — and
-asserts each one is rejected with the right exit status. The first case is a
-control: it feeds the unmodified inputs and requires them to PASS, so a driver
-that rejects everything (including correct input) cannot be mistaken for a
-working gate.
+asserts each one is rejected with the right exit status. It also regenerates
+from a tree configured with different switches and requires the profile already
+recorded for that platform to survive, because a census that lets one
+configuration overwrite another goes quiet instead of going red. The first case
+is a control: it feeds the unmodified inputs and requires them to PASS, so a
+driver that rejects everything (including correct input) cannot be mistaken for
+a working gate.
 
 Exit statuses under test:
     0   the census matches the build tree
-    1   the census is wrong: it drifted, is missing, or violates its schema
+    1   the census is wrong: it drifted, is missing, violates its schema, or
+        records a feature set its own profile key does not describe
     2   the census could not be measured at all
     77  this build tree is a profile the census does not record, so nothing
         was compared — visibly a skip, never a pass
@@ -70,6 +74,24 @@ def run_check(script: Path, build_dir: Path, census: Path, schema: Path) -> subp
     )
 
 
+def run_write(script: Path, build_dir: Path, census: Path, schema: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--write",
+            "--build-dir",
+            str(build_dir),
+            "--census",
+            str(census),
+            "--schema",
+            str(schema),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
 def expect(case: str, result: subprocess.CompletedProcess, status: int) -> None:
     if result.returncode != status:
         raise ContractFailure(
@@ -113,6 +135,14 @@ def main(argv: list[str]) -> int:
             expect("valid-current", baseline, 0)
 
             key = next(iter(document["profiles"]))
+            # A key is "<system>-<processor>-<enabled features>". Synthetic
+            # profiles below move a real one to another platform, so they keep
+            # the feature half and swap only the platform half.
+            recorded = document["profiles"][key]
+            platform_half = (
+                f"{recorded['system_name'].lower()}-{recorded['system_processor'].lower()}-"
+            )
+            feature_half = key[len(platform_half):]
 
             def mutated(change) -> dict:
                 copy_of = copy.deepcopy(document)
@@ -161,12 +191,32 @@ def main(argv: list[str]) -> int:
             # A census that records no profile for this host states an absence
             # rather than a match, so it must SKIP and never read as a pass.
             renamed = copy.deepcopy(document)
-            renamed["profiles"] = {
-                "somethingelse-riscv64": renamed["profiles"].pop(key)
-            }
-            renamed["profiles"]["somethingelse-riscv64"]["key"] = "somethingelse-riscv64"
+            foreign_key = f"somethingelse-riscv64-{feature_half}"
+            renamed["profiles"] = {foreign_key: renamed["profiles"].pop(key)}
+            renamed["profiles"][foreign_key]["key"] = foreign_key
+            renamed["profiles"][foreign_key]["system_name"] = "SomethingElse"
+            renamed["profiles"][foreign_key]["system_processor"] = "riscv64"
             expect("profile-not-recorded", run_check(script, staged, write(renamed), schema), 77)
 
+            # A census naming a different SET of switches than the tree defines
+            # predates this tree's feature list, so it describes no
+            # configuration of it — not even the ones it names. Skipping that
+            # would retire the gate the moment someone adds a switch that
+            # defaults ON, because that moves every recorded key at once.
+            stale = root / "stale"
+            stale_build = stage_build_dir(args.build_dir.resolve(), stale)
+            stale_facts = json.loads((stale_build / FACTS_NAME).read_text())
+            stale_facts["features"]["PULP_ENABLE_UNMEASURED_SWITCH"] = "ON"
+            (stale_build / FACTS_NAME).write_text(json.dumps(stale_facts))
+            expect(
+                "feature-roster-stale",
+                run_check(script, stale_build, write(document), schema),
+                1,
+            )
+
+            # A profile whose key says one feature set and whose body says
+            # another contradicts itself. Nothing can be compared against it,
+            # and calling that "a different profile" would retire the gate.
             def flip_feature(profile: dict) -> None:
                 feature = sorted(profile["features"])[0]
                 profile["features"][feature] = "OFF" if profile["features"][feature] == "ON" else "ON"
@@ -174,17 +224,69 @@ def main(argv: list[str]) -> int:
             expect(
                 "profile-feature-mismatch",
                 run_check(script, staged, write(mutated(flip_feature)), schema),
-                77,
+                1,
+            )
+
+            # Regenerating from a different feature set must ADD a profile, not
+            # replace the one already recorded for this platform. A census keyed
+            # on the platform alone loses the first silently: the two closures
+            # genuinely differ, and afterwards nothing says they disagreed.
+            clobber = root / "clobber"
+            clobber_build = stage_build_dir(args.build_dir.resolve(), clobber)
+            clobber_facts = json.loads((clobber_build / FACTS_NAME).read_text())
+            enabled = sorted(
+                name
+                for name in document["profiles"][key]["features"]
+                if clobber_facts["features"].get(name) == "ON"
+            )
+            if not enabled:
+                raise ContractFailure(
+                    "case profile-not-clobbered: this tree enables no feature to switch off, "
+                    "so a second configuration cannot be simulated"
+                )
+            switched_off = enabled[0]
+            clobber_facts["features"][switched_off] = "OFF"
+            (clobber_build / FACTS_NAME).write_text(json.dumps(clobber_facts))
+
+            clobber_census = root / "clobber.json"
+            clobber_census.write_text(json.dumps(document, indent=2) + "\n")
+            written = run_write(script, clobber_build, clobber_census, schema)
+            if written.returncode != 0:
+                raise ContractFailure(
+                    f"case profile-not-clobbered: --write from a {switched_off}=OFF tree "
+                    f"exited {written.returncode}\nstderr: {written.stderr}"
+                )
+            reloaded = json.loads(clobber_census.read_text())["profiles"]
+            if key not in reloaded:
+                raise ContractFailure(
+                    f"case profile-not-clobbered: writing a {switched_off}=OFF profile "
+                    f"removed {key}; recorded now: {', '.join(sorted(reloaded))}"
+                )
+            added = sorted(set(reloaded) - set(document["profiles"]))
+            if len(added) != 1:
+                raise ContractFailure(
+                    f"case profile-not-clobbered: expected one added profile, got {added}"
+                )
+            if reloaded[key] != document["profiles"][key]:
+                raise ContractFailure(
+                    f"case profile-not-clobbered: {key} was rewritten in place"
+                )
+            # And the surviving profile still answers for the tree it describes,
+            # so the gate is live rather than merely present.
+            expect(
+                "profile-not-clobbered",
+                run_check(script, staged, clobber_census, schema),
+                0,
             )
 
             # A profile for a platform this host cannot measure must not make
             # this host's check fail — several profiles share one document.
             foreign = copy.deepcopy(document)
             other = copy.deepcopy(foreign["profiles"][key])
-            other["key"] = "linux-x86_64"
+            other["key"] = f"linux-x86_64-{feature_half}"
             other["system_name"] = "Linux"
             other["system_processor"] = "x86_64"
-            foreign["profiles"]["linux-x86_64"] = other
+            foreign["profiles"][other["key"]] = other
             expect("foreign-profile-ignored", run_check(script, staged, write(foreign), schema), 0)
 
             # A build tree with no facts cannot be measured, and the census

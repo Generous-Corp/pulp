@@ -4968,3 +4968,168 @@ TEST_CASE("a control with no design accent is left to the theme",
 
     CHECK(js.find("setAccentColor(") == std::string::npos);
 }
+
+TEST_CASE("generated JS keeps durable per-control indicator colours without sprites",
+          "[view][import][codegen][indicator-precedence]") {
+    const auto make_ir = [](bool per_control, bool panel_fallback) {
+        DesignIR ir;
+        ir.root.type = "frame";
+        ir.root.name = "Root";
+
+        IRNode knob;
+        knob.type = "frame";
+        knob.name = "DillaKnob";
+        knob.audio_widget = AudioWidgetType::knob;
+        knob.style.width = 86.0f;
+        knob.style.height = 86.0f;
+        knob.attributes["knob_ind_r_in"] = "0.55";
+        knob.attributes["knob_ind_r_out"] = "0.91";
+        knob.attributes["knob_ind_w"] = "0.04";
+        if (per_control)
+            knob.attributes["knob_ind_color"] = "#ffffffff";
+        if (panel_fallback)
+            knob.attributes["design_indicator"] = "#ff0000ff";
+        // Deliberately no asset_path: portable/self-contained persistence may
+        // prune importer-time sprite paths while retaining the authored pointer.
+        ir.root.children.push_back(std::move(knob));
+
+        IRNode fader;
+        fader.type = "frame";
+        fader.name = "DillaFader";
+        fader.audio_widget = AudioWidgetType::fader;
+        fader.style.width = 180.0f;
+        fader.style.height = 24.0f;
+        if (per_control)
+            fader.attributes["fader_ind_color"] = "#28dcf0ff";
+        if (panel_fallback)
+            fader.attributes["design_indicator"] = "#ff0000ff";
+        // Deliberately no fader body/indicator asset paths for the same reason.
+        ir.root.children.push_back(std::move(fader));
+        return ir;
+    };
+
+    for (const auto mode : {CodeGenMode::web_compat,
+                            CodeGenMode::bridge_native_js}) {
+        CodeGenOptions opts;
+        opts.mode = mode;
+        opts.include_comments = false;
+
+        const auto authored = generate_pulp_js(make_ir(true, true), opts);
+        INFO(authored);
+        const auto knob_at = authored.find("setKnobCapturedIndicator(");
+        const auto fader_at = authored.rfind("setFaderSkin(");
+        REQUIRE(knob_at != std::string::npos);
+        REQUIRE(fader_at != std::string::npos);
+        const auto knob_stmt = authored.substr(
+            knob_at, authored.find('\n', knob_at) - knob_at);
+        const auto fader_stmt = authored.substr(
+            fader_at, authored.find('\n', fader_at) - fader_at);
+        CHECK(knob_stmt.find("#ffffffff") != std::string::npos);
+        CHECK(fader_stmt.find("#28dcf0ff") != std::string::npos);
+        CHECK(knob_stmt.find(", true)") != std::string::npos);
+        CHECK(fader_stmt.find(", true)") != std::string::npos);
+        CHECK(knob_stmt.find("#ff0000ff") == std::string::npos);
+        CHECK(fader_stmt.find("#ff0000ff") == std::string::npos);
+        CHECK(authored.find("setKnobSpriteStrip(") == std::string::npos);
+        CHECK(authored.find("setFaderCapturedArt(") == std::string::npos);
+
+        auto invalid_ir = make_ir(true, true);
+        invalid_ir.root.children[0].attributes["knob_ind_color"] = "rgb(nope)";
+        invalid_ir.root.children[1].attributes["fader_ind_color"] = "rgb(255)";
+        const auto invalid = generate_pulp_js(invalid_ir, opts);
+        INFO(invalid);
+        const auto invalid_knob_at = invalid.find("setKnobCapturedIndicator(");
+        const auto invalid_fader_at = invalid.find("setFaderSkin(");
+        REQUIRE(invalid_knob_at != std::string::npos);
+        REQUIRE(invalid_fader_at != std::string::npos);
+        const auto invalid_knob_stmt = invalid.substr(
+            invalid_knob_at, invalid.find('\n', invalid_knob_at) - invalid_knob_at);
+        const auto invalid_fader_stmt = invalid.substr(
+            invalid_fader_at, invalid.find('\n', invalid_fader_at) - invalid_fader_at);
+        CHECK(invalid_knob_stmt.find("#ff0000ff") != std::string::npos);
+        CHECK(invalid_fader_stmt.find("#ff0000ff") != std::string::npos);
+        CHECK(invalid_knob_stmt.find(", false)") != std::string::npos);
+        CHECK(invalid_fader_stmt.find(", false)") != std::string::npos);
+
+        const auto panel = generate_pulp_js(make_ir(false, true), opts);
+        INFO(panel);
+        const auto panel_knob_at = panel.find("setKnobCapturedIndicator(");
+        const auto panel_fader_at = panel.find("setFaderSkin(");
+        REQUIRE(panel_knob_at != std::string::npos);
+        REQUIRE(panel_fader_at != std::string::npos);
+        CHECK(panel.substr(panel_knob_at,
+                           panel.find('\n', panel_knob_at) - panel_knob_at)
+                  .find("#ff0000ff") != std::string::npos);
+        const auto panel_knob_stmt = panel.substr(
+            panel_knob_at, panel.find('\n', panel_knob_at) - panel_knob_at);
+        const auto panel_fader_stmt = panel.substr(
+            panel_fader_at, panel.find('\n', panel_fader_at) - panel_fader_at);
+        CHECK(panel_knob_stmt.find(", false)") != std::string::npos);
+        CHECK(panel_fader_stmt.find("#ff0000ff") != std::string::npos);
+        CHECK(panel_fader_stmt.find(", false)") != std::string::npos);
+
+        const auto themed = generate_pulp_js(make_ir(false, false), opts);
+        INFO(themed);
+        const auto themed_knob_at = themed.find("setKnobCapturedIndicator(");
+        REQUIRE(themed_knob_at != std::string::npos);
+        CHECK(themed.substr(themed_knob_at,
+                            themed.find('\n', themed_knob_at) - themed_knob_at)
+                  .find(", '', ") != std::string::npos);
+        CHECK(themed.substr(themed_knob_at,
+                            themed.find('\n', themed_knob_at) - themed_knob_at)
+                  .find(", false)") != std::string::npos);
+        // No authored track/fill/thumb means no synthetic fader skin: the
+        // runtime's control.thumb/theme remains the authority.
+        CHECK(themed.find("setFaderSkin(") == std::string::npos);
+    }
+}
+
+TEST_CASE("generated fader skin keeps sampled and isolated control colors above panel fallbacks",
+          "[view][import][codegen][indicator-precedence]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode fader;
+    fader.type = "frame";
+    fader.name = "LayeredFader";
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.style.width = 24.0f;
+    fader.style.height = 120.0f;
+    fader.attributes["design_track"] = "#110000ff";
+    fader.attributes["design_accent"] = "#220000ff";
+    fader.attributes["design_indicator"] = "#330000ff";
+    fader.attributes["skin_track_color"] = "#001100ff";
+    fader.attributes["skin_fill_color"] = "#002200ff";
+    fader.attributes["skin_thumb_color"] = "#003300ff";
+    fader.attributes["fader_ind_color"] = "#28dcf0ff";
+    ir.root.children.push_back(std::move(fader));
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    opts.skin_faders = true;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+
+    const auto panel = js.find("#330000ff");
+    const auto sampled = js.find("#003300ff");
+    const auto isolated = js.find("#28dcf0ff");
+    REQUIRE(panel != std::string::npos);
+    REQUIRE(sampled != std::string::npos);
+    REQUIRE(isolated != std::string::npos);
+    CHECK(panel < sampled);
+    CHECK(sampled < isolated);
+
+    const auto statement_at = [&](std::size_t color_at) {
+        const auto begin = js.rfind("setFaderSkin(", color_at);
+        REQUIRE(begin != std::string::npos);
+        const auto end = js.find('\n', color_at);
+        REQUIRE(end != std::string::npos);
+        return js.substr(begin, end - begin);
+    };
+    const auto panel_statement = statement_at(panel);
+    const auto sampled_statement = statement_at(sampled);
+    const auto isolated_statement = statement_at(isolated);
+    CHECK(panel_statement.find(", false)") != std::string::npos);
+    CHECK(sampled_statement.find(", true)") != std::string::npos);
+    CHECK(isolated_statement.find(", true)") != std::string::npos);
+}

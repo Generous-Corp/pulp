@@ -36,24 +36,8 @@ namespace {
 /// tolerance is how a control comes out right on one path and wrong on the other.
 std::pair<canvas::Color, bool> parse_skin_color(const std::string& value) {
     const canvas::Color unparsed = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
-    if (value.empty()) return {unparsed, false};
-    if (value[0] == '#') {
-        // `parse_css_color` returns its white default for a malformed hex run
-        // rather than reporting failure, so the accepted lengths stay checked
-        // here — otherwise `#ab12` would report success and paint white.
-        if (value.size() != 4 && value.size() < 7) return {unparsed, false};
-        return {parse_css_color(value), true};
-    }
-    if (value == "transparent") return {parse_css_color(value), true};
-    // The functional forms `parse_css_color` understands. Anything else — a
-    // named colour, a var(), a gradient — is reported unrecognized so the caller
-    // keeps its fallback rather than receiving that parser's white.
-    static constexpr std::string_view kFunctionalForms[] = {
-        "rgb(", "rgba(", "hsl(", "hsla(", "oklab(", "oklch("};
-    for (const auto form : kFunctionalForms)
-        if (value.compare(0, form.size(), form) == 0)
-            return {parse_css_color(value), true};
-    return {unparsed, false};
+    if (!css_color_syntax_supported(value)) return {unparsed, false};
+    return {parse_css_color(value), true};
 }
 
 } // namespace
@@ -134,7 +118,8 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    // setKnobCapturedIndicator(id, rIn, rOut, width, color, phaseRad) — the design's OWN
+    // setKnobCapturedIndicator(id, rIn, rOut, width, color, phaseRad,
+    //                          colorAuthored?) — recovered pointer geometry.
     // pointer geometry, as fractions of the disc's half extent. Knob::paint
     // sweeps THIS pointer along the value arc instead of the synthetic notch.
     //
@@ -147,18 +132,23 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
             auto id = args.get<std::string>(0, "");
             auto* k = dynamic_cast<Knob*>(self.widget(id));
             if (!k) return choc::value::Value();
-            // No captured colour means Pulp must not invent one: fall back to
-            // the same `knob.thumb` token the synthetic notch resolves, so a
-            // theme reaches the pointer instead of a fixed near-white.
-            auto color = k->resolve_color("knob.thumb", canvas::Color::rgba8(235, 235, 235));
-            if (auto [c, ok] = parse_skin_color(args.get<std::string>(4, "")); ok)
-                color = c;
+            // Panel-wide design_indicator is only a fallback. Store both its
+            // colour and provenance so Knob::paint resolves its live
+            // knob.thumb theme on every frame; only a true per-control
+            // knob_ind_color bypasses that theme.
+            auto color = canvas::Color::rgba8(235, 235, 235);
+            const auto [parsed, has_color] =
+                parse_skin_color(args.get<std::string>(4, ""));
+            if (has_color) color = parsed;
+            const bool color_authored = has_color &&
+                args.get<bool>(6, true);
             k->set_captured_indicator(
                 static_cast<float>(args.get<double>(1, 0.0)),
                 static_cast<float>(args.get<double>(2, 0.0)),
                 static_cast<float>(args.get<double>(3, 0.0)),
                 color,
-                static_cast<float>(args.get<double>(5, 0.0)));
+                static_cast<float>(args.get<double>(5, 0.0)),
+                color_authored);
             k->request_repaint();
             return choc::value::Value();
         });
@@ -211,21 +201,52 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         });
 
     // setFaderSkin(id, trackColor, fillColor, thumbColor, thumbBorderColor?,
-    //              thumbW?, thumbH?, cornerRadius?)
+    //              thumbW?, thumbH?, cornerRadius?, thumbColorAuthored?)
     register_bridge_function(api, "setFaderSkin",
         [&self](choc::javascript::ArgumentList args) {
             auto* f = dynamic_cast<Fader*>(self.widget(args.get<std::string>(0, "")));
             if (!f) return choc::value::Value();
             if (auto [c, ok] = parse_skin_color(args.get<std::string>(1, "")); ok) f->set_skin_track_color(c);
             if (auto [c, ok] = parse_skin_color(args.get<std::string>(2, "")); ok) f->set_skin_fill_color(c);
-            if (auto [c, ok] = parse_skin_color(args.get<std::string>(3, "")); ok) f->set_skin_thumb_color(c);
-            if (auto [c, ok] = parse_skin_color(args.get<std::string>(4, "")); ok) f->set_skin_thumb_border_color(c);
+            bool thumb_specific = false;
+            const bool thumb_color_authored = args.get<bool>(8, true);
+            const auto [thumb_color, has_thumb_color] =
+                parse_skin_color(args.get<std::string>(3, ""));
+            if (thumb_color_authored) {
+                if (has_thumb_color) {
+                    f->begin_skin_thumb_style();
+                    f->set_skin_thumb_color(thumb_color);
+                    thumb_specific = true;
+                }
+            } else {
+                // Provenance is authoritative even when the optional fallback
+                // colour is empty: replay must retire stale per-control color,
+                // border and geometry state from an earlier authored skin.
+                f->clear_skin_thumb_style();
+                if (has_thumb_color)
+                    f->set_skin_thumb_fallback_color(thumb_color);
+            }
+            if (auto [c, ok] = parse_skin_color(args.get<std::string>(4, "")); ok) {
+                f->begin_skin_thumb_style();
+                f->set_skin_thumb_border_color(c);
+                thumb_specific = true;
+            }
             float tw = static_cast<float>(args.get<double>(5, 0));
             float th = static_cast<float>(args.get<double>(6, 0));
-            if (tw > 0.0f && th > 0.0f) f->set_thumb_size(tw, th);
+            if (tw > 0.0f && th > 0.0f) {
+                f->begin_skin_thumb_style();
+                f->set_thumb_size(tw, th);
+                thumb_specific = true;
+            }
             float cr = static_cast<float>(args.get<double>(7, 0));
-            if (cr > 0.0f) f->set_thumb_corner_radius(cr);
-            f->set_thumb_shape(Fader::ThumbShape::rectangle);
+            if (cr > 0.0f) {
+                f->begin_skin_thumb_style();
+                f->set_thumb_corner_radius(cr);
+                thumb_specific = true;
+            }
+            // Track/fill-only styling must not mutate thumb geometry.
+            if (thumb_specific)
+                f->set_thumb_shape(Fader::ThumbShape::rectangle);
             f->request_repaint();
             return choc::value::Value();
         });

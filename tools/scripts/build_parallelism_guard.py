@@ -19,7 +19,8 @@ Two distinct failure classes:
   The distinction is a property of the **host**, not the command — and a static
   file scan cannot always tell which host a line runs on. So whole-machine is
   flagged only on the surfaces this scan *can* classify as shared: the ones
-  agents copy from (CLAUDE.md, .shipyard/config.toml, .agents/skills/**).
+  agents copy from (CLAUDE.md, .shipyard/config.toml, .agents/skills/**), plus
+  the bootstrap every checkout on the box runs (setup.sh).
 
   ``.github/workflows/**`` is deliberately NOT scanned for whole-machine — but
   **not** because "nothing shares the box" there. A workflow's ``runs-on`` is
@@ -85,11 +86,18 @@ SCAN_DIRS = {
 # shared-host build strings in the repo: a `.github/workflows/**` leg can also
 # resolve to a shared self-hosted runner (see the module docstring), but its
 # `runs-on` is dynamic and unresolvable by a file scan, so those are bounded by
-# the workflow author, not flagged here. These paths are the ones a scan CAN
-# pin down: literal copy-from surfaces agents lift build commands out of.
+# the workflow author, not flagged here.
+#
+# The criterion is "a static scan can tell this runs on, or is copied onto, the
+# shared dev box". That covers two shapes: the copy-from surfaces agents lift
+# build commands out of, and a script whose only caller IS a developer or agent
+# in a checkout on that box. `setup.sh` is the second shape — the bootstrap
+# every fresh worktree and external cloner runs — and it is a *more* certain
+# classification than the prose surfaces, not a weaker one.
 SHARED_HOST_FILES = [
     "CLAUDE.md",              # the command agents copy-paste onto the shared Mac
     ".shipyard/config.toml",  # validation lanes run on the local self-hosted Macs
+    "setup.sh",               # every fresh worktree bootstraps through it, on the box
 ]
 SHARED_HOST_DIRS = {
     ".agents/skills": (".md",),  # read by Claude Code AND Codex, run on the dev box
@@ -150,6 +158,15 @@ REDIRECTION = re.compile(r'\d?>&?\s*\S*|<\s*\S*')
 # this keeps the scan off a core-count read elsewhere on a long command line.
 VALUE_WINDOW = 48
 
+# A job count can also reach the flag through a VARIABLE, which hides the shape
+# from a value-only scan: `JOBS=$(sysctl -n hw.ncpu)` on one line and
+# `-j"$JOBS"` on the next is whole-machine, but neither line looks it alone.
+# These resolve one hop — the job value's variable name, and the assignments the
+# same file makes — which is enough for the shell/YAML/toml surfaces scanned here.
+VALUE_VARIABLE = re.compile(
+    r'''[=\s]*["']?(?:\$\{?([A-Za-z_]\w*)\}?|%([A-Za-z_]\w*)%)''')
+ASSIGNMENT = re.compile(r'''^\s*(?:export\s+|set\s+)?([A-Za-z_]\w*)\s*=\s*(\S.*)$''')
+
 COMMENT_PREFIXES = ("#", "//", "*", "///")
 
 
@@ -191,17 +208,47 @@ def _logical_lines(text: str):
         i += 1
 
 
-def _classify(code: str, end: int) -> str | None:
+def _is_whole_machine(value: str) -> bool:
+    """True when `value` reads the host's core count without dividing it down."""
+    value = REDIRECTION.sub(" ", value)
+    return bool(CORE_COUNT_EXPANSION.search(value)) and not SHARE_ARITHMETIC.search(value)
+
+
+def _variable_assignments(text: str) -> dict[str, str]:
+    """Map every variable assigned in the file to its right-hand side.
+
+    Only one hop is resolved, and the last assignment wins. That is deliberately
+    crude: it exists to stop a core-count read from being laundered through a
+    variable, not to interpret the shell."""
+    assignments: dict[str, str] = {}
+    for _lineno, line in _logical_lines(text):
+        stripped = line.lstrip()
+        if stripped.startswith(COMMENT_PREFIXES):
+            continue
+        m = ASSIGNMENT.match(line)
+        if m:
+            assignments[m.group(1)] = m.group(2)
+    return assignments
+
+
+def _classify(code: str, end: int, assignments: dict[str, str] | None = None) -> str | None:
     """Classify the job value that follows a `--parallel`/`-j` at `end`.
 
     Returns "bare" (no count at all), "whole-machine" (an undivided read of the
-    host's core count), or None when the value is a bounded share."""
+    host's core count, directly or through a variable the same file assigns), or
+    None when the value is a bounded share."""
     rest = code[end:]
     if not BOUNDED.match(rest):
         return "bare"
-    value = REDIRECTION.sub(" ", rest[:VALUE_WINDOW])
-    if CORE_COUNT_EXPANSION.search(value) and not SHARE_ARITHMETIC.search(value):
+    if _is_whole_machine(rest[:VALUE_WINDOW]):
         return "whole-machine"
+    # The value may name a variable this file assigns from the core count.
+    m = VALUE_VARIABLE.match(rest)
+    if m and assignments:
+        name = m.group(1) or m.group(2)
+        rhs = assignments.get(name)
+        if rhs and _is_whole_machine(rhs):
+            return "whole-machine"
     return None
 
 
@@ -244,6 +291,9 @@ def scan_file_kinds(path: Path, shared_host: bool | None = None) -> list[tuple[i
     if shared_host is None:
         shared_host = is_shared_host_surface(path)
     fenced = _shell_fenced_lines(text) if suffix == ".md" else None
+    # Only needed to unmask a laundered core-count read, which is a shared-host
+    # finding; skip the pass entirely where that class is not enforced.
+    assignments = _variable_assignments(text) if shared_host else {}
     for lineno, line in _logical_lines(text):
         if fenced is not None and lineno not in fenced:
             continue
@@ -252,7 +302,7 @@ def scan_file_kinds(path: Path, shared_host: bool | None = None) -> list[tuple[i
             continue
         for pattern in (PARALLEL, DASH_J):
             for m in pattern.finditer(code):
-                kind = _classify(code, m.end())
+                kind = _classify(code, m.end(), assignments)
                 # A whole-machine count is only a finding on a surface this scan
                 # has classified as shared. A non-shared surface here includes
                 # `.github/workflows/**`, whose `runs-on` a file scan cannot
@@ -338,7 +388,9 @@ def main(argv: list[str]) -> int:
               "job count from the host governor. In a raw command, derive a share "
               "($(( $(nproc) / 4 ))) or use a literal. This flag fires only on the "
               "surfaces the scan can classify as shared (CLAUDE.md, "
-              ".shipyard/config.toml, .agents/skills/**); it does NOT scan "
+              ".shipyard/config.toml, .agents/skills/**, setup.sh), and it "
+              "resolves a job count reached through a variable the same file "
+              "assigns; it does NOT scan "
               "`.github/workflows/**`, whose `runs-on` is dynamic and may itself be "
               "a self-hosted shared runner — bounding a whole-machine build there is "
               "the workflow author's job (route the self-hosted leg through the "

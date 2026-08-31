@@ -12,9 +12,18 @@
 ## Quick Build
 
 ```bash
-./setup.sh                                    # bootstrap deps
+./setup.sh                                    # bootstrap deps, then Release build + tests
+```
+
+`setup.sh` configures `build/` as Release with `PULP_BUILD_EXAMPLES=OFF`, so a
+later bare reconfigure of the same directory inherits both from the cache. Pass
+`./setup.sh --examples`, or `-DPULP_BUILD_EXAMPLES=ON` on a reconfigure, to add
+the example projects. To drive the steps yourself instead:
+
+```bash
+./setup.sh --deps-only                        # bootstrap deps only
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  # configure
-cmake --build build -j$(nproc)                # build
+cmake --build build -j8                       # build
 ctest --test-dir build --output-on-failure    # test
 ```
 
@@ -23,6 +32,7 @@ ctest --test-dir build --output-on-failure    # test
 | Option | Default | Description |
 |--------|---------|-------------|
 | `PULP_BUILD_TESTS` | ON | Build test targets |
+| `PULP_BUILD_EXAMPLES` | ON | Build the example projects. `setup.sh` configures `OFF` unless `--examples` is passed. |
 | `PULP_ENABLE_GPU` | ON | Enable Dawn/Skia GPU rendering |
 | `PULP_ENABLE_PROJECT_PACKAGE` | ON | Build and export the optional project-package component and dependent Timeline authoring tools. `OFF` omits them, so the installed SDK cannot satisfy a request for the `project-package` component. |
 | `PULP_ENABLE_JS` | ON | Build the JS scripting + web-compat layer (`pulp::view-script`). `OFF` yields a native-only `pulp::view` with no JS engine — smaller binaries, and the native faithful-vector design-import path still works. |
