@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from typing import Callable, Iterable
@@ -65,25 +66,67 @@ def _file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _binary_identity(resources: Path, binary: Path) -> str:
-    """Use the candidate's release identity algorithm for a signed helper."""
-    identity_tool = resources / "examples/forge-modular/binary_identity.py"
-    spec = importlib.util.spec_from_file_location(
-        "forge_qualification_binary_identity", identity_tool)
-    if spec is None or spec.loader is None:
-        raise QualificationError(
-            f"cannot load Forge binary identity authority: {identity_tool}")
-    module = importlib.util.module_from_spec(spec)
+def _binary_identity(_resources: Path, binary: Path) -> str:
+    """Hash executable content without executing candidate-owned code.
+
+    A Developer ID signature is replaceable publication metadata. Zero its
+    load-command fields and exclude its blob, matching Forge's release
+    identity contract while keeping this verifier entirely reviewer-owned.
+    """
     try:
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        identity = module.content_sha256(str(binary))
-    except Exception as exc:
+        data = bytearray(binary.read_bytes())
+        if len(data) < 28:
+            return hashlib.sha256(data).hexdigest()
+        magic = bytes(data[:4])
+        if magic == b"\xcf\xfa\xed\xfe":
+            endian, header_size = "<", 32
+        elif magic == b"\xfe\xed\xfa\xcf":
+            endian, header_size = ">", 32
+        elif magic == b"\xce\xfa\xed\xfe":
+            endian, header_size = "<", 28
+        elif magic == b"\xfe\xed\xfa\xce":
+            endian, header_size = ">", 28
+        else:
+            return hashlib.sha256(data).hexdigest()
+
+        command_count = struct.unpack_from(endian + "I", data, 16)[0]
+        offset = header_size
+        signature_offset = None
+        for _ in range(command_count):
+            if offset + 8 > len(data):
+                raise ValueError("truncated Mach-O load commands")
+            command, size = struct.unpack_from(endian + "II", data, offset)
+            if size < 8 or offset + size > len(data):
+                raise ValueError("invalid Mach-O load command")
+            if command == 0x1D:  # LC_CODE_SIGNATURE
+                if size < 16:
+                    raise ValueError("truncated LC_CODE_SIGNATURE")
+                signature_offset = struct.unpack_from(
+                    endian + "I", data, offset + 8)[0]
+                data[offset + 8:offset + 16] = b"\0" * 8
+            elif command in (0x1, 0x19) and size >= 40:
+                segment_name = bytes(
+                    data[offset + 8:offset + 24]).rstrip(b"\0")
+                if segment_name == b"__LINKEDIT":
+                    if command == 0x19:  # LC_SEGMENT_64
+                        if size < 56:
+                            raise ValueError("truncated LC_SEGMENT_64")
+                        data[offset + 32:offset + 40] = b"\0" * 8
+                        data[offset + 48:offset + 56] = b"\0" * 8
+                    else:  # LC_SEGMENT
+                        data[offset + 28:offset + 32] = b"\0" * 4
+                        data[offset + 36:offset + 40] = b"\0" * 4
+            offset += size
+        if signature_offset is not None:
+            if signature_offset > len(data):
+                raise ValueError(
+                    "code signature begins beyond end of Mach-O")
+            data = data[:signature_offset]
+        identity = hashlib.sha256(data).hexdigest()
+    except (OSError, ValueError, struct.error) as exc:
         raise QualificationError(
             f"cannot identify Forge binary {binary}: {exc}") from exc
-    finally:
-        sys.modules.pop(spec.name, None)
-    if not isinstance(identity, str) or not HEX64.fullmatch(identity):
+    if not HEX64.fullmatch(identity):
         raise QualificationError(
             f"Forge binary identity is not one exact SHA-256: {binary}")
     return identity

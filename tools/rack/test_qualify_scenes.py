@@ -285,6 +285,26 @@ class QualificationTests(unittest.TestCase):
                          Q._binary_identity(kwargs["build_info"].parent, decoder))
         self.assertTrue(inventory_path.is_file())
 
+    def test_prepare_never_executes_candidate_identity_helper(self) -> None:
+        kwargs = self.packaged_prepare_kwargs()
+        marker = self.fixture.root / "candidate-helper-executed"
+        helper = (kwargs["build_info"].parent /
+                  "examples/forge-modular/binary_identity.py")
+        helper.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker)!r}).write_text('executed')\n"
+            "def content_sha256(_path): return 'e' * 64\n")
+
+        identity_path, _inventory_path = Q.prepare_inputs(**kwargs)
+
+        self.assertFalse(marker.exists())
+        receipt = json.loads(identity_path.read_text())["identity"]
+        decoder = kwargs["build_info"].parent / "build/rack_patch_decode"
+        self.assertEqual(receipt["rack_patch_decode_sha256"],
+                         Q._binary_identity(kwargs["build_info"].parent,
+                                            decoder))
+        self.assertNotEqual("e" * 64, receipt["rack_patch_decode_sha256"])
+
     def test_packaged_prepare_rejects_decoder_identity_mutation(self) -> None:
         kwargs = self.packaged_prepare_kwargs()
         executing_decoder = kwargs["toolchain"] / "rack_patch_decode"
