@@ -40,6 +40,16 @@ required-gate topology. The authoritative declarative surface is
 `tools/scripts/runner_topology.json`; reconcile it with live variables using
 `python3 tools/scripts/runner_topology_check.py --mode=report`.
 
+The canonical `.github/workflows/build.yml` `Build and Test` pull-request run
+is excluded from broad stale-run and superseded-run janitors. Its narrow
+old-predecessor/current-zero-job concurrency wedge is owned by Shipyard's
+default-off, receipt-fenced recovery command. A generic age sweep or shell
+cleanup must fail closed on a missing workflow path and must never cancel that
+path; otherwise two cancellation actuators can race and make restart evidence
+ambiguous. This exclusion does not authorize recovery by itself—the dedicated
+Shipyard invocation remains separately enabled only after its pinned release,
+receipt namespace protection, and canary are in place.
+
 ## Runner timing metrics
 
 When asked whether Pulp's local runners are fast, stuck, regressing, or worth
