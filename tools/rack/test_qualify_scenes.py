@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -15,11 +17,24 @@ from unittest import mock
 import qualify_scenes as Q
 
 
+def macho(code: bytes, signature: bytes) -> bytes:
+    header = struct.pack("<IiiIIIII", 0xFEEDFACF, 0, 0, 2, 1, 16, 0, 0)
+    signature_offset = len(header) + 16 + len(code)
+    command = struct.pack("<IIII", 0x1D, 16, signature_offset, len(signature))
+    return header + command + code + signature
+
+
 class Fixture:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.toolchain = root / "tools"
         self.toolchain.mkdir()
+        binary_identity = root / "examples/forge-modular/binary_identity.py"
+        binary_identity.parent.mkdir(parents=True)
+        shutil.copy2(
+            Path(Q.__file__).resolve().parents[2] /
+            "examples/forge-modular/binary_identity.py",
+            binary_identity)
         for name in ("patch.py", "with_app_model_selection.py", "idiom_check.py",
                      "fidelity.py", "rack_open.py"):
             (self.toolchain / name).write_text("# fixture\n", encoding="utf-8")
@@ -172,6 +187,31 @@ class QualificationTests(unittest.TestCase):
             "output_dir": self.fixture.root / "qualification-inputs",
         }
 
+    def packaged_prepare_kwargs(self, bundle_name: str = "Forge Modular.app",
+                                build_info_name: str = "FORGE_BUILD_INFO") -> dict:
+        kwargs = self.prepare_kwargs()
+        resources = self.fixture.root / bundle_name / "Contents/Resources"
+        packaged_toolchain = resources / "tools/rack"
+        shutil.copytree(self.fixture.toolchain, packaged_toolchain)
+        packaged_toolchain.joinpath("rack_patch_decode").unlink()
+        packaged_decoder = resources / "build/rack_patch_decode"
+        packaged_decoder.parent.mkdir(parents=True)
+        shutil.copy2(self.fixture.root / "build/rack_patch_decode",
+                     packaged_decoder)
+        packaged_identity = resources / "examples/forge-modular/binary_identity.py"
+        packaged_identity.parent.mkdir(parents=True)
+        shutil.copy2(
+            self.fixture.root / "examples/forge-modular/binary_identity.py",
+            packaged_identity)
+        packaged_build_info = resources / build_info_name
+        shutil.copy2(kwargs["build_info"], packaged_build_info)
+        kwargs.update({
+            "toolchain": packaged_toolchain,
+            "build_info": packaged_build_info,
+            "output_dir": self.fixture.root / "packaged-qualification-inputs",
+        })
+        return kwargs
+
     def test_catalogue_enumerates_exact_fixed_ids_in_order(self) -> None:
         scenes = Q.load_catalogue(self.fixture.catalogue)
         self.assertEqual([scene["id"] for scene in scenes], list(Q.SCENE_IDS))
@@ -232,6 +272,45 @@ class QualificationTests(unittest.TestCase):
             str(kwargs["output_dir"].absolute() / "identity.json"),
             str(kwargs["output_dir"].absolute() / "inventory.json"),
         ])
+
+    def test_prepare_accepts_the_real_packaged_resources_layout(self) -> None:
+        kwargs = self.packaged_prepare_kwargs()
+        decoder = kwargs["build_info"].parent / "build/rack_patch_decode"
+        self.assertFalse(kwargs["toolchain"].joinpath("rack_patch_decode").exists())
+
+        identity_path, inventory_path = Q.prepare_inputs(**kwargs)
+
+        identity = json.loads(identity_path.read_text())["identity"]
+        self.assertEqual(identity["rack_patch_decode_sha256"],
+                         Q._binary_identity(kwargs["build_info"].parent, decoder))
+        self.assertTrue(inventory_path.is_file())
+
+    def test_packaged_prepare_rejects_decoder_identity_mutation(self) -> None:
+        kwargs = self.packaged_prepare_kwargs()
+        executing_decoder = kwargs["toolchain"] / "rack_patch_decode"
+        executing_decoder.write_bytes(b"stale duplicate decoder")
+        executing_decoder.chmod(0o755)
+
+        with self.assertRaisesRegex(Q.QualificationError,
+                                    "executing.*does not match"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_prepare_does_not_exempt_the_same_layout_outside_an_app(self) -> None:
+        kwargs = self.packaged_prepare_kwargs(bundle_name="Forge Modular")
+
+        with self.assertRaisesRegex(Q.QualificationError,
+                                    "decoder is missing or not executable"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_prepare_does_not_exempt_a_renamed_build_info(self) -> None:
+        kwargs = self.packaged_prepare_kwargs(build_info_name="BUILD_INFO")
+
+        with self.assertRaisesRegex(Q.QualificationError,
+                                    "decoder is missing or not executable"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
 
     def test_prepare_rejects_build_identity_mutations_without_partial_output(self) -> None:
         mutations = {
@@ -301,6 +380,39 @@ class QualificationTests(unittest.TestCase):
         executing_decoder = self.fixture.toolchain / "rack_patch_decode"
         executing_decoder.write_bytes(b"different decoder")
         with self.assertRaisesRegex(Q.QualificationError, "executing.*does not match"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_prepare_accepts_a_decoder_with_only_its_signature_replaced(self) -> None:
+        kwargs = self.prepare_kwargs()
+        candidate = kwargs["build_info"].parent / "build/rack_patch_decode"
+        executing = kwargs["toolchain"] / "rack_patch_decode"
+        candidate.write_bytes(macho(b"same executable code", b"adhoc"))
+        executing.write_bytes(
+            macho(b"same executable code", b"developer id signature"))
+        candidate.chmod(0o755)
+        executing.chmod(0o755)
+        identity = Q._binary_identity(kwargs["build_info"].parent, candidate)
+        stamp = kwargs["toolchain"] / "FORGE_TOOLCHAIN_STAMP"
+        stamp.write_text(stamp.read_text() + f"rack_patch_decode {identity}\n")
+
+        identity_path, _inventory_path = Q.prepare_inputs(**kwargs)
+
+        receipt = json.loads(identity_path.read_text())["identity"]
+        self.assertEqual(receipt["rack_patch_decode_sha256"], identity)
+        self.assertNotEqual(Q._file_digest(candidate), Q._file_digest(executing))
+
+    def test_prepare_rejects_a_decoder_with_mutated_executable_code(self) -> None:
+        kwargs = self.prepare_kwargs()
+        candidate = kwargs["build_info"].parent / "build/rack_patch_decode"
+        executing = kwargs["toolchain"] / "rack_patch_decode"
+        candidate.write_bytes(macho(b"candidate executable code", b"signature"))
+        executing.write_bytes(macho(b"mutated executable code", b"signature"))
+        candidate.chmod(0o755)
+        executing.chmod(0o755)
+
+        with self.assertRaisesRegex(Q.QualificationError,
+                                    "executing.*does not match"):
             Q.prepare_inputs(**kwargs)
         self.assertFalse(kwargs["output_dir"].exists())
 

@@ -65,6 +65,45 @@ def _file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _binary_identity(resources: Path, binary: Path) -> str:
+    """Use the candidate's release identity algorithm for a signed helper."""
+    identity_tool = resources / "examples/forge-modular/binary_identity.py"
+    spec = importlib.util.spec_from_file_location(
+        "forge_qualification_binary_identity", identity_tool)
+    if spec is None or spec.loader is None:
+        raise QualificationError(
+            f"cannot load Forge binary identity authority: {identity_tool}")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        identity = module.content_sha256(str(binary))
+    except Exception as exc:
+        raise QualificationError(
+            f"cannot identify Forge binary {binary}: {exc}") from exc
+    finally:
+        sys.modules.pop(spec.name, None)
+    if not isinstance(identity, str) or not HEX64.fullmatch(identity):
+        raise QualificationError(
+            f"Forge binary identity is not one exact SHA-256: {binary}")
+    return identity
+
+
+def _is_packaged_resources_layout(build_info: Path, toolchain: Path) -> bool:
+    """Recognize only the signed app bundle's non-duplicated helper layout."""
+    resources = build_info.parent
+    contents = resources.parent
+    app_bundle = contents.parent
+    return (
+        build_info.name == "FORGE_BUILD_INFO" and
+        resources.name == "Resources" and
+        contents.name == "Contents" and
+        app_bundle.suffix == ".app" and
+        app_bundle.is_dir() and
+        toolchain == (resources / "tools" / "rack").resolve()
+    )
+
+
 def _completed_response(path: Path) -> bool:
     """A reservation alone is not evidence that the provider returned."""
     try:
@@ -420,17 +459,19 @@ def prepare_inputs(*, toolchain: Path, settings: Path, build_info: Path,
     if not decoder.is_file() or not os.access(decoder, os.X_OK):
         raise QualificationError(
             f"Forge Modular Rack saved-patch decoder is not executable: {decoder}")
-    decoder_identity = _file_digest(decoder)
+    decoder_identity = _binary_identity(build_info.parent, decoder)
     executing_decoder = toolchain / "rack_patch_decode"
-    if (not executing_decoder.is_file() or
-            not os.access(executing_decoder, os.X_OK)):
-        raise QualificationError(
-            "executing Rack saved-patch decoder is missing or not executable: "
-            f"{executing_decoder}")
-    if _file_digest(executing_decoder) != decoder_identity:
-        raise QualificationError(
-            "executing Rack saved-patch decoder does not match the candidate "
-            "executable")
+    packaged_resources = _is_packaged_resources_layout(build_info, toolchain)
+    if not packaged_resources or executing_decoder.exists():
+        if (not executing_decoder.is_file() or
+                not os.access(executing_decoder, os.X_OK)):
+            raise QualificationError(
+                "executing Rack saved-patch decoder is missing or not executable: "
+                f"{executing_decoder}")
+        if _binary_identity(build_info.parent, executing_decoder) != decoder_identity:
+            raise QualificationError(
+                "executing Rack saved-patch decoder does not match the candidate "
+                "executable")
     if stamped_decoder is not None and stamped_decoder != decoder_identity:
         raise QualificationError(
             "FORGE_TOOLCHAIN_STAMP decoder identity does not match the "

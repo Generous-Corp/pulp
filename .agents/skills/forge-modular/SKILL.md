@@ -1203,6 +1203,21 @@ patches.
   the CLI surface on a remote machine needs a window there or an unlocked
   keychain. That is a real blocker, not a flake.
 
+The signed app's qualification inputs use a deliberately non-duplicated helper
+layout: `FORGE_BUILD_INFO` and `build/rack_patch_decode` are under `Resources`,
+while the executing Python toolchain is `Resources/tools/rack`. Qualification
+may treat that decoder as the executing candidate only when the build-info file
+has its exact name and the paths resolve beneath a real
+`*.app/Contents/Resources` boundary. An installed or developer toolchain outside
+that exact bundle layout must still carry its own `rack_patch_decode`,
+identical to the candidate by the canonical content identity, so a missing
+helper cannot pass merely because some bundle was named. Decoder identity comes
+from the bundled
+`examples/forge-modular/binary_identity.py`, not a raw file digest: Developer
+ID signing replaces the Mach-O signature after the stamp is authored. Raw bytes
+may differ only in that excluded signature; executable-content drift must still
+fail qualification.
+
 ## The seam: the app's sources live here, the build happens in Forge
 
 `forge-seam/modular/` holds the shell and its views; `forge-seam/patches/`
