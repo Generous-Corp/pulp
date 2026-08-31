@@ -201,7 +201,7 @@
             "host_bundle_id", "host_version", "host_sha256",
             "application_kind", "application_sha256", "plugin_format",
             "plugin_sha256", "provider_sha256", "build_sha256",
-            "signature_sha256", "content_sha256", "adapter",
+            "signature_sha256", "expected_signatures", "content_sha256", "adapter",
             "display_id", "refresh_hz"
           ],
           "additionalProperties": false,
@@ -221,7 +221,15 @@
             "plugin_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "provider_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "build_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-            "signature_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "signature_sha256": {
+              "type": "string", "pattern": "^[0-9a-f]{64}$",
+              "description": "SHA-256 of expected_signatures sorted lexically and encoded as compact UTF-8 JSON followed by one newline."
+            },
+            "expected_signatures": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "description": "Order-independent exact signature authority for every raw sample in this campaign.",
+              "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+            },
             "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "adapter": { "type": "string", "minLength": 1, "maxLength": 256 },
             "adapter_predicate": { "type": "string", "minLength": 1, "maxLength": 1024 },

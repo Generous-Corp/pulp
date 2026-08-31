@@ -20,6 +20,10 @@ SHA = "1" * 40
 FORGE_SHA = "2" * 40
 POLICY_PULP_SHA = "3" * 40
 DIGEST = "4" * 64
+EXPECTED_SIGNATURES = ["content", "shader", "source"]
+SIGNATURE_DIGEST = hashlib.sha256(
+    (json.dumps(sorted(EXPECTED_SIGNATURES), separators=(",", ":")) + "\n").encode()
+).hexdigest()
 PUBLICATION_SHA = "5" * 40
 APPROVED_SHA = "6" * 40
 PLANNING_MAIN_SHA = "7" * 40
@@ -86,7 +90,7 @@ def raw_campaign(role: str, policy_sha256: str) -> dict[str, Any]:
                     "blank": False, "fallback_state": "prepared",
                     "trace_categories": list(v2.TRACE_CATEGORIES)
                     if state == "candidate-active-session" else [],
-                    "signatures_present": ["source", "shader", "content"],
+                    "signatures_present": list(EXPECTED_SIGNATURES),
                 })
             row[key] = samples
         states.append(row)
@@ -202,7 +206,7 @@ else:
             {"scenario_id": scenario, "role_ids": ["pulp-standalone"], "frame_budget_ns": 1000}
             for scenario in v2.A4_SCENARIOS
         ],
-        "canary": {"binary_sha256": DIGEST, "content_sha256": DIGEST, "signature_sha256": DIGEST, "editor_open_origin": "editor-open-requested", "interaction_lifecycle": "manifest-bound", "steady_state_workload": "manifest-bound"},
+        "canary": {"binary_sha256": DIGEST, "content_sha256": DIGEST, "signature_sha256": SIGNATURE_DIGEST, "editor_open_origin": "editor-open-requested", "interaction_lifecycle": "manifest-bound", "steady_state_workload": "manifest-bound"},
     }
     policy_ref = write_artifact(root, "policy/product-policy.json", policy)
     policy_blob = v2.git_blob_digest((root / policy_ref["path"]).read_bytes())
@@ -247,7 +251,8 @@ raise SystemExit(2)
                 "application_kind": application, "application_sha256": DIGEST,
                 "plugin_format": plugin_format, "plugin_sha256": DIGEST,
                 "provider_sha256": DIGEST, "build_sha256": DIGEST,
-                "signature_sha256": DIGEST, "content_sha256": DIGEST,
+                "signature_sha256": SIGNATURE_DIGEST,
+                "expected_signatures": list(EXPECTED_SIGNATURES), "content_sha256": DIGEST,
                 "adapter": "authority-metal-constrained" if role == "constrained-adapter" else "metal",
                 "display_id": "main", "refresh_hz": 60,
         }
@@ -348,7 +353,91 @@ def expect_rejected(label: str, mutate: Callable[[dict[str, Any], Path], None]) 
                 v2.validate_v2(receipt, root, receipt_path=root / "canonical.json", repository=root)
         except v2.V2AcceptanceError:
             return
-        raise AssertionError(f"planted negative was accepted: {label}")
+    raise AssertionError(f"planted negative was accepted: {label}")
+
+
+def replace_publication_digest(receipt: dict[str, Any], old: str, new: str) -> None:
+    digests = set(receipt["publication"]["artifact_sha256s"])
+    digests.remove(old)
+    digests.add(new)
+    receipt["publication"]["artifact_sha256s"] = sorted(digests)
+
+
+def rebind_campaign_identity(
+    receipt: dict[str, Any], root: Path, role_id: str,
+    mutate: Callable[[dict[str, Any]], None],
+) -> None:
+    campaign = next(row for row in receipt["campaigns"] if row["role_id"] == role_id)
+    mutate(campaign["identity"])
+    identity_digest = hashlib.sha256(
+        (json.dumps(campaign["identity"], sort_keys=True, separators=(",", ":")) + "\n").encode()
+    ).hexdigest()
+    provenance_ref = campaign["sample_provenance"]
+    old = provenance_ref["sha256"]
+    rewrite_artifact(
+        root, provenance_ref,
+        lambda provenance: provenance.update(identity_sha256=identity_digest),
+    )
+    replace_publication_digest(receipt, old, provenance_ref["sha256"])
+
+
+def rebind_raw_signatures(
+    receipt: dict[str, Any], root: Path, signatures: list[str],
+) -> None:
+    campaign = receipt["campaigns"][0]
+    raw_ref = campaign["raw_samples"]
+    old_raw = raw_ref["sha256"]
+    rewrite_artifact(
+        root, raw_ref,
+        lambda raw: raw["states"][1]["warm"][0].update(signatures_present=signatures),
+    )
+    replace_publication_digest(receipt, old_raw, raw_ref["sha256"])
+    provenance_ref = campaign["sample_provenance"]
+    old_provenance = provenance_ref["sha256"]
+    rewrite_artifact(
+        root, provenance_ref,
+        lambda provenance: provenance.update(raw_samples_sha256=raw_ref["sha256"]),
+    )
+    replace_publication_digest(receipt, old_provenance, provenance_ref["sha256"])
+
+
+def plant_headless_content_substitution(receipt: dict[str, Any], root: Path) -> None:
+    rebind_campaign_identity(
+        receipt, root, "headless-reference",
+        lambda identity: identity.update(content_sha256="8" * 64),
+    )
+
+
+def plant_headless_signature_substitution(receipt: dict[str, Any], root: Path) -> None:
+    substituted = ["headless-only-signature"]
+    digest = v2.signature_set_digest(substituted, "test substitution")[0]
+    rebind_campaign_identity(
+        receipt, root, "headless-reference",
+        lambda identity: identity.update(
+            signature_sha256=digest,
+            expected_signatures=substituted,
+        ),
+    )
+
+
+def plant_forge_content_substitution(receipt: dict[str, Any], root: Path) -> None:
+    rebind_campaign_identity(
+        receipt, root, "forge-modular-vst3-reaper",
+        lambda identity: identity.update(content_sha256="8" * 64),
+    )
+
+
+def expect_signature_reorder_accepted() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        receipt = make_fixture(root)
+        rebind_raw_signatures(receipt, root, list(reversed(EXPECTED_SIGNATURES)))
+        with mock.patch.object(v2, "live_protected_main_errors", return_value=[]), mock.patch.object(
+            v2.trace_producer_overhead, "validate_receipt", return_value=None
+        ):
+            assert v2.validate_v2(
+                receipt, root, receipt_path=root / "canonical.json", repository=root,
+            ) is True
 
 
 def policy_publication_errors(
@@ -657,6 +746,15 @@ def main() -> int:
         ("standalone canary binary", lambda r, _p: r["campaigns"][0]["identity"].update(application_sha256="8" * 64)),
         ("constrained canary content", lambda r, _p: r["campaigns"][6]["identity"].update(content_sha256="8" * 64)),
         ("constrained canary signature", lambda r, _p: r["campaigns"][6]["identity"].update(signature_sha256="8" * 64)),
+        ("missing expected-signature authority", lambda r, _p: r["campaigns"][0]["identity"].pop("expected_signatures")),
+        ("duplicate expected-signature authority", lambda r, _p: r["campaigns"][0]["identity"].update(expected_signatures=[*EXPECTED_SIGNATURES, EXPECTED_SIGNATURES[0]])),
+        ("headless content substitution", plant_headless_content_substitution),
+        ("headless signature substitution", plant_headless_signature_substitution),
+        ("Forge shared-content substitution", plant_forge_content_substitution),
+        ("missing observed signature", lambda r, p: rebind_raw_signatures(r, p, EXPECTED_SIGNATURES[:-1])),
+        ("extra observed signature", lambda r, p: rebind_raw_signatures(r, p, [*EXPECTED_SIGNATURES, "extra"])),
+        ("duplicate observed signature", lambda r, p: rebind_raw_signatures(r, p, [*EXPECTED_SIGNATURES, EXPECTED_SIGNATURES[0]])),
+        ("fabricated observed signature", lambda r, p: rebind_raw_signatures(r, p, ["fabricated.signature"])),
         ("standalone lifecycle", lambda r, _p: r["campaigns"][0]["identity"].update(interaction_lifecycle="substitute")),
         ("canary editor-open origin mismatch", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy["canary"].update(editor_open_origin="easier-origin"))),
         ("constrained workload", lambda r, _p: r["campaigns"][6]["identity"].update(steady_state_workload="easier")),
@@ -704,6 +802,7 @@ def main() -> int:
     ]
     for label, mutate in negatives:
         expect_rejected(label, mutate)
+    expect_signature_reorder_accepted()
     required = {("required", 7)}
     successful = [{
         "id": 1, "name": "required", "app": {"id": 7}, "status": "completed",
@@ -726,7 +825,7 @@ def main() -> int:
     else:
         raise AssertionError("incomplete paginated check-runs result was accepted")
     print(
-        f"gpu first-visible A3 v2 acceptance: positive=1 "
+        f"gpu first-visible A3 v2 acceptance: positive=2 "
         f"cli_outcomes=3 planted_negatives={len(negatives)} live_check_controls=26"
     )
     return 0

@@ -273,6 +273,19 @@ def git_blob_digest(data: bytes) -> str:
     return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
 
 
+def signature_set_digest(signatures: Any, label: str) -> tuple[str, frozenset[str]]:
+    """Validate a signature set and return its documented canonical digest."""
+    if (
+        not isinstance(signatures, list)
+        or not signatures
+        or any(not isinstance(value, str) or not value for value in signatures)
+        or len(set(signatures)) != len(signatures)
+    ):
+        raise V2AcceptanceError(f"{label} must be a nonempty unique signature set")
+    canonical = json.dumps(sorted(signatures), separators=(",", ":")) + "\n"
+    return hashlib.sha256(canonical.encode()).hexdigest(), frozenset(signatures)
+
+
 def _github_time(value: Any, label: str) -> dt.datetime:
     if not isinstance(value, str):
         raise V2AcceptanceError(f"{label} is missing")
@@ -562,6 +575,7 @@ def validate_existing_build_proof(
 
 def validate_sample(
     sample: Any, *, role_id: str, state: str, token: str, order: int, seed: int,
+    expected_signatures: frozenset[str],
 ) -> dict[str, Any]:
     sample = exact_keys(sample, {
         "trial_id", "order", "seed", "first_visible_ns", "first_interaction_ns",
@@ -586,14 +600,17 @@ def validate_sample(
     expected_categories = list(TRACE_CATEGORIES) if state == "candidate-active-session" else []
     if sample["trace_categories"] != expected_categories:
         raise V2AcceptanceError(f"raw sample {token} has missing or extra trace categories")
-    if not isinstance(sample["signatures_present"], list) or not sample["signatures_present"]:
-        raise V2AcceptanceError(f"raw sample {token} lacks bound signatures")
+    _, observed_signatures = signature_set_digest(
+        sample["signatures_present"], f"raw sample {token} observed signatures",
+    )
+    if observed_signatures != expected_signatures:
+        raise V2AcceptanceError(f"raw sample {token} does not contain the exact expected signature set")
     return sample
 
 
 def validate_raw_campaign(
     raw: Any, *, role_id: str, policy_sha256: str,
-    policy_interaction: dict[str, Any],
+    policy_interaction: dict[str, Any], expected_signatures: frozenset[str],
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
     raw = exact_keys(raw, {
         "schema", "version", "role_id", "manifest_seed", "trial_order",
@@ -638,6 +655,7 @@ def validate_raw_campaign(
                 validate_sample(
                     sample, role_id=role_id, state=state, token=token,
                     order=by_token[token], seed=seed,
+                    expected_signatures=expected_signatures,
                 )
         result[state] = groups
     return result
@@ -1150,6 +1168,15 @@ def validate_v2(
     campaign_by_role = {row["role_id"]: row for row in campaigns}
     standalone_identity = campaign_by_role["pulp-standalone"]["identity"]
     constrained_identity = campaign_by_role["constrained-adapter"]["identity"]
+    expected_signatures_by_role: dict[str, frozenset[str]] = {}
+    for role_id, campaign in campaign_by_role.items():
+        identity = campaign["identity"]
+        signature_digest, expected_signatures = signature_set_digest(
+            identity["expected_signatures"], f"{role_id} expected signatures",
+        )
+        if identity["signature_sha256"] != signature_digest:
+            raise V2AcceptanceError(f"{role_id} signature authority digest is invalid")
+        expected_signatures_by_role[role_id] = expected_signatures
     canary = policy["canary"]
     for role_id, identity in (
         ("pulp-standalone", standalone_identity),
@@ -1179,8 +1206,21 @@ def validate_v2(
     constrained_product = {
         key: value for key, value in constrained_identity.items() if key not in allowed_deltas
     }
+    standalone_product["expected_signatures"] = sorted(expected_signatures_by_role["pulp-standalone"])
+    constrained_product["expected_signatures"] = sorted(expected_signatures_by_role["constrained-adapter"])
     if standalone_product != constrained_product:
         raise V2AcceptanceError("constrained-adapter changes more than adapter/configuration")
+    headless_identity = campaign_by_role["headless-reference"]["identity"]
+    if (
+        headless_identity["content_sha256"] != standalone_identity["content_sha256"]
+        or headless_identity["signature_sha256"] != standalone_identity["signature_sha256"]
+    ):
+        raise V2AcceptanceError("headless-reference does not use the Pulp standalone content/signatures")
+    forge_content_digests = {
+        campaign_by_role[role_id]["identity"]["content_sha256"] for role_id in FORGE_ROLES
+    }
+    if len(forge_content_digests) != 1:
+        raise V2AcceptanceError("Forge campaigns do not use the same exact content")
     verdicts: dict[str, str] = {}
     nested_artifact_digests: set[str] = set(policy_nested_digests)
     for campaign in campaigns:
@@ -1222,6 +1262,7 @@ def validate_v2(
         samples = validate_raw_campaign(
             raw, role_id=role_id, policy_sha256=policy_sha256,
             policy_interaction=policy_interaction,
+            expected_signatures=expected_signatures_by_role[role_id],
         )
         nested_artifact_digests.update(
             replay_trace_analyzer(campaign, evidence_root, receipt["implementation_head"])
