@@ -153,6 +153,35 @@ async function installedBrowser(environment = process.env) {
   return "";
 }
 
+test("installedBrowser prefers a provisioned browser over system installations",
+  async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-preference-"));
+    const provisioned = path.join(root, "Google Chrome for Testing");
+    const absent = path.join(root, "not-installed");
+    try {
+      await writeFile(provisioned, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+      const conventional = await installedBrowser({});
+      assert.notEqual(
+        provisioned, conventional,
+        "the provisioned path must not be one this host already resolves");
+
+      assert.equal(
+        await installedBrowser({ PULP_DESIGN_BROWSER: provisioned }),
+        provisioned);
+      assert.equal(
+        await installedBrowser({ PULP_BROWSER: provisioned }), provisioned);
+
+      // Control: an unreadable pinned override fails closed rather than
+      // silently measuring a mutable conventional installation.
+      assert.equal(
+        await installedBrowser({ PULP_DESIGN_BROWSER: absent }), "");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("real browser capture waits through a delayed DOM commit",
   { timeout: 20000 }, async (context) => {
     const browser = await installedBrowser();
