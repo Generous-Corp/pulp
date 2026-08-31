@@ -27,6 +27,7 @@ def run(run_id: int, head: str, status: str = "queued", **overrides: object) -> 
         "head_sha": head,
         "head_branch": f"feature/pr-{run_id}",
         "name": "Build and Test",
+        "path": ".github/workflows/advisory.yml",
         "created_at": f"2026-08-14T00:00:{run_id:02d}Z",
     }
     result.update(overrides)
@@ -58,6 +59,21 @@ class PullRequestRunCleanupTests(unittest.TestCase):
     def test_shared_current_head_is_preserved(self) -> None:
         result = plan_cleanup([pull(7, CURRENT), pull(8, CURRENT)], [run(1, CURRENT)])
         self.assertEqual(result["candidate_count"], 0)
+
+    def test_canonical_build_workflow_is_reserved_for_typed_recovery(self) -> None:
+        result = plan_cleanup(
+            [pull(7, CURRENT)],
+            [run(1, STALE, path=".github/workflows/build.yml")],
+        )
+        self.assertEqual(result["candidate_count"], 0)
+
+    def test_missing_workflow_path_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ValueError, "workflow path"):
+            plan_cleanup([pull(7, CURRENT)], [run(1, STALE, path=None)])
+
+    def test_non_string_workflow_path_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ValueError, "workflow path"):
+            plan_cleanup([pull(7, CURRENT)], [run(1, STALE, path=7)])
 
     def test_candidates_are_oldest_first_and_bounded(self) -> None:
         runs = [

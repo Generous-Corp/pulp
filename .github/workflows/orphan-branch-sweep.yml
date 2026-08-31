@@ -105,6 +105,7 @@ jobs:
                   gh-readonly-queue/*) continue ;;
                   release/*) continue ;;
                   chore/bump-shipyard-*) continue ;;
+                  shipyard/receipts/*) continue ;;
               esac
 
               # Look up PR history for this branch (state=all). The

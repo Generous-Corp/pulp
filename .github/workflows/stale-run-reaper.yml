@@ -105,7 +105,10 @@ jobs:
 
           # Scan one run status with one age threshold. Pages through
           # every run via `gh api --paginate`, emitting one TSV row per
-          # run (id, status, created_at, run_started_at, name, branch).
+          # run as one base64-encoded JSON object. Do not use TSV here:
+          # queued runs have an empty run_started_at and Bash whitespace IFS
+          # collapses consecutive tabs, which can shift path into the branch
+          # field and bypass the protected-workflow exclusion.
           scan_status() {
               local status="$1"
               local max_minutes="$2"
@@ -118,7 +121,7 @@ jobs:
                   gh api --paginate \
                       -H "Accept: application/vnd.github+json" \
                       "/repos/${repo}/actions/runs?status=${status}&per_page=100" \
-                      --jq '.workflow_runs[] | [(.id|tostring), .status, .created_at, (.run_started_at // ""), .name, .head_branch] | @tsv' \
+                      --jq '.workflow_runs[] | @base64' \
                       2>/dev/null || true
               )
 
@@ -127,12 +130,36 @@ jobs:
                   return 0
               fi
 
-              while IFS=$'\t' read -r run_id run_status created started name branch; do
-                  [ -z "$run_id" ] && continue
+              while IFS= read -r encoded_run; do
+                  [ -z "$encoded_run" ] && continue
+                  local run_json
+                  if ! run_json=$(printf '%s' "$encoded_run" | base64 --decode 2>/dev/null); then
+                      echo "  skip malformed encoded run (refusing broad cancellation)"
+                      continue
+                  fi
+                  local run_id run_status created started name path branch
+                  if ! run_id=$(jq -er '.id | select(type == "number" and . > 0) | tostring' <<<"$run_json") \
+                    || ! run_status=$(jq -er '.status | select(type == "string" and length > 0)' <<<"$run_json") \
+                    || ! created=$(jq -er '.created_at | select(type == "string" and length > 0)' <<<"$run_json") \
+                    || ! name=$(jq -er '.name | select(type == "string" and length > 0)' <<<"$run_json") \
+                    || ! path=$(jq -er '.path | select(type == "string" and length > 0)' <<<"$run_json") \
+                    || ! branch=$(jq -er '.head_branch | select(type == "string")' <<<"$run_json"); then
+                      echo "  skip malformed run identity (refusing broad cancellation)"
+                      continue
+                  fi
+                  started=$(jq -r '.run_started_at // ""' <<<"$run_json")
                   scanned=$((scanned + 1))
 
                   if [ "$run_id" = "$self_id" ]; then
                       echo "  skip ${run_id} (this reaper run)"
+                      continue
+                  fi
+
+                  # The canonical Build and Test workflow has a narrower,
+                  # receipt-fenced recovery protocol in Shipyard. This broad
+                  # age janitor must never become a competing actuator.
+                  if [ "$path" = ".github/workflows/build.yml" ]; then
+                      echo "  skip ${run_id} (${path} is reserved for typed recovery)"
                       continue
                   fi
 

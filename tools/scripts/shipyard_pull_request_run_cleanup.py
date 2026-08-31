@@ -8,6 +8,11 @@ longer satisfy the current PR head. The steward may cancel only nonterminal
 ``pull_request`` runs whose exact head SHA is absent from every currently open
 pull request. ``pull_request_target`` is deliberately out of scope because its
 workflow run head is the trusted base commit, not the untrusted PR head.
+
+The canonical ``Build and Test`` workflow is also out of scope. Its exact
+predecessor/successor concurrency wedge is owned by Shipyard's typed,
+receipt-backed recovery; letting this broad shell planner cancel those runs
+would create a second actuator outside that fencing protocol.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from typing import Any
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CANCELLABLE_STATES = {"in_progress", "pending", "queued", "requested", "waiting"}
+TYPED_RECOVERY_WORKFLOW_PATH = ".github/workflows/build.yml"
 
 
 def _load(path: Path) -> Any:
@@ -68,6 +74,11 @@ def plan_cleanup(pulls: Any, runs: Any, *, limit: int = 20) -> dict[str, Any]:
         if not isinstance(run, dict):
             raise ValueError("workflow run must be an object")
         if str(run.get("event") or "") != "pull_request":
+            continue
+        workflow_path = run.get("path")
+        if not isinstance(workflow_path, str) or not workflow_path:
+            raise ValueError("nonterminal pull-request run must have a workflow path")
+        if workflow_path == TYPED_RECOVERY_WORKFLOW_PATH:
             continue
         status = str(run.get("status") or "").lower()
         if status == "completed":

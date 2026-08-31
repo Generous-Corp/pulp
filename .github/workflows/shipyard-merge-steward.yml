@@ -321,7 +321,9 @@ jobs:
             jq -e \
               --argjson run_id "$run_id" \
               --arg head "$head" \
-              '.id == $run_id and .event == "pull_request" and .head_sha == $head' \
+              '.id == $run_id and .event == "pull_request" and .head_sha == $head
+               and (.path | type) == "string" and (.path | length) > 0
+               and .path != ".github/workflows/build.yml"' \
               "$RUNNER_TEMP/pull-request-run.json" >/dev/null
             status=$(jq -r '.status' "$RUNNER_TEMP/pull-request-run.json")
             if [ "$status" = completed ]; then
