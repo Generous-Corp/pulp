@@ -17,7 +17,9 @@ capture adoption and publication, `browser_import_cli` owns the
 capture/validation/evidence transaction, `browser_html_import` owns Chromium
 orchestration policy, `browser_capture_backend` owns native discovery and
 subprocess admission, `browser_capture/browser_process.mjs` owns the isolated
-Chromium lifecycle, `browser_capture/security.mjs` owns the in-browser network
+Chromium lifecycle, including exact-profile guardian custody and stale-owner
+recovery that remains effective without Shipyard,
+`browser_capture/security.mjs` owns the in-browser network
 and input policy, `browser_capture/interaction_plan.mjs` owns the bounded
 public plan schema, `browser_capture/interaction_executor.mjs` owns CDP action
 execution, and `browser_capture_ir` owns

@@ -645,6 +645,8 @@ tools:
 exclude:
   - path: tools/import-design/browser_capture/capture.mjs
     reason: Internal browser-capture runtime launched only by pulp-import-design, not a standalone tool an agent should invoke.
+  - path: tools/import-design/browser_capture/browser_process.mjs
+    reason: Internal browser-process lifecycle helper launched only by the capture runtime, including its private guardian subcommand; agents should invoke pulp-import-design instead.
   - path: tools/import-design/fig/testdata/make_synthetic_fig.mjs
     reason: Test-fixture generator for the fig decoder's own unit tests, not a tool an agent reaches for.
   - path: tools/import-design/macro_contract.py

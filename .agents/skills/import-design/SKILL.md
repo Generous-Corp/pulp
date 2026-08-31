@@ -6477,7 +6477,13 @@ already-working controls did not move.
 Reuse `browser_process.mjs` rather than spawning Chrome directly: it already
 spawns detached with an owned profile directory, and `terminateBrowser` signals
 the process GROUP. Chrome forks renderer and GPU helpers, so killing the parent
-alone orphans them.
+alone orphans them. The launcher also holds a private pipe to a detached
+guardian: if the importing Node process is killed before its `finally` block can
+run, pipe closure makes the guardian terminate only the browser whose process
+identity and `--user-data-dir` match the owned profile. A later capture removes
+an abandoned `pulp-browser-capture-*` profile only when its ownership marker
+proves the recorded owner is gone; mismatched or ambiguous processes and
+profiles are preserved fail-closed.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 
