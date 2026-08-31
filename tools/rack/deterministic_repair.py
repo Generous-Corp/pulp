@@ -7,14 +7,12 @@ import copy
 import math
 from dataclasses import dataclass, field
 
-from module_kinds import is_audio_interface
-
-
 @dataclass
 class Repair:
     patch: dict | None = None
     actions: list[str] = field(default_factory=list)
     refusal: list[str] = field(default_factory=list)
+    endpoint_rewrites: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _roles(value) -> frozenset[str]:
@@ -62,27 +60,19 @@ def alternate_output_repairs(
     if not selected_roles:
         return [], ["the silent output has no specific recorded semantic role"]
 
-    # Only touch cables that can reach a listener. A fan-out from the same jack
-    # may drive unrelated modulation elsewhere; changing it would be larger
-    # than the audio-path repair justified by this evidence.
-    reaches_listener = {candidate_id
-                        for candidate_id, candidate in modules.items()
-                        if is_audio_interface(candidate)}
     cables = patch.get("cables") or []
-    changed = True
-    while changed:
-        changed = False
-        for cable in cables:
-            if (cable.get("inputModuleId") in reaches_listener and
-                    cable.get("outputModuleId") not in reaches_listener):
-                reaches_listener.add(cable.get("outputModuleId"))
-                changed = True
+    causal_ids = finding.get("causal_cable_ids")
+    if (not isinstance(causal_ids, list) or not causal_ids or
+            any(not isinstance(cable_id, int) for cable_id in causal_ids)):
+        return [], ["the silent-output finding has no exact causal cable path"]
+    causal_ids = set(causal_ids)
     path_cables = [cable for cable in cables
-                   if cable.get("outputModuleId") == module_id and
+                   if cable.get("id") in causal_ids and
+                   cable.get("outputModuleId") == module_id and
                    cable.get("outputId") == output_id and
-                   cable.get("inputModuleId") in reaches_listener]
-    if not path_cables:
-        return [], ["the silent output has no cable on a path to an audio interface"]
+                   isinstance(cable.get("inputModuleId"), int)]
+    if len(path_cables) != len(causal_ids):
+        return [], ["the recorded causal cable path no longer matches the patch"]
 
     alternatives = []
     for candidate_id, peak in enumerate(activity):
@@ -105,21 +95,45 @@ def alternate_output_repairs(
     plugin, model = module.get("plugin"), module.get("model")
     old_label = names[output_id] if output_id < len(names) else f"OUT {output_id}"
     repairs = []
+    changed_ids = {cable.get("id") for cable in path_cables}
+    unchanged_endpoints = {
+        (cable.get("outputModuleId"), cable.get("outputId"),
+         cable.get("inputModuleId"), cable.get("inputId", 0))
+        for cable in cables if cable.get("id") not in changed_ids
+    }
+    collision_refused = False
     for _, candidate_id in alternatives:
+        proposed_endpoints = {
+            (cable.get("outputModuleId"), candidate_id,
+             cable.get("inputModuleId"), cable.get("inputId", 0))
+            for cable in path_cables
+        }
+        if (len(proposed_endpoints) != len(path_cables) or
+                proposed_endpoints & unchanged_endpoints):
+            collision_refused = True
+            continue
         repaired = copy.deepcopy(patch)
-        changed_ids = {cable.get("id") for cable in path_cables}
+        endpoint_rewrites = []
         for cable in repaired.get("cables") or []:
             if cable.get("id") in changed_ids:
+                old_key = (f"{cable.get('outputModuleId')}:{output_id}>"
+                           f"{cable.get('inputModuleId')}:{cable.get('inputId', 0)}")
                 cable["outputId"] = candidate_id
+                new_key = (f"{cable.get('outputModuleId')}:{candidate_id}>"
+                           f"{cable.get('inputModuleId')}:{cable.get('inputId', 0)}")
+                endpoint_rewrites.append((old_key, new_key))
         new_label = (names[candidate_id] if candidate_id < len(names)
                      else f"OUT {candidate_id}")
         repairs.append(Repair(
             patch=repaired,
+            endpoint_rewrites=endpoint_rewrites,
             actions=[
                 f"auditioned {plugin}/{model} out{candidate_id} "
                 f"'{new_label}' in place of silent same-role out{output_id} "
                 f"'{old_label}' on {len(path_cables)} listener path cable(s)"
             ]))
+    if not repairs and collision_refused:
+        return [], ["every same-role sibling would duplicate an existing cable"]
     return repairs, []
 
 

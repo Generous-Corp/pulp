@@ -104,6 +104,7 @@ class DeterministicRepairTests(unittest.TestCase):
         report = (FIXTURE / "gate-report.txt").read_text()
         finding = P.silence_cause(
             report, patch, silent_live_output_inventory())
+        self.assertEqual([6], finding["causal_cable_ids"])
 
         repairs, refusal = D.alternate_output_repairs(
             patch, silent_live_output_inventory(), finding)
@@ -115,6 +116,25 @@ class DeterministicRepairTests(unittest.TestCase):
             for repair in repairs])
         self.assertEqual(0, next(cable for cable in patch["cables"]
                                  if cable["id"] == 6)["outputId"])
+
+    def test_alternate_output_does_not_rewrite_noncausal_fanout(self) -> None:
+        patch = json.loads((FIXTURE / "unfinished.vcv").read_text())
+        report = (FIXTURE / "gate-report.txt").read_text()
+        finding = P.silence_cause(
+            report, patch, silent_live_output_inventory())
+        patch["cables"].append({
+            "id": 7, "outputModuleId": 5, "outputId": 0,
+            "inputModuleId": 3, "inputId": 1,
+        })
+
+        repairs, refusal = D.alternate_output_repairs(
+            patch, silent_live_output_inventory(), finding)
+
+        self.assertEqual([], refusal)
+        self.assertEqual(1, next(cable for cable in repairs[0].patch["cables"]
+                                 if cable["id"] == 6)["outputId"])
+        self.assertEqual(0, next(cable for cable in repairs[0].patch["cables"]
+                                 if cable["id"] == 7)["outputId"])
 
     def test_alternate_output_never_crosses_or_invents_a_role(self) -> None:
         patch = json.loads((FIXTURE / "unfinished.vcv").read_text())
@@ -129,6 +149,23 @@ class DeterministicRepairTests(unittest.TestCase):
 
         self.assertEqual([], repairs)
         self.assertTrue(any("exact same semantic role" in item
+                            for item in refusal))
+
+    def test_alternate_output_refuses_duplicate_endpoint(self) -> None:
+        patch = json.loads((FIXTURE / "unfinished.vcv").read_text())
+        report = (FIXTURE / "gate-report.txt").read_text()
+        inventory = silent_live_output_inventory()
+        finding = P.silence_cause(report, patch, inventory)
+        patch["cables"].extend({
+            "id": 7 + output_id, "outputModuleId": 5,
+            "outputId": output_id, "inputModuleId": 6, "inputId": 0,
+        } for output_id in (1, 2, 3))
+
+        repairs, refusal = D.alternate_output_repairs(
+            patch, inventory, finding)
+
+        self.assertEqual([], repairs)
+        self.assertTrue(any("duplicate an existing cable" in item
                             for item in refusal))
 
     def test_alternate_output_requires_fresh_audibility_measurement(self) -> None:
@@ -152,6 +189,25 @@ class DeterministicRepairTests(unittest.TestCase):
         self.assertEqual([0.0, 15.0, 30.0, 54.0], calls[0][1])
         self.assertEqual(1, next(cable for cable in repaired["cables"]
                                  if cable["id"] == 6)["outputId"])
+
+    def test_alternate_output_moves_endpoint_keyed_rationale(self) -> None:
+        patch = json.loads((FIXTURE / "unfinished.vcv").read_text())
+        report = (FIXTURE / "gate-report.txt").read_text()
+        why = {"5:0>6:0": "the measured voice reaches the listener"}
+
+        with mock.patch.object(P, "audibility",
+                               return_value=(P.AUDIBLE, "patch gate passed")), \
+                mock.patch.object(P, "keep_deterministic_repair"):
+            repaired, verdict, _ = P.audition_silent_output_repair(
+                patch, silent_live_output_inventory(), P.SILENT, report,
+                why=why)
+
+        self.assertEqual(P.AUDIBLE, verdict)
+        self.assertNotIn("5:0>6:0", why)
+        self.assertEqual("the measured voice reaches the listener",
+                         why["5:1>6:0"])
+        self.assertEqual([], P.lint_why(
+            repaired, silent_live_output_inventory(), why))
 
     def test_alternate_output_is_not_kept_when_every_audition_is_silent(self) -> None:
         patch = json.loads((FIXTURE / "unfinished.vcv").read_text())
