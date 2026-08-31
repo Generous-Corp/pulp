@@ -33,6 +33,7 @@ TOOLCHAIN_PATHS = (
     "examples/forge-modular",
     "core",
     "build/shape_text",
+    "build/rack_patch_decode",
 )
 SIGNED_TOOL_NAMES = {"rack_patch_decode", "shape_text"}
 
@@ -185,15 +186,25 @@ def validate_bundle(
     if not stamp.is_file():
         fail(f"Forge Modular toolchain stamp is missing: {bundle}")
     lines = stamp.read_text(encoding="utf-8").splitlines()
-    if len(lines) != 3 or lines[0] != version or not DATE.fullmatch(lines[1]) \
-            or lines[2] != f"pulp {pulp_ref}":
+    if (len(lines) != 4 or lines[0] != version or
+            not DATE.fullmatch(lines[1]) or lines[2] != f"pulp {pulp_ref}"):
         fail(f"Forge Modular toolchain stamp is not exact: {stamp}")
+    decoder_stamp = lines[3].split()
+    if (len(decoder_stamp) != 2 or decoder_stamp[0] != "rack_patch_decode" or
+            not HEX64.fullmatch(decoder_stamp[1])):
+        fail(f"Forge Modular toolchain stamp has no exact decoder identity: {stamp}")
     shape_text = resources / "build" / "shape_text"
     if not os.access(shape_text, os.X_OK):
         fail(f"Forge Modular shape_text is not executable: {shape_text}")
-    rack_decoder = resources / "tools" / "rack" / "rack_patch_decode"
+    rack_decoder = resources / "build" / "rack_patch_decode"
     if not os.access(rack_decoder, os.X_OK):
         fail(f"Forge Modular Rack saved-patch decoder is not executable: {rack_decoder}")
+    decoder_identity = content_sha256(str(rack_decoder))
+    if decoder_stamp[1] != decoder_identity:
+        fail(
+            "Forge Modular Rack saved-patch decoder does not match its "
+            f"toolchain stamp: {rack_decoder}"
+        )
     return {
         "bundle": str(bundle.resolve()),
         "source_snapshot_sha256": fields["source_snapshot_sha256"],
