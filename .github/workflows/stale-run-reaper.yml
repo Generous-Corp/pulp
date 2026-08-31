@@ -137,8 +137,9 @@ jobs:
                       echo "  skip malformed encoded run (refusing broad cancellation)"
                       continue
                   fi
-                  local run_id run_status created started name path branch
+                  local run_id workflow_id run_status created started name path branch
                   if ! run_id=$(jq -er '.id | select(type == "number" and . > 0) | tostring' <<<"$run_json") \
+                    || ! workflow_id=$(jq -er '.workflow_id | select(type == "number" and . > 0) | tostring' <<<"$run_json") \
                     || ! run_status=$(jq -er '.status | select(type == "string" and length > 0)' <<<"$run_json") \
                     || ! created=$(jq -er '.created_at | select(type == "string" and length > 0)' <<<"$run_json") \
                     || ! name=$(jq -er '.name | select(type == "string" and length > 0)' <<<"$run_json") \
@@ -158,8 +159,16 @@ jobs:
                   # The canonical Build and Test workflow has a narrower,
                   # receipt-fenced recovery protocol in Shipyard. This broad
                   # age janitor must never become a competing actuator.
-                  if [ "$path" = ".github/workflows/build.yml" ]; then
-                      echo "  skip ${run_id} (${path} is reserved for typed recovery)"
+                  if [ "$path" = ".github/workflows/build.yml" ] \
+                    || [ "$workflow_id" = "256999733" ] \
+                    || [ "$name" = "Build and Test" ]; then
+                      if [ "$path" != ".github/workflows/build.yml" ] \
+                        || [ "$workflow_id" != "256999733" ] \
+                        || [ "$name" != "Build and Test" ]; then
+                          echo "  refusing typed-recovery workflow identity drift for run ${run_id}" >&2
+                          exit 1
+                      fi
+                      echo "  skip ${run_id} (${name} id=${workflow_id} path=${path} is reserved for typed recovery)"
                       continue
                   fi
 

@@ -28,6 +28,8 @@ from typing import Any
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CANCELLABLE_STATES = {"in_progress", "pending", "queued", "requested", "waiting"}
 TYPED_RECOVERY_WORKFLOW_PATH = ".github/workflows/build.yml"
+TYPED_RECOVERY_WORKFLOW_ID = 256999733
+TYPED_RECOVERY_WORKFLOW_NAME = "Build and Test"
 
 
 def _load(path: Path) -> Any:
@@ -78,13 +80,26 @@ def plan_cleanup(pulls: Any, runs: Any, *, limit: int = 20) -> dict[str, Any]:
         workflow_path = run.get("path")
         if not isinstance(workflow_path, str) or not workflow_path:
             raise ValueError("nonterminal pull-request run must have a workflow path")
-        if workflow_path == TYPED_RECOVERY_WORKFLOW_PATH:
-            continue
         status = str(run.get("status") or "").lower()
         if status == "completed":
             continue
         if status not in CANCELLABLE_STATES:
             raise ValueError(f"unexpected nonterminal pull-request run status: {status!r}")
+        workflow_id = run.get("workflow_id")
+        workflow_name = run.get("name")
+        typed_identity_fields = (
+            workflow_path == TYPED_RECOVERY_WORKFLOW_PATH,
+            workflow_id == TYPED_RECOVERY_WORKFLOW_ID,
+            workflow_name == TYPED_RECOVERY_WORKFLOW_NAME,
+        )
+        if any(typed_identity_fields):
+            if not all(typed_identity_fields):
+                raise ValueError("typed-recovery workflow identity drifted")
+            continue
+        if isinstance(workflow_id, bool) or not isinstance(workflow_id, int) or workflow_id < 1:
+            raise ValueError("nonterminal pull-request run must have a positive workflow id")
+        if not isinstance(workflow_name, str) or not workflow_name:
+            raise ValueError("nonterminal pull-request run must have a workflow name")
         run_id = run.get("id")
         if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
             raise ValueError("nonterminal pull-request run must have a positive integer id")
@@ -102,6 +117,8 @@ def plan_cleanup(pulls: Any, runs: Any, *, limit: int = 20) -> dict[str, Any]:
                 "head_sha": head,
                 "head_branch": str(run.get("head_branch") or ""),
                 "workflow": str(run.get("name") or ""),
+                "workflow_id": workflow_id,
+                "workflow_path": workflow_path,
                 "status": status,
                 "created_at": str(run.get("created_at") or ""),
             }
