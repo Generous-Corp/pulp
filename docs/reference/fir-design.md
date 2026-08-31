@@ -89,9 +89,45 @@ empty, including when finite input drives an intermediate calculation outside
 the representable range. `rank_tolerance` must be in `(0, 1]`; rank loss and
 non-finite arithmetic are reported separately.
 
-This API does not perform Remez exchange, minimum-order search, IIR fitting,
-or frequency warping. Those are separate algorithms with distinct validation
-and lifecycle contracts.
+`design_fir_least_squares()` does not itself perform Remez exchange; see the
+equiripple section below. Minimum-order search, IIR fitting, and frequency
+warping remain separate algorithms with distinct validation and lifecycle
+contracts, and are not provided here.
+
+## Equiripple design
+
+`design_fir_equiripple()` solves the weighted-minimax problem by the Remez
+exchange, the Parks and McClellan method. Where the least-squares designer
+minimizes weighted squared error and lets the worst case fall where it may,
+this equalizes the weighted error across the approximation bands, which is what
+lets a caller state stopband depth and transition width as *requirements*
+rather than discover them after the fact.
+
+Input is a set of ascending, disjoint `FirEquirippleBand` requirements in
+radians/sample on `[0, pi]`, each with a signed zero-phase amplitude and a
+positive weight. Frequencies between bands are transition regions: they are
+neither approximated nor weighted. A band weighted `k` times higher converges to
+`k` times smaller ripple, so the weight ratio is the design's ripple ratio.
+
+The result reports the achieved per-band ripple, the alternation set, the
+equalized minimax error, the peak error measured on the design grid, and the
+iteration count. For `r` independent coefficients a converged design exhibits
+`r + 1` alternating extrema of equal weighted magnitude; that alternation
+property is the acceptance oracle, checkable from the returned taps alone.
+
+This is offline design work. It allocates and iterates, is never audio-callback
+reachable, and costs `O(iterations * r^3)` in the number of independent
+coefficients, so large tap counts are deliberately an offline expense. It is
+deterministic: grid construction, the initial alternation set, pivoting, and
+extremum tie-breaking are all fixed.
+
+Failure is closed and explicit. `not_converged` reports both an exhausted
+iteration budget and a converged design whose minimax error exceeds a stated
+`maximum_minimax_error`, which is how an infeasible spec at a given tap count is
+distinguished from a filter that silently misses it. Malformed band sets,
+non-positive weights, frequencies outside `[0, pi]`, and a tap count that does
+not match the requested linear-phase type are rejected as `invalid_argument`.
+Every non-success result carries empty coefficients.
 
 ## Minimum-phase reconstruction
 

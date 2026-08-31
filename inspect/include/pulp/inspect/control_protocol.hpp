@@ -231,6 +231,12 @@ struct ControlHostPreflightBootstrapEnvelope {
                            const ControlHostPreflightBootstrapEnvelope&) = default;
 };
 
+struct ControlHostPreflightReceiptEnvelope {
+    std::string nonce;
+    friend bool operator==(const ControlHostPreflightReceiptEnvelope&,
+                           const ControlHostPreflightReceiptEnvelope&) = default;
+};
+
 /// Broker-to-host execution request. Client and grant identities deliberately
 /// remain broker-private; the host receives only the fields needed to run the
 /// already-admitted operation.
@@ -465,7 +471,8 @@ using ControlEnvelopePayload =
                  ControlHostReadyEnvelope, ControlHostReadyResult,
                  ControlHostHeartbeatEnvelope, ControlHostHeartbeatResult,
                  ControlHostPreflightChallengeEnvelope, ControlHostPreflightResponseEnvelope,
-                 ControlHostPreflightBootstrapEnvelope, ControlHostExecuteEnvelope,
+                 ControlHostPreflightBootstrapEnvelope, ControlHostPreflightReceiptEnvelope,
+                 ControlHostExecuteEnvelope,
                  ControlHostProgressEnvelope, ControlHostCancelEnvelope,
                  ControlHostAuthorityEndEnvelope,
                  ControlHostCompleteEnvelope>;

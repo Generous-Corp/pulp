@@ -36,6 +36,9 @@ enum class FirDesignStatus {
     rank_deficient,
     ill_conditioned,
     numerical_failure,
+    /// The exchange hit its iteration cap without meeting the convergence
+    /// tolerance, or the achieved minimax error exceeded a stated requirement.
+    not_converged,
 };
 
 enum class LinearPhaseFirType {
@@ -74,6 +77,59 @@ struct FirLeastSquaresResult {
     /// Ratio of largest to smallest accepted diagonal of pivoted R. This is a
     /// deterministic warning metric, not the 2-norm condition number of A.
     double qr_diagonal_condition_estimate = 0.0;
+
+    explicit operator bool() const noexcept {
+        return status == FirDesignStatus::success;
+    }
+};
+
+/// One contiguous approximation band for an equiripple design.
+///
+/// Bands are half-open requirements on the signed zero-phase amplitude, given
+/// in radians/sample on [0, pi] like FirDesignPoint::omega. Frequencies between
+/// bands are transition regions: they are not approximated and not weighted.
+struct FirEquirippleBand {
+    double lower_omega = 0.0;
+    double upper_omega = 0.0;
+    /// Desired signed zero-phase amplitude across the band.
+    double amplitude = 0.0;
+    /// Positive weight. The exchange equalizes weight * |A(w) - amplitude|, so
+    /// a band weighted k times higher converges to k times smaller ripple.
+    double weight = 1.0;
+};
+
+struct FirEquirippleOptions {
+    std::size_t tap_count = 0;
+    LinearPhaseFirType type = LinearPhaseFirType::type_i_symmetric_odd;
+    /// Dense-grid points per independent coefficient. The classic Parks and
+    /// McClellan value is 16; smaller grids can miss an extremum.
+    std::size_t grid_density = 16u;
+    /// Bounded exchange budget. Reaching it is reported, never ignored.
+    std::size_t maximum_iterations = 64u;
+    /// Relative gap between the grid's peak error and the interpolated ripple
+    /// below which the exchange is converged.
+    double convergence_tolerance = 1.0e-8;
+    /// Optional requirement. When positive, a converged design whose minimax
+    /// error exceeds it is rejected as infeasible at this tap count rather than
+    /// returned as a filter that silently misses the spec.
+    double maximum_minimax_error = 0.0;
+    std::uint64_t maximum_workspace_bytes = kDefaultFirDesignWorkspaceBytes;
+};
+
+struct FirEquirippleResult {
+    FirDesignStatus status = FirDesignStatus::invalid_argument;
+    std::vector<double> coefficients;
+    /// The final alternation set, ascending. Size is the number of independent
+    /// coefficients plus one when the alternation theorem is satisfied.
+    std::vector<double> extremal_frequencies;
+    /// Achieved max |A(w) - amplitude| per input band, unweighted.
+    std::vector<double> band_ripples;
+    /// The equalized weighted ripple, |delta|.
+    double minimax_error = 0.0;
+    /// Largest weighted error measured on the dense grid at the returned
+    /// design. Converged designs have this within tolerance of minimax_error.
+    double measured_weighted_error = 0.0;
+    std::size_t iterations = 0;
 
     explicit operator bool() const noexcept {
         return status == FirDesignStatus::success;
@@ -561,6 +617,358 @@ inline FirLeastSquaresResult design_fir_least_squares(std::span<const FirDesignP
             clear_payload(result);
             return result;
         }
+        result.status = FirDesignStatus::success;
+        return result;
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    } catch (const std::bad_alloc&) {
+        clear_payload(result);
+        result.status = FirDesignStatus::allocation_failure;
+        return result;
+    } catch (const std::length_error&) {
+        clear_payload(result);
+        result.status = FirDesignStatus::allocation_failure;
+        return result;
+    }
+#endif
+}
+
+namespace fir_design_detail {
+
+/// Solve a small dense square system in place by Gaussian elimination with
+/// partial pivoting. Deterministic: the pivot is the largest magnitude in the
+/// column, ties broken by the lowest row index.
+inline bool solve_dense_in_place(std::vector<double>& matrix, std::vector<double>& rhs,
+                                 std::size_t n) noexcept {
+    for (std::size_t column = 0u; column < n; ++column) {
+        std::size_t pivot = column;
+        double best = std::abs(matrix[column * n + column]);
+        for (std::size_t row = column + 1u; row < n; ++row) {
+            const double candidate = std::abs(matrix[row * n + column]);
+            if (candidate > best) {
+                best = candidate;
+                pivot = row;
+            }
+        }
+        if (!(best > 0.0) || !std::isfinite(best))
+            return false;
+        if (pivot != column) {
+            for (std::size_t k = column; k < n; ++k)
+                std::swap(matrix[pivot * n + k], matrix[column * n + k]);
+            std::swap(rhs[pivot], rhs[column]);
+        }
+        const double diagonal = matrix[column * n + column];
+        for (std::size_t row = column + 1u; row < n; ++row) {
+            const double factor = matrix[row * n + column] / diagonal;
+            if (!std::isfinite(factor))
+                return false;
+            if (factor == 0.0)
+                continue;
+            for (std::size_t k = column; k < n; ++k)
+                matrix[row * n + k] = std::fma(-factor, matrix[column * n + k], matrix[row * n + k]);
+            rhs[row] = std::fma(-factor, rhs[column], rhs[row]);
+        }
+    }
+    for (std::size_t reverse = n; reverse-- > 0u;) {
+        double value = rhs[reverse];
+        for (std::size_t k = reverse + 1u; k < n; ++k)
+            value = std::fma(-matrix[reverse * n + k], rhs[k], value);
+        const double solved = value / matrix[reverse * n + reverse];
+        if (!std::isfinite(solved))
+            return false;
+        rhs[reverse] = solved;
+    }
+    return true;
+}
+
+inline void clear_payload(FirEquirippleResult& result) noexcept {
+    result.coefficients.clear();
+    result.extremal_frequencies.clear();
+    result.band_ripples.clear();
+    result.minimax_error = 0.0;
+    result.measured_weighted_error = 0.0;
+}
+
+} // namespace fir_design_detail
+
+/// Equiripple (weighted minimax) design of a real Type I-IV linear-phase FIR by
+/// the Remez exchange, the Parks and McClellan method.
+///
+/// Where design_fir_least_squares minimizes weighted squared error and lets the
+/// worst-case error fall where it may, this equalizes the weighted error: the
+/// returned filter attains the same weighted ripple at every alternation point,
+/// which is the smallest achievable peak error for the tap count. That is what
+/// lets a caller state stopband depth and transition width as requirements
+/// instead of discovering them, which windowed-sinc design cannot express.
+///
+/// This function allocates and iterates. It is for design and control threads,
+/// never an audio callback. Work is O(iterations * r^3) in the number of
+/// independent coefficients r, plus O(iterations * grid * r) for the sweep, so
+/// large tap counts are deliberately an offline cost.
+///
+/// Determinism: the grid, the initial alternation set, the pivoting, and the
+/// extremum tie-breaking are all fixed, so a given input always yields the same
+/// output. Amplitudes are absolute signed zero-phase targets in the same
+/// convention as FirDesignPoint; there is no implicit normalization.
+///
+/// Fail-closed. The result carries empty coefficients unless status is success.
+inline FirEquirippleResult design_fir_equiripple(std::span<const FirEquirippleBand> bands,
+                                                 const FirEquirippleOptions& options) {
+    using namespace fir_design_detail;
+    FirEquirippleResult result;
+    result.status = FirDesignStatus::invalid_argument;
+
+    if (bands.empty())
+        return result;
+    if (!valid_type_length(options.type, options.tap_count))
+        return result;
+    if (options.grid_density == 0u || options.maximum_iterations == 0u)
+        return result;
+    if (!(options.convergence_tolerance > 0.0) || !std::isfinite(options.convergence_tolerance))
+        return result;
+    if (!std::isfinite(options.maximum_minimax_error) || options.maximum_minimax_error < 0.0)
+        return result;
+    if (options.tap_count > kMaximumFirDesignTapCount) {
+        result.status = FirDesignStatus::unsupported_size;
+        return result;
+    }
+
+    double previous_upper = -1.0;
+    for (const auto& band : bands) {
+        if (!std::isfinite(band.lower_omega) || !std::isfinite(band.upper_omega) ||
+            !std::isfinite(band.amplitude) || !std::isfinite(band.weight))
+            return result;
+        if (!(band.weight > 0.0))
+            return result;
+        if (band.lower_omega < 0.0 || band.upper_omega > pi)
+            return result;
+        if (!(band.lower_omega < band.upper_omega))
+            return result;
+        if (band.lower_omega <= previous_upper)
+            return result; // bands must be ascending and disjoint
+        previous_upper = band.upper_omega;
+    }
+
+    const std::size_t coefficients = independent_coefficient_count(options.type, options.tap_count);
+    if (coefficients == 0u)
+        return result;
+    const std::size_t unknowns = coefficients + 1u; // basis coefficients plus delta
+
+    CheckedRetainedByteCharge charge(options.maximum_workspace_bytes);
+
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    try {
+#endif
+        // Dense grid, apportioned across bands by width so every band is
+        // represented even when one is far narrower than another.
+        double total_width = 0.0;
+        for (const auto& band : bands)
+            total_width += band.upper_omega - band.lower_omega;
+        if (!(total_width > 0.0))
+            return result;
+
+        const std::size_t requested_points = options.grid_density * unknowns;
+        if (requested_points > kMaximumFirDesignPointCount) {
+            result.status = FirDesignStatus::unsupported_size;
+            return result;
+        }
+        const auto grid_elements = static_cast<std::uint64_t>(requested_points) + bands.size();
+        const auto square = static_cast<std::uint64_t>(unknowns) * unknowns;
+        if (!charge.add<double>(grid_elements) || !charge.add<double>(grid_elements) ||
+            !charge.add<double>(grid_elements) || !charge.add<std::size_t>(grid_elements) ||
+            !charge.add<double>(square) || !charge.add<double>(unknowns) ||
+            !charge.add<double>(coefficients) || !charge.add<double>(grid_elements)) {
+            result.status = FirDesignStatus::workspace_limit_exceeded;
+            return result;
+        }
+
+        std::vector<double> grid_omega;
+        std::vector<double> grid_desired;
+        std::vector<double> grid_weight;
+        std::vector<std::size_t> grid_band;
+        grid_omega.reserve(requested_points + bands.size());
+        for (std::size_t b = 0u; b < bands.size(); ++b) {
+            const auto& band = bands[b];
+            const double width = band.upper_omega - band.lower_omega;
+            std::size_t count = static_cast<std::size_t>(
+                std::llround(static_cast<double>(requested_points) * (width / total_width)));
+            count = std::max<std::size_t>(count, 2u);
+            for (std::size_t i = 0u; i < count; ++i) {
+                const double t = static_cast<double>(i) / static_cast<double>(count - 1u);
+                const double omega = band.lower_omega + t * width;
+                // A forced-zero endpoint cannot approximate a nonzero target,
+                // and contributes an unbounded error that would capture every
+                // exchange. Excluding it is the standard treatment.
+                if (is_forced_zero_endpoint(options.type, omega))
+                    continue;
+                grid_omega.push_back(omega);
+                grid_desired.push_back(band.amplitude);
+                grid_weight.push_back(band.weight);
+                grid_band.push_back(b);
+            }
+        }
+        const std::size_t grid_size = grid_omega.size();
+        if (grid_size < unknowns)
+            return result;
+
+        // Initial alternation set: evenly spaced across the grid.
+        std::vector<std::size_t> extremal(unknowns);
+        for (std::size_t i = 0u; i < unknowns; ++i)
+            extremal[i] = static_cast<std::size_t>(
+                std::llround(static_cast<double>(i) * static_cast<double>(grid_size - 1u) /
+                             static_cast<double>(unknowns - 1u)));
+
+        std::vector<double> matrix(unknowns * unknowns);
+        std::vector<double> rhs(unknowns);
+        std::vector<double> solution(coefficients);
+        std::vector<double> error(grid_size);
+        double delta = 0.0;
+        bool converged = false;
+        std::size_t iteration = 0u;
+
+        for (; iteration < options.maximum_iterations; ++iteration) {
+            for (std::size_t i = 0u; i < unknowns; ++i) {
+                const double omega = grid_omega[extremal[i]];
+                for (std::size_t k = 0u; k < coefficients; ++k)
+                    matrix[i * unknowns + k] = basis_value(options.type, k, omega);
+                const double sign = (i % 2u == 0u) ? 1.0 : -1.0;
+                matrix[i * unknowns + coefficients] = -sign / grid_weight[extremal[i]];
+                rhs[i] = grid_desired[extremal[i]];
+            }
+            if (!solve_dense_in_place(matrix, rhs, unknowns)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                result.iterations = iteration;
+                return result;
+            }
+            for (std::size_t k = 0u; k < coefficients; ++k)
+                solution[k] = rhs[k];
+            delta = rhs[coefficients];
+            if (!std::isfinite(delta)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                result.iterations = iteration;
+                return result;
+            }
+
+            double peak = 0.0;
+            for (std::size_t g = 0u; g < grid_size; ++g) {
+                double amplitude = 0.0;
+                for (std::size_t k = 0u; k < coefficients; ++k)
+                    amplitude = std::fma(solution[k],
+                                         basis_value(options.type, k, grid_omega[g]), amplitude);
+                const double weighted = grid_weight[g] * (amplitude - grid_desired[g]);
+                if (!std::isfinite(weighted)) {
+                    result.status = FirDesignStatus::numerical_failure;
+                    clear_payload(result);
+                    return result;
+                }
+                error[g] = weighted;
+                peak = std::max(peak, std::abs(weighted));
+            }
+
+            const double reference = std::max(std::abs(delta), 1.0e-300);
+            if (peak - std::abs(delta) <= options.convergence_tolerance * reference) {
+                converged = true;
+                ++iteration;
+                break;
+            }
+
+            // Exchange: every local maximum of |error|, then thin to a single
+            // alternating set of exactly `unknowns` points.
+            std::vector<std::size_t> candidates;
+            candidates.reserve(grid_size);
+            for (std::size_t g = 0u; g < grid_size; ++g) {
+                // A band edge is a constrained extremum and is admitted
+                // unconditionally. The approximation region stops there while
+                // the error is still free to rise, so an edge is frequently not
+                // a local maximum yet still carries an alternation. Requiring
+                // it to beat its interior neighbour drops it exactly when the
+                // error climbs into the band, which starves the alternation set
+                // and fails a design that is in fact converging.
+                const bool starts_band = g == 0u || grid_band[g] != grid_band[g - 1u];
+                const bool ends_band = g + 1u == grid_size || grid_band[g] != grid_band[g + 1u];
+                const bool interior_peak =
+                    (g == 0u || std::abs(error[g]) >= std::abs(error[g - 1u])) &&
+                    (g + 1u == grid_size || std::abs(error[g]) >= std::abs(error[g + 1u]));
+                if ((starts_band || ends_band || interior_peak) && std::abs(error[g]) > 0.0)
+                    candidates.push_back(g);
+            }
+            // Collapse runs of the same error sign, keeping the largest.
+            std::vector<std::size_t> alternating;
+            alternating.reserve(candidates.size());
+            for (std::size_t index : candidates) {
+                if (!alternating.empty()) {
+                    const double previous = error[alternating.back()];
+                    if ((previous > 0.0) == (error[index] > 0.0)) {
+                        if (std::abs(error[index]) > std::abs(previous))
+                            alternating.back() = index;
+                        continue;
+                    }
+                }
+                alternating.push_back(index);
+            }
+            if (alternating.size() < unknowns) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                result.iterations = iteration;
+                return result;
+            }
+            // Drop the weakest end repeatedly so the retained set stays
+            // contiguous in alternation and keeps the largest deviations.
+            while (alternating.size() > unknowns) {
+                if (std::abs(error[alternating.front()]) < std::abs(error[alternating.back()]))
+                    alternating.erase(alternating.begin());
+                else
+                    alternating.pop_back();
+            }
+            extremal = alternating;
+        }
+
+        if (!converged) {
+            result.status = FirDesignStatus::not_converged;
+            clear_payload(result);
+            result.iterations = iteration;
+            return result;
+        }
+
+        result.coefficients.assign(options.tap_count, 0.0);
+        reconstruct_coefficients(options.type, solution, result.coefficients);
+        result.minimax_error = std::abs(delta);
+        result.iterations = iteration;
+
+        // Measure the delivered filter rather than trusting the solve.
+        result.band_ripples.assign(bands.size(), 0.0);
+        double measured_peak = 0.0;
+        for (std::size_t g = 0u; g < grid_size; ++g) {
+            const double amplitude =
+                linear_phase_fir_amplitude(result.coefficients, options.type, grid_omega[g]);
+            if (!std::isfinite(amplitude)) {
+                result.status = FirDesignStatus::numerical_failure;
+                clear_payload(result);
+                return result;
+            }
+            const double deviation = std::abs(amplitude - grid_desired[g]);
+            result.band_ripples[grid_band[g]] =
+                std::max(result.band_ripples[grid_band[g]], deviation);
+            measured_peak = std::max(measured_peak, grid_weight[g] * deviation);
+        }
+        result.measured_weighted_error = measured_peak;
+
+        result.extremal_frequencies.reserve(unknowns);
+        for (std::size_t index : extremal)
+            result.extremal_frequencies.push_back(grid_omega[index]);
+        std::sort(result.extremal_frequencies.begin(), result.extremal_frequencies.end());
+
+        if (options.maximum_minimax_error > 0.0 &&
+            result.minimax_error > options.maximum_minimax_error) {
+            // The exchange succeeded; the spec did not. Report infeasibility at
+            // this tap count instead of a filter that quietly misses it.
+            clear_payload(result);
+            result.status = FirDesignStatus::not_converged;
+            result.iterations = iteration;
+            return result;
+        }
+
         result.status = FirDesignStatus::success;
         return result;
 #if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)

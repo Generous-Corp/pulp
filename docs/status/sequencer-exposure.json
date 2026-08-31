@@ -2101,6 +2101,69 @@
       }
     },
     {
+      "id": "signal-fir-equiripple-design",
+      "title": "Equiripple FIR design by the Remez exchange",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "signal-fir-equiripple-design-20260830",
+      "owned_paths": [
+        "core/signal/include/pulp/signal/fir_design.hpp",
+        "test/cmake/dsp_rt_contract_tests.cmake",
+        "test/test_signal_fir_remez.cpp",
+        "docs/reference/fir-design.md",
+        "docs/status/agent-capabilities.json"
+      ],
+      "evidence": [
+        {
+          "path": "core/signal/include/pulp/signal/fir_design.hpp",
+          "needles": [
+            "inline FirEquirippleResult design_fir_equiripple(",
+            "struct FirEquirippleBand"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The weighted-minimax linear-phase FIR designer ships as public header-only API on Pulp::signal, alongside its least-squares twin in pulp/signal/fir_design.hpp.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/signal/include/pulp/signal/fir_design.hpp",
+              "needles": [
+                "inline FirEquirippleResult design_fir_equiripple("
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Filter design is an offline control-thread computation that returns coefficients; it adds no Timeline command and renders no audio."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline surface is added, so there is no MCP tool to expose."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The designer is never audio-callback reachable and owns no parameter; a product consumer would expose the resulting filter, not the design call."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "exposed",
+          "rationale": "Published as installed capability signal.fir-equiripple-design with a typed cpp_function binding and link probe, so an agent can discover and call it.",
+          "evidence": [
+            {
+              "kind": "capability_definition",
+              "path": "docs/status/agent-capabilities.json",
+              "needles": [
+                "signal.fir-equiripple-design"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "authoring-capsule-substrate",
       "title": "Portable authoring-capsule substrate",
       "classification": "public_sdk",
