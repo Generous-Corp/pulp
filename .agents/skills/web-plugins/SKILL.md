@@ -1193,3 +1193,35 @@ Hosts gate damage retirement on `render::frame_reached_output(outcome)`,
 so a backend that misreports makes the UI either repaint forever
 (false failure) or go stale (false success). If you add a web render
 path, return an honest outcome rather than defaulting to `presented`.
+
+## `headless_defaults.cpp` must never share a link with `pulp-format-core`
+
+`core/format/src/wasm/headless_defaults.cpp` supplies the WASM lane's own
+definitions of `Processor::create_view()` and
+`create_ara_document_controller()`, because a plugin that overrides neither
+still carries both slots in its vtable and the wclap/wam links contain no view
+layer and no ARA SDK.
+
+The native definitions of those same two methods live in `format.cpp` and
+`ara.cpp`, both compiled into **`pulp-format-core`**. So the ODR prohibition is
+now about a *target*, not just two filenames: `PulpWclap.cmake` and
+`PulpWam.cmake` compile format sources directly and must never grow a link to
+`pulp-format-core`. Nothing enforces that mechanically — the comment at the top
+of the file is the only guard, which is why it must keep naming the right
+target.
+
+**Completeness rule, measured rather than assumed.** *Defining* one of these as
+`return nullptr;` does **not** need the returned type complete; `format.cpp`
+compiles against nothing but `processor.hpp`'s forward declaration, which is
+what keeps `pulp-format-core` view-free. *Calling* one does, because the caller
+destroys the returned `unique_ptr` and `~unique_ptr` instantiates the deleter:
+
+```
+error: invalid application of 'sizeof' to an incomplete type 'pulp::view::View'
+```
+
+So "unique_ptr needs a complete type" is true at the destruction site, not at
+the definition. The minimal `class View {}` / `class AraDocumentController {}`
+completions in that file are kept because the TU stands in for the whole view
+and ARA layers in a link that has neither, not because returning nullptr would
+otherwise fail to compile.

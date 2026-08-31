@@ -16,7 +16,6 @@
 #include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/parameter_text.hpp>
-#include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
@@ -906,9 +905,8 @@ IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
             return nullptr;
         }
         if (processor_ && processor_->has_editor()) {
-            auto* view = new PulpPlugView(
+            return make_plug_view(
                 *processor_, store_, owner_alive_.capture());
-            return view;
         }
 #endif
     }
