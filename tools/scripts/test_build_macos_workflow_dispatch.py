@@ -152,9 +152,11 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
         if step.get("name") == "Initialize isolated retarget paths"
     )["run"]
     for marker in (
+        'cd "$PULP_UNTRUSTED_SOURCE"',
         "exec sudo -u nobody /usr/bin/env -i",
         'HOME="$PULP_UNTRUSTED_HOME"',
         'TMPDIR="$PULP_UNTRUSTED_TMPDIR"',
+        'PULP_UNTRUSTED_SOURCE="$PULP_UNTRUSTED_SOURCE"',
     ):
         if marker not in init:
             raise AssertionError(f"untrusted account wrapper lost {marker}")

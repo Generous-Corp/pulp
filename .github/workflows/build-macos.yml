@@ -319,11 +319,13 @@ jobs:
           # PR code runs as another uid with an empty, explicit environment, so
           # it cannot read the runner process environment or receive any
           # ACTIONS_*, GITHUB_*, token, credential, or command-file variable.
+          cd "$PULP_UNTRUSTED_SOURCE"
           exec sudo -u nobody /usr/bin/env -i \
             HOME="$PULP_UNTRUSTED_HOME" \
             TMPDIR="$PULP_UNTRUSTED_TMPDIR" \
             PATH="$PULP_TRUSTED_PATH" \
             CI=1 \
+            PULP_UNTRUSTED_SOURCE="$PULP_UNTRUSTED_SOURCE" \
             PULP_BUILD_DIR="$PULP_BUILD_DIR" \
             PULP_TRUSTED_CHECKOUT="$PULP_TRUSTED_CHECKOUT" \
             PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$PULP_SHARED_FETCHCONTENT_SOURCE_DIR" \
