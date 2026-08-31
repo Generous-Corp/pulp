@@ -88,6 +88,10 @@ list(REMOVE_DUPLICATES _actual_closure)
 list(SORT _actual_closure)
 
 set(_expected_engine_closure
+    # The header-only Result/queue primitives every rung above is built on.
+    # Pulp::timebase names it instead of Pulp::runtime, and Pulp::runtime
+    # carries it too, so it is in every closure measured here.
+    Pulp::foundation
     # Arrives transitively: playback -> audio -> sample-bank-manifest. pulp-audio
     # PUBLIC-links it, so every consumer of the engine closure links it too.
     Pulp::sample-bank-manifest
@@ -136,6 +140,7 @@ list(REMOVE_DUPLICATES _actual_project_package_closure)
 list(SORT _actual_project_package_closure)
 set(_expected_project_package_closure
     Pulp::everest
+    Pulp::foundation
     Pulp::hwy
     Pulp::mbedcrypto
     Pulp::mbedtls
@@ -164,6 +169,7 @@ list(SORT _actual_smf_codec_closure)
 
 set(_expected_smf_codec_closure
     Pulp::everest
+    Pulp::foundation
     Pulp::hwy
     Pulp::mbedcrypto
     Pulp::mbedtls
@@ -211,6 +217,7 @@ list(SORT _actual_daw_export_closure)
 set(_expected_daw_export_closure
     Pulp::dawproject-export
     Pulp::everest
+    Pulp::foundation
     Pulp::hwy
     Pulp::interchange
     Pulp::mbedcrypto
@@ -242,6 +249,7 @@ set(_expected_importer_closure
     Pulp::sample-bank-manifest
     Pulp::dawproject-import
     Pulp::events
+    Pulp::foundation
     # The importer's refusal sites derive from the interchange capability table,
     # so interchange is part of its installed closure, not an internal detail.
     Pulp::interchange
