@@ -59,6 +59,7 @@ NON_DEVICE_WEIGHTED_SUITES = (
 )
 QUALITY_WEIGHTED_SUITES = {
     "agent-capability-manifest-selftest",
+    "gpu-dpr-v2-evidence-selftest",
     "gpu-dpr-runner-selftest",
     "gpu-first-visible-external-adapter-selftest",
 }
