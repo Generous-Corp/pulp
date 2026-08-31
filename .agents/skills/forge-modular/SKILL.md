@@ -1171,6 +1171,72 @@ generated DSP and provide actionable retry context.
 using as `FORGE_MODULAR_TOOLCHAIN_ROOT` — CMake refuses a dirty toolchain and
 the next Forge configure fails.
 
+### A cable into a CV input carries nothing while its depth control is zero
+
+The patch-side twin of the inert-input case above, and it is worse, because
+nothing in the patch distinguishes the broken version from the working one.
+
+Measured, not reasoned: the same edge into `Fundamental/VCF` `in:0` reads
+CAUSAL at **1206x** the detection floor with the depth control open, and
+NOT_CAUSAL at **0.00x** with it at its default of zero. Same cable, same
+analyzer, structurally identical patches. A label reader calls both a
+modulation edge, and every structural check in `lint()` passes on both. So a
+patch that cables a CV input without opening its depth control **looks
+correct, lints clean, and does nothing** — the person who asked for it gets no
+error, just a result that is inexplicably boring.
+
+Module authors default depth controls to zero because that is the safe
+default, so this is ordinary rather than exotic. Measured over 184 generated
+patches (69 prompts), **21.7% of prompt families shipped at least one dead
+edge** — and they were the modulation prompts: *slow vibrato on a sustained
+note* built LFO → attenuator (set to a careful 0.06) → VCO `Frequency
+modulation`, and left `FM amount` at 0. There is no vibrato in that patch.
+
+`tools/rack/cv_depth.py` handles both halves, and only one of them needs
+evidence:
+
+- **`open_depth_controls`** is the fix, and it runs inside `prepare_and_lint`
+  before anything judges the patch. Cable a CV input, get a nonzero depth.
+  **Nonzero by default, never nonzero by force** — a value the model or the
+  prompt authored is left exactly as written, *including a deliberate zero*.
+  Opening a control is benign, so a nominated association is good enough to
+  act on.
+- **`dead_edge_errors`** is the report, and it can reject a patch, so it only
+  does that where a witness receipt rendered audio
+  (`cv-depth-receipts.json`). Everything else reaches the reader through
+  `explain()` and fails nothing.
+
+**Three verdicts, never collapsed.** `FAIL` needs a witness that graded
+blocking. `ADVISORY` is a name heuristic — its precision beyond the ground
+truth it was built from is UNMEASURED, which is exactly why it may not
+reject a user's patch. `UNEVALUATED` means the module has depth controls and
+we do not know which one governs this input; failing a patch for a gap in our
+own coverage would punish the user for our missing measurement.
+
+`Nominated.blocking` returns a literal `False` and the class carries no field
+that reaches it. That is deliberate: a guess must be **structurally** unable
+to reject a patch, not merely policy-bound not to. `test_cv_depth.py` asserts
+it at confidences past anything the rules emit.
+
+**Every association rule abstains rather than guess.** Two candidate controls
+for one input is an abstention, not a coin flip — that is how a heuristic
+acquires confident wrong answers. The consequence is real coverage loss:
+`Cutoff CV (1V/oct)` and `Frequency modulation` defeat word matching, so a
+`sole-candidate` rule pairs by counting when a module offers exactly one
+modulation input and exactly one depth control. It reaches the two commonest
+dead edges in the corpus and is still NOMINATED.
+
+**What this does NOT reach.** The rule only fills a control the patch never
+mentioned. Where the model explicitly writes the depth param to `0.0` — which
+is *8 of the 9 dead edges surviving the fix* — the rule correctly stands down
+and the edge is only reported. That residue is a prompt-contract problem, not
+a default-value one.
+
+**Coverage is the honest caveat.** An association is known for only ~9% of
+cable-fed inputs, so 21.7% is a floor, not an estimate. Before quoting any
+dead-edge rate, print how many edges were evaluable: a low number here is
+usually the instrument, not the world.
+
 ### A guard nothing runs goes stale silently, and this one did
 
 That test was written, was correct, and exited 1 — and **nothing ever ran it**.

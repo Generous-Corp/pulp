@@ -40,6 +40,7 @@ import sys
 from typing import NamedTuple
 
 import attempt_artifacts
+import cv_depth
 import maker_intent
 from module_kinds import is_audio_interface
 
@@ -1881,6 +1882,14 @@ def explain(patch: dict, inv: dict, why: dict | None = None) -> str:
         n = len(patch.get("modules", []))
         return (f"{n} module(s), nothing patched together yet — "
                 f"no cables in this file.") if n else "empty patch"
+    # Edges that reach an input whose depth control is at zero carry nothing.
+    # These rest on a name heuristic, so they are told to the reader rather
+    # than used to reject the patch.
+    quiet = cv_depth.advisory_notes(patch, inv)
+    if quiet:
+        out.append("MODULATION THAT MAY NOT BE HEARD")
+        out.extend(f"  {note}" for note in quiet)
+        out.append("")
     return "\n".join(out).rstrip()
 
 
@@ -2190,6 +2199,11 @@ def prepare_and_lint(patch: dict, inv: dict,
     physical_errs = place_physical_targets(patch, inv)
     materialize_module_state(
         patch, inv, compiled_state_baseline=base_patch)
+    # A cable into a CV input carries nothing while its depth control sits at
+    # zero, and nothing structural distinguishes that patch from a working
+    # one. Open the controls this patch never spoke about, before anything
+    # judges it.
+    cv_depth.open_depth_controls(patch, inv)
     patch = reflow(patch, inv)
     return patch, list(dict.fromkeys(physical_errs + lint(patch, inv)))
 
@@ -2414,6 +2428,9 @@ def lint(patch: dict, inv: dict) -> list[str]:
     errs.extend(module_state_contract_errors(patch, inv))
     errs.extend(pitch_step_domain_errors(patch, inv))
     errs.extend(module_activation_contract_errors(patch, inv))
+    # Blocking dead edges only. An association a name heuristic proposed is
+    # reported by explain(), never here: a guess must not reject a patch.
+    errs.extend(cv_depth.dead_edge_errors(patch, inv))
 
     # A patch that reaches no audio interface makes no sound, which is a far
     # more common generated failure than a malformed file.

@@ -51,6 +51,17 @@ if(Python3_Interpreter_FOUND)
         SKIP_RETURN_CODE 3
         TIMEOUT 300)
 
+    # A cable into a CV input carries nothing while that input's depth control
+    # sits at zero, and no structural check can tell that patch from a working
+    # one -- so this is registered here rather than left to a Rack-enabled
+    # build. Hermetic: it builds its own inventory and never touches the SDK.
+    add_test(NAME rack-cv-depth
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_cv_depth.py)
+    set_tests_properties(rack-cv-depth PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 60)
+
     add_test(NAME rack-generation-eligibility
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_generation_eligibility.py)
