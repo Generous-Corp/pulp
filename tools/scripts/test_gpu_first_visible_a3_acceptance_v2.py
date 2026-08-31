@@ -18,8 +18,12 @@ import gpu_first_visible_a3_acceptance as a3
 v2 = a3.a3_v2
 SHA = "1" * 40
 FORGE_SHA = "2" * 40
-BLOB = "3" * 40
 DIGEST = "4" * 64
+PUBLICATION_SHA = "5" * 40
+APPROVED_SHA = "6" * 40
+PLANNING_MAIN_SHA = "7" * 40
+POLICY_PATH = "research/evidence/gpu-ux/a3-budget/a3-v2-test-authority.product-policy.json"
+POLICY_PR = "https://github.com/danielraffel/pulp-planning/pull/1"
 SCRIPT = Path(__file__).with_name("gpu_first_visible_a3_acceptance_v2.py")
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -135,8 +139,8 @@ else:
         "build_verifier_receipt": embedded_build_ref,
         "source_build_receipt": source_build_ref,
     })
-    support_payload = write_artifact(root, "policy/support-matrix-payload.json", {"protected": True})
-    a1_payload = write_artifact(root, "policy/a1-evidence-payload.json", {"authentic": True})
+    support_payload = write_artifact(root, v2.SUPPORT_MATRIX, {"protected": True})
+    a1_payload = write_artifact(root, v2.A0_GPU_BASELINE, {"authentic_a1": True})
     support_ref = write_artifact(root, "policy/support-matrix.json", {
         "schema": "pulp.gpu-first-visible-generated-evidence.v1", "version": 1,
         "kind": "support-matrix", "implementation_head": SHA, "producer": producer_ref,
@@ -150,8 +154,6 @@ else:
     policy = {
         "schema": "pulp.gpu-first-visible-budget-authority.v1", "version": 1,
         "budget_id": "a3-v2-test-authority",
-        "source": {"repository": "danielraffel/pulp-planning", "revision": SHA, "path": "research/evidence/gpu-ux/a3-budget/a3-v2-test-authority.product-policy.json", "blob": BLOB},
-        "approval": {"github_user_id": 25807, "mode": "approval", "pr_url": "https://github.com/danielraffel/pulp-planning/pull/1", "approved_head": SHA},
         "clock": "mach_continuous_time", "editor_open_origin": "editor-open-requested",
         "first_nonblank_endpoint": "first-nonblank-presented-frame", "statistic": "p95",
         "first_applicable_pulp_revision": SHA,
@@ -171,13 +173,16 @@ else:
         "canary": {"binary_sha256": DIGEST, "content_sha256": DIGEST, "signature_sha256": DIGEST, "editor_open_origin": "editor-open-requested", "interaction_lifecycle": "manifest-bound", "steady_state_workload": "manifest-bound"},
     }
     policy_ref = write_artifact(root, "policy/product-policy.json", policy)
+    policy_blob = v2.git_blob_digest((root / policy_ref["path"]).read_bytes())
     validation_ref = write_artifact(root, "policy/validation.json", {
         "schema": "pulp.gpu-first-visible-product-policy-validation.v1", "version": 1,
         "status": "pass", "checked_at": "2026-08-29T00:00:00Z",
         "fresh_live_state": True, "protected_commit": True,
-        "repository": policy["source"]["repository"], "revision": SHA,
-        "path": policy["source"]["path"], "blob": BLOB,
-        "github_user_id": 25807, "approved_head": SHA,
+        "repository": "danielraffel/pulp-planning",
+        "publication_commit": PUBLICATION_SHA, "path": POLICY_PATH,
+        "blob": policy_blob, "github_user_id": 25807,
+        "approval_mode": "approval", "pr_url": POLICY_PR,
+        "approved_head": APPROVED_SHA,
     })
     campaigns = []
     analyzer_ref = write_executable(root, "tooling/pulp-analyzer", '''#!/usr/bin/env python3
@@ -214,6 +219,17 @@ raise SystemExit(2)
                 "adapter": "authority-metal-constrained" if role == "constrained-adapter" else "metal",
                 "display_id": "main", "refresh_hz": 60,
         }
+        if role in {"pulp-standalone", "constrained-adapter"}:
+            identity.update({
+                "adapter_configuration": (
+                    "authority-config" if role == "constrained-adapter" else "default"
+                ),
+                "editor_open_origin": "editor-open-requested",
+                "interaction_lifecycle": "manifest-bound",
+                "steady_state_workload": "manifest-bound",
+            })
+        if role == "constrained-adapter":
+            identity["adapter_predicate"] = "supported-constrained-metal-adapter"
         identity_digest = hashlib.sha256(
             (json.dumps(identity, sort_keys=True, separators=(",", ":")) + "\n").encode()
         ).hexdigest()
@@ -293,6 +309,105 @@ def expect_rejected(label: str, mutate: Callable[[dict[str, Any], Path], None]) 
         raise AssertionError(f"planted negative was accepted: {label}")
 
 
+def policy_publication_errors(
+    validation: dict[str, Any], policy_bytes: bytes, *,
+    protected: bool = True, ancestor: bool = True,
+    protected_blob: str | None = None, pr_head: str = APPROVED_SHA,
+    merge_commit: str = PUBLICATION_SHA, base_ref: str = "main",
+    author_id: int = 7, author_type: str = "User",
+    review_id: int = 25807, review_type: str = "User",
+    reviews: list[tuple[str, str]] | None = None,
+) -> list[str]:
+    expected_blob = validation["blob"]
+
+    def command_json(command: list[str]) -> dict[str, Any]:
+        endpoint = command[2]
+        if endpoint.endswith("/branches/main"):
+            return {"protected": protected, "commit": {"sha": PLANNING_MAIN_SHA}}
+        if "/compare/" in endpoint:
+            return {
+                "base_commit": {"sha": PUBLICATION_SHA},
+                "merge_base_commit": {"sha": PUBLICATION_SHA if ancestor else "8" * 40},
+                "status": "ahead" if ancestor else "diverged", "behind_by": 0,
+            }
+        if f"?ref={PUBLICATION_SHA}" in endpoint:
+            return {"type": "file", "path": POLICY_PATH, "sha": expected_blob}
+        if f"?ref={APPROVED_SHA}" in endpoint:
+            return {"type": "file", "path": POLICY_PATH, "sha": expected_blob}
+        if f"?ref={PLANNING_MAIN_SHA}" in endpoint:
+            return {
+                "type": "file", "path": POLICY_PATH,
+                "sha": protected_blob or expected_blob,
+            }
+        if endpoint.endswith("/pulls/1"):
+            return {
+                "state": "closed", "merged_at": "2026-08-29T01:00:00Z",
+                "merge_commit_sha": merge_commit, "base": {"ref": base_ref},
+                "head": {"sha": pr_head},
+                "user": {"id": author_id, "type": author_type},
+            }
+        raise AssertionError(f"unexpected live-policy endpoint: {endpoint}")
+
+    def fetch_pages(_ghapp: str, endpoint: str, **_kwargs: Any) -> list[dict[str, Any]]:
+        assert endpoint.endswith("/pulls/1/reviews"), endpoint
+        states = reviews or [("APPROVED", "2026-08-29T00:30:00Z")]
+        return [
+            {
+                "id": index, "user": {"id": review_id, "type": review_type},
+                "state": state, "commit_id": validation["approved_head"],
+                "submitted_at": submitted_at,
+            }
+            for index, (state, submitted_at) in enumerate(states, start=1)
+        ]
+
+    with mock.patch.object(v2, "_command_json", side_effect=command_json), mock.patch.object(
+        v2, "_fetch_all_pages", side_effect=fetch_pages
+    ):
+        return v2.product_policy_publication_errors(validation, policy_bytes, "ghapp")
+
+
+def plant_old_policy_self_provenance(receipt: dict[str, Any], root: Path) -> None:
+    def mutate(policy: dict[str, Any]) -> None:
+        policy["source"] = {
+            "repository": "danielraffel/pulp-planning", "revision": SHA,
+            "path": POLICY_PATH, "blob": "3" * 40,
+        }
+        policy["approval"] = {
+            "github_user_id": 25807, "mode": "approval", "pr_url": POLICY_PR,
+            "approved_head": SHA,
+        }
+
+    rewrite_artifact(root, receipt["product_policy"]["authority"], mutate)
+
+
+def plant_old_validation_self_provenance(receipt: dict[str, Any], root: Path) -> None:
+    def mutate(validation: dict[str, Any]) -> None:
+        validation["revision"] = validation.pop("publication_commit")
+        validation.pop("approval_mode")
+        validation.pop("pr_url")
+
+    rewrite_artifact(root, receipt["product_policy"]["validation"], mutate)
+
+
+def plant_unrelated_required_coverage(
+    receipt: dict[str, Any], root: Path, key: str,
+) -> None:
+    policy_path = root / receipt["product_policy"]["authority"]["path"]
+    policy = json.loads(policy_path.read_text())
+    wrapper_ref = policy["required_coverage"][key]
+    if isinstance(wrapper_ref, list):
+        wrapper_ref = wrapper_ref[0]
+    payload_ref = write_artifact(root, f"policy/unrelated-{key}.json", {"protected": True})
+    rewrite_artifact(
+        root, wrapper_ref,
+        lambda wrapper: wrapper.update(artifact=payload_ref),
+    )
+    policy_path.write_text(json.dumps(policy, sort_keys=True) + "\n")
+    receipt["product_policy"]["authority"]["sha256"] = hashlib.sha256(
+        policy_path.read_bytes()
+    ).hexdigest()
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -301,6 +416,106 @@ def main() -> int:
             v2.trace_producer_overhead, "validate_receipt", return_value=None
         ):
             assert v2.validate_v2(receipt, root, receipt_path=root / "canonical.json", repository=root) is True
+        policy_bytes = (root / receipt["product_policy"]["authority"]["path"]).read_bytes()
+        policy = json.loads(policy_bytes)
+        validation = json.loads(
+            (root / receipt["product_policy"]["validation"]["path"]).read_text()
+        )
+        assert validation["publication_commit"] != validation["approved_head"]
+        assert policy_publication_errors(validation, policy_bytes) == []
+        equal_head = dict(validation, approved_head=PUBLICATION_SHA)
+        assert policy_publication_errors(
+            equal_head, policy_bytes, pr_head=PUBLICATION_SHA,
+        ) == []
+        assert "bytes" in policy_publication_errors(validation, policy_bytes + b"\n")[0]
+        assert any(
+            "exact approved head" in error
+            for error in policy_publication_errors(validation, policy_bytes, pr_head="9" * 40)
+        )
+        assert any(
+            "protected main" in error
+            for error in policy_publication_errors(
+                validation, policy_bytes, protected_blob="9" * 40,
+            )
+        )
+        assert any(
+            "effective pre-merge exact-head" in error
+            for error in policy_publication_errors(
+                validation, policy_bytes,
+                reviews=[("APPROVED", "2026-08-29T01:30:00Z")],
+            )
+        )
+        assert any(
+            "live protected branch" in error
+            for error in policy_publication_errors(validation, policy_bytes, protected=False)
+        )
+        assert any(
+            "not an ancestor" in error
+            for error in policy_publication_errors(validation, policy_bytes, ancestor=False)
+        )
+        for kwargs in (
+            {"merge_commit": "9" * 40},
+            {"base_ref": "release"},
+        ):
+            assert any(
+                "recorded merged main PR" in error
+                for error in policy_publication_errors(validation, policy_bytes, **kwargs)
+            )
+        assert any(
+            "effective pre-merge exact-head" in error
+            for error in policy_publication_errors(
+                validation, policy_bytes, review_id=40003,
+            )
+        )
+        for revoked_state in ("CHANGES_REQUESTED", "DISMISSED"):
+            assert any(
+                "effective pre-merge exact-head" in error
+                for error in policy_publication_errors(
+                    validation, policy_bytes,
+                    reviews=[
+                        ("APPROVED", "2026-08-29T00:20:00Z"),
+                        (revoked_state, "2026-08-29T00:40:00Z"),
+                    ],
+                )
+            )
+        assert policy_publication_errors(
+            validation, policy_bytes,
+            reviews=[
+                ("APPROVED", "2026-08-29T00:20:00Z"),
+                ("COMMENTED", "2026-08-29T00:40:00Z"),
+            ],
+        ) == []
+        author_validation = dict(validation, approval_mode="author")
+        assert policy_publication_errors(
+            author_validation, policy_bytes, author_id=25807,
+        ) == []
+        assert any(
+            "author identity" in error
+            for error in policy_publication_errors(
+                author_validation, policy_bytes, author_id=40004,
+            )
+        )
+        protected_blobs = {
+            path: v2.git_blob_digest((root / path).read_bytes())
+            for path in (v2.SUPPORT_MATRIX, v2.A0_GPU_BASELINE)
+        }
+
+        def protected_content(command: list[str]) -> dict[str, Any]:
+            endpoint = command[2]
+            path = endpoint.split("/contents/", 1)[1].split("?ref=", 1)[0]
+            return {"type": "file", "path": path, "sha": protected_blobs[path]}
+
+        with mock.patch.object(v2, "_command_json", side_effect=protected_content):
+            assert v2.protected_required_coverage_errors(
+                policy, root, SHA, "ghapp",
+            ) == []
+        with mock.patch.object(
+            v2, "_command_json",
+            return_value={"type": "file", "path": v2.SUPPORT_MATRIX, "sha": "9" * 40},
+        ):
+            assert "exact protected Pulp blob" in v2.protected_required_coverage_errors(
+                policy, root, SHA, "ghapp",
+            )[0]
         terminal_path = root / "terminal.json"
         terminal_path.write_text(json.dumps(receipt), encoding="utf-8")
         terminal = subprocess.run(
@@ -336,10 +551,27 @@ def main() -> int:
         ("omitted role", lambda r, _p: r["campaigns"].pop()),
         ("extra role", lambda r, _p: r["campaigns"].append(copy.deepcopy(r["campaigns"][0]))),
         ("substituted host", lambda r, _p: r["campaigns"][0]["identity"].update(host_kind="substitute")),
+        ("standalone canary binary", lambda r, _p: r["campaigns"][0]["identity"].update(application_sha256="8" * 64)),
+        ("constrained canary content", lambda r, _p: r["campaigns"][6]["identity"].update(content_sha256="8" * 64)),
+        ("constrained canary signature", lambda r, _p: r["campaigns"][6]["identity"].update(signature_sha256="8" * 64)),
+        ("standalone lifecycle", lambda r, _p: r["campaigns"][0]["identity"].update(interaction_lifecycle="substitute")),
+        ("constrained workload", lambda r, _p: r["campaigns"][6]["identity"].update(steady_state_workload="easier")),
+        ("constrained predicate", lambda r, _p: r["campaigns"][6]["identity"].update(adapter_predicate="executor-selected")),
+        ("constrained configuration", lambda r, _p: r["campaigns"][6]["identity"].update(adapter_configuration="executor-selected")),
+        ("missing standalone configuration", lambda r, _p: r["campaigns"][0]["identity"].pop("adapter_configuration")),
+        ("constrained product substitution", lambda r, _p: r["campaigns"][6]["identity"].update(build_sha256="8" * 64)),
         ("false unavailable", lambda r, _p: r["campaigns"][0].update(status="unavailable")),
         ("executor disposition", lambda r, _p: r.update(disposition="queue-B4")),
         ("caller self-attestation", lambda r, _p: r["publication"].update(protected=True, head=SHA, required_checks=[])),
-        ("wrong policy head", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy["source"].update(revision="9" * 40))),
+        ("old policy self-provenance", plant_old_policy_self_provenance),
+        ("old validation self-provenance", plant_old_validation_self_provenance),
+        ("malformed publication commit", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(publication_commit="bad"))),
+        ("wrong planning policy path", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(path=f"{v2.PLANNING_POLICY_DIRECTORY}/other.product-policy.json"))),
+        ("unavailable Pulp policy source", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(repository="Generous-Corp/pulp", pr_url="https://github.com/Generous-Corp/pulp/pull/1"))),
+        ("unavailable Forge policy source", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(repository="Generous-Corp/forge", pr_url="https://github.com/Generous-Corp/forge/pull/1"))),
+        ("unsafe policy budget ID", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy.update(budget_id="../other"))),
+        ("unrelated support matrix", lambda r, p: plant_unrelated_required_coverage(r, p, "support_matrix")),
+        ("missing A0 baseline", lambda r, p: plant_unrelated_required_coverage(r, p, "a1_evidence")),
         ("missing steady budget", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy["roles"][0].pop("steady_gpu_frame_p95_ns"))),
         ("short samples", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["raw_samples"], lambda raw: raw["states"][0]["warm"].pop())),
         ("wrong seed", lambda r, p: rewrite_artifact(p, r["campaigns"][0]["raw_samples"], lambda raw: raw.update(manifest_seed=0))),
@@ -382,7 +614,7 @@ def main() -> int:
         raise AssertionError("incomplete paginated check-runs result was accepted")
     print(
         f"gpu first-visible A3 v2 acceptance: positive=1 "
-        f"cli_outcomes=3 planted_negatives={len(negatives)} live_check_controls=6"
+        f"cli_outcomes=3 planted_negatives={len(negatives)} live_check_controls=24"
     )
     return 0
 

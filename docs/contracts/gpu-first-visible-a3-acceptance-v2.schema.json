@@ -222,6 +222,11 @@
             "signature_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "adapter": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "adapter_predicate": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "adapter_configuration": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "editor_open_origin": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "interaction_lifecycle": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "steady_state_workload": { "type": "string", "minLength": 1, "maxLength": 1024 },
             "display_id": { "type": "string", "minLength": 1, "maxLength": 256 },
             "refresh_hz": { "type": "number", "minimum": 1 }
           }
