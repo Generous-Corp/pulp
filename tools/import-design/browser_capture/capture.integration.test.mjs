@@ -108,9 +108,14 @@ test("escapeRegExp preserves arbitrary text as a literal pattern", () => {
   assert.doesNotMatch(`${literal}suffix`, pattern);
 });
 
-async function installedBrowser() {
+// PULP_DESIGN_BROWSER names the browser the rest of the import lane resolves,
+// and is how a provisioned, version-pinned build is handed to this suite. It
+// outranks the conventional installations so the capture cases exercise the
+// browser they were given rather than whatever Chrome the machine carries.
+async function installedBrowser(env = process.env) {
   const candidates = [
-    process.env.PULP_BROWSER,
+    env.PULP_DESIGN_BROWSER,
+    env.PULP_BROWSER,
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/usr/bin/google-chrome",
@@ -128,6 +133,36 @@ async function installedBrowser() {
   }
   return "";
 }
+
+test("installedBrowser prefers a provisioned browser over system installations",
+  async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-preference-"));
+    const provisioned = path.join(root, "Google Chrome for Testing");
+    const absent = path.join(root, "not-installed");
+    try {
+      await writeFile(provisioned, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+      const conventional = await installedBrowser({});
+      assert.notEqual(
+        provisioned, conventional,
+        "the provisioned path must not be one this host already resolves");
+
+      assert.equal(
+        await installedBrowser({ PULP_DESIGN_BROWSER: provisioned }),
+        provisioned);
+      assert.equal(
+        await installedBrowser({ PULP_BROWSER: provisioned }), provisioned);
+
+      // Control: an unreadable override falls through to the conventional
+      // installations, so the assertions above measure preference within one
+      // access-checked list rather than a variable that bypasses the check.
+      assert.equal(
+        await installedBrowser({ PULP_DESIGN_BROWSER: absent }), conventional);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
 test("real browser capture waits through a delayed DOM commit",
   { timeout: 20000 }, async (context) => {
