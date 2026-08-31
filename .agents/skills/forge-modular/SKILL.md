@@ -1250,6 +1250,28 @@ than one branch.
 The state lives in each module's saved `data` blob, which decodes as ordinary
 JSON with self-describing keys. `running` is the commonest.
 
+**An allowlist writes; a heuristic only reports.** Name shape was the right
+instrument for *measuring* a corpus of other people's patches, where the module
+set is unbounded. It is the wrong one for a **writer**: the generator knows
+exactly which modules it emits, so it can be exact. Two off-valued keys, both
+found by *reading* a family's key set rather than by pattern, show why:
+
+- **`ImpromptuModular/clockMaster: false` marks the clocks that are NOT the
+  master.** Setting several true creates a conflict — and this is the same
+  plugin whose clocks dominate the wake list, so it is inside the blast radius
+  rather than at the edge of it.
+- **`Valley/frozen: false` is a reverb's healthy state.** True silences the
+  patch. The same shape as the `bypass` inversion.
+
+From a name, `running` on an unread family is indistinguishable from
+`clockMaster`. So `TRANSPORT_RUN_KEYS` (plus any run field the curated registry
+declares) is what may be **written**; a run-shaped key anywhere else is
+reported as `SUSPECTED` and left alone. Extending the allowlist is a short read,
+not a guess: key counts look prohibitive only because one concept is indexed per
+track or step (`manualBeat-0-3`, `id_t3_fadeRate`), and collapsing the index
+takes 364 keys to 91 and 692 to 100 — Impromptu, CountModula and Valley are 30,
+20 and 8.
+
 **Three sign errors, each of which INVERTS a result rather than weakening it:**
 
 1. **`bypass` and `muted` are not run flags.** `bypass: false` is the *healthy*
@@ -1258,7 +1280,12 @@ JSON with self-describing keys. `running` is the commonest.
    that a bare `bypass` never qualifies anyway, so `NOT_RUN_WORDS` earns its
    keep only on **compound** keys like `bypassRunning`. The same argument keeps
    `enabled`, `active` and `on` out — a false there is routinely the legitimate
-   default of an optional feature.
+   default of an optional feature. **`clockMaster` and `frozen` are denied by
+   NAME as well**, because the word set happening to contain neither CLOCK nor
+   FROZEN today is an accident: widen it and the exclusion would vanish
+   silently. Proven rather than asserted — widening `RUN_WORDS` to include
+   CLOCK/MASTER/FROZEN leaves the suite green, and only dropping the by-name
+   denial as well turns it red.
 2. **A list value is refused.** A per-channel `[true] × 24`, or a `run: [1]`,
    must not read as stopped. Held in two independent places, so breaking either
    one alone leaves the behaviour correct.

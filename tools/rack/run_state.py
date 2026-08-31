@@ -32,6 +32,24 @@ channel that CAN ask for a stopped module is the curated state registry,
 `module-state-overrides.json`, and a rule that declares the field there is
 honoured.
 
+AN ALLOWLIST WRITES; A HEURISTIC ONLY REPORTS. Name shape was the right
+instrument for MEASURING a corpus of other people's patches, where the module
+set is unbounded. It is the wrong one for a writer: the generator knows
+exactly which modules it emits, so it can be exact. Two off-valued keys found
+by READING key sets rather than by pattern show why the difference matters,
+and neither is exotic:
+
+  `ImpromptuModular/clockMaster: false`  marks the clocks that are NOT the
+      master. Setting several true creates a conflict -- and this is the same
+      plugin whose clocks dominate the wake list, so it sits inside the blast
+      radius rather than at the edge of it.
+  `Valley/frozen: false`  is a reverb's HEALTHY state. Flipping it true
+      silences the patch. The same shape as the `bypass: false` inversion.
+
+So the rule is narrower than "run-shaped keys go true". It is: the module's
+own TRANSPORT-RUN state goes true, and a key is transport-run only when
+something read that module family and said so.
+
 WHAT THIS DOES NOT DO. It never INVENTS a run key. Where a module carries no
 run-shaped key, we do not know the key's name, its type, or whether the module
 has one at all, and writing a guessed key into a saved-state blob is exactly
@@ -63,7 +81,31 @@ RUN_WORDS = frozenset({"RUN", "RUNNING", "ISRUNNING", "PLAY", "PLAYING",
 # behaviour nobody asked for.
 NOT_RUN_WORDS = frozenset({"BYPASS", "BYPASSED", "MUTE", "MUTED", "SOLO"})
 
+# Exact transport-run keys, per module family, for the families the generator
+# emits. THIS is what may be written. Extending it is a short read rather than
+# a guess: blob key counts look prohibitive only because one concept is indexed
+# per track or step (`manualBeat-0-3`, `id_t3_fadeRate`), and collapsing the
+# index takes 364 keys to 91 and 692 to 100 -- Impromptu, CountModula and
+# Valley are 30, 20 and 8. Read the family, add the key, add a test.
+#
+# The curated state registry is the other exact source: a run key a
+# `module-state-overrides.json` rule declares was also read rather than
+# guessed, so it is unioned in at call time.
+TRANSPORT_RUN_KEYS: dict[str, tuple[str, ...]] = {
+    "AS/SEQ16": ("running",),
+}
+
+# Keys that LOOK like transport-run state and are not. Every entry was found
+# by reading a module family's key set, and each one INVERTS a result rather
+# than weakening it: writing true here breaks a patch that was fine.
+NOT_TRANSPORT_RUN = frozenset({
+    "clockMaster",      # ImpromptuModular: false marks a NON-master clock
+    "frozen",           # Valley: false is a reverb's healthy state
+    "bypass", "bypassed", "muted", "mute", "solo",
+})
+
 STOPPED = "STOPPED"
+SUSPECTED = "SUSPECTED"
 RUNNING = "RUNNING"
 UNEVALUATED = "UNEVALUATED"
 
@@ -75,10 +117,41 @@ def _words(key: str) -> frozenset:
 
 
 def is_run_key(key: str) -> bool:
+    """Whether a key LOOKS like transport-run state. Reporting only.
+
+    Never sufficient to write. `clockMaster` and `frozen` are excluded by name
+    as well as by word, because the word set happening not to contain CLOCK or
+    FROZEN today is an accident rather than a guarantee -- widen RUN_WORDS and
+    the exclusion would vanish silently.
+    """
+    if key in NOT_TRANSPORT_RUN:
+        return False
     words = _words(key)
     if words & NOT_RUN_WORDS:
         return False
     return bool(words & RUN_WORDS)
+
+
+def writable_run_keys(rules: dict, plugin: str, model: str,
+                      data: dict) -> list:
+    """The keys in this blob we may WRITE: exact ones only.
+
+    The allowlist union the run fields the curated registry declares, minus
+    anything the registry declared stopped, minus the explicit denials, minus
+    list values. A run-shaped key on a family nobody has read is reported, not
+    written.
+    """
+    if not isinstance(data, dict):
+        return []
+    rule = (rules or {}).get(f"{plugin}/{model}") or {}
+    declared = {k for k in (rule.get("data_defaults") or {})
+                if k not in NOT_TRANSPORT_RUN and _words(k) & RUN_WORDS}
+    allowed = set(TRANSPORT_RUN_KEYS.get(f"{plugin}/{model}", ())) | declared
+    stopped_by_rule = _registry_stopped_fields(rules, plugin, model)
+    return sorted(k for k in data
+                  if k in allowed and k not in stopped_by_rule
+                  and k not in NOT_TRANSPORT_RUN
+                  and not isinstance(data[k], (list, dict)))
 
 
 def reads_as_stopped(value) -> bool:
@@ -156,19 +229,31 @@ def findings(patch: dict, inv: dict, rules: dict | None = None) -> list[dict]:
         data = m.get("data")
         keys = run_keys(data)
         declared = _registry_stopped_fields(rules, plugin, model)
+        writable = set(writable_run_keys(rules, plugin, model, data))
         for key in sorted(keys):
             if key in declared:
                 continue           # the registry asked for this value
             if not reads_as_stopped(data[key]):
                 continue
+            exact = key in writable
             out.append({
-                "check": "stopped-run-flag", "verdict": STOPPED,
+                "check": "stopped-run-flag",
+                "verdict": STOPPED if exact else SUSPECTED,
                 "ref": f"{slug} data.{key}",
                 "detail": (f"saved as {data[key]!r}, so this module does not "
                            f"run; a stopped clock silences the patch rather "
-                           f"than one branch of it"),
-                "remedy": f"set data.{key} to "
-                          f"{running_value_like(data[key])!r}"})
+                           f"than one branch of it"
+                           + ("" if exact else
+                              f" (nobody has read {slug}'s key set, so this "
+                              f"is a name match and is reported rather than "
+                              f"written: an off-valued key such as "
+                              f"ImpromptuModular's clockMaster looks the same "
+                              f"from here)")),
+                "remedy": (f"set data.{key} to {running_value_like(data[key])!r}"
+                           if exact else
+                           f"read {slug}'s saved state and, if data.{key} is "
+                           f"its transport-run flag, add it to "
+                           f"TRANSPORT_RUN_KEYS")})
         if not keys and is_clock(inv, plugin, model):
             out.append({
                 "check": "run-state-unknown", "verdict": UNEVALUATED,
@@ -208,10 +293,9 @@ def start_stopped_modules(patch: dict, inv: dict,
         data = m.get("data")
         if not isinstance(data, dict):
             continue
-        declared = _registry_stopped_fields(rules, m.get("plugin"),
-                                            m.get("model"))
-        for key in sorted(run_keys(data)):
-            if key in declared or not reads_as_stopped(data[key]):
+        for key in writable_run_keys(rules, m.get("plugin"), m.get("model"),
+                                     data):
+            if not reads_as_stopped(data[key]):
                 continue
             before = data[key]
             data[key] = running_value_like(before)
@@ -232,3 +316,9 @@ def stopped_run_flag_errors(patch: dict, inv: dict,
     """
     return [f"{f['ref']}: {f['detail']}"
             for f in findings(patch, inv, rules) if f["verdict"] == STOPPED]
+
+
+def suspected_notes(patch: dict, inv: dict, rules: dict | None = None) -> list:
+    """Run-shaped keys on families nobody has read. Reported, never written."""
+    return [f"{f['ref']}: {f['detail']}"
+            for f in findings(patch, inv, rules) if f["verdict"] == SUSPECTED]

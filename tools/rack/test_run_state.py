@@ -19,6 +19,14 @@ import run_state as R                                        # noqa: E402
 RULES = {"Toy/SEQ16": {"data_defaults": {"running": True}},
          "Toy/STOPBOX": {"data_defaults": {"running": False}}}
 
+# The writer only touches families somebody has READ. These stand in for that
+# reading; `Toy/UNREAD` deliberately has no entry, so it exercises the case
+# where a run-shaped key must be reported rather than written.
+ALLOWLIST = {"Toy/CLOCK": ("running", "run", "isRunning", "clock_running",
+                           "playing", "isPlaying", "started", "transport"),
+             "Toy/SEQ16": ("running",),
+             "Toy/STOPBOX": ("running",)}
+
 
 def inventory() -> dict:
     def mod(name, tags):
@@ -29,6 +37,7 @@ def inventory() -> dict:
         "CLOCK": mod("CLOCK", ["Clock"]),
         "SEQ16": mod("SEQ16", ["Sequencer"]),
         "STOPBOX": mod("STOPBOX", ["Clock"]),
+        "UNREAD": mod("UNREAD", ["Clock"]),
         "VCA": mod("VCA", ["Amplifier"]),
     }}}
 
@@ -157,6 +166,75 @@ def test_a_registry_that_declares_running_does_not_excuse_a_false(inv):
             ("and the flip is reported", len(notes) == 1, str(notes))]
 
 
+def test_an_off_valued_key_is_never_written(inv):
+    """Two keys where `false` is healthy or a role marker, not a stop.
+
+    Both were found by READING a module family's key set rather than by
+    pattern, and both would be broken by a naive "set every run-shaped flag
+    true" pass. `clockMaster: false` marks the clocks that are NOT the master,
+    so setting several true creates a conflict — and it lives in the same
+    plugin family whose clocks dominate the wake list. `frozen: false` is a
+    reverb's healthy state, and true silences the patch.
+
+    Locked by NAME, not left to the word set: RUN_WORDS happening to contain
+    neither CLOCK nor FROZEN today is an accident, and widening it later would
+    drop the exclusion silently.
+    """
+    out = []
+    for key in ("clockMaster", "frozen"):
+        out.append((f"`{key}` is not a transport-run key",
+                    not R.is_run_key(key), key))
+        out.append((f"`{key}` is denied by name",
+                    key in R.NOT_TRANSPORT_RUN, str(R.NOT_TRANSPORT_RUN)))
+        pch = patch_of(mod(1, "CLOCK", {key: False}))
+        notes = R.start_stopped_modules(pch, inv, RULES)
+        out.append((f"`{key}: false` survives the writer untouched",
+                    data_of(pch) == {key: False} and not notes,
+                    f"{data_of(pch)} {notes}"))
+        fs = R.findings(pch, inv, RULES)
+        out.append((f"and `{key}` is never named as a stopped run flag",
+                    not [f for f in fs
+                         if f["verdict"] in (R.STOPPED, R.SUSPECTED)],
+                    str(fs)))
+        # A clock carrying only this key has NO run flag, so the honest
+        # verdict is that its constructor default decides — not silence.
+        out.append((f"the module is instead reported UNEVALUATED",
+                    [f["verdict"] for f in fs] == [R.UNEVALUATED], str(fs)))
+    return out
+
+
+def test_an_unread_family_is_reported_not_written(inv):
+    """An allowlist writes; a heuristic only reports.
+
+    Name shape was the right instrument for measuring a corpus of other
+    people's patches. It is the wrong one for a writer, because from a name
+    `running` on an unread family is indistinguishable from `clockMaster`.
+    """
+    pch = patch_of(mod(1, "UNREAD", {"running": False}))
+    notes = R.start_stopped_modules(pch, inv, RULES)
+    fs = R.findings(pch, inv, RULES)
+    return [("an unread family is not written",
+             data_of(pch) == {"running": False} and not notes,
+             f"{data_of(pch)} {notes}"),
+            ("it is reported as SUSPECTED, not STOPPED",
+             [f["verdict"] for f in fs] == [R.SUSPECTED], str(fs)),
+            ("it never rejects the patch",
+             R.stopped_run_flag_errors(pch, inv, RULES) == [], str(fs)),
+            ("and it says what reading the family would settle",
+             any("TRANSPORT_RUN_KEYS" in f.get("remedy", "") for f in fs),
+             str(fs))]
+
+
+def test_a_read_family_is_written(inv):
+    pch = patch_of(mod(1, "CLOCK", {"running": False}))
+    notes = R.start_stopped_modules(pch, inv, RULES)
+    return [("a family on the allowlist is written",
+             data_of(pch) == {"running": True} and len(notes) == 1,
+             f"{data_of(pch)} {notes}"),
+            ("Toy/CLOCK is on the allowlist for this suite",
+             "Toy/CLOCK" in R.TRANSPORT_RUN_KEYS, str(R.TRANSPORT_RUN_KEYS))]
+
+
 def test_key_spellings_are_recognised(inv):
     out = []
     for key in ("running", "isRunning", "clock_running", "run", "playing",
@@ -248,6 +326,9 @@ CASES = [
     test_words_that_are_off_by_default_are_excluded,
     test_the_registry_may_ask_for_a_stopped_module,
     test_a_registry_that_declares_running_does_not_excuse_a_false,
+    test_an_off_valued_key_is_never_written,
+    test_an_unread_family_is_reported_not_written,
+    test_a_read_family_is_written,
     test_key_spellings_are_recognised,
     test_other_saved_state_is_not_disturbed,
     test_a_module_with_no_data_is_never_given_any,
@@ -259,6 +340,7 @@ CASES = [
 
 
 def main() -> int:
+    R.TRANSPORT_RUN_KEYS.update(ALLOWLIST)
     inv = inventory()
     bad = ran = 0
     for case in CASES:
