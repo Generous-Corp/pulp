@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import struct
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -25,6 +26,9 @@ RECORDER = importlib.util.module_from_spec(RECORDER_SPEC)
 RECORDER_SPEC.loader.exec_module(RECORDER)
 VERIFIER = RECORDER.verifier
 OLD = ROOT / "docs/validation/gpu-probes/m3-a2-real-probes-20260828"
+darwin_mutation_proof = unittest.skipUnless(
+    sys.platform == "darwin", "requires macOS kqueue/renameatx_np mutation proof"
+)
 
 
 def png_chunk(kind: bytes, payload: bytes) -> bytes:
@@ -759,6 +763,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     build, build / "prefix", forge, output
                 )
 
+    @darwin_mutation_proof
     def test_receipt_publication_claims_directory_without_replacement(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -782,6 +787,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 ["evidence.json", "receipt.json"],
             )
 
+    @darwin_mutation_proof
     def test_receipt_publication_rejects_named_directory_swap_before_receipt(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -811,6 +817,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             self.assertFalse((moved / "receipt.json").exists())
             self.assertEqual(list(output.iterdir()), [])
 
+    @darwin_mutation_proof
     def test_receipt_publication_rejects_parent_directory_swap_before_receipt(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -842,6 +849,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             self.assertFalse((moved_parent / "published" / "receipt.json").exists())
             self.assertEqual(list(parent.iterdir()), [])
 
+    @darwin_mutation_proof
     def test_retained_output_parent_rejects_swap_before_publication(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -868,6 +876,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                 parent_claim.close()
                 staging_claim.close()
 
+    @darwin_mutation_proof
     def test_fresh_directory_claim_rejects_staging_inode_swap(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -895,6 +904,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     RECORDER.claim_fresh_directory(path, "install-prefix")
             self.assertTrue(path.is_dir())
 
+    @darwin_mutation_proof
     def test_receipt_publication_rejects_staged_inode_swap(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -923,6 +933,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             self.assertFalse((output / "receipt.json").exists())
             self.assertFalse((output / "evidence.json").exists())
 
+    @darwin_mutation_proof
     def test_receipt_publication_rejects_in_place_receipt_mutation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -952,6 +963,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
                     self.publish(staging, output)
             self.assertFalse((output / "receipt.json").exists())
 
+    @darwin_mutation_proof
     def test_receipt_publication_rejects_post_verification_staging_mutation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1029,6 +1041,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             finally:
                 claim.close()
 
+    @darwin_mutation_proof
     def test_retained_build_outputs_reject_replace_and_restore(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1067,6 +1080,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             finally:
                 claim.close()
 
+    @darwin_mutation_proof
     def test_bounded_launch_rechecks_child_inode_after_execution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1108,6 +1122,7 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             finally:
                 claim.close()
 
+    @darwin_mutation_proof
     def test_bounded_launch_detects_restored_ancestor_swap(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

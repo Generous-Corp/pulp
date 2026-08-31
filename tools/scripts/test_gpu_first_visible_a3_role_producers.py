@@ -1024,6 +1024,16 @@ def main() -> int:
                 assert receipt["outcome"] == "inconclusive"
                 assert receipt["dependencies"] == ["product-policy:required-coverage"]
                 continue
+            if sys.platform != "darwin" and receipt["dependencies"] == [
+                "source-build-isolation:macos-sandbox"
+            ]:
+                assert completed.returncode == 2
+                assert receipt["outcome"] == "inconclusive"
+                assert receipt["reason"] == (
+                    "independent source proof requires the macOS sandbox used by the M5 campaign"
+                )
+                assert not any(receipt["artifacts"].values())
+                continue
             assert completed.returncode == 0, (role, completed.stdout, completed.stderr, receipt)
             assert receipt["outcome"] == "pass"
             assert all(receipt["artifacts"].values())

@@ -319,7 +319,7 @@ def require_release_build_configuration(
 
     build_root = require_real_directory(build_root)
     cache_path = build_root / "CMakeCache.txt"
-    cache_payload = read_regular(cache_path, 4 * 1024 * 1024).decode("utf-8")
+    cache_payload = read_regular(cache_path, MAX_FILE_BYTES).decode("utf-8")
     configured_source = _cache_value(cache_payload, "CMAKE_HOME_DIRECTORY")
     build_type = _cache_value(cache_payload, "CMAKE_BUILD_TYPE")
     configurations = _cache_value(cache_payload, "CMAKE_CONFIGURATION_TYPES")
@@ -434,7 +434,7 @@ def build_install_identity(
             "root": str(build_root),
             "cmake_cache": {
                 "path": str(cache_path),
-                "sha256": sha256_file(cache_path, 4 * 1024 * 1024),
+                "sha256": sha256_file(cache_path, MAX_FILE_BYTES),
                 "cmake_home_directory": configured_source,
                 "build_type": build_type or "multi-config",
             },

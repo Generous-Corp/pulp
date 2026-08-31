@@ -901,6 +901,27 @@ def main() -> int:
             pass
         else:
             raise AssertionError("non-source-bound state build driver passed")
+        if sys.platform != "darwin":
+            try:
+                overhead.collect_state(
+                    request_path=collection_request_path,
+                    evidence_root=collection_evidence,
+                    source_root=source_root,
+                    binary=collection_host,
+                    driver=collection_driver,
+                    build_driver=state_build_driver,
+                    output=collection_evidence / "platform-boundary.json",
+                    trace_processor=None,
+                )
+            except overhead.OverheadError as error:
+                assert str(error) == "state source proof requires the macOS sandbox"
+            else:
+                raise AssertionError("non-macOS state source proof unexpectedly ran")
+            print(
+                "gpu-first-visible-a3-trace-producer-overhead: "
+                "portable_negatives=pass macos_source_proof=platform-gated"
+            )
+            return 0
         for mutation in (
             "state-build-read-measured",
             "state-build-read-ambient",
@@ -925,7 +946,10 @@ def main() -> int:
                     output=mutation_root / "raw.json", trace_processor=None,
                 )
             except overhead.OverheadError as error:
-                assert "omitted its receipt" in str(error), error
+                if sys.platform == "darwin":
+                    assert "omitted its receipt" in str(error), error
+                else:
+                    assert str(error) == "state source proof requires the macOS sandbox"
             else:
                 raise AssertionError(f"state build sandbox accepted {mutation}")
         mismatch_root = temp_root / "state-build-product-mismatch"

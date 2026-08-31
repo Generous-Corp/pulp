@@ -340,6 +340,7 @@ class CleanAgentHarnessTests(unittest.TestCase):
                 client.close()
                 server_side.close()
 
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS security(1)")
     def test_keychain_staging_uses_codex_only_acl_and_no_auth_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw).resolve()
@@ -807,7 +808,8 @@ class CleanAgentHarnessTests(unittest.TestCase):
             (build / "CMakeCache.txt").write_text(
                 f"CMAKE_HOME_DIRECTORY:INTERNAL={source}\n"
                 "CMAKE_BUILD_TYPE:STRING=Release\n"
-                f"CMAKE_COMMAND:INTERNAL={shutil.which('cmake')}\n",
+                f"CMAKE_COMMAND:INTERNAL={shutil.which('cmake')}\n"
+                + ("# bounded cache padding\n" * 200_000),
                 encoding="utf-8",
             )
             built = build / "bin/pulp-cpp"

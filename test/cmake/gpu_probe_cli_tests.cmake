@@ -183,19 +183,35 @@ execute_process(
     RESULT_VARIABLE positive_rc
     OUTPUT_VARIABLE positive_json
     ERROR_VARIABLE positive_stderr)
-if(NOT positive_rc EQUAL 0)
+string(JSON positive_schema ERROR_VARIABLE positive_schema_error
+    GET "${positive_json}" schema)
+string(JSON positive_verdict ERROR_VARIABLE positive_verdict_error
+    GET "${positive_json}" verdict)
+if(positive_schema_error OR positive_verdict_error OR
+   NOT positive_schema STREQUAL "pulp.gpu-probe-result.v1")
+    message(FATAL_ERROR "positive probe did not emit typed v1 evidence")
+endif()
+if(positive_rc EQUAL 0)
+    if(NOT positive_verdict STREQUAL "pass")
+        message(FATAL_ERROR "successful positive probe did not emit a pass result")
+    endif()
+    foreach(artifact IN ITEMS input.complex-f32 expected.f32 observed.f32)
+        if(NOT EXISTS "${ARTIFACT_ROOT}/positive/${artifact}")
+            message(FATAL_ERROR "positive probe omitted ${artifact}")
+        endif()
+    endforeach()
+elseif(UNIX AND NOT APPLE AND positive_rc EQUAL 2)
+    string(JSON positive_code ERROR_VARIABLE positive_code_error
+        GET "${positive_json}" passes 0 code)
+    if(positive_code_error OR NOT positive_verdict STREQUAL "unavailable" OR
+       NOT positive_code STREQUAL "gpu_compute_adapter_unavailable")
+        message(FATAL_ERROR
+            "headless Linux probe did not emit exact typed unavailable evidence: "
+            "${positive_stderr}")
+    endif()
+else()
     message(FATAL_ERROR "positive probe failed (${positive_rc}): ${positive_stderr}")
 endif()
-string(JSON positive_verdict ERROR_VARIABLE positive_json_error
-    GET "${positive_json}" verdict)
-if(positive_json_error OR NOT positive_verdict STREQUAL "pass")
-    message(FATAL_ERROR "positive probe did not emit a pass result: ${positive_json_error}")
-endif()
-foreach(artifact IN ITEMS input.complex-f32 expected.f32 observed.f32)
-    if(NOT EXISTS "${ARTIFACT_ROOT}/positive/${artifact}")
-        message(FATAL_ERROR "positive probe omitted ${artifact}")
-    endif()
-endforeach()
 
 file(WRITE "${ARTIFACT_ROOT}/blocked-artifact-directory" "not a directory")
 execute_process(

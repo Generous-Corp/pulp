@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import py_compile
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,9 @@ SPEC = importlib.util.spec_from_file_location("gpu_trace_overhead_acceptance", S
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+darwin_mutation_proof = unittest.skipUnless(
+    sys.platform == "darwin", "requires macOS kqueue/renameatx_np mutation proof"
+)
 
 
 class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
@@ -462,6 +466,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact recording checkout HEAD"):
             MODULE.assert_exact_live_head(ROOT, parent)
 
+    @darwin_mutation_proof
     def test_mixed_install_prefix_cannot_borrow_current_build_stamp(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -513,6 +518,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "differ from the exact build output"):
                 retained_identity()
 
+    @darwin_mutation_proof
     def test_retained_build_output_rejects_replace_and_restore(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -551,6 +557,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             finally:
                 claim.close()
 
+    @darwin_mutation_proof
     def test_output_must_be_new_and_outside_every_protected_tree(self):
         with tempfile.TemporaryDirectory() as temporary:
             external = Path(temporary)
@@ -578,6 +585,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             MODULE.atomic_write_json(published, {"status": "pass"})
             self.assertEqual(json.loads(published.read_text()), {"status": "pass"})
 
+    @darwin_mutation_proof
     def test_output_publication_rejects_parent_directory_swap(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -598,6 +606,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse((moved / "receipt.json").exists())
 
+    @darwin_mutation_proof
     def test_output_publication_rejects_staged_inode_swap(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -617,6 +626,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     MODULE.atomic_write_json(output, {"status": "pass"})
             self.assertFalse(output.exists())
 
+    @darwin_mutation_proof
     def test_output_publication_rejects_in_place_receipt_mutation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -633,6 +643,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     MODULE.atomic_write_json(output, {"status": "pass"})
             self.assertFalse(output.exists())
 
+    @darwin_mutation_proof
     def test_output_parent_claim_spans_recording_before_publication(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -652,6 +663,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                 claim.close()
             self.assertFalse(output.exists())
 
+    @darwin_mutation_proof
     def test_fresh_directory_claim_binds_created_inode_not_swapped_staging(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -677,6 +689,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
                     MODULE.claim_fresh_directory(path, "install-prefix")
             self.assertTrue(path.is_dir())
 
+    @darwin_mutation_proof
     def test_retained_git_tree_rejects_source_write_and_restore(self):
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary) / "repository"
@@ -706,6 +719,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             finally:
                 claim.close()
 
+    @darwin_mutation_proof
     def test_retained_generated_build_inputs_reject_write_and_restore(self):
         with tempfile.TemporaryDirectory() as temporary:
             build = Path(temporary) / "build"
@@ -736,6 +750,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             finally:
                 claim.close()
 
+    @darwin_mutation_proof
     def test_render_provider_claim_retains_actual_skia_dawn_and_v8_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -880,6 +895,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             finally:
                 os.close(descriptor)
 
+    @darwin_mutation_proof
     def test_retained_executable_claim_rejects_child_inode_swap(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
