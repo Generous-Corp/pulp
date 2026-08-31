@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import qualify_scenes as Q
 
@@ -127,6 +128,50 @@ class QualificationTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.fixture = Fixture(Path(self.temp.name))
 
+    def prepare_fixture(self) -> tuple[Path, dict]:
+        forge_revision = "a" * 40
+        pulp_revision = "b" * 40
+        decoder = self.fixture.root / "build" / "rack_patch_decode"
+        decoder.parent.mkdir(exist_ok=True)
+        decoder.write_bytes(b"fixture decoder")
+        decoder.chmod(0o755)
+        executing_decoder = self.fixture.toolchain / "rack_patch_decode"
+        executing_decoder.write_bytes(decoder.read_bytes())
+        executing_decoder.chmod(0o755)
+        self.fixture.toolchain.joinpath("with_app_model_selection.py").write_bytes(
+            Path(Q.__file__).with_name("with_app_model_selection.py").read_bytes())
+        self.fixture.toolchain.joinpath("FORGE_TOOLCHAIN_STAMP").write_text(
+            f"0.21.0\n2026-08-30\npulp {pulp_revision}\n",
+            encoding="utf-8")
+        build_info = self.fixture.root / "FORGE_BUILD_INFO"
+        fields = {
+            "schema": "1",
+            "version": "0.21.0",
+            "product": "Forge Modular",
+            "product_id": "com.generous.forge.modular",
+            "role": "Rack module and patch generator",
+            "format": "Standalone application",
+            "build": "Release · darwin-arm64",
+            "pulp_sdk": f"0.826.0 · {pulp_revision}",
+            "source_git_head": forge_revision,
+            "source_git_dirty": "false",
+            "source_snapshot_sha256": "c" * 64,
+        }
+        build_info.write_text(
+            "".join(f"{key}={value}\n" for key, value in fields.items()),
+            encoding="utf-8")
+        return build_info, fields
+
+    def prepare_kwargs(self) -> dict:
+        build_info, _fields = self.prepare_fixture()
+        return {
+            "toolchain": self.fixture.toolchain,
+            "settings": self.fixture.settings,
+            "build_info": build_info,
+            "expected_pulp_ref": "b" * 40,
+            "output_dir": self.fixture.root / "qualification-inputs",
+        }
+
     def test_catalogue_enumerates_exact_fixed_ids_in_order(self) -> None:
         scenes = Q.load_catalogue(self.fixture.catalogue)
         self.assertEqual([scene["id"] for scene in scenes], list(Q.SCENE_IDS))
@@ -152,6 +197,170 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(selected["model"], "fixture-model")
         self.assertEqual(Q.snapshot_inventory(self.fixture.toolchain), {
             "Fixture": {"version": "1", "modules": ["One"]}})
+
+    def test_prepare_atomically_authors_provider_free_receipts(self) -> None:
+        kwargs = self.prepare_kwargs()
+        identity_path, inventory_path = Q.prepare_inputs(**kwargs)
+        identity = json.loads(identity_path.read_text())
+        inventory = json.loads(inventory_path.read_text())
+        self.assertEqual(identity["schema"], Q.IDENTITY_SCHEMA)
+        self.assertEqual(identity["identity"]["forge_revision"], "a" * 40)
+        self.assertEqual(identity["identity"]["pulp_revision"], "b" * 40)
+        self.assertEqual(identity["identity"]["provider"], "codex")
+        self.assertEqual(identity["identity"]["model"], "fixture-model")
+        self.assertEqual(inventory, {
+            "schema": Q.INVENTORY_SCHEMA,
+            "inventory": {"Fixture": {"modules": ["One"], "version": "1"}},
+        })
+        before = (identity_path.read_bytes(), inventory_path.read_bytes())
+        self.assertEqual(Q.prepare_inputs(**kwargs), (identity_path, inventory_path))
+        self.assertEqual(
+            (identity_path.read_bytes(), inventory_path.read_bytes()), before)
+
+    def test_prepare_cli_needs_no_catalogue_or_provider_call(self) -> None:
+        kwargs = self.prepare_kwargs()
+        completed = subprocess.run([
+            sys.executable, str(Path(Q.__file__)), "prepare",
+            "--toolchain-root", str(kwargs["toolchain"]),
+            "--settings", str(kwargs["settings"]),
+            "--build-info", str(kwargs["build_info"]),
+            "--expected-pulp-ref", kwargs["expected_pulp_ref"],
+            "--output-dir", str(kwargs["output_dir"]),
+        ], text=True, capture_output=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.splitlines(), [
+            str(kwargs["output_dir"].absolute() / "identity.json"),
+            str(kwargs["output_dir"].absolute() / "inventory.json"),
+        ])
+
+    def test_prepare_rejects_build_identity_mutations_without_partial_output(self) -> None:
+        mutations = {
+            "dirty": ("source_git_dirty=false", "source_git_dirty=true"),
+            "wrong product": ("product=Forge Modular", "product=Forge Sequencer"),
+            "wrong build": ("build=Release · darwin-arm64",
+                            "build=Debug · darwin-arm64"),
+            "version disagreement": ("version=0.21.0", "version=0.21.1"),
+            "wrong source": ("source_git_head=" + "a" * 40,
+                             "source_git_head=not-a-sha"),
+            "wrong snapshot": ("source_snapshot_sha256=" + "c" * 64,
+                               "source_snapshot_sha256=not-a-sha"),
+        }
+        for label, (old, new) in mutations.items():
+            with self.subTest(label=label):
+                kwargs = self.prepare_kwargs()
+                text = kwargs["build_info"].read_text().replace(old, new)
+                kwargs["build_info"].write_text(text)
+                with self.assertRaises(Q.QualificationError):
+                    Q.prepare_inputs(**kwargs)
+                self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_prepare_rejects_duplicate_build_field_and_stamp_disagreement(self) -> None:
+        kwargs = self.prepare_kwargs()
+        with kwargs["build_info"].open("a", encoding="utf-8") as output:
+            output.write("product=Forge Modular\n")
+        with self.assertRaisesRegex(Q.QualificationError, "repeats field"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+        kwargs = self.prepare_kwargs()
+        self.fixture.toolchain.joinpath("FORGE_TOOLCHAIN_STAMP").write_text(
+            "0.21.0\n2026-08-30\npulp " + "d" * 40 + "\n"
+            "rack_patch_decode " + "e" * 64 + "\n")
+        with self.assertRaisesRegex(Q.QualificationError, "different Pulp"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+        kwargs = self.prepare_kwargs()
+        self.fixture.toolchain.joinpath("FORGE_TOOLCHAIN_STAMP").write_text(
+            "0.21.0\n2026-08-30\npulp " + "b" * 40 + "\n")
+        self.fixture.root.joinpath("build/rack_patch_decode").unlink()
+        with self.assertRaisesRegex(Q.QualificationError, "not executable"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_prepare_binds_optional_stamp_decoder_to_candidate_executable(self) -> None:
+        kwargs = self.prepare_kwargs()
+        decoder = self.fixture.root / "build" / "rack_patch_decode"
+        digest = Q._file_digest(decoder)
+        stamp = self.fixture.toolchain / "FORGE_TOOLCHAIN_STAMP"
+        stamp.write_text(stamp.read_text() + f"rack_patch_decode {digest}\n")
+        identity_path, _inventory_path = Q.prepare_inputs(**kwargs)
+        identity = json.loads(identity_path.read_text())["identity"]
+        self.assertEqual(identity["rack_patch_decode_sha256"], digest)
+
+        kwargs["output_dir"].rename(self.fixture.root / "accepted-inputs")
+        stamp.write_text(
+            "0.21.0\n2026-08-30\npulp " + "b" * 40 + "\n"
+            "rack_patch_decode " + "e" * 64 + "\n")
+        with self.assertRaisesRegex(Q.QualificationError, "candidate executable"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_prepare_rejects_executing_decoder_different_from_candidate(self) -> None:
+        kwargs = self.prepare_kwargs()
+        executing_decoder = self.fixture.toolchain / "rack_patch_decode"
+        executing_decoder.write_bytes(b"different decoder")
+        with self.assertRaisesRegex(Q.QualificationError, "executing.*does not match"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_prepare_requires_explicit_sdk_authority_and_checks_optional_stamp(self) -> None:
+        kwargs = self.prepare_kwargs()
+        kwargs["expected_pulp_ref"] = "e" * 40
+        with self.assertRaisesRegex(Q.QualificationError, "expected Pulp SDK"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+        kwargs = self.prepare_kwargs()
+        with kwargs["build_info"].open("a", encoding="utf-8") as output:
+            output.write("expected_pulp_sdk_ref=" + "e" * 40 + "\n")
+        with self.assertRaisesRegex(Q.QualificationError, "does not match pulp_sdk"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_prepare_preflight_failures_leave_no_partial_pair(self) -> None:
+        cases = (
+            ("selection", lambda kwargs: kwargs.update(
+                selection_loader=lambda _toolchain, _settings: (_ for _ in ()).throw(
+                    Q.QualificationError("bad selection")))),
+            ("inventory error", lambda kwargs: kwargs.update(
+                inventory_loader=lambda _toolchain: (_ for _ in ()).throw(
+                    Q.QualificationError("bad inventory")))),
+            ("empty inventory", lambda kwargs: kwargs.update(
+                inventory_loader=lambda _toolchain: {})),
+        )
+        for label, mutate in cases:
+            with self.subTest(label=label):
+                kwargs = self.prepare_kwargs()
+                mutate(kwargs)
+                with self.assertRaises(Q.QualificationError):
+                    Q.prepare_inputs(**kwargs)
+                self.assertFalse(kwargs["output_dir"].exists())
+
+    def test_prepare_refuses_partial_or_different_existing_destination(self) -> None:
+        kwargs = self.prepare_kwargs()
+        kwargs["output_dir"].mkdir()
+        kwargs["output_dir"].joinpath("identity.json").write_text("{}\n")
+        with self.assertRaisesRegex(Q.QualificationError, "incomplete or owned"):
+            Q.prepare_inputs(**kwargs)
+        self.assertFalse(kwargs["output_dir"].joinpath("inventory.json").exists())
+
+    def test_prepare_never_clobbers_concurrently_created_empty_directory(self) -> None:
+        kwargs = self.prepare_kwargs()
+        rename_exclusive = Q._rename_directory_exclusive
+
+        def racing_publish(source: Path, destination: Path) -> None:
+            destination.mkdir()
+            rename_exclusive(source, destination)
+
+        with mock.patch.object(
+                Q, "_rename_directory_exclusive", side_effect=racing_publish):
+            with self.assertRaisesRegex(Q.QualificationError, "incomplete or owned"):
+                Q.prepare_inputs(**kwargs)
+        self.assertTrue(kwargs["output_dir"].is_dir())
+        self.assertEqual(list(kwargs["output_dir"].iterdir()), [])
+        self.assertEqual(list(self.fixture.root.glob(
+            ".qualification-inputs.*.tmp")), [])
 
     def test_each_scene_gets_one_submission_and_zero_retries(self) -> None:
         runner = FakeRunner()
