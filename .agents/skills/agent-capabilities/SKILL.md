@@ -686,3 +686,23 @@ from the change that caused it.
 `pulp-format-core` and `pulp-format-view`. Note also that the umbrella must
 stay a real STATIC library rather than INTERFACE, because the export set
 expects an archive artifact.
+
+## Adding a target to `PULP_SDK_TARGETS` is public surface
+
+`PULP_SDK_TARGETS` in `tools/cmake/PulpInstallRules.cmake` is the export set, so
+appending a target publishes a new `Pulp::<name>` that outside projects can name
+in `target_link_libraries` and `find_package(Pulp COMPONENTS ...)`. It carries
+the ordinary compatibility weight even when the target is INTERFACE-only and
+ships no archive.
+
+Anything already in an exported target's link interface MUST be in that set:
+CMake refuses to export a target whose interface names one that is not. So an
+INTERFACE target introduced to narrow another target's link line is not optional
+to export, it is required by the export that motivated it.
+
+A target defined under `core/<x>/` but not owning a `core/` directory of its own
+draws a `module '<x>': CMake links pulp-<name> but modules.yaml doesn't list it`
+warning from `tools/check-docs.sh`. That warning is correct and unfixable from
+`modules.yaml`, whose entries are validated against `core/<name>/` existing;
+adding a row would convert a warning into a hard failure. `pulp-tracing`,
+`pulp-perfetto` and `pulp-cpp` sit in the same position.

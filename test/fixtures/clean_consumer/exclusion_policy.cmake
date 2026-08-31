@@ -34,10 +34,12 @@
 # as "the DSP closure is empty":
 #
 #   Pulp's own base modules. A DSP consumer necessarily links Pulp::signal,
-#     and through it music, timebase, runtime and platform. That those four
-#     arrive is the design; that pulp-runtime carries an HTTP stack is the
-#     problem, and it is caught below as `tls` rather than by objecting to the
-#     module itself.
+#     and through it music, timebase and foundation. That those arrive is the
+#     design. Pulp::runtime itself is no longer among them: signal, music and
+#     timebase name Pulp::foundation, the header-only Result and queue
+#     primitives, so the HTTP stack compiled into libpulp-runtime.a is no
+#     longer on a DSP consumer's link line. Nothing here objects to the base
+#     modules; `tls` below objects to what one of them used to drag along.
 #
 #   Highway (hwy). A SIMD kernel library is a reasonable thing for a DSP
 #     dependency to bring, and a consumer who wanted the DSP would not be
@@ -119,60 +121,69 @@ set(PULP_CLEAN_CONSUMER_REALIZED_BY_gpu
 
 # ── Recorded state ───────────────────────────────────────────────────────────
 #
-# Groups the minimal DSP consumer violates today, and the targets it acquires.
+# Groups the minimal DSP consumer violates today. The list is empty, and an
+# empty list is a result rather than an absence of one: every group above is
+# checked on every run, and the fixture refuses to report a verdict at all if
+# this SDK realizes none of them.
 #
-# `tls` is the whole list, and the measured route is:
+# `tls` was the one entry. The measured route was:
 #
 #   Pulp::signal -> Pulp::runtime -> Pulp::mbedtls
 #   Pulp::signal -> Pulp::runtime -> Pulp::mbedcrypto -> Pulp::everest
 #   Pulp::signal -> Pulp::runtime -> Pulp::mbedcrypto -> Pulp::p256m
 #
-# Pulp::signal names Pulp::runtime directly (alongside music and timebase) for
-# its queue types, and core/runtime compiles an HTTPS model downloader, an HTTP
-# client, a WebSocket channel and a socket layer into libpulp-runtime.a. Those
-# TUs need mbedTLS, so core/runtime links it PRIVATE, and PRIVATE on a static
-# library is still on the consumer's link line. A biquad therefore links a TLS
-# stack, not because anything in the DSP path uses one, but because the base
-# module every Pulp target sits on is not partitioned.
+# Pulp::signal named Pulp::runtime directly for its queue types, and
+# core/runtime compiles an HTTPS model downloader, an HTTP client, a WebSocket
+# channel and a socket layer into libpulp-runtime.a. Those TUs need mbedTLS, so
+# core/runtime links it PRIVATE, and PRIVATE on a static library is still on
+# the consumer's link line. A biquad therefore linked a TLS stack.
 #
-# Only three of the five are Pulp's own edge. runtime carries mbedtls,
-# mbedcrypto and mbedx509 as LINK_ONLY; everest and p256m are mbedcrypto's own
-# declared interface and arrive purely as a consequence. Cutting the three
-# LINK_ONLY edges removes all five, so the fix is smaller than the count
-# suggests.
+# Three edges carried it: signal, timebase and (through timebase) music each
+# named pulp::runtime. Everest and p256m were mbedcrypto's own declared
+# interface and arrived purely as a consequence, so cutting three edges removed
+# all five. They now name pulp::foundation, an INTERFACE target over the
+# header-only primitives those modules actually use: Result, TripleBuffer,
+# SeqLock, Slot and the SpscQueue wrapper. No header moved and no DSP changed;
+# the modules resolve the same include paths and stop requiring runtime's
+# object code, which is what was dragging mbedTLS along.
 #
-# What this costs, stated precisely, because the two halves differ and quoting
+# What that bought, stated precisely, because the two halves differ and quoting
 # only one of them misleads:
 #
-#   Build time  REAL. The link command for a biquad names libmbedcrypto.a,
-#               libmbedtls.a, libmbedx509.a, libeverest.a and libp256m.a, so a
-#               consumer cannot link DSP without roughly 1.3 MB of mbedTLS
-#               archives present. A DSP-only SDK cannot be produced today.
+#   Build time  REAL, and it was the whole cost. The link command for a biquad
+#               named libmbedcrypto.a, libmbedtls.a, libmbedx509.a,
+#               libeverest.a and libp256m.a, so a consumer could not link DSP
+#               without roughly 1.3 MB of mbedTLS archives present. A
+#               dependency-light DSP profile was not producible. It is now.
 #
-#   Binary      NONE measured here. The linked minimal consumer is ~36 KB and
-#               contains no mbedTLS, httplib or WebSocket symbols: a
-#               header-only biquad pulls in no runtime TU, so lazy static
-#               linking discards all of it. The adoption cost is dependency
-#               availability, not executable bloat.
+#   Binary      NONE, before or after. The linked minimal consumer was ~36 KB
+#               and contained no mbedTLS, httplib or WebSocket symbols even
+#               while the edge existed: a header-only biquad pulls in no
+#               runtime TU, so lazy static linking already discarded all of it.
+#               This is not a size win and should not be described as one.
 #
-# Nothing else is violated, which is worth recording as loudly as the violation
-# itself: the renderer, the JS engine, SDL, the plugin format SDKs, the host,
-# the inspector and the GPU stack all exist in this SDK and are genuinely
-# absent from the DSP closure. The monolith is real but it is one module deep,
-# and the fix is narrower than "split the SDK".
+# The header surface is unchanged and deliberately so. Pulp::foundation carries
+# runtime's whole include directory, because the headers did not move, so a
+# consumer can still reach `#include <pulp/runtime/http.hpp>` and will then
+# fail to link. This contract is about what a consumer must ACQUIRE to build,
+# and that is the link line. Partitioning the headers is separate work.
 #
-# `rust` is NOT in this list and is not clean either: no installed target
-# realizes it in any configuration measured so far, so the auditor reports it
-# unenforceable and refuses to score it. Treat it as unproven.
-set(PULP_CLEAN_CONSUMER_KNOWN_VIOLATED_GROUPS
-    tls)
+# The other groups remain as measured: the renderer, the JS engine, SDL, the
+# plugin format SDKs, the host, the inspector and the GPU stack all exist in
+# this SDK and are genuinely absent from the DSP closure.
+#
+# `rust` is not clean either, and its absence from this list does not say it
+# is: no installed target realizes it in any configuration measured so far, so
+# the auditor reports it unenforceable and refuses to score it. Treat it as
+# unproven.
+set(PULP_CLEAN_CONSUMER_KNOWN_VIOLATED_GROUPS "")
 
-set(PULP_CLEAN_CONSUMER_KNOWN_OFFENDERS_tls
-    Pulp::everest
-    Pulp::mbedcrypto
-    Pulp::mbedtls
-    Pulp::mbedx509
-    Pulp::p256m)
+# One PULP_CLEAN_CONSUMER_KNOWN_OFFENDERS_<group> list per recorded group, so
+# the gate can fail on an offender set that changed while the group stayed
+# violated. There are no recorded groups, so there are none of these. The
+# mechanism is what holds the line if one comes back, and it fails in both
+# directions: a new violation is a regression, and a recorded violation that is
+# no longer reachable is a stale record.
 
 # Symbols that prove a capability was compiled INTO an archive the consumer
 # links, whether or not any CMake edge names it. The link-graph audit is blind

@@ -26,7 +26,8 @@ include(GNUInstallDirs)
 # `pulp-render`, are optional in smoke or non-GPU builds, so only export targets
 # that were actually configured in this build tree.
 set(PULP_SDK_TARGETS
-    pulp-platform pulp-runtime pulp-music pulp-timebase pulp-timeline
+    pulp-platform pulp-foundation pulp-runtime pulp-music pulp-timebase
+    pulp-timeline
 )
 if(TARGET pulp-project-package)
     list(APPEND PULP_SDK_TARGETS pulp-project-package)

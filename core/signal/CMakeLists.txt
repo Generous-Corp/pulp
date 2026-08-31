@@ -7,10 +7,15 @@ target_include_directories(pulp-signal
         $<INSTALL_INTERFACE:include>
 )
 
-# Public signal headers use music vocabulary, runtime queues, and timebase's
-# canonical persisted beat-division table. Propagate those dependencies so
+# Public signal headers use music vocabulary, runtime's header-only queues, and
+# timebase's canonical persisted beat-division table. Propagate those so
 # consumers of pulp::signal do not have to know its header closure.
-target_link_libraries(pulp-signal INTERFACE pulp::music pulp::runtime pulp::timebase)
+#
+# pulp::foundation, not pulp::runtime: the only runtime headers the DSP reaches
+# for are TripleBuffer, SeqLock and Slot, all templates with no object code
+# behind them. Naming the full runtime target instead would put its mbedTLS
+# link items on the link command of anything that computes filter coefficients.
+target_link_libraries(pulp-signal INTERFACE pulp::music pulp::foundation pulp::timebase)
 
 # Link Accelerate framework on Apple for vDSP FFT optimization
 if(APPLE)

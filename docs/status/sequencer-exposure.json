@@ -2004,6 +2004,101 @@
      ]
     }
    }
+  },
+  {
+   "id": "timebase-foundation-link-boundary",
+   "title": "Timebase links the header-only foundation target instead of the full runtime",
+   "classification": "public_sdk",
+   "delivery_state": "pending",
+   "claim_id": "dsp-foundation-link-boundary-20260829",
+   "owned_paths": [
+    ".agents/skills/playback/SKILL.md",
+    ".agents/skills/timeline/SKILL.md",
+    "core/runtime/CMakeLists.txt",
+    "core/timebase/CMakeLists.txt",
+    "docs/guides/timeline-sdk.md",
+    "examples/timeline-sdk-consumer/CMakeLists.txt",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/scripts/timeline_engine_dependency_floor_check.py"
+   ],
+   "evidence": [
+    {
+     "path": "examples/timeline-sdk-consumer/CMakeLists.txt",
+     "needles": [
+      "Pulp::foundation"
+     ]
+    },
+    {
+     "path": "docs/guides/timeline-sdk.md",
+     "needles": [
+      "Pulp::foundation"
+     ]
+    },
+    {
+     "path": "tools/scripts/timeline_engine_dependency_floor_check.py",
+     "needles": [
+      "FORBIDDEN_LINKS"
+     ]
+    },
+    {
+     "path": ".agents/skills/timeline/SKILL.md",
+     "needles": [
+      "Pulp::foundation"
+     ]
+    },
+    {
+     "path": ".agents/skills/playback/SKILL.md",
+     "needles": [
+      "FORBIDDEN_LINKS"
+     ]
+    }
+   ],
+   "surfaces": {
+    "installed_sdk": {
+     "disposition": "exposed",
+     "rationale": "Pulp::foundation is a new exported target in PULP_SDK_TARGETS, and Pulp::timebase's exported link interface changes from Pulp::runtime to Pulp::foundation. The engine closure a timeline consumer links therefore changes, which is why the exact closure lists in the timeline SDK consumer and the target table in the timeline SDK guide had to change with it. No header moves and no engine API is added, removed, or altered: the change is which target carries the header-only Result and queue primitives, so a consumer of the timebase no longer acquires libpulp-runtime.a or the mbedTLS link items its PRIVATE dependencies propagate.",
+     "evidence": [
+      {
+       "kind": "sdk_target",
+       "path": "tools/cmake/PulpInstallRules.cmake",
+       "needles": [
+        "pulp-foundation"
+       ]
+      },
+      {
+       "kind": "sdk_target",
+       "path": "core/runtime/CMakeLists.txt",
+       "needles": [
+        "add_library(pulp-foundation INTERFACE)",
+        "pulp::foundation"
+       ]
+      },
+      {
+       "kind": "sdk_target",
+       "path": "core/timebase/CMakeLists.txt",
+       "needles": [
+        "pulp::foundation"
+       ]
+      }
+     ]
+    },
+    "offline_timeline_cli": {
+     "disposition": "not_applicable",
+     "rationale": "No Timeline command, argument, or handler changes; this is a link-graph and export-set change with no CLI projection."
+    },
+    "offline_timeline_mcp": {
+     "disposition": "not_applicable",
+     "rationale": "No MCP operation, schema, or handler changes; the affected targets carry no MCP projection."
+    },
+    "live_product_control": {
+     "disposition": "not_applicable",
+     "rationale": "No capability, operation, executor binding, or profile policy is added or changed, so no live control grant is created or widened."
+    },
+    "design_time_agent_manifest": {
+     "disposition": "not_applicable",
+     "rationale": "No authoring capability is described or altered; the agent capability manifest is unchanged by this slice."
+    }
+   }
   }
  ],
  "tombstones": []

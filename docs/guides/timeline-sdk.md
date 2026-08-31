@@ -33,22 +33,27 @@ The three requested engine targets produce this installed Pulp link closure:
 | `Pulp::timeline` | Immutable project model, commands, persistence |
 | `Pulp::playback` | Transport, compilation, note/audio/automation rendering |
 | `Pulp::platform` | Runtime's portable platform primitives |
-| `Pulp::runtime` | Results, queues, slots, files, and worker primitives |
+| `Pulp::runtime` | Files, worker primitives, and the rest of the base runtime |
+| `Pulp::foundation` | The header-only Result, queue, and slot primitives, carrying no runtime object code |
 | `Pulp::audio` | Audio buffers, decoded assets, and file support |
 | `Pulp::midi` | MIDI event types and scheduling |
 | `Pulp::state` | Parameter-event and state primitives used by audio |
 | `Pulp::signal` | Header-only signal utilities used by audio |
 | `Pulp::events` | Static implementation dependency of `Pulp::state` listener dispatch |
 
-That is ten first-party Pulp libraries. `Pulp::events` is a static
+That is eleven first-party Pulp libraries. `Pulp::events` is a static
 `LINK_ONLY` dependency of `Pulp::state`; omitting it from the count would not
-describe the installed target graph accurately.
+describe the installed target graph accurately. `Pulp::foundation` is an
+INTERFACE target over headers that `Pulp::runtime` also carries, so it adds a
+name to the closure and no archive to the link; `Pulp::timebase` names it
+instead of `Pulp::runtime` so a consumer of the timebase alone does not acquire
+the runtime's HTTP and TLS link items.
 
 The complete static-link closure also contains six exported implementation
 archives: `Pulp::hwy`, `Pulp::mbedcrypto`, `Pulp::mbedx509`, `Pulp::mbedtls`,
 `Pulp::everest`, and `Pulp::p256m`. They support runtime SIMD and cryptography;
 they are not additional timeline APIs. The external consumer smoke audits all
-sixteen targets and fails if canvas, view, GPU, graph, format, standalone, or
+seventeen targets and fails if canvas, view, GPU, graph, format, standalone, or
 host targets enter the closure.
 
 Plugin hosting is deliberately outside the engine. A desktop integration
