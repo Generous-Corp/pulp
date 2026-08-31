@@ -852,6 +852,30 @@ add_test(NAME cmake-control-shipping-matrix
 set_tests_properties(cmake-control-shipping-matrix PROPERTIES
     LABELS "cmake;control;ship;matrix" TIMEOUT 180)
 
+# Every CTest manifest must parse, including the ones behind an off-by-default
+# option. A manifest body guarded by a flag such as PULP_ENABLE_SCENE3D is
+# never read by an ordinary configure, so a syntax error inside it survives a
+# fully green CI run and only surfaces for whoever next enables the flag. The
+# checker parses each manifest with CMake itself and runs in well under a
+# second, so it stays on the ordinary PR lane.
+add_test(NAME cmake-test-manifest-parse
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_MANIFEST_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cmake
+        -DPULP_MANIFEST_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-manifest-parse
+        -P ${CMAKE_SOURCE_DIR}/tools/cmake/CheckTestManifestParse.cmake)
+set_tests_properties(cmake-test-manifest-parse PROPERTIES
+    LABELS "cmake;gate" TIMEOUT 120)
+
+# Negative control for the checker above: it must reject a truncated command,
+# an orphaned endif(), an unclosed if(), and an empty manifest directory.
+add_test(NAME cmake-test-manifest-parse-selftest
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_MANIFEST_GUARD=${CMAKE_SOURCE_DIR}/tools/cmake/CheckTestManifestParse.cmake
+        -DPULP_MANIFEST_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-manifest-parse-selftest
+        -P ${CMAKE_SOURCE_DIR}/tools/cmake/CheckTestManifestParseSelfTest.cmake)
+set_tests_properties(cmake-test-manifest-parse-selftest PROPERTIES
+    LABELS "cmake;gate" TIMEOUT 120)
+
 # Validation contract tests — schema and reality snapshot
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
