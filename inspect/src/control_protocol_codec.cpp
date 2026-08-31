@@ -506,6 +506,10 @@ std::string encode_control_envelope(const ControlEnvelope& envelope) {
                 payload.addMember("bootstrap_base64",
                                   choc::value::createString(message.bootstrap_base64));
                 payload.addMember("nonce", choc::value::createString(message.nonce));
+            } else if constexpr (std::is_same_v<T, ControlHostPreflightReceiptEnvelope>) {
+                valid = valid_hash(message.nonce);
+                kind = "host-preflight-receipt";
+                payload.addMember("nonce", choc::value::createString(message.nonce));
             } else if constexpr (std::is_same_v<T, ControlHostExecuteEnvelope>) {
                 valid = valid_host_execute(message);
                 kind = "host-execute";

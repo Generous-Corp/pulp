@@ -159,6 +159,18 @@ TEST_CASE("private preflight rejects wrong process authority nonce and malformed
     CHECK_FALSE(malformed.started);
     CHECK(malformed.diagnostics.status == ControlHostPreflightStatus::MalformedMessage);
 
+    auto missing_receipt = launch("--missing-receipt");
+    CHECK_FALSE(missing_receipt.started);
+    CHECK(missing_receipt.diagnostics.status == ControlHostPreflightStatus::Timeout);
+
+    auto wrong_receipt = launch("--wrong-receipt-nonce");
+    CHECK_FALSE(wrong_receipt.started);
+    CHECK(wrong_receipt.diagnostics.status == ControlHostPreflightStatus::NonceMismatch);
+
+    auto replayed_response = launch("--replayed-preflight-response");
+    CHECK_FALSE(replayed_response.started);
+    CHECK(replayed_response.diagnostics.status == ControlHostPreflightStatus::NonceMismatch);
+
 #else
     SUCCEED("unsupported peer-verification platforms fail before authority release");
 #endif

@@ -252,7 +252,9 @@ TEST_CASE("trusted host launcher gives an exact preflighted child a fresh enroll
     REQUIRE(launched.launched());
     REQUIRE(launched.process);
     CHECK(enrollments.size() == 1);
-    CHECK(launched.process->wait().exit_code == 0);
+    const auto process = launched.process->wait();
+    INFO(process.stderr_output);
+    CHECK(process.exit_code == 0);
 #endif
 }
 
