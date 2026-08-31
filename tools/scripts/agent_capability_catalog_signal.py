@@ -848,7 +848,7 @@ EXPORTS = [
             role="designer", kind="cpp_function", include="pulp/signal/fir_design.hpp",
             qualified_name="pulp::signal::design_fir_least_squares",
             target="Pulp::signal",
-            header_fingerprint="sha256:55a8d1dd6b4b8871a84b15f0e60f8ca2a840471fb092a59d313be4bff38a3162",
+            header_fingerprint="sha256:c2cece53531b491e436b8a358d06b54bb5f4babe432e82ad4938f0ab8edd1744",
             address_expression=(
                 "static_cast<pulp::signal::FirLeastSquaresResult (*)"
                 "(std::span<const pulp::signal::FirDesignPoint>, "
@@ -860,6 +860,51 @@ EXPORTS = [
             "role": "designer", "binding": "pulp::signal::design_fir_least_squares",
             "operation": "function_call",
             "arguments": "std::span<const pulp::signal::FirDesignPoint>{}, pulp::signal::FirLeastSquaresOptions{}",
+        }],
+    ),
+    capability(
+        key="signal.fir-equiripple-design", domain="signal",
+        summary=(
+            "Offline weighted-minimax (Parks-McClellan Remez exchange) design of bounded real "
+            "Type I-IV linear-phase FIRs from band requirements."
+        ),
+        rt_class="offline",
+        lifecycle={"construction": "control", "prepare": "offline design; may allocate bounded workspace",
+                   "process": "offline design request", "reset": "none",
+                   "release": "destruction off audio"},
+        state_model=(
+            "Bounded band requirements, a dense exchange grid, the alternation set, and returned "
+            "coefficients, per-band ripple, extremal frequencies, and iteration count."
+        ),
+        seed_model="none",
+        determinism={"repeatability": "bit_exact", "block_partition": "not_applicable",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain=(
+            "ascending disjoint bands in [0, pi] with signed amplitude and positive weight, plus a "
+            "bounded tap/type specification and iteration budget"
+        ),
+        output_domain=(
+            "real linear-phase FIR coefficients, achieved per-band ripple, the alternation set, and "
+            "the equalized minimax error"
+        ),
+        units=["radians per sample", "taps", "linear amplitude", "weighted minimax error"],
+        latency="offline whole-design exchange", tail="none", scheduling="offline request",
+        bindings=[binding(
+            role="designer", kind="cpp_function", include="pulp/signal/fir_design.hpp",
+            qualified_name="pulp::signal::design_fir_equiripple",
+            target="Pulp::signal",
+            header_fingerprint="sha256:c2cece53531b491e436b8a358d06b54bb5f4babe432e82ad4938f0ab8edd1744",
+            address_expression=(
+                "static_cast<pulp::signal::FirEquirippleResult (*)"
+                "(std::span<const pulp::signal::FirEquirippleBand>, "
+                "const pulp::signal::FirEquirippleOptions&)>("
+                "&pulp::signal::design_fir_equiripple)"
+            ),
+        )],
+        _link_probes=[{
+            "role": "designer", "binding": "pulp::signal::design_fir_equiripple",
+            "operation": "function_call",
+            "arguments": "std::span<const pulp::signal::FirEquirippleBand>{}, pulp::signal::FirEquirippleOptions{}",
         }],
     ),
     capability(
@@ -897,7 +942,7 @@ EXPORTS = [
             role="reconstructor", kind="cpp_function", include="pulp/signal/fir_design.hpp",
             qualified_name="pulp::signal::reconstruct_minimum_phase_fir",
             target="Pulp::signal",
-            header_fingerprint="sha256:55a8d1dd6b4b8871a84b15f0e60f8ca2a840471fb092a59d313be4bff38a3162",
+            header_fingerprint="sha256:c2cece53531b491e436b8a358d06b54bb5f4babe432e82ad4938f0ab8edd1744",
             address_expression=(
                 "static_cast<pulp::signal::MinimumPhaseFirResult (*)"
                 "(std::span<const double>, "

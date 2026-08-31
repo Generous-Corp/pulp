@@ -16,7 +16,11 @@ target_include_directories(pulp-sequence
 target_link_libraries(pulp-sequence
     PUBLIC
         pulp::audio
-        pulp::format
+        # Only the authoring vocabulary is used here: process_context.hpp,
+        # graph_runtime_executor.hpp and processor.hpp, none of which reaches
+        # pulp/view. The umbrella would add the editor surface and its
+        # Skia/Dawn closure behind two public headers.
+        pulp::format-core
         pulp::graph
         pulp::midi
         pulp::playback

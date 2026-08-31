@@ -37,11 +37,16 @@ will want to "fix" it. Do not. It is the only lane that can see this class of bu
 from __future__ import annotations
 
 import re
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from repo_source_scan import iter_sources  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SKIP = ("external", "build", ".git", "node_modules", "planning")
 
 # A TU may redefine an ODR-capable toggle ONLY if it is compiled into its own
 # binary that links no default-built TU. Each entry must say which binary.
@@ -53,12 +58,8 @@ ALLOWED_VARIANT_TUS = {
 }
 
 
-def sources(*globs: str):
-    for g in globs:
-        for p in REPO_ROOT.rglob(g):
-            if any(s in p.parts for s in SKIP):
-                continue
-            yield p
+def sources(*globs: str, root: Path | None = None):
+    return iter_sources(root or REPO_ROOT, globs)
 
 
 def odr_capable_toggles() -> dict[str, Path]:
@@ -127,6 +128,25 @@ class MacroGatedHeaderFunctionsAreODRSafe(unittest.TestCase):
             "ALLOWED_VARIANT_TUS here.\n\n"
             + "\n".join(violations),
         )
+
+    def test_scan_ignores_generated_and_foreign_trees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            planted = {
+                "core/signal/svf.hpp",
+                "build/_deps/dep-src/dep.hpp",
+                "build-cov/gen/covered.hpp",
+                "external/choc/choc.h",
+                ".claude/worktrees/agent-0/core/signal/svf.hpp",
+            }
+            for relative in planted:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("#define PULP_PLANTED 1\n", encoding="utf-8")
+            found = {
+                str(p.relative_to(root)) for p in sources("*.hpp", "*.h", root=root)
+            }
+            self.assertEqual(found, {"core/signal/svf.hpp"})
 
     def test_the_debug_lane_that_catches_this_is_still_debug(self) -> None:
         """`.shipyard/config.toml`'s macOS lane MUST stay -O0.

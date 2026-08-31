@@ -40,7 +40,8 @@ protecting.
 
 > **Most "obviously wrong" designs are scar tissue. Find the scar before you cut.**
 
-**Do all four. Write the answers into the report. A proposal without this section is invalid.**
+**Do every check below. Write the answers into the report. A proposal without these
+sections is invalid.**
 
 ### 0.1 — What is this repo's toolchain? (DETECT, never assume)
 
@@ -120,6 +121,41 @@ which you must say plainly rather than paper over.
 FIX rather than to a measurement: prove the instrument can report the thing before you trust
 it. If that skill is available in your environment, use it here.)*
 
+### 0.6 — ORCHESTRATOR INDEPENDENCE: does the product fail without the governor?
+
+Shipyard, tartci, hosted CI, wrappers, and agent hooks can provide valuable
+defense-in-depth. They are not part of the public Pulp or Forge runtime. Every
+reliability report that involves one of those orchestrators must therefore classify
+whether the same failure can reach a developer or user who runs Pulp/Forge directly.
+
+Add the exact `## Orchestrator independence` block from the report template below and
+choose one classification:
+
+- `EXPOSED`: the failure can occur through public source, CLI, SDK, app, plugin, or
+  standalone use without the orchestrator. The fix is incomplete until the public
+  Pulp/Forge layer owns a source-level mechanism **and a focused proof**. An
+  orchestrator-side repair may remain as optional defense-in-depth.
+- `NOT EXPOSED`: the failure exists only in orchestrator state, queueing, fleet
+  custody, or another non-public layer. Cite concrete evidence. The public mechanism
+  and public proof fields must each say `N/A — <reason>`; bare `N/A` is not evidence.
+
+Do not classify from component names. A failure discovered by Shipyard can still be a
+public Pulp lifecycle bug, and a failure seen while building Pulp can still be purely a
+Shipyard queue bug. Trace the failure to the lowest layer that can independently
+reproduce it.
+
+Before publishing the report, run the cheap static check (no build, network, or
+Shipyard required):
+
+```sh
+python3 tools/scripts/friction_report_exposure_check.py planning/friction/<report>.md
+```
+
+This check validates that the classification and evidence are present. It deliberately
+does not claim the named source fix works; the report's focused proof remains the
+authority for that. An `EXPOSED` report cannot move to `FIXED`/`RESOLVED` until that
+public mechanism and proof have landed; an orchestrator-only receipt cannot substitute.
+
 ---
 
 ## Confidence — state it, and say what would raise it
@@ -190,6 +226,13 @@ The tactical thing that gets this specific instance moving. Usually boring.
 ## The fix forever (prevent)
 The mechanism that makes this class impossible. Ranked if there are options,
 with the cost of each. Say plainly if the good fix is blocked on something else.
+
+## Orchestrator independence
+**Public exposure:** EXPOSED | NOT EXPOSED
+**Evidence:** <lowest independently reproducing layer and exact evidence>
+**Public mechanism:** <Pulp/Forge source path or N/A — reason>
+**Public proof:** <focused public-path test/receipt or N/A — reason>
+**Orchestrator role:** <optional defense-in-depth, primary orchestrator-only fix, or N/A — reason>
 
 ## Routing
 - [ ] Fix now, by me

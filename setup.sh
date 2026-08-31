@@ -8,6 +8,9 @@
 #   ./setup.sh --deps-only  # Bootstrap dependencies without configuring/building
 #   ./setup.sh --non-interactive # Never prompt or install system packages
 #   ./setup.sh --dry-run    # Show what would be done without doing it
+#   ./setup.sh --debug      # Configure/build Debug instead of Release
+#   ./setup.sh --examples   # Also build the example projects
+#   ./setup.sh --print-plan # Print the resolved configure/build plan and exit
 #   ./setup.sh --print-skia-ci-dest # Resolve the exact CI cache generation
 
 set -e
@@ -20,7 +23,15 @@ CI_MODE=false
 DEPS_ONLY=false
 NON_INTERACTIVE=false
 PRINT_SKIA_CI_DEST=false
+PRINT_PLAN=false
 ERRORS=0
+
+# Bootstrap builds Release without examples. Release is this repo's documented
+# default build type, and a from-scratch examples tree is a long cost nobody
+# asked for when the goal is a working checkout. Both are opt-in below, and the
+# resulting configure matches the required CI gate's own arguments.
+BUILD_TYPE=Release
+BUILD_EXAMPLES=OFF
 
 for arg in "$@"; do
     case "$arg" in
@@ -29,6 +40,11 @@ for arg in "$@"; do
         --deps-only) DEPS_ONLY=true ;;
         --non-interactive) NON_INTERACTIVE=true ;;
         --print-skia-ci-dest) PRINT_SKIA_CI_DEST=true ;;
+        --debug)   BUILD_TYPE=Debug ;;
+        --release) BUILD_TYPE=Release ;;
+        --examples) BUILD_EXAMPLES=ON ;;
+        --no-examples) BUILD_EXAMPLES=OFF ;;
+        --print-plan) PRINT_PLAN=true ;;
         --help|-h)
             echo "Usage: ./setup.sh [--ci] [--deps-only] [--non-interactive] [--dry-run]"
             echo ""
@@ -37,11 +53,26 @@ for arg in "$@"; do
             echo "  --deps-only Bootstrap external dependencies and stop before configure/build"
             echo "  --non-interactive Never prompt or install missing system packages"
             echo "  --dry-run   Show what would be done without doing it"
+            echo "  --debug     Configure/build Debug (default: Release)"
+            echo "  --release   Configure/build Release (the default)"
+            echo "  --examples  Also build the example projects (default: off)"
+            echo "  --no-examples Skip the example projects (the default)"
+            echo "  --print-plan Print the resolved configure/build plan and exit"
             echo "  --print-skia-ci-dest Print the manifest-selected CI Skia cache and exit"
             exit 0
             ;;
     esac
 done
+
+# The resolved plan is the one testable artifact of the argument parsing above,
+# so expose it directly instead of making a caller infer it from a full run.
+if $PRINT_PLAN; then
+    echo "build_type=$BUILD_TYPE"
+    echo "examples=$BUILD_EXAMPLES"
+    echo "deps_only=$DEPS_ONLY"
+    echo "configure=cmake -S $REPO_ROOT -B $REPO_ROOT/build -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DPULP_BUILD_EXAMPLES=$BUILD_EXAMPLES"
+    exit 0
+fi
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1130,14 +1161,19 @@ fi
 
 step "Configuring CMake"
 
-cmake -S "$REPO_ROOT" -B "$REPO_ROOT/build" -DCMAKE_BUILD_TYPE=Debug
+cmake -S "$REPO_ROOT" -B "$REPO_ROOT/build" \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DPULP_BUILD_EXAMPLES="$BUILD_EXAMPLES"
 
 # ── Build ───────────────────────────────────────────────────────────────────
 
 step "Building"
 
-JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
-cmake --build "$REPO_ROOT/build" -j"$JOBS"
+# Route through the host build governor rather than claiming every core: this
+# script runs on shared machines where a whole-machine build starves the other
+# work already in flight. The wrapper supplies the parallelism, so the build
+# command must not carry its own -j.
+bash "$REPO_ROOT/tools/ci/governed-build.sh" cmake --build "$REPO_ROOT/build"
 
 # ── Test ────────────────────────────────────────────────────────────────────
 
@@ -1145,7 +1181,7 @@ step "Running tests"
 
 CTEST_ARGS=(--test-dir "$REPO_ROOT/build" --output-on-failure)
 if [ "$OS" = "windows" ]; then
-    CTEST_ARGS+=(-C Debug)
+    CTEST_ARGS+=(-C "$BUILD_TYPE")
 fi
 ctest "${CTEST_ARGS[@]}"
 
@@ -1171,6 +1207,10 @@ for example_dir in "$REPO_ROOT/build/examples"/*/; do
         [ -x "$bin" ] && [ ! -d "$bin" ] && echo "    Standalone: $(basename "$bin")"
     done
 done
+
+if [ "$BUILD_EXAMPLES" = "OFF" ]; then
+    echo "    (no example projects — re-run with --examples to build them)"
+fi
 
 echo ""
 echo "  CLI:  $REPO_ROOT/build/tools/cli/pulp"

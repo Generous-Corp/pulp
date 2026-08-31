@@ -3882,6 +3882,21 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `pulp config set import_design.browser {auto,managed,system}` picks the mode;
   `managed-browser-unavailable` fires only when `managed` is selected
   explicitly and nothing is installed.
+- **The Node capture tests do NOT share the C++ discovery order above.**
+  `browser_capture/capture.integration.test.mjs` carries its own
+  `installedBrowser()` resolver, and it is the only browser resolution in the
+  repository written in JavaScript. Whatever the C++ probe learns about managed
+  browsers, `current.json`, or config modes is invisible to it, so a provisioned
+  browser reaches the Node suite only through the environment. Hand it
+  `PULP_DESIGN_BROWSER`, the same variable `collect_browser_candidates` reads.
+  Anything else falls through to the hardcoded system installations, which
+  silently substitutes an unpinned host Chrome for the version the caller
+  verified. The macOS gate provisions exactly this way: it downloads a
+  checksum-pinned Chrome for Testing and publishes `PULP_DESIGN_BROWSER` to
+  `$GITHUB_ENV` for the `pulp-browser-capture-node-integration` ctest. When you
+  add a browser-driven `.mjs` test, read that variable rather than growing a
+  second candidate list, and remember that on a host with no system Chrome the
+  cost of getting this wrong is a silent skip rather than a failure.
 - **"Could not read the version" is not "wrong version".** Reading `--version`
   has been observed to fail once and then succeed moments later on the same
   browser, and it used to surface as "too old or incompatible" — a message that
@@ -6477,7 +6492,13 @@ already-working controls did not move.
 Reuse `browser_process.mjs` rather than spawning Chrome directly: it already
 spawns detached with an owned profile directory, and `terminateBrowser` signals
 the process GROUP. Chrome forks renderer and GPU helpers, so killing the parent
-alone orphans them.
+alone orphans them. The launcher also holds a private pipe to a detached
+guardian: if the importing Node process is killed before its `finally` block can
+run, pipe closure makes the guardian terminate only the browser whose process
+identity and `--user-data-dir` match the owned profile. A later capture removes
+an abandoned `pulp-browser-capture-*` profile only when its ownership marker
+proves the recorded owner is gone; mismatched or ambiguous processes and
+profiles are preserved fail-closed.
 
 ## Scoring a native panel — the instrument lies in two specific ways
 

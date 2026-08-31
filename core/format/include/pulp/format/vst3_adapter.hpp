@@ -54,6 +54,28 @@
 
 namespace pulp::format::vst3 {
 
+// Constructs the editor IPlugView, defined in vst3_plug_view.cpp.
+//
+// This declaration is the adapter's only seam to its own GUI, and it is
+// deliberately view-free: PulpPlugView owns a ViewBridge and a
+// view::PluginViewHost, so naming the concrete type here would put
+// pulp/view on the include path of every translation unit that adapts VST3
+// audio. Returning the SDK interface instead keeps the audio adapter
+// compilable without the view layer, which is what lets it live in
+// pulp-format-core.
+//
+// vst3_plug_view.cpp is compiled per-plugin rather than into the shared
+// library, so this resolves the same way the direct constructor call did:
+// an undefined symbol satisfied by the plugin target.
+//
+// Both this call site and the definition are guarded by PULP_VST3_GUI, so
+// the two must agree: a GUI-capable adapter linked against a non-GUI
+// vst3_plug_view.cpp leaves this symbol undefined at link time rather than
+// silently losing the editor.
+Steinberg::IPlugView* make_plug_view(Processor& processor,
+                                     state::StateStore& store,
+                                     runtime::AliveToken::Handle owner_alive);
+
 // The VST3 combined processor + controller
 // Wraps a pulp::format::Processor for the VST3 host
 //

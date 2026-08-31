@@ -21,7 +21,7 @@
       },
       "midi": {
         "state": "partial",
-        "capabilities": 16
+        "capabilities": 10
       },
       "music": {
         "state": "partial",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 59
+        "capabilities": 60
       },
       "timebase": {
         "state": "partial",
@@ -655,67 +655,6 @@
       "contract_digest": "sha256:860d679e1e74767b8645f6e7175e7b13f999ea6f4bd03fdb32649b6b5fd665a8"
     },
     {
-      "key": "midi.chord-memory",
-      "domain": "midi",
-      "summary": "Bounded chord memory that captures a chord as an interval shape and replays it from single notes in parallel, per-key, and scale-degree modes, optionally revoiced by minimum-motion voice leading.",
-      "rt_class": "audio",
-      "lifecycle": {
-        "construction": "control",
-        "prepare": "reserve output and ledgers on control",
-        "process": "audio",
-        "reset": "audio with prepared output",
-        "release": "none"
-      },
-      "state_model": "Fixed capture slots and a bounded active-trigger table retain each sounding chord's owned notes without allocation.",
-      "seed_model": "none; voicing selection is deterministic",
-      "determinism": {
-        "repeatability": "bit_exact",
-        "block_partition": "invariant",
-        "platform_scope": "same_build",
-        "transport_history": "input"
-      },
-      "input_domain": "captured interval shapes and a MIDI event stream",
-      "output_domain": "owned note-on and note-off MIDI event stream",
-      "units": [
-        "MIDI note",
-        "semitones",
-        "velocity",
-        "scale degree"
-      ],
-      "latency": "none; chords are emitted at the trigger's own sample offset",
-      "tail": "owned chord releases",
-      "scheduling": "input-offset",
-      "bindings": [
-        {
-          "role": "entrypoint",
-          "kind": "cpp_type",
-          "include": "pulp/midi/chord_memory.hpp",
-          "qualified_name": "pulp::midi::ChordMemory<>",
-          "target": "Pulp::midi",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        }
-      ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "status": "usable",
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:4203d6bfbda87423b6ffa248c70be53ae5e95eddef16d5f64abd84701f58fef1"
-    },
-    {
       "key": "midi.controller-mapping",
       "domain": "midi",
       "summary": "Fixed-capacity controller remapping with bounded physical-domain smoothing.",
@@ -776,66 +715,6 @@
       "contract_digest": "sha256:bb10c5a5d34f7f201defb44c5a9b87ff7b63a149dcd6a7728b57630e50f02cc0"
     },
     {
-      "key": "midi.humanize",
-      "domain": "midi",
-      "summary": "Seeded timing and velocity jitter over note attacks, with forward-only timing so the kernel stays causal and its latency equals the declared bound.",
-      "rt_class": "audio",
-      "lifecycle": {
-        "construction": "control",
-        "prepare": "reserve output and ledgers on control",
-        "process": "audio",
-        "reset": "audio with prepared output",
-        "release": "none"
-      },
-      "state_model": "One pending attack per key in a fixed key-space table; no allocation on any path.",
-      "seed_model": "explicit spec seed indexed by the event's absolute sample coordinate",
-      "determinism": {
-        "repeatability": "bit_exact",
-        "block_partition": "invariant",
-        "platform_scope": "same_build",
-        "transport_history": "input"
-      },
-      "input_domain": "MIDI event stream with absolute block position",
-      "output_domain": "timing- and velocity-jittered MIDI event stream",
-      "units": [
-        "samples",
-        "MIDI note",
-        "velocity"
-      ],
-      "latency": "up to the declared timing jitter bound",
-      "tail": "pending attacks released on flush",
-      "scheduling": "absolute-sample",
-      "bindings": [
-        {
-          "role": "entrypoint",
-          "kind": "cpp_type",
-          "include": "pulp/midi/humanize.hpp",
-          "qualified_name": "pulp::midi::Humanize<>",
-          "target": "Pulp::midi",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        }
-      ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "status": "usable",
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:5eef4cdc9af21ef52ef177965ec0d00435b91650620de7e5add882fd03ffa396"
-    },
-    {
       "key": "midi.keyboard-split",
       "domain": "midi",
       "summary": "Lifecycle-safe two-way keyboard split for MIDI 1 and UMP event streams.",
@@ -894,65 +773,6 @@
         }
       },
       "contract_digest": "sha256:69f5a1211ca7e43496604f4c269c3fe9d157a2b5e71856f840ae22074a6a5349"
-    },
-    {
-      "key": "midi.latch",
-      "domain": "midi",
-      "summary": "Hold and toggle note retention with depth-counted balanced releases, so repeated attacks on one key never leak or double-release.",
-      "rt_class": "audio",
-      "lifecycle": {
-        "construction": "control",
-        "prepare": "reserve output and ledgers on control",
-        "process": "audio",
-        "reset": "audio with prepared output",
-        "release": "none"
-      },
-      "state_model": "Retention and physical-key depth counters over the whole 16x128 key space, so retention cannot overflow and needs no allocation.",
-      "seed_model": "none; the kernel is fully deterministic",
-      "determinism": {
-        "repeatability": "bit_exact",
-        "block_partition": "invariant",
-        "platform_scope": "same_build",
-        "transport_history": "input"
-      },
-      "input_domain": "MIDI event stream",
-      "output_domain": "retained note-on and note-off MIDI event stream",
-      "units": [
-        "MIDI note",
-        "velocity"
-      ],
-      "latency": "none; events are emitted at their own sample offset",
-      "tail": "retained notes released on flush",
-      "scheduling": "input-offset",
-      "bindings": [
-        {
-          "role": "entrypoint",
-          "kind": "cpp_type",
-          "include": "pulp/midi/latch.hpp",
-          "qualified_name": "pulp::midi::Latch",
-          "target": "Pulp::midi",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        }
-      ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "status": "usable",
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:808d5c3930d378b9082148c1535460adbc5ce3786a72d049477a5ab28c1615bb"
     },
     {
       "key": "midi.linear-step-player",
@@ -1139,70 +959,6 @@
       "contract_digest": "sha256:fc7544ee9d95a740445ebeb9801df6f01d49a7115f5fe1b07c189271de0dd485"
     },
     {
-      "key": "midi.note-delay",
-      "domain": "midi",
-      "summary": "Bounded MIDI note delay on a tempo division or millisecond clock, with velocity decay and cumulative per-repeat transposition. The dry note passes through, so it is a send.",
-      "rt_class": "audio",
-      "lifecycle": {
-        "construction": "control",
-        "prepare": "reserve output and ledgers on control",
-        "process": "audio",
-        "reset": "audio with prepared output",
-        "release": "none"
-      },
-      "state_model": "A fixed scheduled-note queue plus a per-key armed-source table; an echo's length is rolled back once the authored release reveals how long the source note was held.",
-      "seed_model": "none; echo placement is deterministic",
-      "determinism": {
-        "repeatability": "bit_exact",
-        "block_partition": "invariant",
-        "platform_scope": "same_build",
-        "transport_history": "input"
-      },
-      "input_domain": "MIDI event stream, absolute sample block, and tempo map or constant tempo",
-      "output_domain": "dry MIDI event stream plus owned echo note-on and note-off events",
-      "units": [
-        "ticks",
-        "samples",
-        "milliseconds",
-        "MIDI note",
-        "velocity",
-        "semitones",
-        "percent"
-      ],
-      "latency": "sample-scheduled at the authored delay",
-      "tail": "owned echo releases",
-      "scheduling": "absolute-sample transport-aware",
-      "bindings": [
-        {
-          "role": "entrypoint",
-          "kind": "cpp_type",
-          "include": "pulp/midi/note_delay.hpp",
-          "qualified_name": "pulp::midi::NoteDelay<>",
-          "target": "Pulp::midi",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        }
-      ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "status": "usable",
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:6872c5a4261f503a3a31ab930e8655690e007db4e4d7bf753882a40ffad885f8"
-    },
-    {
       "key": "midi.note-length-shaping",
       "domain": "midi",
       "summary": "Fixed-capacity note duration shaping with overlap ownership and release debt.",
@@ -1322,68 +1078,6 @@
       "contract_digest": "sha256:d51b9ce1cb92b4db8fd7f48d002b43ff999c0130b0a38c4fb7a9a2c89acb2d53"
     },
     {
-      "key": "midi.note-repeat",
-      "domain": "midi",
-      "summary": "Bounded clock-divided note repeat with per-hit probability, velocity decay, and gate. Releasing the key cancels hits that have not started while a sounding hit keeps its gate.",
-      "rt_class": "audio",
-      "lifecycle": {
-        "construction": "control",
-        "prepare": "reserve output and ledgers on control",
-        "process": "audio",
-        "reset": "audio with prepared output",
-        "release": "none"
-      },
-      "state_model": "A fixed scheduled-note queue where each slot owns one note's whole lifecycle, so cancelling an unstarted hit discards its attack and release together.",
-      "seed_model": "explicit spec seed indexed by the attack coordinate and hit index",
-      "determinism": {
-        "repeatability": "bit_exact",
-        "block_partition": "invariant",
-        "platform_scope": "same_build",
-        "transport_history": "input"
-      },
-      "input_domain": "MIDI event stream, absolute sample block, and tempo map or constant tempo",
-      "output_domain": "owned note-on and note-off MIDI event stream",
-      "units": [
-        "ticks",
-        "samples",
-        "MIDI note",
-        "velocity",
-        "percent"
-      ],
-      "latency": "sample-scheduled within the repeat series",
-      "tail": "owned repeat releases",
-      "scheduling": "absolute-sample transport-aware",
-      "bindings": [
-        {
-          "role": "entrypoint",
-          "kind": "cpp_type",
-          "include": "pulp/midi/note_repeat.hpp",
-          "qualified_name": "pulp::midi::NoteRepeat<>",
-          "target": "Pulp::midi",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        }
-      ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "status": "usable",
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:832e6724ebcdf9d400df5cfe48dee95115a8fd1d1ce58373f791f4263efee211"
-    },
-    {
       "key": "midi.scale-aware-mpe-pitch",
       "domain": "midi",
       "summary": "Scale-aware conversion of MPE member pitch into bounded cents with glide.",
@@ -1443,68 +1137,6 @@
         }
       },
       "contract_digest": "sha256:5a93af4746550cc606eacce3c82973f2e3e225c51dc12b365dc90a8c724c81db"
-    },
-    {
-      "key": "midi.strum-spread",
-      "domain": "midi",
-      "summary": "Bounded strum and spread over a near-simultaneous cluster, with direction orders, an integer shape curve, division or millisecond spacing, and seeded jitter.",
-      "rt_class": "audio",
-      "lifecycle": {
-        "construction": "control",
-        "prepare": "reserve output and ledgers on control",
-        "process": "audio",
-        "reset": "audio with prepared output",
-        "release": "none"
-      },
-      "state_model": "A fixed cluster buffer holds the notes of one chord until its window closes, which is the first moment the cluster is known to be complete.",
-      "seed_model": "explicit spec seed indexed by the note's arrival coordinate",
-      "determinism": {
-        "repeatability": "bit_exact",
-        "block_partition": "invariant",
-        "platform_scope": "same_build",
-        "transport_history": "input"
-      },
-      "input_domain": "MIDI event stream, absolute sample block, and tempo map or constant tempo",
-      "output_domain": "time-spread MIDI event stream",
-      "units": [
-        "ticks",
-        "samples",
-        "milliseconds",
-        "MIDI note",
-        "velocity"
-      ],
-      "latency": "one cluster window",
-      "tail": "buffered cluster notes released on flush",
-      "scheduling": "absolute-sample transport-aware",
-      "bindings": [
-        {
-          "role": "entrypoint",
-          "kind": "cpp_type",
-          "include": "pulp/midi/strum.hpp",
-          "qualified_name": "pulp::midi::Strum<>",
-          "target": "Pulp::midi",
-          "availability": {
-            "state": "available",
-            "platforms": [
-              "all"
-            ],
-            "required_features": []
-          }
-        }
-      ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "status": "usable",
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:89f7d7a900d4309ade1f391c1c79d7c793dced2cf57239f077dfadaf15a1fb0c"
     },
     {
       "key": "music.chord-recognition",
@@ -3559,6 +3191,67 @@
         }
       },
       "contract_digest": "sha256:81ba54734e3a70376db0820de63e996499e17a8f9d235114d87fd338828f1ba5"
+    },
+    {
+      "key": "signal.fir-equiripple-design",
+      "domain": "signal",
+      "summary": "Offline weighted-minimax (Parks-McClellan Remez exchange) design of bounded real Type I-IV linear-phase FIRs from band requirements.",
+      "rt_class": "offline",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "offline design; may allocate bounded workspace",
+        "process": "offline design request",
+        "reset": "none",
+        "release": "destruction off audio"
+      },
+      "state_model": "Bounded band requirements, a dense exchange grid, the alternation set, and returned coefficients, per-band ripple, extremal frequencies, and iteration count.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "ascending disjoint bands in [0, pi] with signed amplitude and positive weight, plus a bounded tap/type specification and iteration budget",
+      "output_domain": "real linear-phase FIR coefficients, achieved per-band ripple, the alternation set, and the equalized minimax error",
+      "units": [
+        "radians per sample",
+        "taps",
+        "linear amplitude",
+        "weighted minimax error"
+      ],
+      "latency": "offline whole-design exchange",
+      "tail": "none",
+      "scheduling": "offline request",
+      "bindings": [
+        {
+          "role": "designer",
+          "kind": "cpp_function",
+          "include": "pulp/signal/fir_design.hpp",
+          "qualified_name": "pulp::signal::design_fir_equiripple",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:a63418e9e30fd082d06cb9e61e2987205479bd5f2158b7c19975ecfe351b9f23"
     },
     {
       "key": "signal.fm-operator-engine",
@@ -7025,14 +6718,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 100,
+    "total": 95,
     "by_domain": {
       "audio": 8,
-      "midi": 16,
+      "midi": 10,
       "music": 7,
       "offline": 0,
       "sequence": 1,
-      "signal": 59,
+      "signal": 60,
       "timebase": 9
     }
   },
@@ -9917,6 +9610,15 @@
           {
             "class": "FirLeastSquaresResult",
             "qualified_name": "pulp::signal::FirLeastSquaresResult",
+            "template": null,
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "FirEquirippleResult",
+            "qualified_name": "pulp::signal::FirEquirippleResult",
             "template": null,
             "methods": [
               "bool()"

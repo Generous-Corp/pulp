@@ -1177,3 +1177,29 @@ Traps:
 * A name that identifies no single key — a key wildcard, or a value outside
   0..127 — is SKIPPED, because a VST3 key switch must carry a concrete min/max
   note. It cannot be represented, so it is dropped rather than clamped.
+
+## The adapter reaches its editor through a factory, and `PULP_VST3_GUI` must stay defined
+
+`vst3_adapter.cpp` does not name `PulpPlugView`. It calls
+`make_plug_view()`, declared in `vst3_adapter.hpp` and defined in
+`vst3_plug_view.cpp`. That indirection exists because `PulpPlugView` owns a
+`ViewBridge` and a `view::PluginViewHost`, so naming the type would put
+`pulp/view` on the include path of every TU that adapts VST3 *audio* — which
+is what keeps the adapter compilable in `pulp-format-core`, the half that
+links without the view layer.
+
+The link shape is unchanged by this: `vst3_plug_view.cpp` was already compiled
+per-plugin rather than into the shared library, so `vst3_adapter.o` carried an
+undefined reference resolved by the plugin target before, and still does.
+
+**The gotcha: `PULP_VST3_GUI=1` must remain defined on the target that compiles
+`vst3_adapter.cpp`.** It guards the body of `createView()`. Drop it and
+`createView()` returns `nullptr`, which is legal VST3 — a host simply shows no
+editor. There is no error, no crash, and nothing visible in a DAW except a
+plugin that mysteriously has no UI. If you are moving `vst3_adapter.cpp`
+between targets or reworking the format defines, carry that define with it.
+
+`pulp-test-vst3-plugin-state` is the tripwire: it calls `createView()` through
+the library-compiled adapter, requires non-null, then downcasts to
+`PulpPlugView*` and asserts on its internals. It is a plain ctest in the
+required gate, so the fumble goes red rather than silent.

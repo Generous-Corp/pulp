@@ -2909,3 +2909,20 @@ Two smaller traps in the same area:
   `numeric_code`, and a test pins the ordinal of every existing value. Append
   new causes **after** `Unspecified` — appending anywhere else renumbers a
   shipped code even though the enum still compiles.
+
+## The SDK closure lists in `examples/timeline-sdk-consumer` are exact, and `Pulp::foundation` is in every one
+
+That example is not a demo; it is the installed-SDK closure gate. Each
+`_expected_*_closure` list is compared with `STREQUAL` against the closure walked
+from the real exported targets, so a target ENTERING or LEAVING the closure fails
+it, and the failure surfaces at the consumer's configure step rather than in a
+Pulp build.
+
+`Pulp::foundation` appears in all of them. It is an INTERFACE target over the
+header-only Result and queue primitives that `Pulp::timebase` names in place of
+`Pulp::runtime`, so it adds a name to the closure and no archive to the link.
+Every root measured there reaches timebase, so every list carries it.
+
+When a link edge changes anywhere under the engine, expect to update those lists
+and the target table in `docs/guides/timeline-sdk.md`, whose stated counts are
+part of the same claim.

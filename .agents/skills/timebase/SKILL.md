@@ -235,3 +235,24 @@ Promoting them is behaviour-neutral and must stay that way: the timebase suite
 reports 43,136,088 assertions across 27 cases, and that figure should not move
 when the constants are relocated. If it does, the promotion changed a
 comparison rather than just its spelling.
+
+## `pulp-timebase` links `pulp::foundation`, not `pulp::runtime`
+
+`core/timebase` uses exactly one runtime header, `pulp/runtime/result.hpp`, and
+that header is a template with no translation unit behind it. So the module
+links `pulp::foundation`, an INTERFACE target over the header-only Result and
+queue primitives, and acquires none of runtime's object code.
+
+That is deliberate and load bearing. `libpulp-runtime.a` compiles an HTTP
+client, a WebSocket channel and an HTTPS model downloader, so `pulp-runtime`
+links mbedTLS `PRIVATE` — and CMake propagates a static library's PRIVATE link
+items to every consumer as `$<LINK_ONLY:...>`. Naming `pulp::runtime` here puts
+libmbedcrypto.a, libmbedtls.a, libmbedx509.a, libeverest.a and libp256m.a back
+on the link command of anything that only wanted a tempo map.
+
+The include path is unchanged: `pulp::foundation` carries runtime's include
+directory, so `#include <pulp/runtime/result.hpp>` still resolves. Only the
+link narrows. `FORBIDDEN_LINKS` in
+`tools/scripts/timeline_engine_dependency_floor_check.py` rejects a restored
+`pulp::runtime` link here, and the clean-consumer fixture measures the same
+thing end to end against a staged SDK.

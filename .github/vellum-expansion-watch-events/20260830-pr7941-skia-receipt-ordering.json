@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260830-pr7941-skia-receipt-ordering",
+  "created_at": "2026-08-30T16:14:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record a Pulp-owned release-fetch correction that canonicalizes authenticated Skia receipt ordering across POSIX ZIP paths and case-insensitive Windows Path objects. Exact path, SHA-256, and byte-count integrity remain unchanged. Generic rendering policy remains Vellum-owned; this change neither moves source authority nor widens a transferred implementation boundary.",
+  "tests": [
+    "python3 tools/scripts/test_fetch_skia_for_release.py",
+    "python3 .agents/skills/pulp-vellum-change-routing/scripts/test_route_change.py",
+    "python3 .agents/skills/pulp-vellum-change-routing/scripts/routing_evidence.py validate --projection .github/vellum-ownership.json --require-expansion",
+    "python3 tools/scripts/vellum_freeze_check.py --base \"$(git rev-parse origin/main)\" --head \"$(git rev-parse HEAD)\" --source-head \"$(git rev-parse HEAD)\" --output /tmp/pr7941-vellum-freeze.json",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base \"$(git rev-parse origin/main)\" --head \"$(git rev-parse HEAD)\" --output /tmp/pr7941-vellum-watch.json"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

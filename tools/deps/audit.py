@@ -34,10 +34,15 @@ It verifies two classes of invariant:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
+import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -595,8 +600,13 @@ def find_uncovered_declarations(
     return uncovered
 
 
-def run_git_ls_remote(repo: str, *refs: str) -> str:
-    cmd = ["git", "ls-remote", repo, *refs]
+def run_git_ls_remote(repo: str, *refs: str, options: tuple[str, ...] = ()) -> str:
+    # Options must precede the repository; git treats anything AFTER it as a ref
+    # pattern. `git ls-remote <repo> --tags --refs` therefore matches no refs and
+    # exits 0 with empty output — which this function cannot distinguish from
+    # "the repo has no such ref", so the latest-version lookup silently returned
+    # None for every dependency and the audit reported a bare "present" forever.
+    cmd = ["git", "ls-remote", *options, repo, *refs]
     try:
         result = subprocess.run(
             cmd,
@@ -604,38 +614,151 @@ def run_git_ls_remote(repo: str, *refs: str) -> str:
             capture_output=True,
             text=True,
             check=True,
-            timeout=5,
+            timeout=30,
         )
         return result.stdout.strip()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return ""
 
 
-SEMVER_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+# Two-component releases are real: pugixml ships `v1.14`, and requiring a patch
+# component dropped it from the candidate set entirely — so the audit reported
+# the older three-component `v1.12.1` as "latest", a downgrade presented as
+# drift. Patch defaults to 0 when absent.
+SEMVER_RE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
+
+# A pre-release is not a newer release. These suffixes parse to the same semver
+# key as the final version, so `v1.2.0rc2` tied with and then beat `v1.2.0`, and
+# a Gradle milestone outranked a stable line. Anything carrying one of these is
+# excluded rather than ranked.
+PRERELEASE_RE = re.compile(r"(?i)(rc|alpha|beta|dev|pre|snapshot|-m\d+\b)")
 
 
 def semver_key(value: str):
     match = SEMVER_RE.search(value)
     if not match:
         return None
-    return tuple(int(part) for part in match.groups())
+    # Patch is optional; absent means 0 so `v1.14` ranks as (1, 14, 0) and
+    # compares correctly against `v1.12.1`.
+    return tuple(int(part) if part is not None else 0 for part in match.groups())
 
 
-def latest_semver_tag(repo: str) -> str | None:
-    output = run_git_ls_remote(repo, "--tags", "--refs")
-    candidates: list[tuple[tuple[int, int, int], str]] = []
-    for line in output.splitlines():
-        if not line:
+class ReleaseLookupUnavailable(RuntimeError):
+    """The releases API could not be reached, as distinct from having no releases.
+
+    Kept separate so a rate limit is never silently rendered as "no newer
+    release". An unauthenticated run hits the limit within a handful of
+    dependencies, and a report that quietly degraded to tag ordering at that
+    point would be the same silent all-clear this module already produced once.
+    """
+
+
+GITHUB_REPO_RE = re.compile(r"github\.com[:/]+([^/]+)/([^/]+?)(?:\.git)?/?$")
+
+
+@functools.lru_cache(maxsize=1)
+def github_token() -> str | None:
+    """A token for api.github.com, or None if the host offers none.
+
+    Unauthenticated GitHub allows 60 requests/hour per IP, which this audit
+    exhausts before it reaches its second dependency, so a token is effectively
+    required rather than an optimization. `ghapp` is preferred over `gh`: it
+    authenticates as the Shipyard App with its own quota instead of spending the
+    human's shared personal-token budget.
+    """
+    for variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+        value = os.environ.get(variable)
+        if value:
+            return value
+    for command in (["ghapp", "auth", "token"], ["gh", "auth", "token"]):
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+        except (OSError, subprocess.SubprocessError):
             continue
-        ref = line.split("\t", 1)[1]
+        token = result.stdout.strip()
+        if result.returncode == 0 and token:
+            return token
+    return None
+
+
+def github_latest_release(repo: str) -> str | None:
+    """The tag GitHub itself calls latest, or None when that cannot be answered.
+
+    Tag ordering is a heuristic and it is wrong in ways that are hard to
+    enumerate: Mbed TLS carries `mbedos-16.03-release` tags that outrank every
+    real `mbedtls-4.x`, Yoga carries date-shaped tags, and repositories mix
+    prefixes across release lines. Where a project publishes releases, that is
+    the authoritative answer and no amount of tag parsing beats asking.
+
+    Returns None on any failure — unauthenticated rate limits, a repository with
+    no releases, a non-GitHub host. The caller falls back to tags, and a None
+    here must never be reported as "no newer version": the tag path says that,
+    and it says it from evidence.
+    """
+    match = GITHUB_REPO_RE.search(repo)
+    if not match:
+        return None
+    url = f"https://api.github.com/repos/{match.group(1)}/{match.group(2)}/releases/latest"
+    request = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "pulp-deps-audit",
+    })
+    token = github_token()
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        # 404 is a real answer: this project publishes tags but not releases, so
+        # the tag heuristic is the right source and needs no caveat. Anything
+        # else — rate limiting above all — means we did not get to ask, and the
+        # caller must not present the fallback as though we had.
+        if error.code == 404:
+            return None
+        raise ReleaseLookupUnavailable(str(error.code)) from None
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as error:
+        raise ReleaseLookupUnavailable(type(error).__name__) from None
+    tag = payload.get("tag_name")
+    return tag if isinstance(tag, str) and tag else None
+
+
+def latest_semver_tag_from_refs(refs: Iterable[str]) -> str | None:
+    """Pick the highest real release from `refs/tags/...` names.
+
+    Split out from the network call so the selection rules — which are where
+    every past misreport came from — can be tested against a literal ref list.
+    """
+    candidates: list[tuple[tuple[int, int, int], str]] = []
+    for ref in refs:
+        if not ref:
+            continue
         tag = ref.removeprefix("refs/tags/")
         key = semver_key(tag)
-        if key is not None:
-            candidates.append((key, tag))
+        if key is None:
+            continue
+        # Date-shaped tags parse as perfectly good semver and then dominate the
+        # ordering forever: Yoga's `v2017.02.07.00` reads as (2017, 2, 7), which
+        # outranks its real latest release `v3.2.1`. Reporting that as "latest"
+        # is worse than reporting nothing, because it is a drift signal someone
+        # might act on. No project ships a major version in the thousands, so a
+        # year-shaped major is the honest discriminator.
+        if key[0] >= 1000:
+            continue
+        if PRERELEASE_RE.search(tag):
+            continue
+        candidates.append((key, tag))
     if not candidates:
         return None
     candidates.sort()
     return candidates[-1][1]
+
+
+def latest_semver_tag(repo: str) -> str | None:
+    output = run_git_ls_remote(repo, options=("--tags", "--refs"))
+    return latest_semver_tag_from_refs(
+        line.split("\t", 1)[1] for line in output.splitlines() if "\t" in line
+    )
 
 
 def upstream_status(dep: dict) -> str:
@@ -655,9 +778,15 @@ def upstream_status(dep: dict) -> str:
         ref = dep["upstream"]["ref"]
         output = run_git_ls_remote(repo, f"refs/tags/{ref}")
         exact = "present" if output else "missing"
-        latest = latest_semver_tag(repo)
+        # Authoritative first, heuristic second — and say which one answered.
+        try:
+            latest = github_latest_release(repo) or latest_semver_tag(repo)
+            caveat = ""
+        except ReleaseLookupUnavailable as unavailable:
+            latest = latest_semver_tag(repo)
+            caveat = f" (tag-order guess; releases API unavailable: {unavailable})"
         if latest and latest != ref:
-            return f"{exact}; latest={latest}"
+            return f"{exact}; latest={latest}{caveat}"
         return exact
     if kind == "git-commit":
         ref = dep["upstream"]["ref"].lower()

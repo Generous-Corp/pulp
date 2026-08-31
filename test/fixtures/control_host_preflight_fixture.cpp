@@ -3,6 +3,7 @@
 #include <pulp/inspect/control_host_preflight.hpp>
 #include <pulp/inspect/control_protocol.hpp>
 
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
@@ -64,6 +65,61 @@ bool send_malformed(pulp::inspect::ControlHostBootstrapHandle handle) {
     return true;
 }
 
+enum class ReceiptMode { Missing, WrongNonce, ReplayedResponse };
+
+bool finish_without_valid_receipt(pulp::inspect::ControlHostBootstrapHandle handle,
+                                  ReceiptMode mode) {
+    pulp::events::InterprocessConnection connection;
+    std::atomic<unsigned> frames{0};
+    std::atomic<bool> completed{false};
+    connection.set_on_message([&](const void* data, std::size_t size) {
+        const auto decoded = pulp::inspect::decode_control_envelope(
+            std::string_view(static_cast<const char*>(data), size));
+        if (!decoded)
+            return;
+        const auto frame = frames.fetch_add(1);
+        if (frame == 0) {
+            const auto* challenge = std::get_if<pulp::inspect::ControlHostPreflightChallengeEnvelope>(
+                &decoded->payload);
+            if (challenge) {
+                const auto response = pulp::inspect::encode_control_envelope(
+                    {.payload = pulp::inspect::ControlHostPreflightResponseEnvelope{
+                         challenge->nonce}});
+                (void)connection.send_message(response);
+            }
+            return;
+        }
+        const auto* bootstrap = std::get_if<pulp::inspect::ControlHostPreflightBootstrapEnvelope>(
+            &decoded->payload);
+        if (!bootstrap)
+            return;
+        if (mode == ReceiptMode::WrongNonce) {
+            const auto receipt = pulp::inspect::encode_control_envelope(
+                {.payload = pulp::inspect::ControlHostPreflightReceiptEnvelope{
+                     std::string(64, 'b')}});
+            (void)connection.send_message(receipt);
+        } else if (mode == ReceiptMode::ReplayedResponse) {
+            const auto replay = pulp::inspect::encode_control_envelope(
+                {.payload = pulp::inspect::ControlHostPreflightResponseEnvelope{
+                     bootstrap->nonce}});
+            (void)connection.send_message(replay);
+        }
+        completed.store(true, std::memory_order_release);
+    });
+    if (!connection.attach_inherited_local_socket(handle))
+        return false;
+#ifndef _WIN32
+    ::close(handle);
+#endif
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (!completed.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(1ms);
+    if (mode != ReceiptMode::Missing)
+        std::this_thread::sleep_for(100ms);
+    return completed.load(std::memory_order_acquire);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -108,6 +164,12 @@ int main(int argc, char** argv) {
         return send_wrong_nonce(handle) ? 0 : 66;
     if (mode == "--malformed")
         return send_malformed(handle) ? 0 : 67;
+    if (mode == "--missing-receipt")
+        return finish_without_valid_receipt(handle, ReceiptMode::Missing) ? 0 : 74;
+    if (mode == "--wrong-receipt-nonce")
+        return finish_without_valid_receipt(handle, ReceiptMode::WrongNonce) ? 0 : 75;
+    if (mode == "--replayed-preflight-response")
+        return finish_without_valid_receipt(handle, ReceiptMode::ReplayedResponse) ? 0 : 76;
     if (mode != "--normal" && mode != "--unrelated-handle" && mode != "--verbose" &&
         mode != "--delayed")
         return 64;

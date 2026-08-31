@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260830-capture-provisioned-browser-resolution",
+  "created_at": "2026-08-30T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record correcting the capture integration suite's browser resolution to read PULP_DESIGN_BROWSER. PULP_BROWSER was referenced only by this one test helper; nothing in the repository sets it and no other reader exists, so the suite ignored the checksum-verified pinned Chrome for Testing the macOS gate provisions and fell through to whatever unpinned Chrome the host carried. The candidate list is otherwise unchanged and PULP_BROWSER remains honored as a secondary override. Test-only: no production browser capture, discovery, network policy, rendering, output, or packaging behavior changes. Watch-only: the exact capture route remains Pulp-owned and no design-import, Chromium, rendering, or packaging authority is transferred.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/capture.integration.test.mjs",
+    "confirm-failure: removing the PULP_DESIGN_BROWSER candidate makes the new preference test resolve /Applications/Google Chrome.app instead of the provisioned executable",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <origin/main> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
