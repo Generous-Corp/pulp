@@ -42,6 +42,7 @@ from typing import NamedTuple
 import attempt_artifacts
 import cv_depth
 import maker_intent
+import run_state
 from module_kinds import is_audio_interface
 
 
@@ -2204,6 +2205,13 @@ def prepare_and_lint(patch: dict, inv: dict,
     # one. Open the controls this patch never spoke about, before anything
     # judges it.
     cv_depth.open_depth_controls(patch, inv)
+    # A module saved with its run flag false makes no sound, and when it is
+    # the master clock that is the whole patch rather than one branch. A
+    # person who stops a clock and saves meant to; a generator has no such
+    # habit, so an emitted `false` here is the defect and not the intent.
+    # Runs after materialize_module_state, whose data_defaults are applied
+    # with setdefault and therefore do NOT displace an authored false.
+    run_state.start_stopped_modules(patch, inv, module_state_rules())
     patch = reflow(patch, inv)
     return patch, list(dict.fromkeys(physical_errs + lint(patch, inv)))
 
@@ -2431,6 +2439,8 @@ def lint(patch: dict, inv: dict) -> list[str]:
     # Blocking dead edges only. An association a name heuristic proposed is
     # reported by explain(), never here: a guess must not reject a patch.
     errs.extend(cv_depth.dead_edge_errors(patch, inv))
+    errs.extend(run_state.stopped_run_flag_errors(patch, inv,
+                                                  module_state_rules()))
 
     # A patch that reaches no audio interface makes no sound, which is a far
     # more common generated failure than a malformed file.

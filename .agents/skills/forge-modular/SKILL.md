@@ -1237,6 +1237,72 @@ cable-fed inputs, so 21.7% is a floor, not an estimate. Before quoting any
 dead-edge rate, print how many edges were evaluable: a low number here is
 usually the instrument, not the world.
 
+### A module saved with its run flag false silences the patch
+
+The sibling of the dead-edge rule, and the one with evidence at scale. Measured
+as a census over every silent corpus patch carrying a stopped module: the
+unmodified control held silent **62/70**, flipping the run flag to true **woke
+22**, and a sham arm flipping the same number of blob booleans on keys that are
+*not* run-shaped woke **1/70** — a 25x contrast. The modules that woke are
+dominated by **master clocks**, so one flag silences the whole patch rather
+than one branch.
+
+The state lives in each module's saved `data` blob, which decodes as ordinary
+JSON with self-describing keys. `running` is the commonest.
+
+**Three sign errors, each of which INVERTS a result rather than weakening it:**
+
+1. **`bypass` and `muted` are not run flags.** `bypass: false` is the *healthy*
+   state; folding it in makes a writer switch every healthy module into bypass.
+   Note where the exclusion actually bites: the run-word set is narrow enough
+   that a bare `bypass` never qualifies anyway, so `NOT_RUN_WORDS` earns its
+   keep only on **compound** keys like `bypassRunning`. The same argument keeps
+   `enabled`, `active` and `on` out — a false there is routinely the legitimate
+   default of an optional feature.
+2. **A list value is refused.** A per-channel `[true] × 24`, or a `run: [1]`,
+   must not read as stopped. Held in two independent places, so breaking either
+   one alone leaves the behaviour correct.
+3. **The saved type is preserved on write.** A module that stored `0`/`1` may
+   ignore a JSON boolean — a **silent no-op** presenting as *"starting it does
+   nothing"*, which is a false null rather than a visible failure.
+
+**Why this is a writer and not an audit, and why that reading is the OPPOSITE
+of the dead-edge rule's.** `cv_depth` treats an authored zero as intent and
+stands down. `run_state` treats an authored `false` as the defect and flips it.
+The difference is whose patch it is: a person who stops a clock and saves meant
+to, and their saved patch is evidence of a choice; a generator has no such
+habit and no way to notice it emitted one. The single channel that *can* ask
+for a stopped module is `module-state-overrides.json`, and only a value
+declared **stopped** there is honoured.
+
+**The registry does not close this on its own — verified, not assumed.**
+`materialize_module_state` applies `data_defaults` with `setdefault`, so it
+fills an ABSENT key and never displaces one the model already wrote:
+
+```
+AS/SEQ16 registry declares running: true
+  authored {"running": false} → after materialize_module_state → false   (!)
+  authored key absent          → after materialize_module_state → true   (control)
+```
+
+So the one entry that exists to force that sequencer running is defeated by the
+model writing the field itself. `run_state.start_stopped_modules` runs after
+materialization and closes it.
+
+**It never invents a run key.** Where a module carries no run-shaped key we do
+not know the key's name, its type, or whether the module has one — and writing
+a guessed key into a saved-state blob is exactly the silent no-op of sign error
+3. That case is UNEVALUATED.
+
+**And UNEVALUATED is nearly all of it.** Across 183 generated patches: 107
+clock/sequencer instances, of which **only 5 carry any run-shaped key**. The
+other 102 are decided by the module's constructor default, which no patch-side
+analysis can see. The generator emits almost no saved state at all — three
+distinct `data` keys across 1350 modules — so this class is *nearly not
+expressible* in its output. The rule is a guard against a defect the model can
+introduce and against the registry gap above, not a fix for something currently
+happening. Before quoting a rate here, print how many modules were evaluable.
+
 ### A guard nothing runs goes stale silently, and this one did
 
 That test was written, was correct, and exited 1 — and **nothing ever ran it**.
