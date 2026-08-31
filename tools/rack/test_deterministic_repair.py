@@ -5,12 +5,29 @@ from __future__ import annotations
 
 import copy
 import io
+import json
 import pathlib
 import random
 import unittest
+from unittest import mock
 
 import deterministic_repair as D
 import patch as P
+
+
+FIXTURE = pathlib.Path(__file__).parent / "test_fixtures/silent-live-output"
+
+
+def silent_live_output_inventory() -> dict:
+    return {
+        "AudibleInstruments": {"modules": {"Tides2": {
+            "outputs": ["Channel 1", "Channel 2", "Channel 3", "Channel 4"],
+            "roles_out": ["Audio", "Audio", "Audio", "Audio"],
+        }}},
+        "Core": {"modules": {"AudioInterface2": {
+            "inputs": ["Left", "Right"], "roles_in": ["Audio", "Audio"],
+        }}},
+    }
 
 
 def inventory() -> dict:
@@ -82,6 +99,80 @@ def activation_fixture(layers: int = 6, seed: int = 7240) -> dict:
 
 
 class DeterministicRepairTests(unittest.TestCase):
+    def test_retained_m5_patch_offers_only_live_exact_role_siblings(self) -> None:
+        patch = json.loads((FIXTURE / "unfinished.vcv").read_text())
+        report = (FIXTURE / "gate-report.txt").read_text()
+        finding = P.silence_cause(
+            report, patch, silent_live_output_inventory())
+
+        repairs, refusal = D.alternate_output_repairs(
+            patch, silent_live_output_inventory(), finding)
+
+        self.assertEqual([], refusal)
+        self.assertEqual([1, 2, 3], [
+            next(cable for cable in repair.patch["cables"]
+                 if cable["id"] == 6)["outputId"]
+            for repair in repairs])
+        self.assertEqual(0, next(cable for cable in patch["cables"]
+                                 if cable["id"] == 6)["outputId"])
+
+    def test_alternate_output_never_crosses_or_invents_a_role(self) -> None:
+        patch = json.loads((FIXTURE / "unfinished.vcv").read_text())
+        report = (FIXTURE / "gate-report.txt").read_text()
+        inventory = silent_live_output_inventory()
+        finding = P.silence_cause(report, patch, inventory)
+        inventory["AudibleInstruments"]["modules"]["Tides2"]["roles_out"] = [
+            "Audio", "Cv", "Gate", "Trigger"]
+
+        repairs, refusal = D.alternate_output_repairs(
+            patch, inventory, finding)
+
+        self.assertEqual([], repairs)
+        self.assertTrue(any("exact same semantic role" in item
+                            for item in refusal))
+
+    def test_alternate_output_requires_fresh_audibility_measurement(self) -> None:
+        patch = json.loads((FIXTURE / "unfinished.vcv").read_text())
+        report = (FIXTURE / "gate-report.txt").read_text()
+        calls = []
+
+        def gate(candidate, checkpoints=None):
+            calls.append((candidate, checkpoints))
+            return P.AUDIBLE, "patch gate passed"
+
+        with mock.patch.object(P, "audibility", side_effect=gate), \
+                mock.patch.object(P, "keep_deterministic_repair"):
+            repaired, verdict, measured = P.audition_silent_output_repair(
+                patch, silent_live_output_inventory(), P.SILENT, report,
+                checkpoints=[0.0, 15.0, 30.0, 54.0])
+
+        self.assertEqual(P.AUDIBLE, verdict)
+        self.assertEqual("patch gate passed", measured)
+        self.assertEqual(1, len(calls))
+        self.assertEqual([0.0, 15.0, 30.0, 54.0], calls[0][1])
+        self.assertEqual(1, next(cable for cable in repaired["cables"]
+                                 if cable["id"] == 6)["outputId"])
+
+    def test_alternate_output_is_not_kept_when_every_audition_is_silent(self) -> None:
+        patch = json.loads((FIXTURE / "unfinished.vcv").read_text())
+        report = (FIXTURE / "gate-report.txt").read_text()
+        calls = []
+
+        def gate(candidate, checkpoints=None):
+            calls.append(candidate)
+            return P.SILENT, "still silent"
+
+        with mock.patch.object(P, "audibility", side_effect=gate), \
+                mock.patch.object(P, "keep_deterministic_repair"):
+            retained, verdict, retained_report = \
+                P.audition_silent_output_repair(
+                    patch, silent_live_output_inventory(), P.SILENT, report)
+
+        self.assertEqual(3, len(calls))
+        self.assertEqual(patch, retained)
+        self.assertEqual(P.SILENT, verdict)
+        self.assertEqual(report, retained_report)
+
     def test_exact_drone_class_repairs_with_random_ids_and_order(self) -> None:
         patch = activation_fixture()
         findings = P.module_activation_contract_errors(patch, inventory())

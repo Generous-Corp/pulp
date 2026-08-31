@@ -4790,6 +4790,50 @@ def audibility(patch: dict,
         os.unlink(tmp)
 
 
+def audition_silent_output_repair(
+        patch: dict, inv: dict, verdict: str, report: str,
+        checkpoints: list[float] | None = None,
+        attempt: int = 1) -> tuple[dict, str, str]:
+    """Try exact-role live sibling outputs, retaining every measured result.
+
+    The gate is the authority at both ends: its first report proves the chosen
+    output silent while a sibling is active, and a fresh run over the edited
+    patch must prove audio reaches the interface. An active trace row by itself
+    never becomes a success claim.
+    """
+    if verdict != SILENT:
+        return patch, verdict, report
+    import deterministic_repair
+    finding = silence_cause(report, patch, inv)
+    repairs, refusal = deterministic_repair.alternate_output_repairs(
+        patch, inv, finding)
+    if not repairs:
+        if refusal:
+            keep_deterministic_repair(
+                patch, None,
+                "alternate-output repair refused:\n" +
+                "\n".join(f"  - {reason}" for reason in refusal) + "\n",
+                attempt, "alternate-output")
+        return patch, verdict, report
+
+    for index, repair in enumerate(repairs, 1):
+        candidate_verdict, candidate_report = audibility(
+            repair.patch, checkpoints=checkpoints)
+        action = repair.actions[0]
+        evidence = (f"candidate {index}: {action}\n"
+                    f"verdict: {candidate_verdict}\n{candidate_report}")
+        keep_deterministic_repair(
+            patch, repair.patch, evidence, attempt,
+            f"alternate-output-{index}")
+        if candidate_verdict == AUDIBLE:
+            print(f"  deterministic output repair: {action}", flush=True)
+            return repair.patch, candidate_verdict, candidate_report
+        if candidate_verdict == UNMEASURED:
+            # A broken instrument cannot rank later candidates honestly.
+            break
+    return patch, verdict, report
+
+
 INVENTORY_BEGIN = "<<<FORGE-INVENTORY-BEGIN>>>"
 INVENTORY_END = "<<<FORGE-INVENTORY-END>>>"
 CODEX_INLINE_INVENTORY_CHAR_LIMIT = 128 * 1024
@@ -7630,6 +7674,9 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             verdict, report = audibility(patch, checkpoints=checkpoints)
         else:
             verdict, report = audibility(patch)
+        if base_patch is None:
+            patch, verdict, report = audition_silent_output_repair(
+                patch, inv, verdict, report, checkpoints, attempt + 1)
         runtime_errors = module_runtime_contract_errors(patch, inv, report)
         runtime_idiom = idioms.get(
             diagnosis.built or effective_claimed.slug, {}) \

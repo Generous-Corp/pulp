@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import copy
+import math
 from dataclasses import dataclass, field
+
+from module_kinds import is_audio_interface
 
 
 @dataclass
@@ -12,6 +15,112 @@ class Repair:
     patch: dict | None = None
     actions: list[str] = field(default_factory=list)
     refusal: list[str] = field(default_factory=list)
+
+
+def _roles(value) -> frozenset[str]:
+    """One exact semantic role set, or empty when the inventory is unsure."""
+    values = value if isinstance(value, list) else [value]
+    roles = frozenset(
+        item.casefold() for item in values
+        if isinstance(item, str) and item.strip())
+    if roles & {"any", "any_out", "unknown"}:
+        return frozenset()
+    return roles
+
+
+def alternate_output_repairs(
+        patch: dict, inv: dict, finding: dict | None,
+        ) -> tuple[list[Repair], list[str]]:
+    """Offer measured-live, exact-role sibling outputs for a silent path.
+
+    This is deliberately a candidate planner, not a success oracle. The caller
+    must run every returned patch through the real DSP gate and keep one only
+    when that gate measures it audible. A sibling merely being active in the
+    trace is enough to justify an audition, never enough to claim success.
+    """
+    if not finding or finding.get("whole_module"):
+        return [], ["the silence is not one dead output on a live module"]
+    module_id = finding.get("id")
+    output_id = finding.get("output")
+    activity = finding.get("outs")
+    if (not isinstance(module_id, int) or not isinstance(output_id, int) or
+            not isinstance(activity, list) or not 0 <= output_id < len(activity)):
+        return [], ["the silent-output finding is incomplete"]
+
+    modules = {module.get("id"): module
+               for module in patch.get("modules") or []}
+    module = modules.get(module_id)
+    if module is None:
+        return [], [f"module {module_id} is absent from the patch"]
+    entry = (inv.get(module.get("plugin"), {}).get("modules", {})
+                .get(module.get("model"), {}))
+    names = entry.get("outputs") or []
+    roles = entry.get("roles_out") or []
+    coords = entry.get("outputs_xy")
+    selected_roles = _roles(
+        roles[output_id] if output_id < len(roles) else None)
+    if not selected_roles:
+        return [], ["the silent output has no specific recorded semantic role"]
+
+    # Only touch cables that can reach a listener. A fan-out from the same jack
+    # may drive unrelated modulation elsewhere; changing it would be larger
+    # than the audio-path repair justified by this evidence.
+    reaches_listener = {candidate_id
+                        for candidate_id, candidate in modules.items()
+                        if is_audio_interface(candidate)}
+    cables = patch.get("cables") or []
+    changed = True
+    while changed:
+        changed = False
+        for cable in cables:
+            if (cable.get("inputModuleId") in reaches_listener and
+                    cable.get("outputModuleId") not in reaches_listener):
+                reaches_listener.add(cable.get("outputModuleId"))
+                changed = True
+    path_cables = [cable for cable in cables
+                   if cable.get("outputModuleId") == module_id and
+                   cable.get("outputId") == output_id and
+                   cable.get("inputModuleId") in reaches_listener]
+    if not path_cables:
+        return [], ["the silent output has no cable on a path to an audio interface"]
+
+    alternatives = []
+    for candidate_id, peak in enumerate(activity):
+        if candidate_id == output_id or not isinstance(peak, (int, float)):
+            continue
+        if not math.isfinite(float(peak)) or peak <= 0.0:
+            continue
+        if (isinstance(coords, list) and any(row is not None for row in coords)
+                and (candidate_id >= len(coords) or coords[candidate_id] is None)):
+            continue
+        candidate_roles = _roles(
+            roles[candidate_id] if candidate_id < len(roles) else None)
+        if candidate_roles != selected_roles:
+            continue
+        alternatives.append((abs(candidate_id - output_id), candidate_id))
+    alternatives.sort()
+    if not alternatives:
+        return [], ["no measured-live sibling output has the exact same semantic role"]
+
+    plugin, model = module.get("plugin"), module.get("model")
+    old_label = names[output_id] if output_id < len(names) else f"OUT {output_id}"
+    repairs = []
+    for _, candidate_id in alternatives:
+        repaired = copy.deepcopy(patch)
+        changed_ids = {cable.get("id") for cable in path_cables}
+        for cable in repaired.get("cables") or []:
+            if cable.get("id") in changed_ids:
+                cable["outputId"] = candidate_id
+        new_label = (names[candidate_id] if candidate_id < len(names)
+                     else f"OUT {candidate_id}")
+        repairs.append(Repair(
+            patch=repaired,
+            actions=[
+                f"auditioned {plugin}/{model} out{candidate_id} "
+                f"'{new_label}' in place of silent same-role out{output_id} "
+                f"'{old_label}' on {len(path_cables)} listener path cable(s)"
+            ]))
+    return repairs, []
 
 
 def _position(module: dict) -> tuple[float, float] | None:
