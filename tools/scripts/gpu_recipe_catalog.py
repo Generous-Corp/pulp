@@ -15,6 +15,15 @@ from typing import Any
 import json_schema_lite
 
 
+# Immutable object/history facts are safe to reuse only for an exact repository
+# HEAD. Checkout dirt is intentionally re-read in one batched status call below.
+_HANDOFF_GIT_FACT_CACHE: dict[
+    tuple[str, str, str, str],
+    tuple[str | None, str | None, str | None, str | None, int],
+] = {}
+_HANDOFF_ANCESTOR_CACHE: dict[tuple[str, str, str], int] = {}
+
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_CATALOG = ROOT / "docs/status/gpu-recipes.yaml"
 DEFAULT_SCHEMA = ROOT / "docs/status/gpu-recipes.schema.json"
@@ -714,7 +723,56 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
         "pulp-owned-delete-candidate": "Generous-Corp/pulp",
         "framework-authoritative-transferred-compatibility": "Generous-Corp/vellum",
     }
-    git_facts: dict[tuple[str, str], tuple[str | None, str | None, str | None, str | None, int, str | None]] = {}
+    def git_text(arguments: list[str]) -> str | None:
+        completed = subprocess.run(
+            ["git", *arguments], cwd=root, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, timeout=10, check=False,
+        )
+        return completed.stdout.strip() if completed.returncode == 0 else None
+
+    root_identity = str(root.resolve())
+    head_revision = git_text(["rev-parse", "HEAD"])
+    if head_revision is None:
+        return ["handoff repository HEAD cannot be resolved"]
+
+    routed_paths = sorted(
+        {
+            row["path"]
+            for entry in document.get("entries", [])
+            if isinstance(entry, dict) and isinstance(entry.get("pulp_paths"), list)
+            for row in entry["pulp_paths"]
+            if isinstance(row, dict)
+            and isinstance(row.get("path"), str)
+            and row["path"] != "docs/status/gpu-vellum-handoff.yaml"
+            and (root / row["path"]).exists()
+            and (root / row["path"]).resolve().is_relative_to(root.resolve())
+        }
+    )
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *routed_paths],
+        cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, timeout=10, check=False,
+    )
+    if status.returncode != 0:
+        return ["handoff repository checkout status cannot be resolved"]
+    dirty_paths: set[str] = set()
+    records = status.stdout.split(b"\0")
+    index = 0
+    while index < len(records) and records[index]:
+        record = records[index]
+        code = record[:2]
+        dirty_paths.add(record[3:].decode("utf-8", errors="surrogateescape"))
+        if b"R" in code or b"C" in code:
+            index += 1
+            if index < len(records) and records[index]:
+                dirty_paths.add(records[index].decode("utf-8", errors="surrogateescape"))
+        index += 1
+
+    git_facts: dict[
+        tuple[str, str],
+        tuple[str | None, str | None, str | None, str | None, int, bool],
+    ] = {}
     route_owners: dict[str, str] = {}
     for index, entry in enumerate(document.get("entries", [])):
         if not isinstance(entry, dict) or not isinstance(entry.get("pulp_paths"), list):
@@ -742,37 +800,47 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
             object_id = row.get("object_id")
             object_type = row.get("object_type")
 
-            def git_text(arguments: list[str]) -> str | None:
-                completed = subprocess.run(
-                    ["git", *arguments], cwd=root, stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                    text=True, timeout=10, check=False,
-                )
-                return completed.stdout.strip() if completed.returncode == 0 else None
-
             fact_key = (str(revision), path)
             if fact_key not in git_facts:
-                pinned_object = git_text(["rev-parse", f"{revision}:{path}"])
-                pinned_type = (
-                    git_text(["cat-file", "-t", pinned_object]) if pinned_object else None
+                immutable_key = (root_identity, head_revision, str(revision), path)
+                immutable_facts = _HANDOFF_GIT_FACT_CACHE.get(immutable_key)
+                if immutable_facts is None:
+                    pinned_object = git_text(["rev-parse", f"{revision}:{path}"])
+                    pinned_type = (
+                        git_text(["cat-file", "-t", pinned_object])
+                        if pinned_object else None
+                    )
+                    head_object = git_text(["rev-parse", f"HEAD:{path}"])
+                    latest_owner = git_text(
+                        ["log", "-1", "--format=%H", "HEAD", "--", path]
+                    )
+                    ancestor_key = (root_identity, head_revision, str(revision))
+                    ancestor_code = _HANDOFF_ANCESTOR_CACHE.get(ancestor_key)
+                    if ancestor_code is None:
+                        ancestor_code = subprocess.run(
+                            ["git", "merge-base", "--is-ancestor", str(revision), "HEAD"],
+                            cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, timeout=10, check=False,
+                        ).returncode
+                        _HANDOFF_ANCESTOR_CACHE[ancestor_key] = ancestor_code
+                    immutable_facts = (
+                        pinned_object, pinned_type, head_object, latest_owner, ancestor_code,
+                    )
+                    _HANDOFF_GIT_FACT_CACHE[immutable_key] = immutable_facts
+                pinned_object, pinned_type, head_object, latest_owner, ancestor_code = (
+                    immutable_facts
                 )
-                head_object = git_text(["rev-parse", f"HEAD:{path}"])
-                latest_owner = git_text(["log", "-1", "--format=%H", "HEAD", "--", path])
-                ancestor_code = subprocess.run(
-                    ["git", "merge-base", "--is-ancestor", str(revision), "HEAD"], cwd=root,
-                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL, timeout=10, check=False,
-                ).returncode
-                checkout_status = git_text(
-                    ["status", "--porcelain=v1", "--untracked-files=all", "--", path]
+                checkout_dirty = any(
+                    dirty == path or dirty.startswith(path.rstrip("/") + "/")
+                    for dirty in dirty_paths
                 )
                 git_facts[fact_key] = (
                     pinned_object, pinned_type, head_object, latest_owner,
-                    ancestor_code, checkout_status,
+                    ancestor_code, checkout_dirty,
                 )
             (
                 pinned_object, pinned_type, head_object, latest_owner,
-                ancestor_code, checkout_status,
+                ancestor_code, checkout_dirty,
             ) = git_facts[fact_key]
             if pinned_object is None:
                 problems.append(
@@ -785,7 +853,7 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
                 or pinned_type != object_type
                 or head_object != object_id
                 or latest_owner != revision
-                or checkout_status != ""
+                or checkout_dirty
             ):
                 problems.append(
                     f"handoff entries[{index}].pulp_paths[{row_index}] has stale "
