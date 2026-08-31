@@ -190,6 +190,10 @@ class SharedHostClassificationTest(unittest.TestCase):
             ".shipyard/config.toml",
             ".agents/skills/stretch/SKILL.md",
             ".agents/skills/ci/SKILL.md",
+            # The bootstrap every fresh worktree and external cloner runs, in a
+            # checkout on the shared box. Its host is not dynamic the way a
+            # workflow's `runs-on` is, so the scan CAN classify it.
+            "setup.sh",
         ):
             self.assertTrue(guard.is_shared_host_surface(self._p(rel)), rel)
 
@@ -202,10 +206,70 @@ class SharedHostClassificationTest(unittest.TestCase):
         for rel in (
             ".github/workflows/build.yml",
             "tools/scripts/local_diff_cover.sh",
-            "setup.sh",
             "ci/some-lane.yml",
         ):
             self.assertFalse(guard.is_shared_host_surface(self._p(rel)), rel)
+
+
+class LaunderedThroughAVariableTest(unittest.TestCase):
+    """A core-count read assigned to a variable and passed as `-j"$VAR"` is the
+    same whole-machine command, split across two lines. Neither line carries the
+    shape on its own, so a value-only scan reads it as a bounded env var and
+    waves it through — which is how `setup.sh` held a `-j"$JOBS"` fed by
+    `sysctl -n hw.ncpu` while the guard reported OK."""
+
+    def _kinds(self, text: str, shared_host: bool = True) -> list[str]:
+        return kinds(text, shared_host=shared_host)
+
+    def test_core_count_via_a_variable_is_whole_machine(self):
+        text = ('JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)\n'
+                'cmake --build "$REPO_ROOT/build" -j"$JOBS"\n')
+        self.assertEqual(self._kinds(text), ["whole-machine"])
+
+    def test_nproc_via_a_variable_is_whole_machine(self):
+        text = 'JOBS=$(nproc)\ncmake --build build --parallel "${JOBS}"\n'
+        self.assertEqual(self._kinds(text), ["whole-machine"])
+
+    def test_windows_env_var_form_is_resolved(self):
+        text = 'JOBS=%NUMBER_OF_PROCESSORS%\ncmake --build build -j%JOBS%\n'
+        self.assertEqual(self._kinds(text), ["whole-machine"])
+
+    def test_a_variable_holding_a_derived_share_is_accepted(self):
+        text = 'JOBS=$(( $(nproc) / 4 ))\ncmake --build build -j"$JOBS"\n'
+        self.assertEqual(self._kinds(text), [])
+
+    def test_a_variable_holding_a_literal_is_accepted(self):
+        text = 'JOBS=8\ncmake --build build -j"$JOBS"\n'
+        self.assertEqual(self._kinds(text), [])
+
+    def test_a_variable_the_file_never_assigns_is_accepted(self):
+        # An inherited env var could be anything; the scan resolves one hop
+        # within the file and does not guess beyond it.
+        self.assertEqual(self._kinds('cmake --build b -j"$JOBS"\n'), [])
+
+    def test_an_assignment_in_a_comment_does_not_convict(self):
+        text = ('# JOBS=$(nproc)  <- the trap this guard exists to catch\n'
+                'JOBS=8\ncmake --build build -j"$JOBS"\n')
+        self.assertEqual(self._kinds(text), [])
+
+    def test_laundering_is_not_flagged_on_an_unclassified_surface(self):
+        # Same rule as a direct core-count read: whole-machine is a shared-host
+        # finding only. A workflow author still owns bounding their own leg.
+        text = 'JOBS=$(nproc)\ncmake --build build -j"$JOBS"\n'
+        self.assertEqual(self._kinds(text, shared_host=False), [])
+
+
+class BootstrapScriptIsBoundedTest(unittest.TestCase):
+    """`setup.sh` runs on the shared box on every fresh checkout, so its build
+    must take a share. This pins the script itself, not just the classifier."""
+
+    def test_repo_setup_sh_has_no_whole_machine_build(self):
+        path = guard.REPO_ROOT / "setup.sh"
+        findings = guard.scan_file_kinds(path)
+        self.assertEqual(
+            [f for f in findings if f[2] == "whole-machine"], [],
+            "setup.sh must route its build through the governor, not claim every core",
+        )
 
 
 class WorkflowAuthorOwnsWholeMachineTest(unittest.TestCase):
