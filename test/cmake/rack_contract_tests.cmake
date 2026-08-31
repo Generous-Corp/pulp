@@ -36,6 +36,20 @@ if(Python3_Interpreter_FOUND)
         LABELS "rack;contract"
         TIMEOUT 180)
 
+    # Does the plugin we build actually LOAD where Rack loads it? Registered
+    # here rather than behind PULP_HAS_RACK because the defect it guards --
+    # a macOS plugin linked without libRack -- shipped for a month with five
+    # green gates: every one of them dlopened the plugin inside a host that
+    # had already linked libRack, where the failure cannot reproduce. It
+    # skips loudly (exit 3) without the Rack SDK, and builds the real pack
+    # rather than a stand-in. Longer timeout: it compiles the pack once.
+    add_test(NAME rack-plugin-loads
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_rack_plugin_loads.py)
+    set_tests_properties(rack-plugin-loads PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 300)
+
     add_test(NAME rack-generation-eligibility
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_generation_eligibility.py)
