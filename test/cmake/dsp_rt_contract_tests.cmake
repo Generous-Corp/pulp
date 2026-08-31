@@ -343,6 +343,16 @@ pulp_add_test_suite(pulp-test-signal-fir-design
     LIBRARIES pulp::signal
     TIMEOUT 300)
 
+# Equiripple FIR design by the Remez exchange. The alternation theorem is the
+# in-test oracle: r independent coefficients must yield r+1 alternating extrema
+# of equal weighted magnitude, checked from the returned taps by a direct DFT.
+# The least-squares twin at the same order is the negative control. Offline
+# design work, not realtime DSP.
+pulp_add_test_suite(pulp-test-signal-fir-remez
+    SOURCES test_signal_fir_remez.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 # Prepared streaming reverse windows: independent hand-sequence oracle,
 # boundary fading, latency/tail/state, partitioning, and RT proof.
 pulp_add_test_suite(pulp-test-signal-reverse-buffer
