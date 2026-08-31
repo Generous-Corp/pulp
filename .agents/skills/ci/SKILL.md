@@ -7719,3 +7719,95 @@ The shape that works, and the one `timeline-fuzz.yml` uses:
 cases/sec, so the whole PR budget is well under a second and the nightly budget can be raised
 almost for free. Budget the build, not the iterations, and keep `timeout-minutes` on both jobs
 plus `-max_total_time` on libFuzzer.
+
+## A new `core/` module needs three separate registrations, revealed one at a time
+
+Landing a new subsystem under `core/` is not one edit. Four places have to agree,
+and `gates.sh` surfaces them **serially** — each run fails on the next one it
+reaches, so a fix-and-rerun loop looks like whack-a-mole unless you do all four
+up front:
+
+1. `CMakeLists.txt` — the `option()` and the `add_subdirectory()`.
+2. `tools/cmake/PulpInstallRules.cmake` — `PULP_SDK_TARGETS` and
+   `_pulp_sdk_header_subsystems`, if the module ships in the SDK.
+3. `codecov.yml` — an `individual_components` entry. Without one, every file in
+   the module matches no component and is invisible to the slicing dashboard
+   (`test_codecov_components.py`).
+4. `ci/coverage-surfaces.yaml` — the component id in the `native-default`
+   component set. A component that exists in `codecov.yml` but has no producer
+   expectation and no N/A disposition fails
+   `test_coverage_surface_contract.py` with "every configured component must
+   have a producer expectation or an N/A disposition".
+
+(3) and (4) are a pair and neither is inferable from the other: `codecov.yml`
+says the component *exists*, `coverage-surfaces.yaml` says something is expected
+to *measure* it. Fixing only the one the failure named leaves the other to fail
+on the next run.
+
+Editing either file trips a different skill-sync gate — `codecov.yml` and
+`ci/coverage-surfaces.yaml` map to different skills — so expect the skill-sync
+check to fire twice for what is conceptually one change.
+
+## A job's green says nothing about a step that was skipped inside it
+
+Reading a job's conclusion as evidence about a step inside it is wrong whenever
+the step is `if:`-guarded, and it is the easiest mistake to make because the
+green is real — it is just green about something else.
+
+Concretely: `Release-path build (linux-x64)` passes while never fetching V8,
+because the fetch is guarded `if: matrix.platform == 'darwin-arm64'`
+(`.github/workflows/release-path-pr-gate.yml`). Reading that pass as "linux's V8
+digest matches" produced a confident, wrong conclusion about a supply-chain
+drift.
+
+Ask the run about the STEP, not the job:
+
+```sh
+ghapp api "repos/Generous-Corp/pulp/actions/runs/$RUN/jobs" \
+  --jq '.jobs[] | select(.name|test("<leg>")) | .steps[]
+        | select(.name|test("<step>")) | "\(.conclusion)  \(.name)"'
+```
+
+It returns `skipped`, `success`, or `failure` per step. Pair it with a leg you
+expect to have RUN the step: if the two legs return the same thing, the query is
+wrong, not the world.
+
+Related but not the same: `tools/scripts/required_gate_liveness.py` already
+asserts every *required context* actually ran for a merged commit. That covers a
+gate vanishing entirely; it does not cover a step being conditionally skipped
+inside a gate that reports success.
+
+## The fifth registration, and why `gates.sh` cannot warn you about it
+
+The four registrations above are what a new `core/` module needs to *build and
+be measured*. Shipping it needs a fifth, and this one is invisible locally:
+
+5. `tools/scripts/release_product_matrix.json` — add the target to
+   `pulp_library_stems`, alphabetically. STATIC libraries only; an INTERFACE
+   library must NOT be listed.
+6. `docs/status/consumption-profiles.json` — regenerate with
+   `python3 tools/scripts/consumption_census.py --write`. Missing this fails the
+   **required** `macos` gate on `consumption-census-drift` after a ~40-minute
+   run, which is the most expensive way to discover any of these.
+
+Six, not four, and they surface one at a time in roughly increasing cost:
+`gates.sh` catches the first four in seconds, CI's workflow-lint catches the
+fifth in two minutes, and the required macOS gate catches the sixth in forty.
+
+`gates.sh` does not run `test_release_artifact_contents.py`, so a branch goes
+green locally and then fails in CI's workflow-lint job with `PULP_SDK_TARGETS
+archives and release_product_matrix.json drifted`. Run it yourself:
+
+```sh
+python3 tools/scripts/test_release_artifact_contents.py
+```
+
+**And treat a second, different drift from that test with suspicion on a built
+checkout.** Its interface-library scan used to walk build trees, where
+`test/inspector-shipping-scanner` generates a fixture `CMakeLists.txt` declaring
+`pulp-format` as an INTERFACE library — so a real STATIC library looked like an
+interface one and vanished from the archive set. CI never saw it (clean
+checkout); it appeared only on a machine that had built once, which is exactly
+the machine verifying the fix. That is fixed now, but the shape is worth
+remembering: when a local run disagrees with CI, suspect the local *tree* before
+the local *change*.
