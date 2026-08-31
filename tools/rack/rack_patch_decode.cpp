@@ -51,6 +51,9 @@ constexpr std::size_t kMaxTarBytes = 256ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kBlockBytes = 512;
 constexpr int kWindowLogMaxParameter = 100;
 constexpr int kWindowLogMax = 28;
+constexpr std::array<std::uint8_t, 16> kMacOsXAppleDoubleHome{
+    'M', 'a', 'c', ' ', 'O', 'S', ' ', 'X',
+    ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
 
 class DecompressionStream {
   public:
@@ -197,10 +200,100 @@ void validate_checksum(const std::uint8_t* header) {
         throw std::runtime_error("tar header checksum does not match");
 }
 
+std::uint16_t read_big_endian_16(const std::uint8_t* bytes) {
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(bytes[0]) << 8) |
+        static_cast<std::uint16_t>(bytes[1]));
+}
+std::uint32_t read_big_endian_32(const std::uint8_t* bytes) {
+    return (static_cast<std::uint32_t>(bytes[0]) << 24) |
+           (static_cast<std::uint32_t>(bytes[1]) << 16) |
+           (static_cast<std::uint32_t>(bytes[2]) << 8) |
+           static_cast<std::uint32_t>(bytes[3]);
+}
+
+bool is_supported_appledouble_path(std::string_view path) {
+    // copyfile(3) writes these two sidecars when Rack saves a patch whose
+    // directory or patch.json carries macOS metadata. They describe only the
+    // two archive members the decoder already accepts; no other dot-underscore
+    // name is inferred to be harmless.
+    return path == "._." || path == "._patch.json";
+}
+
+void validate_appledouble(const std::uint8_t* data, std::size_t size,
+                          std::string_view path) {
+    constexpr std::uint32_t kAppleDoubleMagic = 0x00051607;
+    constexpr std::uint32_t kAppleDoubleVersion2 = 0x00020000;
+    constexpr std::uint32_t kResourceForkEntry = 2;
+    constexpr std::uint32_t kFinderInfoEntry = 9;
+    constexpr std::size_t kHeaderBytes = 26;
+    constexpr std::size_t kEntryBytes = 12;
+
+    const auto fail = [path](std::string_view reason) {
+        throw std::runtime_error(
+            "tar AppleDouble member " + std::string(path) + " " +
+            std::string(reason));
+    };
+    if (size < kHeaderBytes) fail("is truncated");
+    if (read_big_endian_32(data) != kAppleDoubleMagic)
+        fail("has the wrong magic");
+    if (read_big_endian_32(data + 4) != kAppleDoubleVersion2)
+        fail("has an unsupported version");
+    if (!std::equal(kMacOsXAppleDoubleHome.begin(),
+                    kMacOsXAppleDoubleHome.end(), data + 8))
+        fail("is not a macOS copyfile sidecar");
+
+    const auto entry_count = read_big_endian_16(data + 24);
+    if (entry_count != 2)
+        fail("does not contain exactly Finder metadata and an empty resource fork");
+    if (entry_count > (size - kHeaderBytes) / kEntryBytes)
+        fail("has a truncated entry table");
+    const auto table_end = kHeaderBytes + entry_count * kEntryBytes;
+
+    bool found_finder_info = false;
+    bool found_resource_fork = false;
+    std::size_t covered_until = table_end;
+    for (std::size_t index = 0; index < entry_count; ++index) {
+        const auto* entry = data + kHeaderBytes + index * kEntryBytes;
+        const auto id = read_big_endian_32(entry);
+        const auto raw_offset = read_big_endian_32(entry + 4);
+        const auto raw_length = read_big_endian_32(entry + 8);
+        const auto offset = static_cast<std::size_t>(raw_offset);
+        const auto length = static_cast<std::size_t>(raw_length);
+        if (offset < table_end || offset > size || length > size - offset)
+            fail("has an out-of-bounds entry");
+
+        if (id == kFinderInfoEntry) {
+            if (found_finder_info) fail("has duplicate Finder metadata");
+            if (length == 0) fail("has empty Finder metadata");
+            if (offset != covered_until)
+                fail("has unaccounted bytes before Finder metadata");
+            covered_until = offset + length;
+            found_finder_info = true;
+        } else if (id == kResourceForkEntry) {
+            if (found_resource_fork) fail("has duplicate resource forks");
+            if (length != 0)
+                fail("contains a resource fork rather than metadata only");
+            if (offset != size)
+                fail("has an ambiguous empty resource fork offset");
+            found_resource_fork = true;
+        } else {
+            fail("contains an unsupported entry");
+        }
+    }
+    if (!found_finder_info || !found_resource_fork)
+        fail("is missing required metadata entries");
+    if (covered_until != size)
+        fail("has unaccounted trailing bytes");
+}
+
 std::vector<std::uint8_t> read_patch_json(
         const std::vector<std::uint8_t>& tar) {
     std::vector<std::uint8_t> patch;
     bool found = false;
+    bool found_root_directory = false;
+    bool found_root_appledouble = false;
+    bool found_patch_appledouble = false;
     bool terminated = false;
     std::size_t offset = 0;
     while (offset < tar.size()) {
@@ -229,22 +322,34 @@ std::vector<std::uint8_t> read_patch_json(
             if (path != "." || size != 0)
                 throw std::runtime_error(
                     "tar contains an unsupported directory member: " + path);
+            found_root_directory = true;
         } else if (type != 0 && type != '0') {
             throw std::runtime_error(
                 "tar contains a non-regular member: " + path);
         }
-        if ((type == 0 || type == '0') && path != "patch.json")
-            throw std::runtime_error(
-                "tar contains an unsupported regular member: " + path);
         const auto data_offset = offset + kBlockBytes;
         const auto padded = ((size + kBlockBytes - 1) / kBlockBytes) * kBlockBytes;
         if (padded > tar.size() - data_offset || size > tar.size() - data_offset)
             throw std::runtime_error("tar member extends beyond the archive");
         if (type == 0 || type == '0') {
-            if (found) throw std::runtime_error("tar contains duplicate patch.json");
-            found = true;
-            patch.assign(tar.begin() + data_offset,
-                         tar.begin() + data_offset + size);
+            if (path == "patch.json") {
+                if (found)
+                    throw std::runtime_error("tar contains duplicate patch.json");
+                found = true;
+                patch.assign(tar.begin() + data_offset,
+                             tar.begin() + data_offset + size);
+            } else if (is_supported_appledouble_path(path)) {
+                auto& already_found = path == "._."
+                    ? found_root_appledouble : found_patch_appledouble;
+                if (already_found)
+                    throw std::runtime_error(
+                        "tar contains duplicate AppleDouble member: " + path);
+                validate_appledouble(tar.data() + data_offset, size, path);
+                already_found = true;
+            } else {
+                throw std::runtime_error(
+                    "tar contains an unsupported regular member: " + path);
+            }
         }
         offset = data_offset + padded;
     }
@@ -252,6 +357,9 @@ std::vector<std::uint8_t> read_patch_json(
     if (!found)
         throw std::runtime_error(
             "Rack patch archive contains no regular root patch.json");
+    if (found_root_appledouble && !found_root_directory)
+        throw std::runtime_error(
+            "tar AppleDouble member ._. has no matching root directory");
     return patch;
 }
 
