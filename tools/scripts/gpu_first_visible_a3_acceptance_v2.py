@@ -1325,6 +1325,10 @@ def validate_v2(
             "interaction_measurement_endpoint": "endpoint",
         }
         if role_id in VISIBLE_ROLES:
+            if identity.get("editor_open_origin") != policy["editor_open_origin"]:
+                raise V2AcceptanceError(
+                    f"{role_id} campaign does not bind the protected editor-open origin"
+                )
             if any(identity.get(field) != policy_interaction[policy_field]
                    for field, policy_field in interaction_fields.items()):
                 raise V2AcceptanceError(f"{role_id} campaign does not bind exact interaction authority")

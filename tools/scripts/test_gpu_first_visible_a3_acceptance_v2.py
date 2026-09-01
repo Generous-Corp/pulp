@@ -290,7 +290,6 @@ raise SystemExit(2)
                 "adapter_configuration": (
                     "authority-config" if role == "constrained-adapter" else "default"
                 ),
-                "editor_open_origin": "editor-open-requested",
                 "interaction_lifecycle": "manifest-bound",
                 "steady_state_workload": "manifest-bound",
             })
@@ -299,6 +298,7 @@ raise SystemExit(2)
         if role != "headless-reference":
             role_interaction = interaction(role)
             identity.update({
+                "editor_open_origin": "editor-open-requested",
                 "interaction_origin": role_interaction["origin"],
                 "interaction_stimulus": role_interaction["stimulus"],
                 "interaction_expected_state": role_interaction["expected_state_change"],
@@ -477,6 +477,24 @@ def plant_forge_content_substitution(receipt: dict[str, Any], root: Path) -> Non
     rebind_campaign_identity(
         receipt, root, "forge-modular-vst3-reaper",
         lambda identity: identity.update(content_sha256="8" * 64),
+    )
+
+
+def plant_missing_forge_editor_open_origin(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    rebind_campaign_identity(
+        receipt, root, "forge-modular-auv2-logic",
+        lambda identity: identity.pop("editor_open_origin"),
+    )
+
+
+def plant_wrong_forge_editor_open_origin(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    rebind_campaign_identity(
+        receipt, root, "forge-modular-vst3-reaper",
+        lambda identity: identity.update(editor_open_origin="first-visible-frame"),
     )
 
 
@@ -870,6 +888,8 @@ def main() -> int:
         ("headless content substitution", plant_headless_content_substitution),
         ("headless signature substitution", plant_headless_signature_substitution),
         ("Forge shared-content substitution", plant_forge_content_substitution),
+        ("missing Forge editor-open origin", plant_missing_forge_editor_open_origin),
+        ("wrong Forge editor-open origin", plant_wrong_forge_editor_open_origin),
         ("self-consistent forged Forge signatures", plant_self_consistent_forged_forge_signatures),
         ("missing observed signature", lambda r, p: rebind_raw_signatures(r, p, EXPECTED_SIGNATURES[:-1])),
         ("extra observed signature", lambda r, p: rebind_raw_signatures(r, p, [*EXPECTED_SIGNATURES, "extra"])),
