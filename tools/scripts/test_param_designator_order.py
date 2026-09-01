@@ -33,8 +33,13 @@ from repo_source_scan import iter_sources  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PARAMETER_HPP = REPO_ROOT / "core" / "state" / "include" / "pulp" / "state" / "parameter.hpp"
 
-# A designator at the start of a line inside an initializer: `.name = ...`
-DESIGNATOR = re.compile(r"^\s*\.(\w+)\s*=", re.M)
+# A designator inside an initializer: `.name = ...`. Anchoring this to the start of
+# a line would only ever see the FIRST designator of a single-line initializer, so
+# `{.kind = k, .range = r}` would report one field, compare it against nothing, and
+# pass — the exact ordering GCC rejects. Anchor on what actually precedes a
+# designator instead (`{`, `,`, or the start of the initializer), which also keeps
+# member assignment (`info.range = x`) from reading as one.
+DESIGNATOR = re.compile(r"(?:^|[{,])\s*\.(\w+)\s*=", re.M)
 # `store.add_parameter({ ... });` — non-greedy, brace-balanced enough in practice
 # because these initializers only nest one level (`.range = {a, b, c, d}`).
 ADD_PARAM = re.compile(r"add_parameter\(\s*\{(.*?)\}\s*\)\s*;", re.S)
@@ -71,6 +76,17 @@ def param_info_field_order() -> list[str]:
 
 def cpp_sources(root: Path | None = None) -> list[Path]:
     return list(iter_sources(root or REPO_ROOT, ("*.hpp", "*.cpp", "*.h", "*.cc")))
+
+
+def out_of_order_initializers(src: str, rank: dict[str, int]) -> list[tuple[int, list[str]]]:
+    """`(line, designators)` for every `add_parameter` initializer that GCC would reject."""
+    found: list[tuple[int, list[str]]] = []
+    for m in ADD_PARAM.finditer(src):
+        used = [f for f in DESIGNATOR.findall(m.group(1)) if f in rank]
+        ranks = [rank[f] for f in used]
+        if ranks != sorted(ranks):
+            found.append((src[: m.start()].count("\n") + 1, used))
+    return found
 
 
 class ParamInfoDesignatorOrder(unittest.TestCase):
@@ -116,6 +132,41 @@ class ParamInfoDesignatorOrder(unittest.TestCase):
             found = {str(p.relative_to(root)) for p in cpp_sources(root)}
             self.assertEqual(found, {"core/state/param.cpp"})
 
+    def test_detects_violations_on_one_line_as_well_as_many(self) -> None:
+        """Guard the guard: prove the matcher fires, in both layouts, before trusting a
+        clean tree scan. The same initializer written on one line and across several is
+        the same GCC error, so a checker that only sees the multi-line form reports
+        `[]` for a repo full of the single-line form."""
+        rank = {name: i for i, name in enumerate(self.order)}
+
+        def lines(src: str) -> list[int]:
+            return [line for line, _ in out_of_order_initializers(src, rank)]
+
+        self.assertEqual(
+            lines('add_parameter({.id = "a", .kind = k, .range = r});'),
+            [1],
+            "A one-line out-of-order initializer went unreported. Anchoring the "
+            "designator pattern to the start of a line sees only the first field of "
+            "such an initializer, so there is nothing left to compare it against.",
+        )
+        self.assertEqual(
+            lines('add_parameter({\n  .id = "a",\n  .kind = k,\n  .range = r,\n});'),
+            [1],
+        )
+        # Controls: correctly ordered initializers must stay silent in both layouts,
+        # or the assertions above would pass for a matcher that flags everything.
+        self.assertEqual(lines('add_parameter({.id = "a", .range = r, .kind = k});'), [])
+        self.assertEqual(
+            lines('add_parameter({\n  .id = "a",\n  .range = r,\n  .kind = k,\n});'),
+            [],
+        )
+        # A nested `.range` brace and ordinary member assignment are not designators
+        # of the outer initializer.
+        self.assertEqual(
+            lines('add_parameter({.id = "a", .range = {0.0f, 1.0f}, .kind = k});'), []
+        )
+        self.assertEqual(lines("info.kind = k;\ninfo.range = r;\n"), [])
+
     def test_every_add_parameter_follows_declaration_order(self) -> None:
         rank = {name: i for i, name in enumerate(self.order)}
         violations: list[str] = []
@@ -128,23 +179,17 @@ class ParamInfoDesignatorOrder(unittest.TestCase):
             if "add_parameter" not in src:
                 continue
 
-            for m in ADD_PARAM.finditer(src):
-                used = [
-                    f for f in DESIGNATOR.findall(m.group(1)) if f in rank
+            for line, used in out_of_order_initializers(src, rank):
+                rel = path.relative_to(REPO_ROOT)
+                out_of_order = [
+                    f"{a} before {b}"
+                    for a, b in zip(used, used[1:])
+                    if rank[a] > rank[b]
                 ]
-                ranks = [rank[f] for f in used]
-                if ranks != sorted(ranks):
-                    line = src[: m.start()].count("\n") + 1
-                    rel = path.relative_to(REPO_ROOT)
-                    out_of_order = [
-                        f"{a} before {b}"
-                        for a, b in zip(used, used[1:])
-                        if rank[a] > rank[b]
-                    ]
-                    violations.append(
-                        f"{rel}:{line} — {', '.join(out_of_order)} "
-                        f"(ParamInfo declares: {' → '.join(used and sorted(used, key=rank.get))})"
-                    )
+                violations.append(
+                    f"{rel}:{line} — {', '.join(out_of_order)} "
+                    f"(ParamInfo declares: {' → '.join(used and sorted(used, key=rank.get))})"
+                )
 
         self.assertEqual(
             violations,

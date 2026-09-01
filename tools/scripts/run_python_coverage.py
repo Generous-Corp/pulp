@@ -28,6 +28,10 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from repo_source_scan import iter_sources  # noqa: E402
+
 try:
     import coverage
 except ImportError:  # pragma: no cover - exercised manually
@@ -238,7 +242,13 @@ def _report_source_files(source_roots: list[str], omit_globs: list[str]) -> list
     seen: set[Path] = set()
     for source_root in source_roots:
         root = REPO_ROOT / source_root
-        candidates = [root] if root.is_file() else sorted(root.rglob("*.py"))
+        # Prune generated trees during the walk. A packaging `build/` directory
+        # under a source root (setuptools stages a copy of the package into
+        # `build/lib/`) is gitignored, so CI never sees it and a developer who
+        # has built that package locally measures a different denominator than
+        # the gate does — the duplicates are never imported, so they report as
+        # uncovered and depress the local number below CI's.
+        candidates = [root] if root.is_file() else list(iter_sources(root, ("*.py",)))
         for path in candidates:
             if not path.is_file() or path.suffix != ".py":
                 continue
