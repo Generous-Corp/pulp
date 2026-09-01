@@ -48,7 +48,11 @@ cleanup must fail closed on a missing workflow path and must never cancel that
 path; otherwise two cancellation actuators can race and make restart evidence
 ambiguous. This exclusion does not authorize recovery by itself—the dedicated
 Shipyard invocation remains separately enabled only after its pinned release,
-receipt namespace protection, and canary are in place.
+receipt namespace protection, and canary are in place. Pulp pins the bounded
+primitive at Shipyard v0.143.0; that pin supplies the command but does not turn
+on apply mode. The protected-main worker must stay repository-serialized,
+perform a dry run first, and prove one live exact-head canary before scheduled
+activation.
 
 ## Runner timing metrics
 
@@ -4187,6 +4191,12 @@ rejects the dispatch if the live PR head moved or the exact source is no longer
 the queued `pull_request` attempt for `.github/workflows/build.yml` with an
 exhaustive zero-job census. Operator dispatches leave recovery false, omit the
 source identity, and retain live-head resolution.
+Shipyard v0.143.0 provides the matching default-off
+`shipyard runner zero-job-recover` controller primitive. It creates and then
+re-reads an exact receipt, refuses duplicate/conflicting receipt contexts,
+requires the exhaustive current-attempt census to remain unchanged, and never
+cancels the source run. GitHub remains workflow scheduler and merge authority;
+TartCI remains capacity scheduler.
 The first PR checkout occurs only in the clone owned by `nobody`; this keeps
 PR-selected Git filters and LFS endpoints out of the trusted environment. The
 untrusted build job has only contents-read permission, no Actions/Namespace
