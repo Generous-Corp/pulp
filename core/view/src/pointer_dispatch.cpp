@@ -260,6 +260,9 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     me.pointer_id = pointer.pointer_id;
     me.altitude_angle = pointer.altitude_angle;
     me.azimuth_angle = pointer.azimuth_angle;
+    me.movement_x = pointer.movement_x;
+    me.movement_y = pointer.movement_y;
+    me.has_movement_delta = pointer.has_movement_delta;
     dispatch_dom_pointer_event(root, target, me, true);
 
     // The legacy callbacks carry no button identity and historically mean the

@@ -210,6 +210,7 @@ public:
     std::function<void(float dx, float dy)> on_resize;
 
     void paint(canvas::Canvas& canvas) override;
+    void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
     bool wants_mouse_input() const override { return true; }
@@ -219,6 +220,9 @@ public:
 private:
     float drag_start_x_ = 0;
     float drag_start_y_ = 0;
+    float movement_x_ = 0;
+    float movement_y_ = 0;
+    bool native_drag_pending_ = false;
 };
 
 }  // namespace pulp::view

@@ -109,6 +109,9 @@ struct PointerAttributes {
     int pointer_id = 0;
     float altitude_angle = 0.0f;  ///< Stylus altitude above the display plane.
     float azimuth_angle = 0.0f;   ///< Stylus direction around the display plane.
+    float movement_x = 0.0f;     ///< Host-reported X delta since the prior event.
+    float movement_y = 0.0f;     ///< Host-reported Y delta since the prior event.
+    bool has_movement_delta = false;  ///< The host supplied the movement fields.
 };
 
 /// Deliver one drag tick of an in-flight gesture to the captured `target`.
@@ -117,7 +120,7 @@ struct PointerAttributes {
 /// The target receives, in this order, EXACTLY ONCE each:
 ///   1. the MODERN channel — `on_mouse_event(MouseEvent)` with
 ///      `phase == MousePhase::drag`, carrying `modifiers`, `click_count`,
-///      `pointer_type` and `pressure`;
+///      `pointer_type`, `pressure`, and host-reported movement deltas;
 ///   2. the LEGACY channel — `on_mouse_drag(Point)` then `on_drag(Point)`,
 ///      which carry a bare local Point and are kept for compatibility;
 ///   3. ancestor bubbling — `on_drag` on each ancestor that declares one,

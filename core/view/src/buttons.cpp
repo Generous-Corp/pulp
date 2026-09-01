@@ -224,11 +224,41 @@ void ResizableCorner::paint(canvas::Canvas& canvas) {
 void ResizableCorner::on_mouse_down(Point pos) {
     drag_start_x_ = pos.x;
     drag_start_y_ = pos.y;
+    movement_x_ = 0.0f;
+    movement_y_ = 0.0f;
+    native_drag_pending_ = false;
 }
 
 void ResizableCorner::on_mouse_drag(Point pos) {
-    if (on_resize)
-        on_resize(pos.x - drag_start_x_, pos.y - drag_start_y_);
+    // Native movement is captured by the modern channel, but the callback is
+    // deliberately emitted here on the legacy hop. Pointer dispatch
+    // re-validates the target between those two channels, so a modern handler
+    // that synchronously unmounted this corner cannot leave us invoking a
+    // callback through a destroyed object.
+    if (native_drag_pending_) {
+        native_drag_pending_ = false;
+        auto resize = on_resize;
+        const float x = movement_x_;
+        const float y = movement_y_;
+        if (resize) resize(x, y);
+        return;
+    }
+    auto resize = on_resize;
+    if (resize) resize(pos.x - drag_start_x_, pos.y - drag_start_y_);
+}
+
+void ResizableCorner::on_mouse_event(const MouseEvent& event) {
+    if (event.isDrag() && event.button == MouseButton::left &&
+        event.has_movement_delta) {
+        movement_x_ += event.movement_x;
+        movement_y_ += event.movement_y;
+        native_drag_pending_ = true;
+    }
+
+    // Terminal by design: View::on_mouse_event dispatches arbitrary user code
+    // which may synchronously remove and destroy this widget. Pointer dispatch
+    // will re-validate the target before calling on_mouse_drag().
+    View::on_mouse_event(event);
 }
 
 }  // namespace pulp::view

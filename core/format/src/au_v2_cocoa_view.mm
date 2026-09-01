@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <memory>
 
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
@@ -172,68 +173,51 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
     if (![NSThread isMainThread] || !editor_view) return false;
 
     NSView* container = [editor_view superview];
-    NSWindow* window = [editor_view window];
-    if (!container || !window) return false;
+    if (!container || ![editor_view window]) return false;
 
-    const NSSize previous_view = [editor_view frame].size;
-    const NSSize previous_container = [container frame].size;
-    const NSRect previous_window = [window frame];
+    const NSRect previous_view = [editor_view frame];
+    const NSRect previous_container = [container frame];
     const NSSize requested = NSMakeSize(next_w, next_h);
-    // Logic does not reliably observe an immediate-container frame mutation.
-    // The old transaction therefore returned success after shrinking only the
-    // AU content while the visible plug-in window stayed put. Resize the
-    // enclosing window by the same delta and keep its top-left corner fixed;
-    // this preserves Logic's own header/chrome instead of assuming the AU view
-    // equals the content size.
-    const auto next_window =
-        pulp::format::au::editor_resize_detail::resize_window_preserving_top_left(
-            {previous_window.origin.x, previous_window.origin.y,
-             previous_window.size.width, previous_window.size.height},
-            previous_view.width, previous_view.height, requested.width,
-            requested.height);
-    const NSRect requested_window = NSMakeRect(
-        next_window.x, next_window.y, next_window.width, next_window.height);
 
     pulp_trace_auv2_resize_hierarchy(editor_view, "before");
-    [NSAnimationContext beginGrouping];
-    [[NSAnimationContext currentContext] setDuration:0.0];
-    [container setFrameSize:requested];
+    // Logic observes the returned editor view and propagates its exact size to
+    // the immediate container and outer plug-in window. Mutating the container
+    // first applies the same delta twice through its flexible autoresizing mask,
+    // producing the alternating min/huge geometry seen during a live drag.
+    // Never resize Logic's enclosing NSWindow directly either: the host owns its
+    // chrome and mouse capture. One editor mutation is the complete transaction.
     editor_host.set_size(next_w, next_h);
-    [window setFrame:requested_window display:YES animate:NO];
-    [[window contentView] layoutSubtreeIfNeeded];
-    [container layoutSubtreeIfNeeded];
-    [NSAnimationContext endGrouping];
+    [editor_view setNeedsDisplay:YES];
     pulp_trace_auv2_resize_hierarchy(editor_view, "after");
 
-    const NSSize applied_view = [editor_view frame].size;
-    const NSSize applied_container = [container frame].size;
-    const NSRect applied_window = [window frame];
+    const NSRect applied_view = [editor_view frame];
+    const NSRect applied_container = [container frame];
     const auto exact_size = [](NSSize actual, NSSize expected) {
         return std::fabs(actual.width - expected.width) < 0.5 &&
                std::fabs(actual.height - expected.height) < 0.5;
     };
-    const auto exact_rect = [&exact_size](NSRect actual, NSRect expected) {
-        return std::fabs(actual.origin.x - expected.origin.x) < 0.5 &&
-               std::fabs(actual.origin.y - expected.origin.y) < 0.5 &&
-               exact_size(actual.size, expected.size);
+    const auto exact_origin = [](NSPoint actual, NSPoint expected) {
+        return std::fabs(actual.x - expected.x) < 0.5 &&
+               std::fabs(actual.y - expected.y) < 0.5;
     };
-    if (exact_size(applied_view, requested) &&
-        exact_size(applied_container, requested) &&
-        exact_rect(applied_window, requested_window)) {
+    if (exact_size(applied_view.size, requested) &&
+        exact_size(applied_container.size, requested) &&
+        exact_origin(applied_view.origin, previous_view.origin) &&
+        exact_origin(applied_container.origin, previous_container.origin)) {
         return true;
     }
 
     // Fail closed. A partial native resize is worse than a refusal because it
-    // leaves the editor and the host window disagreeing about hit coordinates.
-    [NSAnimationContext beginGrouping];
-    [[NSAnimationContext currentContext] setDuration:0.0];
-    [window setFrame:previous_window display:YES animate:NO];
-    [container setFrameSize:previous_container];
+    // leaves the returned editor and its host container disagreeing about hit
+    // coordinates.
+    // Restore the host-owned parent first, then the returned editor last.
+    // Reversing that order lets the parent's flexible autoresizing mask mutate
+    // an already-restored child a second time.
+    [container setFrame:previous_container];
     editor_host.set_size(
-        static_cast<uint32_t>(std::lround(previous_view.width)),
-        static_cast<uint32_t>(std::lround(previous_view.height)));
-    [[window contentView] layoutSubtreeIfNeeded];
-    [NSAnimationContext endGrouping];
+        static_cast<uint32_t>(std::lround(previous_view.size.width)),
+        static_cast<uint32_t>(std::lround(previous_view.size.height)));
+    [editor_view setFrameOrigin:previous_view.origin];
     pulp_trace_auv2_resize_hierarchy(editor_view, "rollback");
     return false;
 }
@@ -334,10 +318,18 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
 
     // AU v2 has no host size callback — the DAW resizes the returned NSView
     // directly. Forward native frame changes to the bridge so the surfaces
-    // resize and Processor::on_view_resized fires.
+    // resize and Processor::on_view_resized fires. A plugin-initiated resize
+    // can synchronously bounce through the same NSView callback while Logic is
+    // applying or rolling back its parent geometry; suppress those transient
+    // frames and publish exactly once after an exact native acceptance.
+    struct ResizeTransactionState {
+        bool active = false;
+    };
+    auto resize_transaction = std::make_shared<ResizeTransactionState>();
     format::ViewBridge* bridge_ptr = bridge.get();
-    host->set_resize_callback([bridge_ptr](uint32_t w, uint32_t h) {
-        bridge_ptr->resize(w, h);
+    host->set_resize_callback([bridge_ptr, resize_transaction](uint32_t w,
+                                                               uint32_t h) {
+        if (!resize_transaction->active) bridge_ptr->resize(w, h);
     });
 
     runtime::log_info("AU v2 editor: created view ({}x{}, mode={}, gpu={})",
@@ -352,16 +344,74 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
     // AppKit clamps/refuses the requested frame, and mutate the design viewport
     // only after the exact native size sticks.
     format::ViewBridge* resize_bridge = bridge.get();
+    const auto resize_bridge_alive = resize_bridge->alive_token();
     view::PluginViewHost* resize_host = host.get();
     __unsafe_unretained NSView* resize_view = editorView;
     const auto resize_host_info = format::detect_host_info();
     const bool resize_logic_container =
         format::resolved_quirks(resize_host_info.type, resize_host_info.version)
             .logic_au_v2_container_resize;
+    if (pulp_auv2_resize_trace_enabled()) {
+        NSLog(@"[pulp-auv2-resize] install host-type=%d host-version=%d.%d.%d "
+               "logic-container=%d editor=%@ processor=%p",
+              static_cast<int>(resize_host_info.type),
+              resize_host_info.version.major, resize_host_info.version.minor,
+              resize_host_info.version.patch,
+              resize_logic_container, editorView,
+              static_cast<void*>(ctx.processor));
+    }
     format::au::editor_resize_detail::install_editor_resize_handler(
         *ctx.processor, (const void*)editorView, *resize_bridge,
+        [resize_view, resize_bridge_alive, resize_logic_container,
+         resize_transaction]() -> std::shared_ptr<void> {
+            // request_editor_resize() copies its handler outside the
+            // Processor side-table lock. Reject a stale copy before touching
+            // any captured editor pointer, host, or bridge. AU v2 Cocoa editor
+            // lifecycle and AppKit geometry are main-thread-only.
+            if (![NSThread isMainThread] || !resize_logic_container ||
+                resize_transaction->active ||
+                !runtime::AliveToken::is_alive(resize_bridge_alive) ||
+                !resize_view) {
+                return {};
+            }
+
+            // Retain both the returned view and its associated ownership. The
+            // latter owns the PluginViewHost + ViewBridge; retaining only the
+            // NSView would not by itself make that C++ lifetime contract
+            // explicit if a host removes or re-associates the view reentrantly.
+            auto* owner = static_cast<PulpAUEditorOwner*>(
+                objc_getAssociatedObject(resize_view, &kOwnershipKey));
+            if (!owner) return {};
+            [resize_view retain];
+            [owner retain];
+
+            struct LifetimeLease {
+                NSView* view = nil;
+                PulpAUEditorOwner* owner = nil;
+                std::shared_ptr<ResizeTransactionState> transaction;
+            };
+            auto* lease = new LifetimeLease{
+                resize_view, owner, resize_transaction};
+            resize_transaction->active = true;
+            return std::shared_ptr<void>(
+                lease, [](void* opaque) {
+                    auto* held = static_cast<LifetimeLease*>(opaque);
+                    // Drop the in-flight guard before releasing ObjC lifetime;
+                    // either release may synchronously run editor teardown.
+                    held->transaction->active = false;
+                    [held->view release];
+                    [held->owner release];
+                    delete held;
+                });
+        },
         [resize_view, resize_host,
          resize_logic_container](uint32_t next_w, uint32_t next_h) -> bool {
+            if (pulp_auv2_resize_trace_enabled()) {
+                NSLog(@"[pulp-auv2-resize] callback main=%d editor=%@ "
+                       "logic-container=%d requested=%ux%u",
+                      [NSThread isMainThread], resize_view,
+                      resize_logic_container, next_w, next_h);
+            }
             if (![NSThread isMainThread] || !resize_view ||
                 !resize_logic_container) {
                 return false;
@@ -376,6 +426,24 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
                     resize_bridge->size_hints())) {
                 resize_host->set_design_viewport_top_align(true);
             }
+            // PluginViewHost::set_size updates its cached native frame before
+            // asking AppKit to resize, so that programmatic mutation does not
+            // re-enter its ordinary native resize callback. Publish the
+            // accepted dimensions explicitly so Processor::on_view_resized
+            // and ViewBridge's live size stay synchronized with Logic. This is
+            // the final bridge/host access: the callback may close the editor.
+            resize_bridge->resize(next_w, next_h);
+        },
+        [resize_view, resize_bridge_alive, resize_logic_container] {
+            if (![NSThread isMainThread] || !resize_logic_container ||
+                !runtime::AliveToken::is_alive(resize_bridge_alive) ||
+                !resize_view) {
+                return false;
+            }
+            // Logic can retain the returned NSView after closing its editor.
+            // Only a view still attached to both a hierarchy and a window is
+            // an eligible target for a new plugin-initiated resize.
+            return [resize_view superview] != nil && [resize_view window] != nil;
         });
     bridge->notify_attached();
 

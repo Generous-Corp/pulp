@@ -422,8 +422,17 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
     }
     auto* live_target = drag_target->live_in(*root);
     if (!live_target) return;
+    pulp::view::PointerAttributes pointer;
+    pointer.movement_x = static_cast<float>(event.deltaX);
+    // Preserve the established macOS relative-input contract: AppKit's raw
+    // deltaY is already the signed movement Pulp widgets consume. Negating it
+    // here makes bottom-right resize handles shrink on a physical downward
+    // drag and disagrees with MacWindowHost's relative-mouse path.
+    pointer.movement_y = static_cast<float>(event.deltaY);
+    pointer.has_movement_delta = true;
     pulp::view::deliver_mouse_drag(*root, live_target, pt, mods,
-                                   static_cast<int>(event.clickCount));
+                                   static_cast<int>(event.clickCount),
+                                   pulp::view::MouseButton::left, pointer);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw: %s\n", e.what());
   } catch (...) {
@@ -828,11 +837,9 @@ bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
   }
 }
 
-// Set the macOS cursor from the view under `local` (root coords). Mirrors the
-// standalone host's hover→NSCursor mapping (window_host_mac.mm) for the subset
-// that matters in a plugin editor — most importantly IBeam over a text field so
-// a focused/hovered TextEditor shows the expected i-beam (pulp: AU hosted-view
-// key routing). Unknown styles fall back to the arrow cursor.
+// Set the macOS cursor from the view under `local` (root coords). Use the same
+// complete mapping as the standalone host so diagonal resize, grab/grabbing,
+// invisible, and CSS-backed styles cannot silently degrade in a plug-in view.
 void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point local) {
   try {
     if (!root) return;
@@ -841,32 +848,14 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
     // land on the sibling under the lower rows and they'd never highlight.
     if (pulp_plugin_route_to_open_popup(
             root, local, [&](pulp::view::MouseEvent&) {})) {
-        [[NSCursor arrowCursor] set];
+        pulp::view::mac_geometry::set_ns_cursor_for_style(
+            pulp::view::View::CursorStyle::default_);
         return;
     }
     root->simulate_hover(local);
     auto* target = root->hit_test(local);
-    if (!target) { [[NSCursor arrowCursor] set]; return; }
-    switch (target->cursor()) {
-        case pulp::view::View::CursorStyle::text:
-            [[NSCursor IBeamCursor] set]; break;
-        case pulp::view::View::CursorStyle::pointer:
-            [[NSCursor pointingHandCursor] set]; break;
-        case pulp::view::View::CursorStyle::crosshair:
-            [[NSCursor crosshairCursor] set]; break;
-        case pulp::view::View::CursorStyle::grab:
-            [[NSCursor openHandCursor] set]; break;
-        case pulp::view::View::CursorStyle::grabbing:
-            [[NSCursor closedHandCursor] set]; break;
-        case pulp::view::View::CursorStyle::not_allowed:
-            [[NSCursor operationNotAllowedCursor] set]; break;
-        case pulp::view::View::CursorStyle::horizontal_resize:
-            [[NSCursor resizeLeftRightCursor] set]; break;
-        case pulp::view::View::CursorStyle::vertical_resize:
-            [[NSCursor resizeUpDownCursor] set]; break;
-        default:
-            [[NSCursor arrowCursor] set]; break;
-    }
+    pulp::view::mac_geometry::set_ns_cursor_for_style(
+        target ? target->cursor() : pulp::view::View::CursorStyle::default_);
   } catch (...) {
     // A cursor update must never take down the host process.
   }

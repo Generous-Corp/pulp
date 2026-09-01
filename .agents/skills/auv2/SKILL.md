@@ -560,13 +560,18 @@ The attribute is a static-analysis hint only — dropping it from derived-class 
 
 Calling `_ownership->bridge->close()` HERE explicitly (BEFORE `delete _ownership`) reverses that order: the View dies first, then `~PluginViewHost` dereferences a dangling `root_` reference and crashes the AU v2 editor close path. The fix is to remove the explicit close, NOT to add it. Same rule applies to any future Cocoa-View ownership wrapper that mixes a `ViewBridge` and a `PluginViewHost` in the same C++ scope.
 
-### Plugin-initiated resize is a Logic-only immediate-container transaction
+### Plugin-initiated resize is a Logic-only editor transaction
 
 AU v2 exposes no host `request_resize` callback. For Logic, the validated
-plugin-initiated path resizes the Cocoa editor's immediate container on the
-main thread, behind the `logic_au_v2_container_resize` host quirk. Do not enable
-that hierarchy mutation for GarageBand or an unverified AU host merely because
-it also embeds the returned NSView.
+plugin-initiated path resizes only the returned Cocoa editor on the main thread,
+behind the `logic_au_v2_container_resize` host quirk. Logic observes that view
+and propagates the exact size to its immediate container and outer plug-in
+window. Do not resize the container first: Pulp's editor and container carry
+flexible width/height autoresizing, so the same delta is then applied twice and
+the geometry oscillates between extremes. Do not mutate Logic's enclosing
+`NSWindow` either; the host owns its chrome and mouse capture. Do not enable
+this behavior for GarageBand or an unverified AU host merely because it also
+embeds the returned NSView.
 
 The Cocoa view builds its `ViewBridge` from
 `ViewBridge::Options::hosted_editor()` — never a hand-assembled `Options`; a
@@ -582,6 +587,14 @@ owner-scoped handler before `notify_attached()` so an editor-open callback can
 request its restored mode size, and remove it before host/bridge teardown.
 `PulpAUEditorOwnership` uses the processor's alive token for that cleanup
 because the adapter can outlive the Cocoa view.
+
+The resize grip must not derive deltas from absolute view coordinates. A pinned
+design viewport changes that mapping while the resize is in flight, so the same
+physical cursor maps to a different point after every accepted frame. The macOS
+plug-in host normalizes `NSEvent.deltaX/deltaY` into Pulp's positive-down
+`MouseEvent::movement_x/movement_y`; generic `ResizableCorner` accumulates those
+native deltas and suppresses the duplicate point-only legacy callback. Product
+code supplies only its size/aspect policy through `on_resize`.
 
 ### Out-of-process Logic starves the CPU editor's paint — drive it from the pump
 
