@@ -76,6 +76,10 @@ def role_expected_signatures(role: str) -> list[str]:
     return list(EXPECTED_SIGNATURES)
 
 
+def forge_adapter_configuration(role: str) -> str:
+    return f"authority-config:{role}"
+
+
 def policy_role(role: str) -> dict[str, Any]:
     build_authority = None
     if role in v2.FORGE_ROLES:
@@ -90,6 +94,8 @@ def policy_role(role: str) -> dict[str, Any]:
                 signatures, f"{role} fixture signatures",
             )[0],
             "expected_signatures": signatures,
+            "adapter": "metal",
+            "adapter_configuration": forge_adapter_configuration(role),
         }
     return {
         "role_id": role,
@@ -293,6 +299,8 @@ raise SystemExit(2)
                 "interaction_lifecycle": "manifest-bound",
                 "steady_state_workload": "manifest-bound",
             })
+        elif role in v2.FORGE_ROLES:
+            identity["adapter_configuration"] = forge_adapter_configuration(role)
         if role == "constrained-adapter":
             identity["adapter_predicate"] = "supported-constrained-metal-adapter"
         if role != "headless-reference":
@@ -503,6 +511,17 @@ def plant_easier_standalone_adapter(
 ) -> None:
     rebind_campaign_identity(
         receipt, root, "pulp-standalone",
+        lambda identity: identity.update(
+            adapter="software", adapter_configuration="easier-baseline",
+        ),
+    )
+
+
+def plant_easier_forge_adapter(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    rebind_campaign_identity(
+        receipt, root, "forge-modular-clap-reaper",
         lambda identity: identity.update(
             adapter="software", adapter_configuration="easier-baseline",
         ),
@@ -780,6 +799,10 @@ def main() -> int:
         assert policy_publication_errors(
             author_validation, policy_bytes, reviews=[], author_id=40004,
         ) == []
+        assert policy_publication_errors(
+            author_validation, policy_bytes, reviews=[],
+            commit_date="2026-08-28T23:30:00Z",
+        ) == []
         assert any(
             "cryptographically attributable exact-head" in error
             for error in policy_publication_errors(
@@ -792,6 +815,13 @@ def main() -> int:
             for error in policy_publication_errors(
                 author_validation, policy_bytes, reviews=[],
                 commit_verified=False,
+            )
+        )
+        assert any(
+            "cryptographically attributable exact-head" in error
+            for error in policy_publication_errors(
+                author_validation, policy_bytes, reviews=[],
+                commit_date="2026-08-29T01:00:01Z",
             )
         )
         protected_blobs = {
@@ -913,6 +943,7 @@ def main() -> int:
         ("constrained configuration", lambda r, _p: r["campaigns"][6]["identity"].update(adapter_configuration="executor-selected")),
         ("missing standalone configuration", lambda r, _p: r["campaigns"][0]["identity"].pop("adapter_configuration")),
         ("easier standalone adapter baseline", plant_easier_standalone_adapter),
+        ("easier Forge adapter baseline", plant_easier_forge_adapter),
         ("constrained product substitution", lambda r, _p: r["campaigns"][6]["identity"].update(build_sha256="8" * 64)),
         ("campaign interaction origin", lambda r, _p: r["campaigns"][0]["identity"].update(interaction_origin="easier-origin")),
         ("campaign interaction stimulus", lambda r, _p: r["campaigns"][1]["identity"].update(interaction_stimulus="easier-stimulus")),

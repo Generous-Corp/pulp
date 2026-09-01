@@ -60,9 +60,12 @@ GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 POLICY_BUDGET_ID = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 ARTIFACT_KEYS = {"path", "sha256"}
 CANONICAL_RECEIPT = "docs/validation/gpu-first-visible-a3-acceptance.json"
-FORGE_BUILD_AUTHORITY_FIELDS = (
+FORGE_BUILD_DIGEST_FIELDS = (
     "application_sha256", "plugin_sha256", "provider_sha256", "build_sha256",
     "content_sha256", "signature_sha256",
+)
+FORGE_BUILD_AUTHORITY_FIELDS = (
+    *FORGE_BUILD_DIGEST_FIELDS, "adapter", "adapter_configuration",
 )
 
 
@@ -404,12 +407,17 @@ def validate_product_policy(
             exact_keys(build_authority, {
                 *FORGE_BUILD_AUTHORITY_FIELDS, "expected_signatures",
             }, f"product policy role {row['role_id']} build authority")
-            for field in FORGE_BUILD_AUTHORITY_FIELDS:
+            for field in FORGE_BUILD_DIGEST_FIELDS:
                 if not isinstance(build_authority[field], str) or not SHA256.fullmatch(
                     build_authority[field]
                 ):
                     raise V2AcceptanceError(
                         f"product policy role {row['role_id']} build authority {field} is invalid"
+                    )
+            for field in ("adapter", "adapter_configuration"):
+                if not isinstance(build_authority[field], str) or not build_authority[field]:
+                    raise V2AcceptanceError(
+                        f"product policy role {row['role_id']} build authority {field} is missing"
                     )
             signature_digest, _ = signature_set_digest(
                 build_authority["expected_signatures"],
@@ -1062,7 +1070,7 @@ def product_policy_publication_errors(
             or not isinstance(verification.get("payload"), str)
             or not verification["payload"]
             or authored_time is None
-            or not created_time <= authored_time <= merged_time
+            or authored_time > merged_time
         ):
             errors.append(
                 "product policy author mode lacks an exact-head Daniel approval or "
@@ -1248,7 +1256,7 @@ def validate_v2(
                 )
             ):
                 raise V2AcceptanceError(
-                    f"{role_id} does not match its protected Forge build/signature authority"
+                    f"{role_id} does not match its protected Forge build authority"
                 )
             expected_signatures_by_role[role_id] = authority_expected_signatures
         else:
