@@ -62,7 +62,7 @@ python3 tools/scripts/gpu_health_run_attestation.py \
   --health-result docs/validation/gpu-health/a1/m5/pulp-doctor-gpu.json \
   --output docs/validation/gpu-health/a1/m5/run-attestation.json \
   --signing-key /path/to/pre-provisioned/m5-ed25519 \
-  --host-id m5 --stable-machine-id '<platform UUID from host inventory>' \
+  --host-id m5 --stable-machine-id "$PULP_PRIVATE_STABLE_MACHINE_ID" \
   --configuration 'power=low;fallback=false' \
   --probe-id gpu-compute-magnitude \
   --implementation-revision '<40-character implementation SHA>' \
@@ -72,9 +72,19 @@ python3 tools/scripts/gpu_health_run_attestation.py \
   --producer-code-signature '<exact code-signature identity or digest>'
 ```
 
+`PULP_PRIVATE_STABLE_MACHINE_ID` is private local input and must not be copied
+into the evidence tree or logs. The producer publishes only
+`stable_machine_id_sha256`, computed as SHA-256 over the ASCII domain
+`pulp.gpu-health.machine.v1`, one NUL byte, and the exact UTF-8 bytes of the raw
+identifier. This non-reversible pseudonym deliberately makes the same machine
+linkable across Pulp GPU-health evidence, but it is domain-separated from raw
+identifier hashes and other application namespaces. `host_id` remains a
+non-sensitive logical alias such as `m5`, never a serial number or user name.
+
 Verification is independent of the producer. Its local trusted-host registry
-maps one `host_id` to the expected stable machine ID and SSH public key; the
-registry contains no private key. The verifier requires the implementation,
+maps one logical `host_id` to the expected machine pseudonym and SSH public key;
+the registry contains neither the raw stable identifier nor a private key. The
+verifier requires the implementation,
 evidence, and containing attestation revisions to form the expected ancestry,
 requires the latter two to be ancestors of the named protected ref, re-reads
 the schema and health result from Git, re-hashes the live producer binary,
@@ -94,7 +104,8 @@ python3 tools/scripts/verify_gpu_health_run_attestation.py \
   --expected-implementation-revision '<40-character implementation SHA>' \
   --expected-producer-build-id '<exact build ID>' \
   --expected-producer-code-signature '<exact code-signature identity or digest>' \
-  --expected-host-id m5 --expected-stable-machine-id '<platform UUID>' \
+  --expected-host-id m5 \
+  --expected-stable-machine-id-sha256 '<64 lowercase hex pseudonym>' \
   --expected-configuration 'power=low;fallback=false' \
   --expected-probe-id gpu-compute-magnitude \
   --expected-adapter-name '<exact Dawn adapter name>' \
@@ -109,8 +120,8 @@ clock is always the current system UTC time and has no command-line override.
 
 The trusted-host registry is a closed JSON object with
 `schema: pulp.gpu-health-trusted-hosts.v1`, `version: 1`, and a `hosts` array.
-Each host has exactly `host_id`, `stable_machine_id`, and `public_key` (the
-single-line `ssh-ed25519 ...` public key). A missing trust entry, stale run,
+Each host has exactly `host_id`, `stable_machine_id_sha256`, and `public_key`
+(the single-line `ssh-ed25519 ...` public key). A missing trust entry, stale run,
 unprotected commit, changed binary/result/schema, older-but-ancestral
 implementation, alternate passing probe, or cross-host/configuration/adapter
 reuse is a verification failure, never unavailable-as-pass.

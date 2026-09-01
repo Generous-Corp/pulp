@@ -13,10 +13,10 @@
     "evidence_publication_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "host": {
       "type": "object", "additionalProperties": false,
-      "required": ["host_id", "stable_machine_id"],
+      "required": ["host_id", "stable_machine_id_sha256"],
       "properties": {
         "host_id": { "type": "string", "minLength": 1, "maxLength": 1024 },
-        "stable_machine_id": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        "stable_machine_id_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
     "selection": {

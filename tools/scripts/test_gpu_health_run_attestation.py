@@ -25,9 +25,13 @@ HEALTH_SCHEMA_PATH = Path("docs/contracts/gpu-health-result-v2.schema.json")
 CREATED = "2026-09-01T07:00:00Z"
 MEASURED = "2026-09-01T06:59:00Z"
 NOW = "2026-09-01T07:05:00Z"
+RAW_MACHINE_ID = "fixture-private-platform-uuid-m5"
 sys.path.insert(0, str(HERE))
 import json_schema_lite  # noqa: E402
+import gpu_health_run_attestation as producer  # noqa: E402
 import verify_gpu_health_run_attestation as verifier  # noqa: E402
+
+MACHINE_ID_SHA256 = producer.stable_machine_id_sha256(RAW_MACHINE_ID)
 
 
 def run(*args: str | Path, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -89,7 +93,8 @@ class Fixture:
         self.trust.write_text(json.dumps({
             "schema": "pulp.gpu-health-trusted-hosts.v1", "version": 1,
             "hosts": [{
-                "host_id": "m5", "stable_machine_id": "platform-uuid-m5",
+                "host_id": "m5",
+                "stable_machine_id_sha256": MACHINE_ID_SHA256,
                 "public_key": self.public_key,
             }],
         }, sort_keys=True) + "\n")
@@ -111,7 +116,7 @@ class Fixture:
             "--output", output,
             "--signing-key", signing_key,
             "--host-id", "m5",
-            "--stable-machine-id", "platform-uuid-m5",
+            "--stable-machine-id", RAW_MACHINE_ID,
             "--configuration", "power=low;fallback=false",
             "--probe-id", "gpu-compute-magnitude",
             "--implementation-revision", self.implementation,
@@ -141,7 +146,7 @@ class Fixture:
             "--expected-producer-build-id", "pulp-build-fixture",
             "--expected-producer-code-signature", "adhoc:fixture-cdhash",
             "--expected-host-id", "m5",
-            "--expected-stable-machine-id", "platform-uuid-m5",
+            "--expected-stable-machine-id-sha256", MACHINE_ID_SHA256,
             "--expected-configuration", "power=low;fallback=false",
             "--expected-probe-id", "gpu-compute-magnitude",
             "--expected-adapter-name", "Apple M5",
@@ -249,6 +254,33 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
             (self.fixture.repo / self.fixture.attestation_path).read_text()
         )
         self.assertEqual(json_schema_lite.validate(attestation, schema), [])
+        self.assertEqual(
+            attestation["host"]["stable_machine_id_sha256"], MACHINE_ID_SHA256
+        )
+        self.assertNotIn(RAW_MACHINE_ID, json.dumps(attestation))
+        self.assertNotIn(RAW_MACHINE_ID, self.fixture.trust.read_text())
+
+    def test_machine_pseudonym_uses_the_canonical_domain_separator(self) -> None:
+        raw = RAW_MACHINE_ID.encode("utf-8")
+        expected = hashlib.sha256(
+            b"pulp.gpu-health.machine.v1\0" + raw
+        ).hexdigest()
+        self.assertEqual(producer.MACHINE_ID_DOMAIN,
+                         b"pulp.gpu-health.machine.v1\0")
+        self.assertEqual(producer.stable_machine_id_sha256(RAW_MACHINE_ID), expected)
+        self.assertNotEqual(expected, hashlib.sha256(raw).hexdigest())
+        self.assertNotEqual(
+            expected,
+            hashlib.sha256(b"pulp.gpu-health.machine.v2\0" + raw).hexdigest(),
+        )
+
+    def test_producer_never_publishes_or_logs_raw_machine_id(self) -> None:
+        output = Path(self.temp.name) / "privacy-scan.json"
+        result = self.fixture.produce(self.fixture.evidence, CREATED, output)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn(RAW_MACHINE_ID, output.read_text())
+        self.assertNotIn(RAW_MACHINE_ID, result.stdout)
+        self.assertNotIn(RAW_MACHINE_ID, result.stderr)
 
     def test_mutable_attestation_ref_is_resolved_once(self) -> None:
         valid_revision = self.fixture.attestation
@@ -295,7 +327,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
     def test_cross_host_configuration_backend_device_and_adapter_reuse_fails(self) -> None:
         substitutions = {
             "--expected-host-id": "other-host",
-            "--expected-stable-machine-id": "other-machine",
+            "--expected-stable-machine-id-sha256": "0" * 64,
             "--expected-configuration": "fallback=true",
             "--expected-adapter-name": "substituted adapter",
             "--expected-backend": "Software",
@@ -306,6 +338,14 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                 result = self.fixture.verify(option, value)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("does not match verifier policy", result.stdout)
+
+    def test_trusted_machine_pseudonym_substitution_fails(self) -> None:
+        trust = json.loads(self.fixture.trust.read_text())
+        trust["hosts"][0]["stable_machine_id_sha256"] = "f" * 64
+        self.fixture.trust.write_text(json.dumps(trust, sort_keys=True) + "\n")
+        result = self.fixture.verify()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pseudonym does not match trusted host policy", result.stdout)
 
     def test_older_valid_implementation_ancestor_is_not_expected(self) -> None:
         older = run(

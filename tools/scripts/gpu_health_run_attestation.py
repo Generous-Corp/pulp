@@ -19,6 +19,7 @@ SCHEMA = "pulp.gpu-health-run-attestation.v1"
 NAMESPACE = SCHEMA
 SCHEMA_PATH = "docs/contracts/gpu-health-run-attestation-v1.schema.json"
 HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v2.schema.json"
+MACHINE_ID_DOMAIN = b"pulp.gpu-health.machine.v1\0"
 
 
 def fail(message: str) -> None:
@@ -32,6 +33,13 @@ def canonical(value: object) -> bytes:
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def stable_machine_id_sha256(raw_stable_machine_id: str) -> str:
+    """Pseudonymize the exact private UTF-8 identifier in Pulp's evidence domain."""
+    if not isinstance(raw_stable_machine_id, str) or not raw_stable_machine_id:
+        fail("stable machine ID must be a non-empty private value")
+    return sha256(MACHINE_ID_DOMAIN + raw_stable_machine_id.encode("utf-8"))
 
 
 def strict_json(data: bytes) -> dict:
@@ -173,7 +181,12 @@ def main() -> int:
         "created_at": created_at,
         "implementation_revision": args.implementation_revision,
         "evidence_publication_revision": args.evidence_publication_revision,
-        "host": {"host_id": args.host_id, "stable_machine_id": args.stable_machine_id},
+        "host": {
+            "host_id": args.host_id,
+            "stable_machine_id_sha256": stable_machine_id_sha256(
+                args.stable_machine_id
+            ),
+        },
         "selection": {
             "configuration": args.configuration,
             "probe_id": args.probe_id,

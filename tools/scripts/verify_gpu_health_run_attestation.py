@@ -148,7 +148,7 @@ def validate_shape(attestation: dict[str, Any]) -> None:
           "run attestation")
     require(attestation["schema"] == SCHEMA and attestation["version"] == 1,
             "run attestation has the wrong contract identity")
-    exact(attestation["host"], {"host_id", "stable_machine_id"}, "host")
+    exact(attestation["host"], {"host_id", "stable_machine_id_sha256"}, "host")
     exact(attestation["selection"], {"configuration", "probe_id", "adapter_name",
                                      "backend", "device"}, "selection")
     exact(attestation["producer"], {"binary_path", "binary_sha256", "build_id",
@@ -174,14 +174,15 @@ def validate_shape(attestation: dict[str, Any]) -> None:
         require(isinstance(value, str) and len(value) == 40
                 and all(c in "0123456789abcdef" for c in value),
                 f"{field} is not an exact lowercase Git revision")
-    for parent, fields in ((attestation["host"], ("host_id", "stable_machine_id")),
+    for parent, fields in ((attestation["host"], ("host_id",)),
                            (attestation["selection"], ("configuration", "probe_id",
                                                         "adapter_name", "backend", "device")),
                            (attestation["producer"], ("binary_path", "build_id",
                                                        "code_signature"))):
         require(all(isinstance(parent[field], str) and parent[field] for field in fields),
                 "run attestation contains an empty identity field")
-    for parent, field in ((attestation["producer"], "binary_sha256"),
+    for parent, field in ((attestation["host"], "stable_machine_id_sha256"),
+                          (attestation["producer"], "binary_sha256"),
                           (attestation["gpu_health_result"], "sha256"),
                           (attestation["canonical_health_schema"], "sha256"),
                           (attestation["canonical_schema"], "sha256")):
@@ -213,7 +214,7 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
     parser.add_argument("--expected-producer-build-id", required=True)
     parser.add_argument("--expected-producer-code-signature", required=True)
     parser.add_argument("--expected-host-id", required=True)
-    parser.add_argument("--expected-stable-machine-id", required=True)
+    parser.add_argument("--expected-stable-machine-id-sha256", required=True)
     parser.add_argument("--expected-configuration", required=True)
     parser.add_argument("--expected-probe-id", required=True)
     parser.add_argument("--expected-adapter-name", required=True)
@@ -229,6 +230,11 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
                 and all(c in "0123456789abcdef" for c in expected_implementation),
                 "expected implementation revision must be an exact lowercase "
                 "40-character Git SHA")
+        expected_machine_id = args.expected_stable_machine_id_sha256
+        require(isinstance(expected_machine_id, str)
+                and len(expected_machine_id) == 64
+                and all(c in "0123456789abcdef" for c in expected_machine_id),
+                "expected stable machine pseudonym must be an exact lowercase SHA-256")
         protected_revision = resolve_commit(repo, args.protected_ref, "protected ref")
         attestation_revision = resolve_commit(
             repo, args.attestation_revision, "attestation revision"
@@ -241,7 +247,7 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
         expected = {
             "implementation_revision": expected_implementation,
             "host_id": args.expected_host_id,
-            "stable_machine_id": args.expected_stable_machine_id,
+            "stable_machine_id_sha256": expected_machine_id,
             "configuration": args.expected_configuration,
             "probe_id": args.expected_probe_id,
             "adapter_name": args.expected_adapter_name,
@@ -346,10 +352,14 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
         matches = [host for host in trust["hosts"]
                    if host.get("host_id") == attestation["host"]["host_id"]]
         require(len(matches) == 1, "signed host_id is not uniquely trusted")
-        trusted = exact(matches[0], {"host_id", "stable_machine_id", "public_key"},
+        trusted = exact(matches[0], {"host_id", "stable_machine_id_sha256", "public_key"},
                         "trusted host")
-        require(trusted["stable_machine_id"] == attestation["host"]["stable_machine_id"],
-                "stable machine identity does not match trusted host policy")
+        trusted_machine_id = trusted["stable_machine_id_sha256"]
+        require(isinstance(trusted_machine_id, str) and len(trusted_machine_id) == 64
+                and all(c in "0123456789abcdef" for c in trusted_machine_id),
+                "trusted stable machine pseudonym must be an exact lowercase SHA-256")
+        require(trusted_machine_id == attestation["host"]["stable_machine_id_sha256"],
+                "stable machine pseudonym does not match trusted host policy")
         public_key = parse_ed25519_public_key(trusted["public_key"])
         fingerprint = key_fingerprint(public_key)
         require(fingerprint == attestation["authentication"]["signer_key_fingerprint"],
