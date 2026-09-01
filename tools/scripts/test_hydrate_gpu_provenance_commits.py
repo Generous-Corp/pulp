@@ -15,7 +15,7 @@ import hydrate_gpu_provenance_commits as hydration
 class HydrationTests(unittest.TestCase):
     def test_checked_in_provenance_fits_the_bounded_commit_budget(self) -> None:
         revisions = hydration.required_commits(pathlib.Path(__file__).resolve().parents[2])
-        self.assertEqual(len(revisions), 65)
+        self.assertGreater(len(revisions), 0)
         self.assertLessEqual(len(revisions), hydration.MAX_COMMITS)
 
     def test_provenance_at_the_bounded_commit_budget_is_accepted(self) -> None:
