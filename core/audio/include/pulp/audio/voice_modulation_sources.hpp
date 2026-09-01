@@ -178,6 +178,24 @@ public:
         config_.lfo.depth = depth;
     }
 
+    /// RT-safe after prepare. Reshapes every voice's LFO, preserving phase and
+    /// the lifecycle stage.
+    ///
+    /// A shape selector is a control a player turns, so it belongs with the
+    /// rate and depth rather than behind `prepare()`. Leaving it prepare-only
+    /// forces a caller whose shape is authored per patch to re-prepare a bank
+    /// the audio thread may be reading from, which is a data race the caller
+    /// then has to invent a publication scheme to avoid. Random streams are not
+    /// reseeded, so switching away from `sh_random` and back resumes the same
+    /// stream rather than replaying it.
+    void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {
+        if (!prepared())
+            return;
+        config_.lfo.wave = wave;
+        for (auto& lfo : lfos_)
+            lfo.set_wave(wave);
+    }
+
     /// RT-safe after prepare. Note-on retriggers that voice's LFO per its
     /// phase policy (free-running ignores it) and restarts its envelope.
     void note_on(std::size_t voice_index) noexcept {
