@@ -1339,7 +1339,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SpectralMaskProcessorT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:424014c924770f60d35e16b7179b552ca1b4747381734186fb15d6fb7bd94247"
+                    "sha256:322800ed271065a445d0040f3e2b8305884476f3e70fce49787f718e87a709e0"
                 ),
             ),
             binding(
@@ -1348,7 +1348,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SpectralMaskProcessorConfigT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:424014c924770f60d35e16b7179b552ca1b4747381734186fb15d6fb7bd94247"
+                    "sha256:322800ed271065a445d0040f3e2b8305884476f3e70fce49787f718e87a709e0"
                 ),
             ),
         ],
