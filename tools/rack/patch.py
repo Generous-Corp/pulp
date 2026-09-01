@@ -43,6 +43,7 @@ import attempt_artifacts
 import cv_depth
 import maker_intent
 import run_state
+import signal_path
 from module_kinds import is_audio_interface
 
 
@@ -1891,6 +1892,13 @@ def explain(patch: dict, inv: dict, why: dict | None = None) -> str:
         out.append("MODULATION THAT MAY NOT BE HEARD")
         out.extend(f"  {note}" for note in quiet)
         out.append("")
+    # A gain stage or a jack role that rests on a name heuristic, or a
+    # repair too ambiguous to make, is told to the reader the same way.
+    blocked = signal_path.advisory_notes(patch, inv)
+    if blocked:
+        out.append("SIGNAL THAT MAY NOT GET THROUGH")
+        out.extend(f"  {note}" for note in blocked)
+        out.append("")
     return "\n".join(out).rstrip()
 
 
@@ -2212,6 +2220,12 @@ def prepare_and_lint(patch: dict, inv: dict,
     # Runs after materialize_module_state, whose data_defaults are applied
     # with setdefault and therefore do NOT displace an authored false.
     run_state.start_stopped_modules(patch, inv, module_state_rules())
+    # A carrier can reach a real jack at a valid index and still be
+    # inaudible: a level of 0 multiplies it away, and a modulation jack
+    # never carried it in the first place. Both are legal files that make
+    # no sound, so they are repaired here rather than judged later.
+    signal_path.open_gain_stages(patch, inv)
+    signal_path.route_carriers_to_signal_inputs(patch, inv)
     patch = reflow(patch, inv)
     return patch, list(dict.fromkeys(physical_errs + lint(patch, inv)))
 
@@ -2441,6 +2455,10 @@ def lint(patch: dict, inv: dict) -> list[str]:
     errs.extend(cv_depth.dead_edge_errors(patch, inv))
     errs.extend(run_state.stopped_run_flag_errors(patch, inv,
                                                   module_state_rules()))
+    # Blocking only where the Audio port role was read rather than guessed;
+    # an inferred role is reported by explain(). Both writers above run
+    # first, so this catches a regression in that ordering.
+    errs.extend(signal_path.dead_signal_path_errors(patch, inv))
 
     # A patch that reaches no audio interface makes no sound, which is a far
     # more common generated failure than a malformed file.

@@ -64,12 +64,16 @@ def voice(**over):
 CASES = [
     # ── must pass ────────────────────────────────────────────────────────────
     ("a plain working voice", voice(), True, None),
+    # The VCA's inputs are CV_INPUT then IN_INPUT, so the carrier belongs on
+    # in:1. Cabled to in:0 this renders 0.000 V through the real DSP -- the
+    # module multiplies by an unconnected IN_INPUT -- while every structural
+    # check passes, which is the case `signal_path` exists to catch.
     ("our own modules end to end", {
         "version": "2.6.6",
         "modules": [mod(1, "ForgeModular", "VCO"),
                     mod(2, "ForgeModular", "VCA", (10, 0)),
                     mod(3, "Core", "AudioInterface2", (20, 0))],
-        "cables": [cable(1, 1, 0, 2, 0), cable(2, 2, 0, 3, 0)]}, True, None),
+        "cables": [cable(1, 1, 0, 2, 1), cable(2, 2, 0, 3, 0)]}, True, None),
     ("modules from several vendors mixed", {
         "version": "2.6.6",
         "modules": [mod(1, "ForgeModular", "LFO"),
