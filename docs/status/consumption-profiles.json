@@ -213,7 +213,7 @@
           {
             "exported_as": "Pulp::midi",
             "closure_node_count": 21,
-            "public_header_count": 43
+            "public_header_count": 50
           },
           {
             "exported_as": "Pulp::events",
@@ -3316,7 +3316,7 @@
             ]
           },
           "public_headers": {
-            "count": 43,
+            "count": 50,
             "roots": [
               "core/midi/include"
             ],
