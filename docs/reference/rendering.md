@@ -247,8 +247,10 @@ workflow in the [GPU validation checklist](../guides/gpu-validation-checklist.md
 The host signature binds the stable machine, exact selected probe/configuration,
 adapter name/backend/device, result path/digest/run ID, producer binary/build/
 code-signature identity, canonical schema, implementation revision, and the
-preceding evidence-publication revision. Protected Git ancestry of the later
-attestation publication remains a separate verifier check.
+preceding evidence-publication revision. The independent caller must supply the
+exact expected implementation revision and probe ID; ancestry or another
+passing probe with the same adapter identity is not equivalent. Protected Git
+ancestry of the later attestation publication remains a separate verifier check.
 
 The render check consumes the existing `Renderer3D` and `HeadlessSurface`
 interfaces; it does not create another renderer. `HeadlessSurface` is a

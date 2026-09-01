@@ -45,6 +45,8 @@ class Fixture:
         run("git", "init", "-q", "-b", "main", cwd=self.repo)
         run("git", "config", "user.name", "GPU Health Test", cwd=self.repo)
         run("git", "config", "user.email", "gpu-health@example.invalid", cwd=self.repo)
+        (self.repo / "bootstrap.txt").write_text("repository bootstrap\n")
+        self.commit("repository bootstrap")
         (self.repo / "implementation.txt").write_text("implementation\n")
         self.commit("implementation")
         self.implementation = self.head()
@@ -66,6 +68,11 @@ class Fixture:
         health["probes"][0]["adapter"].update({
             "name": "Apple M5", "device": "vendor=0x106b,device=0x0001",
         })
+        alternate_probe = json.loads(json.dumps(health["probes"][0]))
+        alternate_probe["probe_id"] = "renderer3d-frame"
+        for event in alternate_probe["events"]:
+            event["sequence"] += len(health["probes"][0]["events"])
+        health["probes"].append(alternate_probe)
         health_file.write_text(json.dumps(health, sort_keys=True) + "\n")
         self.commit("publish result and schema")
         self.evidence = self.head()
@@ -128,11 +135,13 @@ class Fixture:
             "--protected-ref", protected_ref,
             "--trusted-hosts", self.trust,
             "--producer-binary", self.binary,
+            "--expected-implementation-revision", self.implementation,
             "--expected-producer-build-id", "pulp-build-fixture",
             "--expected-producer-code-signature", "adhoc:fixture-cdhash",
             "--expected-host-id", "m5",
             "--expected-stable-machine-id", "platform-uuid-m5",
             "--expected-configuration", "power=low;fallback=false",
+            "--expected-probe-id", "gpu-compute-magnitude",
             "--expected-adapter-name", "Apple M5",
             "--expected-backend", "Metal",
             "--expected-device", "vendor=0x106b,device=0x0001",
@@ -215,6 +224,8 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         result = self.fixture.verify()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("verified", result.stdout)
+        self.assertIn(f"implementation={self.fixture.implementation}", result.stdout)
+        self.assertIn("probe_id=gpu-compute-magnitude", result.stdout)
         schema = json.loads((SOURCE_ROOT / SCHEMA_PATH).read_text())
         attestation = json.loads(
             (self.fixture.repo / self.fixture.attestation_path).read_text()
@@ -275,6 +286,20 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                 result = self.fixture.verify(option, value)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("does not match verifier policy", result.stdout)
+
+    def test_older_valid_implementation_ancestor_is_not_expected(self) -> None:
+        older = run(
+            "git", "rev-parse", f"{self.fixture.implementation}^",
+            cwd=self.fixture.repo,
+        ).stdout.strip()
+        result = self.fixture.verify("--expected-implementation-revision", older)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not match verifier policy", result.stdout)
+
+    def test_alternate_passing_probe_with_same_adapter_is_not_selected(self) -> None:
+        result = self.fixture.verify("--expected-probe-id", "renderer3d-frame")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not match verifier policy", result.stdout)
 
     def test_result_substitution_fails(self) -> None:
         attestation = json.loads((self.fixture.repo / self.fixture.attestation_path).read_text())

@@ -78,7 +78,8 @@ registry contains no private key. The verifier requires the implementation,
 evidence, and containing attestation revisions to form the expected ancestry,
 requires the latter two to be ancestors of the named protected ref, re-reads
 the schema and health result from Git, re-hashes the live producer binary,
-checks the caller's exact selection policy, verifies the host signature, and
+requires the caller's exact implementation revision and selected probe as well
+as the remaining selection policy, verifies the host signature, and
 applies an explicit freshness ceiling to the GPU result's machine-produced
 `measured_at_utc`. Re-signing an old result cannot refresh that timestamp:
 
@@ -90,10 +91,12 @@ python3 tools/scripts/verify_gpu_health_run_attestation.py \
   --protected-ref origin/main \
   --trusted-hosts /path/to/local/trusted-gpu-hosts.json \
   --producer-binary /absolute/path/to/pulp-cpp \
+  --expected-implementation-revision '<40-character implementation SHA>' \
   --expected-producer-build-id '<exact build ID>' \
   --expected-producer-code-signature '<exact code-signature identity or digest>' \
   --expected-host-id m5 --expected-stable-machine-id '<platform UUID>' \
   --expected-configuration 'power=low;fallback=false' \
+  --expected-probe-id gpu-compute-magnitude \
   --expected-adapter-name '<exact Dawn adapter name>' \
   --expected-backend Metal --expected-device '<exact Dawn device identity>' \
   --max-age-seconds 1800
@@ -103,8 +106,9 @@ The trusted-host registry is a closed JSON object with
 `schema: pulp.gpu-health-trusted-hosts.v1`, `version: 1`, and a `hosts` array.
 Each host has exactly `host_id`, `stable_machine_id`, and `public_key` (the
 single-line `ssh-ed25519 ...` public key). A missing trust entry, stale run,
-unprotected commit, changed binary/result/schema, or cross-host/configuration/
-adapter reuse is a verification failure, never unavailable-as-pass.
+unprotected commit, changed binary/result/schema, older-but-ancestral
+implementation, alternate passing probe, or cross-host/configuration/adapter
+reuse is a verification failure, never unavailable-as-pass.
 
 ## DPR experiment evidence (A4 v2)
 

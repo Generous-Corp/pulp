@@ -208,11 +208,13 @@ def main() -> int:
     parser.add_argument("--protected-ref", required=True)
     parser.add_argument("--trusted-hosts", type=Path, required=True)
     parser.add_argument("--producer-binary", type=Path, required=True)
+    parser.add_argument("--expected-implementation-revision", required=True)
     parser.add_argument("--expected-producer-build-id", required=True)
     parser.add_argument("--expected-producer-code-signature", required=True)
     parser.add_argument("--expected-host-id", required=True)
     parser.add_argument("--expected-stable-machine-id", required=True)
     parser.add_argument("--expected-configuration", required=True)
+    parser.add_argument("--expected-probe-id", required=True)
     parser.add_argument("--expected-adapter-name", required=True)
     parser.add_argument("--expected-backend", required=True)
     parser.add_argument("--expected-device", required=True)
@@ -225,30 +227,43 @@ def main() -> int:
         attestation_revision = resolve_commit(
             repo, args.attestation_revision, "attestation revision"
         )
+        expected_implementation = resolve_commit(
+            repo, args.expected_implementation_revision,
+            "expected implementation revision",
+        )
         ancestor(repo, attestation_revision, protected_revision,
                  "attestation revision is not protected ancestry")
         attestation_bytes = git_blob(repo, attestation_revision, args.attestation_path)
         attestation = strict_json(attestation_bytes, "run attestation")
         validate_shape(attestation)
         expected = {
+            "implementation_revision": expected_implementation,
             "host_id": args.expected_host_id,
             "stable_machine_id": args.expected_stable_machine_id,
             "configuration": args.expected_configuration,
+            "probe_id": args.expected_probe_id,
             "adapter_name": args.expected_adapter_name,
             "backend": args.expected_backend,
             "device": args.expected_device,
         }
-        observed = {**attestation["host"], **{
-            key: attestation["selection"][key]
-            for key in ("configuration", "adapter_name", "backend", "device")
-        }}
+        observed = {
+            "implementation_revision": attestation["implementation_revision"],
+            **attestation["host"],
+            **{
+                key: attestation["selection"][key]
+                for key in (
+                    "configuration", "probe_id", "adapter_name", "backend", "device"
+                )
+            },
+        }
         require(observed == expected,
-                "host/configuration/adapter selection does not match verifier policy")
+                "implementation/host/configuration/probe/adapter selection does "
+                "not match verifier policy")
         require(attestation["producer"]["build_id"] == args.expected_producer_build_id
                 and attestation["producer"]["code_signature"] ==
                 args.expected_producer_code_signature,
                 "producer build or code-signature identity does not match verifier policy")
-        implementation = attestation["implementation_revision"]
+        implementation = observed["implementation_revision"]
         evidence = attestation["evidence_publication_revision"]
         ancestor(repo, implementation, evidence,
                  "implementation revision is not evidence-publication ancestry")
@@ -357,7 +372,11 @@ def main() -> int:
     except (Failure, OSError) as error:
         print(f"gpu-health run-attestation verification failed: {error}")
         return 1
-    print(f"gpu-health run-attestation verified revision={attestation_revision}")
+    print(
+        "gpu-health run-attestation verified "
+        f"revision={attestation_revision} "
+        f"implementation={expected_implementation} probe_id={args.expected_probe_id}"
+    )
     return 0
 
 
