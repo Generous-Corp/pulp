@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260831-pr7984-native-gradient-fidelity",
+  "created_at": "2026-08-31T17:55:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned recovery of authored CSS gradient geometry, layered background placement and repetition, knob and fader indicators, and the corresponding DesignIR, generated-runtime, native-materializer, and bridge persistence needed for Forge panels to retain Chromium fidelity in Skia. Unsupported painted round and space repeat modes now fail closed into browser-native capture instead of silently disappearing. The work restores existing Pulp import and rendering behavior without changing Vellum source authority, the accepted expansion boundary, or design-import ownership.",
+  "tests": [
+    "pulp-test-browser-capture-import [background-repeat] and [validation]",
+    "pulp-test-design-import-native-materializer [background]",
+    "pulp-test-design-import code generation",
+    "full browser capture/import suite",
+    "Forge Dilla Chromium-to-Skia exact replay at 98 percent registered fidelity",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

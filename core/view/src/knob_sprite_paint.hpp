@@ -29,11 +29,14 @@ void draw_knob_indicator_notch(canvas::Canvas& canvas,
 // Pointer reproduced from the design's OWN indicator node
 // (set_captured_indicator). Same [-135°,+135°] value→angle arc as the
 // synthetic notch, but the radii, width and color come from the imported art,
-// and it pivots at the disc core center (cx, cy).
+// and it pivots at the disc core center (cx, cy). An optional outline records
+// an HTML border without changing the single-stroke SVG pointer path.
 void draw_knob_captured_pointer(canvas::Canvas& canvas,
                                 float cx, float cy,
                                 float r_in, float r_out, float width,
                                 canvas::Color color, float value,
-                                float phase_rad = 0.0f);
+                                float phase_rad = 0.0f,
+                                canvas::Color outline_color = {},
+                                float outline_width = 0.0f);
 
 }  // namespace pulp::view

@@ -344,6 +344,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_str("backgroundGradient", s.background_gradient);
     set_opt_str("backgroundImage", s.background_image);
     set_opt_str("backgroundRepeat", s.background_repeat);
+    set_opt_str("backgroundPosition", s.background_position);
     set_opt_str("backgroundSize", s.background_size);
     set_opt_str("objectFit", s.object_fit);
     set_opt_str("color", s.color);
@@ -1881,6 +1882,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_string_member(out, first, "backgroundGradient", s.background_gradient);
     write_string_member(out, first, "backgroundImage", s.background_image);
     write_string_member(out, first, "backgroundRepeat", s.background_repeat);
+    write_string_member(out, first, "backgroundPosition", s.background_position);
     write_string_member(out, first, "backgroundSize", s.background_size);
     write_string_member(out, first, "objectFit", s.object_fit);
     write_string_member(out, first, "color", s.color);

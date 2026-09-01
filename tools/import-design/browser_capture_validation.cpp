@@ -91,6 +91,21 @@ std::optional<std::uint64_t> attribute_uint64(
     return value;
 }
 
+std::optional<std::string> first_capture_fallback(
+    const pulp::view::IRNode& node) {
+    const auto reason = node.attributes.find("capture_fallback_reason");
+    if (reason != node.attributes.end()) {
+        std::string detail = reason->second;
+        if (const auto value = node.attributes.find("capture_fallback_detail");
+            value != node.attributes.end() && !value->second.empty())
+            detail += " `" + value->second + "`";
+        return detail;
+    }
+    for (const auto& child : node.children)
+        if (const auto found = first_capture_fallback(child)) return found;
+    return std::nullopt;
+}
+
 std::string extent(int width, int height) {
     return std::to_string(width) + "x" + std::to_string(height);
 }
@@ -419,6 +434,8 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
                 "native panel validation refused: " +
                 std::to_string(*fallback_count) +
                 " painted element fallback(s) have no native painter";
+            if (const auto fallback = first_capture_fallback(ir.root))
+                result.error += " (" + *fallback + ")";
             if (const auto fraction = attribute_number(
                     ir.root, "native_nodes_unpainted_area_fraction")) {
                 result.error += " (unpainted area fraction " +

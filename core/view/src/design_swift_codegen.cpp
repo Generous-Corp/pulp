@@ -31,6 +31,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <map>
 #include <optional>
 #include <set>
@@ -503,6 +504,59 @@ bool is_bound_widget(NativeWidgetKind kind) {
     }
 }
 
+void report_captured_raster_fidelity(const SwiftEmitCtx& ctx,
+                                     const IRNode& node,
+                                     NativeWidgetKind kind) {
+    const auto has = [&](std::string_view key) { return attr(node, key).has_value(); };
+    const auto material_self_paint = [&] {
+        const auto positive_width = [](const std::optional<float>& width) {
+            return width && std::isfinite(*width) && *width > 0.0f;
+        };
+        const auto& style = node.style;
+        return style.background_color ||
+            (style.background_gradient && !style.background_gradient->empty()) ||
+            positive_width(style.border_width) ||
+            positive_width(style.border_top_width) ||
+            positive_width(style.border_right_width) ||
+            positive_width(style.border_bottom_width) ||
+            positive_width(style.border_left_width);
+    };
+    const auto finite_number = [&](std::string_view key) -> std::optional<double> {
+        const auto value = attr(node, key);
+        if (!value || value->empty()) return std::nullopt;
+        char* end = nullptr;
+        const double parsed = std::strtod(value->c_str(), &end);
+        if (end != value->c_str() + value->size() || !std::isfinite(parsed))
+            return std::nullopt;
+        return parsed;
+    };
+    const auto box_dpr = finite_number("browser_box_paint_dpr");
+    const auto box_left = finite_number("browser_box_paint_left_px");
+    const auto box_top = finite_number("browser_box_paint_top_px");
+    const auto box_right = finite_number("browser_box_paint_right_px");
+    const auto box_bottom = finite_number("browser_box_paint_bottom_px");
+    // Capture records a snapped rect for every eligible flattened node. It is
+    // material only where native View self-paint consumes it; a transparent
+    // layout/text carrier keeps the same Swift pixels, so strict fidelity must
+    // not reject it merely for transporting inert metadata.
+    if (material_self_paint() && box_dpr && *box_dpr > 0.0 && box_left && box_top &&
+        box_right && box_bottom && *box_right > *box_left && *box_bottom > *box_top)
+        push_fidelity(ctx, node, "swiftui-browser-box-paint-rect",
+                      "captured browser CSS-edge paint geometry has no SwiftUI raster-equivalent",
+                      /*informational=*/false);
+    if (has("captured_raster_dpr") || has("captured_raster_origin_x_px") ||
+        has("captured_raster_origin_y_px"))
+        push_fidelity(ctx, node, "swiftui-captured-raster-origin",
+                      "captured browser raster destination cannot be preserved by SwiftUI controls",
+                      /*informational=*/false);
+    if (kind == NativeWidgetKind::knob &&
+        (has("knob_ind_r_out") || has("knob_ind_w") || has("knob_ind_color") ||
+         has("knob_ind_outline_color") || has("knob_ind_outline_w")))
+        push_fidelity(ctx, node, "swiftui-knob-captured-indicator",
+                      "captured knob pointer geometry and outline cannot be represented by PulpKnob",
+                      /*informational=*/false);
+}
+
 // Emit a bound control as an inline `switch` over the resolver result so a
 // missing or duplicate parameter is visible rather than silently mis-bound.
 void emit_bound_control(std::ostringstream& out, const SwiftEmitCtx& ctx,
@@ -622,6 +676,151 @@ std::vector<std::string> split_top_level_commas(std::string_view s) {
     return out;
 }
 
+std::vector<std::string> split_top_level_spaces(std::string_view s) {
+    std::vector<std::string> out;
+    std::string current;
+    int depth = 0;
+    for (const char c : s) {
+        if (c == '(') { ++depth; current += c; }
+        else if (c == ')') { depth = std::max(0, depth - 1); current += c; }
+        else if (depth == 0 && std::isspace(static_cast<unsigned char>(c))) {
+            if (!current.empty()) { out.push_back(std::move(current)); current.clear(); }
+        } else current += c;
+    }
+    if (!current.empty()) out.push_back(std::move(current));
+    return out;
+}
+
+std::string compact_lower(std::string_view value) {
+    std::string compact;
+    compact.reserve(value.size());
+    for (const unsigned char c : value) {
+        if (!std::isspace(c)) compact += static_cast<char>(std::tolower(c));
+    }
+    return compact;
+}
+
+std::string trim_copy(std::string_view value) {
+    const auto first = value.find_first_not_of(" \t\n\r");
+    if (first == std::string_view::npos) return {};
+    const auto last = value.find_last_not_of(" \t\n\r");
+    return std::string(value.substr(first, last - first + 1));
+}
+
+std::optional<std::string> exact_css_function_args(std::string_view value,
+                                                    std::string_view name) {
+    const auto trimmed = trim_copy(value);
+    const auto lower = lower_copy(trimmed);
+    const std::string prefix = std::string(name) + "(";
+    if (lower.rfind(prefix, 0) != 0) return std::nullopt;
+    int depth = 0;
+    for (std::size_t i = prefix.size() - 1; i < lower.size(); ++i) {
+        if (lower[i] == '(') ++depth;
+        else if (lower[i] == ')' && --depth == 0) {
+            if (i + 1 != lower.size()) return std::nullopt;
+            return trimmed.substr(prefix.size(), i - prefix.size());
+        }
+    }
+    return std::nullopt;
+}
+
+bool is_none_background_layer(std::string_view value) {
+    return compact_lower(value) == "none";
+}
+
+bool is_exact_linear_gradient_layer(std::string_view value) {
+    return exact_css_function_args(value, "linear-gradient").has_value();
+}
+
+bool is_full_box_size_component(std::string_view component) {
+    const auto compact = compact_lower(component);
+    if (compact == "auto") return true;
+    if (!compact.ends_with('%')) return false;
+    const std::string number = compact.substr(0, compact.size() - 1);
+    char* end = nullptr;
+    return std::strtof(number.c_str(), &end) == 100.0f &&
+        end == number.c_str() + number.size();
+}
+
+struct BackgroundSizeAxes {
+    bool full_x = true;
+    bool full_y = true;
+};
+
+BackgroundSizeAxes background_size_axes(std::string_view value) {
+    const auto compact = compact_lower(value);
+    if (compact == "contain" || compact == "cover") return {};
+    const auto components = split_top_level_spaces(value);
+    if (components.empty()) return {};
+    BackgroundSizeAxes axes;
+    axes.full_x = is_full_box_size_component(components[0]);
+    axes.full_y = components.size() < 2 || is_full_box_size_component(components[1]);
+    return axes;
+}
+
+bool has_nonzero_absolute_length(std::string_view value) {
+    // Browser capture serializes computed lengths in px. Keep other common CSS
+    // length units too so direct DesignIR exports cannot silently lose a phase.
+    static constexpr std::array<std::string_view, 14> units = {
+        "vmin", "vmax", "rem", "rlh", "px", "em", "vw", "vh",
+        "cm", "mm", "in", "pt", "pc", "lh",
+    };
+    const auto lower = compact_lower(value);
+    for (const auto unit : units) {
+        std::size_t search = 0;
+        while ((search = lower.find(unit, search)) != std::string::npos) {
+            std::size_t number_start = search;
+            while (number_start > 0) {
+                const unsigned char c = lower[number_start - 1];
+                if (!std::isdigit(c) && c != '.' && c != '+' && c != '-' &&
+                    c != 'e' && c != 'E')
+                    break;
+                --number_start;
+            }
+            const std::string number(lower.substr(number_start, search - number_start));
+            char* end = nullptr;
+            const float parsed = std::strtof(number.c_str(), &end);
+            if (end == number.c_str() + number.size() && parsed != 0.0f) return true;
+            search += unit.size();
+        }
+    }
+    return false;
+}
+
+bool is_zero_position_component(std::string_view value) {
+    const auto compact = compact_lower(value);
+    if (compact == "left" || compact == "top")
+        return true;
+    const auto zero_number = [](std::string_view number) {
+        char* end = nullptr;
+        const std::string text(number);
+        return std::strtof(text.c_str(), &end) == 0.0f &&
+            end == text.c_str() + text.size();
+    };
+    if (compact.ends_with("px") || compact.ends_with('%'))
+        return zero_number(compact.substr(0, compact.size() - (compact.ends_with("px") ? 2 : 1)));
+    return zero_number(compact);
+}
+
+bool is_nonzero_percent(std::string_view value) {
+    const auto compact = compact_lower(value);
+    if (!compact.ends_with('%')) return false;
+    const std::string number = compact.substr(0, compact.size() - 1);
+    char* end = nullptr;
+    return std::strtof(number.c_str(), &end) != 0.0f &&
+        end == number.c_str() + number.size();
+}
+
+bool background_position_component_is_material(std::string_view component, bool full_axis) {
+    if (has_nonzero_absolute_length(component)) return true;
+    if (is_zero_position_component(component)) return false;
+    if (is_nonzero_percent(component)) return !full_axis;
+    // Browser capture normally serializes positions as two computed percentage
+    // or px components. An unfamiliar authored form must fail closed rather
+    // than being mistaken for an inert full-box percentage.
+    return true;
+}
+
 // Inner argument list of `name(...)`, case-insensitive on the function name.
 // Returns nullopt if the value isn't that function. The match must sit on an
 // identifier boundary so `name="linear-gradient"` does NOT match the substring
@@ -697,7 +896,7 @@ std::pair<std::string, std::string> gradient_unit_points(const std::string& dir)
 // value isn't a parseable linear-gradient with >= 2 colors.
 struct GradientResult { std::string expr; bool dropped_positions = false; };
 std::optional<GradientResult> swift_linear_gradient_expr(std::string_view value) {
-    auto inner = fn_args(value, "linear-gradient");
+    auto inner = exact_css_function_args(value, "linear-gradient");
     if (!inner) return std::nullopt;
     std::vector<std::string> parts = split_top_level_commas(*inner);
     if (parts.empty()) return std::nullopt;
@@ -736,7 +935,11 @@ std::optional<GradientResult> swift_linear_gradient_expr(std::string_view value)
             if (space != std::string::npos) dropped = true;
         }
         std::string expr = swift_color_expr(col);
-        if (!expr.empty()) colors.push_back(expr);
+        // A color hint, interpolation clause, malformed stop, or unsupported
+        // token must not be skipped just because two surrounding colors remain.
+        // Returning nullopt makes the strict-fidelity issue explicit instead.
+        if (expr.empty()) return std::nullopt;
+        colors.push_back(expr);
     }
     if (colors.size() < 2) return std::nullopt;
     std::ostringstream ss;
@@ -824,8 +1027,89 @@ void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
     // Fill: a gradient wins over a flat color (CSS layers background-image over
     // background-color). A non-parseable gradient falls back to the flat color.
     bool filled = false;
+    // SwiftUI has no CSS background-layer model. Preserve declared image-list
+    // indices while classifying: `none` does not paint, but it DOES consume a
+    // background-size/position list slot before a later real image.
+    struct DeclaredBackgroundLayer {
+        std::string value;
+        bool paints = false;
+        bool exact_linear = false;
+    };
+    std::vector<DeclaredBackgroundLayer> background_image_layers;
     if (st.background_gradient) {
-        if (auto g = swift_linear_gradient_expr(*st.background_gradient)) {
+        for (const auto& layer : split_top_level_commas(*st.background_gradient)) {
+            if (layer.empty()) continue;
+            background_image_layers.push_back({layer, !is_none_background_layer(layer),
+                                               is_exact_linear_gradient_layer(layer)});
+        }
+    }
+    const auto paints = [](const DeclaredBackgroundLayer& layer) { return layer.paints; };
+    const auto painted_count = static_cast<std::size_t>(std::count_if(
+        background_image_layers.begin(), background_image_layers.end(), paints));
+    std::optional<std::string> single_linear_layer;
+    if (painted_count == 1) {
+        const auto it = std::find_if(background_image_layers.begin(), background_image_layers.end(), paints);
+        if (it != background_image_layers.end() && it->exact_linear)
+            single_linear_layer = it->value;
+    }
+    if (painted_count > 0) {
+        const auto sizes = st.background_size
+            ? split_top_level_commas(*st.background_size) : std::vector<std::string>{};
+        std::vector<BackgroundSizeAxes> size_axes;
+        size_axes.reserve(background_image_layers.size());
+        bool material_background_size = false;
+        for (std::size_t i = 0; i < background_image_layers.size(); ++i) {
+            if (!background_image_layers[i].paints) {
+                size_axes.push_back({});
+                continue;
+            }
+            const auto axes = sizes.empty() ? BackgroundSizeAxes{}
+                : background_size_axes(sizes[i % sizes.size()]);
+            size_axes.push_back(axes);
+            material_background_size = material_background_size || !axes.full_x || !axes.full_y;
+        }
+        if (painted_count > 1)
+            push_fidelity(ctx, node, "swiftui-background-layers",
+                          "multiple CSS background-image gradient layers cannot be represented by "
+                          "one SwiftUI LinearGradient", /*informational=*/false);
+        if (material_background_size)
+            push_fidelity(ctx, node, "swiftui-background-size",
+                          "background-size `" + *st.background_size +
+                          "` changes CSS gradient geometry; SwiftUI tiling is unsupported",
+                          /*informational=*/false);
+
+        bool material_background_position = false;
+        if (st.background_position && !st.background_position->empty()) {
+            const auto positions = split_top_level_commas(*st.background_position);
+            for (std::size_t i = 0; i < background_image_layers.size() && !material_background_position; ++i) {
+                if (!background_image_layers[i].paints) continue;
+                const auto& position = positions[i % positions.size()];
+                const auto compact = compact_lower(position);
+                if (compact == "0%0%" || compact == "0px0px" || compact == "00" ||
+                    compact == "lefttop")
+                    continue;
+                const auto components = split_top_level_spaces(position);
+                if (components.size() == 2) {
+                    material_background_position =
+                        background_position_component_is_material(components[0], size_axes[i].full_x) ||
+                        background_position_component_is_material(components[1], size_axes[i].full_y);
+                } else {
+                    // Browser capture writes two computed components. Keep an
+                    // unfamiliar authored form fail-closed if it carries a
+                    // non-zero length; otherwise it is safe only at full size.
+                    material_background_position = has_nonzero_absolute_length(position) ||
+                        !size_axes[i].full_x || !size_axes[i].full_y;
+                }
+            }
+        }
+        if (material_background_position)
+            push_fidelity(ctx, node, "swiftui-background-position",
+                          "background-position `" + *st.background_position +
+                          "` uses CSS background-layer phase; SwiftUI tiling is unsupported",
+                          /*informational=*/false);
+    }
+    if (single_linear_layer) {
+        if (auto g = swift_linear_gradient_expr(*single_linear_layer)) {
             emit_line(out, depth + 1, s, ".background(" + g->expr + ")");
             filled = true;
             if (g->dropped_positions)
@@ -834,10 +1118,15 @@ void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
                               "SwiftUI spaces stops evenly", /*informational=*/true);
         } else {
             push_fidelity(ctx, node, "swiftui-gradient",
-                          "background gradient `" + *st.background_gradient +
+                          "background gradient `" + *single_linear_layer +
                           "` is not a 2-color linear-gradient; using flat fill",
-                          /*informational=*/true);
+                          /*informational=*/false);
         }
+    } else if (painted_count > 0) {
+        push_fidelity(ctx, node, "swiftui-gradient",
+                      "background image `" + *st.background_gradient +
+                      "` is not one top-level 2-color linear-gradient; using flat fill",
+                      /*informational=*/false);
     }
     if (!filled && st.background_color) {
         std::string color = swift_color_expr(*st.background_color);
@@ -1285,6 +1574,10 @@ void emit_node(std::ostringstream& out, const SwiftEmitCtx& ctx,
         emit_line(out, depth, s, "// " + swift_comment_safe(node.name));
 
     const NativeWidgetKind kind = resolved.kind;
+    // This precedes the bound-control fast path: PulpKnob/PulpSlider return
+    // before generic modifiers, but their captured browser raster contracts
+    // are still fidelity-relevant for every Swift export.
+    report_captured_raster_fidelity(ctx, node, kind);
 
     // Text.
     if (kind == NativeWidgetKind::label || node.type == "text") {
