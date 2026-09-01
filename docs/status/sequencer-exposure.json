@@ -2284,6 +2284,12 @@
           "needles": [
             "class Latch {"
           ]
+        },
+        {
+          "path": "core/midi/include/pulp/midi/strum.hpp",
+          "needles": [
+            "static void stable_order("
+          ]
         }
       ],
       "surfaces": {

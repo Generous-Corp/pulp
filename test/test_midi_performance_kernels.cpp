@@ -789,19 +789,51 @@ TEST_CASE("strum with zero jitter is exactly deterministic", "[midi][strum][pari
     REQUIRE(identical(run(kWholeBlock, 1), run(kRaggedBlocks, 1)));
 }
 
-TEST_CASE("strum allocates nothing while processing", "[midi][strum][rt-safety]") {
+namespace {
+
+/// Fill a strum's cluster bound and process it in every direction, watching the
+/// allocator. Templated on the bound because how large a cluster has to be
+/// before an allocating sort shows itself is a property of the standard
+/// library, not of the kernel.
+template <std::size_t MaximumClusterNotes> void probe_strum_cluster_ordering() {
     midi::StrumSpec spec{};
     spec.window_samples = 64;
-    midi::Strum<> strum{spec};
     auto input = prepared_buffer();
     auto output = prepared_buffer();
-    REQUIRE(input.add(midi::MidiEvent::note_on(0, 60, 100)));
-    REQUIRE(input.add(midi::MidiEvent::note_on(0, 64, 100)));
-    {
+    // A cluster can outgrow the 128 notes one channel has, so wrap onto the next
+    // channel rather than repeating a note: two attacks on one key would be an
+    // unbalanced pair, which is a different kernel behaviour than the one under
+    // probe here.
+    for (std::size_t i = 0; i < MaximumClusterNotes; ++i)
+        REQUIRE(input.add(midi::MidiEvent::note_on(static_cast<std::uint8_t>(i / 128),
+                                                   static_cast<std::uint8_t>(i % 128), 100)));
+
+    // Every direction orders the same cluster through its own comparator, and
+    // Alternate flips between two of them across successive clusters.
+    for (const auto direction :
+         {midi::StrumDirection::Up, midi::StrumDirection::Down, midi::StrumDirection::AsPlayed,
+          midi::StrumDirection::Random, midi::StrumDirection::Alternate}) {
+        spec.direction = direction;
+        midi::Strum<MaximumClusterNotes> strum{spec};
         pulp::test::RtAllocationProbe probe;
         strum.process(input, output, constant_block(0, 512));
+        strum.process(input, output, constant_block(512, 512));
         REQUIRE_FALSE(probe.saw_allocation());
     }
+}
+
+} // namespace
+
+TEST_CASE("strum allocates nothing while processing", "[midi][strum][rt-safety]") {
+    // A full cluster, not a pair. Ordering a cluster is the one part of this
+    // kernel that could reach for scratch space, and how big a cluster has to be
+    // before that shows differs by standard library: libstdc++ takes scratch for
+    // any non-empty range, while libc++ sorts up to 128 trivially-copyable
+    // elements in place. Probing the default 16-note bound alone therefore
+    // cannot fail on macOS however the ordering is written, so probe past the
+    // wider threshold too and let neither library hide an allocation.
+    probe_strum_cluster_ordering<midi::Strum<>::contract().state_capacity>();
+    probe_strum_cluster_ordering<192>();
 }
 
 // ---------------------------------------------------------------------------

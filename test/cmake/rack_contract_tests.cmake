@@ -68,6 +68,28 @@ if(Python3_Interpreter_FOUND)
         SKIP_RETURN_CODE 3
         TIMEOUT 300)
 
+    # A cable into a CV input carries nothing while that input's depth control
+    # sits at zero, and no structural check can tell that patch from a working
+    # one -- so this is registered here rather than left to a Rack-enabled
+    # build. Hermetic: it builds its own inventory and never touches the SDK.
+    add_test(NAME rack-cv-depth
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_cv_depth.py)
+    set_tests_properties(rack-cv-depth PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 60)
+
+    # A module saved with its run flag false makes no sound, and when it is
+    # the master clock that silences the whole patch. Three of its cases
+    # guard sign errors that INVERT a result rather than weaken it, so this
+    # is registered rather than left to a Rack-enabled build. Hermetic.
+    add_test(NAME rack-run-state
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_run_state.py)
+    set_tests_properties(rack-run-state PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 60)
+
     add_test(NAME rack-generation-eligibility
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_generation_eligibility.py)
