@@ -361,8 +361,14 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
     // captured target if a handler unmounted it mid-dispatch.
     if (!pulp::view::deliver_mouse_down(*root, drag_target->live_in(*root), pt,
                                         modifiers_from_ns_flags(event.modifierFlags),
-                                        static_cast<int>(event.clickCount)))
+                                        static_cast<int>(event.clickCount))) {
         drag_target->reset();
+    } else if (auto* target = drag_target->live_in(*root)) {
+        // A press handler can switch grab -> grabbing. AppKit does not send a
+        // cursorUpdate while this view owns the drag, so publish the captured
+        // view's post-handler style at each pointer phase.
+        set_ns_cursor_for_style(target->cursor());
+    }
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseDown handler threw: %s\n", e.what());
   } catch (...) {
@@ -436,6 +442,8 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
     pulp::view::deliver_mouse_drag(*root, live_target, pt, mods,
                                    static_cast<int>(event.clickCount),
                                    pulp::view::MouseButton::left, pointer);
+    if (auto* target = drag_target->live_in(*root))
+        set_ns_cursor_for_style(target->cursor());
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw: %s\n", e.what());
   } catch (...) {
@@ -488,6 +496,8 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
     pulp::view::deliver_mouse_up(*root, live_target, pt,
                                  modifiers_from_ns_flags(event.modifierFlags),
                                  static_cast<int>(event.clickCount), up_host);
+    if (auto* target = drag_target->live_in(*root))
+        set_ns_cursor_for_style(target->cursor());
     drag_target->reset();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw: %s\n", e.what());
