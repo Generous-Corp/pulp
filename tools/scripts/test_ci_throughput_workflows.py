@@ -527,6 +527,49 @@ class ShipyardTopologyContractTests(unittest.TestCase):
 
 
 class CTestIsolationContractTests(unittest.TestCase):
+    def test_browser_process_lifecycle_is_split_and_run_serial(self) -> None:
+        manifest = (
+            ROOT / "test" / "cmake" / "design_import_tool_cli_tests.cmake"
+        ).read_text(encoding="utf-8")
+        lifecycle = re.search(
+            r"add_test\(NAME pulp-browser-capture-process-lifecycle.*?"
+            r"set_tests_properties\(pulp-browser-capture-process-lifecycle "
+            r"PROPERTIES(?P<properties>.*?)\)",
+            manifest,
+            re.S,
+        )
+        self.assertIsNotNone(lifecycle)
+        self.assertRegex(
+            manifest,
+            r"set\(_PULP_BROWSER_CAPTURE_PROCESS_LIFECYCLE_TEST\s+"
+            r"\$\{CMAKE_SOURCE_DIR\}/tools/import-design/browser_capture/"
+            r"browser_process\.test\.mjs\)",
+        )
+        self.assertRegex(lifecycle.group("properties"), r"\bRUN_SERIAL\s+TRUE\b")
+        self.assertRegex(lifecycle.group("properties"), r"\bTIMEOUT\s+60\b")
+
+        unit = re.search(
+            r"add_test\(NAME pulp-browser-capture-node-unit.*?\)",
+            manifest,
+            re.S,
+        )
+        self.assertIsNotNone(unit)
+        self.assertNotIn("browser_process.test.mjs", unit.group(0))
+
+        integration = re.search(
+            r"add_test\(NAME pulp-browser-capture-node-integration.*?"
+            r"set_tests_properties\(pulp-browser-capture-node-integration "
+            r"PROPERTIES(?P<properties>.*?)\)",
+            manifest,
+            re.S,
+        )
+        self.assertIsNotNone(integration)
+        self.assertIn("_PULP_BROWSER_CAPTURE_INTEGRATION_TEST", integration.group(0))
+        self.assertRegex(
+            integration.group("properties"), r"\bRUN_SERIAL\s+TRUE\b"
+        )
+        self.assertRegex(integration.group("properties"), r"\bTIMEOUT\s+600\b")
+
     def test_real_dmg_creators_share_only_the_hdiutil_resource_lock(self) -> None:
         manifests = (
             (ROOT / "test" / "cmake" / "cli_tests.cmake",
