@@ -3358,6 +3358,49 @@ def rack_plugin_dirs() -> list[str]:
             os.path.isdir(os.path.join(rack_user, name))]
 
 
+def licence_user_dir() -> tuple[str | None, int]:
+    """A Rack user directory an offline harness may point `asset::init()` at.
+
+    Modules bought through the VCV Library resolve a cached key at
+    `<asset::userDir>/licenses/<plugin>.vcvkey`. `asset::userDir` is empty
+    until `asset::init()` runs, so in a harness that never calls it the lookup
+    goes to `/licenses/...`, finds nothing, and the module decides it is
+    unlicensed -- whereupon it runs and writes zero to every output. It logs
+    nothing and constructs normally, so the patch simply reads as silent and
+    the blame lands on the patch or on the module. An offline check that skips
+    this measures the licence check rather than the DSP.
+
+    The directory returned is ours, with `licenses` symlinked to Rack's, so
+    keys resolve where Rack resolves them and nothing is written into Rack's
+    own directory. The key count is returned because zero is a real state: it
+    means commercial modules are being measured unlicensed, which is a
+    property of the machine rather than of any module.
+    """
+    real = None
+    for base in (os.path.expanduser("~/Library/Application Support/Rack2"),
+                 os.path.expanduser("~/.local/share/Rack2"),
+                 os.path.expanduser("~/.Rack2")):
+        candidate = os.path.join(base, "licenses")
+        if os.path.isdir(candidate):
+            real = candidate
+            break
+    if real is None:
+        return None, 0
+    staged = os.path.join(CACHE_DIR, "rack-user-dir")
+    try:
+        os.makedirs(staged, exist_ok=True)
+        link = os.path.join(staged, "licenses")
+        if os.path.islink(link) and \
+                os.path.realpath(link) != os.path.realpath(real):
+            os.unlink(link)
+        if not os.path.islink(link) and not os.path.exists(link):
+            os.symlink(real, link)
+        keys = len([f for f in os.listdir(real) if f.endswith(".vcvkey")])
+    except OSError:
+        return None, 0
+    return staged, keys
+
+
 def install_module(plugin: str, version: str, premium: bool,
                    entitled: bool = False) -> tuple:
     """Fetch a library plugin into Rack's plugin directory.
@@ -4788,7 +4831,12 @@ def audibility(patch: dict,
             env["PATCH_GATE_CHECKPOINTS"] = ",".join(
                 f"{checkpoint:g}" for checkpoint in checkpoints)
             timeout = max(timeout, checkpoints[-1] + 126.0)
-        r = subprocess.run([gate, tmp, pdir], capture_output=True, text=True,
+        # Without the user directory a commercially licensed module cannot
+        # find its key, silences itself, and the patch reads as silent for a
+        # reason that has nothing to do with the patch.
+        user_dir, _keys = licence_user_dir()
+        argv = [gate, tmp, pdir] + ([user_dir] if user_dir else [])
+        r = subprocess.run(argv, capture_output=True, text=True,
                            timeout=timeout, env=env)
         # A CRASH IS NOT SILENCE. The gate dies on SIGSEGV loading some
         # third-party plugins, and a negative return code with no output was

@@ -1011,8 +1011,17 @@ def check_gate_survives_third_party() -> tuple:
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "patch_gate.cpp")).read()
     body = src[src.find("int main("):]
-    at_ctx = body.find("install_rack_context(argv[1])")
+    at_ctx = body.find("install_rack_context(argv[1]")
     at_load = body.find("load_plugin(")
+    # Scoped to the installer's own definition rather than to the whole file:
+    # the ordering that matters is that the licence directory is resolved by
+    # the same function that stands the context up, which `at_ctx` above has
+    # already pinned ahead of the first dlopen. Searching the whole file and
+    # comparing against an offset into `main` would be comparing positions in
+    # two different strings.
+    installer = src[src.find("void install_rack_context("):src.find("int main(")]
+    at_asset = installer.find("rack::asset::init()")
+    at_userdir = installer.find("rack::asset::userDir")
     if "contextSet" not in src:
         bad += 1
         print("  WRONG  the gate never installs a Rack context, so every "
@@ -1022,9 +1031,15 @@ def check_gate_survives_third_party() -> tuple:
         bad += 1
         print("  WRONG  the gate loads a plugin before the Rack context "
               "exists; the context has to come first, as it does in Rack")
+    elif at_asset < 0 or at_userdir < 0 or at_userdir > at_asset:
+        bad += 1
+        print("  WRONG  the gate never points asset::userDir at a directory "
+              "holding the cached VCV licence keys, so every commercially "
+              "licensed module decides it is unlicensed and writes zero to "
+              "every output while constructing and running normally")
     else:
-        print("  ok     the gate stands up a Rack context before it loads "
-              "anything")
+        print("  ok     the gate stands up a Rack context, and resolves the "
+              "licence key directory, before it loads anything")
 
     ran += 1
     at_up = body.find("bring_up(")
