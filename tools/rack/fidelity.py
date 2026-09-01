@@ -108,10 +108,19 @@ def build_probe(dest: str, sdk: str | None = None) -> str:
         ["clang++", "-std=c++20", "-O2", "-fPIC", "-shared", "-o", lib,
          os.path.join(HERE, "fidelity_probe.cpp"),
          f"-I{sdk}/include", f"-I{sdk}/dep/include",
-         "-DARCH_MAC", "-undefined", "dynamic_lookup"],
+         "-DARCH_MAC", f"-L{sdk}", "-lRack",
+         "-undefined", "dynamic_lookup"],
         capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit("the probe did not compile:\n" + r.stderr)
+    # Same contract as the shipped pack: link libRack and name the path Rack
+    # symlinks at startup, because a bare install name never consults LC_RPATH.
+    r = subprocess.run(["install_name_tool", "-change", "libRack.dylib",
+                        "/tmp/Rack2/libRack.dylib", lib],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit("could not repoint the probe's libRack load "
+                         "command:\n" + r.stderr)
     # Rack resolves the entry point with dlsym and reports nothing at all when
     # it comes back null, so the plugin would simply be absent -- and a run
     # with no probe in it looks exactly like a run that measured nothing.
