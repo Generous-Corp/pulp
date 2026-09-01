@@ -23,7 +23,24 @@ import patch  # noqa: E402
 import rack_open  # noqa: E402
 
 
-class RackPluginDiscoverySafety(unittest.TestCase):
+class SdkIsolatedTestCase(unittest.TestCase):
+    """A base that undoes `generate.main()`'s rebinding of the module SDK.
+
+    `generate.py` declares `global SDK` and reassigns it from `resolve_sdk()`,
+    so any test that mocks `resolve_sdk` and reaches `main()` leaves its stub
+    path bound for every test that runs afterwards. That was invisible while
+    SDK only fed `-I` include paths (a bad one is a warning); it became two
+    failures the moment the link line started using it, in a test that passes
+    on its own and fails in the suite. Restore it per test.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        sdk = generate.SDK
+        self.addCleanup(setattr, generate, "SDK", sdk)
+
+
+class RackPluginDiscoverySafety(SdkIsolatedTestCase):
     @staticmethod
     def write_plugin(directory: pathlib.Path, slug: str = "MakerPack") -> None:
         package = directory / slug
@@ -129,7 +146,7 @@ class RackPluginDiscoverySafety(unittest.TestCase):
             self.assertFalse((root / ".Forge-Modular-replaced-packs").exists())
 
 
-class ExclusiveMakerSafety(unittest.TestCase):
+class ExclusiveMakerSafety(SdkIsolatedTestCase):
     mentions = {
         "Named Maker": {
             "slugs": ["MakerPack", "MakerUtilities"],
@@ -199,7 +216,7 @@ class ExclusiveMakerSafety(unittest.TestCase):
             available, self.mentions))
 
 
-class ToolchainHeaderClosureSafety(unittest.TestCase):
+class ToolchainHeaderClosureSafety(SdkIsolatedTestCase):
     def test_curated_symbol_completes_its_public_header_without_model_repair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -277,7 +294,7 @@ class ToolchainHeaderClosureSafety(unittest.TestCase):
                     [], generate.missing_public_header_dependencies(str(root)))
 
 
-class RackLaunchSafety(unittest.TestCase):
+class RackLaunchSafety(SdkIsolatedTestCase):
     # Synthetic equivalents of the exact macOS copyfile(3) members found in
     # M5 patch 1787949832935-001 (archive SHA-256
     # 9b63d6a521b711376278dd73c0dd916ee7ac6ef2dcfcb8e67df0b8c15b478410).
@@ -1347,7 +1364,7 @@ class RackLaunchSafety(unittest.TestCase):
         opened.assert_called_once_with(app, os.path.realpath(artifact))
 
 
-class GeneratedSlugSafety(unittest.TestCase):
+class GeneratedSlugSafety(SdkIsolatedTestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.pack = pathlib.Path(self.temp.name)
@@ -1427,7 +1444,7 @@ class GeneratedSlugSafety(unittest.TestCase):
                 self.assertFalse(outside.exists())
 
 
-class PromptBudgetSafety(unittest.TestCase):
+class PromptBudgetSafety(SdkIsolatedTestCase):
     def test_repeated_defaults_use_the_contracts_compact_lossless_form(self) -> None:
         inventory = {"Fixture": {"name": "Fixture", "modules": {
             "Voice": {"name": "Voice", "params": [
@@ -1444,7 +1461,7 @@ class PromptBudgetSafety(unittest.TestCase):
         self.assertIn("`d=` is that knob's default value", contract)
 
 
-class BundledToolchainSafety(unittest.TestCase):
+class BundledToolchainSafety(SdkIsolatedTestCase):
     def test_installer_copies_prebuilt_decoder_without_compiler_and_preserves_it(
             self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1596,7 +1613,7 @@ class BundledToolchainSafety(unittest.TestCase):
             run.assert_not_called()
 
 
-class ExplicitRequestContract(unittest.TestCase):
+class ExplicitRequestContract(SdkIsolatedTestCase):
     def setUp(self) -> None:
         self.prompt = (
             "Create a 6HP clock. RATE -3..3 default 0; WIDTH 0.05..0.95 "
@@ -1641,7 +1658,7 @@ class ExplicitRequestContract(unittest.TestCase):
         self.assertIn("requested output PHASE is missing", problems)
 
 
-class FailedGenerationTransaction(unittest.TestCase):
+class FailedGenerationTransaction(SdkIsolatedTestCase):
     def test_restore_covers_every_emitter_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             pack = pathlib.Path(root)
@@ -1704,17 +1721,34 @@ class FailedGenerationTransaction(unittest.TestCase):
             self.assertEqual(before, after)
 
 
-class BehaviourGateInfrastructureSafety(unittest.TestCase):
+class BehaviourGateInfrastructureSafety(SdkIsolatedTestCase):
     @unittest.skipUnless(sys.platform == "darwin", "Mach-O dependency proof")
     def test_real_plugin_records_accelerate_load_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as root:
-            pack = pathlib.Path(root) / "pack"
+            root_path = pathlib.Path(root)
+            pack = root_path / "pack"
+            sdk = root_path / "rack-sdk"
             (pack / "src").mkdir(parents=True)
+            sdk.mkdir()
+            # This is a real Mach-O link inspection, but it must not depend on
+            # a developer's live Forge Modular Rack-SDK installation.  The
+            # generated source below references no Rack symbols, so a tiny
+            # dylib with Rack's real install name is the complete hermetic
+            # link fixture needed to prove the separate Accelerate load
+            # command.  Product loadability is covered by the dedicated
+            # generated-plugin/Rack load probes.
+            subprocess.run(
+                ["clang++", "-dynamiclib", "-x", "c++", "-",
+                 "-install_name", "libRack.dylib",
+                 "-o", str(sdk / "libRack.dylib")],
+                input="extern \"C\" void rack_test_fixture() {}\n",
+                text=True, capture_output=True, check=True)
             (pack / "src" / "FFTUSER.cpp").write_text(
                 "#include <pulp/signal/fft.hpp>\n"
                 "extern \"C\" __attribute__((visibility(\"default\"))) "
                 "void init() { pulp::signal::FftT<double> fft(8); }\n")
-            with mock.patch.object(generate, "PACK", str(pack)):
+            with mock.patch.object(generate, "PACK", str(pack)), \
+                    mock.patch.object(generate, "SDK", str(sdk)):
                 ok, dylib, _objects = generate.compile_all(root)
 
             self.assertTrue(ok, dylib)
@@ -1724,6 +1758,40 @@ class BehaviourGateInfrastructureSafety(unittest.TestCase):
             self.assertIn("Accelerate.framework", dependencies)
 
     def test_plugin_links_public_signal_platform_dependencies(self) -> None:
+        commands, link = self._linked_plugin_commands()
+        framework = link.index("-framework")
+        self.assertEqual("Accelerate", link[framework + 1])
+
+    def test_plugin_links_librack_as_well_as_flat_namespace_lookup(self) -> None:
+        """`-undefined dynamic_lookup` is additive; it does not replace -lRack.
+
+        The SDK's plugin.mk applies `-L$(RACK_DIR) -lRack` unconditionally and
+        THEN adds the flat-namespace flag on macOS. Taking only the flag ships
+        a plugin Rack refuses with `symbol not found in flat namespace`, which
+        is what happened -- for a month, with every other gate green, because
+        they all dlopen the plugin inside a host that already links libRack.
+        """
+        commands, link = self._linked_plugin_commands()
+        self.assertIn("-lRack", link)
+        self.assertIn("-L/rack-sdk", link)
+        self.assertIn("-undefined", link)
+        self.assertEqual("dynamic_lookup", link[link.index("-undefined") + 1])
+
+    def test_plugin_repoints_the_librack_load_command(self) -> None:
+        """libRack's bare install name never consults LC_RPATH.
+
+        So linking alone is not enough: the load command has to name the path
+        Rack symlinks at startup, which is what plugin.mk's `dist:` target
+        does and why all 251 working plugins show it.
+        """
+        commands, _link = self._linked_plugin_commands()
+        change = next((c for c in commands if c[0] == "install_name_tool"), None)
+        self.assertIsNotNone(change, f"no install_name_tool call in {commands}")
+        self.assertIn("libRack.dylib", change)
+        self.assertIn(generate.RACK_RUNTIME_LIB, change)
+
+    def _linked_plugin_commands(self):
+        """`(every command run, the clang++ link command)` for one pack build."""
         with tempfile.TemporaryDirectory() as root:
             pack = pathlib.Path(root) / "pack"
             (pack / "src").mkdir(parents=True)
@@ -1732,7 +1800,15 @@ class BehaviourGateInfrastructureSafety(unittest.TestCase):
 
             def run(command, **_kwargs):
                 commands.append(command)
-                stdout = " T _init\n" if command[0] == "nm" else ""
+                if command[0] == "nm":
+                    stdout = " T _init\n"
+                elif command[0] == "otool":
+                    # What a correctly linked plugin's load commands look like.
+                    # Returning "" here made the whole suite pass while the
+                    # shipped plugin could not load.
+                    stdout = f"\t{generate.RACK_RUNTIME_LIB} (compat 0.0.0)\n"
+                else:
+                    stdout = ""
                 return mock.Mock(returncode=0, stdout=stdout, stderr="")
 
             with mock.patch.object(generate, "PACK", str(pack)), \
@@ -1744,8 +1820,7 @@ class BehaviourGateInfrastructureSafety(unittest.TestCase):
             self.assertTrue(ok, output)
             link = next(command for command in commands
                         if command[0] == "clang++" and "-shared" in command)
-            framework = link.index("-framework")
-            self.assertEqual("Accelerate", link[framework + 1])
+            return commands, link
 
     def test_gate_links_public_signal_platform_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -1903,7 +1978,7 @@ class BehaviourGateInfrastructureSafety(unittest.TestCase):
             self.assertIn("_missing_generated_symbol", output)
 
 
-class ZeroModelReplay(unittest.TestCase):
+class ZeroModelReplay(SdkIsolatedTestCase):
     def test_normal_module_build_spends_one_provider_call_by_default(self) -> None:
         response_text = (
             "```json manifest\n"
@@ -2057,7 +2132,7 @@ class ZeroModelReplay(unittest.TestCase):
                 "/tmp/plugin.dylib", str(pathlib.Path(root) / "install"))
 
 
-class PulpDspUseGate(unittest.TestCase):
+class PulpDspUseGate(SdkIsolatedTestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.pack = pathlib.Path(self.temp.name)

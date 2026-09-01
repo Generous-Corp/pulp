@@ -431,17 +431,21 @@ reject the look-alike graph where each edge is present on a different module.
 
 ## The module pack builds green and fails at load
 
-A Rack plugin is a shared **MODULE**, linked with `-undefined dynamic_lookup`.
-A source list missing 25 of 28 files produces a dylib that builds with exit 0
-and 28 undefined `model` symbols, and Rack rejects the plugin **whole** when it
-`dlopen`s it — every other module with it.
+A Rack plugin is a shared **MODULE**, linked with `-lRack` **and** `-undefined
+dynamic_lookup`. A source list missing 25 of 28 files produces a dylib that
+builds with exit 0 and 28 undefined `model` symbols, and Rack rejects the
+plugin **whole** when it `dlopen`s it — every other module with it.
 
 So gate on the artifact, never on the build:
 
 ```bash
 nm -u build-rack/rack/ForgeModular/plugin.dylib | grep model   # must be empty
 python3 tools/rack/test_pack_links.py                          # + 3 static checks
+python3 tools/rack/test_rack_plugin_loads.py                   # does it LOAD?
 ```
+
+That `grep model` is necessary and badly insufficient — see the next section
+for the month it cost.
 
 `examples/forge-modular/CMakeLists.txt` globs `src/*.cpp` with
 `CONFIGURE_DEPENDS` for this reason. Do not replace it with a list.
@@ -450,6 +454,73 @@ The Rack SDK is developer-supplied, so most machines never configure the target
 and the failure waits for whoever does have it. `tools/rack/fetch_sdk.py
 --check` reports where it is (usually `~/SDKs/Rack-SDK`) — use it rather than
 searching the filesystem.
+
+## `-undefined dynamic_lookup` is ADDITIVE, and omitting `-lRack` ships a plugin that cannot load
+
+ForgeModular could not load in VCV Rack for a month. Every gate was green the
+entire time, and the evidence was sitting in the user's own Rack log:
+
+```
+Could not load plugin: dlopen failed: symbol not found in flat namespace
+  '__ZN4rack3app10PortWidget10onDragDropERKNS_6widget6Widget13DragDropEventE'
+```
+
+**The cause is one flag, and a misreading of the SDK.** `plugin.mk` line 22
+applies `-L$(RACK_DIR) -lRack` **unconditionally**, and line 42 then **ADDS**
+`-undefined dynamic_lookup` on macOS. The flag is additive; it is not a
+replacement for the link. Pulp took only the flag, so the dylib carried 140
+undefined `rack::` symbols and **no libRack load command**.
+
+The control that settles it in one line:
+
+```bash
+for d in ~/Library/Application\ Support/Rack2/plugins-mac-arm64/*/plugin.dylib; do
+  otool -L "$d" | grep -q libRack && echo L || echo N; done | sort | uniq -c
+# 251 L, 1 N — and the 1 was ours
+```
+
+**Linking is not the whole fix.** libRack's own install name is the bare
+`libRack.dylib`, and a bare name never consults `LC_RPATH`. The load command
+has to name `/tmp/Rack2/libRack.dylib`, the path Rack symlinks at startup —
+which is what `plugin.mk`'s `dist:` target does with `install_name_tool
+-change`, and why all 251 working plugins show that path.
+
+**Why five gates missed it, which is the transferable part.** Every load-time
+gate we had runs the plugin inside a process that has *already* linked libRack
+— the behaviour gate links it, the patch gate links it, real Rack obviously
+links it. Under flat-namespace lookup dyld resolves the plugin's symbols out
+of the host image, so **`dlopen` SUCCEEDS in all of them**. The defect is
+invisible in every configuration except the one the user is in.
+
+| gate | why it was blind |
+|---|---|
+| `patch_gate.cpp` `dlopen` | the gate binary itself links libRack |
+| `run_behaviour_gate` | links the module's `.o` files into a libRack-linked exe — the shipped dylib is linked a *second, different* way |
+| `test_pack_links.py` | reads `nm -u` but filters to names containing `"model"`, discarding the whole `rack::` namespace |
+| `prove_rack_opens.py` | launches real Rack, which links libRack |
+| `test_generate_safety.py` | the only test reading `otool -L`, and it asserted only `Accelerate.framework` |
+
+So a probe for this class must do one of exactly two things: read the **load
+commands**, or `dlopen` from a host that links **no** libRack.
+`test_rack_plugin_loads.py` does both, builds the real pack rather than a
+stand-in, and pairs every check with a control that must come out the other
+way — a gate for a defect five other gates could not see has to prove on every
+run that it can still see it.
+
+**Two producers, and both were wrong.** `generate.py:compile_all` (the Python
+tempdir build that makes the *installed* artifact) and
+`tools/cmake/PulpRack.cmake` (`pulp_add_rack_plugin`). Linux and Windows always
+linked Rack; only the macOS branch did not. Fixing one and not the other is the
+standing trap here — and note the third copy: the running toolchain at
+`~/Library/Application Support/Forge Modular/tools/rack/`, seeded from the app
+bundle by `install_toolchain.sh`. **A repo-only fix does not reach the next
+real build until the toolchain is reinstalled.**
+
+**What it invalidates.** A patch corpus generated while the pack could not load
+was never heard. 96% of the generated patches place at least one ForgeModular
+module, so essentially every measurement over that corpus is about a rack with
+missing modules, whatever else it also says. Check `otool -L` before trusting
+any generation-era audio result.
 
 ## Intent anchors are constraints, not decoration
 
