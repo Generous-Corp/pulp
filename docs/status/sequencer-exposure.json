@@ -2324,6 +2324,68 @@
           ]
         }
       }
+    },
+    {
+      "id": "signal-spectral-mask-realtime-layout",
+      "title": "Realtime spectral-mask layout adoption",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "signal-spectral-mask-realtime-layout-20260901",
+      "owned_paths": [
+        "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+        "test/test_spectral_primitives.cpp",
+        "docs/status/agent-capabilities.json"
+      ],
+      "evidence": [
+        {
+          "path": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+          "needles": [
+            "[[nodiscard]] bool set_layout_rt(const Layout& layout) noexcept",
+            "void adopt_audio_layout_() noexcept"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The public Pulp::signal spectral-mask processor accepts a fully prepared layout through a bounded realtime publication slot and adopts it on the audio owner at a frame boundary.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+              "needles": [
+                "[[nodiscard]] bool set_layout_rt(const Layout& layout) noexcept"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Realtime spectral layout publication is an audio-owner primitive and adds no offline Timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The primitive is consumed by processors and adds no MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The primitive owns no Product A control surface; products expose their own parameters and publish the resulting layout."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "exposed",
+          "rationale": "The installed capability manifest publishes signal.spectral-mask-processor with the realtime layout entry point in its typed C++ binding.",
+          "evidence": [
+            {
+              "kind": "capability_definition",
+              "path": "docs/status/agent-capabilities.json",
+              "needles": [
+                "signal.spectral-mask-processor",
+                "set_layout_rt"
+              ]
+            }
+          ]
+        }
+      }
     }
   ],
   "tombstones": []
