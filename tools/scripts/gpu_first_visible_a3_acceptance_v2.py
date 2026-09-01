@@ -455,12 +455,16 @@ def validate_product_policy(
         raise V2AcceptanceError("required coverage lacks the A0-named protected GPU baseline")
     canary = exact_keys(policy["canary"], {
         "binary_sha256", "content_sha256", "signature_sha256",
-        "editor_open_origin", "interaction_lifecycle", "steady_state_workload",
+        "adapter", "adapter_configuration", "editor_open_origin",
+        "interaction_lifecycle", "steady_state_workload",
     }, "product policy canary")
     for field in ("binary_sha256", "content_sha256", "signature_sha256"):
         if not isinstance(canary[field], str) or not SHA256.fullmatch(canary[field]):
             raise V2AcceptanceError(f"product policy canary.{field} is invalid")
-    for field in ("editor_open_origin", "interaction_lifecycle", "steady_state_workload"):
+    for field in (
+        "adapter", "adapter_configuration", "editor_open_origin",
+        "interaction_lifecycle", "steady_state_workload",
+    ):
         if not isinstance(canary[field], str) or not canary[field]:
             raise V2AcceptanceError(f"product policy canary.{field} is missing")
     if canary["editor_open_origin"] != policy["editor_open_origin"]:
@@ -1258,6 +1262,14 @@ def validate_v2(
             identity["application_sha256"] != canary["binary_sha256"]
             or identity["content_sha256"] != canary["content_sha256"]
             or identity["signature_sha256"] != canary["signature_sha256"]
+            or (
+                role_id == "pulp-standalone"
+                and (
+                    identity.get("adapter") != canary["adapter"]
+                    or identity.get("adapter_configuration")
+                    != canary["adapter_configuration"]
+                )
+            )
             or identity.get("editor_open_origin") != canary["editor_open_origin"]
             or identity.get("interaction_lifecycle") != canary["interaction_lifecycle"]
             or identity.get("steady_state_workload") != canary["steady_state_workload"]
@@ -1265,18 +1277,23 @@ def validate_v2(
             raise V2AcceptanceError(f"{role_id} is not the authority-bound Pulp standalone canary")
     coverage = policy["required_coverage"]
     if (
-        not isinstance(standalone_identity.get("adapter_configuration"), str)
-        or not standalone_identity["adapter_configuration"]
+        constrained_identity.get("adapter") != coverage["adapter"]
         or constrained_identity.get("adapter_predicate") != coverage["predicate"]
         or constrained_identity.get("adapter_configuration") != coverage["configuration"]
     ):
-        raise V2AcceptanceError("standalone campaigns do not bind the authority adapter configurations")
-    allowed_deltas = {"adapter", "adapter_predicate", "adapter_configuration"}
+        raise V2AcceptanceError(
+            "constrained-adapter does not bind the authority adapter/configuration"
+        )
+    authorized_constrained_deltas = {
+        "adapter", "adapter_predicate", "adapter_configuration",
+    }
     standalone_product = {
-        key: value for key, value in standalone_identity.items() if key not in allowed_deltas
+        key: value for key, value in standalone_identity.items()
+        if key not in authorized_constrained_deltas
     }
     constrained_product = {
-        key: value for key, value in constrained_identity.items() if key not in allowed_deltas
+        key: value for key, value in constrained_identity.items()
+        if key not in authorized_constrained_deltas
     }
     standalone_product["expected_signatures"] = sorted(expected_signatures_by_role["pulp-standalone"])
     constrained_product["expected_signatures"] = sorted(expected_signatures_by_role["constrained-adapter"])
@@ -1315,8 +1332,6 @@ def validate_v2(
             raise V2AcceptanceError(f"{role_id} does not bind the authority Forge revision")
         if role_id not in FORGE_ROLES and identity["forge_revision"] is not None:
             raise V2AcceptanceError(f"{role_id} carries an unrelated Forge revision")
-        if role_id == "constrained-adapter" and identity["adapter"] != policy["required_coverage"]["adapter"]:
-            raise V2AcceptanceError("constrained-adapter does not use the authority-selected adapter")
         policy_interaction = policy_roles[role_id]["first_interaction"]
         interaction_fields = {
             "interaction_origin": "origin",

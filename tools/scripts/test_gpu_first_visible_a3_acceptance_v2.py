@@ -232,7 +232,7 @@ else:
             {"scenario_id": scenario, "role_ids": ["pulp-standalone"], "frame_budget_ns": 1000}
             for scenario in v2.A4_SCENARIOS
         ],
-        "canary": {"binary_sha256": DIGEST, "content_sha256": DIGEST, "signature_sha256": SIGNATURE_DIGEST, "editor_open_origin": "editor-open-requested", "interaction_lifecycle": "manifest-bound", "steady_state_workload": "manifest-bound"},
+        "canary": {"binary_sha256": DIGEST, "content_sha256": DIGEST, "signature_sha256": SIGNATURE_DIGEST, "adapter": "metal", "adapter_configuration": "default", "editor_open_origin": "editor-open-requested", "interaction_lifecycle": "manifest-bound", "steady_state_workload": "manifest-bound"},
     }
     policy_ref = write_artifact(root, "policy/product-policy.json", policy)
     policy_blob = v2.git_blob_digest((root / policy_ref["path"]).read_bytes())
@@ -495,6 +495,17 @@ def plant_wrong_forge_editor_open_origin(
     rebind_campaign_identity(
         receipt, root, "forge-modular-vst3-reaper",
         lambda identity: identity.update(editor_open_origin="first-visible-frame"),
+    )
+
+
+def plant_easier_standalone_adapter(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    rebind_campaign_identity(
+        receipt, root, "pulp-standalone",
+        lambda identity: identity.update(
+            adapter="software", adapter_configuration="easier-baseline",
+        ),
     )
 
 
@@ -901,6 +912,7 @@ def main() -> int:
         ("constrained predicate", lambda r, _p: r["campaigns"][6]["identity"].update(adapter_predicate="executor-selected")),
         ("constrained configuration", lambda r, _p: r["campaigns"][6]["identity"].update(adapter_configuration="executor-selected")),
         ("missing standalone configuration", lambda r, _p: r["campaigns"][0]["identity"].pop("adapter_configuration")),
+        ("easier standalone adapter baseline", plant_easier_standalone_adapter),
         ("constrained product substitution", lambda r, _p: r["campaigns"][6]["identity"].update(build_sha256="8" * 64)),
         ("campaign interaction origin", lambda r, _p: r["campaigns"][0]["identity"].update(interaction_origin="easier-origin")),
         ("campaign interaction stimulus", lambda r, _p: r["campaigns"][1]["identity"].update(interaction_stimulus="easier-stimulus")),
