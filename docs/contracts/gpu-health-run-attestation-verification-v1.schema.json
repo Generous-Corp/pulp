@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pulp.audio/contracts/gpu-health-run-attestation-verification-v1.schema.json",
   "title": "Pulp GPU health run attestation verification v1",
+  "description": "Records verification of a logical producer path and descriptor-read producer bytes by SHA-256. Platform build identifiers and OS code-signature metadata are not authenticated by v1.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "version", "status", "verified_at_utc", "max_age_seconds", "implementation_revision", "evidence_revision", "protected_ref_revision", "attestation", "health_result", "canonical_schemas", "selection", "host", "trusted_host", "producer", "verifier", "signature", "chronology"],
@@ -76,7 +77,7 @@
     },
     "producer": {
       "type": "object", "additionalProperties": false,
-      "required": ["binary_path", "binary_sha256", "build_id", "code_signature_identity"],
+      "required": ["binary_path", "binary_sha256"],
       "properties": {
         "binary_path": {
           "$ref": "#/$defs/local_path",
@@ -85,9 +86,7 @@
         "binary_sha256": {
           "$ref": "#/$defs/sha256",
           "description": "SHA-256 of the separately opened and unchanged local producer byte source, equal to the signed digest."
-        },
-        "build_id": { "$ref": "#/$defs/identity" },
-        "code_signature_identity": { "$ref": "#/$defs/identity" }
+        }
       }
     },
     "verifier": {

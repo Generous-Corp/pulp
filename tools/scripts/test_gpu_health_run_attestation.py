@@ -120,6 +120,7 @@ class Fixture:
         signing_key: Path | None = None,
         machine_input: str = RAW_MACHINE_ID + "\n",
         machine_option: tuple[str, ...] = ("--stable-machine-id-stdin",),
+        producer_extra: tuple[str, ...] = (),
     ) -> subprocess.CompletedProcess:
         output = output or self.repo / self.attestation_path
         signing_key = signing_key or self.key
@@ -135,8 +136,7 @@ class Fixture:
             "--implementation-revision", self.implementation,
             "--evidence-publication-revision", evidence,
             "--producer-binary", self.binary,
-            "--producer-build-id", "pulp-build-fixture",
-            "--producer-code-signature", "adhoc:fixture-cdhash",
+            *producer_extra,
             "--created-at", created_at, check=False, input_text=machine_input)
 
     def commit(self, message: str) -> None:
@@ -157,8 +157,6 @@ class Fixture:
             "--producer-binary", self.binary,
             "--expected-producer-binary-path", self.binary.resolve(),
             "--expected-implementation-revision", self.implementation,
-            "--expected-producer-build-id", "pulp-build-fixture",
-            "--expected-producer-code-signature", "adhoc:fixture-cdhash",
             "--expected-host-id", "m5",
             "--expected-stable-machine-id-sha256", MACHINE_ID_SHA256,
             "--expected-configuration", "power=low;fallback=false",
@@ -275,7 +273,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         self.assertEqual(record["host"]["stable_machine_id_sha256"],
                          MACHINE_ID_SHA256)
         self.assertEqual(record["trusted_host"]["key_type"], "ssh-ed25519")
-        self.assertEqual(record["producer"]["build_id"], "pulp-build-fixture")
+        self.assertEqual(set(record["producer"]), {"binary_path", "binary_sha256"})
         self.assertEqual(record["producer"]["binary_path"],
                          str(self.fixture.binary.resolve()))
         self.assertEqual(record["verifier"]["contract_version"], 1)
@@ -566,6 +564,37 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         result = self.fixture.verify()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("binary digest", result.stderr)
+
+    def test_arbitrary_build_and_signature_strings_cannot_create_authority(self) -> None:
+        produced = self.fixture.produce(
+            self.fixture.evidence, CREATED,
+            producer_extra=("--producer-build-id", "invented-build",
+                            "--producer-code-signature", "invented-signature"),
+        )
+        self.assertNotEqual(produced.returncode, 0)
+        self.assertIn("unrecognized arguments", produced.stderr)
+
+        verified = run(
+            "python3", VERIFIER, *self.fixture.verify_arguments(),
+            "--expected-producer-build-id", "invented-build",
+            "--expected-producer-code-signature", "invented-signature",
+            check=False,
+        )
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertEqual(verified.stdout, "")
+        self.assertIn("unrecognized arguments", verified.stderr)
+
+        self.fixture.publish_adversarially_signed(
+            self.fixture.evidence,
+            operation=lambda value: value["producer"].update({
+                "build_id": "invented-build",
+                "code_signature": "invented-signature",
+            }),
+        )
+        signed = self.fixture.verify()
+        self.assertNotEqual(signed.returncode, 0)
+        self.assertEqual(signed.stdout, "")
+        self.assertIn("producer has missing or unknown members", signed.stderr)
 
     def test_private_producer_snapshot_verifies_without_publishing_its_path(self) -> None:
         snapshot = Path(self.temp.name) / "private-snapshot" / "pulp-cpp.snapshot"

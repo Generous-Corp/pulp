@@ -245,12 +245,15 @@ verified
 [`pulp.gpu-health-run-attestation.v1`](../contracts/gpu-health-run-attestation-v1.schema.json)
 workflow in the [GPU validation checklist](../guides/gpu-validation-checklist.md#authenticate-a-published-hardware-run).
 The host signature binds the stable machine, exact selected probe/configuration,
-adapter name/backend/device, result path/digest/run ID, producer binary/build/
-code-signature identity, canonical schema, implementation revision, and the
+adapter name/backend/device, result path/digest/run ID, signed producer path and
+exact binary digest, canonical schema, implementation revision, and the
 preceding evidence-publication revision. The independent caller must supply the
 exact expected implementation revision and probe ID; ancestry or another
 passing probe with the same adapter identity is not equivalent. Protected Git
 ancestry of the later attestation publication remains a separate verifier check.
+Version 1 does not authenticate platform build IDs or OS code-signature
+metadata; downstream policy must not authorize on caller-supplied descriptions
+of either.
 Successful verification emits the closed
 [`pulp.gpu-health-run-attestation-verification.v1`](../contracts/gpu-health-run-attestation-verification-v1.schema.json)
 record; downstream policy consumes that record rather than scraping diagnostic

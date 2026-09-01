@@ -152,8 +152,6 @@ def main() -> int:
     parser.add_argument("--implementation-revision", required=True)
     parser.add_argument("--evidence-publication-revision", required=True)
     parser.add_argument("--producer-binary", type=Path, required=True)
-    parser.add_argument("--producer-build-id", required=True)
-    parser.add_argument("--producer-code-signature", required=True)
     parser.add_argument("--created-at", help=argparse.SUPPRESS)
     args = parser.parse_args()
     machine_id_sha256 = read_stable_machine_id_sha256(sys.stdin.buffer)
@@ -215,8 +213,6 @@ def main() -> int:
         "producer": {
             "binary_path": str(binary),
             "binary_sha256": sha256(binary_bytes),
-            "build_id": args.producer_build_id,
-            "code_signature": args.producer_code_signature,
         },
         "gpu_health_result": {
             "path": args.health_result,

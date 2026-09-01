@@ -225,8 +225,7 @@ def validate_shape(attestation: dict[str, Any]) -> None:
     exact(attestation["host"], {"host_id", "stable_machine_id_sha256"}, "host")
     exact(attestation["selection"], {"configuration", "probe_id", "adapter_name",
                                      "backend", "device"}, "selection")
-    exact(attestation["producer"], {"binary_path", "binary_sha256", "build_id",
-                                    "code_signature"}, "producer")
+    exact(attestation["producer"], {"binary_path", "binary_sha256"}, "producer")
     exact(attestation["gpu_health_result"],
           {"path", "sha256", "run_id", "schema", "measured_at_utc"},
           "gpu_health_result")
@@ -251,8 +250,7 @@ def validate_shape(attestation: dict[str, Any]) -> None:
     for parent, fields in ((attestation["host"], ("host_id",)),
                            (attestation["selection"], ("configuration", "probe_id",
                                                         "adapter_name", "backend", "device")),
-                           (attestation["producer"], ("binary_path", "build_id",
-                                                       "code_signature"))):
+                           (attestation["producer"], ("binary_path",))):
         require(all(isinstance(parent[field], str) and parent[field] for field in fields),
                 "run attestation contains an empty identity field")
     for parent, field in ((attestation["host"], "stable_machine_id_sha256"),
@@ -286,8 +284,6 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
     parser.add_argument("--producer-binary", type=Path, required=True)
     parser.add_argument("--expected-producer-binary-path", required=True)
     parser.add_argument("--expected-implementation-revision", required=True)
-    parser.add_argument("--expected-producer-build-id", required=True)
-    parser.add_argument("--expected-producer-code-signature", required=True)
     parser.add_argument("--expected-host-id", required=True)
     parser.add_argument("--expected-stable-machine-id-sha256", required=True)
     parser.add_argument("--expected-configuration", required=True)
@@ -345,10 +341,6 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
         require(observed == expected,
                 "implementation/host/configuration/probe/adapter selection does "
                 "not match verifier policy")
-        require(attestation["producer"]["build_id"] == args.expected_producer_build_id
-                and attestation["producer"]["code_signature"] ==
-                args.expected_producer_code_signature,
-                "producer build or code-signature identity does not match verifier policy")
         implementation = observed["implementation_revision"]
         evidence = attestation["evidence_publication_revision"]
         ancestor(repo, implementation, evidence,
@@ -532,8 +524,6 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
             "producer": {
                 "binary_path": signed_binary_path,
                 "binary_sha256": binary_digest,
-                "build_id": attestation["producer"]["build_id"],
-                "code_signature_identity": attestation["producer"]["code_signature"],
             },
             "verifier": {
                 "contract_version": VERIFIER_CONTRACT_VERSION,

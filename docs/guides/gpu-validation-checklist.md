@@ -68,9 +68,7 @@ python3 tools/scripts/gpu_health_run_attestation.py \
   --probe-id gpu-compute-magnitude \
   --implementation-revision '<40-character implementation SHA>' \
   --evidence-publication-revision '<40-character result/schema commit SHA>' \
-  --producer-binary /absolute/path/to/pulp-cpp \
-  --producer-build-id '<exact build ID>' \
-  --producer-code-signature '<exact code-signature identity or digest>'
+  --producer-binary /absolute/path/to/pulp-cpp
 ```
 
 The private inventory tool must write exactly one non-empty LF-terminated UTF-8
@@ -109,8 +107,6 @@ python3 tools/scripts/verify_gpu_health_run_attestation.py \
   --producer-binary /private/read-only/snapshot/pulp-cpp \
   --expected-producer-binary-path /absolute/signed/path/to/pulp-cpp \
   --expected-implementation-revision '<40-character implementation SHA>' \
-  --expected-producer-build-id '<exact build ID>' \
-  --expected-producer-code-signature '<exact code-signature identity or digest>' \
   --expected-host-id m5 \
   --expected-stable-machine-id-sha256 '<64 lowercase hex pseudonym>' \
   --expected-configuration 'power=low;fallback=false' \
@@ -131,6 +127,14 @@ fails if its inode, path, size, or timestamps change during the read. It may
 therefore be a private read-only snapshot at a different path. The snapshot
 path is never emitted; the verification record retains the signed logical path
 and the verified digest.
+
+Version 1 does not authenticate a platform build ID, code-signature identity,
+team ID, CDHash, or package-signing metadata. Caller-supplied strings are not
+evidence and the producer and verifier reject the former build/signature CLI
+options. Consumers, including A3 policy, must authorize only the signed logical
+path, the descriptor-read SHA-256, and the protected Git publication bindings.
+A future platform-specific metadata extractor requires a new versioned
+contract before such metadata can carry authority.
 
 On success, stdout is exactly one canonical JSON record conforming to
 [`pulp.gpu-health-run-attestation-verification.v1`](../contracts/gpu-health-run-attestation-verification-v1.schema.json).
