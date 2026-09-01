@@ -487,12 +487,34 @@ def _find_control(items: list[dict], name: str) -> dict | None:
     return None
 
 
+def requested_panel_width(prompt: str) -> int | None:
+    """The exact HP width the user named, if any."""
+    match = re.search(r"(?<!\d)(\d+)\s*HP\b", prompt, re.I)
+    return int(match.group(1)) if match else None
+
+
+def honor_explicit_panel_width(prompt: str, mod: dict) -> None:
+    """Preserve an exact user width through the generic density validator.
+
+    The emitter deliberately rejects needlessly sparse panels, but it does not
+    receive the generation request. Once the request contract has proved that
+    the manifest implements an explicitly requested width, record that fact in
+    the manifest as the existing, auditable density waiver. Unrequested widths
+    still have to satisfy the normal density rule.
+    """
+    requested = requested_panel_width(prompt)
+    if requested is None or mod.get("hp") != requested:
+        return
+    if not mod.get("width_waiver"):
+        mod["width_waiver"] = f"User explicitly requested a {requested}HP panel."
+
+
 def module_intent_problems(prompt: str, mod: dict) -> list[str]:
     """Deterministic explicit facts in the request versus the manifest."""
     problems = []
-    hp = re.search(r"(?<!\d)(\d+)\s*HP\b", prompt, re.I)
-    if hp and mod.get("hp") != int(hp.group(1)):
-        problems.append(f"requested {hp.group(1)}HP, manifest has {mod.get('hp')}HP")
+    hp = requested_panel_width(prompt)
+    if hp is not None and mod.get("hp") != hp:
+        problems.append(f"requested {hp}HP, manifest has {mod.get('hp')}HP")
 
     number = r"-?(?:\d+(?:\.\d*)?|\.\d+)"
     range_pattern = re.compile(
@@ -1046,6 +1068,7 @@ def _main(argv, resources: contextlib.ExitStack):
                    explanation)
             continue
         log("explicit request contract verified")
+        honor_explicit_panel_width(a.prompt, mod)
 
         dsp, completed_headers = toolchain_headers.complete_known_public_headers(
             ROOT, dsp)
