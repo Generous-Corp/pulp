@@ -1478,6 +1478,8 @@ void apply_visual_style(View& view, const IRStyle& style,
     }
     if (style.background_repeat)
         view.set_background_repeat(*style.background_repeat);
+    if (style.background_position)
+        view.set_background_position(*style.background_position);
     if (style.background_size)
         view.set_background_size(*style.background_size);
     // object-fit is honored by ImageView::paint; on plain Views it sits in the
@@ -2102,6 +2104,12 @@ void apply_captured_art_knob_skin(
                           static_cast<int>(pw), static_cast<int>(ph), 1,
                           SpriteStrip::Orientation::vertical);
     knob.set_sprite_strip(std::move(strip));
+    const float dpr = attr_float(node, "captured_raster_dpr").value_or(0.0f);
+    const float x_px = attr_float(node, "captured_raster_origin_x_px").value_or(0.0f);
+    const float y_px = attr_float(node, "captured_raster_origin_y_px").value_or(0.0f);
+    if (std::isfinite(dpr) && dpr > 0.0f && std::isfinite(x_px) &&
+        std::isfinite(y_px))
+        knob.set_captured_raster_origin(x_px / dpr, y_px / dpr, dpr);
     const float cw = attr_float(node, "art_core_w").value_or(0.0f);
     const float ch = attr_float(node, "art_core_h").value_or(0.0f);
     if (cw > 0.0f && ch > 0.0f)
@@ -2136,6 +2144,12 @@ void apply_durable_knob_indicator(Knob& knob, const IRNode& node) {
             r_in, *r_out, w, color,
             finite_or("knob_ind_phase_rad", 0.0f),
             color_authored);
+        if (const auto outline_w = attr_float(node, "knob_ind_outline_w");
+            outline_w && std::isfinite(*outline_w) && *outline_w > 0.0f) {
+            if (const auto hex = attr(node, "knob_ind_outline_color"))
+                if (const auto outline = parse_indicator_css_color(*hex))
+                    knob.set_captured_indicator_outline(*outline, *outline_w);
+        }
     }
 }
 
@@ -2190,6 +2204,12 @@ void apply_captured_art_fader_skin(
         attr_float(node, "fader_control_natural_w").value_or(body_w),
         attr_float(node, "fader_control_natural_h").value_or(body_h),
         attr_bool(node, "fader_body_includes_static_track"));
+    const float dpr = attr_float(node, "captured_raster_dpr").value_or(0.0f);
+    const float x_px = attr_float(node, "captured_raster_origin_x_px").value_or(0.0f);
+    const float y_px = attr_float(node, "captured_raster_origin_y_px").value_or(0.0f);
+    if (std::isfinite(dpr) && dpr > 0.0f && std::isfinite(x_px) &&
+        std::isfinite(y_px))
+        fader.set_captured_raster_origin(x_px / dpr, y_px / dpr, dpr);
 }
 
 std::unique_ptr<View> make_widget(const IRNode& node,
@@ -2564,6 +2584,24 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     apply_visual_style(*view, node.style,
                        /*skip_border=*/resolved.kind == NativeWidgetKind::image_view,
                        /*skip_box_shadow=*/body_is_painted_beneath(node));
+    const float box_paint_dpr =
+        attr_float(node, "browser_box_paint_dpr").value_or(0.0f);
+    const float box_paint_left =
+        attr_float(node, "browser_box_paint_left_px").value_or(0.0f);
+    const float box_paint_top =
+        attr_float(node, "browser_box_paint_top_px").value_or(0.0f);
+    const float box_paint_right =
+        attr_float(node, "browser_box_paint_right_px").value_or(0.0f);
+    const float box_paint_bottom =
+        attr_float(node, "browser_box_paint_bottom_px").value_or(0.0f);
+    if (std::isfinite(box_paint_dpr) && box_paint_dpr > 0.0f &&
+        std::isfinite(box_paint_left) && std::isfinite(box_paint_top) &&
+        std::isfinite(box_paint_right) && std::isfinite(box_paint_bottom) &&
+        box_paint_right > box_paint_left && box_paint_bottom > box_paint_top)
+        view->set_captured_box_paint_rect(
+            box_paint_left / box_paint_dpr, box_paint_top / box_paint_dpr,
+            box_paint_right / box_paint_dpr, box_paint_bottom / box_paint_dpr,
+            box_paint_dpr);
     if (resolved.kind == NativeWidgetKind::image_view)
         apply_imported_image_sizing(*view, node);
 

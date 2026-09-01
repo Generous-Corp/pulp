@@ -308,7 +308,8 @@ PaintedTreeCounts lower_into(const SnapshotSpec& spec, const std::string& name,
                              IRNode& root,
                              const std::unordered_map<int, std::string>&
                                  captured_element_assets = {},
-                             bool flatten_to_paint_order = false) {
+                             bool flatten_to_paint_order = false,
+                             double device_scale = 0.0) {
     const auto path = write_snapshot(build_snapshot(spec), name);
     const auto index = CapturedStyleIndex::load(path);
     // The index holds no reference to the file, so it goes now rather than at
@@ -316,7 +317,7 @@ PaintedTreeCounts lower_into(const SnapshotSpec& spec, const std::string& name,
     // leave the snapshot behind exactly on the runs someone wants to inspect.
     fs::remove(path);
     REQUIRE(index);
-    return lower_painted_tree(*index, 0.0, 0.0, root,
+    return lower_painted_tree(*index, 0.0, 0.0, device_scale, root,
                               captured_element_assets,
                               flatten_to_paint_order);
 }
@@ -325,10 +326,11 @@ LoweredSnapshot lower_snapshot(const SnapshotSpec& spec,
                                const std::string& name,
                                const std::unordered_map<int, std::string>&
                                    captured_element_assets = {},
-                               bool flatten_to_paint_order = false) {
+                               bool flatten_to_paint_order = false,
+                               double device_scale = 0.0) {
     LoweredSnapshot out;
     out.counts = lower_into(spec, name, out.root, captured_element_assets,
-                            flatten_to_paint_order);
+                            flatten_to_paint_order, device_scale);
     return out;
 }
 
@@ -473,6 +475,77 @@ TEST_CASE("native lowering places nodes at Chrome's solved boxes verbatim",
         CHECK(*entry.node->style.width > 0.0f);
         CHECK(*entry.node->style.height > 0.0f);
     }
+}
+
+TEST_CASE("native lowering records Chromium CSS-edge snap rects for box paint",
+          "[browser-capture][native-lowering][raster-snap]") {
+    // This matrix is the capture-side half of the fractional-raster fixture:
+    // at DPR 2 Chrome paints page y=32.25 at device row 64, y=52.5 at 106,
+    // and y=72.75 at 146. That is floor(CSS edge + 0.5) * DPR, never
+    // round(CSS edge * DPR). Both far edges are asserted because a box with an
+    // integer origin and a fractional height still needs a different painted
+    // bottom edge. The known-good integer control must remain untouched.
+    const auto lowered = lower_snapshot(
+        {
+            .node_names = "[0,1,2,3,3,3,3,3,3,3,3,3]",
+            .node_types = "[9,1,1,1,1,1,1,1,1,1,1,1]",
+            .parents = "[-1,0,1,2,2,2,2,2,2,2,9,2]",
+            .attributes =
+                "[[],[],[],[4,5],[4,6],[4,7],[4,8],[4,9],[4,10],[4,11],[4,16],[4,17]]",
+            .layout_nodes = "[0,1,2,3,4,5,6,7,8,9,10,11]",
+            .styles = "[[14,12,13],[14,12,13],[14,12,13],[14,12,13],"
+                      "[14,12,13],[14,12,13],[14,12,13],[14,12,13],"
+                      "[14,12,13],[14,12,15],[14,12,13],[14,12,13]]",
+            .bounds = "[[0,0,160,140],[0,0,160,140],[0,0,160,140],"
+                      "[10,12,20,8],[10.25,32.25,20,8],"
+                      "[10.5,52.5,20,8],[10.75,72.75,20,8],"
+                      "[0,90,20,10.5],[-0.25,112.5,20.5,8],"
+                      "[30,112.5,20.5,8],[35,117,8,3],[-0.5,122.5,20.5,8]]",
+            .paint_orders = "[0,1,1,2,3,4,5,6,7,8,9,10]",
+            .computed_names =
+                R"(["background-image","display","transform"])",
+            .strings = R"J("#document","HTML","BODY","DIV","class","integer","quarter","half","three-quarter","integer-origin-fractional-edge","negative","transformed","block","none","linear-gradient(#f00,#0f0)","matrix(2,0,0,2,0,0)","transformed-descendant","negative-tie")J",
+        },
+        "browser-css-edge-snap", {}, false, 2.0);
+
+    const auto rect = [&](std::string_view klass) {
+        const auto* node = find_named(lowered.root, "div." + std::string(klass));
+        REQUIRE(node != nullptr);
+        return std::array<std::string, 4>{
+            attribute(*node, "browser_box_paint_left_px"),
+            attribute(*node, "browser_box_paint_top_px"),
+            attribute(*node, "browser_box_paint_right_px"),
+            attribute(*node, "browser_box_paint_bottom_px")};
+    };
+    CHECK(rect("integer") == std::array<std::string, 4>{"20.000000", "24.000000",
+                                                           "60.000000", "40.000000"});
+    CHECK(rect("quarter") == std::array<std::string, 4>{"20.000000", "64.000000",
+                                                           "60.000000", "80.000000"});
+    CHECK(rect("half") == std::array<std::string, 4>{"22.000000", "106.000000",
+                                                        "62.000000", "122.000000"});
+    CHECK(rect("three-quarter") == std::array<std::string, 4>{"22.000000", "146.000000",
+                                                                 "62.000000", "162.000000"});
+    CHECK(rect("integer-origin-fractional-edge") ==
+          std::array<std::string, 4>{"0.000000", "180.000000", "40.000000", "202.000000"});
+    CHECK(rect("negative") == std::array<std::string, 4>{"0.000000", "226.000000",
+                                                           "40.000000", "242.000000"});
+    // Chromium's negative tie is toward +infinity: -0.5 and -0.25 both snap
+    // to 0, while -0.75 snaps to -1. C++ std::round(-0.5) is wrong here.
+    CHECK(rect("negative-tie") == std::array<std::string, 4>{"0.000000", "246.000000",
+                                                               "40.000000", "262.000000"});
+
+    // DOMSnapshot's transformed bounds are post-transform. They cannot be a
+    // local background/border paint rect, so the metadata must stay absent.
+    const auto* transformed = find_named(lowered.root, "div.transformed");
+    REQUIRE(transformed != nullptr);
+    CHECK(attribute(*transformed, "browser_box_paint_dpr").empty());
+    CHECK(attribute(*transformed, "browser_box_paint_rect_ineligible") == "transform");
+    const auto* transformed_descendant =
+        find_named(lowered.root, "div.transformed-descendant");
+    REQUIRE(transformed_descendant != nullptr);
+    CHECK(attribute(*transformed_descendant, "browser_box_paint_dpr").empty());
+    CHECK(attribute(*transformed_descendant,
+                    "browser_box_paint_rect_ineligible") == "transformed-ancestor");
 }
 
 // A layout engine places an absolutely positioned child against its parent's
@@ -1379,6 +1452,80 @@ TEST_CASE("canvas and image elements classify away from native",
     });
     REQUIRE(image != nullptr);
     CHECK(attribute(*image, "src") == "logo.png");
+}
+
+TEST_CASE("unsupported gradient repeat distribution becomes an explicit fallback",
+          "[browser-capture][native-lowering][background-repeat]") {
+    // `round` and `space` change tile geometry/distribution; treating either
+    // as ordinary repeat would produce a plausible but wrong grid. The tree
+    // must therefore make the gap auditable, while ordinary CSS repeat forms
+    // remain native paint.
+    struct RepeatCase {
+        const char* value;
+        int string_index;
+        bool fallback;
+        int gradient_index;
+        const char* expected_detail;
+    };
+    const std::array cases{
+        RepeatCase{"repeat", 10, false, 5, "repeat"},
+        RepeatCase{"repeat-x", 11, false, 5, "repeat-x"},
+        RepeatCase{"repeat-y", 12, false, 5, "repeat-y"},
+        RepeatCase{"no-repeat", 13, false, 5, "no-repeat"},
+        RepeatCase{"space", 14, true, 5, "space"},
+        RepeatCase{"round", 15, true, 5, "round"},
+        RepeatCase{"repeat space", 16, true, 5, "repeat space"},
+        RepeatCase{"round no-repeat", 17, true, 5, "round no-repeat"},
+        // Per-layer repeat values align with each background-image layer, not
+        // with the first gradient's internal comma-separated stop list.
+        RepeatCase{"repeat, space", 19, true, 18, "space"},
+    };
+    for (const auto& probe : cases) {
+        DYNAMIC_SECTION(probe.value) {
+            const auto lowered = lower_snapshot(
+                {
+                    .node_names = "[0,1,2,3]",
+                    .node_types = "[9,1,1,1]",
+                    .parents = "[-1,0,1,2]",
+                    .attributes = "[[],[],[],[]]",
+                    .layout_nodes = "[0,1,2,3]",
+                    .styles = "[[4,10,9],[4,10,9],[4,10,9],[" +
+                              std::to_string(probe.gradient_index) + "," +
+                              std::to_string(probe.string_index) + ",9]]",
+                    .bounds = "[[0,0,100,100],[0,0,100,100],[0,0,100,100],"
+                              "[10,10,40,20]]",
+                    .paint_orders = "[0,1,1,2]",
+                    .computed_names =
+                        R"(["background-image","background-repeat","display"])",
+                    .strings =
+                        R"J("#document","HTML","BODY","DIV","none",)J"
+                        R"J("linear-gradient(#f00,#0f0)","background-image",)J"
+                        R"J("background-repeat","display","block","repeat",)J"
+                        R"J("repeat-x","repeat-y","no-repeat","space","round",)J"
+                        R"J("repeat space","round no-repeat",)J"
+                        R"J("linear-gradient(#f00,#0f0), linear-gradient(#00f,#fff)",)J"
+                        R"J("repeat, space")J",
+                },
+                "gradient-repeat-" + std::string(probe.value));
+            const auto* div = find_node(lowered.root, [](const IRNode& node) {
+                return attribute(node, "source_tag") == "div";
+            });
+            REQUIRE(div != nullptr);
+            CHECK((lowered.counts.element_capture_fallback == 1) == probe.fallback);
+            if (probe.fallback) {
+                CHECK(attribute(*div, "paint_class") == "element-capture-fallback");
+                CHECK(attribute(*div, "capture_fallback_reason") == "background-repeat");
+                CHECK(attribute(*div, "capture_fallback_detail") == probe.expected_detail);
+                CHECK(attribute(*div, "unpainted") == "true");
+                CHECK_FALSE(div->style.background_gradient);
+                CHECK_FALSE(div->style.background_repeat);
+            } else {
+                CHECK(attribute(*div, "paint_class") == "native");
+                REQUIRE(div->style.background_gradient);
+                CHECK(*div->style.background_repeat == probe.value);
+            }
+        }
+    }
 }
 
 TEST_CASE("captured canvas lowers as its own integrity-bound image layer",

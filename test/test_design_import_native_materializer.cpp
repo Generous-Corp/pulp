@@ -4,6 +4,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/control_painters.hpp>
+#include <pulp/view/css_gradient.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_sources.hpp>
@@ -27,6 +28,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -1621,6 +1623,14 @@ TEST_CASE("baked native materializer reproduces the design's captured knob point
     knob.attributes["asset_path"] = "/resolved/disc.png";
     knob.attributes["png_natural_w"] = "420";
     knob.attributes["png_natural_h"] = "484";
+    knob.attributes["captured_raster_origin_x_px"] = "48";
+    knob.attributes["captured_raster_origin_y_px"] = "53";
+    knob.attributes["captured_raster_dpr"] = "2";
+    knob.attributes["browser_box_paint_left_px"] = "49";
+    knob.attributes["browser_box_paint_top_px"] = "54";
+    knob.attributes["browser_box_paint_right_px"] = "111";
+    knob.attributes["browser_box_paint_bottom_px"] = "120";
+    knob.attributes["browser_box_paint_dpr"] = "2";
     knob.attributes["knob_ind_r_in"] = "0.604";
     knob.attributes["knob_ind_r_out"] = "0.936";
     knob.attributes["knob_ind_w"] = "0.05";
@@ -1633,6 +1643,14 @@ TEST_CASE("baked native materializer reproduces the design's captured knob point
     auto* k = dynamic_cast<Knob*>(root->child_at(0));
     REQUIRE(k != nullptr);
     REQUIRE(k->has_captured_indicator());
+    REQUIRE(k->has_captured_box_paint_rect());
+    CHECK(k->captured_box_paint_left() == Catch::Approx(24.5f));
+    CHECK(k->captured_box_paint_top() == Catch::Approx(27.0f));
+    CHECK(k->captured_box_paint_right() == Catch::Approx(55.5f));
+    CHECK(k->captured_box_paint_bottom() == Catch::Approx(60.0f));
+    CHECK(k->captured_raster_scale() == Catch::Approx(2.0f));
+    CHECK(k->captured_raster_origin_x() == Catch::Approx(24.0f));
+    CHECK(k->captured_raster_origin_y() == Catch::Approx(26.5f));
     CHECK(k->captured_indicator_r_out() == Catch::Approx(0.936f));
     CHECK(k->captured_indicator_r_in() == Catch::Approx(0.604f));
 }
@@ -1718,6 +1736,28 @@ TEST_CASE("baked native materializer resolves an rgba() background color",
     const auto c = root->background_color();
     CHECK(c.r == Catch::Approx(171.0f / 255.0f).margin(0.01f));
     CHECK(c.a == Catch::Approx(0.1f).margin(0.01f));
+}
+
+TEST_CASE("baked native materializer preserves per-layer background position",
+          "[view][import][native-materializer][gradient]") {
+    // The Dilla footer offsets its second checkerboard layer by `2px 2px`.
+    // Carry the declaration through DesignIR into the same View slot the
+    // native painter resolves by original CSS layer index.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "footer-dither";
+    ir.root.style.width = 160.0f;
+    ir.root.style.height = 12.0f;
+    ir.root.style.background_gradient =
+        "linear-gradient(45deg, #fff 25%, transparent 25%, transparent 75%, #fff 75%), "
+        "linear-gradient(45deg, #fff 25%, transparent 25%, transparent 75%, #fff 75%)";
+    ir.root.style.background_size = "4px 4px";
+    ir.root.style.background_repeat = "repeat";
+    ir.root.style.background_position = "0 0, 2px 2px";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    CHECK(root->background_position() == "0 0, 2px 2px");
 }
 
 TEST_CASE("baked native materializer maps a Dropdown frame to an interactive ComboBox",
@@ -3502,6 +3542,8 @@ TEST_CASE("authored designed-control indicators override the inherited thumb tok
         knob_node.attributes["knob_ind_w"] = "0.04";
         knob_node.attributes["knob_ind_phase_rad"] = "0.25";
         knob_node.attributes["knob_ind_color"] = "#ffffff";
+        knob_node.attributes["knob_ind_outline_color"] = "#000000";
+        knob_node.attributes["knob_ind_outline_w"] = "1";
         ir.root.children.push_back(std::move(knob_node));
 
         auto root = build_native_view_tree(ir, {}, {});
@@ -3514,6 +3556,7 @@ TEST_CASE("authored designed-control indicators override the inherited thumb tok
         CHECK(knob->captured_indicator_r_out() == Catch::Approx(0.91f));
         CHECK(knob->captured_indicator_phase_rad() == Catch::Approx(0.25f));
         CHECK(knob->captured_indicator_color_authored());
+        CHECK(knob->captured_indicator_outline_width() == Catch::Approx(1.0f));
 
         knob->set_bounds({0, 0, 160.0f, 160.0f});
         pulp::canvas::RecordingCanvas canvas;
@@ -4353,4 +4396,309 @@ TEST_CASE("a resize constraint wins over an explicit margin on the same side",
     REQUIRE(vview != nullptr);
     CHECK(vview->flex().margin_top == Catch::Approx(9.0f));
     CHECK(vview->flex().dim_margin_top.unit != DimensionUnit::auto_);
+}
+
+// Pixel comparison remains the acceptance test for these patterns, but the
+// pre-push coverage configuration intentionally uses the portable recording
+// canvas rather than Skia. Exercise the same shared View paint contract here:
+// CSS list values keep their declared image index through `none`, px tile
+// stops normalize against the tile, and a captured paint rect adjusts only the
+// element's own outer paint geometry.
+TEST_CASE("native background layers retain CSS list pairing in portable paint",
+          "[view][import][native-materializer][background-layers]") {
+    View layered;
+    layered.set_bounds({0.0f, 0.0f, 16.0f, 12.0f});
+    layered.set_background_color(Color::rgba8(16, 20, 24, 255));
+    layered.set_background_size("3px 4px, 8px 6px");
+    layered.set_background_repeat("no-repeat, repeat");
+    layered.set_background_position("1px 2px, 2px 1px");
+    REQUIRE(apply_css_background_gradient(
+        layered,
+        "none, linear-gradient(to right, #ff0000 1px, transparent 1px)"));
+
+    pulp::canvas::RecordingCanvas layer_canvas;
+    layered.paint_all(layer_canvas);
+
+    int linear_shaders = 0;
+    int tiled_fills = 0;
+    bool saw_second_layer_origin = false;
+    for (const auto& command : layer_canvas.commands()) {
+        if (command.type == pulp::canvas::DrawCommand::Type::set_fill_gradient_linear)
+            ++linear_shaders;
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_rect &&
+            command.f[2] == 8.0f && command.f[3] == 6.0f) {
+            ++tiled_fills;
+            saw_second_layer_origin = saw_second_layer_origin ||
+                (command.f[0] == -6.0f && command.f[1] == -5.0f);
+        }
+    }
+    // The first declared image is `none`; the visible gradient must instead
+    // pair with size/repeat/position entry 1 and fill its 8x6 repeated tile.
+    CHECK(linear_shaders == 9);
+    CHECK(tiled_fills == 9);
+    CHECK(saw_second_layer_origin);
+
+    View dots;
+    dots.set_bounds({0.0f, 0.0f, 16.0f, 16.0f});
+    dots.set_background_size("8px 8px");
+    dots.set_background_repeat("repeat");
+    REQUIRE(apply_css_background_gradient(
+        dots, "radial-gradient(circle, #ffffff 1px, transparent 1px)"));
+
+    pulp::canvas::RecordingCanvas dot_canvas;
+    dots.paint_all(dot_canvas);
+    int radial_shaders = 0;
+    for (const auto& command : dot_canvas.commands()) {
+        if (command.type == pulp::canvas::DrawCommand::Type::set_fill_gradient_radial)
+            ++radial_shaders;
+    }
+    // One shader per 8px tile proves radial px stops enter the shared tiled
+    // gradient paint path rather than collapsing to an untiled solid fill.
+    CHECK(radial_shaders == 4);
+
+    View snapped;
+    snapped.set_bounds({0.0f, 0.0f, 10.0f, 10.5f});
+    snapped.set_background_color(Color::rgba8(0, 255, 0, 255));
+    snapped.set_border(Color::rgba8(255, 0, 0, 255), 1.0f);
+    snapped.set_overflow(View::Overflow::hidden);
+    snapped.set_captured_box_paint_rect(0.0f, 0.0f, 10.0f, 11.0f, 2.0f);
+
+    pulp::canvas::RecordingCanvas snap_canvas;
+    snapped.paint_all(snap_canvas);
+    bool saw_snapped_fill = false;
+    bool saw_deferred_overflow = false;
+    for (const auto& command : snap_canvas.commands()) {
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_rect &&
+            command.f[2] == 10.0f && command.f[3] == 11.0f)
+            saw_snapped_fill = true;
+        if (command.type == pulp::canvas::DrawCommand::Type::clip_rect &&
+            command.f[2] == 10.0f && command.f[3] == 10.5f)
+            saw_deferred_overflow = true;
+    }
+    CHECK(saw_snapped_fill);
+    CHECK(saw_deferred_overflow);
+
+    View equal_size;
+    equal_size.set_bounds({0.0f, 0.0f, 16.0f, 12.0f});
+    equal_size.set_background_size("16px 12px");
+    equal_size.set_background_repeat("repeat");
+    equal_size.set_background_position("2px 0");
+    REQUIRE(apply_css_background_gradient(
+        equal_size, "linear-gradient(to right, #ff0000, #0000ff)"));
+    pulp::canvas::RecordingCanvas equal_canvas;
+    equal_size.paint_all(equal_canvas);
+    bool saw_equal_phase = false;
+    for (const auto& command : equal_canvas.commands()) {
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_rect &&
+            command.f[0] == 2.0f && command.f[1] == 0.0f &&
+            command.f[2] == 16.0f && command.f[3] == 12.0f)
+            saw_equal_phase = true;
+    }
+    CHECK(saw_equal_phase);
+
+    View oversized;
+    oversized.set_bounds({0.0f, 0.0f, 16.0f, 12.0f});
+    oversized.set_background_size("24px 18px");
+    oversized.set_background_repeat("repeat");
+    oversized.set_background_position("2px 3px");
+    REQUIRE(apply_css_background_gradient(
+        oversized, "linear-gradient(to right, #ff0000, #0000ff)"));
+    pulp::canvas::RecordingCanvas oversized_canvas;
+    oversized.paint_all(oversized_canvas);
+    bool saw_oversized_phase = false;
+    for (const auto& command : oversized_canvas.commands()) {
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_rect &&
+            command.f[0] == 2.0f && command.f[1] == 3.0f &&
+            command.f[2] == 24.0f && command.f[3] == 18.0f)
+            saw_oversized_phase = true;
+    }
+    CHECK(saw_oversized_phase);
+
+    const auto has_no_repeat_tile = [](std::string_view position,
+                                       float wanted_x, float wanted_y) {
+        View view;
+        view.set_bounds({0.0f, 0.0f, 16.0f, 12.0f});
+        view.set_background_size("8px 6px");
+        view.set_background_repeat("no-repeat");
+        view.set_background_position(std::string(position));
+        REQUIRE(apply_css_background_gradient(
+            view, "linear-gradient(to right, #ff0000, #0000ff)"));
+        pulp::canvas::RecordingCanvas canvas;
+        view.paint_all(canvas);
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::fill_rect &&
+                command.f[0] == wanted_x && command.f[1] == wanted_y &&
+                command.f[2] == 8.0f && command.f[3] == 6.0f)
+                return true;
+        }
+        return false;
+    };
+    CHECK(has_no_repeat_tile("right 2px bottom 3px", 6.0f, 3.0f));
+    CHECK(has_no_repeat_tile("calc(100% - 2px) calc(100% - 3px)", 6.0f, 3.0f));
+    CHECK(has_no_repeat_tile("calc(100% - 1px - 1px) calc(100% - 1px - 2px)",
+                             6.0f, 3.0f));
+    CHECK(has_no_repeat_tile("top", 4.0f, 0.0f));
+    CHECK(has_no_repeat_tile("bottom right", 8.0f, 6.0f));
+    CHECK(has_no_repeat_tile("left 10px center", 10.0f, 3.0f));
+    CHECK(has_no_repeat_tile("center top 10px", 4.0f, 10.0f));
+    // Two-value syntax is ordered x then y: a horizontal keyword followed by
+    // a length sets the vertical axis. A vertical-first keyword + length is
+    // not a valid two-value position.
+    CHECK(has_no_repeat_tile("left 10px", 0.0f, 10.0f));
+    CHECK(has_no_repeat_tile("right 10px", 8.0f, 10.0f));
+    CHECK(has_no_repeat_tile("center left", 0.0f, 3.0f));
+    CHECK(has_no_repeat_tile("top center", 4.0f, 0.0f));
+    CHECK(has_no_repeat_tile("center right", 8.0f, 3.0f));
+    CHECK(has_no_repeat_tile("bottom center", 4.0f, 6.0f));
+
+    View unsupported;
+    unsupported.set_bounds({0.0f, 0.0f, 16.0f, 12.0f});
+    unsupported.set_background_size("4px 4px");
+    REQUIRE(apply_css_background_gradient(
+        unsupported, "linear-gradient(to right, #ff0000, #0000ff)"));
+    const auto shader_count = [&](View& view) {
+        pulp::canvas::RecordingCanvas canvas;
+        view.paint_all(canvas);
+        int count = 0;
+        for (const auto& command : canvas.commands())
+            if (command.type == pulp::canvas::DrawCommand::Type::set_fill_gradient_linear)
+                ++count;
+        return count;
+    };
+    unsupported.set_background_repeat("no-repeat");
+    unsupported.set_background_position("right 2px left 3px");
+    CHECK(shader_count(unsupported) == 0);
+    unsupported.set_background_position("calc(100%-2px) 0");
+    CHECK(shader_count(unsupported) == 0);
+    unsupported.set_background_position("calc(100% -2px) 0");
+    CHECK(shader_count(unsupported) == 0);
+    unsupported.set_background_position("top 20px");
+    CHECK(shader_count(unsupported) == 0);
+    unsupported.set_background_position("bottom 20px");
+    CHECK(shader_count(unsupported) == 0);
+    unsupported.set_background_position(". 0");
+    CHECK(shader_count(unsupported) == 0);
+    unsupported.set_background_position("1. 0");
+    CHECK(shader_count(unsupported) == 0);
+    unsupported.set_background_position(
+        "999999999999999999999999999999999999999999999999px 0");
+    CHECK(shader_count(unsupported) == 0);
+
+    View overflow_size;
+    overflow_size.set_bounds({0.0f, 0.0f, std::numeric_limits<float>::max(), 12.0f});
+    overflow_size.set_background_size("1000% 6px");
+    overflow_size.set_background_repeat("no-repeat");
+    REQUIRE(apply_css_background_gradient(
+        overflow_size, "linear-gradient(to right, #ff0000, #0000ff)"));
+    CHECK(shader_count(overflow_size) == 0);
+
+    View overflow_position;
+    overflow_position.set_bounds({0.0f, 0.0f, std::numeric_limits<float>::max(), 12.0f});
+    overflow_position.set_background_size("1px 6px");
+    overflow_position.set_background_repeat("no-repeat");
+    overflow_position.set_background_position("1000% 0");
+    REQUIRE(apply_css_background_gradient(
+        overflow_position, "linear-gradient(to right, #ff0000, #0000ff)"));
+    CHECK(shader_count(overflow_position) == 0);
+}
+
+TEST_CASE("native background size, repeat, and position retain browser pixels",
+          "[view][import][native-materializer][background-layers][pixel]") {
+    if (!raw_rgba_render_available())
+        SKIP("Skia raw RGBA raster backend unavailable");
+
+    struct Frame {
+        std::vector<uint8_t> rgba;
+        uint32_t width = 0, height = 0;
+        const uint8_t* at(uint32_t x, uint32_t y) const {
+            return &rgba[(static_cast<size_t>(y) * width + x) * 4];
+        }
+        bool red(uint32_t x, uint32_t y) const {
+            const auto* p = at(x, y);
+            return p[0] > 200 && p[2] < 50;
+        }
+        bool blue(uint32_t x, uint32_t y) const {
+            const auto* p = at(x, y);
+            return p[2] > 200 && p[0] < 50;
+        }
+        bool green(uint32_t x, uint32_t y) const {
+            const auto* p = at(x, y);
+            return p[1] > 200 && p[0] < 50 && p[2] < 50;
+        }
+    };
+    const auto render = [](std::string_view size, std::string_view repeat,
+                           std::string_view position) -> Frame {
+        View view;
+        view.set_bounds({0.0f, 0.0f, 16.0f, 12.0f});
+        view.set_background_color(Color::rgba8(0, 255, 0, 255));
+        view.set_background_size(std::string(size));
+        view.set_background_repeat(std::string(repeat));
+        view.set_background_position(std::string(position));
+        REQUIRE(apply_css_background_gradient(
+            view, "linear-gradient(to right, #ff0000 50%, #0000ff 50%)"));
+        Frame frame;
+        frame.rgba = render_to_rgba(view, 16, 12, 1.0f,
+                                    &frame.width, &frame.height);
+        REQUIRE_FALSE(frame.rgba.empty());
+        REQUIRE(frame.width == 16);
+        REQUIRE(frame.height == 12);
+        return frame;
+    };
+
+    const Frame equal = render("16px 12px", "repeat", "2px 0");
+    CHECK(equal.blue(0, 6));
+    CHECK(equal.red(3, 6));
+
+    const Frame oversized = render("24px 18px", "repeat", "2px 3px");
+    CHECK(oversized.blue(0, 6));
+    CHECK(oversized.red(3, 6));
+
+    const Frame edge = render("8px 6px", "no-repeat", "right 2px bottom 3px");
+    const Frame calc = render("8px 6px", "no-repeat",
+                              "calc(100% - 2px) calc(100% - 3px)");
+    CHECK(edge.rgba == calc.rgba);
+    CHECK(edge.green(0, 0));
+    CHECK(edge.red(7, 4));
+
+    // Level-3 edge/offset permutations must match their two-component
+    // equivalents, not be rejected and disappear at the paint boundary.
+    CHECK(render("8px 6px", "no-repeat", "left 2px center").rgba ==
+          render("8px 6px", "no-repeat", "2px center").rgba);
+    CHECK(render("8px 6px", "no-repeat", "center top 2px").rgba ==
+          render("8px 6px", "no-repeat", "center 2px").rgba);
+    // In two-value syntax a horizontal keyword is x and the length is y.
+    CHECK(render("8px 6px", "no-repeat", "left 2px").rgba ==
+          render("8px 6px", "no-repeat", "0 2px").rgba);
+    CHECK(render("8px 6px", "no-repeat", "right 2px").rgba ==
+          render("8px 6px", "no-repeat", "100% 2px").rgba);
+    // Reversed pairs involving `center` are valid two-keyword forms and
+    // resolve by axis, not textual order.
+    CHECK(render("8px 6px", "no-repeat", "center left").rgba ==
+          render("8px 6px", "no-repeat", "left center").rgba);
+    CHECK(render("8px 6px", "no-repeat", "top center").rgba ==
+          render("8px 6px", "no-repeat", "center top").rgba);
+    CHECK(render("8px 6px", "no-repeat", "center right").rgba ==
+          render("8px 6px", "no-repeat", "right center").rgba);
+    CHECK(render("8px 6px", "no-repeat", "bottom center").rgba ==
+          render("8px 6px", "no-repeat", "center bottom").rgba);
+    // Leading decimal fractions are valid CSS numbers; their canonical forms
+    // must paint identically through the real Skia raster path.
+    CHECK(render("8px 6px", "no-repeat", ".5px 0").rgba ==
+          render("8px 6px", "no-repeat", "0.5px 0").rgba);
+    CHECK(render("8px 6px", "no-repeat", ".5% 0").rgba ==
+          render("8px 6px", "no-repeat", "0.5% 0").rgba);
+    // Invalid vertical-first keyword + length fails closed rather than using
+    // a guessed axis ordering.
+    const Frame invalid_vertical_first = render("8px 6px", "no-repeat", "top 2px");
+    CHECK(invalid_vertical_first.green(0, 0));
+    CHECK(invalid_vertical_first.green(15, 11));
+
+    const Frame repeat_x = render("4px 6px", "repeat-x", "0 0");
+    CHECK(repeat_x.red(1, 2));
+    CHECK(repeat_x.red(5, 2));
+    CHECK(repeat_x.green(1, 8));
+    const Frame repeat_y = render("4px 6px", "repeat-y", "0 0");
+    CHECK(repeat_y.red(1, 2));
+    CHECK(repeat_y.green(5, 2));
+    CHECK(repeat_y.red(1, 8));
 }

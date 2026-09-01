@@ -410,6 +410,19 @@ std::optional<float> eval_calc_position(const std::string& token,
 // so the reader records the unit rather than the caller guessing from it.
 enum class StopUnit { none, fraction, pixels };
 
+// A repeating-linear band and a non-repeating px-stop list both need to know
+// whether every authored stop uses one coordinate system. An omitted FIRST
+// stop resolves to zero in either system; an omitted later stop was distributed
+// over the full gradient by parse_stops and must not be silently reinterpreted.
+bool stops_all_in(const std::vector<StopUnit>& units, StopUnit want) {
+    if (units.empty() || want == StopUnit::none) return false;
+    for (std::size_t i = 0; i < units.size(); ++i) {
+        if (i == 0 && units[i] == StopUnit::none) continue;
+        if (units[i] != want) return false;
+    }
+    return true;
+}
+
 // A stop position resolved to the gradient's own 0..1 parameter, or nullopt
 // when the token is not a position at all.
 //
@@ -832,22 +845,13 @@ bool parse_one_gradient(const std::string& gradient,
             // "Every stop was written in `want`", with the one exception
             // above: an unpositioned FIRST stop resolves to 0, which is where
             // CSS puts it anyway and which reads the same in either unit.
-            const auto stops_all_in = [&](StopUnit want) {
-                if (units.empty() || want == StopUnit::none) return false;
-                for (std::size_t i = 0; i < units.size(); ++i) {
-                    if (i == 0 && units[i] == StopUnit::none) continue;
-                    if (units[i] != want) return false;
-                }
-                return true;
-            };
-
             float repeat_span = 0.0f;
             auto repeat_unit = View::BackgroundGradient::RepeatUnit::px;
             bool positions_in_px = false;
             if (linear_repeats) {
                 const StopUnit band_unit =
                     units.empty() ? StopUnit::none : units.back();
-                const bool uniform = stops_all_in(band_unit);
+                const bool uniform = stops_all_in(units, band_unit);
                 const float band =
                     *std::max_element(positions.begin(), positions.end());
                 if (uniform && band > 0.0f) {
@@ -874,7 +878,7 @@ bool parse_one_gradient(const std::string& gradient,
                 // Left as parameters, `1px` means 1.0, which is the END of the
                 // ramp: `linear-gradient(<colour> 1px, transparent 1px)` puts
                 // both stops there and floods the box with the first colour.
-                positions_in_px = stops_all_in(StopUnit::pixels);
+                positions_in_px = stops_all_in(units, StopUnit::pixels);
             }
             out = {}; out.type = 1;
             out.x0 = x0; out.y0 = y0; out.x1 = x1; out.y1 = y1;
@@ -966,6 +970,7 @@ bool parse_one_gradient(const std::string& gradient,
 
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
+        std::vector<StopUnit> units;
         // A radial stop position measures along the gradient's horizontal
         // radius, so a calc() `px` term needs that radius — which needs the
         // box, and is refused rather than guessed when there is none.
@@ -975,11 +980,15 @@ bool parse_one_gradient(const std::string& gradient,
                       View::resolve_radial(geom, box.width, box.height).rx)
                 : std::nullopt;
         if (!parse_stops(inner.substr(color_start), color_of, colors, positions,
-                         /*angular=*/false, radius_px))
+                         /*angular=*/false, radius_px, &units))
             return false;
         if (!colors.empty()) {
             out = std::move(geom);
             out.type = 2;
+            // As with a linear tile, a raw pixel length can only be divided by
+            // the actual painted tile's radius. Keep it raw until the native
+            // painter has that radius instead of treating `1px` as 100%.
+            out.positions_in_px = stops_all_in(units, StopUnit::pixels);
             out.colors = std::move(colors); out.positions = std::move(positions);
             return true;
         }
@@ -1087,7 +1096,10 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
     // rest. A stack missing a layer is a wrong render that looks like a right
     // one — the same reason an unevaluable calc() refuses its gradient.
     std::vector<View::BackgroundGradient> layers;
-    for (const auto& layer_css : split_background_layers(css)) {
+    const auto image_layers = split_background_layers(css);
+    for (std::size_t image_layer_index = 0; image_layer_index < image_layers.size();
+         ++image_layer_index) {
+        const auto& layer_css = image_layers[image_layer_index];
         // `none` is a LAYER, not a parse failure: it is the initial value of
         // background-image, and Chrome's computed style spells a shorthand that
         // set only a colour as a trailing `, none`. Refusing it dropped the
@@ -1113,6 +1125,10 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
                 "did not parse: {} (whole value: {})", layer_css, css);
             return false;
         }
+        // `layers` only contains painted gradients, so its vector index is
+        // not necessarily the CSS background-image index: `none, gradient`
+        // must use the second size/repeat/position value.
+        layer.css_image_layer_index = image_layer_index;
         layers.push_back(std::move(layer));
     }
     if (layers.empty()) return false;
