@@ -35,10 +35,10 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "ON"
+        "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 69,
+        "installed_target_count": 70,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
