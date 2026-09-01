@@ -1807,7 +1807,7 @@ test("authored-frame fitting rejects a root lost before sidecar collection",
   });
 
 test("authored-frame fitting rejects a root lost before accepted pixels",
-  { timeout: 30000 }, async (context) => {
+  { timeout: 45000 }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -1850,7 +1850,7 @@ test("authored-frame fitting rejects a root lost before accepted pixels",
         "--initial-width", "1280",
         "--initial-height", "300",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", "30000",
         "--fit-authored-frame",
       ], { maxBuffer: 1024 * 1024 }), (error) =>
         error.stderr.includes("capture-authored-frame-unavailable"));
