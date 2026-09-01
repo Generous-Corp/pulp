@@ -338,6 +338,18 @@ stale while looking entirely plausible. Observed live: it read base 28/45 while
 answering the wrong question, so the sequence when resolving a conflict is:
 resolve → commit the merge → refresh fingerprints → re-derive → `--write`.
 
+**Take the base's side of a `contract-history.json` conflict.** Merging a base
+that landed its own transaction conflicts here as a both-append: your side holds
+the entry your `--write` appended, the base holds every entry up to its own tip,
+and the two are not reconcilable line by line. `git checkout --theirs` is right,
+and it does not discard your transaction — `updated_history_entries()` appends
+the entry describing the **previous** manifest, so history never carries your
+branch's own state to begin with. That state lives in
+`docs/status/agent-capabilities.json`, which the re-derive regenerates
+afterwards. Hand-merging the two runs instead produces a history whose tail is
+not the protected base's entry, which is exactly what the append-only check
+rejects.
+
 Regenerate exactly once from final header bytes. Each `--write` appends a full
 entry to `contract-history.json`, so editing the header again after a
 successful `--write` leaves two entries for one logical change.
