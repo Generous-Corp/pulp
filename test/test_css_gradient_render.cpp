@@ -14,7 +14,10 @@
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/view.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <cmath>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -23,6 +26,36 @@ using namespace pulp::view;
 namespace {
 
 constexpr int kSize = 160;
+
+// The tiled-layer declarations are resolved by View::paint_all(), under its
+// ScopedNoAlloc contract. Keep the probe's canvas deliberately inert so this
+// test isolates parsing/resolution from Skia's capture-only allocations.
+class NoOpCanvas final : public pulp::canvas::Canvas {
+public:
+    void save() override {}
+    void restore() override {}
+    void translate(float, float) override {}
+    void scale(float, float) override {}
+    void rotate(float) override {}
+    void clip_rect(float, float, float, float) override {}
+    void set_fill_color(pulp::canvas::Color) override {}
+    void set_stroke_color(pulp::canvas::Color) override {}
+    void set_line_width(float) override {}
+    void set_line_cap(pulp::canvas::LineCap) override {}
+    void set_line_join(pulp::canvas::LineJoin) override {}
+    void fill_rect(float, float, float, float) override {}
+    void stroke_rect(float, float, float, float) override {}
+    void fill_rounded_rect(float, float, float, float, float) override {}
+    void stroke_rounded_rect(float, float, float, float, float) override {}
+    void fill_circle(float, float, float) override {}
+    void stroke_circle(float, float, float) override {}
+    void stroke_arc(float, float, float, float, float) override {}
+    void stroke_line(float, float, float, float) override {}
+    void set_font(const std::string&, float) override {}
+    void set_text_align(pulp::canvas::TextAlign) override {}
+    void fill_text(const std::string&, float, float) override {}
+    float measure_text(const std::string&) override { return 0.0f; }
+};
 
 // Renders a background gradient over a fixed box. The box is square so a conic
 // sweep is radially symmetric and a missing wedge shows up as a flat region
@@ -61,14 +94,46 @@ void require_same_render(const std::string& a, const std::string& b) {
 // rather than stretched.
 std::vector<uint8_t> render_css_tiled(const std::string& css,
                                       const std::string& size,
-                                      const std::string& repeat = "repeat") {
+                                      const std::string& repeat = "repeat",
+                                      const std::string& position = "") {
     View v;
     v.set_bounds({0.0f, 0.0f, static_cast<float>(kSize), static_cast<float>(kSize)});
     v.set_background_color({20, 20, 20, 255});
     v.set_background_size(size);
     v.set_background_repeat(repeat);
+    v.set_background_position(position);
     REQUIRE(apply_css_background_gradient(v, css));
     return render_to_png(v, kSize, kSize, 1.0f, ScreenshotBackend::skia);
+}
+
+// The imported node stays fractional for layout and hit testing, but its own
+// fill/border paint receives the browser-compatible snapped rect. Rendering it
+// as a child of an integer panel mirrors native browser lowering exactly.
+std::vector<uint8_t> render_box_paint_scene(float device_scale,
+                                            float top, float height,
+                                            bool snapped,
+                                            float snapped_top = 0.0f,
+                                            float snapped_bottom = 0.0f) {
+    constexpr int kSceneW = 120;
+    constexpr int kSceneH = 140;
+    View root;
+    root.set_bounds({0.0f, 0.0f, static_cast<float>(kSceneW),
+                     static_cast<float>(kSceneH)});
+    root.set_background_color(Color::rgba8(20, 25, 30, 255));
+    auto child = std::make_unique<View>();
+    child->set_bounds({10.0f, top, 40.0f, height});
+    child->set_background_color(Color::rgba8(0, 255, 0, 255));
+    child->set_border(Color::rgba8(255, 0, 0, 255), 1.0f);
+    // Native lowering sets overflow from the captured style. Keep it enabled
+    // here so a snapped far edge proves it is not clipped back to the stale
+    // fractional self bounds before child clipping is installed.
+    child->set_overflow(View::Overflow::hidden);
+    if (snapped)
+        child->set_captured_box_paint_rect(10.0f, snapped_top, 50.0f,
+                                           snapped_bottom, device_scale);
+    root.add_child(std::move(child));
+    return render_to_png(root, kSceneW, kSceneH, device_scale,
+                         ScreenshotBackend::skia);
 }
 
 // The pixel half of `require_same_render`, for cases whose two sides are not
@@ -105,6 +170,94 @@ std::string eight_explicit_bands() {
 }
 
 }  // namespace
+
+TEST_CASE("captured box paint rect snaps fractional fill and border edges",
+          "[view][gradient][raster-snap]") {
+    // Independent Chromium control, captured at DPR 2: page y=32.25 paints at
+    // device row 64, y=52.5 at 106, and y=72.75 at 146. Its contract is
+    // round(page_css_edge) * DPR. Every fractional scene below must match an
+    // otherwise identical integer scene byte-for-byte, proving both fill and
+    // the uniform 1px border use the captured rect. The final DPR1 control
+    // prevents baking a DPR2-only rule into the painter.
+    const auto require_same_scene = [](const std::vector<uint8_t>& actual,
+                                       const std::vector<uint8_t>& reference) {
+        REQUIRE(!reference.empty());
+        REQUIRE(actual.size() == reference.size());
+        CHECK(actual == reference);
+    };
+
+    // Integer control: the metadata is an identity transform.
+    require_same_scene(render_box_paint_scene(2.0f, 12.0f, 8.0f, true, 12.0f, 20.0f),
+                       render_box_paint_scene(2.0f, 12.0f, 8.0f, false));
+
+    // Fractional origin, independent .25/.5/.75 CSS phases.
+    require_same_scene(render_box_paint_scene(2.0f, 32.25f, 8.0f, true, 32.0f, 40.0f),
+                       render_box_paint_scene(2.0f, 32.0f, 8.0f, false));
+    require_same_scene(render_box_paint_scene(2.0f, 52.5f, 8.0f, true, 53.0f, 61.0f),
+                       render_box_paint_scene(2.0f, 53.0f, 8.0f, false));
+    require_same_scene(render_box_paint_scene(2.0f, 72.75f, 8.0f, true, 73.0f, 81.0f),
+                       render_box_paint_scene(2.0f, 73.0f, 8.0f, false));
+
+    // Integer origin but fractional far edge: this is the distinct failure
+    // class in Dilla's root/footer/cell boxes. The top is unchanged at 90;
+    // only the bottom extends to the browser's 101px edge.
+    require_same_scene(render_box_paint_scene(2.0f, 90.0f, 10.5f, true, 90.0f, 101.0f),
+                       render_box_paint_scene(2.0f, 90.0f, 11.0f, false));
+
+    // DPR 1 stays the same CSS-edge rule, not round(edge * a hard-coded 2).
+    require_same_scene(render_box_paint_scene(1.0f, 52.5f, 8.0f, true, 53.0f, 61.0f),
+                       render_box_paint_scene(1.0f, 53.0f, 8.0f, false));
+
+    // An imported ancestor clip uses a temporary canvas scope for self ink.
+    // The captured paint rect defers overflow until after the expanded border;
+    // that subtree clip must be installed only AFTER the first ancestor restore
+    // or its red absolutely-positioned descendant can escape overflow:hidden.
+    View clipped;
+    clipped.set_bounds({0.0f, 0.0f, 40.0f, 8.0f});
+    clipped.set_background_color(Color::rgba8(0, 255, 0, 255));
+    clipped.set_border(Color::rgba8(255, 0, 0, 255), 1.0f);
+    clipped.set_overflow(View::Overflow::hidden);
+    clipped.set_ancestor_clip_rect({1.0f, 1.0f, 38.0f, 6.0f});
+    clipped.set_captured_box_paint_rect(0.0f, 0.0f, 40.0f, 8.0f, 1.0f);
+    auto escaping_child = std::make_unique<View>();
+    escaping_child->set_bounds({0.0f, 20.0f, 40.0f, 8.0f});
+    escaping_child->set_position(View::Position::absolute);
+    escaping_child->set_background_color(Color::rgba8(255, 0, 255, 255));
+    clipped.add_child(std::move(escaping_child));
+    pulp::canvas::RecordingCanvas recording;
+    clipped.paint_all(recording);
+    int first_ancestor_clip = -1;
+    int ancestor_save_depth = -1;
+    int ancestor_restore = -1;
+    int overflow_clip = -1;
+    int save_depth = 0;
+    for (int i = 0; i < static_cast<int>(recording.commands().size()); ++i) {
+        const auto& command = recording.commands()[i];
+        if (command.type == pulp::canvas::DrawCommand::Type::save)
+            ++save_depth;
+        if (command.type == pulp::canvas::DrawCommand::Type::clip_rect) {
+            if (first_ancestor_clip < 0 && command.f[0] == 1.0f && command.f[1] == 1.0f &&
+                command.f[2] == 38.0f && command.f[3] == 6.0f) {
+                first_ancestor_clip = i;
+                ancestor_save_depth = save_depth;
+            }
+            if (command.f[0] == 0.0f && command.f[1] == 0.0f &&
+                command.f[2] == 40.0f && command.f[3] == 8.0f)
+                overflow_clip = i;
+        }
+        if (command.type == pulp::canvas::DrawCommand::Type::restore) {
+            if (first_ancestor_clip >= 0 && ancestor_restore < 0 &&
+                save_depth == ancestor_save_depth)
+                ancestor_restore = i;
+            --save_depth;
+        }
+    }
+    REQUIRE(first_ancestor_clip >= 0);
+    REQUIRE(ancestor_restore >= 0);
+    REQUIRE(overflow_clip >= 0);
+    CHECK(overflow_clip > ancestor_restore);
+
+}
 
 // A sweep covers the whole circle. Skia clamps angles outside the shader's
 // [start, end] window instead of wrapping, so passing the CSS rotation as the
@@ -601,6 +754,123 @@ TEST_CASE("a one-pixel stop over a sized tile is a scanline per tile",
     const auto untiled = render_css(scanline);
     const auto cmp = compare_screenshots(tiled, untiled);
     INFO("tiled vs untiled similarity " << cmp.similarity);
+    CHECK(cmp.similarity < 0.999f);
+}
+
+// Background subproperties are CSS lists aligned by image-layer index. The
+// captured Dilla grid and footer checkerboard both carry the explicit
+// two-value form; treating it as one whitespace list silently disables tiling.
+TEST_CASE("comma-separated background sizes preserve Dilla grid layers",
+          "[view][gradient][linear][background-layers]") {
+    const std::string grid =
+        "linear-gradient(90deg, #ffffff 0px, #ffffff 1px, #141414 1px, #141414 8px), "
+        "linear-gradient(#ffffff 0px, #ffffff 1px, #141414 1px, #141414 8px)";
+    require_same_pixels(
+        render_css_tiled(grid, "8px 8px, 8px 8px", "repeat, repeat"),
+        render_css_tiled(grid, "8px 8px", "repeat"));
+}
+
+TEST_CASE("Dilla footer checkerboard keeps its per-layer tile position",
+          "[view][gradient][linear][background-layers]") {
+    const std::string checkerboard =
+        "linear-gradient(45deg, rgba(255, 255, 255, 0.5) 25%, "
+        "rgba(0, 0, 0, 0.5) 25%, rgba(0, 0, 0, 0.5) 75%, "
+        "rgba(255, 255, 255, 0.5) 75%), "
+        "linear-gradient(45deg, rgba(255, 255, 255, 0.5) 25%, "
+        "rgba(0, 0, 0, 0.5) 25%, rgba(0, 0, 0, 0.5) 75%, "
+        "rgba(255, 255, 255, 0.5) 75%)";
+    const auto offset = render_css_tiled(
+        checkerboard, "8px 8px, 8px 8px", "repeat, repeat",
+        "0 0, 2px 2px");
+    const auto aligned = render_css_tiled(
+        checkerboard, "8px 8px, 8px 8px", "repeat, repeat",
+        "0 0, 0 0");
+    REQUIRE(analyze_screenshot_content(offset).luminance_stddev > 1.0);
+    // The exact captured footer offsets its second checkerboard layer by 2px.
+    // A storage-only `background-position` makes these renders identical.
+    const auto cmp = compare_screenshots(offset, aligned);
+    INFO("offset checkerboard vs aligned similarity " << cmp.similarity);
+    CHECK(cmp.similarity < 0.999f);
+}
+
+TEST_CASE("background list values stay paired with their image layer",
+          "[view][gradient][linear][background-layers]") {
+    // The first image is topmost. Its `repeat-x`/8px-wide tile must remain
+    // paired with it while the painter walks the stack in reverse to draw the
+    // second, horizontal-stripe image first.
+    const std::string sized_layers =
+        "linear-gradient(to right, #ff0000 0px, #ff0000 1px, "
+        "rgba(0, 0, 0, 0) 1px, rgba(0, 0, 0, 0) 8px), "
+        "linear-gradient(#0000ff 0px, #0000ff 1px, "
+        "rgba(0, 0, 0, 0) 1px, rgba(0, 0, 0, 0) 8px)";
+    const std::string repeated_layers =
+        "repeating-linear-gradient(to right, #ff0000 0px, #ff0000 1px, "
+        "rgba(0, 0, 0, 0) 1px, rgba(0, 0, 0, 0) 8px), "
+        "repeating-linear-gradient(#0000ff 0px, #0000ff 1px, "
+        "rgba(0, 0, 0, 0) 1px, rgba(0, 0, 0, 0) 8px)";
+    require_same_pixels(
+        render_css_tiled(sized_layers, "8px 100%, 100% 8px",
+                         "repeat-x, repeat-y"),
+        render_css(repeated_layers));
+}
+
+TEST_CASE("a non-painting background image still consumes its CSS list slot",
+          "[view][gradient][linear][background-layers]") {
+    // The parser drops `none` from its drawable gradient vector, but CSS
+    // aligns size/repeat/position lists to the original background-image list.
+    // Reverse the two values so using the compact vector index produces a
+    // visibly horizontal, unshifted pattern rather than this vertical one.
+    const std::string stripe =
+        "linear-gradient(to right, #ff0000 0px, #ff0000 1px, "
+        "rgba(0, 0, 0, 0) 1px, rgba(0, 0, 0, 0) 8px)";
+    require_same_pixels(
+        render_css_tiled("none, " + stripe,
+                         "100% 8px, 8px 100%",
+                         "repeat-y, repeat-x",
+                         "0 3px, 2px 0"),
+        render_css_tiled(stripe, "8px 100%", "repeat-x", "2px 0"));
+}
+
+TEST_CASE("tiled background layer resolution does not allocate while painting",
+          "[view][gradient][background-layers][rt-safety]") {
+    View v;
+    v.set_bounds({0.0f, 0.0f, static_cast<float>(kSize), static_cast<float>(kSize)});
+    v.set_background_color({20, 20, 20, 255});
+    v.set_background_size("8px 8px, 8px 8px");
+    v.set_background_repeat("repeat, repeat");
+    v.set_background_position("0 0, 2px 2px");
+    REQUIRE(apply_css_background_gradient(
+        v,
+        "linear-gradient(to right, #fff 0px, #fff 1px, transparent 1px, transparent 8px), "
+        "radial-gradient(circle, #fff 0px, #fff 1px, transparent 1px, transparent 8px)"));
+
+    NoOpCanvas canvas;
+    v.paint_all(canvas);  // Warm any non-steady View state before probing.
+    pulp::test::RtAllocationProbe probe;
+    for (int i = 0; i < 32; ++i) v.paint_all(canvas);
+    CHECK_FALSE(probe.saw_allocation());
+}
+
+TEST_CASE("a one-pixel radial stop over a tile is a dot rather than a solid",
+          "[view][gradient][radial]") {
+    const std::string px_dot =
+        "radial-gradient(circle, #ffffff 0px, #ffffff 1px, #141414 1px, #141414 8px)";
+    // `circle` defaults to farthest-corner. On an 8px square tile that radius
+    // is sqrt(2) * 4px, so one CSS pixel is 17.677669% of its horizontal
+    // radius. This independent form proves raw pixels were normalized against
+    // the tile radius at paint.
+    require_same_pixels(
+        render_css_tiled(px_dot, "8px 8px"),
+        render_css_tiled(
+            "radial-gradient(circle, #ffffff 0%, #ffffff 17.677669%, "
+            "#141414 17.677669%, #141414 100%)",
+            "8px 8px"));
+    const auto solid = render_css_tiled(
+        "radial-gradient(circle, #ffffff 0%, #ffffff 100%, #141414 100%)",
+        "8px 8px");
+    const auto cmp = compare_screenshots(
+        render_css_tiled(px_dot, "8px 8px"), solid);
+    INFO("radial px dot vs solid similarity " << cmp.similarity);
     CHECK(cmp.similarity < 0.999f);
 }
 

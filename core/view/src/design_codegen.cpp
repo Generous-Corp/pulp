@@ -577,6 +577,10 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                        << "', "
                        << finite_numeric_attribute(node, "knob_ind_phase_rad", 0.0)
                        << ", " << (indicator.authored ? "true" : "false")
+                       << ", '" << js_single_quote_escape(
+                              select_indicator_color(node, "knob_ind_outline_color").color)
+                       << "', "
+                       << finite_numeric_attribute(node, "knob_ind_outline_w", 0.0)
                        << ");\n";
                 }
             }
@@ -703,6 +707,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // an empty panel and was reported as a layout bug three separate times, on
     // three different panels, before the size was found missing here.
     emit_str("backgroundSize", s.background_size);
+    emit_str("backgroundPosition", s.background_position);
     emit_str("color", s.color);
     emit_float("opacity", s.opacity);
     emit_str("mixBlendMode", s.mix_blend_mode);
@@ -1626,6 +1631,10 @@ static void emit_js_audio_widget(const NativeEmit& e) {
                << "', "
                << finite_numeric_attribute(node, "knob_ind_phase_rad", 0.0)
                << ", " << (indicator.authored ? "true" : "false")
+               << ", '" << js_single_quote_escape(
+                      select_indicator_color(node, "knob_ind_outline_color").color)
+               << "', "
+               << finite_numeric_attribute(node, "knob_ind_outline_w", 0.0)
                << ");\n";
         }
         emit_style(id);

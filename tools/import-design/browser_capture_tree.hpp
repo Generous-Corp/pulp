@@ -165,6 +165,7 @@ struct PaintedTreeCounts {
 PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                      double dx,
                                      double dy,
+                                     double device_scale,
                                      pulp::view::IRNode& root,
                                      const std::unordered_map<int, std::string>&
                                          captured_element_assets = {},

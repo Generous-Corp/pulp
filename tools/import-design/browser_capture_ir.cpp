@@ -893,6 +893,17 @@ int lower_semantic_controls(const fs::path& path,
                             string_member(candidate, "indicator_color");
                         !color.empty())
                         control.attributes["knob_ind_color"] = css_color_to_hex(color);
+                    const auto border = object_member(candidate, "indicator_border");
+                    if (border.isObject()) {
+                        const auto color = string_member(border, "color");
+                        const auto width = number_member(border, "width", 0.0);
+                        if (!color.empty() && std::isfinite(width) && width > 0.0) {
+                            control.attributes["knob_ind_outline_color"] =
+                                css_color_to_hex(color);
+                            control.attributes["knob_ind_outline_w"] =
+                                std::to_string(width);
+                        }
+                    }
                     control.attributes["browser_sprite_crop_px"] =
                         device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
                     // The PAINTED footprint, deliberately: this pass crops the
@@ -1823,7 +1834,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // belongs to rather than under it.
     if (native_lowering) {
         const auto tree = lower_painted_tree(
-            *captured_styles, control_dx, control_dy, ir.root,
+            *captured_styles, control_dx, control_dy, dpr, ir.root,
             captured_element_assets,
             // A captured canvas can interleave with pseudo-elements and DOM
             // ancestors in Chromium's paint list. Preserve hierarchy for
