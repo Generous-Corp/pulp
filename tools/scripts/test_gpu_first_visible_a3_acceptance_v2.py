@@ -396,6 +396,29 @@ raise SystemExit(2)
     return receipt
 
 
+def expect_campaign_identity_schema_parity(receipt: dict[str, Any]) -> None:
+    schema = json.loads(v2.SCHEMA_PATH.read_text())
+    identity_schema = schema["$defs"]["campaign"]["properties"]["identity"]
+    validator_common_fields = {
+        *v2.DERIVED_CAMPAIGN_IDENTITY_FIELDS,
+        *v2.BUILD_AUTHORITY_FIELDS,
+        "expected_signatures",
+    }
+    assert set(identity_schema["required"]) == validator_common_fields
+    assert not validator_common_fields.intersection(
+        {*v2.VISIBLE_POLICY_IDENTITY_FIELDS, "adapter_predicate"}
+    )
+    expanded = v2.expand_local_schema_refs(schema, schema)
+    for field in (
+        "adapter_configuration", "interaction_lifecycle", "steady_state_workload",
+    ):
+        omitted = copy.deepcopy(receipt)
+        omitted["campaigns"][1]["identity"].pop(field)
+        problems = v2.json_schema_lite.validate(omitted, expanded)
+        assert problems, f"public schema accepted campaign identity without {field}"
+        assert any(field in problem for problem in problems), problems
+
+
 def expect_rejected(label: str, mutate: Callable[[dict[str, Any], Path], None]) -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -814,6 +837,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         receipt = make_fixture(root)
+        expect_campaign_identity_schema_parity(receipt)
         with mock.patch.object(v2, "live_protected_main_errors", return_value=[]), mock.patch.object(
             v2.trace_producer_overhead, "validate_receipt", return_value=None
         ):

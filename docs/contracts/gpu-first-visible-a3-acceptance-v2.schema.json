@@ -202,6 +202,7 @@
             "application_kind", "application_sha256", "plugin_format",
             "plugin_sha256", "provider_sha256", "build_sha256",
             "signature_sha256", "expected_signatures", "content_sha256", "adapter",
+            "adapter_configuration", "interaction_lifecycle", "steady_state_workload",
             "display_id", "refresh_hz"
           ],
           "additionalProperties": false,
