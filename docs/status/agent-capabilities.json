@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 45,
+  "manifest_revision": 46,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -291,7 +291,7 @@
     {
       "key": "audio.voice-modulation-sources",
       "domain": "audio",
-      "summary": "Prepared fixed-memory bank of per-voice LFO and AHDSR envelope sources with free-running or retriggered phase policy and per-voice unison phase spread, feeding constant or audio-rate voice modulation lanes.",
+      "summary": "Prepared fixed-memory bank of per-voice LFO and AHDSR envelope sources with free-running or retriggered phase policy and per-voice unison phase spread, feeding constant or audio-rate voice modulation lanes. LFO rate and depth are live automation destinations, retunable from the audio thread without restarting phase.",
       "rt_class": "audio",
       "lifecycle": {
         "construction": "none",
