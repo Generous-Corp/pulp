@@ -123,6 +123,18 @@ A **different** dead module, or a different requirement, is progress and must
 never be called a repeat: escalating on a run that is improving tells the model
 to throw away a fix that worked.
 
+### A live module can still feed the one output that stays silent
+
+Do not send another model call when the full Rack gate proves that a patch's
+listener path is silent but the source module has a measured-live sibling
+output. `deterministic_repair.py` may audition that sibling only when its exact
+semantic role set matches the silent output, and it may change only cables on
+the listener path. Activity is not acceptance: rerun the full DSP/audibility
+gate and keep the repair only when the patch becomes measured audible. If no
+same-role sibling qualifies, or the replacement remains silent, preserve the
+original patch and its honest failure. This is a general output-selection
+repair, never a module-identity exception.
+
 `render_inventory` has the same honesty rule: a module with no recorded jacks
 prints `ports: UNKNOWN`, and inputs and outputs are independent. It used to
 emit both only `if m.get("inputs")`, so an uncartographed module and one with
