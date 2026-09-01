@@ -144,6 +144,14 @@ For an existing capability change:
 - Keep numeric parameter ranges/defaults/choices in `forge-catalog.json`; use a
   `forge_descriptor` reference instead of copying them.
 
+For realtime capability implementations, do not treat a short-range
+`std::stable_sort` as allocation-free merely because the macOS/libc++ probe is
+green. libstdc++ may allocate scratch space for every non-empty range while
+libc++ keeps small trivially-copyable ranges in place. Prefer a bounded
+in-place stable ordering algorithm when the capability already declares a
+fixed maximum, and size the allocation negative control beyond libc++'s short
+in-place threshold so either standard library can expose a regression.
+
 For removal:
 
 1. First publish the live capability as `status: deprecated` with a matching
