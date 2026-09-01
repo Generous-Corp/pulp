@@ -15,11 +15,74 @@
       }
     ]
   },
+  "LomasModules/AdvancedSampler": {
+    "plugin_version": "2.0.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "plays back a .wav file the person loads into the module through its own on-panel browser, and the installed pack carries no audio of its own, so a freshly generated instance has no sample to trigger and its output stays at zero. Choose a module that synthesises its own signal"
+    }
+  },
   "PathSet-Infinity/WarpDrive": {
     "plugin_version": "2.1.0",
     "fresh_generation": {
       "status": "unsupported",
       "reason": "requires opaque persisted coil, LFO, and envelope sequences, and no exact admitted authoring compiler exists"
+    }
+  },
+  "SickoCV/DrumPlayer": {
+    "plugin_version": "2.7.10",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "each of its four drum slots plays one .wav file the person loads through the module's own on-panel browser, and the installed pack ships only metronome click audio, so a freshly generated instance has no sample in any slot and triggers produce silence. Choose a synthesised drum module instead"
+    }
+  },
+  "SickoCV/DrumPlayerMini": {
+    "plugin_version": "2.7.10",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "plays one .wav file the person loads through the module's own on-panel browser, and the installed pack ships only metronome click audio, so a freshly generated instance has no sample loaded and triggers produce silence. Choose a synthesised drum module instead"
+    }
+  },
+  "SickoCV/DrumPlayerMk2": {
+    "plugin_version": "2.7.10",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "each of its four drum slots plays one .wav file the person loads through the module's own on-panel browser, and the installed pack ships only metronome click audio, so a freshly generated instance has no sample in any slot and triggers produce silence. Choose a synthesised drum module instead"
+    }
+  },
+  "SickoCV/DrumPlayerPlus": {
+    "plugin_version": "2.7.10",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "each of its four drum slots plays one .wav file the person loads through the module's own on-panel browser, and the installed pack ships only metronome click audio, so a freshly generated instance has no sample in any slot and triggers produce silence. Choose a synthesised drum module instead"
+    }
+  },
+  "SickoCV/DrumPlayerXtra": {
+    "plugin_version": "2.7.10",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "each of its four drum slots plays one .wav file the person loads through the module's own on-panel browser, and the installed pack ships only metronome click audio, so a freshly generated instance has no sample in any slot and triggers produce silence. Choose a synthesised drum module instead"
+    }
+  },
+  "SickoCV/KeySampler": {
+    "plugin_version": "2.7.10",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "maps keyboard pitches onto .wav files the person loads through the module's own on-panel browser, and the installed pack ships only metronome click audio, so a freshly generated instance has nothing mapped and produces silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "SickoCV/SickoPlayer": {
+    "plugin_version": "2.7.10",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "plays back a .wav file the person loads through the module's own on-panel browser, and the installed pack ships only metronome click audio, so a freshly generated instance has no sample loaded and produces silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "SickoCV/Wavetabler": {
+    "plugin_version": "2.7.10",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "scans a wavetable read from a .wav file the person loads through the module's own on-panel browser, and the installed pack ships only metronome click audio, so a freshly generated instance has no table to scan and produces silence. Choose an oscillator with built-in waveforms"
     }
   },
   "TwinSlide/TwinSlide": {
@@ -56,5 +119,159 @@
       {"field": "peak_abs_v", "min_absolute_difference": 0.1}
     ],
     "data_defaults": {}
+  },
+  "VCV-Host/Host": {
+    "plugin_version": "2.0.4",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "produces sound only by running a third-party plugin the person selects in the module's own plugin browser, and its saved state records only the name of that plugin file, which is resolved against the plugin folders of whichever machine later opens the patch; a generated patch cannot name a plugin it can know is installed there, so the module comes up reading \"(No plugin)\" with nothing to run. Choose a module that synthesises its own signal"
+    }
+  },
+  "VCV-Host/Host-CC": {
+    "plugin_version": "2.0.4",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "an expander that turns CV into MIDI CC for whatever plugin the adjacent Host module is running; with no hosted plugin there is nothing to control, and Host itself cannot be freshly generated for the same reason. Choose a module that synthesises its own signal"
+    }
+  },
+  "VCV-Host/Host-CV": {
+    "plugin_version": "2.0.4",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "an expander that exposes the parameters of whatever plugin the adjacent Host module is running; with no hosted plugin there are no parameters to expose, and Host itself cannot be freshly generated for the same reason. Choose a module that synthesises its own signal"
+    }
+  },
+  "VCV-Host/Host-FX": {
+    "plugin_version": "2.0.4",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "applies an effect only by running a third-party plugin the person selects in the module's own plugin browser, and its saved state records only the name of that plugin file, which is resolved against the plugin folders of whichever machine later opens the patch; a generated patch cannot name a plugin it can know is installed there, so the module comes up reading \"(No plugin)\" and the effect the patch was built around is simply absent. Choose a built-in effect module"
+    }
+  },
+  "VCV-Host/Host-Gate": {
+    "plugin_version": "2.0.4",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "an expander that turns gates into MIDI notes for whatever plugin the adjacent Host module is running; with no hosted plugin there is nothing to play, and Host itself cannot be freshly generated for the same reason. Choose a module that synthesises its own signal"
+    }
+  },
+  "VCV-Host/Host-XL": {
+    "plugin_version": "2.0.4",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "produces sound only by running a third-party plugin the person selects in the module's own plugin browser, and its saved state records only the name of that plugin file, which is resolved against the plugin folders of whichever machine later opens the patch; a generated patch cannot name a plugin it can know is installed there, so the module comes up reading \"(No plugin)\" with nothing to run and its parameter cells addressing nothing. Choose a module that synthesises its own signal"
+    }
+  },
+  "dbRackFormulaOne/FormulaOne": {
+    "plugin_version": "2.0.2",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "evaluates an expression written in its own scripting language, which a person types into the module's editor; a fresh instance holds an empty expression and nothing compiled, and its process step writes to no output at all until an expression compiles, so it stays at zero however the patch is cabled. Choose a module that synthesises its own signal"
+    }
+  },
+  "dbRackFormulaOne/FormulaOneEdit": {
+    "plugin_version": "2.0.2",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "an editor expander whose only function is to let a person type an expression into the adjacent Formula One; it has no signal path of its own, and Formula One itself cannot be freshly generated for the same reason. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/AutobreakStudio": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "chops a breakbeat read from a .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has nothing to chop and produces silence. Choose a synthesised drum module instead"
+    }
+  },
+  "voxglitch/GrainEngineMK2": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "granulates a .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has nothing to granulate and produces silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/autobreak": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "chops a breakbeat read from a .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has nothing to chop and produces silence. Choose a synthesised drum module instead"
+    }
+  },
+  "voxglitch/cue_research": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "plays back and emits cue triggers from a .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has no sample and produces neither audio nor triggers. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/ghosts": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "scans looping grains through a .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has nothing to scan and produces silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/groovebox": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "sequences eight tracks of .wav files the person loads into its slots through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has no sample on any track and produces silence. Choose a synthesised drum module instead"
+    }
+  },
+  "voxglitch/looper": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "loops one .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has nothing loaded and produces silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/onepoint": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "reads its CV sequence from an external data file the person selects through the module's own browser rather than from steps a patch can author; with no file selected it emits no sequence. Choose a sequencer whose steps live in the patch"
+    }
+  },
+  "voxglitch/onezero": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "reads its gate sequence from an external data file the person selects through the module's own browser rather than from steps a patch can author; with no file selected it emits no gates. Choose a sequencer whose steps live in the patch"
+    }
+  },
+  "voxglitch/repeater": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "loops one .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has nothing loaded and produces silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/sampler16p": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "each of its sixteen playback slots holds a .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has no sample in any slot and triggers produce silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/samplerx8": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "each of its eight playback slots holds a .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has no sample in any slot and triggers produce silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/wavbank": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "plays and switches between the .wav files in a folder the person picks through the module's own directory browser, and the pack ships no audio for this module, so a freshly generated instance has no folder and produces silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/wavbankmc": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "plays and switches between the multi-channel .wav files in a folder the person picks through the module's own directory browser, and the pack ships no audio for this module, so a freshly generated instance has no folder and produces silence. Choose a module that synthesises its own signal"
+    }
   }
 }
