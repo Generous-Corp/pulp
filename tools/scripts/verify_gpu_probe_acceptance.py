@@ -140,11 +140,15 @@ EXPECTED_BINARIES_V2 = {
     "installed_cpp_delegate",
     "installed_mcp",
 }
+GPU_HEALTH_SCHEMA_SOURCE_PATHS = (
+    "docs/contracts/gpu-health-result-v1.schema.json",
+    "docs/contracts/gpu-health-result-v2.schema.json",
+)
 EXPECTED_SOURCE_BLOBS_V2 = EXPECTED_SOURCE_BLOBS | {
     "CMakeLists.txt",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
     "docs/contracts/gpu-probe-result-v1.schema.json",
-    "docs/contracts/gpu-health-result-v2.schema.json",
+    *GPU_HEALTH_SCHEMA_SOURCE_PATHS,
     "docs/status/gpu-recipes.schema.json",
     "docs/status/gpu-recipes.yaml",
     "docs/validation/gpu-probes/README.md",
