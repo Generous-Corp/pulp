@@ -2206,6 +2206,13 @@
             "preview_capsule",
             "admit_to_staging"
           ]
+        },
+        {
+          "path": "core/authoring_capsule/src/staging.cpp",
+          "needles": [
+            "#include <windows.h>",
+            "#include <sddl.h>"
+          ]
         }
       ],
       "surfaces": {

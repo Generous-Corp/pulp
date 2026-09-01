@@ -123,6 +123,18 @@ A **different** dead module, or a different requirement, is progress and must
 never be called a repeat: escalating on a run that is improving tells the model
 to throw away a fix that worked.
 
+### A live module can still feed the one output that stays silent
+
+Do not send another model call when the full Rack gate proves that a patch's
+listener path is silent but the source module has a measured-live sibling
+output. `deterministic_repair.py` may audition that sibling only when its exact
+semantic role set matches the silent output, and it may change only cables on
+the listener path. Activity is not acceptance: rerun the full DSP/audibility
+gate and keep the repair only when the patch becomes measured audible. If no
+same-role sibling qualifies, or the replacement remains silent, preserve the
+original patch and its honest failure. This is a general output-selection
+repair, never a module-identity exception.
+
 `render_inventory` has the same honesty rule: a module with no recorded jacks
 prints `ports: UNKNOWN`, and inputs and outputs are independent. It used to
 emit both only `if m.get("inputs")`, so an uncartographed module and one with
@@ -1432,6 +1444,21 @@ patches.
 - Over SSH the model CLI cannot reach its credential in the login keychain, so
   the CLI surface on a remote machine needs a window there or an unlocked
   keychain. That is a real blocker, not a flake.
+
+The signed app's qualification inputs use a deliberately non-duplicated helper
+layout: `FORGE_BUILD_INFO` and `build/rack_patch_decode` are under `Resources`,
+while the executing Python toolchain is `Resources/tools/rack`. Qualification
+may treat that decoder as the executing candidate only when the build-info file
+has its exact name and the paths resolve beneath a real
+`*.app/Contents/Resources` boundary. An installed or developer toolchain outside
+that exact bundle layout must still carry its own `rack_patch_decode`,
+identical to the candidate by the canonical content identity, so a missing
+helper cannot pass merely because some bundle was named. Decoder identity comes
+from the bundled
+`examples/forge-modular/binary_identity.py`, not a raw file digest: Developer
+ID signing replaces the Mach-O signature after the stamp is authored. Raw bytes
+may differ only in that excluded signature; executable-content drift must still
+fail qualification.
 
 ## The seam: the app's sources live here, the build happens in Forge
 

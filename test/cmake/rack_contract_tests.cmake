@@ -36,6 +36,23 @@ if(Python3_Interpreter_FOUND)
         LABELS "rack;contract"
         TIMEOUT 180)
 
+    # Replays retained model responses through the normal patch gates with
+    # provider resolution forbidden. This pins deterministic repairs as truly
+    # zero-provider behavior rather than prompt advice in disguise.
+    add_test(NAME rack-patch-replay
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_patch_replay.py)
+    set_tests_properties(rack-patch-replay PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 60)
+
+    add_test(NAME rack-deterministic-repair
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_deterministic_repair.py)
+    set_tests_properties(rack-deterministic-repair PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 60)
+
     # Does the plugin we build actually LOAD where Rack loads it? Registered
     # here rather than behind PULP_HAS_RACK because the defect it guards --
     # a macOS plugin linked without libRack -- shipped for a month with five

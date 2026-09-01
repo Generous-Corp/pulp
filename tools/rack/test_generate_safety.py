@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -294,6 +295,36 @@ class ToolchainHeaderClosureSafety(SdkIsolatedTestCase):
 
 
 class RackLaunchSafety(SdkIsolatedTestCase):
+    # Synthetic equivalents of the exact macOS copyfile(3) members found in
+    # M5 patch 1787949832935-001 (archive SHA-256
+    # 9b63d6a521b711376278dd73c0dd916ee7ac6ef2dcfcb8e67df0b8c15b478410).
+    # Keeping the fixture inline avoids committing the user's patch while
+    # retaining its otherwise invisible ._. / ._patch.json member layout.
+    APPLEDOUBLE_VALID = (
+        "KLUv/QRYBQcAgokgIiDFbA4UrT2/XuirQbgAbj0FBEjjwDDIUiQACJIAAI2jmQId"
+        "5aAWZKhOMl2U4BWBXEOCFZtsV0aBXPTHGaPzWMmqZCGWRgGqbXY+y0dozuj/m8Ue"
+        "tBYU03SwbYPtRdoe2F78GG+ReBZF2IsFhMAdQLW6+c/ykdBvO9H//3mg//dWGyIg"
+        "8AKxIJrkAYZLD9JCizAg5nlgZFV63Q3oDWPQAZhAWVXqgCSKTSAAA6/yB0BBCZCYT"
+        "DsyuKAc7CBwfsLyBAd0UTWIREPD5G62kU4B8U4NkDyGrSaOuUxPlwj+MJLq")
+    APPLEDOUBLE_BAD_MAGIC = (
+        "KLUv/QRYjQYAIkkfIDCvjgGgPgYYM/X/UEf13FMgVvVgizDMPwQhHhLC5UgB2wSx"
+        "FGymbTabjGA1gZojgteqZNVlgRr0y3q5LiVKKMxinFif5+VTK/T/TrQi9hYWkoSw7Y"
+        "NtN20PbDu/xmMoHmUTtrOAEADcGYvdzH+edD6/bYD+/5Q+/+/4iAEeAIQPerAYBMJA"
+        "YZ5lYGRAJdDdgHmMzhGwWG/yB8gUgACJMdNeMrggc7CCwHlBWIIJwIAvoAaQqKFhJ"
+        "fcgWwhQQLwhNQAkBxhAqwGOlcv0BIgbH5E9")
+    APPLEDOUBLE_RESOURCE_FORK = (
+        "KLUv/QRYXQYA8sgeHyDP5hSt/tWh3e9oYAaRDkbDyDAMaYJXRyiEgFYNYinf5aAYb"
+        "K5PNt9DwSwCPQYFqzbpso0CPTn9DzQrW5VECMZRixPnWv6Zc/p/J1rag9aCoqoOANs"
+        "G24y0PbDNeNfaRWIxirAZCwiB3xfK1e5rKJLS9P+PIun/HRsxHAB8D3owIMTEQA2eZ"
+        "WBjQNVAxgFzDBVHpwQGVA2QX7ggc7CCwHlBWIIJwIBjoMItx6JhJfdg2G6OAgAwCIE"
+        "3ZtpQGfwsBsCxcpmeABE6B8Il")
+    APPLEDOUBLE_WRONG_NAME = (
+        "KLUv/QRYrQYAYkkgIiDFbA4UrdFPb6q/RrAAbj0FBEjTi6HKJjhwRCGAZMWQSQHd"
+        "BKEUZKZumc6JYCWBnCOC1aJsFVaB3M7fkQBYncSL0mhAE+Xz3oGknP/fRCtCa2EhS"
+        "QjbPthe1vbA9uLXeAzFo2jCXiwgBO6ManXzn6Hd+duG+f9/Huj/nVmXhj1iHgCED3q"
+        "wGATCQGGeZWBjQFXQ8YB5tM5RsFhv8gfIFIAAiTHTXjK4IHOwgsB5QViCCcCALqAGk"
+        "aihYSV3INsIUEC8ITUAJAcYQKsBjpXL5AS4IBf6dA==")
+
     def _archive_runtime(self, directory: pathlib.Path) -> str:
         decoder = directory / "rack_patch_decode"
         completed = subprocess.run(
@@ -377,6 +408,34 @@ class RackLaunchSafety(SdkIsolatedTestCase):
                     self.assertEqual(2, modules)
                     self.assertEqual(
                         hashlib.sha256(payload).hexdigest(), digest)
+
+    @unittest.skipUnless(sys.platform == "darwin",
+                         "Rack's packaged launcher is a macOS surface")
+    def test_rack_saved_patch_accepts_only_metadata_only_appledouble(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            decoder = self._archive_runtime(pathlib.Path(tmp) / "build")
+            valid = base64.b64decode(self.APPLEDOUBLE_VALID)
+            archive = pathlib.Path(tmp) / "appledouble.vcv"
+            archive.write_bytes(valid)
+            modules, digest = rack_open._patch_identity(
+                str(archive), _decoder=decoder)
+            self.assertEqual(2, modules)
+            self.assertEqual(hashlib.sha256(valid).hexdigest(), digest)
+
+            cases = {
+                self.APPLEDOUBLE_BAD_MAGIC: "AppleDouble member ._. has the wrong magic",
+                self.APPLEDOUBLE_RESOURCE_FORK:
+                    "contains a resource fork rather than metadata only",
+                self.APPLEDOUBLE_WRONG_NAME:
+                    "unsupported regular member: ._other",
+            }
+            for encoded, message in cases.items():
+                with self.subTest(message=message):
+                    completed = subprocess.run(
+                        [decoder], input=base64.b64decode(encoded),
+                        capture_output=True, timeout=10)
+                    self.assertEqual(1, completed.returncode)
+                    self.assertIn(message, completed.stderr.decode())
 
     @unittest.skipUnless(sys.platform == "darwin",
                          "Rack's packaged launcher is a macOS surface")

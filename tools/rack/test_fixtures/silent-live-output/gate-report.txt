@@ -1,0 +1,11 @@
+patch gate: 6 modules (5 instantiated, 1 not a library), 6 cables
+  per-module output activity:
+        Muxlicer           ch=1 out0=10.000 out1=0.000
+        Picus              ch=1 out0=10.000 out1=0.000
+        SEQ                ch=1 out0=0.917 out1=0.000
+        Bogaudio-DADSRH    ch=1 out0=10.000 out1=10.000
+        Tides2             ch=1 out0=0.000 out1=5.000 out2=8.000 out3=8.000
+        AudioInterface2    (not instantiated)
+  warn  Tides2 out 0 is silent (mean 0.000000 V)
+  FAIL  every cable into the audio interface is silent — this patch makes no sound
+PATCH GATE FAILED: 1 failure(s), 1 warning(s)
