@@ -2215,6 +2215,83 @@
           "rationale": "This packaging row records installed artifacts and does not alter the sequencer design-time capability manifest."
         }
       }
+    },
+    {
+      "id": "authoring-capsule-substrate",
+      "title": "Portable authoring-capsule substrate",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "authoring-capsule-substrate-20260831",
+      "owned_paths": [
+        "core/authoring_capsule/CMakeLists.txt",
+        "core/authoring_capsule/include/pulp/authoring_capsule/archive.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/canonical_pcm.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/capsule.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/component.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/limits.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/manifest.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/preview.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/profile_registry.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/safe_path.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/signature.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/staging.hpp",
+        "core/authoring_capsule/include/pulp/authoring_capsule/status.hpp",
+        "core/authoring_capsule/src/archive.cpp",
+        "core/authoring_capsule/src/canonical_json.cpp",
+        "core/authoring_capsule/src/canonical_json.hpp",
+        "core/authoring_capsule/src/canonical_pcm.cpp",
+        "core/authoring_capsule/src/capsule.cpp",
+        "core/authoring_capsule/src/completeness.cpp",
+        "core/authoring_capsule/src/manifest.cpp",
+        "core/authoring_capsule/src/profile_registry.cpp",
+        "core/authoring_capsule/src/safe_path.cpp",
+        "core/authoring_capsule/src/staging.cpp",
+        "core/authoring_capsule/src/status.cpp",
+        "tools/cmake/PulpInstallRules.cmake",
+        "test/test_authoring_capsule.cpp",
+        "test/cmake/authoring_capsule_tests.cmake",
+        "docs/reference/authoring-capsule.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/authoring_capsule/include/pulp/authoring_capsule/capsule.hpp",
+          "needles": [
+            "preview_capsule",
+            "admit_to_staging"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The capsule substrate ships as the exported target pulp-authoring-capsule with public headers under pulp/authoring_capsule, so a consumer can read, admit and stage a capsule from an installed SDK.",
+          "evidence": [
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "pulp-authoring-capsule"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The substrate is a container and rights format. It adds no offline Timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The substrate is a container and rights format. It adds no MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The substrate carries no Product A live control capability, grant, or policy projection."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The capability manifest scans DSP and generator-facing domains. An authoring and container surface publishes no typed generative capability, so it is deliberately outside PUBLIC_ROOTS in tools/scripts/agent_capability_surface.py."
+        }
+      }
     }
   ],
   "tombstones": []

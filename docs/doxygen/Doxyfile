@@ -23,6 +23,7 @@ OUTPUT_DIRECTORY       = ../../build/api-docs
 # neither its target nor its headers, so it is not part of the SDK surface
 # this reference documents.
 INPUT                  = ../../core/audio/include \
+                         ../../core/authoring_capsule/include \
                          ../../core/canvas/include \
                          ../../core/events/include \
                          ../../core/format/include \

@@ -138,3 +138,134 @@ TEST_CASE("Result assignment preserves destination on throw",
     REQUIRE(dst.has_value());
     REQUIRE(dst->payload == 11);
 }
+
+// `Result<void, E>` is its own specialization because a union cannot hold
+// `void`. These cover the states the primary template's tests cover, plus the
+// one that only exists here: assigning success over an error must destroy the
+// error rather than leave it alive under a `has_value()` that now says true.
+
+TEST_CASE("Result<void, E> default-constructs as success", "[runtime][result]") {
+    Result<void, std::string> r;
+    REQUIRE(r.has_value());
+    REQUIRE(static_cast<bool>(r));
+    REQUIRE_FALSE(r.is_err());
+}
+
+TEST_CASE("Result<void, E> carries an error", "[runtime][result]") {
+    Result<void, std::string> r(Err(std::string("nope")));
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.is_err());
+    REQUIRE(r.error() == "nope");
+}
+
+TEST_CASE("Result<void, E> copies and moves both states", "[runtime][result]") {
+    Result<void, std::string> err(Err(std::string("bad")));
+    Result<void, std::string> copied = err;
+    REQUIRE(copied.is_err());
+    REQUIRE(copied.error() == "bad");
+
+    Result<void, std::string> moved = std::move(copied);
+    REQUIRE(moved.is_err());
+    REQUIRE(moved.error() == "bad");
+
+    Result<void, std::string> ok;
+    Result<void, std::string> ok_copy = ok;
+    REQUIRE(ok_copy.has_value());
+}
+
+TEST_CASE("Result<void, E> assignment crosses both state boundaries",
+          "[runtime][result]") {
+    Result<void, std::string> dst(Err(std::string("first")));
+    const Result<void, std::string> ok;
+
+    dst = ok;
+    REQUIRE(dst.has_value());
+
+    const Result<void, std::string> err(Err(std::string("second")));
+    dst = err;
+    REQUIRE(dst.is_err());
+    REQUIRE(dst.error() == "second");
+
+    dst = Result<void, std::string>();
+    REQUIRE(dst.has_value());
+}
+
+namespace {
+
+// Counts construction and destruction so "destroyed exactly once" is an
+// assertion rather than a hope that a double-destroy would have crashed.
+struct Counted {
+    static inline int live = 0;
+    int payload = 0;
+    explicit Counted(int p) : payload(p) { ++live; }
+    Counted(const Counted& o) : payload(o.payload) { ++live; }
+    Counted(Counted&& o) noexcept : payload(o.payload) { ++live; }
+    Counted& operator=(const Counted&) = default;
+    Counted& operator=(Counted&&) noexcept = default;
+    ~Counted() { --live; }
+};
+
+}  // namespace
+
+TEST_CASE("Result<void, E> destroys its error exactly once", "[runtime][result]") {
+    Counted::live = 0;
+    {
+        Result<void, Counted> r(Err(Counted(5)));
+        REQUIRE(r.is_err());
+        REQUIRE(r.error().payload == 5);
+        REQUIRE(Counted::live == 1);
+
+        // Overwriting an error with success must run ~Counted now, not leave
+        // it alive to be destroyed a second time at scope exit.
+        r = Result<void, Counted>();
+        REQUIRE(r.has_value());
+        REQUIRE(Counted::live == 0);
+    }
+    REQUIRE(Counted::live == 0);
+}
+
+TEST_CASE("Result<void, E> move-assignment replaces an error with an error",
+          "[runtime][result]") {
+    // The error-over-error path is the one with an ordering requirement: the
+    // incoming error is constructed into a temporary BEFORE the old one is
+    // destroyed, so a throwing move cannot leave the destination holding a
+    // destroyed error under a `has_value()` that still says false.
+    Counted::live = 0;
+    {
+        Result<void, Counted> dst(Err(Counted(1)));
+        Result<void, Counted> src(Err(Counted(2)));
+        REQUIRE(Counted::live == 2);
+
+        dst = std::move(src);
+        REQUIRE(dst.is_err());
+        CHECK(dst.error().payload == 2);
+        // The destination's original error is gone; only the moved-in one and
+        // the (still alive, moved-from) source remain.
+        CHECK(Counted::live == 2);
+    }
+    CHECK(Counted::live == 0);
+
+    // The same crossing with a copy, which takes the sibling branch.
+    Counted::live = 0;
+    {
+        Result<void, Counted> dst(Err(Counted(3)));
+        const Result<void, Counted> src(Err(Counted(4)));
+        dst = src;
+        REQUIRE(dst.is_err());
+        CHECK(dst.error().payload == 4);
+        CHECK(Counted::live == 2);
+    }
+    CHECK(Counted::live == 0);
+
+    // Self-assignment must not destroy the error it is about to read.
+    Counted::live = 0;
+    {
+        Result<void, Counted> self(Err(Counted(5)));
+        Result<void, Counted>& alias = self;
+        self = std::move(alias);
+        REQUIRE(self.is_err());
+        CHECK(self.error().payload == 5);
+        CHECK(Counted::live == 1);
+    }
+    CHECK(Counted::live == 0);
+}

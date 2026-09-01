@@ -693,6 +693,40 @@ the bypass trailer by reflex:
   A note costs the same as the trailer and leaves the next person something to
   read.
 
+## A green `--check` says nothing about a module outside `PUBLIC_ROOTS`
+
+`PUBLIC_ROOTS` in `tools/scripts/agent_capability_surface.py` lists exactly six
+domains: `audio`, `midi`, `music`, `sequence`, `signal`, `timebase`. Headers
+anywhere else are not scanned, not classified, and not fingerprinted.
+
+That matters most at the moment it is least visible. Adding a new optional
+module under `core/` and exporting it — appending the target to
+`PULP_SDK_TARGETS` and the directory to `_pulp_sdk_header_subsystems` in
+`tools/cmake/PulpInstallRules.cmake` — ships its public headers in the SDK. Then
+`agent_capability_manifest.py --check` prints `fresh; N keys and M public
+headers checked` and exits 0, which reads like the new headers were reviewed.
+They were not looked at.
+
+Control the reading before trusting it:
+
+```sh
+python3 -c "import re; t=open('tools/scripts/agent_capability_surface.py').read(); \
+print(re.findall(r'\"source\": \"([^\"]+)\"', t))"
+```
+
+If the new module's include root is absent, the manifest has no opinion about
+it, and the header count staying put is the expected result rather than
+evidence of coverage.
+
+The `PulpInstallRules.cmake` edit is what fires the skill-sync gate for this
+skill, and that is the right moment to make the call deliberately: does the new
+domain belong in `PUBLIC_ROOTS`? A DSP or generator-facing surface does. An
+authoring, packaging, or container surface — where "capability" would mean a
+consumer contract with typed bindings and operational probes that do not exist —
+does not, and adding it would mean manufacturing rows to describe headers no
+generator claims. Record which way you went; silence here looks identical to
+having never asked.
+
 ## Splitting an exported target means exporting BOTH halves
 
 `tools/cmake/PulpInstallRules.cmake` holds `PULP_SDK_TARGETS`, the list
