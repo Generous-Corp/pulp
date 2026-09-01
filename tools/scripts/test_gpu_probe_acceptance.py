@@ -54,6 +54,35 @@ def write_png(path: Path, *, patterned: bool = True) -> None:
 
 
 class GpuProbeAcceptanceTests(unittest.TestCase):
+    def test_doctor_result_capture_is_atomic_and_replaces_complete_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            destination = directory / "forge-gpu-doctor.json"
+            destination.write_bytes(b"previous-complete-result\n")
+
+            RECORDER.write_bytes_atomically(destination, b'{"verdict":"pass"}\n')
+
+            self.assertEqual(destination.read_bytes(), b'{"verdict":"pass"}\n')
+            self.assertEqual(
+                list(directory.glob(f".{destination.name}.*")), []
+            )
+
+    def test_doctor_result_capture_failure_preserves_previous_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            destination = directory / "forge-gpu-doctor.json"
+            original = b"previous-complete-result\n"
+            destination.write_bytes(original)
+            with mock.patch.object(
+                RECORDER.os, "replace", side_effect=OSError("injected rename failure")
+            ):
+                with self.assertRaises(OSError):
+                    RECORDER.write_bytes_atomically(destination, b"partial-result\n")
+            self.assertEqual(destination.read_bytes(), original)
+            self.assertEqual(
+                list(directory.glob(f".{destination.name}.*")), []
+            )
+
     def publish(self, staging: Path, output: Path) -> None:
         claim = RECORDER.retain_staged_evidence(staging)
         try:
