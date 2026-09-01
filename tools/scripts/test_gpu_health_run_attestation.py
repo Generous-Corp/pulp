@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -17,6 +18,8 @@ SOURCE_ROOT = HERE.parents[1]
 SCHEMA_PATH = Path("docs/contracts/gpu-health-run-attestation-v1.schema.json")
 CREATED = "2026-09-01T07:00:00Z"
 NOW = "2026-09-01T07:05:00Z"
+sys.path.insert(0, str(HERE))
+import json_schema_lite  # noqa: E402
 
 
 def run(*args: str | Path, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -137,6 +140,11 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         result = self.fixture.verify()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("verified", result.stdout)
+        schema = json.loads((SOURCE_ROOT / SCHEMA_PATH).read_text())
+        attestation = json.loads(
+            (self.fixture.repo / self.fixture.attestation_path).read_text()
+        )
+        self.assertEqual(json_schema_lite.validate(attestation, schema), [])
 
     def test_cross_host_configuration_backend_device_and_adapter_reuse_fails(self) -> None:
         substitutions = {
