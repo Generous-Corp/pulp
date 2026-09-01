@@ -149,6 +149,35 @@ public:
     bool prepared() const noexcept { return prepared_; }
     const VoiceModulationSourcesConfig& config() const noexcept { return config_; }
 
+    /// RT-safe after prepare. Retunes every voice's LFO, preserving phase and
+    /// the lifecycle stage.
+    ///
+    /// Rate is an automation destination in every synth that has an LFO at all
+    /// — it is what a "LFO Rate" knob writes to — so it cannot be reachable
+    /// only through `prepare()`. `prepare()` allocates, is control-thread only,
+    /// and restarts phase; sweeping a rate knob through it would stall the LFO
+    /// at phase 0 for the whole sweep. The rate is clamped into the shipped
+    /// LFO's legal range exactly as `prepare()` clamps it.
+    void set_lfo_rate_hz(double rate_hz) noexcept {
+        if (!prepared() || !std::isfinite(rate_hz))
+            return;
+        config_.lfo.rate_hz = rate_hz;
+        for (auto& lfo : lfos_)
+            lfo.set_rate_hz(rate_hz);
+    }
+
+    /// RT-safe after prepare. Rescales every voice's bipolar LFO output.
+    ///
+    /// Negative values invert the wave, which is the documented way to express
+    /// a source whose convention is the inverse of this one's. Depth is the
+    /// other half of a live LFO's automation surface, and has the same reason
+    /// as the rate for not living behind `prepare()`.
+    void set_lfo_depth(float depth) noexcept {
+        if (!prepared() || !std::isfinite(depth))
+            return;
+        config_.lfo.depth = depth;
+    }
+
     /// RT-safe after prepare. Note-on retriggers that voice's LFO per its
     /// phase policy (free-running ignores it) and restarts its envelope.
     void note_on(std::size_t voice_index) noexcept {
