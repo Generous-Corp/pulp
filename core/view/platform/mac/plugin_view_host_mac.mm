@@ -273,6 +273,10 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
     {
         const auto overlay_press = pulp::view::route_press_to_active_overlay(
             *root, pt);
+        if (overlay_press.consume_press) {
+            drag_target->reset();
+            return;
+        }
         if (overlay_press.routing == pulp::view::OverlayPressRouting::routed) {
             drag_target->set(overlay_press.target);
             pulp::view::ComboBox::notify_global_click(drag_target->live_in(*root));
@@ -309,9 +313,8 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
                 drag_target->reset();
             return;
         }
-        // dismissed / not_hittable / no_overlay all fall through to the
-        // regular path below, so an outside click both closes the overlay and
-        // activates whatever sits underneath.
+        // A click-through dismissal, not_hittable, and no_overlay fall through
+        // to the regular path below. Consuming overlays returned above.
     }
 
     pulp::view::MouseEvent gesture_event;

@@ -381,6 +381,10 @@ struct OverlayPressTarget {
     OverlayPressRouting routing = OverlayPressRouting::no_overlay;
     /// Non-null only when `routing == OverlayPressRouting::routed`.
     View* target = nullptr;
+    /// True when an outside press dismissed an overlay that opted to consume
+    /// that initiating pointer sequence. Hosts must stop before gesture and
+    /// ordinary hit-test routing so the same press cannot mutate the underlay.
+    bool consume_press = false;
 };
 
 /// Consult the generalized overlay slot for a press at `root_pt`.

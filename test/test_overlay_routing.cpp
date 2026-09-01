@@ -528,10 +528,32 @@ TEST_CASE("route_press_to_active_overlay: press outside dismisses the overlay",
 
     REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
     REQUIRE(press.target == nullptr);
+    REQUIRE_FALSE(press.consume_press);
     REQUIRE(View::active_overlay_ == nullptr);
     // Routed through dismiss_active_overlay(), not a bare release_overlay(),
     // so React state can flip setOpen(false).
     REQUIRE(dismissed_calls == 1);
+}
+
+TEST_CASE("route_press_to_active_overlay preserves outside-click consumption",
+          "[view][overlay][pointer]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {500.0f, 500.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(press.target == nullptr);
+    REQUIRE(press.consume_press);
+    REQUIRE(View::active_overlay_ == nullptr);
 }
 
 TEST_CASE("route_press_to_active_overlay: guards rejecting the point do not "
