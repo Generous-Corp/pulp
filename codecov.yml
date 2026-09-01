@@ -144,6 +144,7 @@ ignore:
   - "**/sdl_window_host.cpp"
   - "**/scanner_clap.cpp"
   - "**/plugin_slot_au.mm"
+  - "**/au_v2_cocoa_view.mm"
   - "**/au_v2_adapter.cpp"
   - "**/au_adapter.mm"
   - "**/au_v2_instrument.cpp"

@@ -131,6 +131,15 @@ function __dispatchCallbackOnly__(id, eventName) {
     if (priorLevel > 0) return priorLevel;
     var key = id + ':' + eventName;
     var cb = __callbacks__[key];
+    // The React host keeps the current closure in its own registry so a
+    // retained DOM/materialized node can survive native subtree replacement.
+    // If native callback cleanup ran during that replacement, recover the
+    // live handler from the authoritative React registry instead of dropping
+    // the first semantic event delivered before listener replay.
+    if (!cb && typeof globalThis !== 'undefined'
+        && globalThis.__pulpReactEventCallbacks__ instanceof Map) {
+        cb = globalThis.__pulpReactEventCallbacks__.get(key);
+    }
     var level = 0;
     if (cb) {
         // Keep handler exceptions inside the JS dispatch boundary. If a React
@@ -186,6 +195,22 @@ function __dispatch__(id, eventName) {
     // React-DOM's delegated root listener lives.
     if (typeof __nativeElements__ !== 'undefined') {
         var el = __nativeElements__[id];
+        // Materialized-state upgrades may replace a native View subtree while
+        // retaining the corresponding live DOM nodes. The cleanup correctly
+        // retires stale callbacks, but older upgrade paths can temporarily
+        // drop the native-id map entry before the retained node is appended
+        // again. Recover by identity from the live document so semantic
+        // events such as `dismiss` are never lost during that bounded seam.
+        if (!el && typeof document !== 'undefined' && document.querySelectorAll) {
+            var liveNodes = document.querySelectorAll('*');
+            for (var ni = 0; ni < liveNodes.length; ++ni) {
+                if (liveNodes[ni] && liveNodes[ni]._id === id) {
+                    el = liveNodes[ni];
+                    __nativeElements__[id] = el;
+                    break;
+                }
+            }
+        }
         if (typeof globalThis.__pulpDispatchHits__ === 'undefined') globalThis.__pulpDispatchHits__ = { byType: {}, missingElement: 0, dispatched: 0, rootListenersFired: 0, lastErr: null, total: 0 };
         var stats = globalThis.__pulpDispatchHits__;
         stats.total = (stats.total || 0) + 1;
@@ -715,6 +740,18 @@ bool WidgetBridge::dispatch_key_for_root(View& root, int key_code,
         if (&bridge->root_ == &root)
             handled = bridge->forward_key_event_handled(
                           key_code, modifiers, is_down, &root) || handled;
+    }
+    // Escape dismissal is a framework default, not a platform-host detail.
+    // Script handlers run first so they can update product state themselves;
+    // the semantic overlay claim is then retired unconditionally. This also
+    // covers React state updates that do not commit until the next host pump,
+    // where relying on `defaultPrevented` alone would leave a stale native
+    // claim alive for another frame (or indefinitely in a quiescent host).
+    if (is_down && key_code == static_cast<int>(KeyCode::escape)) {
+        if (auto* overlay = root.interaction().active_overlay) {
+            overlay->dismiss_claimed_overlay();
+            handled = true;
+        }
     }
     return handled;
 }

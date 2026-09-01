@@ -206,6 +206,16 @@ control thread, and call `process()` or `process_frame()` on the audio thread.
 The processor owns frame-boundary table adoption, gain interpolation,
 overlap-add reconstruction, latency reporting, and latency-aligned dry/wet.
 
+Sample-scheduled host automation is the bounded exception to control-thread
+publication. A single audio owner may call `set_layout_rt()` with the latest
+fixed-capacity layout while applying events at their block offsets. The
+processor copies that layout into prepared storage and compiles/adopts it only
+at the next spectral-frame boundary, without allocation, locks, or a
+control-thread round trip. Do not call `set_layout_rt()` from multiple writers
+or use it as a replacement for UI/state-restore `publish_layout()`; the two
+paths deliberately keep separate writer contracts and converge only at the
+audio owner's frame-boundary adoption point.
+
 Use categorical mask entries for true mute: a muted bin is multiplied by exact
 zero, not represented by a finite decibel floor. Reuse this processor for
 zoomable filter banks, spectral gates, freezes, morphing, and related products

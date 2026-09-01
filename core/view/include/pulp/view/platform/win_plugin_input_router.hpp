@@ -165,6 +165,10 @@ public:
             // synchronously replace the pointer bracket. A stale outer frame
             // must not feed its press into the replacement's gesture session.
             if (!accepts_original()) return;
+            if (overlay_press.consume_press) {
+                cancel_gesture();
+                return;
+            }
             if (overlay_press.routing == OverlayPressRouting::routed)
                 drag_target_.set(overlay_press.target);
             MouseEvent gesture_event;

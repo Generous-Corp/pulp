@@ -201,6 +201,32 @@ TEST_CASE("SpectralMaskProcessor latest publication replaces an in-flight target
     REQUIRE(processor.active_table_version() == 2);
 }
 
+TEST_CASE("SpectralMaskProcessor adopts audio-owner layouts at a frame boundary",
+          "[signal][spectral-mask-processor][automation][rt]") {
+    SpectralMaskProcessor processor;
+    REQUIRE(processor.prepare(config()));
+
+    auto control = layout(1);
+    control.bands[0].gain_db = -12.0f;
+    REQUIRE(processor.publish_layout(control));
+
+    auto automated = layout(1);
+    automated.bands[0].gain_db = 6.0f;
+    automated.transition_frames = 0;
+    const auto before = g_alloc_count.load();
+    REQUIRE(processor.set_layout_rt(automated));
+
+    std::array<std::complex<float>, kFftSize / 2 + 1> frame{};
+    std::fill(frame.begin(), frame.end(), std::complex<float>{1.0f, -1.0f});
+    std::complex<float>* frames[] = {frame.data()};
+    REQUIRE(processor.process_frame(frames, static_cast<int>(frame.size())));
+    REQUIRE(g_alloc_count.load() == before);
+
+    const float expected = std::pow(10.0f, 6.0f / 20.0f);
+    REQUIRE_THAT(frame[100].real(), WithinAbs(expected, 1.0e-6f));
+    REQUIRE_THAT(frame[100].imag(), WithinAbs(-expected, 1.0e-6f));
+}
+
 TEST_CASE("SpectralMaskProcessor is invariant to host block partitioning",
           "[signal][spectral-mask-processor][block]") {
     SpectralMaskProcessor a;

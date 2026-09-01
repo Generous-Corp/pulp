@@ -1286,7 +1286,7 @@ required job: path-filtering the workflow or job would prevent the stable
 required context from reporting.
 
 CTest display names are not identities: the authoritative target currently has
-21,214 registrations but only 21,155 unique names. The inventory validator
+21,227 registrations but only 21,168 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned
@@ -1300,6 +1300,12 @@ portable basename in the registration fingerprint while the toolchain digest
 binds their raw and resolved paths plus a bounded content digest, so same-named
 tools remain distinguishable. Raw worktree paths and CTest registration order
 are intentionally excluded from portable identity.
+
+Regenerate this contract only after merging the current target branch and
+reconfiguring its exact tree. The JSON inventory, Shipyard `full_test_count`,
+pinned policy assertions, and these documented counts move together; deriving
+any of them from a stale PR build can silently omit tests already present on
+`main`.
 
 Do not promote selection from shadow to authoritative based on a few green
 runs. Graduation requires per-risk-class comparison evidence showing that the
