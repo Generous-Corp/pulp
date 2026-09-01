@@ -473,6 +473,7 @@ TEST_CASE("a declared knob gets its own crop of the capture with the pointer era
 
     DesignIR ir;
     ir.root.type = "frame";
+    ir.root.attributes["browser_device_scale_factor"] = "2";
     ir.root.children.push_back(declared_knob());
 
     std::string error;
@@ -484,6 +485,11 @@ TEST_CASE("a declared knob gets its own crop of the capture with the pointer era
     REQUIRE(knob.attributes.count("asset_path") == 1);
     CHECK(knob.attributes.at("png_natural_w") == std::to_string(kDialSize));
     CHECK(knob.attributes.at("png_natural_h") == std::to_string(kDialSize));
+    CHECK(knob.attributes.at("captured_raster_origin_x_px") ==
+          std::to_string(kDialLeft));
+    CHECK(knob.attributes.at("captured_raster_origin_y_px") ==
+          std::to_string(kDialTop));
+    CHECK(knob.attributes.at("captured_raster_dpr") == "2.000000");
     // A single static disc. A multi-frame strip would bake rotation into its
     // frames and suppress the pointer overlay entirely.
     CHECK(knob.attributes.at("sprite_strip_frame_count") == "1");
@@ -549,6 +555,32 @@ TEST_CASE("a declared knob gets its own crop of the capture with the pointer era
                                face_red(face_radius(x, y))) <= 2);
             }
     }
+}
+
+TEST_CASE("a transformed ancestor suppresses a captured sprite raster origin",
+          "[import-design][browser-capture][knob][indicator][transform]") {
+    TempDirectory temp;
+    const auto capture = temp.root / "browser.png";
+    write_png(capture, synthetic_panel());
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.attributes["browser_device_scale_factor"] = "2";
+    auto knob = declared_knob();
+    // browser_capture_tree marks this because the crop is in transformed page
+    // coordinates. The local widget draw destination must not consume it.
+    knob.attributes["browser_box_paint_rect_ineligible"] = "transformed-ancestor";
+    ir.root.children.push_back(std::move(knob));
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error) == 1);
+    CHECK(error.empty());
+    const auto& lowered = ir.root.children.front();
+    CHECK(lowered.attributes.count("asset_path") == 1);
+    CHECK(lowered.attributes.count("captured_raster_origin_x_px") == 0);
+    CHECK(lowered.attributes.count("captured_raster_origin_y_px") == 0);
+    CHECK(lowered.attributes.count("captured_raster_dpr") == 0);
 }
 
 TEST_CASE("a declared knob body is cropped exactly from the indicator-free frame",

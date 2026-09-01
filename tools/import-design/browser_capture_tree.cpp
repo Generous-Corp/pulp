@@ -146,6 +146,79 @@ bool references_asset(const pulp::view::IRStyle& style) {
            !style.background_image->empty();
 }
 
+std::string_view trim_css(std::string_view value) {
+    const auto first = value.find_first_not_of(kCssWhitespace);
+    if (first == std::string_view::npos) return {};
+    const auto last = value.find_last_not_of(kCssWhitespace);
+    return value.substr(first, last - first + 1);
+}
+
+/// Split a CSS comma-list without confusing a gradient's own comma-separated
+/// stop list for a new background layer.
+std::vector<std::string_view> css_layers(std::string_view value) {
+    std::vector<std::string_view> out;
+    std::size_t start = 0;
+    int depth = 0;
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '(') ++depth;
+        else if (value[i] == ')' && depth > 0) --depth;
+        else if (value[i] == ',' && depth == 0) {
+            out.push_back(trim_css(value.substr(start, i - start)));
+            start = i + 1;
+        }
+    }
+    out.push_back(trim_css(value.substr(start)));
+    return out;
+}
+
+bool gradient_layer(std::string_view value) {
+    value = trim_css(value);
+    static constexpr std::string_view kFunctions[] = {
+        "linear-gradient(", "radial-gradient(", "conic-gradient(",
+        "repeating-linear-gradient(", "repeating-radial-gradient(",
+        "repeating-conic-gradient(",
+    };
+    return std::any_of(std::begin(kFunctions), std::end(kFunctions),
+                       [value](std::string_view function) {
+                           return value.substr(0, function.size()) == function;
+                       });
+}
+
+bool repeat_layer_needs_distribution(std::string_view value) {
+    value = trim_css(value);
+    std::size_t start = 0;
+    while (start < value.size()) {
+        const auto end = value.find_first_of(kCssWhitespace, start);
+        const auto token = value.substr(start, end == std::string_view::npos
+                                                    ? std::string_view::npos
+                                                    : end - start);
+        if (token == "round" || token == "space") return true;
+        if (end == std::string_view::npos) break;
+        start = value.find_first_not_of(kCssWhitespace, end);
+        if (start == std::string_view::npos) break;
+    }
+    return false;
+}
+
+/// `round` and `space` need CSS distribution arithmetic. The native painter
+/// intentionally implements neither: approximating either as ordinary repeat
+/// would draw an authoritative-looking but phase-wrong grid. Refuse only the
+/// affected painted gradient layer so browser validation prevents publication
+/// before that blank fallback can be scored.
+std::optional<std::string> unsupported_gradient_repeat(
+    const pulp::view::IRStyle& style) {
+    if (!style.background_gradient || !style.background_repeat) return std::nullopt;
+    const auto images = css_layers(*style.background_gradient);
+    const auto repeats = css_layers(*style.background_repeat);
+    if (repeats.empty()) return std::nullopt;
+    for (std::size_t index = 0; index < images.size(); ++index) {
+        if (!gradient_layer(images[index])) continue;
+        const auto repeat = repeats[index % repeats.size()];
+        if (repeat_layer_needs_distribution(repeat)) return std::string(repeat);
+    }
+    return std::nullopt;
+}
+
 /// A readable, stable name. Reviewers and structural assertions both need to
 /// see WHAT a node is, and `div` alone across two hundred nodes says nothing.
 ///
@@ -720,6 +793,7 @@ std::string_view to_string(PaintClass paint_class) {
 PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                                      double dx,
                                      double dy,
+                                     double device_scale,
                                      IRNode& root,
                                      const std::unordered_map<int, std::string>&
                                          captured_element_assets,
@@ -1137,6 +1211,28 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                               is_text ? ComputedStyleScope::text_only
                                       : ComputedStyleScope::box_and_text,
                               type_scale.ok() ? type_scale.scale : 1.0);
+        // The style carrier deliberately drops most transforms because the
+        // captured box is already post-transform. A descendant's page-space
+        // rect is post-transform too, even when it has no transform of its
+        // own, so exclude the entire transformed ancestry from local paint
+        // rect adjustment. It is not safe to turn an absolute captured rect
+        // back into a local untransformed background/border extent.
+        std::string rect_ineligible;
+        for (int cursor = node.node_index, steps = 0;
+             cursor >= 0 && steps < index.node_count();
+             cursor = index.parent_of(cursor), ++steps) {
+            const auto ancestor_styles = index.styles_for_node(cursor);
+            const auto transform = ancestor_styles.find("transform");
+            if (transform == ancestor_styles.end() || transform->second.empty() ||
+                transform->second == "none")
+                continue;
+            rect_ineligible = cursor == node.node_index ? "transform"
+                                                         : "transformed-ancestor";
+            break;
+        }
+        if (!rect_ineligible.empty())
+            lowered.attributes["browser_box_paint_rect_ineligible"] =
+                std::move(rect_ineligible);
         // Written after the computed styles, which deliberately drop
         // `transform` — the box they were handed is post-transform, so the only
         // node entitled to an angle is one whose box was rewritten back to the
@@ -1212,6 +1308,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
             lowered.style.background_gradient.reset();
             lowered.style.background_image.reset();
             lowered.style.background_repeat.reset();
+            lowered.style.background_position.reset();
             lowered.style.background_size.reset();
             lowered.style.box_shadow.clear();
             lowered.style.border.reset();
@@ -1236,7 +1333,9 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                 node.bounds.width * node.bounds.height;
         };
 
-        if (svg_root && svg_subtree.drawable()) {
+        if (const auto unsupported_repeat = unsupported_gradient_repeat(lowered.style)) {
+            capture_fallback("background-repeat", *unsupported_repeat);
+        } else if (svg_root && svg_subtree.drawable()) {
             lowered.type = "frame";
             lowered.attributes["svg_shapes"] =
                 std::to_string(svg_subtree.shapes.size());
@@ -1647,6 +1746,35 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     // asked for, so this is the window every lowered node is drawn through.
     const ClipRect root_clip = overflow_clip_of(root, -dx, -dy);
 
+    // Keep the browser-verified CSS-edge snap contract for native box paint.
+    // Chromium uses floor(page-space CSS edge + 0.5) before applying the
+    // capture DPR; this is intentionally not round(edge * DPR), nor C++
+    // std::round (whose negative ties go away from zero). The solved CSS layout
+    // remains fractional; this metadata is consumed only by View's
+    // background/border painter, so children and hit testing keep their
+    // original geometry. Transformed boxes are excluded because their capture
+    // rect is post-transform and cannot be applied as a local rect adjustment.
+    const auto record_paint_rect = [&](IRNode& node, const CapturedBox& box) {
+        if (!(device_scale > 0.0) || !std::isfinite(device_scale)) return;
+        if (node.attributes.contains("browser_box_paint_rect_ineligible") ||
+            (node.style.transform && !node.style.transform->empty() &&
+             *node.style.transform != "none"))
+            return;
+        const auto snapped_edge = [device_scale](double css_edge) {
+            const double css_pixel = std::floor(css_edge + 0.5);
+            return css_pixel == 0.0 ? 0.0 : css_pixel * device_scale;
+        };
+        node.attributes["browser_box_paint_left_px"] =
+            std::to_string(snapped_edge(box.left + dx));
+        node.attributes["browser_box_paint_top_px"] =
+            std::to_string(snapped_edge(box.top + dy));
+        node.attributes["browser_box_paint_right_px"] =
+            std::to_string(snapped_edge(box.left + box.width + dx));
+        node.attributes["browser_box_paint_bottom_px"] =
+            std::to_string(snapped_edge(box.top + box.height + dy));
+        node.attributes["browser_box_paint_dpr"] = std::to_string(device_scale);
+    };
+
     // A baked browser panel is a paint artifact, not a DOM runtime. Chromium's
     // paint order can interleave nodes from separate DOM subtrees (pseudo
     // elements and canvas overlays do this routinely), which no nested View
@@ -1660,6 +1788,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
     if (flatten_to_paint_order) {
         int flat_z = 0;
         for (auto& entry : slots) {
+            record_paint_rect(entry.node, entry.box);
             entry.node.style.left = static_cast<float>(entry.box.left + dx);
             entry.node.style.top = static_cast<float>(entry.box.top + dy);
             entry.node.style.width = static_cast<float>(entry.box.width);
@@ -1678,6 +1807,7 @@ PaintedTreeCounts lower_painted_tree(const CapturedStyleIndex& index,
                            double frame_top, int depth, IRNode& parent,
                            ClipRect ancestor_clip) -> void {
         auto& entry = slots[static_cast<size_t>(slot)];
+        record_paint_rect(entry.node, entry.box);
         entry.node.style.left = static_cast<float>(entry.box.left - frame_left);
         entry.node.style.top = static_cast<float>(entry.box.top - frame_top);
         entry.node.style.width = static_cast<float>(entry.box.width);
