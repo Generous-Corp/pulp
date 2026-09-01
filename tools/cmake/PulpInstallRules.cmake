@@ -32,6 +32,9 @@ set(PULP_SDK_TARGETS
 if(TARGET pulp-project-package)
     list(APPEND PULP_SDK_TARGETS pulp-project-package)
 endif()
+if(TARGET pulp-authoring-capsule)
+    list(APPEND PULP_SDK_TARGETS pulp-authoring-capsule)
+endif()
 # pulp-format is an umbrella over pulp-format-core and pulp-format-view.
 # All three are exported: the umbrella's interface names the two halves, so a
 # consumer resolving Pulp::format from an installed SDK would otherwise find a
@@ -291,6 +294,9 @@ set(_pulp_sdk_header_subsystems
 )
 if(TARGET pulp-project-package)
     list(APPEND _pulp_sdk_header_subsystems project_package)
+endif()
+if(TARGET pulp-authoring-capsule)
+    list(APPEND _pulp_sdk_header_subsystems authoring_capsule)
 endif()
 list(APPEND _pulp_sdk_header_subsystems
     timeline_agent_view timeline_editor playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas

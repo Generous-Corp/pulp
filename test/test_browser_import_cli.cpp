@@ -344,6 +344,62 @@ TEST_CASE("browser CLI adapter fails before localization when validation fails",
     CHECK(localization_calls == 0);
 }
 
+TEST_CASE("browser CLI refuses unsupported gradient repeat before publication",
+          "[import-design][browser-capture][cli-adapter][background-repeat]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.validate = true;
+    std::string validation_error;
+    int localization_calls = 0;
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [&](const id::BrowserHtmlImportRequest& capture_request,
+            std::string_view) {
+            auto captured = captured_import(capture_request, tree);
+            auto* html = std::get_if<id::BrowserHtmlCaptured>(&captured);
+            REQUIRE(html != nullptr);
+            html->design_ir.root.attributes[
+                "native_nodes_element_capture_fallback"] = "1";
+            html->design_ir.root.attributes[
+                "native_nodes_unpainted_area_fraction"] = "0.125";
+            pulp::view::IRNode fallback;
+            fallback.attributes["capture_fallback_reason"] = "background-repeat";
+            fallback.attributes["capture_fallback_detail"] = "round no-repeat";
+            html->design_ir.root.children.push_back(std::move(fallback));
+            return captured;
+        };
+    operations.validate_capture =
+        [&](const pulp::view::DesignIR& ir,
+            const id::BrowserCaptureValidationOptions& options) {
+            const auto result = id::validate_browser_capture_design_ir(ir, options);
+            validation_error = result.error;
+            return result;
+        };
+    operations.localize_assets =
+        [&](pulp::view::DesignIR&, const std::string&, std::string*) {
+            ++localization_calls;
+            return true;
+        };
+
+    const auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "<html>", operations);
+    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+    REQUIRE(failure);
+    CHECK(failure->exit_code == 1);
+    CHECK(localization_calls == 0);
+    CHECK(validation_error.find("background-repeat") != std::string::npos);
+    CHECK(validation_error.find("round no-repeat") != std::string::npos);
+    // Validation rejects before any primary or optional render/diff evidence
+    // can become publishable output.
+    CHECK_FALSE(fs::exists(request.output_file));
+    CHECK_FALSE(fs::exists(
+        request.output_file.parent_path() / "ui-claude-design-render.png"));
+    CHECK_FALSE(fs::exists(
+        request.output_file.parent_path() / "ui-claude-design-diff.png"));
+}
+
 TEST_CASE("browser validation is required with and without --validate",
           "[import-design][browser-capture][cli-adapter][validation-contract]") {
     TempTree tree;
@@ -1198,6 +1254,10 @@ TEST_CASE("native browser validation refuses unpainted fallbacks before scoring"
     ir.root.style.height = 32.0f;
     ir.root.attributes["native_nodes_element_capture_fallback"] = "2";
     ir.root.attributes["native_nodes_unpainted_area_fraction"] = "2.0000";
+    pulp::view::IRNode fallback;
+    fallback.attributes["capture_fallback_reason"] = "background-repeat";
+    fallback.attributes["capture_fallback_detail"] = "repeat space";
+    ir.root.children.push_back(std::move(fallback));
 
     auto root = pulp::view::build_native_view_tree(ir, ir.asset_manifest);
     REQUIRE(root);
@@ -1218,6 +1278,8 @@ TEST_CASE("native browser validation refuses unpainted fallbacks before scoring"
     CHECK_FALSE(result.scored);
     CHECK(result.error.find("2 painted element fallback(s)") !=
           std::string::npos);
+    CHECK(result.error.find("background-repeat") != std::string::npos);
+    CHECK(result.error.find("repeat space") != std::string::npos);
     CHECK(result.error.find("2.000000") != std::string::npos);
     CHECK_FALSE(fs::exists(tree.root / "render.png"));
     CHECK_FALSE(fs::exists(tree.root / "diff.png"));

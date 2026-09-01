@@ -108,6 +108,27 @@ import attempt_artifacts
 import toolchain_headers
 
 SDK = fetch_sdk.installed_at() or fetch_sdk.DEST
+# Where Rack symlinks its own dylib at startup, and therefore the only path a
+# plugin's libRack load command may name.
+RACK_RUNTIME_LIB = "/tmp/Rack2/libRack.dylib"
+
+
+def rack_link_command_missing(lib: str) -> str:
+    """Why this dylib would fail to load in Rack, or "" if it would load.
+
+    Reads LOAD COMMANDS, not symbols. Every dlopen gate we have runs the
+    plugin inside a process that already linked libRack, so the missing link
+    is invisible to all of them; the load commands are where it shows.
+    """
+    if sys.platform != "darwin":
+        return ""
+    out = subprocess.run(["otool", "-L", lib],
+                         capture_output=True, text=True).stdout
+    if RACK_RUNTIME_LIB in out:
+        return ""
+    return (f"{os.path.basename(lib)} does not load libRack from "
+            f"{RACK_RUNTIME_LIB}; Rack will refuse it with "
+            f"'symbol not found in flat namespace'. otool -L said:\n{out}")
 
 
 def resolve_sdk(log=lambda _msg: None) -> str:
@@ -645,12 +666,31 @@ def compile_all(tmp):
     if errs:
         return False, "\n".join(errs), []
     lib = os.path.join(tmp, "plugin.dylib")
+    # `-lRack` AND `-undefined dynamic_lookup`, not one or the other. The SDK's
+    # own plugin.mk applies `-L$(RACK_DIR) -lRack` unconditionally and then
+    # ADDS the flat-namespace flag on macOS -- the flag is additive, not a
+    # replacement for the link. Taking only the flag produces a dylib with 140
+    # undefined `rack::` symbols and no libRack load command, which resolves
+    # fine inside any host that already linked libRack (every gate we have)
+    # and fails in the one place that matters: `Could not load plugin: dlopen
+    # failed: symbol not found in flat namespace`, in the user's Rack.
     r = subprocess.run(["clang++", "-shared", "-o", lib, *objs,
+                        f"-L{SDK}", "-lRack",
                         "-undefined", "dynamic_lookup",
                         *_signal_platform_link_args()],
                        capture_output=True, text=True)
     if r.returncode != 0:
         return False, r.stderr, []
+    # libRack's own install name is the bare `libRack.dylib`, and a bare name
+    # does not consult LC_RPATH -- so the load command has to name the path
+    # Rack symlinks at startup. plugin.mk's `dist:` target does exactly this.
+    r = subprocess.run(["install_name_tool", "-change", "libRack.dylib",
+                        RACK_RUNTIME_LIB, lib], capture_output=True, text=True)
+    if r.returncode != 0:
+        return False, f"could not repoint the libRack load command: {r.stderr}", []
+    missing = rack_link_command_missing(lib)
+    if missing:
+        return False, missing, []
     # The entry point must be exported, or Rack's dlsym returns null and the
     # plugin fails to load with no diagnostic at all.
     nm = subprocess.run(["nm", "-gU", lib], capture_output=True, text=True).stdout

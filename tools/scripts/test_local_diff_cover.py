@@ -24,6 +24,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -502,6 +503,96 @@ class TargetedCtestTests(unittest.TestCase):
         self.assertIn('INVALID_PROFILE_SHARDS}" -gt 25', text)
         self.assertIn("INVALID_PROFILE_SHARDS * 100", text)
         self.assertIn("PROFILE_SHARDS * 5", text)
+
+    def test_profile_merge_uses_one_input_file_not_overwriting_xargs_batches(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn('PROFILE_LIST="${BUILD_DIR}/coverage/profraw-files.txt"', text)
+        self.assertIn('--input-files="${profile_list}" -o "${profdata}"', text)
+        self.assertNotIn(
+            "xargs -0 llvm-profdata merge",
+            text,
+            "xargs splits a full profile set across argv-sized batches; each "
+            "batch overwrites the same profdata output and drops earlier hits",
+        )
+
+    def test_profile_merge_preserves_all_spaced_comma_path_shards(self) -> None:
+        """Native input lists merge every controlled shard despite parent-path punctuation."""
+        compiler = shutil.which("clang")
+        profdata = shutil.which("llvm-profdata")
+        if profdata is None and shutil.which("xcrun"):
+            xcrun = subprocess.run(
+                ["xcrun", "-f", "llvm-profdata"],
+                capture_output=True,
+                text=True,
+            )
+            if xcrun.returncode == 0:
+                profdata = xcrun.stdout.strip()
+        if compiler is None or profdata is None:
+            self.skipTest("clang and llvm-profdata are required by the coverage gate")
+
+        with tempfile.TemporaryDirectory(prefix="pulp profile, shards ") as raw:
+            root = pathlib.Path(raw)
+            source = root / "profile_fixture.c"
+            binary = root / "profile_fixture"
+            source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+            subprocess.run(
+                [compiler, "-fprofile-instr-generate", str(source), "-o", str(binary)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            profiles = root / "raw profiles"
+            profiles.mkdir()
+            for name in ("pulp-one.profraw", "pulp-two.profraw"):
+                env = os.environ.copy()
+                env["LLVM_PROFILE_FILE"] = str(profiles / name)
+                subprocess.run([str(binary)], env=env, check=True)
+            # llvm-profdata must warn about — and continue past — an isolated
+            # malformed shard. Keep the managed prefix so it exercises the
+            # exact list discovery path rather than an arbitrary file glob.
+            (profiles / "pulp-malformed.profraw").write_bytes(b"not a profile")
+
+            profile_list = root / "coverage files.txt"
+            merged = root / "merged.profdata"
+            merge_log = root / "merge.log"
+            env = os.environ.copy()
+            env["PULP_DIFF_COVER_LIB_ONLY"] = "1"
+            env["PATH"] = f"{pathlib.Path(profdata).parent}{os.pathsep}{env['PATH']}"
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f'source "{SCRIPT}"\n'
+                    'merge_coverage_profiles "$1" "$2" "$3" "$4"',
+                    "bash",
+                    str(profiles),
+                    str(profile_list),
+                    str(merged),
+                    str(merge_log),
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                profile_list.read_text(encoding="utf-8").splitlines(),
+                ["./pulp-malformed.profraw", "./pulp-one.profraw", "./pulp-two.profraw"],
+                "the generated input list must contain every controlled relative shard",
+            )
+            log = merge_log.read_text(encoding="utf-8")
+            warnings = re.findall(r"^(?:warning|error): .*\.profraw:", log, re.MULTILINE)
+            self.assertEqual(warnings, ["warning: ./pulp-malformed.profraw:"], log)
+
+            shown = subprocess.run(
+                [profdata, "show", "--all-functions", "--counts", str(merged)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertRegex(shown.stdout, r"(?s)main:.*?Function count: 2")
 
 
 class RequiredGateCtestSelectionTests(unittest.TestCase):
@@ -1435,6 +1526,11 @@ def _run_script(root: pathlib.Path, env_extra: dict | None = None,
     env.pop("PULP_DIFF_COVER_LIB_ONLY", None)
     env.pop("PULP_SKIP_DIFF_COVER", None)
     env.pop("PULP_DIFF_COVER_MIN_FREE_GIB", None)
+    # Fixtures own their compare authority. A pre-push hook exports its live
+    # origin/main override into the CTest environment; inheriting it here
+    # makes these throwaway repositories fetch an authority they deliberately
+    # do not have instead of exercising their configured local base.
+    env.pop("PULP_DIFF_COVER_COMPARE_BRANCH", None)
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -1509,6 +1605,24 @@ class DiskPreconditionTests(unittest.TestCase):
         self.assertNotIn(
             self.BUILD_MARKER, r.stdout + r.stderr,
             "the coverage configure started anyway — the check must precede it",
+        )
+
+    def test_fixture_authority_ignores_parent_compare_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = _worktree_with_config(pathlib.Path(td), "wt", 999_999)
+            prior = os.environ.get("PULP_DIFF_COVER_COMPARE_BRANCH")
+            os.environ["PULP_DIFF_COVER_COMPARE_BRANCH"] = "origin/main"
+            try:
+                r = _run_script(root)
+            finally:
+                if prior is None:
+                    os.environ.pop("PULP_DIFF_COVER_COMPARE_BRANCH", None)
+                else:
+                    os.environ["PULP_DIFF_COVER_COMPARE_BRANCH"] = prior
+        self.assertEqual(r.returncode, self.DISK_EXIT, r.stdout + r.stderr)
+        self.assertNotIn(
+            "fresh compare authority is unavailable", r.stdout + r.stderr,
+            "the fixture must retain its configured local compare branch",
         )
 
     def test_message_names_disk_space_and_the_remedy(self) -> None:
