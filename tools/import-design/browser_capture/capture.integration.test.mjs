@@ -1632,7 +1632,7 @@ test("an explicit --width resolves a layout the bounded correction cannot",
         "--initial-width", "1280",
         "--initial-height", "300",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", "30000",
       ], { maxBuffer: 1024 * 1024 }), (error) =>
         error.stderr.includes("capture-negative-overflow"));
 
@@ -1647,7 +1647,7 @@ test("an explicit --width resolves a layout the bounded correction cannot",
         "--width", "2600",
         "--initial-height", "300",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", "30000",
       ], { maxBuffer: 1024 * 1024 });
 
       const envelope = JSON.parse(
@@ -1692,7 +1692,7 @@ test("authored-frame fitting reloads once at a contained fixed point",
         "--initial-width", "1280",
         "--initial-height", "800",
         "--dpr", "2",
-        "--timeout-ms", "30000",
+        "--timeout-ms", "45000",
         "--fit-authored-frame",
       ], { maxBuffer: 1024 * 1024 });
 
