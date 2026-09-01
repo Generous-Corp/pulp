@@ -9,7 +9,9 @@ import binascii
 import datetime as dt
 import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import sys
@@ -95,6 +97,55 @@ def local_artifact(path: Path, label: str) -> dict[str, str]:
     except OSError as error:
         raise Failure(f"{label} cannot be read: {error}") from error
     return {"path": str(resolved), "sha256": digest}
+
+
+def read_descriptor(descriptor: int, size: int) -> bytes:
+    return os.read(descriptor, size)
+
+
+def sha256_opened_regular_file(path: Path, label: str) -> str:
+    """Hash one unchanged regular-file inode without following a symlink."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise Failure(f"{label} cannot be securely opened: {error}") from error
+    try:
+        before = os.fstat(descriptor)
+        require(stat.S_ISREG(before.st_mode), f"{label} must be a regular file")
+        try:
+            path_before = os.stat(path, follow_symlinks=False)
+        except OSError as error:
+            raise Failure(f"{label} path changed after opening: {error}") from error
+        require(not stat.S_ISLNK(path_before.st_mode)
+                and (path_before.st_dev, path_before.st_ino) ==
+                    (before.st_dev, before.st_ino),
+                f"{label} path changed or traverses a symlink")
+
+        digest = hashlib.sha256()
+        while True:
+            chunk = read_descriptor(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+
+        after = os.fstat(descriptor)
+        try:
+            path_after = os.stat(path, follow_symlinks=False)
+        except OSError as error:
+            raise Failure(f"{label} path changed while being read: {error}") from error
+        stable_fields = ("st_dev", "st_ino", "st_mode", "st_size",
+                         "st_mtime_ns", "st_ctime_ns")
+        require(all(getattr(before, field) == getattr(after, field)
+                    for field in stable_fields)
+                and not stat.S_ISLNK(path_after.st_mode)
+                and (path_after.st_dev, path_after.st_ino) ==
+                    (after.st_dev, after.st_ino),
+                f"{label} changed while being read")
+        return digest.hexdigest()
+    finally:
+        os.close(descriptor)
 
 
 def resolve_commit(repo: Path, revision: str, label: str) -> str:
@@ -233,6 +284,7 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
     parser.add_argument("--protected-ref", required=True)
     parser.add_argument("--trusted-hosts", type=Path, required=True)
     parser.add_argument("--producer-binary", type=Path, required=True)
+    parser.add_argument("--expected-producer-binary-path", required=True)
     parser.add_argument("--expected-implementation-revision", required=True)
     parser.add_argument("--expected-producer-build-id", required=True)
     parser.add_argument("--expected-producer-code-signature", required=True)
@@ -362,13 +414,14 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
                 and adapter.get("device") == attestation["selection"]["device"],
                 "selected adapter/backend/device does not match the protected GPU-health result")
 
-        binary = args.producer_binary.resolve()
-        require(str(binary) == attestation["producer"]["binary_path"],
-                "producer binary path does not match the signed run")
-        try:
-            binary_digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-        except OSError as error:
-            raise Failure(f"producer binary cannot be read: {error}") from error
+        signed_binary_path = args.expected_producer_binary_path
+        require(isinstance(signed_binary_path, str) and signed_binary_path,
+                "expected producer binary path must not be empty")
+        require(signed_binary_path == attestation["producer"]["binary_path"],
+                "producer binary path does not match verifier policy")
+        binary_digest = sha256_opened_regular_file(
+            args.producer_binary, "producer binary byte source"
+        )
         require(binary_digest == attestation["producer"]["binary_sha256"],
                 "producer binary digest does not match the signed run")
 
@@ -477,7 +530,7 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
                 "matched_key_fingerprint": fingerprint,
             },
             "producer": {
-                "binary_path": str(binary),
+                "binary_path": signed_binary_path,
                 "binary_sha256": binary_digest,
                 "build_id": attestation["producer"]["build_id"],
                 "code_signature_identity": attestation["producer"]["code_signature"],

@@ -106,7 +106,8 @@ python3 tools/scripts/verify_gpu_health_run_attestation.py \
   --attestation-path docs/validation/gpu-health/a1/m5/run-attestation.json \
   --protected-ref origin/main \
   --trusted-hosts /path/to/local/trusted-gpu-hosts.json \
-  --producer-binary /absolute/path/to/pulp-cpp \
+  --producer-binary /private/read-only/snapshot/pulp-cpp \
+  --expected-producer-binary-path /absolute/signed/path/to/pulp-cpp \
   --expected-implementation-revision '<40-character implementation SHA>' \
   --expected-producer-build-id '<exact build ID>' \
   --expected-producer-code-signature '<exact code-signature identity or digest>' \
@@ -123,6 +124,13 @@ python3 tools/scripts/verify_gpu_health_run_attestation.py \
 it must be the exact lowercase 40-hex commit ID. The attestation revision and
 protected ref are resolved once to immutable commits; the verifier's freshness
 clock is always the current system UTC time and has no command-line override.
+`--expected-producer-binary-path` is the exact logical path signed by the
+attestation. `--producer-binary` is only the local regular-file byte source: the
+verifier opens it without symlink traversal, hashes that one descriptor, and
+fails if its inode, path, size, or timestamps change during the read. It may
+therefore be a private read-only snapshot at a different path. The snapshot
+path is never emitted; the verification record retains the signed logical path
+and the verified digest.
 
 On success, stdout is exactly one canonical JSON record conforming to
 [`pulp.gpu-health-run-attestation-verification.v1`](../contracts/gpu-health-run-attestation-verification-v1.schema.json).

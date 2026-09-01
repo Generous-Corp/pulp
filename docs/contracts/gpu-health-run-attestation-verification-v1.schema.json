@@ -78,8 +78,14 @@
       "type": "object", "additionalProperties": false,
       "required": ["binary_path", "binary_sha256", "build_id", "code_signature_identity"],
       "properties": {
-        "binary_path": { "$ref": "#/$defs/local_path" },
-        "binary_sha256": { "$ref": "#/$defs/sha256" },
+        "binary_path": {
+          "$ref": "#/$defs/local_path",
+          "description": "Signed logical producer path matched to explicit verifier policy; not the verifier's private local byte-source path."
+        },
+        "binary_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "SHA-256 of the separately opened and unchanged local producer byte source, equal to the signed digest."
+        },
         "build_id": { "$ref": "#/$defs/identity" },
         "code_signature_identity": { "$ref": "#/$defs/identity" }
       }

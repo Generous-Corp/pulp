@@ -155,6 +155,7 @@ class Fixture:
             "--protected-ref", protected_ref,
             "--trusted-hosts", self.trust,
             "--producer-binary", self.binary,
+            "--expected-producer-binary-path", self.binary.resolve(),
             "--expected-implementation-revision", self.implementation,
             "--expected-producer-build-id", "pulp-build-fixture",
             "--expected-producer-code-signature", "adhoc:fixture-cdhash",
@@ -275,6 +276,8 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                          MACHINE_ID_SHA256)
         self.assertEqual(record["trusted_host"]["key_type"], "ssh-ed25519")
         self.assertEqual(record["producer"]["build_id"], "pulp-build-fixture")
+        self.assertEqual(record["producer"]["binary_path"],
+                         str(self.fixture.binary.resolve()))
         self.assertEqual(record["verifier"]["contract_version"], 1)
         verifier_artifacts = [record["verifier"]["entrypoint"],
                               *record["verifier"]["dependencies"]]
@@ -563,6 +566,86 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         result = self.fixture.verify()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("binary digest", result.stderr)
+
+    def test_private_producer_snapshot_verifies_without_publishing_its_path(self) -> None:
+        snapshot = Path(self.temp.name) / "private-snapshot" / "pulp-cpp.snapshot"
+        snapshot.parent.mkdir()
+        shutil.copyfile(self.fixture.binary, snapshot)
+        result = self.fixture.verify("--producer-binary", str(snapshot))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        record = json.loads(result.stdout)
+        self.assertEqual(record["producer"]["binary_path"],
+                         str(self.fixture.binary.resolve()))
+        self.assertEqual(record["producer"]["binary_sha256"],
+                         hashlib.sha256(snapshot.read_bytes()).hexdigest())
+        self.assertNotIn(str(snapshot), result.stdout)
+
+    def test_signed_logical_producer_path_substitution_fails(self) -> None:
+        result = self.fixture.verify(
+            "--expected-producer-binary-path", "/substituted/logical/pulp-cpp"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("path does not match verifier policy", result.stderr)
+
+    def test_signed_logical_producer_path_policy_is_required(self) -> None:
+        arguments = [str(argument) for argument in self.fixture.verify_arguments()]
+        option = arguments.index("--expected-producer-binary-path")
+        del arguments[option:option + 2]
+        result = run("python3", VERIFIER, *arguments, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("--expected-producer-binary-path", result.stderr)
+
+    def test_producer_byte_source_symlink_is_rejected(self) -> None:
+        symlink = Path(self.temp.name) / "producer-symlink"
+        symlink.symlink_to(self.fixture.binary)
+        result = self.fixture.verify("--producer-binary", str(symlink))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("cannot be securely opened", result.stderr)
+
+    def test_producer_byte_source_mutation_during_read_is_rejected(self) -> None:
+        original_read = verifier.read_descriptor
+        mutated = False
+
+        def mutate_after_read(descriptor: int, size: int) -> bytes:
+            nonlocal mutated
+            chunk = original_read(descriptor, size)
+            if chunk and not mutated:
+                self.fixture.binary.write_bytes(b"mutated during verification\n")
+                mutated = True
+            return chunk
+
+        with mock.patch.object(verifier, "read_descriptor",
+                               side_effect=mutate_after_read):
+            result = self.fixture.verify()
+        self.assertTrue(mutated)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("changed while being read", result.stderr)
+
+    def test_producer_byte_source_path_replacement_during_read_is_rejected(self) -> None:
+        replacement = Path(self.temp.name) / "replacement-producer"
+        replacement.write_bytes(self.fixture.binary.read_bytes())
+        original_read = verifier.read_descriptor
+        replaced = False
+
+        def replace_after_read(descriptor: int, size: int) -> bytes:
+            nonlocal replaced
+            chunk = original_read(descriptor, size)
+            if chunk and not replaced:
+                replacement.replace(self.fixture.binary)
+                replaced = True
+            return chunk
+
+        with mock.patch.object(verifier, "read_descriptor",
+                               side_effect=replace_after_read):
+            result = self.fixture.verify()
+        self.assertTrue(replaced)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("changed while being read", result.stderr)
 
     def test_untrusted_signer_fails(self) -> None:
         other_key = Path(self.temp.name) / "other-key"

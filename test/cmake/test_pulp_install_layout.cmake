@@ -166,7 +166,8 @@ execute_process(
     OUTPUT_VARIABLE _gpu_health_verifier_help_stdout
     ERROR_VARIABLE _gpu_health_verifier_help_stderr)
 if(NOT _gpu_health_verifier_help_rc EQUAL 0 OR
-   NOT _gpu_health_verifier_help_stdout MATCHES "--attestation-revision")
+   NOT _gpu_health_verifier_help_stdout MATCHES "--attestation-revision" OR
+   NOT _gpu_health_verifier_help_stdout MATCHES "--expected-producer-binary-path")
     message(FATAL_ERROR
         "Installed GPU health attestation verifier is not runnable as a closed bundle:\n"
         "${_gpu_health_verifier_help_stdout}\n${_gpu_health_verifier_help_stderr}")
