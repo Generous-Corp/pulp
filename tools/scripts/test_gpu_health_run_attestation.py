@@ -31,12 +31,16 @@ import json_schema_lite  # noqa: E402
 import gpu_health_run_attestation as producer  # noqa: E402
 import verify_gpu_health_run_attestation as verifier  # noqa: E402
 
-MACHINE_ID_SHA256 = producer.stable_machine_id_sha256(RAW_MACHINE_ID)
+MACHINE_ID_SHA256 = hashlib.sha256(
+    b"pulp.gpu-health.machine.v1\0" + RAW_MACHINE_ID.encode("utf-8")
+).hexdigest()
 
 
-def run(*args: str | Path, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
+def run(*args: str | Path, cwd: Path | None = None, check: bool = True,
+        input_text: str | None = None) -> subprocess.CompletedProcess:
     result = subprocess.run([str(arg) for arg in args], cwd=cwd, text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                            input=input_text, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, check=False)
     if check and result.returncode:
         raise AssertionError(f"command failed: {args}\n{result.stdout}\n{result.stderr}")
     return result
@@ -106,8 +110,12 @@ class Fixture:
         self.attestation = self.head()
         run("git", "branch", "protected", self.attestation, cwd=self.repo)
 
-    def produce(self, evidence: str, created_at: str, output: Path | None = None,
-                signing_key: Path | None = None) -> subprocess.CompletedProcess:
+    def produce(
+        self, evidence: str, created_at: str, output: Path | None = None,
+        signing_key: Path | None = None,
+        machine_input: str = RAW_MACHINE_ID + "\n",
+        machine_option: tuple[str, ...] = ("--stable-machine-id-stdin",),
+    ) -> subprocess.CompletedProcess:
         output = output or self.repo / self.attestation_path
         signing_key = signing_key or self.key
         return run("python3", PRODUCER,
@@ -116,7 +124,7 @@ class Fixture:
             "--output", output,
             "--signing-key", signing_key,
             "--host-id", "m5",
-            "--stable-machine-id", RAW_MACHINE_ID,
+            *machine_option,
             "--configuration", "power=low;fallback=false",
             "--probe-id", "gpu-compute-magnitude",
             "--implementation-revision", self.implementation,
@@ -124,7 +132,7 @@ class Fixture:
             "--producer-binary", self.binary,
             "--producer-build-id", "pulp-build-fixture",
             "--producer-code-signature", "adhoc:fixture-cdhash",
-            "--created-at", created_at, check=False)
+            "--created-at", created_at, check=False, input_text=machine_input)
 
     def commit(self, message: str) -> None:
         run("git", "add", ".", cwd=self.repo)
@@ -267,7 +275,12 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         ).hexdigest()
         self.assertEqual(producer.MACHINE_ID_DOMAIN,
                          b"pulp.gpu-health.machine.v1\0")
-        self.assertEqual(producer.stable_machine_id_sha256(RAW_MACHINE_ID), expected)
+        self.assertEqual(
+            producer.read_stable_machine_id_sha256(
+                io.BytesIO(raw + b"\n"), is_tty=False
+            ),
+            expected,
+        )
         self.assertNotEqual(expected, hashlib.sha256(raw).hexdigest())
         self.assertNotEqual(
             expected,
@@ -281,6 +294,49 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         self.assertNotIn(RAW_MACHINE_ID, output.read_text())
         self.assertNotIn(RAW_MACHINE_ID, result.stdout)
         self.assertNotIn(RAW_MACHINE_ID, result.stderr)
+        self.assertNotIn(RAW_MACHINE_ID, " ".join(result.args))
+
+    def test_raw_machine_id_argv_option_is_rejected(self) -> None:
+        output = Path(self.temp.name) / "argv-refused.json"
+        result = self.fixture.produce(
+            self.fixture.evidence, CREATED, output,
+            machine_option=(
+                "--stable-machine-id-stdin",
+                "--stable-machine-id", "forbidden-argv-value",
+            ),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments: --stable-machine-id", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_machine_id_stdin_rejects_empty_multiline_nul_and_oversize(self) -> None:
+        cases = (
+            ("empty", "\n", "must not be empty"),
+            ("multiline", "first\nsecond\n", "multiple lines or trailing data"),
+            ("nul", "first\0second\n", "must not contain NUL"),
+            ("oversize", "x" * 1025 + "\n", "1024-byte limit"),
+            ("unterminated", "one-line", "LF-terminated"),
+        )
+        for label, machine_input, expected in cases:
+            with self.subTest(label=label):
+                output = Path(self.temp.name) / f"stdin-{label}.json"
+                result = self.fixture.produce(
+                    self.fixture.evidence, CREATED, output,
+                    machine_input=machine_input,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+                self.assertFalse(output.exists())
+
+    def test_machine_id_stdin_refuses_interactive_tty_and_invalid_utf8(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "non-interactive pipe"):
+            producer.read_stable_machine_id_sha256(
+                io.BytesIO(b"private\n"), is_tty=True
+            )
+        with self.assertRaisesRegex(SystemExit, "valid UTF-8"):
+            producer.read_stable_machine_id_sha256(
+                io.BytesIO(b"\xff\n"), is_tty=False
+            )
 
     def test_mutable_attestation_ref_is_resolved_once(self) -> None:
         valid_revision = self.fixture.attestation

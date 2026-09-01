@@ -57,12 +57,13 @@ pre-provisioned Ed25519 SSH host key. It never creates a key or changes host
 configuration:
 
 ```bash
+private-host-inventory read-stable-machine-id | \
 python3 tools/scripts/gpu_health_run_attestation.py \
   --repository "$PWD" \
   --health-result docs/validation/gpu-health/a1/m5/pulp-doctor-gpu.json \
   --output docs/validation/gpu-health/a1/m5/run-attestation.json \
   --signing-key /path/to/pre-provisioned/m5-ed25519 \
-  --host-id m5 --stable-machine-id "$PULP_PRIVATE_STABLE_MACHINE_ID" \
+  --host-id m5 --stable-machine-id-stdin \
   --configuration 'power=low;fallback=false' \
   --probe-id gpu-compute-magnitude \
   --implementation-revision '<40-character implementation SHA>' \
@@ -72,8 +73,13 @@ python3 tools/scripts/gpu_health_run_attestation.py \
   --producer-code-signature '<exact code-signature identity or digest>'
 ```
 
-`PULP_PRIVATE_STABLE_MACHINE_ID` is private local input and must not be copied
-into the evidence tree or logs. The producer publishes only
+The private inventory tool must write exactly one non-empty LF-terminated UTF-8
+identifier of at most 1024 bytes. The producer refuses an interactive terminal,
+NUL, multiple lines, trailing data, invalid UTF-8, and oversized input. No
+machine identifier is accepted through argv or environment variables, and
+stdin has no competing JSON or evidence role. The raw value must not be copied
+into the evidence tree or logs. The producer hashes it immediately and
+publishes only
 `stable_machine_id_sha256`, computed as SHA-256 over the ASCII domain
 `pulp.gpu-health.machine.v1`, one NUL byte, and the exact UTF-8 bytes of the raw
 identifier. This non-reversible pseudonym deliberately makes the same machine

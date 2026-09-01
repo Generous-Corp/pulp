@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 import json_schema_lite
@@ -20,6 +21,7 @@ NAMESPACE = SCHEMA
 SCHEMA_PATH = "docs/contracts/gpu-health-run-attestation-v1.schema.json"
 HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v2.schema.json"
 MACHINE_ID_DOMAIN = b"pulp.gpu-health.machine.v1\0"
+MAX_STABLE_MACHINE_ID_BYTES = 1024
 
 
 def fail(message: str) -> None:
@@ -35,11 +37,28 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def stable_machine_id_sha256(raw_stable_machine_id: str) -> str:
-    """Pseudonymize the exact private UTF-8 identifier in Pulp's evidence domain."""
-    if not isinstance(raw_stable_machine_id, str) or not raw_stable_machine_id:
-        fail("stable machine ID must be a non-empty private value")
-    return sha256(MACHINE_ID_DOMAIN + raw_stable_machine_id.encode("utf-8"))
+def read_stable_machine_id_sha256(stream, *, is_tty: bool | None = None) -> str:
+    """Read one private LF-terminated UTF-8 identifier and return only its digest."""
+    interactive = stream.isatty() if is_tty is None else is_tty
+    if interactive:
+        fail("stable machine ID stdin must be a non-interactive pipe")
+    value = stream.read(MAX_STABLE_MACHINE_ID_BYTES + 2)
+    if len(value) > MAX_STABLE_MACHINE_ID_BYTES + 1:
+        fail("stable machine ID stdin exceeds the 1024-byte limit")
+    if not value.endswith(b"\n"):
+        fail("stable machine ID stdin must contain exactly one LF-terminated value")
+    raw = value[:-1]
+    if not raw:
+        fail("stable machine ID stdin must not be empty")
+    if b"\0" in raw:
+        fail("stable machine ID stdin must not contain NUL")
+    if b"\n" in raw or b"\r" in raw:
+        fail("stable machine ID stdin must not contain multiple lines or trailing data")
+    try:
+        raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        fail("stable machine ID stdin must be valid UTF-8")
+    return sha256(MACHINE_ID_DOMAIN + raw)
 
 
 def strict_json(data: bytes) -> dict:
@@ -120,14 +139,14 @@ def selected_probe(health: dict, probe_id: str) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--health-result", required=True,
                         help="repository-relative result path")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--signing-key", type=Path, required=True)
     parser.add_argument("--host-id", required=True)
-    parser.add_argument("--stable-machine-id", required=True)
+    parser.add_argument("--stable-machine-id-stdin", action="store_true", required=True)
     parser.add_argument("--configuration", required=True)
     parser.add_argument("--probe-id", required=True)
     parser.add_argument("--implementation-revision", required=True)
@@ -137,6 +156,7 @@ def main() -> int:
     parser.add_argument("--producer-code-signature", required=True)
     parser.add_argument("--created-at", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    machine_id_sha256 = read_stable_machine_id_sha256(sys.stdin.buffer)
 
     for label, revision in (("implementation", args.implementation_revision),
                             ("evidence publication", args.evidence_publication_revision)):
@@ -183,9 +203,7 @@ def main() -> int:
         "evidence_publication_revision": args.evidence_publication_revision,
         "host": {
             "host_id": args.host_id,
-            "stable_machine_id_sha256": stable_machine_id_sha256(
-                args.stable_machine_id
-            ),
+            "stable_machine_id_sha256": machine_id_sha256,
         },
         "selection": {
             "configuration": args.configuration,
