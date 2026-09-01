@@ -2064,10 +2064,15 @@ How the seam is wired:
   Its Settings-tab callback must read the bridge's CURRENT preferred size,
   not capture the initial dimensions; otherwise returning from Settings after
   an editor mode switch silently restores the old window shape.
-- `request_editor_resize` returns **false** when no handler is installed (no
-  editor open, or a host with no resize path), when multiple simultaneous
-  editor windows make the processor-level target ambiguous, or when the host
-  refused — the editor must keep its current size then. It is main-thread only.
+- `request_editor_resize` returns **false** when no active handler is installed
+  (no editor open, or a host with no resize path), when multiple simultaneous
+  active editor windows make the processor-level target ambiguous, or when the
+  host refused — the editor must keep its current size then. A host such as
+  Logic may retain a detached AUv2 Cocoa editor object after close, so each
+  registration may provide an `is_active` predicate; stale retained handlers
+  are ignored rather than making a reopened editor permanently ambiguous. Run
+  those predicates outside the side-table mutex because host queries may
+  re-enter teardown. The API remains main-thread only.
 - `ViewBridge::set_preferred_size(w, h)` recomputes `size_hints_` preferred +
   aspect from (w, h) but PRESERVES the min/max drag bounds, so a mode switch
   changes the window's aspect without snapping the resize grips.
@@ -2077,6 +2082,20 @@ the built editor host). An editor that wants a non-default size at OPEN (e.g. a
 reopen straight into a compact mode) must re-request on its first idle/poll tick,
 when the handler is live — the size it chose during `create_view()` predated the
 handler and was dropped.
+
+Gotcha (Logic AUv2): resize the returned editor view exactly once and let Logic
+propagate that geometry to its immediate container and outer plug-in window.
+Resizing Logic's container first applies the delta again through its flexible
+autoresizing mask, producing alternating tiny/huge frames and visible backing
+bars. Never mutate Logic's enclosing `NSWindow`; the host owns its chrome and
+mouse capture. Treat the operation as a transaction: retain the returned view
+and its associated editor owner, suppress the ordinary native resize callback
+while the request is in flight, accept only when both editor and immediate
+container reach the exact requested size without moving their origins, and
+otherwise restore parent first and editor last. Publish `ViewBridge::resize`
+once only after acceptance. The registration's activity predicate must require
+the returned view to still have both a superview and a window, which is what
+keeps close/reopen working when Logic retains the old Cocoa object.
 
 Gotcha (ABI): the handler is stored in a SIDE TABLE
 (`detail::editor_resize_handlers()`, a processor-keyed map of owner-keyed
