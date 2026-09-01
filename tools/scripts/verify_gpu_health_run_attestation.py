@@ -72,6 +72,15 @@ def git_blob(repo: Path, revision: str, path: str) -> bytes:
     return result.stdout
 
 
+def resolve_commit(repo: Path, revision: str, label: str) -> str:
+    result = git(repo, "rev-parse", "--verify", f"{revision}^{{commit}}")
+    require(result.returncode == 0, f"{label} does not resolve to a commit")
+    resolved = result.stdout.decode().strip()
+    require(len(resolved) == 40 and all(c in "0123456789abcdef" for c in resolved),
+            f"{label} did not resolve to an exact lowercase Git revision")
+    return resolved
+
+
 def ancestor(repo: Path, older: str, newer: str, label: str) -> None:
     result = git(repo, "merge-base", "--is-ancestor", older, newer)
     require(result.returncode == 0, label)
@@ -88,6 +97,22 @@ def key_fingerprint(public_key: str) -> str:
     require(result.returncode == 0 and "SHA256:" in result.stdout,
             "trusted host public key is not a readable SSH key")
     return "SHA256:" + result.stdout.split("SHA256:", 1)[1].split()[0]
+
+
+def parse_ed25519_public_key(value: Any) -> str:
+    require(isinstance(value, str) and "\n" not in value and "\r" not in value,
+            "trusted host public key must be one ssh-ed25519 key line")
+    parts = value.split(" ")
+    require(len(parts) == 2 and parts[0] == "ssh-ed25519" and bool(parts[1]),
+            "trusted host public key must be exactly ssh-ed25519")
+    try:
+        blob = base64.b64decode(parts[1], validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise Failure("trusted host Ed25519 public key is malformed") from error
+    prefix = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20"
+    require(len(blob) == len(prefix) + 32 and blob.startswith(prefix),
+            "trusted host Ed25519 public key is malformed")
+    return value
 
 
 def parse_time(value: str, label: str) -> dt.datetime:
@@ -196,12 +221,13 @@ def main() -> int:
     args = parser.parse_args()
     try:
         repo = args.repository.resolve()
-        protected = git(repo, "rev-parse", "--verify", f"{args.protected_ref}^{{commit}}")
-        require(protected.returncode == 0, "protected ref does not resolve to a commit")
-        protected_revision = protected.stdout.decode().strip()
-        ancestor(repo, args.attestation_revision, protected_revision,
+        protected_revision = resolve_commit(repo, args.protected_ref, "protected ref")
+        attestation_revision = resolve_commit(
+            repo, args.attestation_revision, "attestation revision"
+        )
+        ancestor(repo, attestation_revision, protected_revision,
                  "attestation revision is not protected ancestry")
-        attestation_bytes = git_blob(repo, args.attestation_revision, args.attestation_path)
+        attestation_bytes = git_blob(repo, attestation_revision, args.attestation_path)
         attestation = strict_json(attestation_bytes, "run attestation")
         validate_shape(attestation)
         expected = {
@@ -226,9 +252,9 @@ def main() -> int:
         evidence = attestation["evidence_publication_revision"]
         ancestor(repo, implementation, evidence,
                  "implementation revision is not evidence-publication ancestry")
-        ancestor(repo, evidence, args.attestation_revision,
+        ancestor(repo, evidence, attestation_revision,
                  "evidence publication is not attestation-publication ancestry")
-        require(evidence != args.attestation_revision,
+        require(evidence != attestation_revision,
                 "evidence publication must precede the containing attestation revision")
         ancestor(repo, evidence, protected_revision,
                  "evidence publication revision is not protected ancestry")
@@ -307,7 +333,8 @@ def main() -> int:
                         "trusted host")
         require(trusted["stable_machine_id"] == attestation["host"]["stable_machine_id"],
                 "stable machine identity does not match trusted host policy")
-        fingerprint = key_fingerprint(trusted["public_key"])
+        public_key = parse_ed25519_public_key(trusted["public_key"])
+        fingerprint = key_fingerprint(public_key)
         require(fingerprint == attestation["authentication"]["signer_key_fingerprint"],
                 "signer key fingerprint does not match trusted host policy")
         try:
@@ -316,7 +343,7 @@ def main() -> int:
             raise Failure("run-attestation signature is not valid base64") from error
         unsigned = dict(attestation)
         del unsigned["authentication"]
-        verify_signature(unsigned, trusted["public_key"], trusted["host_id"], signature)
+        verify_signature(unsigned, public_key, trusted["host_id"], signature)
 
         require(args.max_age_seconds >= 0, "max age must be non-negative")
         measured = parse_time(health_ref["measured_at_utc"], "measured_at_utc")
@@ -330,7 +357,7 @@ def main() -> int:
     except (Failure, OSError) as error:
         print(f"gpu-health run-attestation verification failed: {error}")
         return 1
-    print("gpu-health run-attestation verified")
+    print(f"gpu-health run-attestation verified revision={attestation_revision}")
     return 0
 
 

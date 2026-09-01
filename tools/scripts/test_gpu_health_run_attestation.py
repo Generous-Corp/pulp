@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
@@ -12,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 PRODUCER = HERE / "gpu_health_run_attestation.py"
@@ -24,6 +27,7 @@ MEASURED = "2026-09-01T06:59:00Z"
 NOW = "2026-09-01T07:05:00Z"
 sys.path.insert(0, str(HERE))
 import json_schema_lite  # noqa: E402
+import verify_gpu_health_run_attestation as verifier  # noqa: E402
 
 
 def run(*args: str | Path, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -88,14 +92,15 @@ class Fixture:
         self.attestation = self.head()
         run("git", "branch", "protected", self.attestation, cwd=self.repo)
 
-    def produce(self, evidence: str, created_at: str,
-                output: Path | None = None) -> subprocess.CompletedProcess:
+    def produce(self, evidence: str, created_at: str, output: Path | None = None,
+                signing_key: Path | None = None) -> subprocess.CompletedProcess:
         output = output or self.repo / self.attestation_path
+        signing_key = signing_key or self.key
         return run("python3", PRODUCER,
             "--repository", self.repo,
             "--health-result", self.health_path,
             "--output", output,
-            "--signing-key", self.key,
+            "--signing-key", signing_key,
             "--host-id", "m5",
             "--stable-machine-id", "platform-uuid-m5",
             "--configuration", "power=low;fallback=false",
@@ -114,11 +119,11 @@ class Fixture:
     def head(self) -> str:
         return run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
 
-    def verify(self, *extra: str, protected_ref: str = "protected") -> subprocess.CompletedProcess:
+    def verify_arguments(self, *extra: str, protected_ref: str = "protected",
+                         attestation_revision: str | None = None) -> list[str | Path]:
         command: list[str | Path] = [
-            "python3", VERIFIER,
             "--repository", self.repo,
-            "--attestation-revision", self.attestation,
+            "--attestation-revision", attestation_revision or self.attestation,
             "--attestation-path", self.attestation_path,
             "--protected-ref", protected_ref,
             "--trusted-hosts", self.trust,
@@ -135,6 +140,14 @@ class Fixture:
             "--now", NOW,
         ]
         command.extend(extra)
+        return command
+
+    def verify(self, *extra: str, protected_ref: str = "protected",
+               attestation_revision: str | None = None) -> subprocess.CompletedProcess:
+        command = ["python3", VERIFIER, *self.verify_arguments(
+            *extra, protected_ref=protected_ref,
+            attestation_revision=attestation_revision,
+        )]
         return run(*command, check=False)
 
     def mutate_attestation(self, operation) -> None:
@@ -146,8 +159,10 @@ class Fixture:
         self.attestation = self.head()
         run("git", "branch", "-f", "protected", self.attestation, cwd=self.repo)
 
-    def publish_adversarially_signed(self, evidence: str) -> None:
+    def publish_adversarially_signed(self, evidence: str,
+                                     signing_key: Path | None = None) -> None:
         """Sign an evidence binding that the real producer correctly refuses."""
+        signing_key = signing_key or self.key
         path = self.repo / self.attestation_path
         value = json.loads(path.read_text())
         health = (self.repo / self.health_path).read_bytes()
@@ -167,9 +182,19 @@ class Fixture:
                 json.dumps(unsigned, allow_nan=False, ensure_ascii=False,
                            separators=(",", ":"), sort_keys=True) + "\n"
             )
-            run("ssh-keygen", "-Y", "sign", "-f", self.key,
+            run("ssh-keygen", "-Y", "sign", "-f", signing_key,
                 "-n", "pulp.gpu-health-run-attestation.v1", statement)
             signature = (Path(str(statement) + ".sig")).read_bytes()
+        public_key = run("ssh-keygen", "-y", "-f", signing_key).stdout.strip()
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as key_file:
+            key_file.write(public_key + "\n")
+            key_file.flush()
+            fingerprint_output = run(
+                "ssh-keygen", "-lf", key_file.name, "-E", "sha256"
+            ).stdout
+        value["authentication"]["signer_key_fingerprint"] = (
+            "SHA256:" + fingerprint_output.split("SHA256:", 1)[1].split()[0]
+        )
         value["authentication"]["signature"] = base64.b64encode(signature).decode()
         path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
         self.commit("publish adversarially signed attestation")
@@ -195,6 +220,46 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
             (self.fixture.repo / self.fixture.attestation_path).read_text()
         )
         self.assertEqual(json_schema_lite.validate(attestation, schema), [])
+
+    def test_mutable_attestation_ref_is_resolved_once(self) -> None:
+        valid_revision = self.fixture.attestation
+        path = self.fixture.repo / self.fixture.attestation_path
+        path.write_text('{"moved":"after-resolution"}\n')
+        self.fixture.commit("publish post-resolution substitution")
+        moved_revision = self.fixture.head()
+        run("git", "branch", "moving-attestation", valid_revision,
+            cwd=self.fixture.repo)
+
+        original_git = verifier.git
+        moved = False
+
+        def move_after_resolution(
+            repo: Path, *args: str, input_bytes: bytes | None = None
+        ) -> subprocess.CompletedProcess:
+            nonlocal moved
+            result = original_git(repo, *args, input_bytes=input_bytes)
+            if args == ("rev-parse", "--verify", "moving-attestation^{commit}"):
+                run("git", "branch", "-f", "moving-attestation", moved_revision,
+                    cwd=self.fixture.repo)
+                moved = True
+            return result
+
+        arguments = self.fixture.verify_arguments(
+            attestation_revision="moving-attestation"
+        )
+        output = io.StringIO()
+        with mock.patch.object(sys, "argv", [str(VERIFIER), *map(str, arguments)]), \
+                mock.patch.object(verifier, "git", side_effect=move_after_resolution), \
+                contextlib.redirect_stdout(output):
+            result = verifier.main()
+        self.assertTrue(moved)
+        self.assertEqual(result, 0, output.getvalue())
+        self.assertIn(f"revision={valid_revision}", output.getvalue())
+        self.assertEqual(
+            run("git", "rev-parse", "moving-attestation",
+                cwd=self.fixture.repo).stdout.strip(),
+            moved_revision,
+        )
 
     def test_cross_host_configuration_backend_device_and_adapter_reuse_fails(self) -> None:
         substitutions = {
@@ -252,6 +317,41 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         result = self.fixture.verify()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("fingerprint does not match", result.stdout)
+
+    def test_non_ed25519_and_malformed_trusted_keys_fail_closed(self) -> None:
+        rsa_key = Path(self.temp.name) / "rsa-key"
+        run("ssh-keygen", "-q", "-t", "rsa", "-b", "2048", "-N", "",
+            "-f", rsa_key)
+        refused = self.fixture.produce(
+            self.fixture.evidence, CREATED,
+            Path(self.temp.name) / "rsa-producer-refused.json",
+            signing_key=rsa_key,
+        )
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("not Ed25519", refused.stderr)
+
+        self.fixture.publish_adversarially_signed(
+            self.fixture.evidence, signing_key=rsa_key
+        )
+        rsa_public_key = run("ssh-keygen", "-y", "-f", rsa_key).stdout.strip()
+        trust = json.loads(self.fixture.trust.read_text())
+        trust["hosts"][0]["public_key"] = rsa_public_key
+        self.fixture.trust.write_text(json.dumps(trust, sort_keys=True) + "\n")
+        result = self.fixture.verify()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exactly ssh-ed25519", result.stdout)
+
+        for label, public_key, expected in (
+            ("ecdsa", "ecdsa-sha2-nistp256 AAAA", "exactly ssh-ed25519"),
+            ("unsupported", "ssh-dss AAAA", "exactly ssh-ed25519"),
+            ("malformed", "ssh-ed25519 !!!!", "malformed"),
+        ):
+            with self.subTest(label=label):
+                trust["hosts"][0]["public_key"] = public_key
+                self.fixture.trust.write_text(json.dumps(trust, sort_keys=True) + "\n")
+                result = self.fixture.verify()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stdout)
 
     def test_health_result_schema_and_semantic_failures_are_rejected_before_signing(self) -> None:
         health_path = self.fixture.repo / self.fixture.health_path
