@@ -31,6 +31,7 @@ Every check here is paired with a control that must come out the other way. A
 gate for a defect that was invisible to five other gates has to prove, on
 every run, that it can still see it.
 """
+import contextlib
 import os
 import subprocess
 import sys
@@ -102,6 +103,28 @@ def dlopens(probe, lib):
     return r.returncode == 0, (r.stderr or "").strip()
 
 
+@contextlib.contextmanager
+def provision_rack_runtime(sdk_lib):
+    """Make Rack's absolute runtime install name resolvable for this probe."""
+    runtime_lib = generate.RACK_RUNTIME_LIB
+    runtime_dir = os.path.dirname(runtime_lib)
+    created_dir = False
+    created_link = False
+    if not os.path.isdir(runtime_dir):
+        os.makedirs(runtime_dir)
+        created_dir = True
+    if not os.path.lexists(runtime_lib):
+        os.symlink(sdk_lib, runtime_lib)
+        created_link = True
+    try:
+        yield
+    finally:
+        if created_link:
+            os.unlink(runtime_lib)
+        if created_dir:
+            os.rmdir(runtime_dir)
+
+
 def main() -> int:
     if sys.platform != "darwin":
         print("skip   this defect is macOS flat-namespace linkage")
@@ -128,7 +151,7 @@ def main() -> int:
             bad += 1
             print(f"  WRONG  {name}\n         {detail}")
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp, provision_rack_runtime(sdk_lib):
         unlinked, err = build(tmp, "unlinked.dylib", link_rack=False)
         if unlinked is None:
             print(f"skip   the probe plugin did not compile:\n{err}")

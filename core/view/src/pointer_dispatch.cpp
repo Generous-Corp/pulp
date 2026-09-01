@@ -260,6 +260,9 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     me.pointer_id = pointer.pointer_id;
     me.altitude_angle = pointer.altitude_angle;
     me.azimuth_angle = pointer.azimuth_angle;
+    me.movement_x = pointer.movement_x;
+    me.movement_y = pointer.movement_y;
+    me.has_movement_delta = pointer.has_movement_delta;
     dispatch_dom_pointer_event(root, target, me, true);
 
     // The legacy callbacks carry no button identity and historically mean the
@@ -693,8 +696,9 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
     // dismiss_active_overlay() rather than the bare release_overlay() so React
     // state can flip setOpen(false) via on_overlay_dismissed; a bare release
     // leaves the component believing it is still open.
+    const bool consume_press = overlay->overlay_consumes_outside_click();
     View::dismiss_active_overlay(root);
-    return {OverlayPressRouting::dismissed, nullptr};
+    return {OverlayPressRouting::dismissed, nullptr, consume_press};
 }
 
 }  // namespace pulp::view

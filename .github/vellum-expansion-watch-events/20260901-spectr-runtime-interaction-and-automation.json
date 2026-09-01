@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260901-spectr-runtime-interaction-and-automation",
+  "created_at": "2026-09-01T08:24:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned plugin runtime improvements for popup dismissal, macOS cursor feedback, AUv2 host resizing, and realtime spectral automation. These changes improve the generic SDK behavior inherited by Spectr without transferring implementation authority or changing the accepted Vellum expansion boundary.",
+  "tests": [
+    "pulp-test-au-v2-cocoa-ui",
+    "pulp-test-au-v2-effect",
+    "pulp-browser-capture-node-integration",
+    "pulp-test-overlay-routing",
+    "pulp-test-plugin-view-hover-macos",
+    "pulp-test-spectral-primitives",
+    "pulp-test-view-bridge",
+    "pulp-test-widget-bridge-rn-style",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

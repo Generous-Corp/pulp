@@ -120,6 +120,9 @@ struct MouseEvent {
     float pressure = 0.5f;       ///< 0.0–1.0 (0.5 = default for mouse)
     float altitude_angle = 0;    ///< Stylus tilt in radians (0 = perpendicular)
     float azimuth_angle = 0;     ///< Stylus rotation in radians (0–2π)
+    float movement_x = 0;        ///< Host-reported horizontal movement since the prior event
+    float movement_y = 0;        ///< Host-reported vertical movement since the prior event
+    bool has_movement_delta = false;  ///< Movement fields came from the native host
 
     bool isShiftDown() const  { return (modifiers & kModShift) != 0; }
     bool isCtrlDown() const   { return (modifiers & kModCtrl) != 0; }

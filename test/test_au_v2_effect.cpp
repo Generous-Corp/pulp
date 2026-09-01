@@ -15,6 +15,7 @@
 // channel-voice message family.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/au_v2_instrument.hpp>  // pulls the MusicDevice SDK (AUMusicLookup)
@@ -23,6 +24,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
+#include <pulp/state/param_cursor.hpp>
 
 #include "support/thread_progress.hpp"
 
@@ -963,6 +965,137 @@ TEST_CASE("AU v2 effect clears OutputIsSilence when the processor generates outp
     REQUIRE(effect.ProcessBufferLists(flags, input.bl, output.bl, kFrames) == noErr);
     REQUIRE((flags & kAudioUnitRenderAction_OutputIsSilence) == 0);
     REQUIRE((flags & kAudioUnitRenderAction_PreRender) != 0);
+
+    effect.DoCleanup();
+}
+
+namespace {
+
+class ScheduledAutomationProcessor final : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUScheduledAutomationTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-scheduled-automation",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 1}},
+            .output_buses = {{"Main Out", 1}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter({.id = 1,
+                             .name = "Gain",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        pulp::state::ParamCursor cursor(state(), param_events());
+        for (std::size_t n = 0; n < output.num_samples(); ++n) {
+            cursor.advance_to(static_cast<int32_t>(n));
+            output.channel_ptr(0)[n] = cursor.value(1);
+        }
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_scheduled_automation_effect() {
+    return std::make_unique<ScheduledAutomationProcessor>();
+}
+
+class TestScheduledEffect final : public pulp::format::au::PulpAUEffect {
+public:
+    TestScheduledEffect() : PulpAUEffect(nullptr) {}
+
+    OSStatus process_scheduled(AudioUnitRenderActionFlags& flags,
+                               AudioBufferList& input,
+                               AudioBufferList& output,
+                               UInt32 frames) {
+        ScheduledProcessParams params{.actionFlags = &flags,
+                                      .inputBufferList = &input,
+                                      .outputBufferList = &output};
+        return ProcessForScheduledParams(GetParamEventList(), frames, &params);
+    }
+
+    void clear_scheduled() { GetParamEventList().clear(); }
+};
+
+}  // namespace
+
+TEST_CASE("AU v2 effect preserves scheduled offsets and ramps for processors",
+          "[au][au-v2][automation][sample-accurate]")
+{
+    const auto previous = pulp::format::registered_factory();
+    pulp::format::register_plugin(create_scheduled_automation_effect);
+    struct RestoreFactory {
+        pulp::format::ProcessorFactory value;
+        ~RestoreFactory() { pulp::format::register_plugin(value); }
+    } restore{previous};
+
+    constexpr UInt32 kFrames = 64;
+    TestScheduledEffect effect;
+    effect.CreateElements();
+    REQUIRE(effect.GetInput(0)->SetStreamFormat(
+                silence_test_format(48000.0, 1)) == noErr);
+    REQUIRE(effect.GetOutput(0)->SetStreamFormat(
+                silence_test_format(48000.0, 1)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    std::array<float, kFrames> input_samples{};
+    std::array<float, kFrames> output_samples{};
+    AudioBufferList input{};
+    input.mNumberBuffers = 1;
+    input.mBuffers[0] = {1, kFrames * sizeof(float), input_samples.data()};
+    AudioBufferList output{};
+    output.mNumberBuffers = 1;
+    output.mBuffers[0] = {1, kFrames * sizeof(float), output_samples.data()};
+
+    AudioUnitParameterEvent immediate{};
+    immediate.eventType = kParameterEvent_Immediate;
+    immediate.parameter = 1;
+    immediate.scope = kAudioUnitScope_Global;
+    immediate.element = 0;
+    immediate.eventValues.immediate.bufferOffset = 16;
+    immediate.eventValues.immediate.value = 1.0f;
+    REQUIRE(effect.ScheduleParameter(&immediate, 1) == noErr);
+
+    AudioUnitRenderActionFlags flags = 0;
+    REQUIRE(effect.process_scheduled(flags, input, output, kFrames) == noErr);
+    for (UInt32 n = 0; n < 16; ++n) REQUIRE(output_samples[n] == 0.0f);
+    for (UInt32 n = 16; n < kFrames; ++n) REQUIRE(output_samples[n] == 1.0f);
+
+    effect.clear_scheduled();
+    REQUIRE(effect.SetParameter(1, kAudioUnitScope_Global, 0, 0.0f, 0) == noErr);
+    output_samples.fill(-1.0f);
+    input.mBuffers[0] = {1, kFrames * sizeof(float), input_samples.data()};
+    output.mBuffers[0] = {1, kFrames * sizeof(float), output_samples.data()};
+
+    AudioUnitParameterEvent ramp{};
+    ramp.eventType = kParameterEvent_Ramped;
+    ramp.parameter = 1;
+    ramp.scope = kAudioUnitScope_Global;
+    ramp.element = 0;
+    ramp.eventValues.ramp.startBufferOffset = 16;
+    ramp.eventValues.ramp.durationInFrames = 32;
+    ramp.eventValues.ramp.startValue = 0.0f;
+    ramp.eventValues.ramp.endValue = 1.0f;
+    REQUIRE(effect.ScheduleParameter(&ramp, 1) == noErr);
+    REQUIRE(effect.process_scheduled(flags, input, output, kFrames) == noErr);
+    for (UInt32 n = 0; n < 16; ++n) REQUIRE(output_samples[n] == 0.0f);
+    REQUIRE(output_samples[16] == 0.0f);
+    REQUIRE(output_samples[32] == Catch::Approx(0.5f));
+    REQUIRE(output_samples[47] == Catch::Approx(31.0f / 32.0f));
+    for (UInt32 n = 48; n < kFrames; ++n) REQUIRE(output_samples[n] == 1.0f);
 
     effect.DoCleanup();
 }

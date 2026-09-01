@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 46,
+  "manifest_revision": 47,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -12970,6 +12970,7 @@
               "reset()",
               "publish_layout(const Layout& layout)",
               "publish_table(const Table& table)",
+              "set_layout_rt(const Layout& layout)",
               "process_frame(std::complex<SampleType>* const* frames, int num_bins)",
               "set_mix(SampleType mix)",
               "set_mix_ramp_samples(int samples)",
@@ -12977,8 +12978,7 @@
               "prepared()",
               "latency_samples()",
               "maximum_tail_samples()",
-              "num_bins()",
-              "channels()"
+              "num_bins()"
             ],
             "enums": []
           }

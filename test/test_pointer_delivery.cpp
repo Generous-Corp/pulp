@@ -18,6 +18,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/view/gesture.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -117,6 +118,107 @@ TEST_CASE("deliver_mouse_drag carries modifiers on the modern channel", "[view][
     CHECK_THAT(e.position.x, WithinAbs(30.0f, 0.01f));
     CHECK_THAT(e.position.y, WithinAbs(20.0f, 0.01f));
     CHECK_THAT(e.window_position.x, WithinAbs(130.0f, 0.01f));
+}
+
+TEST_CASE("deliver_mouse_drag preserves host movement deltas on the modern channel",
+          "[view][input][drag]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<DragSpy>();
+    DragSpy* spy = child.get();
+    spy->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(child));
+
+    PointerAttributes pointer;
+    pointer.movement_x = 17.5f;
+    pointer.movement_y = -9.25f;
+    pointer.has_movement_delta = true;
+    deliver_mouse_drag(root, spy, {130, 70}, 0, 1,
+                       MouseButton::left, pointer);
+
+    REQUIRE(spy->events.size() == 1);
+    CHECK_THAT(spy->events.front().movement_x, WithinAbs(17.5f, 0.001f));
+    CHECK_THAT(spy->events.front().movement_y, WithinAbs(-9.25f, 0.001f));
+    CHECK(spy->events.front().has_movement_delta);
+}
+
+TEST_CASE("ResizableCorner accumulates native movement without legacy double delivery",
+          "[view][input][drag][resize]") {
+    ResizableCorner grip;
+    std::vector<Point> deltas;
+    grip.on_resize = [&](float x, float y) { deltas.push_back({x, y}); };
+
+    grip.on_mouse_down({4, 4});
+
+    MouseEvent first;
+    first.phase = MousePhase::drag;
+    first.button = MouseButton::left;
+    first.movement_x = 10.0f;
+    first.movement_y = 5.0f;
+    first.has_movement_delta = true;
+    grip.on_mouse_event(first);
+    grip.on_mouse_drag({500, 500});
+
+    MouseEvent second = first;
+    second.movement_x = -2.0f;
+    second.movement_y = 3.0f;
+    grip.on_mouse_event(second);
+    grip.on_mouse_drag({800, 800});
+
+    REQUIRE(deltas.size() == 2);
+    CHECK_THAT(deltas[0].x, WithinAbs(10.0f, 0.001f));
+    CHECK_THAT(deltas[0].y, WithinAbs(5.0f, 0.001f));
+    CHECK_THAT(deltas[1].x, WithinAbs(8.0f, 0.001f));
+    CHECK_THAT(deltas[1].y, WithinAbs(8.0f, 0.001f));
+}
+
+TEST_CASE("ResizableCorner waits for post-modern liveness validation",
+          "[view][input][drag][resize][lifetime]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<ResizableCorner>();
+    ResizableCorner* grip = child.get();
+    grip->set_bounds({0, 0, 16, 16});
+    int resize_calls = 0;
+    grip->on_resize = [&](float, float) { ++resize_calls; };
+    grip->on_pointer_event = [&](const MouseEvent&) {
+        // A modern handler may synchronously destroy its own target. The
+        // dispatcher must revalidate before the legacy hop emits on_resize.
+        auto removed = root.remove_child(grip);
+        REQUIRE(removed != nullptr);
+    };
+    root.add_child(std::move(child));
+
+    PointerAttributes pointer;
+    pointer.movement_x = 10.0f;
+    pointer.movement_y = 5.0f;
+    pointer.has_movement_delta = true;
+    REQUIRE_NOTHROW(deliver_mouse_drag(root, grip, {8, 8}, 0, 1,
+                                       MouseButton::left, pointer));
+
+    CHECK(root.child_count() == 0);
+    CHECK(resize_calls == 0);
+}
+
+TEST_CASE("ResizableCorner ignores native movement from non-primary drags",
+          "[view][input][drag][resize]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<ResizableCorner>();
+    ResizableCorner* grip = child.get();
+    grip->set_bounds({0, 0, 16, 16});
+    int resize_calls = 0;
+    grip->on_resize = [&](float, float) { ++resize_calls; };
+    root.add_child(std::move(child));
+
+    PointerAttributes pointer;
+    pointer.movement_x = 10.0f;
+    pointer.movement_y = 5.0f;
+    pointer.has_movement_delta = true;
+    deliver_mouse_drag(root, grip, {8, 8}, 0, 1,
+                       MouseButton::right, pointer);
+
+    CHECK(resize_calls == 0);
 }
 
 TEST_CASE("deliver_mouse_drag fires each channel exactly once, modern first",

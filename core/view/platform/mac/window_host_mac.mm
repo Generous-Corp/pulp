@@ -552,6 +552,12 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                     modifiers_from_ns_flags(event.modifierFlags),
                     static_cast<int>(event.clickCount))) {
                 _dragTargetCapture.reset();
+            } else if (auto* target =
+                           _dragTargetCapture.live_in(*self.rootView)) {
+                // A press handler can switch grab -> grabbing. AppKit does not
+                // send a cursorUpdate while this view owns the drag, so publish
+                // the captured view's post-handler style at each pointer phase.
+                set_ns_cursor_for_style(target->cursor());
             }
         }
             [self setNeedsDisplay:YES];
@@ -597,6 +603,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     if (!dragTarget) { _dragTargetCapture.reset(); return; }
     pulp::view::deliver_mouse_drag(*self.rootView, dragTarget, pt,
                                    modifiers, clickCount);
+    if (auto* target = _dragTargetCapture.live_in(*self.rootView))
+        set_ns_cursor_for_style(target->cursor());
     [self setNeedsDisplay:YES];
 }
 
@@ -853,6 +861,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 };
                 pulp::view::deliver_mouse_up(*self.rootView, dragTarget, pt, modifiers,
                                              static_cast<int>(event.clickCount), up_host);
+                if (auto* target = releasedTarget.live_in(*self.rootView))
+                    set_ns_cursor_for_style(target->cursor());
             }
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {

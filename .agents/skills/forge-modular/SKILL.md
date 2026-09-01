@@ -523,6 +523,13 @@ stand-in, and pairs every check with a control that must come out the other
 way — a gate for a defect five other gates could not see has to prove on every
 run that it can still see it.
 
+On macOS the no-libRack host probe still needs dyld to resolve the plugin's
+intentional absolute load command. The test must provision
+`/tmp/Rack2/libRack.dylib` from the fetched SDK inside a scoped context, then
+remove only the directory or symlink that context created. A load-command
+inspection alone does not prove the artifact loads, while leaving a warm
+`/tmp/Rack2` behind makes later runs depend on untracked machine state.
+
 **Two producers, and both were wrong.** `generate.py:compile_all` (the Python
 tempdir build that makes the *installed* artifact) and
 `tools/cmake/PulpRack.cmake` (`pulp_add_rack_plugin`). Linux and Windows always
