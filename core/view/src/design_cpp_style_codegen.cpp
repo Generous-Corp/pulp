@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <optional>
 #include <sstream>
@@ -271,6 +272,25 @@ void emit_visual_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_repeat(" + cpp_string_literal(*style.background_repeat) + ");");
     if (style.background_size)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_size(" + cpp_string_literal(*style.background_size) + ");");
+    if (style.background_position)
+        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_background_position(" + cpp_string_literal(*style.background_position) + ");");
+    const auto box_paint_dpr = attr_float(node, "browser_box_paint_dpr");
+    const auto box_paint_left = attr_float(node, "browser_box_paint_left_px");
+    const auto box_paint_top = attr_float(node, "browser_box_paint_top_px");
+    const auto box_paint_right = attr_float(node, "browser_box_paint_right_px");
+    const auto box_paint_bottom = attr_float(node, "browser_box_paint_bottom_px");
+    if (box_paint_dpr && *box_paint_dpr > 0.0f && box_paint_left && box_paint_top &&
+        box_paint_right && box_paint_bottom && std::isfinite(*box_paint_dpr) &&
+        std::isfinite(*box_paint_left) && std::isfinite(*box_paint_top) &&
+        std::isfinite(*box_paint_right) && std::isfinite(*box_paint_bottom) &&
+        *box_paint_right > *box_paint_left && *box_paint_bottom > *box_paint_top)
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->set_captured_box_paint_rect(" +
+                  format_float(*box_paint_left / *box_paint_dpr) + ", " +
+                  format_float(*box_paint_top / *box_paint_dpr) + ", " +
+                  format_float(*box_paint_right / *box_paint_dpr) + ", " +
+                  format_float(*box_paint_bottom / *box_paint_dpr) + ", " +
+                  format_float(*box_paint_dpr) + ");");
     if (style.object_fit)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_object_fit(" + cpp_string_literal(*style.object_fit) + ");");
     emit_color("set_inheritable_text_color", style.color);

@@ -2,7 +2,7 @@
 //
 // Holds View::paint_all and its private paint helpers (apply_canvas_transforms,
 // push_effect_layers / pop_effect_layers, paint_outset_shadows,
-// apply_overflow_and_clip_path, paint_background_and_border,
+// apply_overflow_clip, apply_clip_path, paint_background_and_border,
 // paint_children_in_order, paint_post_decorations, paint_content) plus the two
 // file-local corner-path builders they use. Split out of the 2400-line view.cpp
 // purely to move the paint monolith into its own TU — same directory precedent
@@ -27,8 +27,8 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::view {
@@ -587,7 +587,7 @@ void View::paint_outset_shadows(canvas::Canvas& canvas) {
     }
 }
 
-void View::apply_overflow_and_clip_path(canvas::Canvas& canvas) {
+void View::apply_overflow_clip(canvas::Canvas& canvas) {
     // Clip only when overflow:hidden / overflow:scroll is explicitly
     // opted into. Default is overflow:visible (CSS default)
     // so absolutely-positioned popover/dropdown children that extend
@@ -681,6 +681,9 @@ void View::apply_overflow_and_clip_path(canvas::Canvas& canvas) {
         }
     }
 
+}
+
+void View::apply_clip_path(canvas::Canvas& canvas) {
     // CSS `clip-path: path("...")`. The View's local coordinate space is
     // (0,0)→(bounds_.width, bounds_.height) at this point, so the SVG-path-d
     // string is interpreted in the border-box coordinate space. The Skia
@@ -715,69 +718,398 @@ namespace {
 // tiling existed.
 struct BackgroundTile {
     float w = 0.0f, h = 0.0f;
+    bool repeat_x = true, repeat_y = true;
+    bool valid = true;
 };
+
+struct BackgroundPosition {
+    float x = 0.0f, y = 0.0f;
+    bool supported = true;
+};
+
+constexpr bool css_space(char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+std::string_view trim_css(std::string_view value) {
+    while (!value.empty() && css_space(value.front())) value.remove_prefix(1);
+    while (!value.empty() && css_space(value.back())) value.remove_suffix(1);
+    return value;
+}
+
+// CSS background-* properties are lists aligned by image-layer index. The
+// parser returns a view into the stored style string rather than allocating a
+// vector while painting inside View::paint_all's ScopedNoAlloc region.
+std::string_view background_layer_value(std::string_view css,
+                                        std::size_t layer_index) {
+    css = trim_css(css);
+    if (css.empty()) return {};
+    std::size_t count = 1;
+    int depth = 0;
+    for (const char c : css) {
+        if (c == '(') ++depth;
+        else if (c == ')' && depth > 0) --depth;
+        else if (c == ',' && depth == 0) ++count;
+    }
+    const std::size_t wanted = layer_index % count;
+    std::size_t start = 0, current = 0;
+    depth = 0;
+    for (std::size_t i = 0; i < css.size(); ++i) {
+        const char c = css[i];
+        if (c == '(') ++depth;
+        else if (c == ')' && depth > 0) --depth;
+        else if (c == ',' && depth == 0) {
+            if (current == wanted) return trim_css(css.substr(start, i - start));
+            ++current;
+            start = i + 1;
+        }
+    }
+    return trim_css(css.substr(start));
+}
+
+struct CssWords {
+    std::string_view first, second, third, fourth;
+    bool too_many = false;
+};
+
+CssWords css_words(std::string_view value) {
+    CssWords result;
+    value = trim_css(value);
+    for (int index = 0; !value.empty(); ++index) {
+        std::size_t end = 0;
+        int depth = 0;
+        while (end < value.size()) {
+            const char c = value[end];
+            if (c == '(') ++depth;
+            else if (c == ')') {
+                if (depth == 0) { result.too_many = true; return result; }
+                --depth;
+            } else if (css_space(c) && depth == 0) {
+                break;
+            }
+            ++end;
+        }
+        if (depth != 0) { result.too_many = true; return result; }
+        const std::string_view word = value.substr(0, end);
+        if (index == 0) result.first = word;
+        else if (index == 1) result.second = word;
+        else if (index == 2) result.third = word;
+        else if (index == 3) result.fourth = word;
+        else { result.too_many = true; return result; }
+        if (end == value.size()) break;
+        value = trim_css(value.substr(end + 1));
+    }
+    return result;
+}
+
+std::optional<float> css_number(std::string_view value) {
+    if (value.empty()) return std::nullopt;
+    std::size_t i = 0;
+    bool negative = false;
+    if (value[i] == '+' || value[i] == '-') negative = value[i++] == '-';
+    const std::size_t whole_start = i;
+    float whole = 0.0f;
+    while (i < value.size() && value[i] >= '0' && value[i] <= '9')
+        whole = whole * 10.0f + static_cast<float>(value[i++] - '0');
+    const bool has_whole = i != whole_start;
+    float fraction = 0.0f, divisor = 1.0f;
+    bool has_fraction = false;
+    if (i < value.size() && value[i] == '.') {
+        ++i;
+        const std::size_t fraction_start = i;
+        while (i < value.size() && value[i] >= '0' && value[i] <= '9') {
+            fraction = fraction * 10.0f + static_cast<float>(value[i++] - '0');
+            divisor *= 10.0f;
+        }
+        has_fraction = i != fraction_start;
+        // A leading decimal point is valid CSS (`.5px`), but a bare or
+        // trailing point is not (`.` / `1.`).
+        if (!has_fraction) return std::nullopt;
+    }
+    if (i != value.size() || (!has_whole && !has_fraction))
+        return std::nullopt;
+    const float result = whole + fraction / divisor;
+    if (!std::isfinite(result)) return std::nullopt;
+    return negative ? -result : result;
+}
 
 // One `background-size` component in pixels, against `extent`. A keyword or a
 // unit this does not read returns nullopt, which drops the whole declaration
 // rather than tiling one axis on a guess.
-std::optional<float> background_size_axis(const std::string& tok, float extent) {
-    if (tok.empty()) return std::nullopt;
-    const auto number = [&](std::size_t unit_len) -> std::optional<float> {
-        if (tok.size() <= unit_len) return std::nullopt;
-        const std::string head = tok.substr(0, tok.size() - unit_len);
-        try {
-            std::size_t used = 0;
-            const float v = std::stof(head, &used);
-            if (used != head.size()) return std::nullopt;
-            return v;
-        } catch (...) {
-            return std::nullopt;
-        }
-    };
+std::optional<float> background_size_axis(std::string_view tok, float extent) {
+    if (tok.empty() || !std::isfinite(extent)) return std::nullopt;
     if (tok.back() == '%') {
-        const auto v = number(1);
-        return v ? std::optional<float>(*v * 0.01f * extent) : std::nullopt;
+        const auto v = css_number(tok.substr(0, tok.size() - 1));
+        if (!v) return std::nullopt;
+        const float resolved = *v * 0.01f * extent;
+        return std::isfinite(resolved) ? std::optional<float>(resolved) : std::nullopt;
     }
-    if (tok.size() > 2 && tok.compare(tok.size() - 2, 2, "px") == 0)
-        return number(2);
+    if (tok.size() > 2 && tok.substr(tok.size() - 2) == "px")
+        return css_number(tok.substr(0, tok.size() - 2));
     return std::nullopt;
 }
 
-BackgroundTile resolve_background_tile(const std::string& size_css,
-                                       const std::string& repeat_css,
+BackgroundTile resolve_background_tile(std::string_view size_css,
+                                       std::string_view repeat_css,
                                        float box_w, float box_h) {
     BackgroundTile tile;
-    if (size_css.empty() || box_w <= 0.0f || box_h <= 0.0f) return tile;
+    if (box_w <= 0.0f || box_h <= 0.0f) { tile.valid = false; return tile; }
+    const CssWords repeat = css_words(repeat_css);
+    const auto repeat_axis = [](std::string_view value) -> std::optional<bool> {
+        if (value.empty() || value == "repeat") return true;
+        if (value == "no-repeat") return false;
+        return std::nullopt;  // round/space require distribution arithmetic
+    };
+    if (repeat.too_many || !repeat.third.empty()) {
+        tile.valid = false;
+        return tile;
+    }
+    if (repeat.first == "repeat-x") {
+        if (!repeat.second.empty()) { tile.valid = false; return tile; }
+        tile.repeat_y = false;
+    } else if (repeat.first == "repeat-y") {
+        if (!repeat.second.empty()) { tile.valid = false; return tile; }
+        tile.repeat_x = false;
+    } else {
+        const auto x = repeat_axis(repeat.first);
+        const auto y = repeat_axis(repeat.second.empty() ? repeat.first : repeat.second);
+        if (!x || !y) { tile.valid = false; return tile; }
+        tile.repeat_x = *x;
+        tile.repeat_y = *y;
+    }
 
-    // A SIZED, NON-REPEATING layer is deliberately left on the old path. Its
-    // ink lands wherever `background-position` says, and position is still a
-    // storage-only slot — so honouring the size without the origin would move
-    // paint to a place nothing has verified. Tiling is what this resolves; the
-    // sized-once case is its own change.
-    if (repeat_css == "no-repeat") return tile;
+    // CSS gradients have no intrinsic size: omitted/auto background-size is
+    // one element-sized image. Retain that geometry rather than treating it as
+    // "no tile" so a non-zero background-position can still phase repeat or
+    // clip a no-repeat layer correctly.
+    tile.w = box_w;
+    tile.h = box_h;
+    if (size_css.empty() || size_css == "auto" || size_css == "auto auto" ||
+        size_css == "contain" || size_css == "cover")
+        return tile;
 
-    std::vector<std::string> parts;
-    std::istringstream in(size_css);
-    for (std::string tok; in >> tok;) parts.push_back(tok);
-    if (parts.empty() || parts.size() > 2) return tile;
+    const CssWords parts = css_words(size_css);
+    if (parts.first.empty() || parts.too_many || !parts.third.empty()) {
+        tile.valid = false;
+        return tile;
+    }
 
-    const auto w = background_size_axis(parts[0], box_w);
+    const auto w = parts.first == "auto" ? std::optional<float>(box_w)
+                                          : background_size_axis(parts.first, box_w);
     // A single value sizes the x axis and leaves y `auto`, which for a gradient
     // is the element's own height.
-    const auto h = parts.size() == 2 ? background_size_axis(parts[1], box_h)
-                                     : std::optional<float>(box_h);
-    if (!w || !h || !(*w > 0.0f) || !(*h > 0.0f)) return tile;
+    const auto h = !parts.second.empty()
+        ? (parts.second == "auto" ? std::optional<float>(box_h)
+                                    : background_size_axis(parts.second, box_h))
+        : std::optional<float>(box_h);
+    if (!w || !h || !(*w > 0.0f) || !(*h > 0.0f)) {
+        tile.valid = false;
+        return tile;
+    }
     tile.w = *w;
     tile.h = *h;
-
-    // `repeat-x` / `repeat-y` pin the other axis to the element, so that axis
-    // yields one tile and no ink moves along it. `round` and `space` differ
-    // only in how the remainder is distributed and tile here as `repeat` does —
-    // a closer approximation than not tiling at all, and named so nobody reads
-    // the omission as support.
-    if (repeat_css == "repeat-x") tile.h = box_h;
-    else if (repeat_css == "repeat-y") tile.w = box_w;
     return tile;
+}
+
+// One axis of a positioned background image. Percentages are relative to the
+// leftover space after the image is sized, which is distinct from the
+// background-size percentage basis (the positioning area itself).
+std::optional<float> background_position_axis(std::string_view token,
+                                              float box_extent,
+                                              float tile_extent,
+                                              bool horizontal) {
+    token = trim_css(token);
+    if (token.empty() || !std::isfinite(box_extent) || !std::isfinite(tile_extent))
+        return std::nullopt;
+    if (token.size() > 6 && token.substr(0, 5) == "calc(" && token.back() == ')') {
+        const std::string_view body = trim_css(token.substr(5, token.size() - 6));
+        float total = 0.0f;
+        std::size_t start = 0;
+        float sign = 1.0f;
+        while (start < body.size()) {
+            while (start < body.size() && css_space(body[start])) ++start;
+            if (start == body.size()) return std::nullopt;
+            if (body[start] == '+' || body[start] == '-') {
+                sign = body[start] == '-' ? -1.0f : 1.0f;
+                ++start;
+                while (start < body.size() && css_space(body[start])) ++start;
+            }
+            std::size_t end = start;
+            while (end < body.size() && body[end] != '+' && body[end] != '-') ++end;
+            // CSS calc requires whitespace around binary +/-. Without it,
+            // `100%-2px` is not a valid expression and must not be treated
+            // as the visually different `100% - 2px`.
+            if (end < body.size() &&
+                (end == 0 || !css_space(body[end - 1]) ||
+                 end + 1 == body.size() || !css_space(body[end + 1])))
+                return std::nullopt;
+            const auto term = background_position_axis(trim_css(body.substr(start, end - start)),
+                                                       box_extent, tile_extent, horizontal);
+            if (!term) return std::nullopt;
+            total += sign * *term;
+            if (!std::isfinite(total)) return std::nullopt;
+            sign = 1.0f;
+            start = end;
+        }
+        return total;
+    }
+    if (token.back() == '%') {
+        const auto value = css_number(token.substr(0, token.size() - 1));
+        if (!value) return std::nullopt;
+        const float resolved = *value * 0.01f * (box_extent - tile_extent);
+        return std::isfinite(resolved) ? std::optional<float>(resolved) : std::nullopt;
+    }
+    if (token.size() > 2 && token.substr(token.size() - 2) == "px")
+        return css_number(token.substr(0, token.size() - 2));
+    // CSS permits the unitless zero in a length position (`0 0`), which is
+    // what Chromium serializes for the first Dilla checkerboard layer.
+    if (const auto value = css_number(token); value && *value == 0.0f)
+        return 0.0f;
+    if ((horizontal && token == "left") || (!horizontal && token == "top"))
+        return 0.0f;
+    if (token == "center") return (box_extent - tile_extent) * 0.5f;
+    if ((horizontal && token == "right") || (!horizontal && token == "bottom"))
+        return box_extent - tile_extent;
+    return std::nullopt;
+}
+
+bool horizontal_edge(std::string_view token) {
+    return token == "left" || token == "right";
+}
+
+bool vertical_edge(std::string_view token) {
+    return token == "top" || token == "bottom";
+}
+
+std::optional<float> background_edge_offset(std::string_view edge,
+                                            std::string_view offset,
+                                            float box_extent,
+                                            float tile_extent,
+                                            bool horizontal) {
+    const auto amount = background_position_axis(offset, box_extent, tile_extent, horizontal);
+    if (!amount) return std::nullopt;
+    if ((horizontal && edge == "left") || (!horizontal && edge == "top"))
+        return *amount;
+    if ((horizontal && edge == "right") || (!horizontal && edge == "bottom"))
+        return box_extent - tile_extent - *amount;
+    return std::nullopt;
+}
+
+BackgroundPosition resolve_background_position(std::string_view position_css,
+                                               float box_w, float box_h,
+                                               float tile_w, float tile_h) {
+    BackgroundPosition position;
+    if (position_css.empty()) return position;
+    const CssWords words = css_words(position_css);
+    if (words.first.empty() || words.too_many) { position.supported = false; return position; }
+    if (!words.fourth.empty()) {
+        const std::string_view edges[] = {words.first, words.third};
+        const std::string_view offsets[] = {words.second, words.fourth};
+        bool saw_x = false, saw_y = false;
+        for (int i = 0; i < 2; ++i) {
+            if (horizontal_edge(edges[i])) {
+                if (saw_x) { position.supported = false; return position; }
+                const auto x = background_edge_offset(edges[i], offsets[i], box_w, tile_w, true);
+                if (!x) { position.supported = false; return position; }
+                position.x = *x;
+                saw_x = true;
+            } else if (vertical_edge(edges[i])) {
+                if (saw_y) { position.supported = false; return position; }
+                const auto y = background_edge_offset(edges[i], offsets[i], box_h, tile_h, false);
+                if (!y) { position.supported = false; return position; }
+                position.y = *y;
+                saw_y = true;
+            } else { position.supported = false; return position; }
+        }
+        if (!saw_x || !saw_y) position.supported = false;
+        return position;
+    }
+    if (!words.third.empty()) {
+        if (horizontal_edge(words.first) &&
+            (vertical_edge(words.third) || words.third == "center")) {
+            const auto x = background_edge_offset(words.first, words.second, box_w, tile_w, true);
+            const auto y = background_position_axis(words.third, box_h, tile_h, false);
+            if (!x || !y) { position.supported = false; return position; }
+            position.x = *x; position.y = *y;
+            return position;
+        }
+        if (vertical_edge(words.first) &&
+            (horizontal_edge(words.third) || words.third == "center")) {
+            const auto y = background_edge_offset(words.first, words.second, box_h, tile_h, false);
+            const auto x = background_position_axis(words.third, box_w, tile_w, true);
+            if (!x || !y) { position.supported = false; return position; }
+            position.x = *x; position.y = *y;
+            return position;
+        }
+        if (words.first == "center" && horizontal_edge(words.second)) {
+            const auto x = background_edge_offset(words.second, words.third, box_w, tile_w, true);
+            if (!x) { position.supported = false; return position; }
+            position.x = *x;
+            position.y = (box_h - tile_h) * 0.5f;
+            return position;
+        }
+        if (words.first == "center" && vertical_edge(words.second)) {
+            const auto y = background_edge_offset(words.second, words.third, box_h, tile_h, false);
+            if (!y) { position.supported = false; return position; }
+            position.x = (box_w - tile_w) * 0.5f;
+            position.y = *y;
+            return position;
+        }
+        position.supported = false;
+        return position;
+    }
+    if (words.second.empty()) {
+        if (vertical_edge(words.first)) {
+            const auto y = background_position_axis(words.first, box_h, tile_h, false);
+            if (!y) { position.supported = false; return position; }
+            position.x = (box_w - tile_w) * 0.5f; position.y = *y;
+            return position;
+        }
+        if (horizontal_edge(words.first)) {
+            const auto x = background_position_axis(words.first, box_w, tile_w, true);
+            if (!x) { position.supported = false; return position; }
+            position.x = *x; position.y = (box_h - tile_h) * 0.5f;
+            return position;
+        }
+    }
+    // Two keyword values may appear in either order. `center left`, for
+    // example, is the same position as `left center`; resolve both values by
+    // their axis rather than assuming that the horizontal one comes second.
+    const auto horizontal_or_center = [](std::string_view value) {
+        return horizontal_edge(value) || value == "center";
+    };
+    const auto vertical_or_center = [](std::string_view value) {
+        return vertical_edge(value) || value == "center";
+    };
+    if (horizontal_or_center(words.first) && vertical_or_center(words.second)) {
+        const auto x = background_position_axis(words.first, box_w, tile_w, true);
+        const auto y = background_position_axis(words.second, box_h, tile_h, false);
+        if (!x || !y) { position.supported = false; return position; }
+        position.x = *x; position.y = *y;
+        return position;
+    }
+    if (vertical_or_center(words.first) && horizontal_or_center(words.second)) {
+        const auto x = background_position_axis(words.second, box_w, tile_w, true);
+        const auto y = background_position_axis(words.first, box_h, tile_h, false);
+        if (!x || !y) { position.supported = false; return position; }
+        position.x = *x; position.y = *y;
+        return position;
+    }
+    if (const auto value = background_position_axis(words.first, box_w, tile_w, true))
+        position.x = *value;
+    else { position.supported = false; return position; }
+    const auto y = words.second.empty() ? std::string_view("center") : words.second;
+    if (const auto value = background_position_axis(y, box_h, tile_h, false))
+        position.y = *value;
+    else position.supported = false;
+    return position;
+}
+
+// The first tile must cover the element's origin. A positive CSS offset of
+// 2px on a 4px tile therefore starts its visible sequence at -2px, then 2px.
+float first_tiled_origin(float offset, float tile_extent) {
+    if (!(tile_extent > 0.0f)) return 0.0f;
+    return offset - std::ceil(offset / tile_extent) * tile_extent;
 }
 
 // A stop list this long fits on the stack. Paint runs inside a ScopedNoAlloc
@@ -793,6 +1125,53 @@ constexpr int kMaxTilesPerAxis = 512;
 }  // namespace
 
 void View::paint_background_and_border(canvas::Canvas& canvas) {
+    // Browser lowering retains the capture-time browser-compatible paint rect
+    // for this box. Layout stays fractional; adjusting only this self-paint
+    // restores its snapped edges without moving descendants or hit bounds. A
+    // transformed node never receives this metadata, and an implausibly
+    // distant target is ignored rather than turning stale capture data into a
+    // visible jump.
+    bool captured_box_paint = false;
+    float paint_w = bounds_.width;
+    float paint_h = bounds_.height;
+    if (captured_box_paint_scale_ > 0.0f &&
+        std::isfinite(captured_box_paint_left_) &&
+        std::isfinite(captured_box_paint_top_) &&
+        std::isfinite(captured_box_paint_right_) &&
+        std::isfinite(captured_box_paint_bottom_)) {
+        float actual_x = bounds_.x, actual_y = bounds_.y;
+        for (const View* parent = parent_; parent != nullptr;
+             parent = parent->parent_) {
+            actual_x += parent->bounds_.x;
+            actual_y += parent->bounds_.y;
+        }
+        const float target_w = captured_box_paint_right_ - captured_box_paint_left_;
+        const float target_h = captured_box_paint_bottom_ - captured_box_paint_top_;
+        const float dx = captured_box_paint_left_ - actual_x;
+        const float dy = captured_box_paint_top_ - actual_y;
+        // CSS edges are snapped before DPR is applied, so a valid origin can
+        // move by half a CSS pixel at every DPR. Both independently snapped
+        // far edges can change the width or height by one CSS pixel.
+        constexpr float kOriginLimit = 0.501f;
+        constexpr float kExtentLimit = 1.001f;
+        const float width_delta = target_w - bounds_.width;
+        const float height_delta = target_h - bounds_.height;
+        if (bounds_.width > 0.0f && bounds_.height > 0.0f &&
+            target_w > 0.0f && target_h > 0.0f &&
+            std::fabs(dx) <= kOriginLimit && std::fabs(dy) <= kOriginLimit &&
+            std::fabs(width_delta) <= kExtentLimit &&
+            std::fabs(height_delta) <= kExtentLimit) {
+            canvas.save();
+            canvas.translate(dx, dy);
+            // This is outer paint geometry only. CSS percentage background
+            // sizes/positions, gradient vectors, border widths, and radii
+            // continue resolving from bounds_ below; only the final coverage
+            // rect and border outline use paint_w/paint_h.
+            paint_w = target_w;
+            paint_h = target_h;
+            captured_box_paint = true;
+        }
+    }
     // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
     // has been called we paint backgrounds and the border via a path
@@ -843,13 +1222,13 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     if (has_bg_) {
         canvas.set_fill_color(bg_color_);
         if (use_per_corner) {
-            build_corner_path(bounds_.width, bounds_.height,
+            build_corner_path(paint_w, paint_h,
                               eff_tl, eff_tr, eff_bl, eff_br);
             canvas.fill_current_path();
         } else if (eff_r > 0) {
-            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+            canvas.fill_rounded_rect(0, 0, paint_w, paint_h, eff_r);
         } else {
-            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+            canvas.fill_rect(0, 0, paint_w, paint_h);
         }
     }
 
@@ -868,20 +1247,35 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     // `linear-gradient(<colour> 1px, transparent 1px)` under
     // `background-size: 100% 32px` painted ONE gradient stretched across the
     // whole element — a monotone wash where the design asked for a stripe every
-    // 32px. Every layer in the stack shares the tile, so it resolves once.
-    const BackgroundTile bg_tile = resolve_background_tile(
-        background_size(), background_repeat(), bounds_.width, bounds_.height);
-    const bool bg_tiles =
-        bg_tile.w > 0.0f && bg_tile.h > 0.0f &&
-        (bg_tile.w < bounds_.width - 0.01f ||
-         bg_tile.h < bounds_.height - 0.01f) &&
-        bounds_.width <= bg_tile.w * static_cast<float>(kMaxTilesPerAxis) &&
-        bounds_.height <= bg_tile.h * static_cast<float>(kMaxTilesPerAxis);
-    const float tile_w = bg_tiles ? bg_tile.w : bounds_.width;
-    const float tile_h = bg_tiles ? bg_tile.h : bounds_.height;
-
-    for (auto layer = bg_gradients_.rbegin(); layer != bg_gradients_.rend(); ++layer) {
+    // 32px. Size and repeat are CSS layers too: resolve the value paired with
+    // each image, cycling a shorter list per the CSS list-matching rule.
+    for (std::size_t reverse_index = bg_gradients_.size(); reverse_index > 0;
+         --reverse_index) {
+        const std::size_t gradient_index = reverse_index - 1;
+        const auto layer = bg_gradients_.begin() +
+                           static_cast<std::ptrdiff_t>(gradient_index);
         if (layer->type <= 0 || layer->colors.empty()) continue;
+        // Gradients are compacted after parsing, whereas CSS background
+        // subproperty lists remain indexed by every declared image (including
+        // a non-painting `none`).  Keep the authored list association while
+        // reverse-walking the compact paint stack.
+        const std::size_t css_layer_index = layer->css_image_layer_index;
+        const BackgroundTile bg_tile = resolve_background_tile(
+            background_layer_value(background_size(), css_layer_index),
+            background_layer_value(background_repeat(), css_layer_index),
+            bounds_.width, bounds_.height);
+        if (!bg_tile.valid || !(bg_tile.w > 0.0f) || !(bg_tile.h > 0.0f))
+            continue;  // unsupported authoring must not silently phase at 0,0
+        const bool tile_count_safe =
+            (!bg_tile.repeat_x || std::ceil(bounds_.width / bg_tile.w) <= kMaxTilesPerAxis) &&
+            (!bg_tile.repeat_y || std::ceil(bounds_.height / bg_tile.h) <= kMaxTilesPerAxis);
+        if (!tile_count_safe) continue;
+        const float tile_w = bg_tile.w;
+        const float tile_h = bg_tile.h;
+        const BackgroundPosition bg_position = resolve_background_position(
+            background_layer_value(background_position(), css_layer_index),
+            bounds_.width, bounds_.height, tile_w, tile_h);
+        if (!bg_position.supported) continue;
         const int grad_n = static_cast<int>(layer->colors.size());
         const Color* grad_c = layer->colors.data();
         const float* grad_p = layer->positions.data();
@@ -957,6 +1351,20 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
                         layer->positions[static_cast<std::size_t>(i)] / line_len;
                 grad_p = stop_buf;
             }
+        } else if (layer->type == 2 && layer->positions_in_px &&
+                   grad_n <= kMaxInlineStops) {
+            // CSS radial stops are measured along the horizontal radius. The
+            // radius belongs to the painted tile (not the importer-time box),
+            // so preserve raw px stops until this point just as linear stops
+            // do. This is what turns `circle, white 1px, transparent 1px`
+            // into a one-pixel dot instead of a solid tile.
+            const auto r = resolve_radial(*layer, tile_w, tile_h);
+            if (r.rx > 0.0f) {
+                for (int i = 0; i < grad_n; ++i)
+                    stop_buf[i] =
+                        layer->positions[static_cast<std::size_t>(i)] / r.rx;
+                grad_p = stop_buf;
+            }
         }
 
         // Set this layer's shader for ONE tile, whose top-left is (ox, oy) in
@@ -986,39 +1394,36 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
             }
         };
 
-        if (!bg_tiles) {
-            set_layer_shader(0.0f, 0.0f);
-            if (use_per_corner) {
-                build_corner_path(bounds_.width, bounds_.height,
-                                                   eff_tl, eff_tr, eff_bl, eff_br);
-                canvas.fill_current_path();
-            } else if (eff_r > 0) {
-                canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
-            } else {
-                canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
-            }
-            canvas.clear_fill_gradient();
-            continue;
-        }
-
         // A tiled layer fills RECTANGLES, so the element's own shape has to
         // come from the clip rather than from the fill. `clip_rect` is the
         // floor every backend implements; a rounded box additionally clips to
         // its corner path, and a backend without a path clip no-ops that and
         // leaves the tiles square-cornered rather than spilling past the box.
         canvas.save();
-        canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
+        canvas.clip_rect(0, 0, paint_w, paint_h);
         if (use_per_corner) {
-            build_corner_path(bounds_.width, bounds_.height,
+            build_corner_path(paint_w, paint_h,
                               eff_tl, eff_tr, eff_bl, eff_br);
             canvas.clip();
         } else if (eff_r > 0) {
-            build_corner_path(bounds_.width, bounds_.height,
+            build_corner_path(paint_w, paint_h,
                               eff_r, eff_r, eff_r, eff_r);
             canvas.clip();
         }
-        for (float ty = 0.0f; ty < bounds_.height; ty += tile_h) {
-            for (float tx = 0.0f; tx < bounds_.width; tx += tile_w) {
+        const float first_y = bg_tile.repeat_y
+            ? first_tiled_origin(bg_position.y, tile_h) : bg_position.y;
+        const float first_x = bg_tile.repeat_x
+            ? first_tiled_origin(bg_position.x, tile_w) : bg_position.x;
+        int y_count = 0;
+        for (float ty = first_y;
+             (bg_tile.repeat_y ? ty < paint_h : y_count == 0) &&
+                 y_count <= kMaxTilesPerAxis;
+             ty += tile_h, ++y_count) {
+            int x_count = 0;
+            for (float tx = first_x;
+                 (bg_tile.repeat_x ? tx < paint_w : x_count == 0) &&
+                     x_count <= kMaxTilesPerAxis;
+                 tx += tile_w, ++x_count) {
                 set_layer_shader(tx, ty);
                 canvas.fill_rect(tx, ty, tile_w, tile_h);
                 canvas.clear_fill_gradient();
@@ -1027,8 +1432,11 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
         canvas.restore();
     }
 
-    paint_border(canvas, use_per_corner, build_corner_path,
+    paint_border(canvas, paint_w, paint_h, use_per_corner, build_corner_path,
                  eff_r, eff_tl, eff_tr, eff_bl, eff_br);
+    if (captured_box_paint) {
+        canvas.restore();
+    }
 }
 
 // A border lives INSIDE the border box. `bounds_` is the border box, so the
@@ -1051,7 +1459,7 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
 //     that path rather than followed per side: the outer arc is then right and
 //     the inner corner is mitred straight, which is a fraction of a pixel off
 //     for the small radii these appear with.
-void View::paint_border(canvas::Canvas& canvas,
+void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
                         bool use_per_corner,
                         const CornerPathBuilder& build_corner_path,
                         float eff_r, float eff_tl, float eff_tr,
@@ -1067,8 +1475,8 @@ void View::paint_border(canvas::Canvas& canvas,
     const auto edge_w = [&](bool was_set, float value) {
         return was_set ? std::max(0.0f, value) : uniform_w;
     };
-    const float w = bounds_.width;
-    const float h = bounds_.height;
+    const float w = paint_w;
+    const float h = paint_h;
 
     // Opposite sides cannot want more than the box has. Chrome resolves that
     // over-constraint by giving the NEAR side its full width and handing the
@@ -1428,12 +1836,31 @@ void View::paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
     paint_outset_shadows(canvas);
     if (clip_shadows) close_ancestor_clip();
 
-    // Pushed outside the scope below because `overflow` / `clip-path` DO apply
-    // to the children, and the ancestor clip deliberately does not.
-    apply_overflow_and_clip_path(canvas);
+    // A captured browser paint rect can extend one snapped device edge past
+    // the solved fractional bounds. Defer only this view's own overflow clip
+    // until after its background/border paint so that edge is not cut back to
+    // the stale logical box. Descendants still receive the original solved
+    // overflow clip, and no layout or hit-testing geometry changes.
+    const bool defer_self_overflow_clip = has_captured_box_paint_rect() &&
+        (has_background_color() || has_background_gradient() || has_border());
+    if (!defer_self_overflow_clip)
+        apply_overflow_clip(canvas);
+    apply_clip_path(canvas);
 
     open_ancestor_clip();
     paint_background_and_border(canvas);
+
+    // `open_ancestor_clip()` owns a canvas save/restore pair. Install the
+    // deferred overflow clip only after that temporary scope closes: overflow
+    // is a subtree clip, so it must remain live while children paint.
+    // Re-open the ancestor scope for this view's widget ink; the persistent
+    // outer canvas scope still carries both clip-path and overflow into the
+    // child traversal below.
+    if (defer_self_overflow_clip) {
+        close_ancestor_clip();
+        apply_overflow_clip(canvas);
+        open_ancestor_clip();
+    }
 
     // Widget-specific painting. The outer timer wraps the whole paint_all body,
     // so `paint(canvas)` no-op overrides on styled containers still get

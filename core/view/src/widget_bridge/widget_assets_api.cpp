@@ -7,6 +7,7 @@
 #include "api_registry.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -119,7 +120,8 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
     });
 
     // setKnobCapturedIndicator(id, rIn, rOut, width, color, phaseRad,
-    //                          colorAuthored?) — recovered pointer geometry.
+    //                          colorAuthored?, outlineColor?, outlineWidth?)
+    // — recovered pointer geometry plus an optional authored CSS outline.
     // pointer geometry, as fractions of the disc's half extent. Knob::paint
     // sweeps THIS pointer along the value arc instead of the synthetic notch.
     //
@@ -149,6 +151,12 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
                 color,
                 static_cast<float>(args.get<double>(5, 0.0)),
                 color_authored);
+            const auto [outline, has_outline] =
+                parse_skin_color(args.get<std::string>(7, ""));
+            const float outline_width =
+                static_cast<float>(args.get<double>(8, 0.0));
+            if (has_outline && std::isfinite(outline_width) && outline_width > 0.0f)
+                k->set_captured_indicator_outline(outline, outline_width);
             k->request_repaint();
             return choc::value::Value();
         });

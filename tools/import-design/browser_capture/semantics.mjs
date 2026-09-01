@@ -710,6 +710,29 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       return '';
     }
   };
+  // A bordered HTML indicator has two authored paints: indicatorColor carries
+  // its fill, while this records the border that encloses that fill. The
+  // browser reports the border-box width in indicator_bounds, so native paint
+  // must draw the outline at that full width and inset the fill by both border
+  // edges. SVG strokes already describe one paint and deliberately do not take
+  // this HTML border path.
+  const indicatorBorder = element => {
+    try {
+      const marked = element.querySelector('[data-pulp-indicator]');
+      if (!marked || marked.namespaceURI === svgNamespace) return null;
+      const style = window.getComputedStyle(marked);
+      const width = parseFloat(style.borderTopWidth);
+      const text = (style.borderTopColor || '').trim();
+      const color = !text || text === 'transparent' || text === 'none' ||
+          text.indexOf('url(') === 0 ||
+          (text.indexOf('rgba(') === 0 && text.replace(/ /g, '').indexOf(',0)') > 0)
+        ? '' : text;
+      if (!Number.isFinite(width) || width <= 0 || !color) return null;
+      return { color, width };
+    } catch (e) {
+      return null;
+    }
+  };
   // Whether the marked element paints every pixel of its client rectangle.
   // For a solid rectangular fader thumb, pixels where white happens to cover
   // white are still thumb pixels and must travel with it. A screenshot delta
@@ -929,6 +952,7 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       // importer.
       indicator_bounds: indicatorBox(element),
       indicator_color: indicatorColor(element),
+      indicator_border: indicatorBorder(element),
       indicator_opaque_box: indicatorOpaqueBox(element),
       accent: accentColor(element),
       data_pulp: data,
