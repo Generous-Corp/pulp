@@ -1,0 +1,56 @@
+{
+ "counts": {
+  "associations": 6,
+  "blocking": 6
+ },
+ "format": "forge.cv-depth-receipts.v1",
+ "modules": {
+  "Fundamental/ADSR": {
+   "0": {
+    "blocking": true,
+    "depth_param_default": 0.0,
+    "evidence": "MEASURED",
+    "grade_reason": "paired receipts, open-depth margin 96.00x",
+    "param": 4
+   },
+   "1": {
+    "blocking": true,
+    "depth_param_default": 0.0,
+    "evidence": "MEASURED",
+    "grade_reason": "paired receipts, open-depth margin 35.16x",
+    "param": 5
+   },
+   "2": {
+    "blocking": true,
+    "depth_param_default": 0.0,
+    "evidence": "MEASURED",
+    "grade_reason": "paired receipts, open-depth margin 9.68x; the NOT_CAUSAL half rests on a control at 3.01x, which has less headroom to tell 'no effect' from 'an effect below the floor'",
+    "param": 6
+   }
+  },
+  "Fundamental/VCF": {
+   "0": {
+    "blocking": true,
+    "depth_param_default": 0.0,
+    "evidence": "MEASURED",
+    "grade_reason": "paired receipts, open-depth margin 1206.00x",
+    "param": 3
+   },
+   "1": {
+    "blocking": true,
+    "depth_param_default": 0.0,
+    "evidence": "MEASURED",
+    "grade_reason": "paired receipts, open-depth margin 97.83x",
+    "param": 5
+   },
+   "2": {
+    "blocking": true,
+    "depth_param_default": 0.0,
+    "evidence": "MEASURED",
+    "grade_reason": "paired receipts, open-depth margin 26.26x",
+    "param": 6
+   }
+  }
+ },
+ "note": "Depth-control associations a causal witness established by rendering audio. Only MEASURED entries live here: a name heuristic never enters this table, because entries here may fail a patch. `blocking` requires both halves of the dead-edge pair and an open-depth margin clearing the witness lane's 5x bar."
+}
