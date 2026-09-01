@@ -1862,6 +1862,16 @@ reroute must not turn the required gate into a full benchmark lane, expose
 protected cache/write authority to PR code, validate a different commit pair,
 or depend on stale runner checkout history.
 
+Automated zero-job recovery sets `recovery=true` and supplies
+`expected_head_sha`, `source_run_id`, and `source_run_attempt`. Before publishing
+a pending check, the protected resolver rejects a moved PR or any source that
+is no longer the exact queued `pull_request` attempt for `build.yml` with an
+exhaustive zero-job census. Manual operator retargets leave recovery false,
+omit the source identity, and continue to resolve the current live head. The untrusted wrapper changes to
+its isolated home before dropping privileges and explicitly forwards only the
+run-unique source path required by setup/build/test; it never inherits the
+protected Actions checkout as its working directory.
+
 Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 
 | Input | Default | Effect |
@@ -1872,6 +1882,10 @@ Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 | `runner=namespace` | — | Routes to `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` |
 | `runner=github-hosted` | — | Routes to `"macos-15"` (free GH-hosted) |
 | `target_ref` | (workflow's ref name) | Exact internal PR head branch to validate and build |
+| `expected_head_sha` | empty | Optional immutable head binding for automated recovery; mismatch fails closed before build |
+| `source_run_id` | empty | Exact zero-job `Build and Test` run; accepted only with `recovery=true` |
+| `source_run_attempt` | empty | Positive exact attempt for `source_run_id`; accepted only with `recovery=true` |
+| `recovery` | `false` | Revalidate the exact queued source run and exhaustive zero-job census before publishing `macos` |
 
 ### Opportunistic reroute daemon
 

@@ -4181,6 +4181,12 @@ It must remain semantically identical to the required macOS gate: resolve an
 open internal PR from the workflow definition on protected `main`, check out
 trusted control code with credentials disabled, then fetch and verify the PR's
 exact head SHA and immutable base SHA without materializing PR-controlled files.
+An automated zero-job recovery controller must set `recovery=true` and pass
+`expected_head_sha`, `source_run_id`, and `source_run_attempt`; the resolver
+rejects the dispatch if the live PR head moved or the exact source is no longer
+the queued `pull_request` attempt for `.github/workflows/build.yml` with an
+exhaustive zero-job census. Operator dispatches leave recovery false, omit the
+source identity, and retain live-head resolution.
 The first PR checkout occurs only in the clone owned by `nobody`; this keeps
 PR-selected Git filters and LFS endpoints out of the trusted environment. The
 untrusted build job has only contents-read permission, no Actions/Namespace
@@ -4191,7 +4197,10 @@ from a disposable non-hardlinked clone created by trusted control before its
 ownership transfers to `nobody`. Do not pass Actions runtime/cache variables,
 GitHub variables, tokens, credentials, or command-file paths across that account
 boundary; do not forward proxy URLs because they may contain userinfo
-credentials. The reporter
+credentials. The empty environment must still receive the isolated source path,
+and the wrapper must change into its `nobody`-owned home before dropping
+privileges; otherwise it inherits an inaccessible Actions checkout cwd and
+fails before configure. The reporter
 revalidates the complete open PR identity (base and head repository/ref/SHA)
 before posting. Immutable recovery identity must be uploaded before the pending
 check exists; the protected source-free `workflow_run` reconciler terminalizes

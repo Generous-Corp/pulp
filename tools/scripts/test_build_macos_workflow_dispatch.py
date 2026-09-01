@@ -17,6 +17,24 @@ RECONCILER = REPO_ROOT / ".github" / "workflows" / "build-macos-reconcile.yml"
 MACOS_COMMAND = REPO_ROOT / "tools" / "cli" / "cmd_macos.cpp"
 BASE_SHA = "a" * 40
 HEAD_SHA = "b" * 40
+SOURCE_RUN_ID = "33438138142"
+
+
+def _source_run(**overrides: object) -> dict[str, object]:
+    source: dict[str, object] = {
+        "id": int(SOURCE_RUN_ID),
+        "workflow_id": 256999733,
+        "event": "pull_request",
+        "status": "queued",
+        "conclusion": None,
+        "run_attempt": 2,
+        "head_sha": HEAD_SHA,
+        "head_branch": "repair/security-7723",
+        "head_repository": {"full_name": "Generous-Corp/pulp"},
+        "path": ".github/workflows/build.yml",
+    }
+    source.update(overrides)
+    return source
 
 
 def _pr(*, number: int = 7723, state: str = "open",
@@ -87,6 +105,11 @@ def _job_text(job_name: str) -> str:
 
 
 def _assert_trust_boundary(workflow: dict[str, object]) -> None:
+    concurrency = workflow.get("concurrency", {})
+    if concurrency.get("cancel-in-progress") != "${{ !inputs.recovery }}":
+        raise AssertionError(
+            "normal retargets may supersede, but recovery must never cancel"
+        )
     jobs = workflow["jobs"]
     build = jobs["build-test"]
     pending = jobs["publish-macos-pending"]
@@ -114,14 +137,13 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
     ):
         if isolated not in build_text:
             raise AssertionError(f"untrusted build lost isolation marker {isolated}")
-    expected_controller_permissions = {
-        "checks": "write", "pull-requests": "read"
-    }
-    for label, controller, text in (
-        ("pending publisher", pending, pending_text),
-        ("check completer", reporter, reporter_text),
+    for label, controller, text, expected_permissions in (
+        ("pending publisher", pending, pending_text,
+         {"actions": "read", "checks": "write", "pull-requests": "read"}),
+        ("check completer", reporter, reporter_text,
+         {"checks": "write", "pull-requests": "read"}),
     ):
-        if controller.get("permissions") != expected_controller_permissions:
+        if controller.get("permissions") != expected_permissions:
             raise AssertionError(f"{label} permissions drifted")
         if "actions/checkout" in text:
             raise AssertionError(f"privileged {label} must never check out source")
@@ -152,8 +174,8 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
         if step.get("name") == "Initialize isolated retarget paths"
     )["run"]
     for marker in (
-        'cd "$PULP_UNTRUSTED_SOURCE"',
         "exec sudo -u nobody /usr/bin/env -i",
+        'cd "$PULP_UNTRUSTED_HOME"',
         'HOME="$PULP_UNTRUSTED_HOME"',
         'TMPDIR="$PULP_UNTRUSTED_TMPDIR"',
         'PULP_UNTRUSTED_SOURCE="$PULP_UNTRUSTED_SOURCE"',
@@ -229,6 +251,11 @@ def _assert_reconciler(document: dict[str, object]) -> None:
 
 
 def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
+         expected_head: str = "",
+         recovery: str = "false", source_run_id: str = "",
+         source_run_attempt: str = "", source_run: dict[str, object] | None = None,
+         source_job_pages: list[dict[str, object]] | None = None,
+         check_run_pages: list[dict[str, object]] | None = None,
          workflow_ref: str = "main",
          detail: dict[str, object] | None = None,
          matches: list[dict[str, object]] | None = None) -> tuple[int, dict[str, str], str]:
@@ -242,10 +269,27 @@ def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
         fixtures.mkdir()
         (fixtures / "detail.json").write_text(json.dumps(detail), encoding="utf-8")
         (fixtures / "matches.json").write_text(json.dumps(matches), encoding="utf-8")
+        (fixtures / "source-run.json").write_text(
+            json.dumps(source_run if source_run is not None else _source_run()),
+            encoding="utf-8",
+        )
+        (fixtures / "source-jobs.json").write_text(
+            json.dumps(source_job_pages if source_job_pages is not None
+                       else [{"total_count": 0, "jobs": []}]),
+            encoding="utf-8",
+        )
+        (fixtures / "check-runs.json").write_text(
+            json.dumps(check_run_pages if check_run_pages is not None
+                       else [{"total_count": 0, "check_runs": []}]),
+            encoding="utf-8",
+        )
         fake_gh = fake_bin / "gh"
         fake_gh.write_text(
             "#!/bin/sh\n"
             "case \"$*\" in\n"
+            "  */commits/*/check-runs*) cat \"$FIXTURES/check-runs.json\" ;;\n"
+            "  */actions/runs/*/jobs*) cat \"$FIXTURES/source-jobs.json\" ;;\n"
+            "  */actions/runs/*) cat \"$FIXTURES/source-run.json\" ;;\n"
             "  */pulls/[0-9]*) cat \"$FIXTURES/detail.json\" ;;\n"
             "  *) cat \"$FIXTURES/matches.json\" ;;\n"
             "esac\n",
@@ -264,6 +308,10 @@ def _run(*, explicit: str = "7723", target_ref: str = "repair/security-7723",
             "GITHUB_REPOSITORY_OWNER": "Generous-Corp",
             "INPUT_PR_NUMBER": explicit,
             "TARGET_REF": target_ref,
+            "INPUT_EXPECTED_HEAD": expected_head,
+            "INPUT_SOURCE_RUN_ID": source_run_id,
+            "INPUT_SOURCE_RUN_ATTEMPT": source_run_attempt,
+            "INPUT_RECOVERY": recovery,
             "WORKFLOW_REF": workflow_ref,
             "GH_TOKEN": "test-token",
         })
@@ -352,6 +400,10 @@ def _run_reporter(*, detail: dict[str, object] | None = None,
 
 
 def _run_pending(*, detail: dict[str, object] | None = None,
+                 recovery: str = "false",
+                 source_run: dict[str, object] | None = None,
+                 source_job_pages: list[dict[str, object]] | None = None,
+                 check_run_pages: list[dict[str, object]] | None = None,
                  ) -> tuple[int, bool, str]:
     detail = detail if detail is not None else _pr()
     with tempfile.TemporaryDirectory() as tmp:
@@ -360,12 +412,29 @@ def _run_pending(*, detail: dict[str, object] | None = None,
         fake_bin.mkdir()
         fixture = root / "detail.json"
         fixture.write_text(json.dumps(detail), encoding="utf-8")
+        (root / "source-run.json").write_text(
+            json.dumps(source_run if source_run is not None else _source_run()),
+            encoding="utf-8",
+        )
+        (root / "source-jobs.json").write_text(
+            json.dumps(source_job_pages if source_job_pages is not None
+                       else [{"total_count": 0, "jobs": []}]),
+            encoding="utf-8",
+        )
+        (root / "check-runs.json").write_text(
+            json.dumps(check_run_pages if check_run_pages is not None
+                       else [{"total_count": 0, "check_runs": []}]),
+            encoding="utf-8",
+        )
         posted = root / "posted"
         fake_gh = fake_bin / "gh"
         fake_gh.write_text(
             "#!/bin/sh\n"
             "case \" $* \" in\n"
             "  *\" --method POST \"*) printf '%s\\n' \"$*\" > \"$POSTED\"; printf '12345\\n' ;;\n"
+            "  *\" /actions/runs/\"*\"/jobs\"*) cat \"$ROOT/source-jobs.json\" ;;\n"
+            "  *\" /actions/runs/\"*) cat \"$ROOT/source-run.json\" ;;\n"
+            "  *\" /commits/\"*\"/check-runs\"*) cat \"$ROOT/check-runs.json\" ;;\n"
             "  *) cat \"$FIXTURE\" ;;\n"
             "esac\n",
             encoding="utf-8",
@@ -377,11 +446,15 @@ def _run_pending(*, detail: dict[str, object] | None = None,
         env.update({
             "PATH": f"{fake_bin}:{os.environ['PATH']}",
             "FIXTURE": str(fixture), "POSTED": str(posted),
+            "ROOT": str(root),
             "GITHUB_OUTPUT": str(output),
             "GITHUB_REPOSITORY": "Generous-Corp/pulp",
             "EXPECTED_PR": "7723", "EXPECTED_BASE": BASE_SHA,
             "EXPECTED_HEAD": HEAD_SHA,
             "EXPECTED_HEAD_REF": "repair/security-7723",
+            "INPUT_RECOVERY": recovery,
+            "INPUT_SOURCE_RUN_ID": SOURCE_RUN_ID,
+            "INPUT_SOURCE_RUN_ATTEMPT": "2",
             "CHECK_EXTERNAL_ID": "retarget-1-1",
             "DETAILS_URL": "https://example.invalid/run/1",
             "GH_TOKEN": "test-token",
@@ -402,6 +475,127 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
             "head_ref": "repair/security-7723",
         })
 
+    def test_automated_recovery_refuses_head_drift(self) -> None:
+        rc, output, error = _run(expected_head="c" * 40)
+        self.assertEqual(rc, 1)
+        self.assertEqual(output, {})
+        self.assertIn("head changed before retarget dispatch", error)
+        rc, output, _ = _run(expected_head=HEAD_SHA)
+        self.assertEqual(rc, 0)
+        self.assertEqual(output["head_sha"], HEAD_SHA)
+
+    def test_recovery_revalidates_exact_pending_zero_job_source(self) -> None:
+        rc, output, error = _run(
+            expected_head=HEAD_SHA,
+            recovery="true",
+            source_run_id=SOURCE_RUN_ID,
+            source_run_attempt="2",
+        )
+        self.assertEqual(rc, 0, error)
+        self.assertEqual(output["head_sha"], HEAD_SHA)
+
+        rc, output, error = _run(
+            expected_head=HEAD_SHA,
+            recovery="true",
+            source_run_id=SOURCE_RUN_ID,
+            source_run_attempt="2",
+            source_run=_source_run(status="pending"),
+        )
+        self.assertEqual(rc, 0, error)
+        self.assertEqual(output["head_sha"], HEAD_SHA)
+
+    def test_recovery_rejects_source_run_identity_or_state_drift(self) -> None:
+        missing_conclusion = _source_run()
+        missing_conclusion.pop("conclusion")
+        cases = {
+            "workflow": {"workflow_id": 1},
+            "event": {"event": "workflow_dispatch"},
+            "status": {"status": "in_progress"},
+            "conclusion": {"status": "completed", "conclusion": "success"},
+            "attempt": {"run_attempt": 3},
+            "head": {"head_sha": "c" * 40},
+            "ref": {"head_branch": "replacement"},
+            "repository": {"head_repository": {"full_name": "attacker/pulp"}},
+            "path": {"path": ".github/workflows/other.yml@refs/pull/7723/merge"},
+            "suffixed path": {
+                "path": ".github/workflows/build.yml@refs/pull/7723/merge"
+            },
+        }
+        for label, overrides in cases.items():
+            with self.subTest(label=label):
+                rc, output, _ = _run(
+                    expected_head=HEAD_SHA,
+                    recovery="true",
+                    source_run_id=SOURCE_RUN_ID,
+                    source_run_attempt="2",
+                    source_run=_source_run(**overrides),
+                )
+                self.assertEqual(rc, 1)
+                self.assertEqual(output, {})
+
+        rc, output, _ = _run(
+            expected_head=HEAD_SHA,
+            recovery="true",
+            source_run_id=SOURCE_RUN_ID,
+            source_run_attempt="2",
+            source_run=missing_conclusion,
+        )
+        self.assertEqual(rc, 1)
+        self.assertEqual(output, {})
+
+    def test_recovery_rejects_nonempty_or_ambiguous_job_census(self) -> None:
+        cases = (
+            [{"total_count": 1, "jobs": [{"id": 9}]}],
+            [{"total_count": 0, "jobs": []}, {"total_count": 0, "jobs": []}],
+            [],
+        )
+        for pages in cases:
+            with self.subTest(pages=pages):
+                rc, output, error = _run(
+                    expected_head=HEAD_SHA,
+                    recovery="true",
+                    source_run_id=SOURCE_RUN_ID,
+                    source_run_attempt="2",
+                    source_job_pages=pages,
+                )
+                self.assertEqual(rc, 1)
+                self.assertEqual(output, {})
+                self.assertIn("exhaustive zero-job", error)
+
+    def test_recovery_refuses_an_existing_macos_check(self) -> None:
+        rc, output, error = _run(
+            expected_head=HEAD_SHA,
+            recovery="true",
+            source_run_id=SOURCE_RUN_ID,
+            source_run_attempt="2",
+            check_run_pages=[{
+                "total_count": 1,
+                "check_runs": [{"id": 7, "name": "macos"}],
+            }],
+        )
+        self.assertEqual(rc, 1)
+        self.assertEqual(output, {})
+        self.assertIn("macos check appeared", error)
+
+    def test_recovery_inputs_are_paired_and_fail_closed(self) -> None:
+        cases = (
+            {"recovery": "true", "source_run_id": "", "source_run_attempt": "2",
+             "expected_head": HEAD_SHA},
+            {"recovery": "true", "source_run_id": SOURCE_RUN_ID,
+             "source_run_attempt": "0", "expected_head": HEAD_SHA},
+            {"recovery": "true", "source_run_id": SOURCE_RUN_ID,
+             "source_run_attempt": "2", "expected_head": ""},
+            {"recovery": "false", "source_run_id": SOURCE_RUN_ID,
+             "source_run_attempt": "2", "expected_head": HEAD_SHA},
+            {"recovery": "maybe", "source_run_id": "",
+             "source_run_attempt": "", "expected_head": ""},
+        )
+        for inputs in cases:
+            with self.subTest(inputs=inputs):
+                rc, output, _ = _run(**inputs)
+                self.assertEqual(rc, 1)
+                self.assertEqual(output, {})
+
     def test_concurrency_uses_the_required_canonical_pr_ref(self) -> None:
         self.assertEqual(
             _workflow()["concurrency"]["group"],
@@ -410,6 +604,14 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         self.assertEqual(
             _workflow()[True]["workflow_dispatch"]["inputs"]["target_ref"]["required"],
             True,
+        )
+        self.assertEqual(
+            _workflow()[True]["workflow_dispatch"]["inputs"]["expected_head_sha"]["default"],
+            "",
+        )
+        self.assertEqual(
+            _workflow()[True]["workflow_dispatch"]["inputs"]["recovery"]["default"],
+            False,
         )
 
     def test_local_route_fails_closed_even_for_current_jit_selector(self) -> None:
@@ -457,6 +659,20 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         self.assertIn("external_id", pending)
         self.assertIn("terminalize_orphan_on_exit", pending)
         self.assertIn("checks", pending)
+
+    def test_recovery_publisher_refuses_late_source_or_check_mutation(self) -> None:
+        for kwargs in (
+            {"source_run": _source_run(status="in_progress")},
+            {"source_job_pages": [{"total_count": 1, "jobs": [{"id": 9}]}]},
+            {"check_run_pages": [{
+                "total_count": 1,
+                "check_runs": [{"id": 7, "name": "macos"}],
+            }]},
+        ):
+            with self.subTest(kwargs=kwargs):
+                rc, posted, _ = _run_pending(recovery="true", **kwargs)
+                self.assertEqual(rc, 1)
+                self.assertFalse(posted)
 
     def test_protected_reconciler_owns_cancelled_pending_checks(self) -> None:
         import yaml
@@ -651,12 +867,12 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
         jobs = _workflow()["jobs"]
         self.assertEqual(
             jobs["resolve-runner"]["permissions"],
-            {"contents": "read", "pull-requests": "read"},
+            {"actions": "read", "contents": "read", "pull-requests": "read"},
         )
         self.assertEqual(jobs["build-test"]["permissions"], {"contents": "read"})
         self.assertEqual(
             jobs["publish-macos-pending"]["permissions"],
-            {"checks": "write", "pull-requests": "read"},
+            {"actions": "read", "checks": "write", "pull-requests": "read"},
         )
         self.assertEqual(
             jobs["complete-macos-check"]["permissions"],
@@ -717,6 +933,28 @@ class BuildMacosWorkflowDispatchTests(unittest.TestCase):
                     step for step in doc["jobs"]["build-test"]["steps"]
                     if step.get("name") == "Initialize isolated retarget paths"
                 ).update({"run": "exec sudo -u nobody env"}),
+            ),
+            (
+                "untrusted wrapper omits isolated source path",
+                lambda doc: next(
+                    step for step in doc["jobs"]["build-test"]["steps"]
+                    if step.get("name") == "Initialize isolated retarget paths"
+                ).update({"run": next(
+                    step for step in doc["jobs"]["build-test"]["steps"]
+                    if step.get("name") == "Initialize isolated retarget paths"
+                )["run"].replace(
+                    'PULP_UNTRUSTED_SOURCE="$PULP_UNTRUSTED_SOURCE" \\\n', ""
+                )}),
+            ),
+            (
+                "untrusted wrapper inherits inaccessible checkout cwd",
+                lambda doc: next(
+                    step for step in doc["jobs"]["build-test"]["steps"]
+                    if step.get("name") == "Initialize isolated retarget paths"
+                ).update({"run": next(
+                    step for step in doc["jobs"]["build-test"]["steps"]
+                    if step.get("name") == "Initialize isolated retarget paths"
+                )["run"].replace('cd "$PULP_UNTRUSTED_HOME"\n', "")}),
             ),
             (
                 "PR setup bypasses untrusted account wrapper",
