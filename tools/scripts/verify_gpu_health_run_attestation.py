@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import json_schema_lite
@@ -198,7 +200,8 @@ def validate_shape(attestation: dict[str, Any]) -> None:
             "authentication identity or signature is malformed")
 
 
-def main() -> int:
+def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
+    """Verify one invocation using an in-process-only injectable UTC clock."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--attestation-revision", required=True)
@@ -217,17 +220,18 @@ def main() -> int:
     parser.add_argument("--expected-backend", required=True)
     parser.add_argument("--expected-device", required=True)
     parser.add_argument("--max-age-seconds", type=int, required=True)
-    parser.add_argument("--now", help=argparse.SUPPRESS)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         repo = args.repository.resolve()
+        expected_implementation = args.expected_implementation_revision
+        require(isinstance(expected_implementation, str)
+                and len(expected_implementation) == 40
+                and all(c in "0123456789abcdef" for c in expected_implementation),
+                "expected implementation revision must be an exact lowercase "
+                "40-character Git SHA")
         protected_revision = resolve_commit(repo, args.protected_ref, "protected ref")
         attestation_revision = resolve_commit(
             repo, args.attestation_revision, "attestation revision"
-        )
-        expected_implementation = resolve_commit(
-            repo, args.expected_implementation_revision,
-            "expected implementation revision",
         )
         ancestor(repo, attestation_revision, protected_revision,
                  "attestation revision is not protected ancestry")
@@ -361,7 +365,10 @@ def main() -> int:
         require(args.max_age_seconds >= 0, "max age must be non-negative")
         measured = parse_time(health_ref["measured_at_utc"], "measured_at_utc")
         created = parse_time(attestation["created_at"], "created_at")
-        now = parse_time(args.now, "now") if args.now else dt.datetime.now(dt.timezone.utc)
+        now = clock()
+        require(isinstance(now, dt.datetime) and now.tzinfo is not None
+                and now.utcoffset() == dt.timedelta(0),
+                "injected verification clock must return a UTC datetime")
         require(measured <= created, "run attestation predates the GPU measurement")
         require(created <= now, "run attestation is dated in the future")
         require(measured <= now, "GPU measurement is dated in the future")
@@ -376,6 +383,11 @@ def main() -> int:
         f"implementation={expected_implementation} probe_id={args.expected_probe_id}"
     )
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    return verify(arguments, clock=lambda: dt.datetime.now(dt.timezone.utc))
 
 
 if __name__ == "__main__":

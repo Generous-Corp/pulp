@@ -102,6 +102,11 @@ python3 tools/scripts/verify_gpu_health_run_attestation.py \
   --max-age-seconds 1800
 ```
 
+`--expected-implementation-revision` is policy data, not a revision expression:
+it must be the exact lowercase 40-hex commit ID. The attestation revision and
+protected ref are resolved once to immutable commits; the verifier's freshness
+clock is always the current system UTC time and has no command-line override.
+
 The trusted-host registry is a closed JSON object with
 `schema: pulp.gpu-health-trusted-hosts.v1`, `version: 1`, and a `hosts` array.
 Each host has exactly `host_id`, `stable_machine_id`, and `public_key` (the

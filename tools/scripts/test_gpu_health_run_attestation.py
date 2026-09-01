@@ -148,18 +148,31 @@ class Fixture:
             "--expected-backend", "Metal",
             "--expected-device", "vendor=0x106b,device=0x0001",
             "--max-age-seconds", "600",
-            "--now", NOW,
         ]
         command.extend(extra)
         return command
 
     def verify(self, *extra: str, protected_ref: str = "protected",
-               attestation_revision: str | None = None) -> subprocess.CompletedProcess:
-        command = ["python3", VERIFIER, *self.verify_arguments(
+               attestation_revision: str | None = None,
+               now: str = NOW) -> subprocess.CompletedProcess:
+        command = self.verify_arguments(
             *extra, protected_ref=protected_ref,
             attestation_revision=attestation_revision,
-        )]
-        return run(*command, check=False)
+        )
+        output = io.StringIO()
+        errors = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            try:
+                status = verifier.verify(
+                    [str(argument) for argument in command],
+                    clock=lambda: verifier.parse_time(now, "test clock"),
+                )
+            except SystemExit as error:
+                status = int(error.code)
+        return subprocess.CompletedProcess(
+            [str(VERIFIER), *map(str, command)], status,
+            stdout=output.getvalue(), stderr=errors.getvalue(),
+        )
 
     def mutate_attestation(self, operation) -> None:
         path = self.repo / self.attestation_path
@@ -264,10 +277,12 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
             attestation_revision="moving-attestation"
         )
         output = io.StringIO()
-        with mock.patch.object(sys, "argv", [str(VERIFIER), *map(str, arguments)]), \
-                mock.patch.object(verifier, "git", side_effect=move_after_resolution), \
+        with mock.patch.object(verifier, "git", side_effect=move_after_resolution), \
                 contextlib.redirect_stdout(output):
-            result = verifier.main()
+            result = verifier.verify(
+                [str(argument) for argument in arguments],
+                clock=lambda: verifier.parse_time(NOW, "test clock"),
+            )
         self.assertTrue(moved)
         self.assertEqual(result, 0, output.getvalue())
         self.assertIn(f"revision={valid_revision}", output.getvalue())
@@ -300,6 +315,47 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         result = self.fixture.verify("--expected-implementation-revision", older)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does not match verifier policy", result.stdout)
+
+    def test_expected_implementation_policy_rejects_movable_or_noncanonical_input(self) -> None:
+        run("git", "tag", "implementation-tag", self.fixture.implementation,
+            cwd=self.fixture.repo)
+        for value in (
+            "HEAD", "main", "implementation-tag",
+            f"{self.fixture.implementation}^{{commit}}",
+            self.fixture.implementation.upper(),
+        ):
+            with self.subTest(value=value):
+                result = self.fixture.verify(
+                    "--expected-implementation-revision", value
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("exact lowercase 40-character Git SHA", result.stdout)
+
+    def test_cli_rejects_now_override(self) -> None:
+        result = run(
+            "python3", VERIFIER,
+            *self.fixture.verify_arguments(), "--now", NOW,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments: --now", result.stderr)
+
+    def test_in_process_clock_is_injected_once(self) -> None:
+        calls = 0
+
+        def clock():
+            nonlocal calls
+            calls += 1
+            return verifier.parse_time(NOW, "test clock")
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status = verifier.verify(
+                [str(argument) for argument in self.fixture.verify_arguments()],
+                clock=clock,
+            )
+        self.assertEqual(status, 0, output.getvalue())
+        self.assertEqual(calls, 1)
 
     def test_alternate_passing_probe_with_same_adapter_is_not_selected(self) -> None:
         result = self.fixture.verify("--expected-probe-id", "renderer3d-frame")
@@ -524,7 +580,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                 fixture.attestation = fixture.head()
                 run("git", "branch", "-f", "protected", fixture.attestation,
                     cwd=fixture.repo)
-                verified = fixture.verify("--now", now)
+                verified = fixture.verify(now=now)
                 self.assertNotEqual(verified.returncode, 0)
                 self.assertIn(expected, verified.stdout)
 
