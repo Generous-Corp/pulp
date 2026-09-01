@@ -192,6 +192,17 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("binary digest", result.stdout)
 
+    def test_untrusted_signer_fails(self) -> None:
+        other_key = Path(self.temp.name) / "other-key"
+        run("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", other_key)
+        public_parts = Path(str(other_key) + ".pub").read_text().split(" ", 2)
+        trust = json.loads(self.fixture.trust.read_text())
+        trust["hosts"][0]["public_key"] = " ".join(public_parts[:2])
+        self.fixture.trust.write_text(json.dumps(trust, sort_keys=True) + "\n")
+        result = self.fixture.verify()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("fingerprint does not match", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
