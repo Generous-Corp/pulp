@@ -291,7 +291,7 @@
     {
       "key": "audio.voice-modulation-sources",
       "domain": "audio",
-      "summary": "Prepared fixed-memory bank of per-voice LFO and AHDSR envelope sources with free-running or retriggered phase policy and per-voice unison phase spread, feeding constant or audio-rate voice modulation lanes. LFO rate and depth are live automation destinations, retunable from the audio thread without restarting phase.",
+      "summary": "Prepared fixed-memory bank of per-voice LFO and AHDSR envelope sources with free-running or retriggered phase policy and per-voice unison phase spread, feeding constant or audio-rate voice modulation lanes. LFO wave, rate, and depth are live automation destinations, settable from the audio thread without restarting phase.",
       "rt_class": "audio",
       "lifecycle": {
         "construction": "none",

@@ -1026,7 +1026,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
-      "fingerprint": "sha256:746841a78e2287a8c2fc3b6561452619ebcdf8def6eb1535731fdcb5da3e2454",
+      "fingerprint": "sha256:5d62d1ef328c7a47103efcc0910ef48928ca844213c6a4a8579cdf8e9f15a234",
       "include": "pulp/audio/voice_modulation_sources.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
