@@ -19,6 +19,23 @@ mutable global browser, but the workflow must fail if the pinned archive cannot
 be downloaded, verified, extracted, or executed; a skipped browser comparison
 is not a passing fidelity gate.
 
+That download is on the critical path of every required-gate job, and it is a
+network dependency the gate cannot route around, so its retry policy matters.
+`curl --retry` treats as transient only a timeout, an FTP 4xx, or an HTTP 408,
+429, 500, 502, 503 or 504 response; **a DNS resolution failure (curl exit 6) is
+not in that set**. The step therefore passes `--retry-all-errors`, without which
+a transient resolver failure inside the ephemeral VM fails the required `macos`
+context outright. This is not hypothetical: on 2026-09-01 three gate jobs failed
+within 100 seconds across two hosts and two unrelated pull requests, all with
+exit 6, while the host LAN resolved and fetched the same URL normally.
+
+`$RUNNER_TEMP` is fresh in every ephemeral VM, so the `if [ ! -x "$chrome" ]`
+guard never hits and the archive is fetched once per job rather than once per
+host. Baking the pinned browser into the golden image, or caching it on a
+host-mounted path, would remove the dependency from the gate entirely; until
+then the retry policy is the only thing standing between a resolver blip and a
+red required check.
+
 The browser-capture Node tests are intentionally split by execution contract:
 dependency-free units, the serial real-Chromium integration file (with its own
 600-second CTest timeout), and the esbuild-backed materialized-runtime

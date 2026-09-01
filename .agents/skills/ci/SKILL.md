@@ -296,6 +296,35 @@ fail on download, checksum, extraction, or executable discovery.  Do **not**
 convert a missing browser into a skipped fidelity test: that would let a PR
 claim source-to-native validation that never occurred.
 
+**A red `macos` on this step is usually the network, not the PR.** The archive
+is fetched over the internet on the critical path of every required-gate job,
+so the step fails whenever the ephemeral VM cannot resolve
+`storage.googleapis.com`. That surfaces as `Process completed with exit code 6`
+(curl: "Could not resolve host") on the *Install pinned Chrome* step. Before
+touching a diff that has nothing to do with browsers, check the shape:
+
+- **Did jobs on OTHER pull requests fail in the same window?** A defect in your
+  branch cannot fail someone else's PR. On 2026-09-01 three gate jobs failed
+  within 100 seconds across two hosts and two unrelated PRs, all with exit 6.
+- **Was the gate green either side of it?** A transient resolver failure has
+  successes bracketing it; a real regression does not.
+- **Does the host LAN resolve and fetch the pinned URL?** `dig` plus a
+  `curl -r 0-0` range request against the exact archive settles it in seconds.
+
+When all three point the same way it is infrastructure. Re-run the failed job
+(`ghapp api -X POST repos/Generous-Corp/pulp/actions/runs/<id>/rerun-failed-jobs`)
+rather than editing the branch — but confirm the condition has actually cleared
+first, by watching an in-flight run clear the same step, so the re-run is not
+spent booting a VM into a still-broken network.
+
+The step passes `--retry-all-errors` precisely because plain `--retry` does
+**not** cover DNS failures: curl retries a timeout, an FTP 4xx, or an HTTP 408,
+429, 500, 502, 503 or 504, and nothing else. Do not "simplify" that flag away.
+Note also that `$RUNNER_TEMP` is fresh in every ephemeral VM, so the
+`if [ ! -x "$chrome" ]` guard never hits and the archive is downloaded once per
+job, not once per host; baking it into the golden image would remove the
+network dependency from the gate entirely.
+
 Browser-capture Node coverage has three distinct CTest entries. Keep the
 dependency-free unit aggregate separate from the real-Chromium integration
 file, whose serial browser cases have their own 600-second bound. The

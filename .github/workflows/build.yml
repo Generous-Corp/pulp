@@ -1317,7 +1317,11 @@ jobs:
           chrome="$chrome_root/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
           if [ ! -x "$chrome" ]; then
             archive="$RUNNER_TEMP/chrome-mac-arm64.zip"
-            curl --fail --location --retry 3 --output "$archive" \
+            # curl --retry covers timeouts and a fixed HTTP/FTP status set; it does
+            # NOT cover a DNS resolution failure (exit 6), which is how this step
+            # has actually failed. --retry-all-errors is what makes that retryable.
+            curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 \
+              --connect-timeout 20 --output "$archive" \
               https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip
             expected=9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee
             actual=$(shasum -a 256 "$archive" | awk '{print $1}')
