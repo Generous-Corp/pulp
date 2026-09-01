@@ -9,6 +9,7 @@
     "schema": { "const": "pulp.gpu-health-result.v1" },
     "version": { "const": 1 },
     "run_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "measured_at_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
     "render_requested": { "type": "boolean" },
     "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
     "health_state": { "enum": ["healthy", "failed", "unavailable", "unverified", "lost"] },

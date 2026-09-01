@@ -235,6 +235,11 @@ same-device correlation. Exit 0 requires authentic identity from at least one
 required probe plus required render/readback/content proof; use the per-probe
 fields when correlation matters.
 
+New active-probe results include `measured_at_utc`, captured immediately before
+probe execution. The field remains optional when parsing stored v1 results for
+compatibility, but authenticated run attestations require it and calculate
+freshness from that measurement time rather than the later signature time.
+
 For protected physical-machine coverage, pair the result with the independently
 verified
 [`pulp.gpu-health-run-attestation.v1`](../contracts/gpu-health-run-attestation-v1.schema.json)

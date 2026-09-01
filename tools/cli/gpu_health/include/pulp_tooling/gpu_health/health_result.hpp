@@ -205,6 +205,10 @@ struct HealthResult {
     std::string schema{ kSchema };
     std::uint32_t version = kVersion;
     std::string run_id;
+    /// UTC wall-clock time captured immediately before active probe execution.
+    /// Empty preserves parsing compatibility with stored v1 results that
+    /// predate authenticated run evidence.
+    std::string measured_at_utc;
     bool render_requested = true;
     Verdict verdict = Verdict::unverified;
     HealthState health_state = HealthState::unverified;

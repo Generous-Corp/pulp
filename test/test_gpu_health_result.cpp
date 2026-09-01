@@ -11,6 +11,7 @@ namespace {
 gh::HealthResult passing_result() {
     gh::HealthResult result;
     result.run_id = "roundtrip";
+    result.measured_at_utc = "2026-09-01T07:00:00Z";
     result.render_requested = true;
     result.verdict = gh::Verdict::pass;
     result.health_state = gh::HealthState::healthy;
@@ -100,4 +101,9 @@ TEST_CASE("GPU health v1 rejects unsupported identity and evidence claims",
     unknown_code.probes[0].events[0].code = "gpu.render.renamed";
     REQUIRE_FALSE(gh::validate(unknown_code, &error));
     REQUIRE(error.find("not registered") != std::string::npos);
+
+    auto malformed_time = passing_result();
+    malformed_time.measured_at_utc = "2026-09-01T07:00:00+01:00";
+    REQUIRE_FALSE(gh::validate(malformed_time, &error));
+    REQUIRE(error.find("measured_at_utc") != std::string::npos);
 }

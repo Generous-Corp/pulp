@@ -14,9 +14,13 @@ import subprocess
 import tempfile
 from typing import Any
 
+import json_schema_lite
+from gpu_health_contract import semantic_errors
+
 SCHEMA = "pulp.gpu-health-run-attestation.v1"
 NAMESPACE = SCHEMA
 SCHEMA_PATH = "docs/contracts/gpu-health-run-attestation-v1.schema.json"
+HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v1.schema.json"
 
 
 class Failure(RuntimeError):
@@ -114,7 +118,8 @@ def verify_signature(statement: dict[str, Any], public_key: str,
 def validate_shape(attestation: dict[str, Any]) -> None:
     exact(attestation, {"schema", "version", "created_at", "implementation_revision",
                         "evidence_publication_revision", "host", "selection", "producer",
-                        "gpu_health_result", "canonical_schema", "authentication"},
+                        "gpu_health_result", "canonical_health_schema",
+                        "canonical_schema", "authentication"},
           "run attestation")
     require(attestation["schema"] == SCHEMA and attestation["version"] == 1,
             "run attestation has the wrong contract identity")
@@ -123,8 +128,11 @@ def validate_shape(attestation: dict[str, Any]) -> None:
                                      "backend", "device"}, "selection")
     exact(attestation["producer"], {"binary_path", "binary_sha256", "build_id",
                                     "code_signature"}, "producer")
-    exact(attestation["gpu_health_result"], {"path", "sha256", "run_id", "schema"},
+    exact(attestation["gpu_health_result"],
+          {"path", "sha256", "run_id", "schema", "measured_at_utc"},
           "gpu_health_result")
+    exact(attestation["canonical_health_schema"], {"path", "sha256"},
+          "canonical_health_schema")
     exact(attestation["canonical_schema"], {"path", "sha256"}, "canonical_schema")
     exact(attestation["authentication"], {"algorithm", "namespace",
                                            "signer_key_fingerprint", "signature"},
@@ -134,6 +142,8 @@ def validate_shape(attestation: dict[str, Any]) -> None:
             "run attestation uses an unsupported authentication method")
     require(attestation["canonical_schema"]["path"] == SCHEMA_PATH,
             "run attestation does not bind the canonical schema path")
+    require(attestation["canonical_health_schema"]["path"] == HEALTH_SCHEMA_PATH,
+            "run attestation does not bind the canonical GPU-health schema path")
     for field in ("implementation_revision", "evidence_publication_revision"):
         value = attestation[field]
         require(isinstance(value, str) and len(value) == 40
@@ -148,6 +158,7 @@ def validate_shape(attestation: dict[str, Any]) -> None:
                 "run attestation contains an empty identity field")
     for parent, field in ((attestation["producer"], "binary_sha256"),
                           (attestation["gpu_health_result"], "sha256"),
+                          (attestation["canonical_health_schema"], "sha256"),
                           (attestation["canonical_schema"], "sha256")):
         value = parent[field]
         require(isinstance(value, str) and len(value) == 64
@@ -155,7 +166,7 @@ def validate_shape(attestation: dict[str, Any]) -> None:
                 f"{field} is not a lowercase SHA-256 digest")
     require(all(isinstance(attestation["gpu_health_result"][field], str)
                 and attestation["gpu_health_result"][field]
-                for field in ("path", "run_id", "schema")),
+                for field in ("path", "run_id", "schema", "measured_at_utc")),
             "GPU-health result reference contains an empty field")
     require(isinstance(attestation["authentication"]["signer_key_fingerprint"], str)
             and attestation["authentication"]["signer_key_fingerprint"].startswith("SHA256:")
@@ -223,20 +234,40 @@ def main() -> int:
                  "evidence publication revision is not protected ancestry")
 
         schema_bytes = git_blob(repo, evidence, SCHEMA_PATH)
-        health_ref = attestation["gpu_health_result"]
-        health_bytes = git_blob(repo, evidence, health_ref["path"])
+        health_schema_bytes = git_blob(repo, evidence, HEALTH_SCHEMA_PATH)
         require(hashlib.sha256(schema_bytes).hexdigest() == attestation["canonical_schema"]["sha256"],
                 "canonical schema digest does not match protected evidence")
-        require(hashlib.sha256(health_bytes).hexdigest() == health_ref["sha256"],
-                "GPU-health result digest does not match protected evidence")
+        require(hashlib.sha256(health_schema_bytes).hexdigest() ==
+                attestation["canonical_health_schema"]["sha256"],
+                "canonical GPU-health schema digest does not match protected evidence")
         schema = strict_json(schema_bytes, "canonical schema")
         require(schema.get("$id") ==
                 "https://pulp.audio/contracts/gpu-health-run-attestation-v1.schema.json",
                 "canonical schema has the wrong identity")
+        schema_problems = json_schema_lite.validate(attestation, schema)
+        require(not schema_problems,
+                f"run attestation violates its canonical schema: {schema_problems[0] if schema_problems else ''}")
+        health_ref = attestation["gpu_health_result"]
+        health_bytes = git_blob(repo, evidence, health_ref["path"])
+        require(hashlib.sha256(health_bytes).hexdigest() == health_ref["sha256"],
+                "GPU-health result digest does not match protected evidence")
+        health_schema = strict_json(health_schema_bytes, "canonical GPU-health schema")
+        require(health_schema.get("$id") ==
+                "https://pulp.audio/contracts/gpu-health-result-v1.schema.json",
+                "canonical GPU-health schema has the wrong identity")
         health = strict_json(health_bytes, "GPU-health result")
+        health_schema_problems = json_schema_lite.validate(health, health_schema)
+        require(not health_schema_problems,
+                "GPU-health result violates its canonical schema: " +
+                (health_schema_problems[0] if health_schema_problems else ""))
+        semantic_problems = semantic_errors(health)
+        require(not semantic_problems,
+                "GPU-health result violates its semantic contract: " +
+                (semantic_problems[0] if semantic_problems else ""))
         require(health.get("schema") == health_ref["schema"] == "pulp.gpu-health-result.v1"
-                and health.get("run_id") == health_ref["run_id"],
-                "GPU-health result identity or run_id was substituted")
+                and health.get("run_id") == health_ref["run_id"]
+                and health.get("measured_at_utc") == health_ref["measured_at_utc"],
+                "GPU-health result identity, run_id, or measurement time was substituted")
         all_probes = health.get("probes")
         require(isinstance(all_probes, list)
                 and all(isinstance(probe, dict) for probe in all_probes),
@@ -288,11 +319,14 @@ def main() -> int:
         verify_signature(unsigned, trusted["public_key"], trusted["host_id"], signature)
 
         require(args.max_age_seconds >= 0, "max age must be non-negative")
+        measured = parse_time(health_ref["measured_at_utc"], "measured_at_utc")
         created = parse_time(attestation["created_at"], "created_at")
         now = parse_time(args.now, "now") if args.now else dt.datetime.now(dt.timezone.utc)
+        require(measured <= created, "run attestation predates the GPU measurement")
         require(created <= now, "run attestation is dated in the future")
-        require((now - created).total_seconds() <= args.max_age_seconds,
-                "run attestation is stale")
+        require(measured <= now, "GPU measurement is dated in the future")
+        require((now - measured).total_seconds() <= args.max_age_seconds,
+                "GPU measurement is stale")
     except (Failure, OSError) as error:
         print(f"gpu-health run-attestation verification failed: {error}")
         return 1

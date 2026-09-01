@@ -12,9 +12,13 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+import json_schema_lite
+from gpu_health_contract import semantic_errors
+
 SCHEMA = "pulp.gpu-health-run-attestation.v1"
 NAMESPACE = SCHEMA
 SCHEMA_PATH = "docs/contracts/gpu-health-run-attestation-v1.schema.json"
+HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v1.schema.json"
 
 
 def fail(message: str) -> None:
@@ -133,9 +137,22 @@ def main() -> int:
     repo = args.repository.resolve()
     health_bytes = git_bytes(repo, args.evidence_publication_revision, args.health_result)
     schema_bytes = git_bytes(repo, args.evidence_publication_revision, SCHEMA_PATH)
+    health_schema_bytes = git_bytes(
+        repo, args.evidence_publication_revision, HEALTH_SCHEMA_PATH
+    )
     health = strict_json(health_bytes)
-    if health.get("schema") != "pulp.gpu-health-result.v1" or not health.get("run_id"):
-        fail("GPU-health result has the wrong schema or an empty run_id")
+    health_schema = strict_json(health_schema_bytes)
+    if health_schema.get("$id") != \
+            "https://pulp.audio/contracts/gpu-health-result-v1.schema.json":
+        fail("canonical GPU-health schema has the wrong identity")
+    schema_problems = json_schema_lite.validate(health, health_schema)
+    if schema_problems:
+        fail(f"GPU-health result violates its canonical schema: {schema_problems[0]}")
+    semantic_problems = semantic_errors(health)
+    if semantic_problems:
+        fail(f"GPU-health result violates its semantic contract: {semantic_problems[0]}")
+    if not health.get("measured_at_utc"):
+        fail("GPU-health result lacks a machine-produced measured_at_utc")
     probe = selected_probe(health, args.probe_id)
     binary = args.producer_binary.resolve()
     try:
@@ -168,6 +185,11 @@ def main() -> int:
             "sha256": sha256(health_bytes),
             "run_id": health["run_id"],
             "schema": health["schema"],
+            "measured_at_utc": health["measured_at_utc"],
+        },
+        "canonical_health_schema": {
+            "path": HEALTH_SCHEMA_PATH,
+            "sha256": sha256(health_schema_bytes),
         },
         "canonical_schema": {"path": SCHEMA_PATH, "sha256": sha256(schema_bytes)},
     }
@@ -189,6 +211,13 @@ def main() -> int:
         "signer_key_fingerprint": fingerprint(key),
         "signature": base64.b64encode(signature).decode("ascii"),
     }
+    attestation_schema = strict_json(schema_bytes)
+    if attestation_schema.get("$id") != \
+            "https://pulp.audio/contracts/gpu-health-run-attestation-v1.schema.json":
+        fail("canonical run-attestation schema has the wrong identity")
+    schema_problems = json_schema_lite.validate(statement, attestation_schema)
+    if schema_problems:
+        fail(f"run attestation violates its canonical schema: {schema_problems[0]}")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(canonical(statement))
     return 0

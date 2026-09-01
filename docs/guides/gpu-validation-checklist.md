@@ -79,7 +79,8 @@ evidence, and containing attestation revisions to form the expected ancestry,
 requires the latter two to be ancestors of the named protected ref, re-reads
 the schema and health result from Git, re-hashes the live producer binary,
 checks the caller's exact selection policy, verifies the host signature, and
-applies an explicit freshness ceiling:
+applies an explicit freshness ceiling to the GPU result's machine-produced
+`measured_at_utc`. Re-signing an old result cannot refresh that timestamp:
 
 ```bash
 python3 tools/scripts/verify_gpu_health_run_attestation.py \

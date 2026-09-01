@@ -469,10 +469,12 @@ The JSON result follows the installed
 [`pulp.gpu-health-result.v1`](../contracts/gpu-health-result-v1.schema.json)
 contract. Each stage distinguishes `pass`, `fail`, `unavailable`, and
 `unverified`, and includes the measured facts and remediation needed to
-interpret it. Adapter identity is reported only from adapter metadata returned
-by Dawn. A Metal, D3D12, Vulkan, or other backend name does not prove that an
-adapter is discrete hardware, and the null/software backend is never reported
-as a hardware pass. Identities are per probe: independently acquired
+interpret it. New active runs record `measured_at_utc` immediately before probe
+execution; older stored v1 results without that optional field still parse but
+cannot support a freshness-checked run attestation. Adapter identity is
+reported only from adapter metadata returned by Dawn. A Metal, D3D12, Vulkan,
+or other backend name does not prove that an adapter is discrete hardware, and
+the null/software backend is never reported as a hardware pass. Identities are per probe: independently acquired
 Renderer3D, HeadlessSurface, and GpuCompute devices are not asserted to be the
 same device. An aggregate pass requires authentic identity from at least one
 required probe plus real render/readback/content proof from the required probe

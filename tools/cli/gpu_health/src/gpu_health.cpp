@@ -8,8 +8,10 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -21,6 +23,20 @@
 
 namespace pulp::tooling::gpu_health {
 namespace {
+
+std::string measurement_time_utc() {
+    const auto now = std::chrono::system_clock::now();
+    const auto value = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &value);
+#else
+    gmtime_r(&value, &utc);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+    return out.str();
+}
 
 EvidenceEvent event(Stage stage, Verdict verdict, std::string code,
                     std::string detail) {
@@ -402,6 +418,7 @@ std::unique_ptr<HealthProvider> make_default_health_provider(
 HealthResult run_health_check(HealthProvider& provider, bool render_requested) {
     HealthResult result;
     result.run_id = "pulp-doctor-gpu-v1";
+    result.measured_at_utc = measurement_time_utc();
     result.render_requested = render_requested;
 
     if (!render_requested) {

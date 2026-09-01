@@ -345,6 +345,19 @@ bool validate(const HealthResult& result, std::string* error) {
     if (result.version != kVersion) return fail("version must be 1");
     if (result.run_id.empty() || result.run_id.size() > 128)
         return fail("run_id must contain 1..128 characters");
+    if (!result.measured_at_utc.empty()) {
+        const auto& value = result.measured_at_utc;
+        const auto digit = [&](std::size_t index) {
+            return index < value.size() && value[index] >= '0' && value[index] <= '9';
+        };
+        if (value.size() != 20 || value[4] != '-' || value[7] != '-' ||
+            value[10] != 'T' || value[13] != ':' || value[16] != ':' ||
+            value[19] != 'Z' || !digit(0) || !digit(1) || !digit(2) ||
+            !digit(3) || !digit(5) || !digit(6) || !digit(8) || !digit(9) ||
+            !digit(11) || !digit(12) || !digit(14) || !digit(15) ||
+            !digit(17) || !digit(18))
+            return fail("measured_at_utc must be an RFC 3339 UTC timestamp");
+    }
     if (result.probes.empty() || result.probes.size() > 16)
         return fail("probes must contain 1..16 entries");
     if (result.recommendations.size() > 32)
@@ -556,6 +569,8 @@ std::string to_json(const HealthResult& result, bool pretty) {
     root.setMember("schema", result.schema);
     root.setMember("version", static_cast<std::int64_t>(result.version));
     root.setMember("run_id", result.run_id);
+    if (!result.measured_at_utc.empty())
+        root.setMember("measured_at_utc", result.measured_at_utc);
     root.setMember("render_requested", result.render_requested);
     root.setMember("verdict", std::string(to_string(result.verdict)));
     root.setMember("health_state", std::string(to_string(result.health_state)));
@@ -585,7 +600,7 @@ std::optional<HealthResult> from_json(std::string_view json, std::string* error)
 
     std::string parse_error;
     static constexpr std::array root_fields{
-        "schema", "version", "run_id", "render_requested", "verdict",
+        "schema", "version", "run_id", "measured_at_utc", "render_requested", "verdict",
         "health_state", "probes", "recommendations",
     };
     if (!has_only_fields(root, root_fields, "$", parse_error))
@@ -599,8 +614,13 @@ std::optional<HealthResult> from_json(std::string_view json, std::string* error)
         version > std::numeric_limits<std::uint32_t>::max())
         return fail(parse_error.empty() ? "$.version is too large" : std::move(parse_error));
     result.version = static_cast<std::uint32_t>(version);
-    if (!read_required_string(root, "run_id", "$.", result.run_id, parse_error) ||
-        !read_required_bool(root, "render_requested", "$.", result.render_requested,
+    if (!read_required_string(root, "run_id", "$.", result.run_id, parse_error))
+        return fail(std::move(parse_error));
+    if (root.hasObjectMember("measured_at_utc") &&
+        !read_required_string(root, "measured_at_utc", "$.", result.measured_at_utc,
+                              parse_error))
+        return fail(std::move(parse_error));
+    if (!read_required_bool(root, "render_requested", "$.", result.render_requested,
                             parse_error) ||
         !read_required_enum(root, "verdict", "$.", result.verdict,
                             verdict_from_string, parse_error) ||
