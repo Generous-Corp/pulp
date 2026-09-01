@@ -1497,7 +1497,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/strum.hpp",
-      "fingerprint": "sha256:bb5df51eb73e754c6493881a22103f6a43ba0957982e590f606052134f5dda75",
+      "fingerprint": "sha256:71b3bfba299503c2dfff38864f7fc8aede43d7e2f3cfb6474e5cfdebb4a0bf67",
       "include": "pulp/midi/strum.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
