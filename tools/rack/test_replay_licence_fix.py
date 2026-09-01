@@ -152,34 +152,89 @@ def test_the_fix_commit_is_found_by_content():
     exactly that way. So the commit is located by the text it introduced, and
     the negative direction -- a repository where nothing introduced that text
     -- has to come back None rather than guessing.
+
+    The history is built here rather than read from the repository this file
+    happens to sit in. A checkout with one commit cannot answer a question
+    about a parent, so pointing the search at the surrounding checkout would
+    make the answer depend on how deeply it was cloned instead of on whether
+    the search works.
     """
     import subprocess
-    repo = os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))))
-    sha = R.licence_fix_commit(repo)
+    import tempfile
 
-    def gate_at(tree_ish: str) -> str:
-        r = subprocess.run(
-            ["git", "show", f"{tree_ish}:tools/rack/patch_gate.cpp"],
-            cwd=repo, capture_output=True, text=True)
-        return r.stdout if r.returncode == 0 else ""
+    def git(cwd, *args):
+        return subprocess.run(
+            ["git", "-c", "user.email=replay@pulp.test",
+             "-c", "user.name=replay", *args],
+            cwd=cwd, capture_output=True, text=True)
 
-    # A well-formed hash is not a right one. Ask the two trees the answer
-    # names: the commit's own gate has to CALL asset::init() and its parent's
-    # has to not, or the replay would compile two gates that differ in
-    # something else and call the difference a licence effect.
-    after = gate_at(sha or "HEAD")
-    before = gate_at(f"{sha}^" if sha else "HEAD")
-    results = [
-        ("a repository with the fix yields a commit",
-         bool(sha) and len(sha or "") == 40, f"got {sha!r} from {repo}"),
-        ("the named commit's gate resolves licence keys",
-         "rack::asset::init()" in after,
-         f"{sha} does not call asset::init() in the gate"),
-        ("its parent's gate does not",
-         bool(before) and "rack::asset::init()" not in before,
-         f"{sha}^ already called asset::init(), so it is not the fix"),
-    ]
+    def write_gate(root: str, body: str):
+        gate = os.path.join(root, "tools", "rack")
+        os.makedirs(gate, exist_ok=True)
+        with open(os.path.join(gate, "patch_gate.cpp"), "w") as f:
+            f.write(body)
+
+    results = []
+    with tempfile.TemporaryDirectory() as root:
+        git(root, "init", "-q", "-b", "main")
+        write_gate(root, "int main() { return 0; }\n")
+        git(root, "add", "tools/rack/patch_gate.cpp")
+        git(root, "commit", "-qm", "gate before the fix")
+        parent = git(root, "rev-parse", "HEAD").stdout.strip()
+
+        write_gate(root, "int main() { rack::asset::init(); return 0; }\n")
+        git(root, "add", "tools/rack/patch_gate.cpp")
+        git(root, "commit", "-qm", "resolve licence keys in the gate")
+        introduced = git(root, "rev-parse", "HEAD").stdout.strip()
+
+        # A later commit that does not touch the string. The search has to
+        # name the commit that introduced it, not the newest one.
+        with open(os.path.join(root, "unrelated.txt"), "w") as f:
+            f.write("later\n")
+        git(root, "add", "unrelated.txt")
+        git(root, "commit", "-qm", "something else entirely")
+
+        sha = R.licence_fix_commit(root)
+
+        def gate_at(tree_ish: str) -> str:
+            r = subprocess.run(
+                ["git", "show", f"{tree_ish}:tools/rack/patch_gate.cpp"],
+                cwd=root, capture_output=True, text=True)
+            return r.stdout if r.returncode == 0 else ""
+
+        # A well-formed hash is not a right one. Ask the two trees the answer
+        # names: the commit's own gate has to CALL asset::init() and its
+        # parent's has to not, or the replay would compile two gates that
+        # differ in something else and call the difference a licence effect.
+        after = gate_at(sha or "HEAD")
+        before = gate_at(f"{sha}^" if sha else "HEAD")
+        results += [
+            ("a repository with the fix yields a commit",
+             bool(sha) and len(sha or "") == 40, f"got {sha!r}"),
+            ("the commit named is the one that introduced the call",
+             sha == introduced, f"got {sha!r}, wanted {introduced!r}"),
+            ("the named commit's gate resolves licence keys",
+             "rack::asset::init()" in after,
+             f"{sha} does not call asset::init() in the gate"),
+            ("its parent's gate does not",
+             bool(before) and "rack::asset::init()" not in before,
+             f"{sha}^ already called asset::init(), so it is not the fix"),
+            ("the parent named is the earlier commit",
+             sha != parent, "the search named the pre-fix commit"),
+        ]
+
+    # A repository whose gate never gained the call: no answer, not a wrong
+    # one. This is the direction that catches a search which returns whatever
+    # commit it happens to land on.
+    with tempfile.TemporaryDirectory() as bare:
+        git(bare, "init", "-q", "-b", "main")
+        write_gate(bare, "int main() { return 0; }\n")
+        git(bare, "add", "tools/rack/patch_gate.cpp")
+        git(bare, "commit", "-qm", "a gate that never resolves licences")
+        results.append(("a history without the fix yields no commit",
+                        R.licence_fix_commit(bare) is None,
+                        "a repository without the fix produced a hash"))
+
     # The opposite direction, in a directory that is not a git repository at
     # all: no answer, not a wrong one.
     results.append(("a directory with no history yields no commit",
