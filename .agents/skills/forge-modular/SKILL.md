@@ -130,10 +130,14 @@ listener path is silent but the source module has a measured-live sibling
 output. `deterministic_repair.py` may audition that sibling only when its exact
 semantic role set matches the silent output, and it may change only cables on
 the listener path. Activity is not acceptance: rerun the full DSP/audibility
-gate and keep the repair only when the patch becomes measured audible. If no
-same-role sibling qualifies, or the replacement remains silent, preserve the
-original patch and its honest failure. This is a general output-selection
-repair, never a module-identity exception.
+gate, then apply every existing blocking prompt-derived static, runtime, and
+long-horizon qualification to that exact candidate. Continue through the
+same-role siblings until one is both audible and fully qualified; audibility
+alone must not short-circuit a later sibling whose real DSP satisfies the
+request. If none fully qualifies, retain the audible candidate with the fewest
+missed requirements as unfinished with its exact errors; preserve the original
+patch only when no sibling became measured audible. This is a general
+output-selection repair, never a module-identity exception.
 
 `render_inventory` has the same honesty rule: a module with no recorded jacks
 prints `ports: UNKNOWN`, and inputs and outputs are independent. It used to
