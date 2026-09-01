@@ -373,7 +373,7 @@
           {
             "exported_as": "Pulp::vst3-sdk",
             "closure_node_count": 1,
-            "public_header_count": 893
+            "public_header_count": 902
           },
           {
             "exported_as": "Pulp::yaml-cpp",
@@ -5435,7 +5435,7 @@
             "system_libraries": []
           },
           "public_headers": {
-            "count": 893,
+            "count": 902,
             "roots": [
               "external/vst3sdk"
             ],
