@@ -80,30 +80,51 @@ def forge_adapter_configuration(role: str) -> str:
     return f"authority-config:{role}"
 
 
+def role_build_authority(role: str) -> dict[str, Any]:
+    signatures = role_expected_signatures(role)
+    if role == "constrained-adapter":
+        adapter, configuration = "authority-metal-constrained", "authority-config"
+    elif role in v2.FORGE_ROLES:
+        adapter, configuration = "metal", forge_adapter_configuration(role)
+    elif role == "headless-reference":
+        adapter, configuration = "metal", "headless-manifest-bound"
+    else:
+        adapter, configuration = "metal", "default"
+    if role in {"pulp-standalone", "constrained-adapter"}:
+        host_bundle_id = "fixture.host.pulp-standalone"
+        lifecycle = workload = "manifest-bound"
+    else:
+        host_bundle_id = f"fixture.host.{role}"
+        lifecycle = f"manifest-bound:{role}"
+        workload = f"workload:{role}"
+    return {
+        "host_bundle_id": host_bundle_id,
+        "host_version": "1",
+        "host_sha256": DIGEST,
+        "application_sha256": DIGEST,
+        "plugin_sha256": DIGEST,
+        "provider_sha256": DIGEST,
+        "build_sha256": DIGEST,
+        "content_sha256": DIGEST,
+        "signature_sha256": v2.signature_set_digest(
+            signatures, f"{role} fixture signatures",
+        )[0],
+        "expected_signatures": signatures,
+        "adapter": adapter,
+        "adapter_configuration": configuration,
+        "interaction_lifecycle": lifecycle,
+        "steady_state_workload": workload,
+    }
+
+
 def policy_role(role: str) -> dict[str, Any]:
-    build_authority = None
-    if role in v2.FORGE_ROLES:
-        signatures = role_expected_signatures(role)
-        build_authority = {
-            "application_sha256": DIGEST,
-            "plugin_sha256": DIGEST,
-            "provider_sha256": DIGEST,
-            "build_sha256": DIGEST,
-            "content_sha256": DIGEST,
-            "signature_sha256": v2.signature_set_digest(
-                signatures, f"{role} fixture signatures",
-            )[0],
-            "expected_signatures": signatures,
-            "adapter": "metal",
-            "adapter_configuration": forge_adapter_configuration(role),
-        }
     return {
         "role_id": role,
         "first_visible_p95_ns": 1000,
         "first_interaction": interaction(role),
         "steady_cpu_frame_p95_ns": 1000,
         "steady_gpu_frame_p95_ns": 1000,
-        "build_authority": build_authority,
+        "build_authority": role_build_authority(role),
     }
 
 
@@ -276,31 +297,28 @@ raise SystemExit(2)
             "gpu_evidence_id": "gpu-evidence", "trace_evidence_id": f"trace-{role}",
             "process_pid": 42, "process_upid": 7,
         })
-        expected_signatures = role_expected_signatures(role)
+        build_authority = role_build_authority(role)
         identity = {
                 "pulp_revision": SHA, "forge_revision": FORGE_SHA if role in v2.FORGE_ROLES else None,
                 "machine_id": "fleet-m5", "hardware": "M5", "os": "macOS", "host_kind": host,
-                "host_bundle_id": "fixture.host", "host_version": "1", "host_sha256": DIGEST,
-                "application_kind": application, "application_sha256": DIGEST,
-                "plugin_format": plugin_format, "plugin_sha256": DIGEST,
-                "provider_sha256": DIGEST, "build_sha256": DIGEST,
-                "signature_sha256": v2.signature_set_digest(
-                    expected_signatures, f"{role} fixture signatures",
-                )[0],
-                "expected_signatures": expected_signatures, "content_sha256": DIGEST,
-                "adapter": "authority-metal-constrained" if role == "constrained-adapter" else "metal",
+                "host_bundle_id": build_authority["host_bundle_id"],
+                "host_version": build_authority["host_version"],
+                "host_sha256": build_authority["host_sha256"],
+                "application_kind": application,
+                "application_sha256": build_authority["application_sha256"],
+                "plugin_format": plugin_format,
+                "plugin_sha256": build_authority["plugin_sha256"],
+                "provider_sha256": build_authority["provider_sha256"],
+                "build_sha256": build_authority["build_sha256"],
+                "signature_sha256": build_authority["signature_sha256"],
+                "expected_signatures": build_authority["expected_signatures"],
+                "content_sha256": build_authority["content_sha256"],
+                "adapter": build_authority["adapter"],
+                "adapter_configuration": build_authority["adapter_configuration"],
+                "interaction_lifecycle": build_authority["interaction_lifecycle"],
+                "steady_state_workload": build_authority["steady_state_workload"],
                 "display_id": "main", "refresh_hz": 60,
         }
-        if role in {"pulp-standalone", "constrained-adapter"}:
-            identity.update({
-                "adapter_configuration": (
-                    "authority-config" if role == "constrained-adapter" else "default"
-                ),
-                "interaction_lifecycle": "manifest-bound",
-                "steady_state_workload": "manifest-bound",
-            })
-        elif role in v2.FORGE_ROLES:
-            identity["adapter_configuration"] = forge_adapter_configuration(role)
         if role == "constrained-adapter":
             identity["adapter_predicate"] = "supported-constrained-metal-adapter"
         if role != "headless-reference":
@@ -525,6 +543,55 @@ def plant_easier_forge_adapter(
         lambda identity: identity.update(
             adapter="software", adapter_configuration="easier-baseline",
         ),
+    )
+
+
+def plant_forge_host_substitution(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    rebind_campaign_identity(
+        receipt, root, "forge-modular-auv2-logic",
+        lambda identity: identity.update(
+            host_bundle_id="easier.host",
+            host_version="0",
+            host_sha256="8" * 64,
+        ),
+    )
+
+
+def plant_missing_forge_lifecycle(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    rebind_campaign_identity(
+        receipt, root, "forge-modular-standalone",
+        lambda identity: identity.pop("interaction_lifecycle"),
+    )
+
+
+def plant_easier_forge_lifecycle(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    rebind_campaign_identity(
+        receipt, root, "forge-modular-auv2-logic",
+        lambda identity: identity.update(interaction_lifecycle="no-interaction"),
+    )
+
+
+def plant_missing_forge_workload(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    rebind_campaign_identity(
+        receipt, root, "forge-modular-vst3-reaper",
+        lambda identity: identity.pop("steady_state_workload"),
+    )
+
+
+def plant_easier_forge_workload(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    rebind_campaign_identity(
+        receipt, root, "forge-modular-clap-reaper",
+        lambda identity: identity.update(steady_state_workload="idle"),
     )
 
 
@@ -944,6 +1011,11 @@ def main() -> int:
         ("missing standalone configuration", lambda r, _p: r["campaigns"][0]["identity"].pop("adapter_configuration")),
         ("easier standalone adapter baseline", plant_easier_standalone_adapter),
         ("easier Forge adapter baseline", plant_easier_forge_adapter),
+        ("Forge host substitution", plant_forge_host_substitution),
+        ("missing Forge lifecycle", plant_missing_forge_lifecycle),
+        ("easier Forge lifecycle", plant_easier_forge_lifecycle),
+        ("missing Forge workload", plant_missing_forge_workload),
+        ("easier Forge workload", plant_easier_forge_workload),
         ("constrained product substitution", lambda r, _p: r["campaigns"][6]["identity"].update(build_sha256="8" * 64)),
         ("campaign interaction origin", lambda r, _p: r["campaigns"][0]["identity"].update(interaction_origin="easier-origin")),
         ("campaign interaction stimulus", lambda r, _p: r["campaigns"][1]["identity"].update(interaction_stimulus="easier-stimulus")),

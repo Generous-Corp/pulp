@@ -60,13 +60,23 @@ GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 POLICY_BUDGET_ID = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 ARTIFACT_KEYS = {"path", "sha256"}
 CANONICAL_RECEIPT = "docs/validation/gpu-first-visible-a3-acceptance.json"
-FORGE_BUILD_DIGEST_FIELDS = (
-    "application_sha256", "plugin_sha256", "provider_sha256", "build_sha256",
-    "content_sha256", "signature_sha256",
+BUILD_AUTHORITY_DIGEST_FIELDS = (
+    "host_sha256", "application_sha256", "plugin_sha256", "provider_sha256",
+    "build_sha256", "content_sha256", "signature_sha256",
 )
-FORGE_BUILD_AUTHORITY_FIELDS = (
-    *FORGE_BUILD_DIGEST_FIELDS, "adapter", "adapter_configuration",
+BUILD_AUTHORITY_TEXT_FIELDS = (
+    "host_bundle_id", "host_version", "adapter", "adapter_configuration",
+    "interaction_lifecycle", "steady_state_workload",
 )
+BUILD_AUTHORITY_FIELDS = (*BUILD_AUTHORITY_DIGEST_FIELDS, *BUILD_AUTHORITY_TEXT_FIELDS)
+DERIVED_CAMPAIGN_IDENTITY_FIELDS = {
+    "pulp_revision", "forge_revision", "machine_id", "hardware", "os",
+    "host_kind", "application_kind", "plugin_format", "display_id", "refresh_hz",
+}
+VISIBLE_POLICY_IDENTITY_FIELDS = {
+    "editor_open_origin", "interaction_origin", "interaction_stimulus",
+    "interaction_expected_state", "interaction_measurement_endpoint",
+}
 
 
 class V2AcceptanceError(ValueError):
@@ -402,34 +412,28 @@ def validate_product_policy(
                 if not isinstance(interaction[field], str) or not interaction[field]:
                     raise V2AcceptanceError(f"{row['role_id']} interaction.{field} is missing")
             _positive_int(interaction["p95_ns"], "first-interaction threshold")
-        build_authority = row["build_authority"]
-        if row["role_id"] in FORGE_ROLES:
-            exact_keys(build_authority, {
-                *FORGE_BUILD_AUTHORITY_FIELDS, "expected_signatures",
-            }, f"product policy role {row['role_id']} build authority")
-            for field in FORGE_BUILD_DIGEST_FIELDS:
-                if not isinstance(build_authority[field], str) or not SHA256.fullmatch(
-                    build_authority[field]
-                ):
-                    raise V2AcceptanceError(
-                        f"product policy role {row['role_id']} build authority {field} is invalid"
-                    )
-            for field in ("adapter", "adapter_configuration"):
-                if not isinstance(build_authority[field], str) or not build_authority[field]:
-                    raise V2AcceptanceError(
-                        f"product policy role {row['role_id']} build authority {field} is missing"
-                    )
-            signature_digest, _ = signature_set_digest(
-                build_authority["expected_signatures"],
-                f"product policy role {row['role_id']} expected signatures",
-            )
-            if build_authority["signature_sha256"] != signature_digest:
+        build_authority = exact_keys(row["build_authority"], {
+            *BUILD_AUTHORITY_FIELDS, "expected_signatures",
+        }, f"product policy role {row['role_id']} build authority")
+        for field in BUILD_AUTHORITY_DIGEST_FIELDS:
+            if not isinstance(build_authority[field], str) or not SHA256.fullmatch(
+                build_authority[field]
+            ):
                 raise V2AcceptanceError(
-                    f"product policy role {row['role_id']} signature authority digest is invalid"
+                    f"product policy role {row['role_id']} build authority {field} is invalid"
                 )
-        elif build_authority is not None:
+        for field in BUILD_AUTHORITY_TEXT_FIELDS:
+            if not isinstance(build_authority[field], str) or not build_authority[field]:
+                raise V2AcceptanceError(
+                    f"product policy role {row['role_id']} build authority {field} is missing"
+                )
+        signature_digest, _ = signature_set_digest(
+            build_authority["expected_signatures"],
+            f"product policy role {row['role_id']} expected signatures",
+        )
+        if build_authority["signature_sha256"] != signature_digest:
             raise V2AcceptanceError(
-                f"non-Forge product policy role {row['role_id']} cannot carry Forge build authority"
+                f"product policy role {row['role_id']} signature authority digest is invalid"
             )
     coverage = exact_keys(
         policy["required_coverage"],
@@ -1237,30 +1241,37 @@ def validate_v2(
     expected_signatures_by_role: dict[str, frozenset[str]] = {}
     for role_id, campaign in campaign_by_role.items():
         identity = campaign["identity"]
+        expected_identity_fields = {
+            *DERIVED_CAMPAIGN_IDENTITY_FIELDS,
+            *BUILD_AUTHORITY_FIELDS,
+            "expected_signatures",
+        }
+        if role_id in VISIBLE_ROLES:
+            expected_identity_fields.update(VISIBLE_POLICY_IDENTITY_FIELDS)
+        if role_id == "constrained-adapter":
+            expected_identity_fields.add("adapter_predicate")
+        exact_keys(identity, expected_identity_fields, f"{role_id} campaign identity")
         campaign_signature_digest, campaign_expected_signatures = signature_set_digest(
             identity["expected_signatures"], f"{role_id} expected signatures",
         )
         if identity["signature_sha256"] != campaign_signature_digest:
             raise V2AcceptanceError(f"{role_id} signature authority digest is invalid")
-        if role_id in FORGE_ROLES:
-            build_authority = policy_roles[role_id]["build_authority"]
-            _, authority_expected_signatures = signature_set_digest(
-                build_authority["expected_signatures"],
-                f"{role_id} protected expected signatures",
+        build_authority = policy_roles[role_id]["build_authority"]
+        _, authority_expected_signatures = signature_set_digest(
+            build_authority["expected_signatures"],
+            f"{role_id} protected expected signatures",
+        )
+        if (
+            campaign_expected_signatures != authority_expected_signatures
+            or any(
+                identity[field] != build_authority[field]
+                for field in BUILD_AUTHORITY_FIELDS
             )
-            if (
-                campaign_expected_signatures != authority_expected_signatures
-                or any(
-                    identity[field] != build_authority[field]
-                    for field in FORGE_BUILD_AUTHORITY_FIELDS
-                )
-            ):
-                raise V2AcceptanceError(
-                    f"{role_id} does not match its protected Forge build authority"
-                )
-            expected_signatures_by_role[role_id] = authority_expected_signatures
-        else:
-            expected_signatures_by_role[role_id] = campaign_expected_signatures
+        ):
+            raise V2AcceptanceError(
+                f"{role_id} does not match its protected role build/runtime authority"
+            )
+        expected_signatures_by_role[role_id] = authority_expected_signatures
     canary = policy["canary"]
     for role_id, identity in (
         ("pulp-standalone", standalone_identity),
