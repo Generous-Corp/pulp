@@ -539,11 +539,10 @@ public:
         for (const auto& candidate : candidates) {
             bool active = true;
             if (candidate.is_active) {
-                try {
-                    active = candidate.is_active();
-                } catch (...) {
-                    active = false;
-                }
+                // Format adapters own this predicate and must keep it
+                // non-throwing: Processor is also compiled by exception-free
+                // targets such as WebCLAP.
+                active = candidate.is_active();
             }
             if (!active) continue;
             if (handler) return false;
