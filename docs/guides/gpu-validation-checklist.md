@@ -38,6 +38,73 @@ to inspect bundle discovery and ABI details. If it reports a completed failure,
 preserve the JSON result and reproduce with the focused render/compute tests
 before moving to a live application.
 
+## Authenticate a published hardware run
+
+A checked-in `pulp doctor gpu --json` file proves measured GPU behavior, but
+its JSON alone does not authenticate the machine that produced it. For a run
+that will support a protected hardware-coverage claim, publish the result and
+the canonical
+[`pulp.gpu-health-run-attestation.v1`](../contracts/gpu-health-run-attestation-v1.schema.json)
+schema in one commit, then produce the signed sibling attestation and publish
+that file in a later commit. The separation is required because a file cannot
+contain the SHA of the commit that contains that same file without a circular
+hash.
+
+The producer reads the health result and schema from the exact evidence commit,
+selects one required passing probe with authentic hardware name/backend/device,
+hashes the exact producer binary, and signs the canonical statement with a
+pre-provisioned Ed25519 SSH host key. It never creates a key or changes host
+configuration:
+
+```bash
+python3 tools/scripts/gpu_health_run_attestation.py \
+  --repository "$PWD" \
+  --health-result docs/validation/gpu-health/a1/m5/pulp-doctor-gpu.json \
+  --output docs/validation/gpu-health/a1/m5/run-attestation.json \
+  --signing-key /path/to/pre-provisioned/m5-ed25519 \
+  --host-id m5 --stable-machine-id '<platform UUID from host inventory>' \
+  --configuration 'power=low;fallback=false' \
+  --probe-id gpu-compute-magnitude \
+  --implementation-revision '<40-character implementation SHA>' \
+  --evidence-publication-revision '<40-character result/schema commit SHA>' \
+  --producer-binary /absolute/path/to/pulp-cpp \
+  --producer-build-id '<exact build ID>' \
+  --producer-code-signature '<exact code-signature identity or digest>'
+```
+
+Verification is independent of the producer. Its local trusted-host registry
+maps one `host_id` to the expected stable machine ID and SSH public key; the
+registry contains no private key. The verifier requires the implementation,
+evidence, and containing attestation revisions to form the expected ancestry,
+requires the latter two to be ancestors of the named protected ref, re-reads
+the schema and health result from Git, re-hashes the live producer binary,
+checks the caller's exact selection policy, verifies the host signature, and
+applies an explicit freshness ceiling:
+
+```bash
+python3 tools/scripts/verify_gpu_health_run_attestation.py \
+  --repository "$PWD" \
+  --attestation-revision '<40-character commit containing run-attestation.json>' \
+  --attestation-path docs/validation/gpu-health/a1/m5/run-attestation.json \
+  --protected-ref origin/main \
+  --trusted-hosts /path/to/local/trusted-gpu-hosts.json \
+  --producer-binary /absolute/path/to/pulp-cpp \
+  --expected-producer-build-id '<exact build ID>' \
+  --expected-producer-code-signature '<exact code-signature identity or digest>' \
+  --expected-host-id m5 --expected-stable-machine-id '<platform UUID>' \
+  --expected-configuration 'power=low;fallback=false' \
+  --expected-adapter-name '<exact Dawn adapter name>' \
+  --expected-backend Metal --expected-device '<exact Dawn device identity>' \
+  --max-age-seconds 1800
+```
+
+The trusted-host registry is a closed JSON object with
+`schema: pulp.gpu-health-trusted-hosts.v1`, `version: 1`, and a `hosts` array.
+Each host has exactly `host_id`, `stable_machine_id`, and `public_key` (the
+single-line `ssh-ed25519 ...` public key). A missing trust entry, stale run,
+unprotected commit, changed binary/result/schema, or cross-host/configuration/
+adapter reuse is a verification failure, never unavailable-as-pass.
+
 ## DPR experiment evidence (A4 v2)
 
 The committed A4 corpus defines an evidence-only experiment; it does not change

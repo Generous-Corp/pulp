@@ -465,7 +465,8 @@ install(PROGRAMS
 # floating documentation URL or an inferred response.
 set(_pulp_gpu_health_contracts
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-read-result-v1.schema.json")
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-read-result-v1.schema.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-run-attestation-v1.schema.json")
 foreach(_pulp_gpu_health_contract IN LISTS _pulp_gpu_health_contracts)
     if(NOT EXISTS "${_pulp_gpu_health_contract}")
         message(FATAL_ERROR

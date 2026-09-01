@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-health-run-attestation-v1.schema.json",
+  "title": "Pulp GPU health run attestation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "created_at", "implementation_revision", "evidence_publication_revision", "host", "selection", "producer", "gpu_health_result", "canonical_schema", "authentication"],
+  "properties": {
+    "schema": { "const": "pulp.gpu-health-run-attestation.v1" },
+    "version": { "const": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "implementation_revision": { "$ref": "#/$defs/sha1" },
+    "evidence_publication_revision": { "$ref": "#/$defs/sha1" },
+    "host": {
+      "type": "object", "additionalProperties": false,
+      "required": ["host_id", "stable_machine_id"],
+      "properties": {
+        "host_id": { "$ref": "#/$defs/nonempty" },
+        "stable_machine_id": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "selection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["configuration", "probe_id", "adapter_name", "backend", "device"],
+      "properties": {
+        "configuration": { "$ref": "#/$defs/nonempty" },
+        "probe_id": { "$ref": "#/$defs/nonempty" },
+        "adapter_name": { "$ref": "#/$defs/nonempty" },
+        "backend": { "$ref": "#/$defs/nonempty" },
+        "device": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "producer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["binary_path", "binary_sha256", "build_id", "code_signature"],
+      "properties": {
+        "binary_path": { "$ref": "#/$defs/nonempty" },
+        "binary_sha256": { "$ref": "#/$defs/sha256" },
+        "build_id": { "$ref": "#/$defs/nonempty" },
+        "code_signature": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "gpu_health_result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "run_id", "schema"],
+      "properties": {
+        "path": { "$ref": "#/$defs/repository_path" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "run_id": { "$ref": "#/$defs/nonempty" },
+        "schema": { "const": "pulp.gpu-health-result.v1" }
+      }
+    },
+    "canonical_schema": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "const": "docs/contracts/gpu-health-run-attestation-v1.schema.json" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "authentication": {
+      "type": "object", "additionalProperties": false,
+      "required": ["algorithm", "namespace", "signer_key_fingerprint", "signature"],
+      "properties": {
+        "algorithm": { "const": "ssh-ed25519" },
+        "namespace": { "const": "pulp.gpu-health-run-attestation.v1" },
+        "signer_key_fingerprint": { "type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]+$" },
+        "signature": { "type": "string", "contentEncoding": "base64", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "nonempty": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "repository_path": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" }
+  }
+}
