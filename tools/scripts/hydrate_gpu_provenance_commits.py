@@ -14,7 +14,7 @@ from typing import Any
 
 
 SHA = re.compile(r"[0-9a-f]{40}")
-MAX_COMMITS = 64
+MAX_COMMITS = 128
 
 
 class HydrationError(RuntimeError):

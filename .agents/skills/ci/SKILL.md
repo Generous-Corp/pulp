@@ -5471,6 +5471,12 @@ so it cannot satisfy those checks. The native `build.yml` job runs
 `hydrate_gpu_provenance_commits.py`: it caps the checked-in Pulp revision set,
 unshallows only the exact `GITHUB_REF` event history when required, and then
 fails closed unless every named revision is a commit and an ancestor of HEAD.
+The cap is a cardinality guard, not permission to truncate evidence. Keep its
+accepted and rejected boundaries covered by
+`test_hydrate_gpu_provenance_commits.py`, and raise the explicit bound with
+headroom when legitimate closed handoff identities approach it; dropping or
+coalescing latest-owner revisions would falsify provenance. The current bound
+is 128 and the checked-in handoff plus independent probe receipt uses 65.
 Do not replace that step with a fixed deepen count, a full all-refs clone, or
 detached per-SHA fetches.
 

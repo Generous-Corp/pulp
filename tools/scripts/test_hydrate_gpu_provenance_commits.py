@@ -13,6 +13,51 @@ import hydrate_gpu_provenance_commits as hydration
 
 
 class HydrationTests(unittest.TestCase):
+    def test_checked_in_provenance_fits_the_bounded_commit_budget(self) -> None:
+        revisions = hydration.required_commits(pathlib.Path(__file__).resolve().parents[2])
+        self.assertEqual(len(revisions), 65)
+        self.assertLessEqual(len(revisions), hydration.MAX_COMMITS)
+
+    def test_provenance_at_the_bounded_commit_budget_is_accepted(self) -> None:
+        handoff = {
+            "entries": [
+                {
+                    "pulp_paths": [
+                        {
+                            "repo": "Generous-Corp/pulp",
+                            "revision": f"{index:040x}",
+                        }
+                        for index in range(hydration.MAX_COMMITS - 1)
+                    ]
+                }
+            ]
+        }
+        receipt = {"verification_equivalent_head": "f" * 40}
+        with mock.patch.object(hydration, "load_object", side_effect=[handoff, receipt]):
+            self.assertEqual(
+                len(hydration.required_commits(pathlib.Path("/repo"))),
+                hydration.MAX_COMMITS,
+            )
+
+    def test_provenance_over_the_bounded_commit_budget_fails_closed(self) -> None:
+        handoff = {
+            "entries": [
+                {
+                    "pulp_paths": [
+                        {
+                            "repo": "Generous-Corp/pulp",
+                            "revision": f"{index:040x}",
+                        }
+                        for index in range(hydration.MAX_COMMITS + 1)
+                    ]
+                }
+            ]
+        }
+        receipt = {"verification_equivalent_head": "0" * 40}
+        with mock.patch.object(hydration, "load_object", side_effect=[handoff, receipt]):
+            with self.assertRaisesRegex(hydration.HydrationError, "allowed range"):
+                hydration.required_commits(pathlib.Path("/repo"))
+
     def test_shallow_boundary_is_reconnected_even_when_objects_exist(self) -> None:
         revision = "a" * 40
         calls: list[list[str]] = []
