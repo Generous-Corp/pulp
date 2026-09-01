@@ -1,6 +1,7 @@
 # Scene3D boundary and golden contract test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+    if(Python3_Interpreter_FOUND)
         add_test(NAME scene3d-boxtextured-fixture-contract
             COMMAND ${Python3_EXECUTABLE}
                 "${CMAKE_SOURCE_DIR}/tools/scene3d/verify_boxtextured_fixture.py"

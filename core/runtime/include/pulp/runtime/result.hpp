@@ -202,4 +202,102 @@ private:
     }
 };
 
+
+/// `Result<void, E>` — an operation that either succeeded or failed with `E`.
+///
+/// The primary template stores `T` and `E` in a union, and a union cannot hold
+/// `void`, so "succeeded, with nothing to hand back" needs its own
+/// specialization rather than a placeholder type. `std::expected<void, E>`
+/// exists for the same reason.
+///
+/// A default-constructed `Result<void, E>` is the SUCCESS state, which is what
+/// makes `return {};` read as "fine" at a call site. Failure is still
+/// `return Err(...);`, so both forms match the primary template.
+template <typename E>
+class Result<void, E> {
+public:
+    using value_type = void;
+    using error_type = E;
+
+    /// Success.
+    Result() noexcept : has_value_(true) {}
+
+    Result(Err<E> err) : has_value_(false) {
+        new (&error_) E(std::move(err).value());
+    }
+
+    Result(const Result& other) : has_value_(other.has_value_) {
+        if (!has_value_) new (&error_) E(other.error_ref());
+    }
+
+    Result(Result&& other) noexcept(std::is_nothrow_move_constructible_v<E>)
+        : has_value_(other.has_value_) {
+        if (!has_value_) new (&error_) E(std::move(other.error_ref()));
+    }
+
+    // Strong exception guarantee, matching the primary template: the old error
+    // is destroyed only after the new one is fully constructed.
+    Result& operator=(const Result& other) {
+        if (this != &other) {
+            if (other.has_value_) {
+                destroy();
+                has_value_ = true;
+            } else {
+                E tmp(other.error_ref());
+                destroy();
+                has_value_ = false;
+                new (&error_) E(std::move(tmp));
+            }
+        }
+        return *this;
+    }
+
+    Result& operator=(Result&& other) noexcept(std::is_nothrow_move_constructible_v<E>) {
+        if (this != &other) {
+            if (other.has_value_) {
+                destroy();
+                has_value_ = true;
+            } else {
+                E tmp(std::move(other.error_ref()));
+                destroy();
+                has_value_ = false;
+                new (&error_) E(std::move(tmp));
+            }
+        }
+        return *this;
+    }
+
+    ~Result() { destroy(); }
+
+    bool has_value() const noexcept { return has_value_; }
+    explicit operator bool() const noexcept { return has_value_; }
+    bool is_err() const noexcept { return !has_value_; }
+
+    /// Present so generic code can call `value()` uniformly. There is nothing
+    /// to return; calling it on an error result is UB, as in the primary
+    /// template.
+    void value() const noexcept {}
+
+    // Pre: `!has_value()`.
+    E&       error() &       { return error_ref(); }
+    const E& error() const & { return error_ref(); }
+    E&&      error() &&      { return std::move(error_ref()); }
+
+private:
+    union {
+        // Only ever alive while `has_value_` is false. An anonymous union keeps
+        // the object empty-ish in the success case rather than paying for an
+        // always-constructed E.
+        E error_;
+    };
+    bool has_value_;
+
+    E&       error_ref()       noexcept { return error_; }
+    const E& error_ref() const noexcept { return error_; }
+
+    void destroy() noexcept {
+        if (!has_value_) error_.~E();
+    }
+};
+
 }  // namespace pulp::runtime

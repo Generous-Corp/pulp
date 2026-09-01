@@ -177,7 +177,7 @@ def main():
             "final-status-without-pixel-adapter-rejected",
             result,
             1,
-            "final Phase 7 goldens require a pixel-producing software adapter",
+            "final renderer goldens require a pixel-producing software adapter",
             errors,
         )
 

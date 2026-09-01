@@ -868,6 +868,18 @@ public:
     }
     bool has_sprite_core() const { return sprite_core_w_ > 0.0f && sprite_core_h_ > 0.0f; }
 
+    /// A browser crop records an exact device-pixel origin and DPR. Layout and
+    /// hit bounds stay fractional; only its static PNG destination is aligned
+    /// back to that captured origin so exact pixels are not resampled.
+    void set_captured_raster_origin(float x, float y, float scale) {
+        captured_raster_origin_x_ = x;
+        captured_raster_origin_y_ = y;
+        captured_raster_scale_ = scale > 0.0f ? scale : 0.0f;
+    }
+    float captured_raster_scale() const { return captured_raster_scale_; }
+    float captured_raster_origin_x() const { return captured_raster_origin_x_; }
+    float captured_raster_origin_y() const { return captured_raster_origin_y_; }
+
     /// Geometry of the design's OWN pointer (e.g. the Figma "Vector 7" hairline)
     /// captured by hoist_captured_art_knobs, expressed relative to the disc core
     /// so the renderer can reproduce the design's indicator instead of the
@@ -894,6 +906,17 @@ public:
     bool captured_indicator_color_authored() const {
         return ind_color_authored_;
     }
+    /// Optional authored CSS border around a captured HTML pointer. SVG/stroke
+    /// pointers retain their single-paint rendering path.
+    void set_captured_indicator_outline(canvas::Color color, float width_px) {
+        ind_outline_color_ = color;
+        ind_outline_width_ = std::max(0.0f, width_px);
+        request_repaint();
+    }
+    float captured_indicator_outline_width() const { return ind_outline_width_; }
+    canvas::Color captured_indicator_outline_color() const {
+        return ind_outline_color_;
+    }
 
 private:
     std::shared_ptr<SpriteStrip> sprite_strip_;
@@ -901,6 +924,9 @@ private:
     float sprite_core_y_ = 0.0f;
     float sprite_core_w_ = 0.0f;
     float sprite_core_h_ = 0.0f;
+    float captured_raster_origin_x_ = 0.0f;
+    float captured_raster_origin_y_ = 0.0f;
+    float captured_raster_scale_ = 0.0f;
     bool has_captured_indicator_ = false;
     float ind_r_in_ = 0.0f;
     float ind_r_out_ = 0.0f;
@@ -908,6 +934,8 @@ private:
     float ind_phase_rad_ = 0.0f;
     canvas::Color ind_color_ = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
     bool ind_color_authored_ = true;
+    canvas::Color ind_outline_color_ = canvas::Color::rgba(0, 0, 0, 1.0f);
+    float ind_outline_width_ = 0.0f;
 };
 
 // ── Fader ────────────────────────────────────────────────────────────────────
@@ -1107,6 +1135,14 @@ public:
         captured_body_includes_static_track_ = body_includes_static_track;
         request_repaint();
     }
+    void set_captured_raster_origin(float x, float y, float scale) {
+        captured_raster_origin_x_ = x;
+        captured_raster_origin_y_ = y;
+        captured_raster_scale_ = scale > 0.0f ? scale : 0.0f;
+    }
+    float captured_raster_scale() const { return captured_raster_scale_; }
+    float captured_raster_origin_x() const { return captured_raster_origin_x_; }
+    float captured_raster_origin_y() const { return captured_raster_origin_y_; }
     bool has_captured_indicator_art() const {
         return captured_indicator_ && captured_indicator_->loaded();
     }
@@ -1221,6 +1257,9 @@ private:
     float captured_control_natural_w_ = 0.0f;
     float captured_control_natural_h_ = 0.0f;
     bool captured_body_includes_static_track_ = false;
+    float captured_raster_origin_x_ = 0.0f;
+    float captured_raster_origin_y_ = 0.0f;
+    float captured_raster_scale_ = 0.0f;
     canvas::Color track_color_{};
     canvas::Color fill_color_{};
     canvas::Color thumb_color_{};

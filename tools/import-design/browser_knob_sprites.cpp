@@ -505,6 +505,8 @@ int apply_browser_capture_control_sprites(
         if (error != nullptr) *error = std::move(message);
         return 0;
     };
+    const auto capture_dpr = numeric_attribute(
+        ir.root, "browser_device_scale_factor");
 
     // Collect first so an unreadable capture is only an error when a knob
     // actually declared a pointer. A panel with no declared indicators must
@@ -646,6 +648,27 @@ int apply_browser_capture_control_sprites(
             std::to_string(body.width);
         node->attributes[is_knob ? "png_natural_h" : "fader_body_natural_h"] =
             std::to_string(body.height);
+        // Keep the crop's absolute device-pixel origin with the durable sprite
+        // contract. At runtime this aligns only the raster body; its View still
+        // keeps the browser's fractional layout and hit bounds.
+        const bool has_transform = node->style.transform &&
+            !node->style.transform->empty() && *node->style.transform != "none";
+        // The capture tree marks descendants of a transformed ancestor too:
+        // their crop coordinates are page-space post-transform, while a
+        // widget's local draw destination is not. Reusing this capture
+        // eligibility marker keeps a static sprite from being stamped at a
+        // stale untransformed origin.
+        const bool raster_origin_ineligible =
+            attribute(*node, "browser_box_paint_rect_ineligible").has_value();
+        if (capture_dpr && *capture_dpr > 0.0 && !has_transform &&
+            !raster_origin_ineligible) {
+            node->attributes["captured_raster_origin_x_px"] =
+                std::to_string(crop_rect->x);
+            node->attributes["captured_raster_origin_y_px"] =
+                std::to_string(crop_rect->y);
+            node->attributes["captured_raster_dpr"] =
+                std::to_string(*capture_dpr);
+        }
         // One static disc. A multi-frame strip encodes rotation in its frames
         // and gets no pointer overlay, which is the opposite of what a capture
         // needs.

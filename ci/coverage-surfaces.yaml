@@ -12,6 +12,7 @@ policy:
 component_sets:
   native-default:
     - audio
+    - authoring_capsule
     - canvas
     - dawproject
     - dsl

@@ -236,6 +236,9 @@ component_management:
       paths:
         - "core/audio/**"
         - "!core/audio/platform/**"
+    - component_id: authoring_capsule
+      name: authoring_capsule
+      paths: ["core/authoring_capsule/**"]
     - component_id: canvas
       name: canvas
       paths:

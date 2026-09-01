@@ -193,3 +193,6 @@
                 --require-runtime-evidence-url
                 "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/scene3d/sidecars/native-gap.pulp3d.json")
         set_tests_properties(scene3d-bake-preflight-runtime-evidence-url-required PROPERTIES
+            PASS_REGULAR_EXPRESSION
+                "bake_readiness=blocked.*runtime_evidence_url_invalid=true")
+    endif()

@@ -197,7 +197,9 @@ catch_discover_tests(pulp-test-canvas-fonts)
 # assertion cannot see any of them — each case renders the CSS beside a
 # hand-written equivalent and requires the two images to agree.
 if(PULP_HAS_SKIA)
-    add_executable(pulp-test-css-gradient-render test_css_gradient_render.cpp)
+    add_executable(pulp-test-css-gradient-render
+        test_css_gradient_render.cpp
+        harness/rt_allocation_probe.cpp)
     target_link_libraries(pulp-test-css-gradient-render
         PRIVATE pulp::view Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-css-gradient-render)
