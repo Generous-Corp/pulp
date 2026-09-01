@@ -1666,13 +1666,30 @@ class BehaviourGateInfrastructureSafety(SdkIsolatedTestCase):
     @unittest.skipUnless(sys.platform == "darwin", "Mach-O dependency proof")
     def test_real_plugin_records_accelerate_load_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as root:
-            pack = pathlib.Path(root) / "pack"
+            root_path = pathlib.Path(root)
+            pack = root_path / "pack"
+            sdk = root_path / "rack-sdk"
             (pack / "src").mkdir(parents=True)
+            sdk.mkdir()
+            # This is a real Mach-O link inspection, but it must not depend on
+            # a developer's live Forge Modular Rack-SDK installation.  The
+            # generated source below references no Rack symbols, so a tiny
+            # dylib with Rack's real install name is the complete hermetic
+            # link fixture needed to prove the separate Accelerate load
+            # command.  Product loadability is covered by the dedicated
+            # generated-plugin/Rack load probes.
+            subprocess.run(
+                ["clang++", "-dynamiclib", "-x", "c++", "-",
+                 "-install_name", "libRack.dylib",
+                 "-o", str(sdk / "libRack.dylib")],
+                input="extern \"C\" void rack_test_fixture() {}\n",
+                text=True, capture_output=True, check=True)
             (pack / "src" / "FFTUSER.cpp").write_text(
                 "#include <pulp/signal/fft.hpp>\n"
                 "extern \"C\" __attribute__((visibility(\"default\"))) "
                 "void init() { pulp::signal::FftT<double> fft(8); }\n")
-            with mock.patch.object(generate, "PACK", str(pack)):
+            with mock.patch.object(generate, "PACK", str(pack)), \
+                    mock.patch.object(generate, "SDK", str(sdk)):
                 ok, dylib, _objects = generate.compile_all(root)
 
             self.assertTrue(ok, dylib)
