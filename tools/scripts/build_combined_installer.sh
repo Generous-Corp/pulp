@@ -129,6 +129,23 @@ echo "[installer] signing keychain ready (timestamped pulp ship doctor probe pas
 
 deep_sign() {  # $1=bundle  $2=entitlements(optional)
   local b="$1" ent="${2:-}"
+  # Control-shipping manifests and scan reports are build evidence, not Mach-O
+  # subcomponents. CMake emits them beside the target so direct-build scanners
+  # can prove the exact binary, but Apple reserves Contents/MacOS for code and
+  # rejects an otherwise valid Developer-ID signature when JSON lives there.
+  # Preserve the receipts in the sealed bundle resources before signing.
+  if [[ -d "$b/Contents/MacOS" ]]; then
+    local _evidence_dir="$b/Contents/Resources/pulp-control-shipping-evidence"
+    local _evidence_moved=0
+    while IFS= read -r -d '' _evidence; do
+      [[ "$_evidence_moved" -eq 1 ]] || mkdir -p "$_evidence_dir"
+      mv "$_evidence" "$_evidence_dir/$(basename "$_evidence")"
+      _evidence_moved=1
+    done < <(find "$b/Contents/MacOS" -maxdepth 1 -type f \
+      \( -name "*.inspector-capabilities.json" \
+         -o -name "*.control-shipping.json" \
+         -o -name "*.control-shipping-report.json" \) -print0)
+  fi
   # An ABSOLUTE rpath in anything the bundle carries is a build-machine leak,
   # and it fails in two different ways that both look like a broken feature
   # rather than a packaging mistake. Where the path is missing, dyld reports
@@ -179,6 +196,22 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
   local _scan=()
   [[ -d "$b/Contents/Resources" ]] && _scan+=("$b/Contents/Resources")
   [[ -d "$b/Contents/MacOS" ]] && _scan+=("$b/Contents/MacOS")
+  # The bundle's CFBundleExecutable is signed as part of the outer bundle. Do
+  # not sign it once as a nested helper first: `codesign` interprets adjacent
+  # `<executable>.*` evidence files as subcomponents when handed the bare Mach-O
+  # path, even though those JSON files are ordinary sealed bundle resources.
+  # This applies to plugin bundles as well as apps, so deriving the executable
+  # from a hard-coded `.app` suffix is insufficient.
+  local _main_exec=""
+  if [[ -f "$b/Contents/Info.plist" ]]; then
+    _main_exec="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
+      "$b/Contents/Info.plist" 2>/dev/null || true)"
+  fi
+  if [[ -z "$_main_exec" ]]; then
+    local _bundle_leaf
+    _bundle_leaf="$(basename "$b")"
+    _main_exec="${_bundle_leaf%.*}"
+  fi
   { [[ ${#_scan[@]} -gt 0 ]] &&
       find "${_scan[@]}" -type f -perm +111 \
            -not -name "*.dylib" -not -name "*.sh" -print0 2>/dev/null || true; } |
@@ -186,7 +219,7 @@ deep_sign() {  # $1=bundle  $2=entitlements(optional)
       # Mach-O only: a shell script or a data file with the execute bit is not
       # something codesign should be handed.
       if file -b "$x" 2>/dev/null | grep -q "Mach-O"; then
-        [[ "$x" == "$b/Contents/MacOS/$(basename "$b" .app)" ]] && continue
+        [[ "$x" == "$b/Contents/MacOS/$_main_exec" ]] && continue
         if [[ "$(basename "$x")" == node ]]; then
           # Preserve the official Node Foundation hardened-runtime signature
           # and its V8 JIT entitlements. Generic Developer-ID re-signing here

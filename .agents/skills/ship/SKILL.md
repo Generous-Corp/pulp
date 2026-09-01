@@ -362,6 +362,17 @@ unsigned — and `core/host/src/scanner.cpp` reads the file from
 lookup too. Guarded by the `vst3-bundle-layout` ctest
 (`tools/cmake/scripts/check_vst3_bundle_layout.py`).
 
+The same Apple rule applies inside `Contents/MacOS/`: only code belongs there.
+Pulp's control-shipping JSON is intentionally emitted beside an unsigned build
+target so the scanner can bind its proof to that exact binary. Before Developer
+ID signing, `build_combined_installer.sh` preserves those manifests and reports
+under `Contents/Resources/pulp-control-shipping-evidence/`; leaving them beside
+the Mach-O makes `codesign` report the JSON as an unsigned subcomponent. The
+signer also resolves `CFBundleExecutable` from `Info.plist` for every bundle
+kind. Do not derive the main executable by stripping only `.app`: doing so
+double-signs the main binary in `.component`, `.vst3`, and `.clap` bundles and
+can trigger the same misleading subcomponent failure.
+
 ### macOS one-command pipeline: `pulp ship release`
 
 ```bash

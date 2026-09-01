@@ -37,9 +37,22 @@ class CombinedInstallerTest(unittest.TestCase):
             capture = tmp / "distribution.xml"
             relocation_capture = tmp / "app-relocation.txt"
             pkg_argv_capture = tmp / "pkgbuild-argv.txt"
+            codesign_argv_capture = tmp / "codesign-argv.txt"
             output = tmp / "out"
 
-            self._write_tool(fake_bin, "codesign", "exit 0\n")
+            self._write_tool(
+                fake_bin,
+                "codesign",
+                'printf "%s\\n" "$*" >> "$CAPTURE_CODESIGN_ARGV"\nexit 0\n',
+            )
+            self._write_tool(
+                fake_bin,
+                "file",
+                'case "${!#}" in\n'
+                '  */Contents/MacOS/*) echo "Mach-O 64-bit executable";;\n'
+                '  *) /usr/bin/file "$@";;\n'
+                'esac\n',
+            )
             self._write_tool(
                 fake_bin,
                 "security",
@@ -122,10 +135,28 @@ class CombinedInstallerTest(unittest.TestCase):
             ]
             if architectures:
                 args.extend(("--architectures", architectures))
+            plugin_bundles: list[Path] = []
             for plugin_name, kind in plugins:
                 suffix = {"au": "component", "vst3": "vst3", "clap": "clap"}[kind]
                 bundle = tmp / f"{plugin_name}.{suffix}"
-                (bundle / "Contents" / "MacOS").mkdir(parents=True)
+                macos = bundle / "Contents" / "MacOS"
+                macos.mkdir(parents=True)
+                (bundle / "Contents" / "Info.plist").write_text(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                    "<plist version=\"1.0\"><dict>"
+                    f"<key>CFBundleExecutable</key><string>{plugin_name}</string>"
+                    "</dict></plist>\n"
+                )
+                executable = macos / plugin_name
+                executable.write_text("fixture executable\n")
+                executable.chmod(0o755)
+                for evidence_name in (
+                    f"{plugin_name}.inspector-capabilities.json",
+                    f"{plugin_name}.{kind}.control-shipping.json",
+                    f"{plugin_name}.{kind}.control-shipping-report.json",
+                ):
+                    (macos / evidence_name).write_text("{}\n")
+                plugin_bundles.append(bundle)
                 args.extend(("--plugin", kind, str(bundle)))
             for title, app_name in apps or []:
                 bundle = tmp / f"{app_name}.app"
@@ -160,6 +191,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 "CAPTURE_XML": str(capture),
                 "CAPTURE_APP_RELOCATION": str(relocation_capture),
                 "CAPTURE_PKG_ARGV": str(pkg_argv_capture),
+                "CAPTURE_CODESIGN_ARGV": str(codesign_argv_capture),
                 "PULP_SIGN_KEYCHAIN": str(tmp / "signing.keychain-db"),
                 "PULP_SIGN_KEYCHAIN_PW": "test-keychain-password",
                 "PULP_SIGN_P12": str(tmp / "signing.p12"),
@@ -194,6 +226,21 @@ class CombinedInstallerTest(unittest.TestCase):
             self._last_pkgbuild_argv = (
                 pkg_argv_capture.read_text() if pkg_argv_capture.is_file() else ""
             )
+            self._last_codesign_argv = (
+                codesign_argv_capture.read_text()
+                if codesign_argv_capture.is_file()
+                else ""
+            )
+            self._last_plugin_evidence_relocated = all(
+                not list((bundle / "Contents" / "MacOS").glob("*.json"))
+                and len(list((bundle / "Contents" / "Resources" /
+                              "pulp-control-shipping-evidence").glob("*.json"))) == 3
+                for bundle in plugin_bundles
+            )
+            self._last_plugin_main_paths = [
+                str(bundle / "Contents" / "MacOS" / bundle.stem)
+                for bundle in plugin_bundles
+            ]
             return capture.read_text(), relocation
 
     def test_multi_plugin_packages_are_unique_and_grouped_by_plugin(self) -> None:
@@ -220,6 +267,12 @@ class CombinedInstallerTest(unittest.TestCase):
         self.assertNotIn('choice="plugin-0">', xml)
         self.assertIn('<line choice="plugin-0-au"/>', xml)
         self.assertIn('<line choice="plugin-0-clap"/>', xml)
+        self.assertTrue(self._last_plugin_evidence_relocated)
+        for main_path in self._last_plugin_main_paths:
+            self.assertFalse(any(
+                line.endswith(main_path)
+                for line in self._last_codesign_argv.splitlines()
+            ))
 
     def test_distinct_names_with_the_same_lossy_slug_do_not_collide(self) -> None:
         xml, _ = self._run_installer([("Foo-Bar", "au"), ("Foo Bar", "au")])
