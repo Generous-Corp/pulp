@@ -4588,6 +4588,13 @@ build's canonical inventory, then run
 Otherwise the full suite can finish almost entirely green and fail only at the
 inventory self-test, forcing a needless second admission cycle.
 
+Merge the current target branch before deriving that inventory. A configured
+tree from a stale PR head can be internally consistent and still omit tests
+that landed on `main`; refreshing the pinned count and digest from it merely
+replaces one stale contract with another. Reconfigure after the merge, derive
+the inventory from that exact tree, and keep the JSON, Shipyard count, policy
+assertions, and local-CI guide in the same commit.
+
 Catch2 `TEST_CASE` additions, removals, and renames are CTest topology changes
 too: discovery materializes each case as a registration even when no CMake
 manifest changed. A 2026-08-28 sequence added four cases and removed one after
