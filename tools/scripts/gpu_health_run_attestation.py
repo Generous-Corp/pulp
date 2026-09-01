@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 
 import json_schema_lite
-from gpu_health_contract import semantic_errors
+from gpu_health_contract import parse_utc_timestamp, semantic_errors
 
 SCHEMA = "pulp.gpu-health-run-attestation.v1"
 NAMESPACE = SCHEMA
@@ -159,7 +159,14 @@ def main() -> int:
         binary_bytes = binary.read_bytes()
     except OSError as error:
         fail(f"cannot read producer binary: {error}")
-    created_at = args.created_at or dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    created_at = args.created_at or (
+        dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        .isoformat().replace("+00:00", "Z")
+    )
+    try:
+        parse_utc_timestamp(created_at, "created_at")
+    except ValueError as error:
+        fail(str(error))
     statement = {
         "schema": SCHEMA,
         "version": 1,

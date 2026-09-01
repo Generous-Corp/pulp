@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <string_view>
 
 namespace gh = pulp::tooling::gpu_health;
 
@@ -106,4 +107,22 @@ TEST_CASE("GPU health v1 rejects unsupported identity and evidence claims",
     malformed_time.measured_at_utc = "2026-09-01T07:00:00+01:00";
     REQUIRE_FALSE(gh::validate(malformed_time, &error));
     REQUIRE(error.find("measured_at_utc") != std::string::npos);
+
+    auto leap_day = passing_result();
+    leap_day.measured_at_utc = "2000-02-29T23:59:59Z";
+    REQUIRE(gh::validate(leap_day, &error));
+
+    for (const std::string_view impossible : {
+             "0000-01-01T00:00:00Z", "1900-02-29T00:00:00Z",
+             "2023-02-29T00:00:00Z",
+             "2024-02-30T00:00:00Z", "2026-04-31T00:00:00Z",
+             "2026-13-01T00:00:00Z", "2026-01-01T24:00:00Z",
+             "2026-01-01T00:60:00Z", "2026-01-01T00:00:60Z",
+         }) {
+        auto invalid_time = passing_result();
+        invalid_time.measured_at_utc = impossible;
+        INFO(impossible);
+        REQUIRE_FALSE(gh::validate(invalid_time, &error));
+        REQUIRE(error.find("measured_at_utc") != std::string::npos);
+    }
 }

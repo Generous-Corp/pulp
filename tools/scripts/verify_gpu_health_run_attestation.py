@@ -15,7 +15,7 @@ import tempfile
 from typing import Any
 
 import json_schema_lite
-from gpu_health_contract import semantic_errors
+from gpu_health_contract import parse_utc_timestamp, semantic_errors
 
 SCHEMA = "pulp.gpu-health-run-attestation.v1"
 NAMESPACE = SCHEMA
@@ -117,11 +117,9 @@ def parse_ed25519_public_key(value: Any) -> str:
 
 def parse_time(value: str, label: str) -> dt.datetime:
     try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (TypeError, ValueError) as error:
-        raise Failure(f"{label} is not an RFC 3339 timestamp") from error
-    require(parsed.tzinfo is not None, f"{label} must carry a UTC offset")
-    return parsed.astimezone(dt.timezone.utc)
+        return parse_utc_timestamp(value, label)
+    except ValueError as error:
+        raise Failure(str(error)) from error
 
 
 def verify_signature(statement: dict[str, Any], public_key: str,

@@ -169,7 +169,8 @@ class Fixture:
         run("git", "branch", "-f", "protected", self.attestation, cwd=self.repo)
 
     def publish_adversarially_signed(self, evidence: str,
-                                     signing_key: Path | None = None) -> None:
+                                     signing_key: Path | None = None,
+                                     operation=None) -> None:
         """Sign an evidence binding that the real producer correctly refuses."""
         signing_key = signing_key or self.key
         path = self.repo / self.attestation_path
@@ -183,6 +184,8 @@ class Fixture:
             "schema": health_value.get("schema", "pulp.gpu-health-result.v1"),
             "measured_at_utc": health_value.get("measured_at_utc", MEASURED),
         })
+        if operation is not None:
+            operation(value)
         unsigned = dict(value)
         del unsigned["authentication"]
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -388,6 +391,8 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
              "canonical schema"),
             ("semantic-inconsistent", lambda value: value.update(
                 verdict="fail", health_state="failed"), "semantic contract"),
+            ("impossible-measurement-date", lambda value: value.update(
+                measured_at_utc="2023-02-29T06:59:00Z"), "semantic contract"),
         )
         for label, operation, expected in cases:
             with self.subTest(label=label):
@@ -405,6 +410,42 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                 verified = self.fixture.verify()
                 self.assertNotEqual(verified.returncode, 0)
                 self.assertIn(expected, verified.stdout)
+
+    def test_impossible_attestation_calendar_values_fail_closed(self) -> None:
+        for label, created_at in (
+            ("year-zero", "0000-01-01T00:00:00Z"),
+            ("century-non-leap", "1900-02-29T07:00:00Z"),
+            ("non-leap-day", "2023-02-29T07:00:00Z"),
+            ("short-month", "2026-04-31T07:00:00Z"),
+            ("hour", "2026-09-01T24:00:00Z"),
+            ("leap-second", "2026-09-01T07:00:60Z"),
+        ):
+            with self.subTest(label=label):
+                output = Path(self.temp.name) / f"invalid-{label}.json"
+                produced = self.fixture.produce(
+                    self.fixture.evidence, created_at, output
+                )
+                self.assertNotEqual(produced.returncode, 0)
+                self.assertIn("created_at", produced.stderr)
+
+                case_root = Path(self.temp.name) / f"signed-{label}"
+                case_root.mkdir()
+                fixture = Fixture(case_root)
+
+                def set_created_at(value, timestamp=created_at):
+                    value["created_at"] = timestamp
+
+                fixture.publish_adversarially_signed(
+                    fixture.evidence,
+                    operation=set_created_at,
+                )
+                verified = fixture.verify()
+                self.assertNotEqual(verified.returncode, 0)
+                self.assertTrue(
+                    "created_at" in verified.stdout
+                    or "canonical schema" in verified.stdout,
+                    verified.stdout,
+                )
 
     def test_attestation_schema_rejects_timestamp_path_pattern_and_length_drift(self) -> None:
         cases = (

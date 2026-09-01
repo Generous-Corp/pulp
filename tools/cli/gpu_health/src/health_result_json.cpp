@@ -123,6 +123,38 @@ void set_error(std::string* error, std::string message) {
     if (error != nullptr) *error = std::move(message);
 }
 
+bool valid_utc_timestamp(std::string_view value) {
+    const auto digit = [&](std::size_t index) {
+        return index < value.size() && value[index] >= '0' && value[index] <= '9';
+    };
+    if (value.size() != 20 || value[4] != '-' || value[7] != '-' ||
+        value[10] != 'T' || value[13] != ':' || value[16] != ':' ||
+        value[19] != 'Z' || !digit(0) || !digit(1) || !digit(2) ||
+        !digit(3) || !digit(5) || !digit(6) || !digit(8) || !digit(9) ||
+        !digit(11) || !digit(12) || !digit(14) || !digit(15) ||
+        !digit(17) || !digit(18))
+        return false;
+    const auto two_digits = [&](std::size_t index) {
+        return (value[index] - '0') * 10 + (value[index + 1] - '0');
+    };
+    const int year = (value[0] - '0') * 1000 + (value[1] - '0') * 100 +
+                     (value[2] - '0') * 10 + value[3] - '0';
+    const int month = two_digits(5);
+    const int day = two_digits(8);
+    const int hour = two_digits(11);
+    const int minute = two_digits(14);
+    const int second = two_digits(17);
+    if (year == 0 || month < 1 || month > 12 || hour > 23 || minute > 59 ||
+        second > 59)
+        return false;
+    constexpr std::array days_per_month{ 31, 28, 31, 30, 31, 30,
+                                         31, 31, 30, 31, 30, 31 };
+    int maximum_day = days_per_month[static_cast<std::size_t>(month - 1)];
+    if (month == 2 && (year % 4 == 0) && (year % 100 != 0 || year % 400 == 0))
+        maximum_day = 29;
+    return day >= 1 && day <= maximum_day;
+}
+
 Verdict combined_verdict(bool any_fail, bool any_unavailable,
                          bool any_unverified) {
     if (any_fail) return Verdict::fail;
@@ -345,19 +377,9 @@ bool validate(const HealthResult& result, std::string* error) {
     if (result.version != kVersion) return fail("version must be 1");
     if (result.run_id.empty() || result.run_id.size() > 128)
         return fail("run_id must contain 1..128 characters");
-    if (!result.measured_at_utc.empty()) {
-        const auto& value = result.measured_at_utc;
-        const auto digit = [&](std::size_t index) {
-            return index < value.size() && value[index] >= '0' && value[index] <= '9';
-        };
-        if (value.size() != 20 || value[4] != '-' || value[7] != '-' ||
-            value[10] != 'T' || value[13] != ':' || value[16] != ':' ||
-            value[19] != 'Z' || !digit(0) || !digit(1) || !digit(2) ||
-            !digit(3) || !digit(5) || !digit(6) || !digit(8) || !digit(9) ||
-            !digit(11) || !digit(12) || !digit(14) || !digit(15) ||
-            !digit(17) || !digit(18))
-            return fail("measured_at_utc must be an RFC 3339 UTC timestamp");
-    }
+    if (!result.measured_at_utc.empty() &&
+        !valid_utc_timestamp(result.measured_at_utc))
+        return fail("measured_at_utc must be an exact valid Gregorian UTC timestamp");
     if (result.probes.empty() || result.probes.size() > 16)
         return fail("probes must contain 1..16 entries");
     if (result.recommendations.size() > 32)

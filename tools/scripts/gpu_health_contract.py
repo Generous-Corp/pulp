@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import re
 from typing import Any
 
 VERDICTS = {"pass", "fail", "unavailable", "unverified"}
@@ -39,6 +41,24 @@ SPECIFIC_EVIDENCE_CODE_BINDINGS = {
     "skia_graphite_unavailable": ("configuration", "unavailable"),
     "wgsl.async_uncaptured_error": ("shader_compile", "fail"),
 }
+UTC_TIMESTAMP_PATTERN = re.compile(
+    r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+)
+
+
+def parse_utc_timestamp(value: Any, label: str) -> dt.datetime:
+    """Parse Pulp's exact UTC form; leap seconds are deliberately unsupported."""
+    if not isinstance(value, str) or UTC_TIMESTAMP_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"{label} must use exact YYYY-MM-DDTHH:MM:SSZ UTC form")
+    try:
+        return dt.datetime(
+            int(value[0:4]), int(value[5:7]), int(value[8:10]),
+            int(value[11:13]), int(value[14:16]), int(value[17:19]),
+            tzinfo=dt.timezone.utc,
+        )
+    except ValueError as error:
+        raise ValueError(f"{label} is not a valid Gregorian UTC date and time") from error
 
 
 def derived_verdict(verdicts: list[str]) -> str:
@@ -56,6 +76,11 @@ def evidence_code_matches(code: str, stage: str, verdict: str) -> bool:
 def semantic_errors(document: dict[str, Any]) -> list[str]:
     """Validate relationships deliberately outside the portable JSON Schema."""
     errors: list[str] = []
+    if "measured_at_utc" in document:
+        try:
+            parse_utc_timestamp(document["measured_at_utc"], "measured_at_utc")
+        except ValueError as error:
+            errors.append(str(error))
     probes = document["probes"]
     if len({probe["probe_id"] for probe in probes}) != len(probes):
         errors.append("probe ids are not unique")
