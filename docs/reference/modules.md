@@ -1606,6 +1606,46 @@ and launch slots are durable document state. The compiler accepts Arrangement
 only; the embedding application owns runtime launcher interpretation and
 scene-to-track arbitration.
 
+## authoring_capsule
+
+A portable authoring capsule is a bounded container plus a canonical manifest
+that states exactly what is inside, what it is compatible with, what it depends
+on, and what rights attach to each component. This module owns the container
+and the admission rules; a registered profile owns what the payload means, so
+the substrate needs no knowledge of any product.
+
+`open_archive()` validates the container without expanding a member: budgets,
+compression methods, path safety, case and Unicode collisions, and the manifest
+being first. `preview_capsule()` then checks the closure in both directions,
+recomputes the revision digest, resolves the profile, and reports compatibility,
+completeness, dependencies, and rights. Preview executes nothing and opens no
+network connection, which is what makes it safe to run on a file a stranger
+sent. `admit_to_staging()` extracts only declared members into an owner-private
+directory, verifying each digest as it lands, and `StagingArea::publish_no_replace()`
+makes the result visible under a name that was previously absent — so an
+incoming project identity can never overwrite a project the user already has.
+
+`revision_digest()` covers the semantic subtree only, excluding the title,
+timestamps, provenance, attestations, and distribution policy. Two exports of an
+unchanged project therefore agree regardless of compression level, member order,
+or which machine wrote them.
+
+**Link:** `pulp::authoring-capsule` · **Include prefix:**
+`<pulp/authoring_capsule/...>`
+
+```cpp
+#include <pulp/authoring_capsule/capsule.hpp>
+
+using namespace pulp::authoring_capsule;
+
+auto archive = open_archive(path);
+if (!archive)
+    return;
+auto preview = preview_capsule(archive.value(), registry, {.product = "my-product"});
+if (!preview)
+    report(status_token(preview.error().status), preview.error().subject);
+```
+
 ## project_package
 
 Crash-consistent publication for stable project-package roots and generic

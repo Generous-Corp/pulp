@@ -75,6 +75,7 @@ struct IRStyle {
     std::optional<std::string> background_gradient;   // linear-gradient(...)
     std::optional<std::string> background_image;      // url(...), data:..., or none
     std::optional<std::string> background_repeat;
+    std::optional<std::string> background_position;
     // CSS background-size keyword ("cover", "contain", "auto"). Figma IMAGE
     // fill scale modes lower here on frame-shaped nodes (FILL → cover,
     // FIT → contain, TILE → auto + background_repeat: repeat). Stored on the

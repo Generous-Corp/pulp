@@ -1798,6 +1798,7 @@ TEST_CASE("a declared knob indicator lowers to movable pointer geometry",
          "paint_bounds":{"left":10,"top":10,"width":100,"height":100},
          "indicator_bounds":{"left":54,"top":18,"width":8,"height":8},
          "indicator_color":"rgb(184, 248, 192)",
+         "indicator_border":{"color":"rgb(0, 0, 0)","width":1},
          "data_pulp":{"param":"declared"}},
         {"kind":"knob","binding_status":"bound","name":"silent",
          "bounds":{"left":200,"top":10,"width":100,"height":124},
@@ -1849,6 +1850,8 @@ TEST_CASE("a declared knob indicator lowers to movable pointer geometry",
     // materializer reads any CSS colour, the scripted bridge reads hex only and
     // silently substitutes near-white for anything else.
     CHECK(declared.at("knob_ind_color") == "#b8f8c0");
+    CHECK(declared.at("knob_ind_outline_color") == "#000000");
+    CHECK(std::stof(declared.at("knob_ind_outline_w")) == Catch::Approx(1.0f));
     // Hand-off to the sprite pass: the control's own pixels and the pointer's,
     // in the capture PNG's frame at its device scale (DPR 2 here).
     CHECK(declared.at("browser_sprite_crop_px") == "20,20,200,200");

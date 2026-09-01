@@ -154,9 +154,24 @@ function(pulp_add_rack_plugin target)
         set(_rack_os "mac")
         set_target_properties(${target} PROPERTIES SUFFIX ".dylib")
         target_compile_definitions(${target} PRIVATE ARCH_MAC)
-        # Rack resolves the plugin's undefined rack:: symbols at load time; the
-        # module never links libRack on macOS.
+        # BOTH the link and the flat-namespace flag, exactly as the SDK's own
+        # plugin.mk does: it applies `-L$(RACK_DIR) -lRack` unconditionally and
+        # then ADDS `-undefined dynamic_lookup` on macOS. The flag is additive.
+        # Taking only the flag builds a dylib carrying undefined `rack::`
+        # symbols and no libRack load command. That loads fine in any host that
+        # already linked libRack -- which is every gate we have, including
+        # dlopen -- and fails in the user's Rack with "symbol not found in flat
+        # namespace". Linux and Windows below always linked Rack; macOS did not.
+        target_link_directories(${target} PRIVATE "${PULP_RACK_SDK_DIR_REAL}")
+        target_link_libraries(${target} PRIVATE Rack)
         target_link_options(${target} PRIVATE -undefined dynamic_lookup)
+        # libRack's install name is the bare `libRack.dylib`, and a bare name
+        # never consults LC_RPATH, so the load command must name the path Rack
+        # symlinks at startup. plugin.mk's `dist:` target does the same change.
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CMAKE_INSTALL_NAME_TOOL}" -change libRack.dylib
+                    /tmp/Rack2/libRack.dylib "$<TARGET_FILE:${target}>"
+            VERBATIM)
     elseif(UNIX)
         set(_rack_os "lin")
         set_target_properties(${target} PROPERTIES SUFFIX ".so")

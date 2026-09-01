@@ -38,7 +38,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 68,
+        "installed_target_count": 69,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -161,6 +161,11 @@
             "public_header_count": 8
           },
           {
+            "exported_as": "Pulp::authoring-capsule",
+            "closure_node_count": 33,
+            "public_header_count": 12
+          },
+          {
             "exported_as": "Pulp::audio",
             "closure_node_count": 32,
             "public_header_count": 113
@@ -208,7 +213,7 @@
           {
             "exported_as": "Pulp::midi",
             "closure_node_count": 21,
-            "public_header_count": 43
+            "public_header_count": 50
           },
           {
             "exported_as": "Pulp::events",
@@ -577,6 +582,82 @@
             "framework:AudioToolbox",
             "framework:CoreAudio",
             "framework:CoreFoundation"
+          ]
+        },
+        "authoring-capsule": {
+          "target": "pulp-authoring-capsule",
+          "exported_as": "Pulp::authoring-capsule",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "core/authoring_capsule",
+          "closure": {
+            "node_count": 33,
+            "pulp_targets": [
+              "pulp-audio",
+              "pulp-authoring-capsule",
+              "pulp-events",
+              "pulp-foundation",
+              "pulp-midi",
+              "pulp-music",
+              "pulp-platform",
+              "pulp-runtime",
+              "pulp-sample-bank-manifest",
+              "pulp-signal",
+              "pulp-state",
+              "pulp-timebase"
+            ],
+            "third_party_targets": [
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing"
+            ]
+          },
+          "external_dependencies": {
+            "count": 21,
+            "third_party_targets": [
+              "everest",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing"
+            ],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [
+              "Accelerate",
+              "AudioToolbox",
+              "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
+              "CoreFoundation",
+              "CoreMIDI",
+              "CoreServices",
+              "Foundation",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "bsm"
+            ]
+          },
+          "public_headers": {
+            "count": 12,
+            "roots": [
+              "core/authoring_capsule/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "pulp-audio",
+            "pulp-runtime"
           ]
         },
         "bundled-fonts": {
@@ -3235,7 +3316,7 @@
             ]
           },
           "public_headers": {
-            "count": 43,
+            "count": 50,
             "roots": [
               "core/midi/include"
             ],

@@ -884,6 +884,7 @@ void apply_computed_styles(const std::map<std::string, std::string>& computed,
         // fill recorded without its size and repeat paints a single 1px line
         // where the design has a grid.
         set_string("background-size", style.background_size);
+        set_string("background-position", style.background_position);
         set_string("background-repeat", style.background_repeat);
     }
 

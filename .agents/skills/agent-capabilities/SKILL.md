@@ -390,6 +390,44 @@ sequence rather than one checklist. Make all four edits before running it:
 4. **Both counters** — `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`,
    reported as two separate errors.
 
+### `rederive.py` alone leaves `contract-history.json` at the protected base
+
+`agent_capability_rederive.py` prints `wrote ... contract-history.json` and then
+`reset N generated artifact(s) to the protected base`. The reset wins: the
+history file ends up matching the base, carrying **none** of the new keys, while
+the manifest and surface files do carry them.
+
+Nothing catches this. `--check` reports `fresh`, `test_agent_capability_manifest.py`
+passes all its checks, and `gates.sh` is green — the history is append-only
+evidence, not a validated input, so no gate reads it. The transaction only looks
+complete.
+
+Run `agent_capability_manifest.py --write` **after** `rederive.py`, then prove
+the history actually moved before believing the transaction is done:
+
+```sh
+git diff --stat HEAD -- tools/agent-capabilities/contract-history.json   # must be non-empty
+grep -c "<your.new-key>" tools/agent-capabilities/contract-history.json  # must be >= 1
+```
+
+Use an already-published key as the control for that grep — a brand-new key from
+the previous transaction returns 1, so a 0 on yours is a real absence rather
+than a broken pattern.
+
+### A catalog-bound header must NOT also get a `REVIEWED_HEADERS` row
+
+A header named by a `binding(...)` in a catalog is already a capability
+entrypoint. Adding a `capability_support` row for it in `REVIEWED_HEADERS` fails
+with `headers cannot be both capability entrypoints and separately reviewed`,
+and that failure arrives from `rederive.py` as a *surface* problem, which reads
+like a fingerprint issue rather than a duplicate-registration one.
+
+For a new kernel header, `REVIEWED_MINIMAL_TARGETS` is the only registry edit it
+needs. `REVIEWED_HEADERS` rows are for headers that no catalog binds: shared
+vocabulary headers (whose `capability_keys` list names the kernels expressed
+over them) and `infrastructure` headers such as a private `detail/` helper,
+which bind no key of their own.
+
 ### `header_fingerprint` is not the SHA-256 of the header file
 
 The declared value and `sha256sum <header>` legitimately differ. Do not
@@ -671,6 +709,40 @@ the bypass trailer by reflex:
   honest record is a line in this skill saying so, not a `Skill-Update: skip`.
   A note costs the same as the trailer and leaves the next person something to
   read.
+
+## A green `--check` says nothing about a module outside `PUBLIC_ROOTS`
+
+`PUBLIC_ROOTS` in `tools/scripts/agent_capability_surface.py` lists exactly six
+domains: `audio`, `midi`, `music`, `sequence`, `signal`, `timebase`. Headers
+anywhere else are not scanned, not classified, and not fingerprinted.
+
+That matters most at the moment it is least visible. Adding a new optional
+module under `core/` and exporting it — appending the target to
+`PULP_SDK_TARGETS` and the directory to `_pulp_sdk_header_subsystems` in
+`tools/cmake/PulpInstallRules.cmake` — ships its public headers in the SDK. Then
+`agent_capability_manifest.py --check` prints `fresh; N keys and M public
+headers checked` and exits 0, which reads like the new headers were reviewed.
+They were not looked at.
+
+Control the reading before trusting it:
+
+```sh
+python3 -c "import re; t=open('tools/scripts/agent_capability_surface.py').read(); \
+print(re.findall(r'\"source\": \"([^\"]+)\"', t))"
+```
+
+If the new module's include root is absent, the manifest has no opinion about
+it, and the header count staying put is the expected result rather than
+evidence of coverage.
+
+The `PulpInstallRules.cmake` edit is what fires the skill-sync gate for this
+skill, and that is the right moment to make the call deliberately: does the new
+domain belong in `PUBLIC_ROOTS`? A DSP or generator-facing surface does. An
+authoring, packaging, or container surface — where "capability" would mean a
+consumer contract with typed bindings and operational probes that do not exist —
+does not, and adding it would mean manufacturing rows to describe headers no
+generator claims. Record which way you went; silence here looks identical to
+having never asked.
 
 ## Splitting an exported target means exporting BOTH halves
 

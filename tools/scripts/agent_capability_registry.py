@@ -21,7 +21,13 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/midi/mpe_voice_tracker.hpp": "Pulp::midi",
     "pulp/midi/note_utility_kernels.hpp": "Pulp::midi",
     "pulp/midi/routing_utility_kernels.hpp": "Pulp::midi",
+    "pulp/midi/chord_memory.hpp": "Pulp::midi",
+    "pulp/midi/humanize.hpp": "Pulp::midi",
+    "pulp/midi/latch.hpp": "Pulp::midi",
+    "pulp/midi/note_delay.hpp": "Pulp::midi",
+    "pulp/midi/note_repeat.hpp": "Pulp::midi",
     "pulp/midi/step_player.hpp": "Pulp::midi",
+    "pulp/midi/strum.hpp": "Pulp::midi",
     "pulp/music/chord.hpp": "Pulp::music",
     "pulp/music/harmony.hpp": "Pulp::music",
     "pulp/music/markov.hpp": "Pulp::music",
@@ -419,14 +425,25 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/midi/detail/note_schedule.hpp",
+        "fingerprint": "sha256:2c3079340fe726d87e09042f023fb307aa7c0a0a9a25719cb1d4d0b16eb51e23",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Private tick-to-sample projection and scheduled-note queue shared by the note "
+            "repeat and note delay kernels; it binds no capability of its own."
+        ),
+    },
+    {
         "include": "pulp/midi/utility_contract.hpp",
         "fingerprint": "sha256:3ecd5aa5c92a2ac31e133059c97915257df2018b904f9fce39d1b0c6f1dadb70",
         "disposition": "capability_support",
         "capability_keys": [
-            "midi.arpeggiator", "midi.channel-routing", "midi.controller-mapping",
-            "midi.keyboard-split", "midi.linear-step-player", "midi.monophonic-note-selection",
-            "midi.note-length-shaping", "midi.note-range-filtering",
-            "midi.scale-aware-mpe-pitch",
+            "midi.arpeggiator", "midi.channel-routing", "midi.chord-memory",
+            "midi.controller-mapping", "midi.humanize", "midi.keyboard-split", "midi.latch",
+            "midi.linear-step-player", "midi.monophonic-note-selection", "midi.note-delay",
+            "midi.note-length-shaping", "midi.note-range-filtering", "midi.note-repeat",
+            "midi.scale-aware-mpe-pitch", "midi.strum-spread",
         ],
         "rationale": (
             "Shared overflow, ordering, transport, reporting, and fail-closed emission "
