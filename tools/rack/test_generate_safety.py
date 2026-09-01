@@ -1641,6 +1641,36 @@ class ExplicitRequestContract(SdkIsolatedTestCase):
         self.assertEqual([], generate.module_intent_problems(
             self.prompt, self.module))
 
+    def test_explicit_width_carries_an_auditable_density_waiver(self) -> None:
+        sparse = {
+            "hp": 10,
+            "params": [{"name": "RATE"}, {"name": "CHARACTER"}],
+            "inputs": [{"name": "RATE CV"}, {"name": "CHARACTER CV"}],
+            "outputs": [{"name": "ONE"}, {"name": "TWO"}],
+        }
+        generate.honor_explicit_panel_width(
+            "a 10 HP chaotic modulation source", sparse)
+        self.assertEqual(
+            "User explicitly requested a 10HP panel.",
+            sparse["width_waiver"])
+
+    def test_unrequested_width_does_not_bypass_density_gate(self) -> None:
+        sparse = {"hp": 10, "params": [], "inputs": [], "outputs": []}
+        generate.honor_explicit_panel_width("a chaotic modulation source", sparse)
+        self.assertNotIn("width_waiver", sparse)
+
+    def test_model_authored_width_waiver_is_preserved(self) -> None:
+        sparse = {"hp": 10, "width_waiver": "Wide touch controller"}
+        generate.honor_explicit_panel_width("a 10HP controller", sparse)
+        self.assertEqual("Wide touch controller", sparse["width_waiver"])
+
+    def test_empty_model_waiver_does_not_erase_request_authority(self) -> None:
+        sparse = {"hp": 10, "width_waiver": ""}
+        generate.honor_explicit_panel_width("a 10HP controller", sparse)
+        self.assertEqual(
+            "User explicitly requested a 10HP panel.",
+            sparse["width_waiver"])
+
     def test_wrong_or_missing_explicit_facts_fail_closed(self) -> None:
         broken = json.loads(json.dumps(self.module))
         broken["hp"] = 8

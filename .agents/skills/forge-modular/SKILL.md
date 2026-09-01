@@ -571,6 +571,20 @@ could not be regenerated from a clone at all.
 A module built from the app lands in the INSTALLED pack only.
 `tools/rack/copy_back.py` lists what is stranded; `--apply` brings it here.
 
+### An explicit panel width outranks the default density heuristic
+
+The panel emitter rejects needlessly sparse modules by default, but it receives
+only the manifest—not the user's request. That once made generation prove an
+exact request for a 10 HP panel and then reject the same 10 HP manifest as too
+sparse. After `module_intent_problems()` proves that the manifest exactly
+matches an explicit `N HP` request, `generate.py` records that authority in the
+existing `width_waiver` field with a deterministic reason.
+
+Keep the boundary narrow: an inferred or mismatched width still has to satisfy
+the ordinary density rule, and an existing non-empty module-authored waiver is
+preserved. Do not weaken or remove the emitter's generic density check to fix a
+request-context problem it cannot see.
+
 ## Two paths draw a module's controls, and they must agree
 
 OURS come from the manifest a panel was emitted from — always present, exact,
