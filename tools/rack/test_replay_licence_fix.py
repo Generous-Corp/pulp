@@ -28,7 +28,7 @@ def test_the_crawled_corpus_is_refused():
     """
     home = os.path.expanduser("~")
     crawled = f"{home}/Library/Application Support/Forge Modular/corpus/" \
-              f"patchstorage/patches/somebody-elses.vcv"
+              f"elsewhere/patches/not-ours.vcv"
     reference = f"{home}/Library/Application Support/Forge Modular/.corpus/" \
                 f"local/notes.vcv"
     ours = f"{home}/Library/Application Support/Forge Modular/patches/mine.vcv"

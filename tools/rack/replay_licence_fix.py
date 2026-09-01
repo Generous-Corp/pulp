@@ -58,11 +58,10 @@ AUDIBLE = "audible"
 SILENT = "silent"
 UNMEASURED = "unmeasured"
 
-#: Any path with one of these in it is somebody else's work. The crawled
-#: corpus lives under `Forge Modular/corpus/patchstorage`; the reference
-#: material lives under `Forge Modular/.corpus`. Neither may enter a corpus
-#: this file measures, names, hashes, or writes down.
-THIRD_PARTY_MARKERS = ("/corpus/patchstorage", "/.corpus/", "/corpus/")
+#: Any path carrying one of these holds work that is not ours. Material
+#: gathered from elsewhere lives under the app's corpus directories, and none
+#: of it may enter a corpus this file measures, names, hashes, or writes down.
+THIRD_PARTY_MARKERS = ("/corpus/", "/.corpus/")
 
 #: The gate's own contract, mirrored from `patch.audibility`. 0 is audible and
 #: 1 is silent; 2 is the gate refusing its own settings and a negative code is
