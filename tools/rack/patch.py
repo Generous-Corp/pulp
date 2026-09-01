@@ -4817,6 +4817,55 @@ def audibility(patch: dict,
         os.unlink(tmp)
 
 
+def audition_silent_output_repair(
+        patch: dict, inv: dict, verdict: str, report: str,
+        checkpoints: list[float] | None = None,
+        attempt: int = 1, why: dict | None = None) -> tuple[dict, str, str]:
+    """Try exact-role live sibling outputs, retaining every measured result.
+
+    The gate is the authority at both ends: its first report proves the chosen
+    output silent while a sibling is active, and a fresh run over the edited
+    patch must prove audio reaches the interface. An active trace row by itself
+    never becomes a success claim.
+    """
+    if verdict != SILENT:
+        return patch, verdict, report
+    import deterministic_repair
+    finding = silence_cause(report, patch, inv)
+    repairs, refusal = deterministic_repair.alternate_output_repairs(
+        patch, inv, finding)
+    if not repairs:
+        if refusal:
+            keep_deterministic_repair(
+                patch, None,
+                "alternate-output repair refused:\n" +
+                "\n".join(f"  - {reason}" for reason in refusal) + "\n",
+                attempt, "alternate-output")
+        return patch, verdict, report
+
+    for index, repair in enumerate(repairs, 1):
+        candidate_verdict, candidate_report = audibility(
+            repair.patch, checkpoints=checkpoints)
+        action = repair.actions[0]
+        evidence = (f"candidate {index}: {action}\n"
+                    f"verdict: {candidate_verdict}\n{candidate_report}")
+        keep_deterministic_repair(
+            patch, repair.patch, evidence, attempt,
+            f"alternate-output-{index}")
+        if candidate_verdict == AUDIBLE:
+            if why is not None:
+                for old_key, new_key in repair.endpoint_rewrites:
+                    note = why.pop(old_key, None)
+                    if note is not None:
+                        why[new_key] = note
+            print(f"  deterministic output repair: {action}", flush=True)
+            return repair.patch, candidate_verdict, candidate_report
+        if candidate_verdict == UNMEASURED:
+            # A broken instrument cannot rank later candidates honestly.
+            break
+    return patch, verdict, report
+
+
 INVENTORY_BEGIN = "<<<FORGE-INVENTORY-BEGIN>>>"
 INVENTORY_END = "<<<FORGE-INVENTORY-END>>>"
 CODEX_INLINE_INVENTORY_CHAR_LIMIT = 128 * 1024
@@ -6561,16 +6610,16 @@ def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
     activity = {m.get("id"): (m, outs) for m, outs in named}
     if not activity:
         return None
-    incoming: dict[int, list[tuple[int, int, int]]] = {}
+    incoming: dict[int, list[tuple[int, int, int, int]]] = {}
     listener_sources = []
     modules = {m.get("id"): m for m in patch.get("modules", [])}
     for c in patch.get("cables", []):
         src = (c.get("outputModuleId"), c.get("outputId"))
         incoming.setdefault(c.get("inputModuleId"), []).append(
-            (*src, c.get("inputId")))
+            (*src, c.get("inputId"), c.get("id")))
         dst = modules.get(c.get("inputModuleId")) or {}
         if is_audio_interface(dst):
-            listener_sources.append(src)
+            listener_sources.append((src, c.get("id")))
 
     def value(pair):
         got = activity.get(pair[0])
@@ -6606,23 +6655,30 @@ def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
             return role in ("gate", "trigger") or "gate" in name or "trig" in name
         return False
 
-    def walk(pair, seen):
+    def walk(pair, seen, outgoing_cable_id):
         if pair in seen or value(pair) != 0.0:
             return None
         seen = seen | {pair}
-        for source_module, source_output, input_id in incoming.get(pair[0], []):
+        for (source_module, source_output, input_id,
+             cable_id) in incoming.get(pair[0], []):
             if not causal_input(pair[0], input_id):
                 continue
-            found = walk((source_module, source_output), seen)
+            found = walk((source_module, source_output), seen, cable_id)
             if found:
                 return found
-        return pair
+        return pair, outgoing_cable_id
 
     pair = None
-    for source in listener_sources:
-        pair = walk(source, set())
-        if pair:
-            break
+    causal_cable_ids = set()
+    for source, listener_cable_id in listener_sources:
+        found = walk(source, set(), listener_cable_id)
+        if not found:
+            continue
+        candidate_pair, cable_id = found
+        if pair is None:
+            pair = candidate_pair
+        if candidate_pair == pair and isinstance(cable_id, int):
+            causal_cable_ids.add(cable_id)
     if pair is None:
         return None
     module, outs = activity[pair[0]]
@@ -6636,6 +6692,7 @@ def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
     return {"id": module.get("id"), "plugin": module.get("plugin"),
             "model": module.get("model"), "outs": outs, "output": output,
             "output_label": label, "whole_module": whole,
+            "causal_cable_ids": sorted(causal_cable_ids),
             "key": base if whole else f"{base} out{output}"}
 
 
@@ -7126,6 +7183,25 @@ def diagnose_module_contract_intent(prompt: str, patch: dict, inv: dict,
     bound = idiom_check.bound_modifiers(prompt, idioms[claimed.slug])
     modifiers = idiom_check.check_modifiers(patch, inv, bound)
     return IntentDiagnosis(None, [], [], [], modifiers)
+
+
+def diagnose_static_candidate(prompt: str, patch: dict, inv: dict, claimed,
+                              effective_claimed, idioms: dict,
+                              module_idiom_contract,
+                              quality_contract) -> IntentDiagnosis:
+    """One complete static diagnosis, reusable after a bounded rewrite."""
+    if module_idiom_contract is None:
+        diagnosis = diagnose_intent(
+            prompt, patch, inv, effective_claimed, idioms)
+    else:
+        diagnosis = diagnose_module_contract_intent(
+            prompt, patch, inv, claimed, idioms)
+    quality_structure = runtime_quality_static_errors(
+        patch, inv, quality_contract)
+    if quality_structure:
+        diagnosis = diagnosis._replace(
+            behaviour=diagnosis.behaviour + quality_structure)
+    return diagnosis
 
 
 def _patch_semantics(patch: dict) -> dict:
@@ -7630,17 +7706,9 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
         # static side for EVERY lint-clean patch, before audio can short-circuit
         # it as SILENT. This also means a gate crash cannot hide a topology or
         # authored-value defect that was fully readable from the patch.
-        if module_idiom_contract is None:
-            diagnosis = diagnose_intent(
-                prompt, patch, inv, effective_claimed, idioms)
-        else:
-            diagnosis = diagnose_module_contract_intent(
-                prompt, patch, inv, claimed, idioms)
-        quality_structure = runtime_quality_static_errors(
-            patch, inv, quality_contract)
-        if quality_structure:
-            diagnosis = diagnosis._replace(
-                behaviour=diagnosis.behaviour + quality_structure)
+        diagnosis = diagnose_static_candidate(
+            prompt, patch, inv, claimed, effective_claimed, idioms,
+            module_idiom_contract, quality_contract)
 
         # Point the audio interface somewhere audible before running DSP, so
         # the thing measured is the thing that will be opened.
@@ -7657,6 +7725,22 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             verdict, report = audibility(patch, checkpoints=checkpoints)
         else:
             verdict, report = audibility(patch)
+        if base_patch is None:
+            measured_patch = patch
+            patch, verdict, report = audition_silent_output_repair(
+                patch, inv, verdict, report, checkpoints, attempt + 1, why)
+            if patch is not measured_patch:
+                # Output labels can distinguish same-role siblings (left/right,
+                # wave shapes, and other port-specific intent). Re-run every
+                # static intent check against the exact patch that the fresh
+                # DSP gate accepted rather than carrying the pre-repair result.
+                diagnosis = diagnose_static_candidate(
+                    prompt, patch, inv, claimed, effective_claimed, idioms,
+                    module_idiom_contract, quality_contract)
+                why_errors = lint_why(patch, inv, why)
+                if why_errors:
+                    diagnosis = diagnosis._replace(
+                        behaviour=diagnosis.behaviour + why_errors)
         runtime_errors = module_runtime_contract_errors(patch, inv, report)
         runtime_idiom = idioms.get(
             diagnosis.built or effective_claimed.slug, {}) \

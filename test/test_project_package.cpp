@@ -32,8 +32,8 @@
 #endif
 #include <aclapi.h>
 #include <process.h>
-#include <sddl.h>
 #include <windows.h>
+#include <sddl.h>
 #else
 #include <csignal>
 #if defined(__APPLE__)
