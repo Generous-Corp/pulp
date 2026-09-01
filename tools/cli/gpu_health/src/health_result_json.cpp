@@ -373,13 +373,16 @@ bool validate(const HealthResult& result, std::string* error) {
         set_error(error, std::move(message));
         return false;
     };
-    if (result.schema != kSchema) return fail("schema must be pulp.gpu-health-result.v1");
-    if (result.version != kVersion) return fail("version must be 1");
+    const bool is_v1 = result.schema == kSchemaV1 && result.version == kVersionV1;
+    const bool is_v2 = result.schema == kSchema && result.version == kVersion;
+    if (!is_v1 && !is_v2)
+        return fail("schema and version must identify GPU-health result v1 or v2");
     if (result.run_id.empty() || result.run_id.size() > 128)
         return fail("run_id must contain 1..128 characters");
-    if (!result.measured_at_utc.empty() &&
-        !valid_utc_timestamp(result.measured_at_utc))
-        return fail("measured_at_utc must be an exact valid Gregorian UTC timestamp");
+    if (is_v1 && !result.measured_at_utc.empty())
+        return fail("measured_at_utc is not a v1 field");
+    if (is_v2 && !valid_utc_timestamp(result.measured_at_utc))
+        return fail("v2 measured_at_utc must be an exact valid Gregorian UTC timestamp");
     if (result.probes.empty() || result.probes.size() > 16)
         return fail("probes must contain 1..16 entries");
     if (result.recommendations.size() > 32)
@@ -427,7 +430,7 @@ bool validate(const HealthResult& result, std::string* error) {
             if (!seen_stages.insert(event.stage).second)
                 return fail("a probe cannot report the same stage twice");
             if (!is_known_evidence_code(event.code))
-                return fail("event code is not registered by gpu-health-result-v1");
+                return fail("event code is not registered by the GPU-health result contract");
             if (!evidence_code_matches(event.code, event.stage, event.verdict))
                 return fail("event code does not match its registered stage and verdict");
             if (event.detail.empty() || event.detail.size() > 1024)
@@ -591,7 +594,7 @@ std::string to_json(const HealthResult& result, bool pretty) {
     root.setMember("schema", result.schema);
     root.setMember("version", static_cast<std::int64_t>(result.version));
     root.setMember("run_id", result.run_id);
-    if (!result.measured_at_utc.empty())
+    if (result.schema == kSchema && result.version == kVersion)
         root.setMember("measured_at_utc", result.measured_at_utc);
     root.setMember("render_requested", result.render_requested);
     root.setMember("verdict", std::string(to_string(result.verdict)));
@@ -621,13 +624,10 @@ std::optional<HealthResult> from_json(std::string_view json, std::string* error)
     }
 
     std::string parse_error;
-    static constexpr std::array root_fields{
-        "schema", "version", "run_id", "measured_at_utc", "render_requested", "verdict",
+    static constexpr std::array v1_root_fields{
+        "schema", "version", "run_id", "render_requested", "verdict",
         "health_state", "probes", "recommendations",
     };
-    if (!has_only_fields(root, root_fields, "$", parse_error))
-        return fail(std::move(parse_error));
-
     HealthResult result;
     if (!read_required_string(root, "schema", "$.", result.schema, parse_error))
         return fail(std::move(parse_error));
@@ -636,11 +636,22 @@ std::optional<HealthResult> from_json(std::string_view json, std::string* error)
         version > std::numeric_limits<std::uint32_t>::max())
         return fail(parse_error.empty() ? "$.version is too large" : std::move(parse_error));
     result.version = static_cast<std::uint32_t>(version);
+    const bool is_v1 = result.schema == kSchemaV1 && result.version == kVersionV1;
+    const bool is_v2 = result.schema == kSchema && result.version == kVersion;
+    if (!is_v1 && !is_v2)
+        return fail("$.schema and $.version must identify GPU-health result v1 or v2");
+    static constexpr std::array v2_root_fields{
+        "schema", "version", "run_id", "measured_at_utc", "render_requested", "verdict",
+        "health_state", "probes", "recommendations",
+    };
+    if (is_v1 && !has_only_fields(root, v1_root_fields, "$", parse_error))
+        return fail(std::move(parse_error));
+    if (is_v2 && !has_only_fields(root, v2_root_fields, "$", parse_error))
+        return fail(std::move(parse_error));
     if (!read_required_string(root, "run_id", "$.", result.run_id, parse_error))
         return fail(std::move(parse_error));
-    if (root.hasObjectMember("measured_at_utc") &&
-        !read_required_string(root, "measured_at_utc", "$.", result.measured_at_utc,
-                              parse_error))
+    if (is_v2 && !read_required_string(root, "measured_at_utc", "$.",
+                                       result.measured_at_utc, parse_error))
         return fail(std::move(parse_error));
     if (!read_required_bool(root, "render_requested", "$.", result.render_requested,
                             parse_error) ||

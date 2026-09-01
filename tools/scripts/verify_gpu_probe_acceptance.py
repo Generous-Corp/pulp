@@ -144,7 +144,7 @@ EXPECTED_SOURCE_BLOBS_V2 = EXPECTED_SOURCE_BLOBS | {
     "CMakeLists.txt",
     "core/runtime/include/pulp/runtime/build_info.hpp.in",
     "docs/contracts/gpu-probe-result-v1.schema.json",
-    "docs/contracts/gpu-health-result-v1.schema.json",
+    "docs/contracts/gpu-health-result-v2.schema.json",
     "docs/status/gpu-recipes.schema.json",
     "docs/status/gpu-recipes.yaml",
     "docs/validation/gpu-probes/README.md",
@@ -192,7 +192,7 @@ RESULT_SCHEMA = (
     Path(__file__).resolve().parents[2]
     / "docs/contracts/gpu-probe-result-v1.schema.json"
 )
-HEALTH_SCHEMA = RESULT_SCHEMA.with_name("gpu-health-result-v1.schema.json")
+HEALTH_SCHEMA = RESULT_SCHEMA.with_name("gpu-health-result-v2.schema.json")
 
 
 def _load(path: Path) -> Any:
@@ -856,7 +856,7 @@ def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) 
             for problem in json_schema_lite.validate(doctor_payload, health_schema):
                 errors.append(f"Forge GPU doctor schema: {problem}")
         if (
-            doctor.get("schema") != "pulp.gpu-health-result.v1"
+            doctor.get("schema") != "pulp.gpu-health-result.v2"
             or doctor.get("verdict") != "pass"
             or doctor.get("health_state") != "healthy"
             or doctor.get("recommendations") != []

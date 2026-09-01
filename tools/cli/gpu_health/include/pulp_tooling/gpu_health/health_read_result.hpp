@@ -128,7 +128,13 @@ struct StartupMeasurements {
 struct HealthReadResult {
     std::string schema{kHealthReadSchema};
     std::uint32_t version = kHealthReadVersion;
-    HealthResult health;
+    HealthResult health = [] {
+        HealthResult value;
+        value.schema = kSchemaV1;
+        value.version = kVersionV1;
+        value.measured_at_utc.clear();
+        return value;
+    }();
     StartupMeasurements startup;
 };
 

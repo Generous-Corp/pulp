@@ -160,6 +160,7 @@ class ProductMatrix:
     control_standalone_host_floor: str
     node_runtime_floor: str
     gpu_health_contract_floor: str
+    gpu_health_v2_contract_floor: str
     gpu_health_run_attestation_contract_floor: str
     gpu_probe_contract_floor: str
     gpu_recipe_catalog_floor: str
@@ -231,6 +232,9 @@ class ProductMatrix:
                 ),
                 gpu_health_contract_floor=str(
                     doc.get("gpu_health_contract_floor", "999999.0.0")
+                ),
+                gpu_health_v2_contract_floor=str(
+                    doc.get("gpu_health_v2_contract_floor", "999999.0.0")
                 ),
                 gpu_health_run_attestation_contract_floor=str(
                     doc.get(
@@ -637,6 +641,13 @@ def required_sdk_members(
     ):
         required.add(
             "pulp-sdk/share/pulp/contracts/gpu-health-result-v1.schema.json"
+        )
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.gpu_health_v2_contract_floor)
+    ):
+        required.add(
+            "pulp-sdk/share/pulp/contracts/gpu-health-result-v2.schema.json"
         )
     if (
         version is not None

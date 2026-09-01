@@ -225,7 +225,7 @@ acquires no GPU device, performs no render or compute work, and reports the run
 as unverified.
 
 The diagnostic emits the versioned
-[`pulp.gpu-health-result.v1`](../contracts/gpu-health-result-v1.schema.json)
+[`pulp.gpu-health-result.v2`](../contracts/gpu-health-result-v2.schema.json)
 contract and exits 0 for a real pass, 1 for a completed measured failure, or 2
 when requested evidence is unavailable or unverified. Backend selection and
 adapter identity are separate facts: never infer a hardware or discrete adapter

@@ -27,7 +27,7 @@
  * Event sequences are zero-based and contiguous across a result. Pixel and
  * color fields are integer counts; fingerprints are opaque unsigned values.
  * Optional measurements distinguish an absent observation from an observed
- * `false` or zero. Serialization preserves the closed v1 field vocabulary.
+ * `false` or zero. Serialization preserves each version's closed vocabulary.
  *
  * @par Results, unavailable evidence, and errors
  * `pass` and `fail` mean requested work completed and was measured.
@@ -38,12 +38,14 @@
  */
 namespace pulp::tooling::gpu_health {
 
-/// Closed JSON schema identity for HealthResult.
-inline constexpr std::string_view kSchema = "pulp.gpu-health-result.v1";
-/// Schema version serialized in HealthResult::version.
-inline constexpr std::uint32_t kVersion = 1;
+/// Historical closed schema identity accepted when parsing stored v1 results.
+inline constexpr std::string_view kSchemaV1 = "pulp.gpu-health-result.v1";
+inline constexpr std::uint32_t kVersionV1 = 1;
+/// Active schema identity emitted by new GPU-health runs.
+inline constexpr std::string_view kSchema = "pulp.gpu-health-result.v2";
+inline constexpr std::uint32_t kVersion = 2;
 
-/// Canonical v1 diagnostic-code registry shared by native, CLI, MCP, and agents.
+/// Canonical diagnostic-code registry shared by result v1/v2, CLI, MCP, and agents.
 inline constexpr std::array kEvidenceCodes{
     std::string_view{"gpu.adapter.fail"},
     std::string_view{"gpu.adapter.null"},
@@ -200,14 +202,13 @@ struct ProbeEvidence {
     std::vector<EvidenceEvent> events;
 };
 
-/// Closed v1 aggregate returned by the GPU health diagnostic.
+/// Closed versioned aggregate returned by the GPU health diagnostic.
 struct HealthResult {
     std::string schema{ kSchema };
     std::uint32_t version = kVersion;
     std::string run_id;
     /// UTC wall-clock time captured immediately before active probe execution.
-    /// Empty preserves parsing compatibility with stored v1 results that
-    /// predate authenticated run evidence.
+    /// Required by v2 and forbidden by the historical v1 contract.
     std::string measured_at_utc;
     bool render_requested = true;
     Verdict verdict = Verdict::unverified;

@@ -21,7 +21,7 @@ PRODUCER = HERE / "gpu_health_run_attestation.py"
 VERIFIER = HERE / "verify_gpu_health_run_attestation.py"
 SOURCE_ROOT = HERE.parents[1]
 SCHEMA_PATH = Path("docs/contracts/gpu-health-run-attestation-v1.schema.json")
-HEALTH_SCHEMA_PATH = Path("docs/contracts/gpu-health-result-v1.schema.json")
+HEALTH_SCHEMA_PATH = Path("docs/contracts/gpu-health-result-v2.schema.json")
 CREATED = "2026-09-01T07:00:00Z"
 MEASURED = "2026-09-01T06:59:00Z"
 NOW = "2026-09-01T07:05:00Z"
@@ -63,6 +63,8 @@ class Fixture:
             (SOURCE_ROOT / "test/fixtures/gpu-ux/pass-hardware.json").read_text()
         )
         health["run_id"] = "m5-a1-run-1"
+        health["schema"] = "pulp.gpu-health-result.v2"
+        health["version"] = 2
         health["measured_at_utc"] = MEASURED
         health["probes"][0]["probe_id"] = "gpu-compute-magnitude"
         health["probes"][0]["adapter"].update({
@@ -181,7 +183,7 @@ class Fixture:
         value["gpu_health_result"].update({
             "sha256": hashlib.sha256(health).hexdigest(),
             "run_id": health_value.get("run_id", "m5-a1-run-1"),
-            "schema": health_value.get("schema", "pulp.gpu-health-result.v1"),
+            "schema": health_value.get("schema", "pulp.gpu-health-result.v2"),
             "measured_at_utc": health_value.get("measured_at_utc", MEASURED),
         })
         if operation is not None:
@@ -385,6 +387,10 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         health_path = self.fixture.repo / self.fixture.health_path
         valid = json.loads(health_path.read_text())
         cases = (
+            ("historical-v1", lambda value: (
+                value.update(schema="pulp.gpu-health-result.v1", version=1),
+                value.pop("measured_at_utc"),
+            ), "canonical schema"),
             ("missing-required", lambda value: value.pop("recommendations"),
              "canonical schema"),
             ("wrong-type", lambda value: value.update(render_requested="yes"),

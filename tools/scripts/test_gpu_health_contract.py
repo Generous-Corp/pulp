@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove the GPU health v1 shape and its cross-field contract."""
+"""Prove frozen GPU health v1 and active v2 shapes and semantics."""
 
 from __future__ import annotations
 
@@ -63,9 +63,17 @@ def main() -> int:
                         help="also verify the real CLI no-render JSON/exit contract")
     args = parser.parse_args()
     schema = load(ROOT / "docs" / "contracts" / "gpu-health-result-v1.schema.json")
+    active_schema = load(
+        ROOT / "docs" / "contracts" / "gpu-health-result-v2.schema.json"
+    )
     manifest = load(FIXTURES / "manifest.json")
     schema_codes = set(schema["properties"]["probes"]["items"]["properties"]
                        ["events"]["items"]["properties"]["code"]["enum"])
+    active_schema_codes = set(
+        active_schema["properties"]["probes"]["items"]["properties"]
+        ["events"]["items"]["properties"]["code"]["enum"]
+    )
+    assert active_schema_codes == schema_codes, "v1/v2 diagnostic registries drifted"
     registry_header = (ROOT / "tools" / "cli" / "gpu_health" / "include" /
                        "pulp_tooling" / "gpu_health" / "health_result.hpp").read_text(
                            encoding="utf-8")
@@ -121,6 +129,24 @@ def main() -> int:
     assert {event["stage"] for doc in documents for event in doc["probes"][0]["events"]} == STAGES
 
     base = documents[0]
+    v1_with_timestamp = copy.deepcopy(base)
+    v1_with_timestamp["measured_at_utc"] = "2026-09-01T07:00:00Z"
+    assert json_schema_lite.validate(v1_with_timestamp, schema), (
+        "closed v1 unexpectedly accepted measured_at_utc"
+    )
+    active = copy.deepcopy(base)
+    active.update(
+        schema="pulp.gpu-health-result.v2",
+        version=2,
+        measured_at_utc="2026-09-01T07:00:00Z",
+    )
+    assert not json_schema_lite.validate(active, active_schema)
+    assert not semantic_errors(active)
+    active_without_timestamp = copy.deepcopy(active)
+    del active_without_timestamp["measured_at_utc"]
+    assert json_schema_lite.validate(active_without_timestamp, active_schema), (
+        "v2 unexpectedly accepted a missing measurement timestamp"
+    )
     mutation_count = mutate_required_fields(base, schema)
     enum_locations = [
         ("verdict",), ("health_state",), ("probes", 0, "verdict"),
@@ -220,7 +246,7 @@ def main() -> int:
             f"healthy required probes must exit 0, got {rendered.returncode}: "
             f"{rendered.stderr}\n{rendered.stdout}")
         rendered_document = json.loads(rendered.stdout)
-        problems = json_schema_lite.validate(rendered_document, schema)
+        problems = json_schema_lite.validate(rendered_document, active_schema)
         assert not problems, f"real CLI rendered schema: {problems}"
         problems = semantic_errors(rendered_document)
         assert not problems, f"real CLI rendered semantic: {problems}"
@@ -233,7 +259,7 @@ def main() -> int:
         assert completed.returncode == 2, (
             f"no-render must exit 2, got {completed.returncode}: {completed.stderr}")
         emitted = json.loads(completed.stdout)
-        problems = json_schema_lite.validate(emitted, schema)
+        problems = json_schema_lite.validate(emitted, active_schema)
         assert not problems, f"real CLI no-render schema: {problems}"
         problems = semantic_errors(emitted)
         assert not problems, f"real CLI no-render semantic: {problems}"

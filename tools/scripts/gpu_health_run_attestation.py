@@ -18,7 +18,7 @@ from gpu_health_contract import parse_utc_timestamp, semantic_errors
 SCHEMA = "pulp.gpu-health-run-attestation.v1"
 NAMESPACE = SCHEMA
 SCHEMA_PATH = "docs/contracts/gpu-health-run-attestation-v1.schema.json"
-HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v1.schema.json"
+HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v2.schema.json"
 
 
 def fail(message: str) -> None:
@@ -143,7 +143,7 @@ def main() -> int:
     health = strict_json(health_bytes)
     health_schema = strict_json(health_schema_bytes)
     if health_schema.get("$id") != \
-            "https://pulp.audio/contracts/gpu-health-result-v1.schema.json":
+            "https://pulp.audio/contracts/gpu-health-result-v2.schema.json":
         fail("canonical GPU-health schema has the wrong identity")
     schema_problems = json_schema_lite.validate(health, health_schema)
     if schema_problems:

@@ -20,7 +20,7 @@ from gpu_health_contract import parse_utc_timestamp, semantic_errors
 SCHEMA = "pulp.gpu-health-run-attestation.v1"
 NAMESPACE = SCHEMA
 SCHEMA_PATH = "docs/contracts/gpu-health-run-attestation-v1.schema.json"
-HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v1.schema.json"
+HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v2.schema.json"
 
 
 class Failure(RuntimeError):
@@ -292,7 +292,7 @@ def main() -> int:
                 "GPU-health result digest does not match protected evidence")
         health_schema = strict_json(health_schema_bytes, "canonical GPU-health schema")
         require(health_schema.get("$id") ==
-                "https://pulp.audio/contracts/gpu-health-result-v1.schema.json",
+                "https://pulp.audio/contracts/gpu-health-result-v2.schema.json",
                 "canonical GPU-health schema has the wrong identity")
         health = strict_json(health_bytes, "GPU-health result")
         health_schema_problems = json_schema_lite.validate(health, health_schema)
@@ -303,7 +303,7 @@ def main() -> int:
         require(not semantic_problems,
                 "GPU-health result violates its semantic contract: " +
                 (semantic_problems[0] if semantic_problems else ""))
-        require(health.get("schema") == health_ref["schema"] == "pulp.gpu-health-result.v1"
+        require(health.get("schema") == health_ref["schema"] == "pulp.gpu-health-result.v2"
                 and health.get("run_id") == health_ref["run_id"]
                 and health.get("measured_at_utc") == health_ref["measured_at_utc"],
                 "GPU-health result identity, run_id, or measurement time was substituted")

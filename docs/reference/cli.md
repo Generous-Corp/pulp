@@ -417,7 +417,7 @@ pulp doctor --caches --fix           # heal user-owned dangling/stale-commit ent
 pulp doctor --caches --fix --dry-run # preview heal without removing anything
 pulp doctor --caches --json          # emit the cache report as stable JSON
 pulp doctor gpu                      # bounded render + compute health evidence
-pulp doctor gpu --json               # pulp.gpu-health-result.v1 JSON
+pulp doctor gpu --json               # pulp.gpu-health-result.v2 JSON
 pulp doctor gpu --no-render --json   # unverified inventory; acquires no GPU device
 pulp doctor --host-quirks            # show the runtime DAW host-quirks policy + enforced accommodations
 pulp doctor quirks                   # synonym for --host-quirks
@@ -466,7 +466,7 @@ no GPU device, performs no active probes, and returns `unverified` rather than
 treating omitted work as a pass.
 
 The JSON result follows the installed
-[`pulp.gpu-health-result.v1`](../contracts/gpu-health-result-v1.schema.json)
+[`pulp.gpu-health-result.v2`](../contracts/gpu-health-result-v2.schema.json)
 contract. Each stage distinguishes `pass`, `fail`, `unavailable`, and
 `unverified`, and includes the measured facts and remediation needed to
 interpret it. New active runs record `measured_at_utc` immediately before probe

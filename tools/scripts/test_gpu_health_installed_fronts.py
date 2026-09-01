@@ -44,7 +44,7 @@ def main() -> int:
                          cwd=cwd, env=env)
             assert result.returncode == 2, (executable, result.returncode, result.stderr)
             evidence = json.loads(result.stdout)
-            assert evidence["schema"] == "pulp.gpu-health-result.v1"
+            assert evidence["schema"] == "pulp.gpu-health-result.v2"
             assert evidence["render_requested"] is False
             assert evidence["verdict"] == "unverified"
 
@@ -62,7 +62,7 @@ def main() -> int:
         if cpp_cli.is_file():
             assert result["structuredContent"]["exit_code"] == 2
             evidence = result["structuredContent"]["evidence"]
-            assert evidence["schema"] == "pulp.gpu-health-result.v1"
+            assert evidence["schema"] == "pulp.gpu-health-result.v2"
             assert evidence["render_requested"] is False
             assert evidence["verdict"] == "unverified"
         else:
