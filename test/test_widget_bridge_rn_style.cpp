@@ -668,6 +668,33 @@ TEST_CASE("root bridge Escape dismisses a semantic overlay by default",
     pulp::view::View::active_overlay_ = nullptr;
 }
 
+TEST_CASE("semantic dismissal recovers the retained React callback after native cleanup",
+          "[view][bridge][overlay][react]") {
+    pulp::view::View::active_overlay_ = nullptr;
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createPanel('popover', '');"
+        "globalThis.__retainedDismissCount = 0;"
+        "globalThis.__pulpReactEventCallbacks__ = new Map();"
+        "globalThis.__pulpReactEventCallbacks__.set('popover:dismiss', () => {"
+        "  globalThis.__retainedDismissCount++;"
+        "});"
+        "claimOverlay('popover', true);"
+        "delete __callbacks__['popover:dismiss'];");
+
+    REQUIRE(root.interaction().active_overlay == bridge.widget("popover"));
+    bridge.widget("popover")->dismiss_claimed_overlay();
+    REQUIRE(root.interaction().active_overlay == nullptr);
+    REQUIRE(engine.evaluate("globalThis.__retainedDismissCount")
+                .getWithDefault<double>(-1) == 1);
+    pulp::view::View::active_overlay_ = nullptr;
+}
+
 // pulp #1420 — `display` CSS values translate to native bridge calls.
 // Five display values are observed in imports: flex, block, inline-block,
 // none, inline-flex. inline-block and inline-flex were previously dropped;
