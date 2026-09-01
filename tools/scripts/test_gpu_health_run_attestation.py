@@ -22,6 +22,9 @@ VERIFIER = HERE / "verify_gpu_health_run_attestation.py"
 SOURCE_ROOT = HERE.parents[1]
 SCHEMA_PATH = Path("docs/contracts/gpu-health-run-attestation-v1.schema.json")
 HEALTH_SCHEMA_PATH = Path("docs/contracts/gpu-health-result-v2.schema.json")
+VERIFICATION_SCHEMA_PATH = Path(
+    "docs/contracts/gpu-health-run-attestation-verification-v1.schema.json"
+)
 CREATED = "2026-09-01T07:00:00Z"
 MEASURED = "2026-09-01T06:59:00Z"
 NOW = "2026-09-01T07:05:00Z"
@@ -64,6 +67,8 @@ class Fixture:
         shutil.copyfile(SOURCE_ROOT / SCHEMA_PATH, schema)
         shutil.copyfile(SOURCE_ROOT / HEALTH_SCHEMA_PATH,
                         self.repo / HEALTH_SCHEMA_PATH)
+        shutil.copyfile(SOURCE_ROOT / VERIFICATION_SCHEMA_PATH,
+                        self.repo / VERIFICATION_SCHEMA_PATH)
         self.health_path = Path("docs/validation/gpu-health/a1/m5/pulp-doctor-gpu.json")
         health_file = self.repo / self.health_path
         health_file.parent.mkdir(parents=True)
@@ -254,9 +259,46 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
     def test_protected_authenticated_run_verifies(self) -> None:
         result = self.fixture.verify()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("verified", result.stdout)
-        self.assertIn(f"implementation={self.fixture.implementation}", result.stdout)
-        self.assertIn("probe_id=gpu-compute-magnitude", result.stdout)
+        record = json.loads(result.stdout)
+        self.assertEqual(record["status"], "verified")
+        self.assertEqual(record["implementation_revision"], self.fixture.implementation)
+        self.assertEqual(record["selection"]["probe_id"], "gpu-compute-magnitude")
+        self.assertEqual(record["evidence_revision"], self.fixture.evidence)
+        self.assertEqual(record["attestation"]["revision"], self.fixture.attestation)
+        self.assertEqual(record["attestation"]["path"], str(self.fixture.attestation_path))
+        self.assertEqual(record["health_result"]["schema"],
+                         "pulp.gpu-health-result.v2")
+        self.assertEqual(record["health_result"]["run_id"], "m5-a1-run-1")
+        self.assertEqual(record["health_result"]["measured_at_utc"], MEASURED)
+        self.assertEqual(record["max_age_seconds"], 600)
+        self.assertEqual(record["host"]["stable_machine_id_sha256"],
+                         MACHINE_ID_SHA256)
+        self.assertEqual(record["trusted_host"]["key_type"], "ssh-ed25519")
+        self.assertEqual(record["producer"]["build_id"], "pulp-build-fixture")
+        self.assertEqual(record["verifier"]["contract_version"], 1)
+        verifier_artifacts = [record["verifier"]["entrypoint"],
+                              *record["verifier"]["dependencies"]]
+        for artifact in verifier_artifacts:
+            self.assertEqual(
+                artifact["sha256"],
+                hashlib.sha256(Path(artifact["path"]).read_bytes()).hexdigest(),
+            )
+        for name, relative in (
+            ("attestation", SCHEMA_PATH),
+            ("health_result", HEALTH_SCHEMA_PATH),
+            ("verification", VERIFICATION_SCHEMA_PATH),
+        ):
+            binding = record["canonical_schemas"][name]
+            self.assertEqual(binding["path"], str(relative))
+            self.assertEqual(
+                binding["blob_sha1"],
+                run("git", "rev-parse", f"{self.fixture.evidence}:{relative}",
+                    cwd=self.fixture.repo).stdout.strip(),
+            )
+        verification_schema = json.loads(
+            (SOURCE_ROOT / VERIFICATION_SCHEMA_PATH).read_text()
+        )
+        self.assertEqual(json_schema_lite.validate(record, verification_schema), [])
         schema = json.loads((SOURCE_ROOT / SCHEMA_PATH).read_text())
         attestation = json.loads(
             (self.fixture.repo / self.fixture.attestation_path).read_text()
@@ -267,6 +309,38 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         )
         self.assertNotIn(RAW_MACHINE_ID, json.dumps(attestation))
         self.assertNotIn(RAW_MACHINE_ID, self.fixture.trust.read_text())
+        self.assertNotIn(RAW_MACHINE_ID, result.stdout)
+        self.assertNotIn(self.fixture.public_key, result.stdout)
+
+    def test_verification_record_schema_rejects_missing_substitution_and_unknown(self) -> None:
+        result = self.fixture.verify()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = json.loads(result.stdout)
+        schema = json.loads((SOURCE_ROOT / VERIFICATION_SCHEMA_PATH).read_text())
+        mutations = (
+            lambda value: value.pop("status"),
+            lambda value: value.update(schema="pulp.other.verification.v1"),
+            lambda value: value["canonical_schemas"]["health_result"].update(
+                path=str(SCHEMA_PATH)
+            ),
+            lambda value: value["verifier"]["dependencies"].reverse(),
+            lambda value: value.update(unverified_input="forbidden"),
+        )
+        for operation in mutations:
+            with self.subTest(operation=operation):
+                changed = json.loads(json.dumps(record))
+                operation(changed)
+                self.assertTrue(json_schema_lite.validate(changed, schema))
+
+    def test_failures_emit_no_partial_verification_record(self) -> None:
+        for result in (
+            self.fixture.verify("--expected-host-id", "other-host"),
+            self.fixture.verify("--max-age-seconds", "60"),
+        ):
+            with self.subTest(stderr=result.stderr):
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("verification failed", result.stderr)
 
     def test_machine_pseudonym_uses_the_canonical_domain_separator(self) -> None:
         raw = RAW_MACHINE_ID.encode("utf-8")
@@ -373,7 +447,8 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
             )
         self.assertTrue(moved)
         self.assertEqual(result, 0, output.getvalue())
-        self.assertIn(f"revision={valid_revision}", output.getvalue())
+        record = json.loads(output.getvalue())
+        self.assertEqual(record["attestation"]["revision"], valid_revision)
         self.assertEqual(
             run("git", "rev-parse", "moving-attestation",
                 cwd=self.fixture.repo).stdout.strip(),
@@ -393,7 +468,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
             with self.subTest(option=option):
                 result = self.fixture.verify(option, value)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("does not match verifier policy", result.stdout)
+                self.assertIn("does not match verifier policy", result.stderr)
 
     def test_trusted_machine_pseudonym_substitution_fails(self) -> None:
         trust = json.loads(self.fixture.trust.read_text())
@@ -401,7 +476,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         self.fixture.trust.write_text(json.dumps(trust, sort_keys=True) + "\n")
         result = self.fixture.verify()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("pseudonym does not match trusted host policy", result.stdout)
+        self.assertIn("pseudonym does not match trusted host policy", result.stderr)
 
     def test_older_valid_implementation_ancestor_is_not_expected(self) -> None:
         older = run(
@@ -410,7 +485,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         ).stdout.strip()
         result = self.fixture.verify("--expected-implementation-revision", older)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not match verifier policy", result.stdout)
+        self.assertIn("does not match verifier policy", result.stderr)
 
     def test_expected_implementation_policy_rejects_movable_or_noncanonical_input(self) -> None:
         run("git", "tag", "implementation-tag", self.fixture.implementation,
@@ -425,7 +500,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                     "--expected-implementation-revision", value
                 )
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("exact lowercase 40-character Git SHA", result.stdout)
+                self.assertIn("exact lowercase 40-character Git SHA", result.stderr)
 
     def test_cli_rejects_now_override(self) -> None:
         result = run(
@@ -456,7 +531,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
     def test_alternate_passing_probe_with_same_adapter_is_not_selected(self) -> None:
         result = self.fixture.verify("--expected-probe-id", "renderer3d-frame")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not match verifier policy", result.stdout)
+        self.assertIn("does not match verifier policy", result.stderr)
 
     def test_result_substitution_fails(self) -> None:
         attestation = json.loads((self.fixture.repo / self.fixture.attestation_path).read_text())
@@ -469,25 +544,25 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
             cwd=self.fixture.repo)
         result = self.fixture.verify()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("result digest", result.stdout)
+        self.assertIn("result digest", result.stderr)
 
     def test_stale_run_fails(self) -> None:
         result = self.fixture.verify("--max-age-seconds", "60")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("stale", result.stdout)
+        self.assertIn("stale", result.stderr)
 
     def test_unprotected_attestation_revision_fails(self) -> None:
         run("git", "branch", "-f", "protected", self.fixture.evidence,
             cwd=self.fixture.repo)
         result = self.fixture.verify()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("not protected ancestry", result.stdout)
+        self.assertIn("not protected ancestry", result.stderr)
 
     def test_binary_substitution_fails(self) -> None:
         self.fixture.binary.write_bytes(b"substituted producer\n")
         result = self.fixture.verify()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("binary digest", result.stdout)
+        self.assertIn("binary digest", result.stderr)
 
     def test_untrusted_signer_fails(self) -> None:
         other_key = Path(self.temp.name) / "other-key"
@@ -498,7 +573,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         self.fixture.trust.write_text(json.dumps(trust, sort_keys=True) + "\n")
         result = self.fixture.verify()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("fingerprint does not match", result.stdout)
+        self.assertIn("fingerprint does not match", result.stderr)
 
     def test_non_ed25519_and_malformed_trusted_keys_fail_closed(self) -> None:
         rsa_key = Path(self.temp.name) / "rsa-key"
@@ -521,7 +596,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
         self.fixture.trust.write_text(json.dumps(trust, sort_keys=True) + "\n")
         result = self.fixture.verify()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("exactly ssh-ed25519", result.stdout)
+        self.assertIn("exactly ssh-ed25519", result.stderr)
 
         for label, public_key, expected in (
             ("ecdsa", "ecdsa-sha2-nistp256 AAAA", "exactly ssh-ed25519"),
@@ -533,7 +608,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                 self.fixture.trust.write_text(json.dumps(trust, sort_keys=True) + "\n")
                 result = self.fixture.verify()
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn(expected, result.stdout)
+                self.assertIn(expected, result.stderr)
 
     def test_health_result_schema_and_semantic_failures_are_rejected_before_signing(self) -> None:
         health_path = self.fixture.repo / self.fixture.health_path
@@ -567,7 +642,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                 self.fixture.publish_adversarially_signed(evidence)
                 verified = self.fixture.verify()
                 self.assertNotEqual(verified.returncode, 0)
-                self.assertIn(expected, verified.stdout)
+                self.assertIn(expected, verified.stderr)
 
     def test_impossible_attestation_calendar_values_fail_closed(self) -> None:
         for label, created_at in (
@@ -600,9 +675,9 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                 verified = fixture.verify()
                 self.assertNotEqual(verified.returncode, 0)
                 self.assertTrue(
-                    "created_at" in verified.stdout
-                    or "canonical schema" in verified.stdout,
-                    verified.stdout,
+                    "created_at" in verified.stderr
+                    or "canonical schema" in verified.stderr,
+                    verified.stderr,
                 )
 
     def test_attestation_schema_rejects_timestamp_path_pattern_and_length_drift(self) -> None:
@@ -623,8 +698,8 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                 result = fixture.verify(*extra)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertTrue(
-                    "canonical schema" in result.stdout or "malformed" in result.stdout,
-                    result.stdout,
+                    "canonical schema" in result.stderr or "malformed" in result.stderr,
+                    result.stderr,
                 )
 
     def test_canonical_schema_identity_divergence_is_rejected(self) -> None:
@@ -647,6 +722,31 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(expected, result.stderr)
 
+    def test_verification_schema_missing_or_identity_substitution_fails_closed(self) -> None:
+        for label, operation, expected in (
+            ("missing", lambda path: path.unlink(), "absent from revision"),
+            ("identity", lambda path: path.write_text(json.dumps({
+                **json.loads(path.read_text()),
+                "$id": "https://example.invalid/substituted.schema.json",
+            }, sort_keys=True) + "\n"), "wrong identity"),
+            ("unsupported", lambda path: path.write_text(json.dumps({
+                **json.loads(path.read_text()),
+                "dependentRequired": {},
+            }, sort_keys=True) + "\n"), "not implemented"),
+        ):
+            with self.subTest(label=label):
+                case_root = Path(self.temp.name) / f"verification-schema-{label}"
+                case_root.mkdir()
+                fixture = Fixture(case_root)
+                operation(fixture.repo / VERIFICATION_SCHEMA_PATH)
+                fixture.commit(f"publish {label} verification schema")
+                evidence = fixture.head()
+                fixture.publish_adversarially_signed(evidence)
+                result = fixture.verify()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn(expected, result.stderr)
+
     def test_new_signature_cannot_refresh_an_old_measurement(self) -> None:
         result = self.fixture.produce(self.fixture.evidence, NOW)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -656,7 +756,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
             cwd=self.fixture.repo)
         verified = self.fixture.verify("--max-age-seconds", "60")
         self.assertNotEqual(verified.returncode, 0)
-        self.assertIn("GPU measurement is stale", verified.stdout)
+        self.assertIn("GPU measurement is stale", verified.stderr)
 
     def test_attestation_chronology_and_future_time_fail_closed(self) -> None:
         cases = (
@@ -678,7 +778,7 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
                     cwd=fixture.repo)
                 verified = fixture.verify(now=now)
                 self.assertNotEqual(verified.returncode, 0)
-                self.assertIn(expected, verified.stdout)
+                self.assertIn(expected, verified.stderr)
 
 
 if __name__ == "__main__":

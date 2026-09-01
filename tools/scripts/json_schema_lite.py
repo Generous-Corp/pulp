@@ -16,7 +16,7 @@ Supported keywords:
     type, const, enum, required, properties, additionalProperties,
     propertyNames, minProperties, maxProperties, items, minItems,
     maxItems, uniqueItems, prefixItems, minLength, maxLength, pattern, minimum,
-    maximum, oneOf
+    maximum, oneOf, local $defs and local $ref
 
 Ignored (annotation-only) keywords:
     $schema, $id, title, description, $comment, examples, default
@@ -56,6 +56,8 @@ _SUPPORTED = frozenset(
         "minimum",
         "maximum",
         "oneOf",
+        "$defs",
+        "$ref",
     }
 )
 
@@ -91,11 +93,12 @@ def validate(document: Any, schema: Any, path: str = "$") -> list[str]:
     Raises `UnsupportedKeyword` if the schema uses a keyword outside the
     documented subset — a loud failure, never a silent skip.
     """
-    _preflight_schema(schema, path)
-    return _validate(document, schema, path)
+    _preflight_schema(schema, path, schema)
+    _reject_reference_cycles(schema, path)
+    return _validate(document, schema, path, schema)
 
 
-def _preflight_schema(schema: Any, path: str) -> None:
+def _preflight_schema(schema: Any, path: str, root: Any) -> None:
     """Reject unsupported schema constructs independent of instance shape."""
     if isinstance(schema, bool):
         return
@@ -111,6 +114,22 @@ def _preflight_schema(schema: Any, path: str) -> None:
                 "unchecked."
             )
 
+    definitions = schema.get("$defs", {})
+    if not isinstance(definitions, dict):
+        raise UnsupportedKeyword(f"{path}: $defs must be an object")
+
+    if "$ref" in schema:
+        reference = schema["$ref"]
+        if (not isinstance(reference, str)
+                or not reference.startswith("#/$defs/")
+                or "/" in reference.removeprefix("#/$defs/")):
+            raise UnsupportedKeyword(
+                f"{path}: only direct local $defs references are supported"
+            )
+        name = reference.removeprefix("#/$defs/")
+        if not isinstance(root, dict) or name not in root.get("$defs", {}):
+            raise UnsupportedKeyword(f"{path}: unresolved local $ref {reference!r}")
+
     if "type" in schema:
         names = schema["type"]
         names = [names] if isinstance(names, str) else list(names)
@@ -119,33 +138,77 @@ def _preflight_schema(schema: Any, path: str) -> None:
                 raise UnsupportedKeyword(f"{path}: unknown type name: {name!r}")
 
     for key, child in schema.get("properties", {}).items():
-        _preflight_schema(child, f"{path}.properties[{key!r}]")
+        _preflight_schema(child, f"{path}.properties[{key!r}]", root)
     if "items" in schema:
-        _preflight_schema(schema["items"], f"{path}.items")
+        _preflight_schema(schema["items"], f"{path}.items", root)
     for index, child in enumerate(schema.get("prefixItems", [])):
-        _preflight_schema(child, f"{path}.prefixItems[{index}]")
+        _preflight_schema(child, f"{path}.prefixItems[{index}]", root)
     if "propertyNames" in schema:
-        _preflight_schema(schema["propertyNames"], f"{path}.propertyNames")
+        _preflight_schema(schema["propertyNames"], f"{path}.propertyNames", root)
     if "additionalProperties" in schema:
         _preflight_schema(
-            schema["additionalProperties"], f"{path}.additionalProperties"
+            schema["additionalProperties"], f"{path}.additionalProperties", root
         )
     for index, branch in enumerate(schema.get("oneOf", [])):
-        _preflight_schema(branch, f"{path}.oneOf[{index}]")
+        _preflight_schema(branch, f"{path}.oneOf[{index}]", root)
+    for name, definition in definitions.items():
+        _preflight_schema(definition, f"{path}.$defs[{name!r}]", root)
 
 
-def _validate(document: Any, schema: Any, path: str) -> list[str]:
+def _reject_reference_cycles(root: Any, path: str) -> None:
+    if not isinstance(root, dict):
+        return
+    definitions = root.get("$defs", {})
+
+    def references(value: Any) -> set[str]:
+        if isinstance(value, dict):
+            found = set()
+            reference = value.get("$ref")
+            if isinstance(reference, str) and reference.startswith("#/$defs/"):
+                found.add(reference.removeprefix("#/$defs/"))
+            for key, child in value.items():
+                if key != "$defs":
+                    found.update(references(child))
+            return found
+        if isinstance(value, list):
+            found = set()
+            for child in value:
+                found.update(references(child))
+            return found
+        return set()
+
+    graph = {name: references(definition)
+             for name, definition in definitions.items()}
+
+    def visit(name: str, active: frozenset[str]) -> None:
+        if name in active:
+            raise UnsupportedKeyword(
+                f"{path}: recursive local $ref through definition {name!r} "
+                "is not supported"
+            )
+        for dependency in graph.get(name, set()):
+            visit(dependency, active | {name})
+
+    for name in graph:
+        visit(name, frozenset())
+
+
+def _validate(document: Any, schema: Any, path: str, root: Any) -> list[str]:
     if schema is True:
         return []
     if schema is False:
         return [f"{path}: schema forbids any value here"]
     errors: list[str] = []
 
+    if "$ref" in schema:
+        name = schema["$ref"].removeprefix("#/$defs/")
+        errors.extend(_validate(document, root["$defs"][name], path, root))
+
     if "oneOf" in schema:
         matches = [
             branch
             for branch in schema["oneOf"]
-            if not _validate(document, branch, path)
+            if not _validate(document, branch, path, root)
         ]
         if len(matches) != 1:
             errors.append(
@@ -178,9 +241,9 @@ def _validate(document: Any, schema: Any, path: str) -> list[str]:
     if isinstance(document, str):
         errors.extend(_validate_string(document, schema, path))
     elif isinstance(document, list):
-        errors.extend(_validate_array(document, schema, path))
+        errors.extend(_validate_array(document, schema, path, root))
     elif isinstance(document, dict):
-        errors.extend(_validate_object(document, schema, path))
+        errors.extend(_validate_object(document, schema, path, root))
 
     return errors
 
@@ -200,7 +263,7 @@ def _validate_string(document: str, schema: dict, path: str) -> list[str]:
     return errors
 
 
-def _validate_array(document: list, schema: dict, path: str) -> list[str]:
+def _validate_array(document: list, schema: dict, path: str, root: Any) -> list[str]:
     errors: list[str] = []
     if "minItems" in schema and len(document) < schema["minItems"]:
         errors.append(f"{path}: fewer than minItems {schema['minItems']}")
@@ -215,10 +278,10 @@ def _validate_array(document: list, schema: dict, path: str) -> list[str]:
     if "items" in schema:
         start = len(schema.get("prefixItems", []))
         for i, item in enumerate(document[start:], start=start):
-            errors.extend(_validate(item, schema["items"], f"{path}[{i}]"))
+            errors.extend(_validate(item, schema["items"], f"{path}[{i}]", root))
     for i, item_schema in enumerate(schema.get("prefixItems", [])):
         if i < len(document):
-            errors.extend(_validate(document[i], item_schema, f"{path}[{i}]"))
+            errors.extend(_validate(document[i], item_schema, f"{path}[{i}]", root))
     return errors
 
 
@@ -241,7 +304,7 @@ def _json_values_equal(first: Any, second: Any) -> bool:
     return first == second
 
 
-def _validate_object(document: dict, schema: dict, path: str) -> list[str]:
+def _validate_object(document: dict, schema: dict, path: str, root: Any) -> list[str]:
     errors: list[str] = []
     if "minProperties" in schema and len(document) < schema["minProperties"]:
         errors.append(f"{path}: fewer than minProperties {schema['minProperties']}")
@@ -256,14 +319,14 @@ def _validate_object(document: dict, schema: dict, path: str) -> list[str]:
     for key, value in document.items():
         child = f"{path}.{key}"
         if "propertyNames" in schema:
-            errors.extend(_validate(key, schema["propertyNames"], f"{child} (name)"))
+            errors.extend(_validate(key, schema["propertyNames"], f"{child} (name)", root))
         if key in props:
-            errors.extend(_validate(value, props[key], child))
+            errors.extend(_validate(value, props[key], child, root))
             continue
         if "additionalProperties" in schema:
             extra = schema["additionalProperties"]
             if extra is False:
                 errors.append(f"{path}: unexpected property {key!r}")
             else:
-                errors.extend(_validate(value, extra, child))
+                errors.extend(_validate(value, extra, child, root))
     return errors

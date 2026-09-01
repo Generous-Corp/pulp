@@ -251,6 +251,10 @@ preceding evidence-publication revision. The independent caller must supply the
 exact expected implementation revision and probe ID; ancestry or another
 passing probe with the same adapter identity is not equivalent. Protected Git
 ancestry of the later attestation publication remains a separate verifier check.
+Successful verification emits the closed
+[`pulp.gpu-health-run-attestation-verification.v1`](../contracts/gpu-health-run-attestation-verification-v1.schema.json)
+record; downstream policy consumes that record rather than scraping diagnostic
+text or treating the signed attestation alone as a verifier verdict.
 
 The render check consumes the existing `Renderer3D` and `HeadlessSurface`
 interfaces; it does not create another renderer. `HeadlessSurface` is a

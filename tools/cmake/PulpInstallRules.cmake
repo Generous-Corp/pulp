@@ -467,7 +467,8 @@ set(_pulp_gpu_health_contracts
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-result-v2.schema.json"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-read-result-v1.schema.json"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-run-attestation-v1.schema.json")
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-run-attestation-v1.schema.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-run-attestation-verification-v1.schema.json")
 foreach(_pulp_gpu_health_contract IN LISTS _pulp_gpu_health_contracts)
     if(NOT EXISTS "${_pulp_gpu_health_contract}")
         message(FATAL_ERROR
@@ -478,6 +479,16 @@ install(FILES ${_pulp_gpu_health_contracts}
     DESTINATION "share/pulp/contracts")
 unset(_pulp_gpu_health_contract)
 unset(_pulp_gpu_health_contracts)
+
+# The verifier imports only these adjacent, source-owned modules. Install the
+# closed bundle together so consumers can bind every executable artifact.
+install(PROGRAMS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/verify_gpu_health_run_attestation.py"
+    DESTINATION "share/pulp/gpu-health-run-attestation-verifier")
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/gpu_health_contract.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/json_schema_lite.py"
+    DESTINATION "share/pulp/gpu-health-run-attestation-verifier")
 
 # Closed schema for independently authored same-trace Perfetto UI review.
 # This is a structural evidence contract, not terminal acceptance authority.

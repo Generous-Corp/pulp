@@ -23,6 +23,11 @@ SCHEMA = "pulp.gpu-health-run-attestation.v1"
 NAMESPACE = SCHEMA
 SCHEMA_PATH = "docs/contracts/gpu-health-run-attestation-v1.schema.json"
 HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v2.schema.json"
+VERIFICATION_SCHEMA = "pulp.gpu-health-run-attestation-verification.v1"
+VERIFICATION_SCHEMA_PATH = \
+    "docs/contracts/gpu-health-run-attestation-verification-v1.schema.json"
+VERIFIER_CONTRACT_VERSION = 1
+VERIFIER_DEPENDENCIES = ("gpu_health_contract.py", "json_schema_lite.py")
 
 
 class Failure(RuntimeError):
@@ -72,6 +77,24 @@ def git_blob(repo: Path, revision: str, path: str) -> bytes:
     result = git(repo, "show", f"{revision}:{path}")
     require(result.returncode == 0, f"{path} is absent from revision {revision}")
     return result.stdout
+
+
+def git_blob_oid(repo: Path, revision: str, path: str) -> str:
+    result = git(repo, "rev-parse", "--verify", f"{revision}:{path}")
+    require(result.returncode == 0, f"{path} has no blob identity at revision {revision}")
+    value = result.stdout.decode().strip()
+    require(len(value) == 40 and all(c in "0123456789abcdef" for c in value),
+            f"{path} has a malformed blob identity at revision {revision}")
+    return value
+
+
+def local_artifact(path: Path, label: str) -> dict[str, str]:
+    resolved = path.resolve()
+    try:
+        digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    except OSError as error:
+        raise Failure(f"{label} cannot be read: {error}") from error
+    return {"path": str(resolved), "sha256": digest}
 
 
 def resolve_commit(repo: Path, revision: str, label: str) -> str:
@@ -242,6 +265,9 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
         ancestor(repo, attestation_revision, protected_revision,
                  "attestation revision is not protected ancestry")
         attestation_bytes = git_blob(repo, attestation_revision, args.attestation_path)
+        attestation_blob = git_blob_oid(
+            repo, attestation_revision, args.attestation_path
+        )
         attestation = strict_json(attestation_bytes, "run attestation")
         validate_shape(attestation)
         expected = {
@@ -284,6 +310,9 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
 
         schema_bytes = git_blob(repo, evidence, SCHEMA_PATH)
         health_schema_bytes = git_blob(repo, evidence, HEALTH_SCHEMA_PATH)
+        verification_schema_bytes = git_blob(
+            repo, evidence, VERIFICATION_SCHEMA_PATH
+        )
         require(hashlib.sha256(schema_bytes).hexdigest() == attestation["canonical_schema"]["sha256"],
                 "canonical schema digest does not match protected evidence")
         require(hashlib.sha256(health_schema_bytes).hexdigest() ==
@@ -298,6 +327,7 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
                 f"run attestation violates its canonical schema: {schema_problems[0] if schema_problems else ''}")
         health_ref = attestation["gpu_health_result"]
         health_bytes = git_blob(repo, evidence, health_ref["path"])
+        health_blob = git_blob_oid(repo, evidence, health_ref["path"])
         require(hashlib.sha256(health_bytes).hexdigest() == health_ref["sha256"],
                 "GPU-health result digest does not match protected evidence")
         health_schema = strict_json(health_schema_bytes, "canonical GPU-health schema")
@@ -342,7 +372,16 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
         require(binary_digest == attestation["producer"]["binary_sha256"],
                 "producer binary digest does not match the signed run")
 
-        trust = strict_json(args.trusted_hosts.read_bytes(), "trusted-host registry")
+        verifier_path = Path(__file__).resolve()
+        verifier_entrypoint = local_artifact(verifier_path, "verifier entrypoint")
+        verifier_dependencies = [
+            local_artifact(verifier_path.with_name(name), f"verifier dependency {name}")
+            for name in VERIFIER_DEPENDENCIES
+        ]
+
+        trust_path = args.trusted_hosts.resolve()
+        trust_bytes = trust_path.read_bytes()
+        trust = strict_json(trust_bytes, "trusted-host registry")
         exact(trust, {"schema", "version", "hosts"}, "trusted-host registry")
         require(trust["schema"] == "pulp.gpu-health-trusted-hosts.v1"
                 and trust["version"] == 1 and isinstance(trust["hosts"], list),
@@ -384,14 +423,103 @@ def verify(argv: Sequence[str], *, clock: Callable[[], dt.datetime]) -> int:
         require(measured <= now, "GPU measurement is dated in the future")
         require((now - measured).total_seconds() <= args.max_age_seconds,
                 "GPU measurement is stale")
-    except (Failure, OSError) as error:
-        print(f"gpu-health run-attestation verification failed: {error}")
+        verified_at = now.isoformat(timespec="seconds").replace("+00:00", "Z")
+        record = {
+            "schema": VERIFICATION_SCHEMA,
+            "version": 1,
+            "status": "verified",
+            "verified_at_utc": verified_at,
+            "max_age_seconds": args.max_age_seconds,
+            "implementation_revision": expected_implementation,
+            "evidence_revision": evidence,
+            "protected_ref_revision": protected_revision,
+            "attestation": {
+                "revision": attestation_revision,
+                "path": args.attestation_path,
+                "blob_sha1": attestation_blob,
+                "sha256": hashlib.sha256(attestation_bytes).hexdigest(),
+            },
+            "health_result": {
+                "path": health_ref["path"],
+                "blob_sha1": health_blob,
+                "sha256": health_ref["sha256"],
+                "schema": health_ref["schema"],
+                "run_id": health_ref["run_id"],
+                "measured_at_utc": health_ref["measured_at_utc"],
+            },
+            "canonical_schemas": {
+                "attestation": {
+                    "path": SCHEMA_PATH,
+                    "blob_sha1": git_blob_oid(repo, evidence, SCHEMA_PATH),
+                    "sha256": hashlib.sha256(schema_bytes).hexdigest(),
+                },
+                "health_result": {
+                    "path": HEALTH_SCHEMA_PATH,
+                    "blob_sha1": git_blob_oid(repo, evidence, HEALTH_SCHEMA_PATH),
+                    "sha256": hashlib.sha256(health_schema_bytes).hexdigest(),
+                },
+                "verification": {
+                    "path": VERIFICATION_SCHEMA_PATH,
+                    "blob_sha1": git_blob_oid(
+                        repo, evidence, VERIFICATION_SCHEMA_PATH
+                    ),
+                    "sha256": hashlib.sha256(
+                        verification_schema_bytes
+                    ).hexdigest(),
+                },
+            },
+            "selection": dict(attestation["selection"]),
+            "host": dict(attestation["host"]),
+            "trusted_host": {
+                "registry_path": str(trust_path),
+                "registry_sha256": hashlib.sha256(trust_bytes).hexdigest(),
+                "key_type": "ssh-ed25519",
+                "matched_key_fingerprint": fingerprint,
+            },
+            "producer": {
+                "binary_path": str(binary),
+                "binary_sha256": binary_digest,
+                "build_id": attestation["producer"]["build_id"],
+                "code_signature_identity": attestation["producer"]["code_signature"],
+            },
+            "verifier": {
+                "contract_version": VERIFIER_CONTRACT_VERSION,
+                "entrypoint": verifier_entrypoint,
+                "dependencies": verifier_dependencies,
+            },
+            "signature": {
+                "namespace": NAMESPACE,
+                "signer_key_fingerprint": attestation["authentication"]
+                                                     ["signer_key_fingerprint"],
+                "result": "verified",
+            },
+            "chronology": {
+                "measured_at_utc": health_ref["measured_at_utc"],
+                "attestation_created_at": attestation["created_at"],
+                "verified_at_utc": verified_at,
+                "measurement_to_attestation_seconds": int(
+                    (created - measured).total_seconds()
+                ),
+                "measurement_age_seconds": int((now - measured).total_seconds()),
+                "attestation_age_seconds": int((now - created).total_seconds()),
+            },
+        }
+        verification_schema = strict_json(
+            verification_schema_bytes, "canonical verification schema"
+        )
+        require(verification_schema.get("$id") ==
+                "https://pulp.audio/contracts/"
+                "gpu-health-run-attestation-verification-v1.schema.json",
+                "canonical verification schema has the wrong identity")
+        record_problems = json_schema_lite.validate(record, verification_schema)
+        require(not record_problems,
+                "verification record violates its canonical schema: " +
+                (record_problems[0] if record_problems else ""))
+    except (Failure, OSError, json_schema_lite.UnsupportedKeyword) as error:
+        print(f"gpu-health run-attestation verification failed: {error}",
+              file=sys.stderr)
         return 1
-    print(
-        "gpu-health run-attestation verified "
-        f"revision={attestation_revision} "
-        f"implementation={expected_implementation} probe_id={args.expected_probe_id}"
-    )
+    sys.stdout.write(canonical(record).decode("utf-8"))
     return 0
 
 

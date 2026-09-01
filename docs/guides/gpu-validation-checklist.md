@@ -124,6 +124,27 @@ it must be the exact lowercase 40-hex commit ID. The attestation revision and
 protected ref are resolved once to immutable commits; the verifier's freshness
 clock is always the current system UTC time and has no command-line override.
 
+On success, stdout is exactly one canonical JSON record conforming to
+[`pulp.gpu-health-run-attestation-verification.v1`](../contracts/gpu-health-run-attestation-verification-v1.schema.json).
+The closed record retains the resolved protected, evidence, and attestation
+commits; Git blob IDs and SHA-256 digests for the attestation, v2 health result,
+and all three canonical schemas; every selection/host/producer policy value;
+the trusted-registry digest and matched Ed25519 fingerprint; signature result;
+and the verified chronology. It also identifies verification contract version
+1 and hashes the verifier entrypoint plus its two adjacent source-owned Python
+dependencies. Consumers must compare those three artifact digests to their own
+approved evidence before execution; the verifier cannot establish trust in
+itself merely by reporting its own digest. Failure is nonzero, writes the
+diagnostic to stderr, and emits no partial or pass-shaped stdout.
+
+The SDK installs the schema under `share/pulp/contracts` and the complete
+verifier bundle under `share/pulp/gpu-health-run-attestation-verifier`. The
+canonical verification schema is read from the evidence-publication commit,
+so that schema must already exist at the recorded evidence revision and pass
+the same protected-ancestry publication proof. The trusted registry stays
+local and private-policy-controlled; the record contains only its path and
+digest, never its public-key text or a raw machine identifier.
+
 The trusted-host registry is a closed JSON object with
 `schema: pulp.gpu-health-trusted-hosts.v1`, `version: 1`, and a `hosts` array.
 Each host has exactly `host_id`, `stable_machine_id_sha256`, and `public_key`

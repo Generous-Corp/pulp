@@ -9,6 +9,7 @@
   "gpu_health_contract_floor": "0.817.0",
   "gpu_health_v2_contract_floor": "0.828.0",
   "gpu_health_run_attestation_contract_floor": "0.828.0",
+  "gpu_health_run_attestation_verification_contract_floor": "0.828.0",
   "gpu_probe_contract_floor": "0.819.0",
   "gpu_recipe_catalog_floor": "0.819.0",
   "gpu_recipe_catalog_sha256": {

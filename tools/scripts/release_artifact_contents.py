@@ -162,6 +162,7 @@ class ProductMatrix:
     gpu_health_contract_floor: str
     gpu_health_v2_contract_floor: str
     gpu_health_run_attestation_contract_floor: str
+    gpu_health_run_attestation_verification_contract_floor: str
     gpu_probe_contract_floor: str
     gpu_recipe_catalog_floor: str
     gpu_recipe_catalog_sha256: dict[str, str]
@@ -239,6 +240,12 @@ class ProductMatrix:
                 gpu_health_run_attestation_contract_floor=str(
                     doc.get(
                         "gpu_health_run_attestation_contract_floor",
+                        "999999.0.0",
+                    )
+                ),
+                gpu_health_run_attestation_verification_contract_floor=str(
+                    doc.get(
+                        "gpu_health_run_attestation_verification_contract_floor",
                         "999999.0.0",
                     )
                 ),
@@ -658,6 +665,24 @@ def required_sdk_members(
         required.add(
             "pulp-sdk/share/pulp/contracts/"
             "gpu-health-run-attestation-v1.schema.json"
+        )
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(
+            matrix.gpu_health_run_attestation_verification_contract_floor
+        )
+    ):
+        required.update(
+            {
+                "pulp-sdk/share/pulp/contracts/"
+                "gpu-health-run-attestation-verification-v1.schema.json",
+                "pulp-sdk/share/pulp/gpu-health-run-attestation-verifier/"
+                "verify_gpu_health_run_attestation.py",
+                "pulp-sdk/share/pulp/gpu-health-run-attestation-verifier/"
+                "gpu_health_contract.py",
+                "pulp-sdk/share/pulp/gpu-health-run-attestation-verifier/"
+                "json_schema_lite.py",
+            }
         )
     if (
         version is not None
