@@ -1533,6 +1533,17 @@ variables and the live registered runners.
 inline elsewhere in this guide are illustrative and can lag; the contract plus
 its checker are authoritative, because they are the only pair that is verified.
 
+The required macOS variable is intentionally the **pre-dispatch** selector.
+For same-repository automatic work, `build.yml` removes the legacy
+`pulp-gate-fast` label and adds exactly one mutually exclusive event class:
+`pulp-build-merge-group` (provider-derived lease priority 110) or
+`pulp-build-pr-head` (priority 100). The TartCI source profile is authoritative
+for what a host can serve: its Pulp lane uses
+`assignment_mode = "event-class-v2"`, declares both tier rows with their exact
+workflow and repository runner-group ID, and declares no fixed lane priority.
+The contract records that transformation separately from the repo variable so
+neither representation is mistaken for the other.
+
 ### The failure this prevents
 
 GitHub does not validate `runs-on`. **A job that asks for a label no runner
@@ -1560,6 +1571,10 @@ disabling overflow. Nothing about either failure is visible without asking.
 | `undeclared` | A live routing variable with no lane in the contract. |
 | `hosted-unknown` | A `runs-on` value that is not self-hosted and not a known GitHub image — i.e. a typo, which queues forever. |
 | `must-unset` | A paid Namespace overflow variable is set (cost guard). |
+| `event-class-contract` | The variable/base transformation is internally incomplete or contradictory. |
+| `profile-contract-drift` | A supplied TartCI source profile does not serve the contracted event classes, scope, or post-transform labels, or incorrectly fixes one priority for both classes. |
+| `profile-receipt-drift` | A supplied installed-profile receipt does not bind to the exact supplied source-profile digest. |
+| `source-manifest-drift` | A supplied private desired-fleet manifest disagrees with the Pulp contract or source profile, including its declared `tart_home`. |
 
 Label matching is **subset containment**: GitHub dispatches to a runner only if
 it carries *every* label in the array. A lane requesting
@@ -1655,7 +1670,19 @@ python3 tools/scripts/runner_topology_check.py --mode=report
 
 # Advisory (never fails), useful while iterating.
 python3 tools/scripts/runner_topology_check.py --mode=hint
+
+# Optional read-only cross-repo evidence (all inputs are fixtures; no host query):
+python3 tools/scripts/runner_topology_check.py --mode=report \
+  --fleet-profile /path/to/profiles/m3-macos-fleet.toml \
+  --fleet-receipt /path/to/installed-receipt.json \
+  --fleet-source-manifest /path/to/fleet/local-macos-desired.json
 ```
+
+The optional evidence flags are repeatable where appropriate and never install,
+reload, enable, or inspect a runner. They compare the checked-in TartCI profile,
+its installation receipt, and the private desired-fleet manifest. Keep
+repo-specific labels and host declarations in those Pulp/private inputs; generic
+Shipyard and TartCI code must not grow a second Pulp host table.
 
 ### An unset variable is not automatically a gap
 
@@ -1695,17 +1722,18 @@ with one that does not.
 > only. `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is kept **UNSET**, so the
 > Namespace overflow described here never fires — it's a documented break-glass
 > option, not the active path. The required gate is the clean-per-job **JIT VM
-> pool** on M3 + M5 (`PULP_LOCAL_MACOS_RUNS_ON_JSON`), selected by the
-> `pulp-gate-fast` label. M1 keeps the generic `pulp-build-vm` label as a
-> rollback/non-required lane but cannot randomly win the serial required gate.
+> pool** (`PULP_LOCAL_MACOS_RUNS_ON_JSON`). Its repo variable carries the
+> reviewed legacy base selector, but `build.yml` replaces `pulp-gate-fast` with
+> the exact PR-head or merge-group class before assignment; profiles serving the
+> gate must advertise both classes and let provider code derive their priorities.
 > Do **not** repurpose the Namespace var to point at self-hosted runners (see
 > CLAUDE.md "Runner priority").
 
 **Read the live variable, not this page's defaults.** A routing var describes
 reality; `build.yml`'s `||` fallback is only what happens when the var is unset.
-The two disagree: `build.yml` defaults macOS overflow to GitHub-hosted
-`["macos-15"]`, while the live variable is the `local-only` sentinel and
-disables overflow. Confirm before reasoning about a route:
+The reviewed contract currently expects GitHub-hosted `macos-15` overflow;
+`local-only` remains the explicit disable sentinel. Confirm before reasoning
+about a route:
 
 ```bash
 gh variable list -R Generous-Corp/pulp | grep RUNS_ON_JSON
@@ -1722,9 +1750,10 @@ PATH="$HOME/.config/tartci/ghapp-shim:$PATH" \
   python3 tools/scripts/runner_topology_check.py --mode=report
 ```
 
-As of 2026-07-31, the required macOS contract selects the fast M3/M5 JIT class,
-overflow is contracted to the `local-only` sentinel, and Namespace variables
-remain unset. Exact labels and hosts belong only in the JSON contract.
+The required macOS contract records the pre-dispatch base and the event-class-v2
+transformation separately, overflow is contracted to GitHub-hosted capacity,
+and Namespace variables remain unset. Exact repo labels and declared profile
+bindings belong in the JSON contract and private fleet/profile inputs.
 
 When the local self-hosted Mac runner is saturated, `build.yml`'s
 `resolve-provider` job can route new PR or workflow-dispatch macOS legs to the
@@ -2085,25 +2114,20 @@ agents that already carry it are exit 0.
 
 ### `TART_HOME` is per-host by design
 
-VM homes differ intentionally per machine:
+The repo does not own a host→path table. Every VM tool resolves the store through
+`tools/ci/lib/tart-home.sh`: explicit `TART_HOME` first, then `vm_home` from
+`tartci host-profile --json`, otherwise a loud error. That shared helper replaced
+the contradictory script-local defaults; do not revive a guessed `$HOME/VMs` or
+`/Volumes/.../VMs` fallback in prose or code. The repo holds the resolution rule;
+the TartCI host profile and its install receipt bind the value.
 
-| Host | `TART_HOME` | Storage |
-|---|---|---|
-| m3 (Studios) | `/Volumes/Workshop/VMs` | external SSD |
-| m1, m5 | `~/VMs` | internal SSD |
-
-**Always set `TART_HOME` explicitly when invoking `tools/ci/*.sh` on a VM host.**
-Those scripts carry contradictory hardcoded defaults — most assume
-`/Volumes/Workshop/VMs`, while `reap-stray-vms.sh` and `setup-ci-host.sh` assume
-`$HOME/VMs`. The worst failure mode is silent: on m3, `reap-stray-vms.sh`
-defaults to `$HOME/VMs`, which is empty on that host, so the stray-VM reaper
-inspects the wrong universe, reaps nothing, and exits 0 reporting success — a
-permanent no-op that looks like a pass.
-
-The principle: a default is an undeclared name wearing a trench coat. On a VM
-host an unset `TART_HOME` should be a loud hard error naming the fix, never a
-guess. The repo holds RULES; the host holds VALUES — per-host truth belongs in
-the tartci host profile, not a repo constant.
+A default-store `tart list` is not active-work proof. If it reports no running
+VMs while `tart run` processes or guest setup are present, the store identity is
+unresolved and the result is **unknown**, not idle. Operational checks must
+resolve the receipt-bound profile first, query Tart with that exact `TART_HOME`,
+and corroborate with process/guest state before declaring an idle boundary. The
+Pulp topology checker only compares supplied profile/receipt/manifest fixtures;
+live store/process reconciliation belongs in TartCI.
 
 These three traps share one shape, covered in the `ci` skill under "The unifying
 invariant — no name without a heartbeat": a name is trustworthy only if an
@@ -2711,8 +2735,9 @@ and both belong to the required `macos` build gate. A local sanitizer VM
 is a *third* guest, so localizing is gated on the **tartci idle-gate**:
 the `pulp-sanitizer-vm-macos` lane shares `TART_HOME` with the gate (a real
 host-wide 2-guest semaphore) and yields its slot whenever the gate has
-queued/in-progress merge-group work. M1 now carries two event-class-v2 Pulp
-gate slots, so it is a shared host and must retain the template's yield keys;
+queued/in-progress required work. A host profile such as M3's can serve both
+event-class-v2 Pulp classes, so an advisory lane sharing that host must retain
+the template's yield keys;
 the exact selector is
 `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-build-merge-group,pulp-build-pr-head`.
 It can never start while required Build and Test work is demanding the host,

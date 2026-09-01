@@ -28,6 +28,9 @@ WHAT IT CHECKS
     degraded     — the only runners that match are offline (may just be asleep).
     hosted       — a GitHub-hosted scalar outside the allowlist (typo catch).
     must-unset   — a variable contracted to stay unset is set (cost guard).
+    event-class  — optional TartCI source profile, installed receipt, and
+                   private desired-fleet fixtures disagree with the Pulp v2
+                   contract. These are read-only inputs; no host is queried.
 
 LABEL MATCHING
     GitHub dispatches a job to a runner only when the runner carries EVERY
@@ -47,11 +50,15 @@ THREE RUNNER STATES, NOT TWO
     python3 tools/scripts/runner_topology_check.py --mode=hint     # advisory
     python3 tools/scripts/runner_topology_check.py --runners-json fixtures/r.json \
         --variables-json fixtures/v.json --jobs-json fixtures/j.json   # offline
+    python3 tools/scripts/runner_topology_check.py \
+        --fleet-profile fixtures/m3.toml --fleet-receipt fixtures/r.json \
+        --fleet-source-manifest fixtures/fleet.json                    # read-only
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -125,6 +132,7 @@ class Contract:
     routing_controls: dict[str, RoutingControl]
     lookback_hours: int
     runs_per_workflow: int
+    event_class_v2: dict[str, Any] | None = None
 
 
 @dataclass
@@ -188,7 +196,22 @@ def load_contract(path: Path) -> Contract:
         routing_controls=controls,
         lookback_hours=int(evidence.get("lookback_hours", 168)),
         runs_per_workflow=int(evidence.get("runs_per_workflow", 20)),
+        event_class_v2=data.get("event_class_v2"),
     )
+
+
+def load_toml_fixture(path: Path) -> dict[str, Any]:
+    """Load optional profile evidence without raising the CLI's Python floor."""
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[import-not-found,no-redef]
+        except ImportError as exc:
+            raise ValueError(
+                "--fleet-profile requires Python 3.11+ or the optional tomli package"
+            ) from exc
+    return tomllib.loads(path.read_text())
 
 
 # ── Live state ──────────────────────────────────────────────────────────
@@ -447,6 +470,297 @@ def has_service_evidence(labels: list[str], served: list[set[str]]) -> bool:
     return any(want == s for s in served)
 
 
+# ── Event-class-v2 profile evidence ──
+
+
+def _fleet_finding(kind: str, subject: str, detail: str) -> Finding:
+    return Finding(ERROR, kind, subject, detail)
+
+
+def _profile_lane(data: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any] | None:
+    lanes = data.get("lane", [])
+    if not isinstance(lanes, list):
+        return None
+    matches = [row for row in lanes if isinstance(row, dict)
+               and row.get("id") == spec["lane_id"]
+               and row.get("repo") == spec["repo"]]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _event_projection(contract: Contract) -> tuple[dict[str, Any] | None, str | None]:
+    """Canonical shared shape for code, TartCI profile, and fleet manifest."""
+    spec = contract.event_class_v2
+    if spec is None:
+        return None, None
+    if not isinstance(spec, dict):
+        return None, "event_class_v2 must be an object"
+    classes = spec.get("classes", [])
+    omit_labels = spec.get("omit_labels", [])
+    profiles = spec.get("profiles", [])
+    if (not isinstance(classes, list)
+            or not all(isinstance(row, dict)
+                       and all(isinstance(row.get(key), str) and row[key]
+                               for key in ("event", "label", "workflow"))
+                       and type(row.get("runner_group_id")) is int
+                       and type(row.get("lease_priority")) is int
+                       for row in classes)
+            or not isinstance(omit_labels, list)
+            or not all(isinstance(label, str) and label for label in omit_labels)
+            or not isinstance(profiles, list) or not profiles
+            or not all(isinstance(row, dict)
+                       and all(isinstance(row.get(key), str) and row[key]
+                               for key in ("name", "manifest_host", "source_path"))
+                       for row in profiles)
+            or not all(isinstance(spec.get(key), str) and spec[key]
+                       for key in ("variable", "lane_id", "repo",
+                                   "assignment_mode"))):
+        return None, "event_class_v2 has invalid typed fields"
+    matching = [lane for lane in contract.lanes
+                if lane.variable == spec.get("variable")]
+    labels = [row.get("label") for row in classes]
+    events = [row.get("event") for row in classes]
+    group_ids = {row.get("runner_group_id") for row in classes}
+    profile_names = [row["name"] for row in profiles]
+    profile_hosts = [row["manifest_host"] for row in profiles]
+    profile_sources = [row["source_path"] for row in profiles]
+    if (len(matching) != 1 or not isinstance(matching[0].expect, list)
+            or not all(isinstance(label, str) for label in matching[0].expect)):
+        return None, "event_class_v2 must name one array-valued lane"
+    if (len(events) != 2 or set(events) != {"merge_group", "pull_request"}
+            or len(labels) != len(set(labels)) or len(group_ids) != 1
+            or spec["assignment_mode"] != "event-class-v2"):
+        return None, "event-class-v2 needs both events, unique labels, and one group"
+    if any(len(values) != len(set(values)) for values in (
+            profile_names, profile_hosts, profile_sources)):
+        return None, "event-class-v2 profile declarations must be unique"
+    if len(omit_labels) != 1:
+        return None, "event-class-v2 requires exactly one legacy omit label"
+    if any(label in matching[0].expect for label in labels):
+        return None, "pre-dispatch selector already contains an event-class label"
+    if any(label not in matching[0].expect for label in omit_labels):
+        return None, "omit_labels contains a label absent from the base selector"
+    tiers = [{key: row[key] for key in ("label", "workflow", "runner_group_id")}
+             for row in classes]
+    return {
+        "dynamic_selector": {
+            "base_labels": matching[0].expect,
+            "event_labels": {row["event"]: row["label"] for row in classes},
+            "legacy_label_removed_before_dispatch": omit_labels[0],
+        },
+        "lease_priority": {row["event"]: row["lease_priority"] for row in classes},
+        "pulp_lane": {
+            "assignment_mode": spec["assignment_mode"],
+            "base_labels": [label for label in matching[0].expect
+                            if label not in omit_labels],
+            "omit_labels": omit_labels,
+            "repo": spec["repo"],
+            "runner_group_id": tiers[0]["runner_group_id"],
+            "tiers": tiers,
+        },
+    }, None
+
+
+def _project(data: Any, shape: dict[str, Any]) -> dict[str, Any]:
+    """Select only typed fields Pulp owns; ignore provider-private additions."""
+    if not isinstance(data, dict):
+        return {}
+    return {key: (_project(data.get(key, {}), value)
+                  if isinstance(value, dict) else data.get(key))
+            for key, value in shape.items()}
+
+
+def _diff_paths(expected: Any, actual: Any, prefix: str = "") -> list[str]:
+    if type(expected) is not type(actual):
+        return [prefix]
+    if isinstance(expected, dict):
+        return [path for key, value in expected.items()
+                for path in _diff_paths(value, actual.get(key),
+                                        f"{prefix}.{key}" if prefix else key)]
+    if isinstance(expected, list):
+        if len(expected) != len(actual):
+            return [prefix]
+        return [path for index, value in enumerate(expected)
+                for path in _diff_paths(value, actual[index],
+                                        f"{prefix}[{index}]")]
+    return [] if expected == actual else [prefix]
+
+
+def _profile_projection(data: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any] | None:
+    lane = _profile_lane(data, spec)
+    if lane is None:
+        return None
+    tiers = lane.get("tier")
+    return {
+        "assignment_mode": lane.get("assignment_mode"),
+        "base_labels": lane.get("labels"),
+        "omit_labels": lane.get("assignment_omit_labels", []),
+        "repo": lane.get("repo"),
+        "runner_group_id": lane.get("runner_group_id"),
+        "tiers": tiers,
+    }
+
+
+def check_event_class_evidence(
+    contract: Contract,
+    profile_inputs: list[tuple[Path, dict[str, Any]]] | None = None,
+    receipt_inputs: list[tuple[Path, dict[str, Any]]] | None = None,
+    source_manifest: tuple[Path, dict[str, Any]] | None = None,
+) -> list[Finding]:
+    """Reconcile optional, read-only TartCI fleet evidence.
+
+    Inputs are fixtures: this never discovers hosts, reads launchd, or invokes
+    TartCI. Pulp owns its repo-specific labels; TartCI remains a generic source
+    of profile and install-receipt evidence.
+    """
+    spec = contract.event_class_v2
+    if spec is None:
+        return []
+    expected, contract_error = _event_projection(contract)
+    if contract_error:
+        subject = (spec.get("variable", "event_class_v2")
+                   if isinstance(spec, dict) else "event_class_v2")
+        return [_fleet_finding(
+            "event-class-contract", str(subject), contract_error)]
+    assert expected is not None
+    findings: list[Finding] = []
+    declared_profiles = {row["name"]: row for row in spec.get("profiles", [])}
+    profiles: dict[str, tuple[Path, dict[str, Any]]] = {}
+    for path, data in profile_inputs or []:
+        name = data.get("name") if isinstance(data, dict) else None
+        subject = str(name or path)
+        declared = declared_profiles.get(name) if isinstance(name, str) else None
+        lane = _profile_lane(data, spec) if isinstance(data, dict) else None
+        profile_view = _profile_projection(data, spec) if lane else None
+        tiers = lane.get("tier", []) if lane else []
+        fixed_priority = bool(lane and ("priority" in lane or (
+            isinstance(tiers, list) and any(
+            isinstance(row, dict) and "priority" in row
+            for row in tiers))))
+        paths = (_diff_paths(expected["pulp_lane"], profile_view)
+                 if profile_view is not None else ["pulp_lane"])
+        if (not isinstance(data, dict) or type(data.get("schema")) is not int
+                or data.get("schema") != 1):
+            paths.append("schema")
+        host = data.get("host", {}) if isinstance(data, dict) else {}
+        if not isinstance(host, dict):
+            host = {}
+        for key in ("id", "tart_home"):
+            if not isinstance(host.get(key), str) or not host[key].strip():
+                paths.append(f"host.{key}")
+        if declared is not None:
+            declared_parts = Path(declared["source_path"]).parts
+            if path.parts[-len(declared_parts):] != declared_parts:
+                paths.append("source_path")
+        duplicate = isinstance(name, str) and name in profiles
+        if declared is None or duplicate or fixed_priority or paths:
+            reasons = paths
+            if declared is None:
+                reasons.append("profile declaration")
+            if duplicate:
+                reasons.append("duplicate profile")
+            if fixed_priority:
+                reasons.append("fixed lane priority")
+            findings.append(_fleet_finding(
+                "profile-contract-drift", subject,
+                "TartCI source profile differs at: " + ", ".join(reasons),
+            ))
+        if isinstance(name, str) and name not in profiles:
+            profiles[name] = (path, data)
+
+    seen_receipts: set[str] = set()
+    for path, receipt in receipt_inputs or []:
+        profile_name = receipt.get("profile") if isinstance(receipt, dict) else None
+        subject = str(profile_name or path)
+        source = profiles.get(profile_name) if isinstance(profile_name, str) else None
+        digest = hashlib.sha256(source[0].read_bytes()).hexdigest() if source else None
+        installed_path = receipt.get("config_path") if isinstance(receipt, dict) else None
+        # TartCI receipts name the installed host snapshot
+        # (~/.config/tartci/macos-fleet-profile.toml), not the checked-in
+        # profiles/<host>.toml source. Their exact-byte digest is the portable
+        # cross-root binding; comparing those intentionally different paths
+        # would reject every genuine installation receipt.
+        if (not isinstance(receipt, dict)
+                or type(receipt.get("schema")) is not int
+                or receipt.get("schema") != 2
+                or not isinstance(profile_name, str) or source is None
+                or profile_name in seen_receipts
+                or not isinstance(installed_path, str)
+                or not Path(installed_path).is_absolute()
+                or receipt.get("config_sha256") != digest):
+            findings.append(_fleet_finding(
+                "profile-receipt-drift", subject,
+                "receipt schema/profile/digest does not bind one exact supplied "
+                f"source profile (source sha256={digest!r}).",
+            ))
+        if isinstance(profile_name, str):
+            seen_receipts.add(profile_name)
+
+    if source_manifest is None:
+        return findings
+
+    manifest_path, manifest = source_manifest
+    if not isinstance(manifest, dict):
+        findings.append(_fleet_finding(
+            "source-manifest-drift", str(manifest_path),
+            "private fleet source manifest must be a JSON object.",
+        ))
+        return findings
+    mismatches = _diff_paths(expected, _project(manifest, expected))
+    source_paths = manifest.get("source_paths", {})
+    if not isinstance(source_paths, dict):
+        mismatches.append("source_paths")
+        source_paths = {}
+    if type(manifest.get("schema")) is not int or manifest.get("schema") != 1:
+        mismatches.append("schema")
+    topology_source = source_paths.get("pulp_topology")
+    if topology_source != "tools/scripts/runner_topology.json":
+        mismatches.append("source_paths.pulp_topology")
+
+    manifest_profiles = source_paths.get("tartci_profiles", [])
+    if not isinstance(manifest_profiles, list):
+        manifest_profiles = []
+        mismatches.append("source_paths.tartci_profiles")
+    hosts = manifest.get("hosts", {})
+    if not isinstance(hosts, dict):
+        mismatches.append("hosts")
+        hosts = {}
+    for name, declared in declared_profiles.items():
+        if declared["source_path"] not in manifest_profiles:
+            mismatches.append("source_paths.tartci_profiles")
+        manifest_host = hosts.get(declared["manifest_host"], {})
+        if not isinstance(manifest_host, dict):
+            mismatches.append(f"hosts.{declared['manifest_host']}")
+            manifest_host = {}
+        for key in ("host_id", "tart_home"):
+            if (not isinstance(manifest_host.get(key), str)
+                    or not manifest_host[key].strip()):
+                mismatches.append(f"hosts.{declared['manifest_host']}.{key}")
+        supplied = profiles.get(name)
+        if supplied is None:
+            continue
+        _profile_path, profile_data = supplied
+        profile_host = profile_data.get("host", {})
+        if not isinstance(profile_host, dict):
+            profile_host = {}
+        lane_data = _profile_lane(profile_data, spec)
+        host_expected = {"host_id": profile_host.get("id"),
+                         "tart_home": profile_host.get("tart_home")}
+        for key in ("min_queued_age_seconds", "supervisors", "vm_cores"):
+            if lane_data and key in manifest_host:
+                host_expected[key] = lane_data.get(key)
+        mismatches.extend(_diff_paths(
+            host_expected,
+            manifest_host,
+            f"hosts.{declared['manifest_host']}"))
+    if mismatches:
+        findings.append(_fleet_finding(
+            "source-manifest-drift", str(manifest_path),
+            "private fleet source manifest differs at: "
+            + ", ".join(sorted(set(mismatches))),
+        ))
+    return findings
+
+
 # ── Checks ──────────────────────────────────────────────────────────────
 
 
@@ -521,7 +835,7 @@ def check(
     """
     if not callable(evidence):
         evidence = static_evidence(evidence)
-    findings: list[Finding] = []
+    findings = check_event_class_evidence(contract)
     declared = {lane.variable for lane in contract.lanes}
 
     if workflows_dir is not None:
@@ -861,10 +1175,31 @@ def main(argv: list[str] | None = None) -> int:
                     help="Fixture of served label sets (list of label lists).")
     ap.add_argument("--workflows-dir", type=Path,
                     help="Workflow directory used to find a lane's consumers.")
+    ap.add_argument("--fleet-profile", type=Path, action="append", default=[],
+                    help="Read-only TartCI source profile fixture (repeatable).")
+    ap.add_argument("--fleet-receipt", type=Path, action="append", default=[],
+                    help="Read-only installed-profile receipt fixture (repeatable).")
+    ap.add_argument("--fleet-source-manifest", type=Path,
+                    help="Read-only private desired-fleet manifest fixture.")
     ap.add_argument("--json", action="store_true", help="Emit findings as JSON.")
     args = ap.parse_args(argv)
 
-    contract = load_contract(args.contract)
+    try:
+        contract = load_contract(args.contract)
+        profile_inputs = [
+            (path, load_toml_fixture(path)) for path in args.fleet_profile
+        ]
+        receipt_inputs = [
+            (path, json.loads(path.read_text())) for path in args.fleet_receipt
+        ]
+        source_manifest = (
+            (args.fleet_source_manifest,
+             json.loads(args.fleet_source_manifest.read_text()))
+            if args.fleet_source_manifest else None
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"runner-topology: evidence input failed: {exc}", file=sys.stderr)
+        return 0 if args.mode == "hint" else 2
     workflows_dir = args.workflows_dir or (
         HERE.parent.parent / ".github" / "workflows"
     )
@@ -907,6 +1242,12 @@ def main(argv: list[str] | None = None) -> int:
 
     findings = check(contract, runners, variables, evidence, workflows_dir,
                      unread_scopes)
+    if profile_inputs or receipt_inputs or source_manifest:
+        findings.extend(
+            finding for finding in check_event_class_evidence(
+                contract, profile_inputs, receipt_inputs, source_manifest)
+            if finding not in findings
+        )
 
     if args.json:
         print(json.dumps([{
