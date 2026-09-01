@@ -322,7 +322,8 @@ def validate_product_policy(
     if (
         policy["schema"] != "pulp.gpu-first-visible-budget-authority.v1"
         or policy["version"] != 1
-        or not POLICY_BUDGET_ID.fullmatch(str(policy["budget_id"]))
+        or not isinstance(policy["budget_id"], str)
+        or not POLICY_BUDGET_ID.fullmatch(policy["budget_id"])
         or policy["clock"] != "mach_continuous_time"
         or policy["editor_open_origin"] != "editor-open-requested"
         or policy["first_nonblank_endpoint"] != "first-nonblank-presented-frame"
@@ -1009,14 +1010,6 @@ def product_policy_publication_errors(
     if pull.get("head", {}).get("sha") != approved_head:
         errors.append("product policy approval is not bound to the exact approved head")
         return errors
-    if validation["approval_mode"] == "author":
-        if (
-            pull.get("user", {}).get("id") != 25807
-            or pull.get("user", {}).get("type") != "User"
-        ):
-            errors.append("product policy author identity is not Daniel's immutable user ID")
-        return errors
-
     reviews = _fetch_all_pages(ghapp, f"repos/{repository}/pulls/{pr_number}/reviews")
     effective: tuple[dt.datetime, int, dict[str, Any]] | None = None
     for review in reviews:
@@ -1037,8 +1030,40 @@ def product_policy_publication_errors(
                 candidate = (submitted, review_id, review)
                 if effective is None or candidate[:2] > effective[:2]:
                     effective = candidate
-    if effective is None or effective[2].get("state") != "APPROVED":
+    exact_head_approved = effective is not None and effective[2].get("state") == "APPROVED"
+    if validation["approval_mode"] == "approval" and not exact_head_approved:
         errors.append("product policy lacks an effective pre-merge exact-head Daniel approval")
+    elif validation["approval_mode"] == "author" and not exact_head_approved:
+        commit = _command_json([
+            ghapp, "api", f"repos/{repository}/commits/{approved_head}",
+        ])
+        authored_at = commit.get("commit", {}).get("committer", {}).get("date")
+        try:
+            authored_time = _github_time(
+                authored_at, "product policy exact-head commit committer date"
+            )
+        except V2AcceptanceError:
+            authored_time = None
+        verification = commit.get("commit", {}).get("verification", {})
+        if (
+            commit.get("sha") != approved_head
+            or commit.get("author", {}).get("id") != 25807
+            or commit.get("author", {}).get("type") != "User"
+            or commit.get("committer", {}).get("id") != 25807
+            or commit.get("committer", {}).get("type") != "User"
+            or verification.get("verified") is not True
+            or verification.get("reason") != "valid"
+            or not isinstance(verification.get("signature"), str)
+            or not verification["signature"]
+            or not isinstance(verification.get("payload"), str)
+            or not verification["payload"]
+            or authored_time is None
+            or not created_time <= authored_time <= merged_time
+        ):
+            errors.append(
+                "product policy author mode lacks an exact-head Daniel approval or "
+                "cryptographically attributable exact-head commit action"
+            )
     return errors
 
 

@@ -521,6 +521,9 @@ def policy_publication_errors(
     reviews: list[tuple[str, str]] | None = None,
     created_at: str = "2026-08-29T00:00:00Z",
     merged_at: str = "2026-08-29T01:00:00Z",
+    commit_author_id: int = 25807, commit_committer_id: int = 25807,
+    commit_verified: bool = True,
+    commit_date: str = "2026-08-29T00:20:00Z",
 ) -> list[str]:
     expected_blob = validation["blob"]
 
@@ -550,11 +553,29 @@ def policy_publication_errors(
                 "head": {"sha": pr_head},
                 "user": {"id": author_id, "type": author_type},
             }
+        if endpoint.endswith(f"/commits/{validation['approved_head']}"):
+            return {
+                "sha": validation["approved_head"],
+                "author": {"id": commit_author_id, "type": "User"},
+                "committer": {"id": commit_committer_id, "type": "User"},
+                "commit": {
+                    "committer": {"date": commit_date},
+                    "verification": {
+                        "verified": commit_verified,
+                        "reason": "valid" if commit_verified else "unsigned",
+                        "signature": "signed" if commit_verified else None,
+                        "payload": "payload" if commit_verified else None,
+                    },
+                },
+            }
         raise AssertionError(f"unexpected live-policy endpoint: {endpoint}")
 
     def fetch_pages(_ghapp: str, endpoint: str, **_kwargs: Any) -> list[dict[str, Any]]:
         assert endpoint.endswith("/pulls/1/reviews"), endpoint
-        states = reviews or [("APPROVED", "2026-08-29T00:30:00Z")]
+        states = (
+            [("APPROVED", "2026-08-29T00:30:00Z")]
+            if reviews is None else reviews
+        )
         return [
             {
                 "id": index, "user": {"id": review_id, "type": review_type},
@@ -591,6 +612,19 @@ def plant_old_validation_self_provenance(receipt: dict[str, Any], root: Path) ->
         validation.pop("pr_url")
 
     rewrite_artifact(root, receipt["product_policy"]["validation"], mutate)
+
+
+def plant_integer_budget_id(receipt: dict[str, Any], root: Path) -> None:
+    rewrite_artifact(
+        root, receipt["product_policy"]["authority"],
+        lambda policy: policy.update(budget_id=1),
+    )
+    rewrite_artifact(
+        root, receipt["product_policy"]["validation"],
+        lambda validation: validation.update(
+            path=f"{v2.PLANNING_POLICY_DIRECTORY}/1.product-policy.json"
+        ),
+    )
 
 
 def plant_unrelated_required_coverage(
@@ -708,13 +742,27 @@ def main() -> int:
             ],
         ) == []
         author_validation = dict(validation, approval_mode="author")
+        # Exact-head Daniel approval is sufficient in author mode too.
         assert policy_publication_errors(
-            author_validation, policy_bytes, author_id=25807,
+            author_validation, policy_bytes,
+        ) == []
+        # Without a review, only Daniel's validly signed exact-head commit action
+        # can establish that he approved the collaborator-updatable PR head.
+        assert policy_publication_errors(
+            author_validation, policy_bytes, reviews=[], author_id=40004,
         ) == []
         assert any(
-            "author identity" in error
+            "cryptographically attributable exact-head" in error
             for error in policy_publication_errors(
-                author_validation, policy_bytes, author_id=40004,
+                author_validation, policy_bytes, reviews=[], author_id=25807,
+                commit_author_id=40004, commit_committer_id=40004,
+            )
+        )
+        assert any(
+            "cryptographically attributable exact-head" in error
+            for error in policy_publication_errors(
+                author_validation, policy_bytes, reviews=[],
+                commit_verified=False,
             )
         )
         protected_blobs = {
@@ -853,6 +901,7 @@ def main() -> int:
         ("unavailable Pulp policy source", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(repository="Generous-Corp/pulp", pr_url="https://github.com/Generous-Corp/pulp/pull/1"))),
         ("unavailable Forge policy source", lambda r, p: rewrite_artifact(p, r["product_policy"]["validation"], lambda validation: validation.update(repository="Generous-Corp/forge", pr_url="https://github.com/Generous-Corp/forge/pull/1"))),
         ("unsafe policy budget ID", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy.update(budget_id="../other"))),
+        ("integer policy budget ID", plant_integer_budget_id),
         ("unrelated support matrix", lambda r, p: plant_unrelated_required_coverage(r, p, "support_matrix")),
         ("missing A0 baseline", lambda r, p: plant_unrelated_required_coverage(r, p, "a1_evidence")),
         ("missing steady budget", lambda r, p: rewrite_artifact(p, r["product_policy"]["authority"], lambda policy: policy["roles"][0].pop("steady_gpu_frame_p95_ns"))),
