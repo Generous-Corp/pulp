@@ -8,10 +8,10 @@
   ],
   "rationale": "Pulp plugin hosts route a native press through both native ComboBox dismissal and the @pulp/react active-overlay bridge. This Pulp-only follow-up makes an outside press consumed when either bridge dismisses its popup, preventing that same host event from muting or drawing a Spectr band underneath the closed overlay. It extends the Pulp-specific plugin-host reconciliation recorded by 20260817-plugin-host-overlay-dismissal; a Vellum-native retained UI should define its own single popup input contract rather than copy the dual bridge.",
   "tests": [
+    "@pulp/react prop-applier-overlay",
     "Vellum freeze",
     "pulp-test-overlay-routing",
-    "pulp-test-widget-bridge-rn-style",
-    "@pulp/react prop-applier-overlay"
+    "pulp-test-widget-bridge-rn-style"
   ],
   "disposition": "pulp-only"
 }
