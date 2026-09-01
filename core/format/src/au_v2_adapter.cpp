@@ -146,6 +146,117 @@ OSStatus PulpAUEffect::SetParameter(AudioUnitParameterID inID, AudioUnitScope in
                                           inBufferOffsetInFrames);
 }
 
+OSStatus PulpAUEffect::ScheduleParameter(
+    const AudioUnitParameterEvent* events, UInt32 num_events)
+{
+    if (events == nullptr && num_events != 0)
+        return kAudioUnitErr_InvalidParameter;
+    if (num_events == 0) return noErr;
+
+    // AUBase::ScheduleParameter immediately calls SetParameter for every
+    // immediate event before retaining the event for Render(). That advances
+    // Pulp's StateStore to the final host value before the event's requested
+    // sample offset. Retain the events ourselves; ProcessScheduledSlice applies
+    // them at the correct slice boundary and exposes ramps through
+    // Processor::param_events().
+    auto& scheduled = GetParamEventList();
+    scheduled.insert(scheduled.end(), events, events + num_events);
+    return noErr;
+}
+
+OSStatus PulpAUEffect::ProcessScheduledSlice(
+    void* user_data, UInt32 start_frame_in_buffer, UInt32 slice_frames,
+    UInt32 total_buffer_frames)
+{
+    const auto slice_end = start_frame_in_buffer + slice_frames;
+    param_events_.clear();
+
+    auto apply_value = [this](AudioUnitParameterID id, float value) {
+        const auto param_id = static_cast<state::ParamID>(id);
+        if (store_.info(param_id) == nullptr) return;
+        ScopedHostParamWrite host_write;
+        store_.set_value_rt(param_id, value);
+    };
+
+    // ProcessForScheduledParams sorts this list before invoking us. Replaying
+    // it in order preserves the host's last-event-wins rule for coincident
+    // events without allocating a per-parameter map on the audio thread.
+    for (const auto& event : GetParamEventList()) {
+        if (event.scope != kAudioUnitScope_Global || event.element != 0) continue;
+        const auto param_id = static_cast<state::ParamID>(event.parameter);
+        if (store_.info(param_id) == nullptr) continue;
+
+        if (event.eventType == kParameterEvent_Immediate) {
+            const auto offset = event.eventValues.immediate.bufferOffset;
+            if (offset <= start_frame_in_buffer) {
+                apply_value(event.parameter, event.eventValues.immediate.value);
+            }
+            if (offset == start_frame_in_buffer) {
+                param_events_.push({param_id, 0,
+                                    event.eventValues.immediate.value, 0});
+            }
+            continue;
+        }
+
+        if (event.eventType != kParameterEvent_Ramped) continue;
+        const auto& ramp = event.eventValues.ramp;
+        const auto ramp_start = std::max<SInt32>(0, ramp.startBufferOffset);
+        const auto duration = ramp.durationInFrames;
+        const auto ramp_end = static_cast<UInt32>(ramp_start) + duration;
+        if (start_frame_in_buffer < static_cast<UInt32>(ramp_start)) continue;
+
+        const auto value_at = [&](UInt32 frame) {
+            if (duration == 0 || frame >= ramp_end) return ramp.endValue;
+            const auto elapsed = frame - static_cast<UInt32>(ramp_start);
+            const auto t = static_cast<float>(elapsed) /
+                           static_cast<float>(duration);
+            return ramp.startValue + (ramp.endValue - ramp.startValue) * t;
+        };
+
+        apply_value(event.parameter, value_at(start_frame_in_buffer));
+        if (start_frame_in_buffer < ramp_end) {
+            const auto segment_end = std::min(slice_end, ramp_end);
+            param_events_.push({
+                param_id, 0, value_at(segment_end),
+                static_cast<int32_t>(segment_end - start_frame_in_buffer)});
+        }
+    }
+    param_events_.sort();
+
+    scheduled_slice_active_ = true;
+    const auto result = AUEffectBase::ProcessScheduledSlice(
+        user_data, start_frame_in_buffer, slice_frames, total_buffer_frames);
+    scheduled_slice_active_ = false;
+
+    // Leave StateStore at the value effective immediately after this slice so
+    // legacy block-rate processors and editor projections observe the same
+    // terminal state as sample-aware processors.
+    for (const auto& event : GetParamEventList()) {
+        if (event.scope != kAudioUnitScope_Global || event.element != 0) continue;
+        const auto param_id = static_cast<state::ParamID>(event.parameter);
+        if (store_.info(param_id) == nullptr) continue;
+        if (event.eventType == kParameterEvent_Immediate) {
+            if (event.eventValues.immediate.bufferOffset <= slice_end) {
+                apply_value(event.parameter, event.eventValues.immediate.value);
+            }
+        } else if (event.eventType == kParameterEvent_Ramped) {
+            const auto& ramp = event.eventValues.ramp;
+            const auto ramp_start = std::max<SInt32>(0, ramp.startBufferOffset);
+            if (slice_end >= static_cast<UInt32>(ramp_start)) {
+                const auto duration = ramp.durationInFrames;
+                const auto elapsed = std::min(
+                    slice_end - static_cast<UInt32>(ramp_start), duration);
+                const auto t = duration == 0
+                    ? 1.0f
+                    : static_cast<float>(elapsed) / static_cast<float>(duration);
+                apply_value(event.parameter,
+                            ramp.startValue + (ramp.endValue - ramp.startValue) * t);
+            }
+        }
+    }
+    return result;
+}
+
 OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope inScope,
                                        AudioUnitElement inElement, UInt32& outDataSize,
                                        bool& outWritable)
@@ -505,8 +616,8 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
 
     apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
 
-    // AU v2 has no scheduled-parameter event source, so this queue is empty
-    // and host params flow via store_ as before. Set it anyway so a Processor
+    // A normal AU render has no scheduled events, while ProcessScheduledSlice
+    // prepares a slice-relative queue above. Set it either way so a Processor
     // always sees a non-null queue. Only the process call is wrapped in
     // ScopedNoAlloc. The MIDI drain above no longer allocates (the buffers are
     // member buffers reset with clear()/clear_sysex(), and SysEx is copied into
@@ -515,7 +626,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // both vectors to the channel count — so the only path that could still
     // allocate is a host that grows the buffer count beyond the configured
     // channels, which the AU non-interleaved float model does not do.
-    param_events_.clear();
+    if (!scheduled_slice_active_) param_events_.clear();
     processor_->set_param_events(&param_events_);
 
     // Input bus views: the main input (index 0), plus — when the descriptor
