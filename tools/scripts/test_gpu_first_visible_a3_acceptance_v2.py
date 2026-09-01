@@ -761,6 +761,55 @@ def plant_unrelated_required_coverage(
     ).hexdigest()
 
 
+def expect_live_coverage_wrong_producer_revision_rejected() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        receipt = make_fixture(root)
+        policy = json.loads(
+            (root / receipt["product_policy"]["authority"]["path"]).read_text()
+        )
+        wrapper_ref = policy["required_coverage"]["support_matrix"]
+        wrapper = json.loads((root / wrapper_ref["path"]).read_text())
+        provenance_ref = wrapper["producer_provenance"]
+        provenance = json.loads((root / provenance_ref["path"]).read_text())
+        source_ref = provenance["source_build_receipt"]
+        rewrite_artifact(
+            root, source_ref,
+            lambda source: source["source_revisions"].update(pulp=SHA),
+        )
+        rewrite_artifact(
+            root, provenance_ref,
+            lambda value: value.update(source_build_receipt=source_ref),
+        )
+        rewrite_artifact(
+            root, wrapper_ref,
+            lambda value: value.update(producer_provenance=provenance_ref),
+        )
+        protected_blobs = {
+            path: v2.git_blob_digest((root / path).read_bytes())
+            for path in (v2.SUPPORT_MATRIX, v2.A0_GPU_BASELINE)
+        }
+
+        def protected_content(command: list[str]) -> dict[str, Any]:
+            endpoint = command[2]
+            if "/compare/" in endpoint:
+                return {
+                    "base_commit": {"sha": POLICY_PULP_SHA},
+                    "merge_base_commit": {"sha": POLICY_PULP_SHA},
+                    "status": "ahead", "ahead_by": 1, "behind_by": 0,
+                }
+            path = endpoint.split("/contents/", 1)[1].split("?ref=", 1)[0]
+            return {"type": "file", "path": path, "sha": protected_blobs[path]}
+
+        with mock.patch.object(v2, "_command_json", side_effect=protected_content):
+            assert any(
+                "source/producer binding is invalid" in error
+                for error in v2.protected_required_coverage_errors(
+                    policy, root, SHA, "ghapp",
+                )
+            )
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -911,6 +960,56 @@ def main() -> int:
             assert v2.protected_required_coverage_errors(
                 policy, root, SHA, "ghapp",
             ) == []
+
+        def post_revision_substitution(command: list[str]) -> dict[str, Any]:
+            endpoint = command[2]
+            if "/compare/" in endpoint:
+                return {
+                    "base_commit": {"sha": POLICY_PULP_SHA},
+                    "merge_base_commit": {"sha": POLICY_PULP_SHA},
+                    "status": "ahead", "ahead_by": 1, "behind_by": 0,
+                }
+            path, revision = endpoint.split("/contents/", 1)[1].split("?ref=", 1)
+            # The old validator queried only the later implementation head, so
+            # evidence absent/different at POLICY_PULP_SHA incorrectly passed.
+            blob = (
+                "9" * 40
+                if revision == POLICY_PULP_SHA and path == v2.SUPPORT_MATRIX
+                else protected_blobs[path]
+            )
+            return {"type": "file", "path": path, "sha": blob}
+
+        with mock.patch.object(v2, "_command_json", side_effect=post_revision_substitution):
+            assert any(
+                "claimed source revision" in error and v2.SUPPORT_MATRIX in error
+                for error in v2.protected_required_coverage_errors(
+                    policy, root, SHA, "ghapp",
+                )
+            )
+
+        def post_revision_addition(command: list[str]) -> dict[str, Any]:
+            endpoint = command[2]
+            if "/compare/" in endpoint:
+                return {
+                    "base_commit": {"sha": POLICY_PULP_SHA},
+                    "merge_base_commit": {"sha": POLICY_PULP_SHA},
+                    "status": "ahead", "ahead_by": 1, "behind_by": 0,
+                }
+            path, revision = endpoint.split("/contents/", 1)[1].split("?ref=", 1)
+            if revision == POLICY_PULP_SHA and path == v2.A0_GPU_BASELINE:
+                return {"message": "Not Found"}
+            return {"type": "file", "path": path, "sha": protected_blobs[path]}
+
+        with mock.patch.object(v2, "_command_json", side_effect=post_revision_addition):
+            assert any(
+                "claimed source revision" in error and v2.A0_GPU_BASELINE in error
+                for error in v2.protected_required_coverage_errors(
+                    policy, root, SHA, "ghapp",
+                )
+            )
+
+        expect_live_coverage_wrong_producer_revision_rejected()
+
         def nonancestor(command: list[str]) -> dict[str, Any]:
             endpoint = command[2]
             if "/compare/" in endpoint:

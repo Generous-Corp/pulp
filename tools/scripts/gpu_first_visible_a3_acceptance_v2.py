@@ -496,10 +496,10 @@ def validate_product_policy(
     return policy, binding["authority"]["sha256"], nested_digests
 
 
-def validate_generated_evidence(
+def resolve_generated_evidence_binding(
     wrapper_ref: dict[str, Any], evidence_root: Path, kind: str,
-    implementation_head: str, nested_digests: set[str],
-) -> str:
+    implementation_head: str,
+) -> tuple[dict[str, Any], Path, Path, dict[str, Any]]:
     wrapper = resolve_artifact(wrapper_ref, evidence_root, f"required coverage {kind}")
     exact_keys(wrapper, {
         "schema", "version", "kind", "implementation_head", "producer",
@@ -520,6 +520,16 @@ def validate_generated_evidence(
     )
     if not os.access(producer, os.X_OK):
         raise V2AcceptanceError(f"required coverage {kind} producer is not executable")
+    return wrapper, producer, artifact, provenance
+
+
+def validate_generated_evidence(
+    wrapper_ref: dict[str, Any], evidence_root: Path, kind: str,
+    implementation_head: str, nested_digests: set[str],
+) -> str:
+    wrapper, producer, artifact, provenance = resolve_generated_evidence_binding(
+        wrapper_ref, evidence_root, kind, implementation_head,
+    )
     completed = subprocess.run(
         [str(producer), "verify-a3-evidence", "--kind", kind, "--artifact", str(artifact), "--json"],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False,
@@ -1086,9 +1096,12 @@ def product_policy_publication_errors(
 def protected_required_coverage_errors(
     policy: dict[str, Any], evidence_root: Path, pulp_head: str, ghapp: str,
 ) -> list[str]:
-    """Bind generated required-coverage inputs to their protected Pulp bytes."""
+    """Bind coverage bytes to their claimed source revision and protected head."""
     coverage = policy["required_coverage"]
-    refs = [coverage["support_matrix"], *coverage["a1_evidence"]]
+    refs = [
+        (coverage["support_matrix"], "support-matrix"),
+        *((ref, "a1-evidence") for ref in coverage["a1_evidence"]),
+    ]
     errors: list[str] = []
     policy_revision = policy["first_applicable_pulp_revision"]
     comparison = _command_json([
@@ -1103,21 +1116,38 @@ def protected_required_coverage_errors(
         or comparison.get("behind_by") != 0
     ):
         errors.append("product policy first-applicable Pulp revision is not strict protected-main ancestry")
-    for ref in refs:
-        wrapper = resolve_artifact(ref, evidence_root, "required coverage live wrapper")
-        artifact = resolve_artifact_path(
-            wrapper["artifact"], evidence_root, "required coverage live artifact",
-        )
+    for ref, kind in refs:
+        try:
+            wrapper, _producer, artifact, _provenance = resolve_generated_evidence_binding(
+                ref, evidence_root, kind, policy_revision,
+            )
+        except V2AcceptanceError as error:
+            errors.append(f"required coverage source/producer binding is invalid: {error}")
+            continue
         path = wrapper["artifact"]["path"]
-        contents = _command_json([
-            ghapp, "api", f"repos/Generous-Corp/pulp/contents/{path}?ref={pulp_head}",
-        ])
-        if (
-            contents.get("type") != "file"
-            or contents.get("path") != path
-            or contents.get("sha") != git_blob_digest(artifact.read_bytes())
+        expected_blob = git_blob_digest(artifact.read_bytes())
+        for revision, label in (
+            (policy_revision, "claimed source revision"),
+            (pulp_head, "current protected head"),
         ):
-            errors.append(f"required coverage is not the exact protected Pulp blob: {path}")
+            try:
+                contents = _command_json([
+                    ghapp, "api",
+                    f"repos/Generous-Corp/pulp/contents/{path}?ref={revision}",
+                ])
+            except (V2AcceptanceError, json.JSONDecodeError) as error:
+                errors.append(
+                    f"required coverage lookup failed at {label}: {path}: {error}"
+                )
+                continue
+            if (
+                contents.get("type") != "file"
+                or contents.get("path") != path
+                or contents.get("sha") != expected_blob
+            ):
+                errors.append(
+                    f"required coverage is not the exact protected Pulp blob at {label}: {path}"
+                )
     return errors
 
 
