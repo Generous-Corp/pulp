@@ -236,19 +236,22 @@ macOS keys the AudioComponent registry on the **(type, subtype, manufacturer)** 
 
 ## Recent changes
 
-### Param-events sidecar + RT-safety guard
+### Scheduled parameter events + RT-safety guard
 
 `ProcessBufferLists()` now `set_param_events(&param_events_)` before
 `processor_->process(...)` and wraps ONLY the process call in
 `pulp::runtime::ScopedNoAlloc` (the preamble — param snapshot, pointer-vector
 resizes — legitimately allocates, so don't widen the guard). This makes the
 param-events contract uniform across formats (VST3/CLAP/AUv3 already had it).
-AU v2's `AUEffectBase` has no scheduled/ramped parameter event source, so
-`param_events_` is **empty** — host params still reach the Processor through
-`store_` (StateStore) exactly as before. A native-component (`NativeCoreProcessor`)
-plugin therefore won't receive sample-accurate params on AU v2 yet; that needs
-the AUv3 `AURenderEventParameter` model and is a follow-up. Do not synthesise an
-AU v2 param-event mapping by guessing.
+Pulp overrides `ScheduleParameter()` and translates AUBase's immediate and
+ramped `AudioUnitParameterEvent` records in `ProcessScheduledSlice()`. Each
+slice receives a slice-relative `ParameterEventQueue`; StateStore is advanced
+to the value effective at the slice boundary so block-rate processors and
+editor projections see the same terminal state. Do not call AUBase's default
+`ScheduleParameter()` first: it eagerly calls `SetParameter()` and destroys the
+pre-event value needed for sample-accurate rendering. Processors should consume
+the queue with `ParamCursor` / `for_each_subblock()` and keep any expensive
+derived-state compilation in prepared fixed-capacity audio-owner storage.
 
 ### ProcessBuffers dispatch
 
