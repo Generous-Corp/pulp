@@ -1116,6 +1116,122 @@ def check_gate_survives_third_party() -> tuple:
     return bad, ran
 
 
+#: A comment or a string can say "dlopen" without calling it; only a call has
+#: an open paren after the name. `dlopen failed: %s` in a format string does
+#: not match, and neither does prose about the dlopen cost.
+_DLOPEN_CALL = re.compile(r"\bdlopen\s*\(")
+
+#: Both of these harnesses carry a doc comment naming the exact calls this
+#: check looks for, because the defect needed explaining where it happened. A
+#: search over the raw text would find the prose and call the file correct
+#: while the code below it did the wrong thing, so comments come out first.
+_CXX_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def _code_only(src: str) -> str:
+    return _CXX_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), src)
+
+
+def licence_resolved_before_dlopen(src: str):
+    """-> (verdict, detail) for one harness's source text.
+
+    A harness that loads somebody else's plugin has to point
+    `rack::asset::userDir` at the cached licence keys and call
+    `rack::asset::init()` BEFORE its first `dlopen`, because a commercially
+    licensed module resolves its key while it is being constructed. Miss it
+    and the module builds, runs, logs nothing, and writes zero to every
+    output -- which reads exactly like a dead module.
+
+    Verdicts: "n/a" (this file loads no plugin), "ok", or "bad".
+    """
+    src = _code_only(src)
+    call = _DLOPEN_CALL.search(src)
+    if not call:
+        return "n/a", "loads no plugin of its own"
+    at_load = call.start()
+    at_userdir = src.find("rack::asset::userDir")
+    at_init = src.find("rack::asset::init()")
+    if at_userdir < 0 or at_init < 0:
+        return "bad", ("never resolves the cached VCV licence keys at all, so "
+                       "every licensed module it measures reads as dead")
+    if at_userdir > at_init:
+        return "bad", ("calls asset::init() before pointing asset::userDir at "
+                       "the licence directory, so init() bakes in the empty "
+                       "default and the lookup goes to /licenses/")
+    if at_init > at_load:
+        return "bad", ("resolves the licence directory only after its first "
+                       "dlopen, and a module resolves its key while it is "
+                       "being constructed")
+    return "ok", "resolves the licence directory before its first dlopen"
+
+
+def check_every_dlopen_harness_resolves_licences() -> tuple:
+    """Every harness that loads a third-party plugin, not just the one we fixed.
+
+    The audibility gate shipped for months without this and reported licensed
+    modules as dead. The gate is fixed; the next harness somebody writes is
+    not, and nothing here would have noticed. So the question is asked of the
+    whole directory: any source that calls `dlopen` has to have resolved the
+    licence key directory first. A file that loads no plugin is not in scope
+    and says so.
+    """
+    bad, ran = 0, 0
+    here = os.path.dirname(os.path.abspath(__file__))
+    sources = sorted(f for f in os.listdir(here) if f.endswith(".cpp"))
+
+    # Both directions on the checker itself, before it is pointed at anything
+    # real. A checker that cannot fail would pass the whole sweep while the
+    # defect it exists to catch walked straight past it.
+    good_src = ('void up(const std::string& d) { rack::asset::userDir = d;\n'
+                '  rack::asset::init(); }\n'
+                'void load() { void* h = dlopen(p.c_str(), RTLD_NOW); }\n')
+    bad_src = ('void load() { void* h = dlopen(p.c_str(), RTLD_NOW); }\n'
+               'void up(const std::string& d) { rack::asset::userDir = d;\n'
+               '  rack::asset::init(); }\n')
+    none_src = 'int main() { std::printf("the dlopen cost is paid once\\n"); }\n'
+    # The prose that explains the defect names the calls that fix it. A file
+    # that only TALKS about them is still broken.
+    talk_src = ('/// rack::asset::userDir then rack::asset::init() must run\n'
+                '/// before the first dlopen.\n' + bad_src)
+    ran += 1
+    controls = [licence_resolved_before_dlopen(good_src)[0],
+                licence_resolved_before_dlopen(bad_src)[0],
+                licence_resolved_before_dlopen(none_src)[0],
+                licence_resolved_before_dlopen(talk_src)[0]]
+    if controls != ["ok", "bad", "n/a", "bad"]:
+        bad += 1
+        print(f"  WRONG  the licence-order check does not discriminate: a "
+              f"correct harness, one that dlopens first, one that loads "
+              f"nothing, and one that only mentions the calls in a comment "
+              f"read as {controls}")
+    else:
+        print("  ok     the licence-order check passes a correct harness, "
+              "fails one that dlopens first, excuses one that loads nothing, "
+              "and is not fooled by a comment naming the calls")
+
+    scoped = []
+    for name in sources:
+        verdict, detail = licence_resolved_before_dlopen(
+            open(os.path.join(here, name)).read())
+        if verdict == "n/a":
+            continue
+        scoped.append(name)
+        ran += 1
+        if verdict == "bad":
+            bad += 1
+            print(f"  WRONG  {name} {detail}")
+        else:
+            print(f"  ok     {name} {detail}")
+
+    if not scoped:
+        # Not a pass. Either no harness loads a plugin any more, or the sweep
+        # stopped finding the ones that do -- and the second is the reason
+        # this check exists.
+        print(f"  SKIP   none of the {len(sources)} C++ sources here calls "
+              f"dlopen, so this proves nothing about licence resolution")
+    return bad, ran
+
+
 def check_unjudged_patch_is_kept() -> tuple:
     """A check that could not run retains evidence but cannot graduate it.
 
@@ -4369,6 +4485,7 @@ def main():
     nf_bad, nf_ran = check_named_is_fetched()
     gc_bad, gc_ran = check_gate_crash_is_not_silence()
     gs_bad, gs_ran = check_gate_survives_third_party()
+    lic_bad, lic_ran = check_every_dlopen_harness_resolves_licences()
     uk_bad, uk_ran = check_unjudged_patch_is_kept()
     sdk_bad, sdk_ran = check_sdk_resolution()
     set_bad, set_ran = check_setting_writer()
@@ -4412,8 +4529,8 @@ def main():
                 output_bad + ship_bad + ver_bad)
     acq_ran += (lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran +
                 output_ran + ship_ran + ver_ran)
-    acq_bad += nf_bad + gs_bad + uk_bad + stream_bad + panel_bad
-    acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
+    acq_bad += nf_bad + gs_bad + lic_bad + uk_bad + stream_bad + panel_bad
+    acq_ran += nf_ran + gs_ran + lic_ran + uk_ran + stream_ran + panel_ran
     # UNION of every lane's counters. Taking one side drops
     # another lane's checks while the total still reads healthy.
     acq_bad += (vp_bad + mel_bad + domain_bad + beh_bad + aff_bad +
