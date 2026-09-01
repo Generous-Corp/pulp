@@ -80,10 +80,19 @@ Rules it follows, each of which was a wrong answer first:
 ## A table is not a fact, and a retry cannot see the run
 
 Two lessons from the run kept in `tools/rack/test_fixtures/silent-oscillator/`.
-A correctly-wired patch was silent because one oscillator produced 0.000 V, and
-the model kept that oscillator for **four consecutive attempts**, adjusting its
-knobs. Its params were all in range and none at a silencing zero, so retuning
-was never going to work.
+A correctly-wired patch read silent because one oscillator reported 0.000 V,
+and the model kept that oscillator for **four consecutive attempts**, adjusting
+its knobs. Its params were all in range and none at a silencing zero, so
+retuning was never going to work.
+
+That oscillator was not broken. It was licensed, and the gate of the day never
+resolved licence keys, so it wrote zeros: this run is an instance of "A
+licensed module runs, writes zeros, and logs nothing" below, and the replay in
+`tools/rack/licence-fix-replay.json` carries both of its patches moving silent
+to audible under the fixed gate. **That changes the cause and not one of the
+lessons.** The retry could not see the harness, only the readings, so naming
+the first module in the chain reading zero was still the right move and the
+right answer was still Zephyr.
 
 **The information was already there and was not usable.** The retry context
 carried the entire per-module table and told the model to "find the FIRST
