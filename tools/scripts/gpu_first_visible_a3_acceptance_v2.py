@@ -60,6 +60,10 @@ GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 POLICY_BUDGET_ID = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 ARTIFACT_KEYS = {"path", "sha256"}
 CANONICAL_RECEIPT = "docs/validation/gpu-first-visible-a3-acceptance.json"
+FORGE_BUILD_AUTHORITY_FIELDS = (
+    "application_sha256", "plugin_sha256", "provider_sha256", "build_sha256",
+    "content_sha256", "signature_sha256",
+)
 
 
 class V2AcceptanceError(ValueError):
@@ -370,6 +374,7 @@ def validate_product_policy(
         exact_keys(row, {
             "role_id", "first_visible_p95_ns", "first_interaction",
             "steady_cpu_frame_p95_ns", "steady_gpu_frame_p95_ns",
+            "build_authority",
         }, f"product policy role {row.get('role_id')}")
         _positive_int(row["first_visible_p95_ns"], "first-visible threshold")
         _positive_int(row["steady_cpu_frame_p95_ns"], "steady CPU threshold")
@@ -393,6 +398,30 @@ def validate_product_policy(
                 if not isinstance(interaction[field], str) or not interaction[field]:
                     raise V2AcceptanceError(f"{row['role_id']} interaction.{field} is missing")
             _positive_int(interaction["p95_ns"], "first-interaction threshold")
+        build_authority = row["build_authority"]
+        if row["role_id"] in FORGE_ROLES:
+            exact_keys(build_authority, {
+                *FORGE_BUILD_AUTHORITY_FIELDS, "expected_signatures",
+            }, f"product policy role {row['role_id']} build authority")
+            for field in FORGE_BUILD_AUTHORITY_FIELDS:
+                if not isinstance(build_authority[field], str) or not SHA256.fullmatch(
+                    build_authority[field]
+                ):
+                    raise V2AcceptanceError(
+                        f"product policy role {row['role_id']} build authority {field} is invalid"
+                    )
+            signature_digest, _ = signature_set_digest(
+                build_authority["expected_signatures"],
+                f"product policy role {row['role_id']} expected signatures",
+            )
+            if build_authority["signature_sha256"] != signature_digest:
+                raise V2AcceptanceError(
+                    f"product policy role {row['role_id']} signature authority digest is invalid"
+                )
+        elif build_authority is not None:
+            raise V2AcceptanceError(
+                f"non-Forge product policy role {row['role_id']} cannot carry Forge build authority"
+            )
     coverage = exact_keys(
         policy["required_coverage"],
         {"predicate", "adapter", "configuration", "support_matrix", "a1_evidence"},
@@ -1171,12 +1200,30 @@ def validate_v2(
     expected_signatures_by_role: dict[str, frozenset[str]] = {}
     for role_id, campaign in campaign_by_role.items():
         identity = campaign["identity"]
-        signature_digest, expected_signatures = signature_set_digest(
+        campaign_signature_digest, campaign_expected_signatures = signature_set_digest(
             identity["expected_signatures"], f"{role_id} expected signatures",
         )
-        if identity["signature_sha256"] != signature_digest:
+        if identity["signature_sha256"] != campaign_signature_digest:
             raise V2AcceptanceError(f"{role_id} signature authority digest is invalid")
-        expected_signatures_by_role[role_id] = expected_signatures
+        if role_id in FORGE_ROLES:
+            build_authority = policy_roles[role_id]["build_authority"]
+            _, authority_expected_signatures = signature_set_digest(
+                build_authority["expected_signatures"],
+                f"{role_id} protected expected signatures",
+            )
+            if (
+                campaign_expected_signatures != authority_expected_signatures
+                or any(
+                    identity[field] != build_authority[field]
+                    for field in FORGE_BUILD_AUTHORITY_FIELDS
+                )
+            ):
+                raise V2AcceptanceError(
+                    f"{role_id} does not match its protected Forge build/signature authority"
+                )
+            expected_signatures_by_role[role_id] = authority_expected_signatures
+        else:
+            expected_signatures_by_role[role_id] = campaign_expected_signatures
     canary = policy["canary"]
     for role_id, identity in (
         ("pulp-standalone", standalone_identity),

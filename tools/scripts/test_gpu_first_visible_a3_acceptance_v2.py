@@ -70,6 +70,37 @@ def interaction(role: str) -> dict[str, Any]:
     }
 
 
+def role_expected_signatures(role: str) -> list[str]:
+    if role in v2.FORGE_ROLES:
+        return [*EXPECTED_SIGNATURES, f"forge-role:{role}"]
+    return list(EXPECTED_SIGNATURES)
+
+
+def policy_role(role: str) -> dict[str, Any]:
+    build_authority = None
+    if role in v2.FORGE_ROLES:
+        signatures = role_expected_signatures(role)
+        build_authority = {
+            "application_sha256": DIGEST,
+            "plugin_sha256": DIGEST,
+            "provider_sha256": DIGEST,
+            "build_sha256": DIGEST,
+            "content_sha256": DIGEST,
+            "signature_sha256": v2.signature_set_digest(
+                signatures, f"{role} fixture signatures",
+            )[0],
+            "expected_signatures": signatures,
+        }
+    return {
+        "role_id": role,
+        "first_visible_p95_ns": 1000,
+        "first_interaction": interaction(role),
+        "steady_cpu_frame_p95_ns": 1000,
+        "steady_gpu_frame_p95_ns": 1000,
+        "build_authority": build_authority,
+    }
+
+
 def raw_campaign(role: str, policy_sha256: str) -> dict[str, Any]:
     seed = v2.derived_seed(policy_sha256, role)
     order = v2.derived_trial_order(policy_sha256, role)
@@ -90,7 +121,7 @@ def raw_campaign(role: str, policy_sha256: str) -> dict[str, Any]:
                     "blank": False, "fallback_state": "prepared",
                     "trace_categories": list(v2.TRACE_CATEGORIES)
                     if state == "candidate-active-session" else [],
-                    "signatures_present": list(EXPECTED_SIGNATURES),
+                    "signatures_present": role_expected_signatures(role),
                 })
             row[key] = samples
         states.append(row)
@@ -195,12 +226,7 @@ else:
         "first_applicable_pulp_revision": POLICY_PULP_SHA,
         "first_applicable_forge_revision": FORGE_SHA,
         "reference_host": {"host_id": "m5", "machine_id": "fleet-m5", "hardware": "M5", "os": "macOS", "display": "main", "refresh_hz": 60},
-        "roles": [
-            {"role_id": role, "first_visible_p95_ns": 1000,
-             "first_interaction": interaction(role),
-             "steady_cpu_frame_p95_ns": 1000, "steady_gpu_frame_p95_ns": 1000}
-            for role in v2.ROLE_IDS
-        ],
+        "roles": [policy_role(role) for role in v2.ROLE_IDS],
         "required_coverage": {"predicate": "supported-constrained-metal-adapter", "adapter": "authority-metal-constrained", "configuration": "authority-config", "support_matrix": support_ref, "a1_evidence": [a1_ref]},
         "a4_scenario_budgets": [
             {"scenario_id": scenario, "role_ids": ["pulp-standalone"], "frame_budget_ns": 1000}
@@ -244,6 +270,7 @@ raise SystemExit(2)
             "gpu_evidence_id": "gpu-evidence", "trace_evidence_id": f"trace-{role}",
             "process_pid": 42, "process_upid": 7,
         })
+        expected_signatures = role_expected_signatures(role)
         identity = {
                 "pulp_revision": SHA, "forge_revision": FORGE_SHA if role in v2.FORGE_ROLES else None,
                 "machine_id": "fleet-m5", "hardware": "M5", "os": "macOS", "host_kind": host,
@@ -251,8 +278,10 @@ raise SystemExit(2)
                 "application_kind": application, "application_sha256": DIGEST,
                 "plugin_format": plugin_format, "plugin_sha256": DIGEST,
                 "provider_sha256": DIGEST, "build_sha256": DIGEST,
-                "signature_sha256": SIGNATURE_DIGEST,
-                "expected_signatures": list(EXPECTED_SIGNATURES), "content_sha256": DIGEST,
+                "signature_sha256": v2.signature_set_digest(
+                    expected_signatures, f"{role} fixture signatures",
+                )[0],
+                "expected_signatures": expected_signatures, "content_sha256": DIGEST,
                 "adapter": "authority-metal-constrained" if role == "constrained-adapter" else "metal",
                 "display_id": "main", "refresh_hz": 60,
         }
@@ -401,6 +430,30 @@ def rebind_raw_signatures(
     replace_publication_digest(receipt, old_provenance, provenance_ref["sha256"])
 
 
+def rebind_all_raw_signatures(
+    receipt: dict[str, Any], root: Path, role_id: str, signatures: list[str],
+) -> None:
+    campaign = next(row for row in receipt["campaigns"] if row["role_id"] == role_id)
+    raw_ref = campaign["raw_samples"]
+    old_raw = raw_ref["sha256"]
+
+    def mutate(raw: dict[str, Any]) -> None:
+        for state in raw["states"]:
+            for group in ("warmups", "warm", "cold"):
+                for sample in state[group]:
+                    sample["signatures_present"] = list(signatures)
+
+    rewrite_artifact(root, raw_ref, mutate)
+    replace_publication_digest(receipt, old_raw, raw_ref["sha256"])
+    provenance_ref = campaign["sample_provenance"]
+    old_provenance = provenance_ref["sha256"]
+    rewrite_artifact(
+        root, provenance_ref,
+        lambda provenance: provenance.update(raw_samples_sha256=raw_ref["sha256"]),
+    )
+    replace_publication_digest(receipt, old_provenance, provenance_ref["sha256"])
+
+
 def plant_headless_content_substitution(receipt: dict[str, Any], root: Path) -> None:
     rebind_campaign_identity(
         receipt, root, "headless-reference",
@@ -425,6 +478,24 @@ def plant_forge_content_substitution(receipt: dict[str, Any], root: Path) -> Non
         receipt, root, "forge-modular-vst3-reaper",
         lambda identity: identity.update(content_sha256="8" * 64),
     )
+
+
+def plant_self_consistent_forged_forge_signatures(
+    receipt: dict[str, Any], root: Path,
+) -> None:
+    role_id = "forge-modular-vst3-reaper"
+    substituted = ["forged.forge.content", "forged.forge.shader"]
+    digest = v2.signature_set_digest(substituted, "forged Forge signatures")[0]
+    # Rebind both campaign-local claims. The previous validator accepted this
+    # self-consistent forgery because it had no protected Forge signature set.
+    rebind_campaign_identity(
+        receipt, root, role_id,
+        lambda identity: identity.update(
+            signature_sha256=digest,
+            expected_signatures=list(substituted),
+        ),
+    )
+    rebind_all_raw_signatures(receipt, root, role_id, substituted)
 
 
 def expect_signature_reorder_accepted() -> None:
@@ -751,6 +822,7 @@ def main() -> int:
         ("headless content substitution", plant_headless_content_substitution),
         ("headless signature substitution", plant_headless_signature_substitution),
         ("Forge shared-content substitution", plant_forge_content_substitution),
+        ("self-consistent forged Forge signatures", plant_self_consistent_forged_forge_signatures),
         ("missing observed signature", lambda r, p: rebind_raw_signatures(r, p, EXPECTED_SIGNATURES[:-1])),
         ("extra observed signature", lambda r, p: rebind_raw_signatures(r, p, [*EXPECTED_SIGNATURES, "extra"])),
         ("duplicate observed signature", lambda r, p: rebind_raw_signatures(r, p, [*EXPECTED_SIGNATURES, EXPECTED_SIGNATURES[0]])),
