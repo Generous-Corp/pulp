@@ -716,6 +716,18 @@ bool WidgetBridge::dispatch_key_for_root(View& root, int key_code,
             handled = bridge->forward_key_event_handled(
                           key_code, modifiers, is_down, &root) || handled;
     }
+    // Escape dismissal is a framework default, not a platform-host detail.
+    // Script handlers run first so they can update product state themselves;
+    // the semantic overlay claim is then retired unconditionally. This also
+    // covers React state updates that do not commit until the next host pump,
+    // where relying on `defaultPrevented` alone would leave a stale native
+    // claim alive for another frame (or indefinitely in a quiescent host).
+    if (is_down && key_code == static_cast<int>(KeyCode::escape)) {
+        if (auto* overlay = root.interaction().active_overlay) {
+            overlay->dismiss_claimed_overlay();
+            handled = true;
+        }
+    }
     return handled;
 }
 

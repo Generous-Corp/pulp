@@ -639,6 +639,35 @@ TEST_CASE("WidgetBridge claimOverlay installs dismiss callback that fires "
     pulp::view::View::active_overlay_ = nullptr;
 }
 
+TEST_CASE("root bridge Escape dismisses a semantic overlay by default",
+          "[view][bridge][overlay][keyboard]") {
+    pulp::view::View::active_overlay_ = nullptr;
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createPanel('popover', '');"
+        "globalThis.__dismissedByEscape = 0;"
+        "const __orig = globalThis.__dispatch__;"
+        "globalThis.__dispatch__ = (id, type, val) => {"
+        "  if (id === 'popover' && type === 'dismiss')"
+        "    globalThis.__dismissedByEscape++;"
+        "  return __orig ? __orig(id, type, val) : undefined;"
+        "};"
+        "claimOverlay('popover', true);");
+
+    REQUIRE(root.interaction().active_overlay == bridge.widget("popover"));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(
+        root, static_cast<int>(KeyCode::escape), kModNone, true));
+    REQUIRE(root.interaction().active_overlay == nullptr);
+    REQUIRE(engine.evaluate("globalThis.__dismissedByEscape")
+                .getWithDefault<double>(-1) == 1);
+    pulp::view::View::active_overlay_ = nullptr;
+}
+
 // pulp #1420 — `display` CSS values translate to native bridge calls.
 // Five display values are observed in imports: flex, block, inline-block,
 // none, inline-flex. inline-block and inline-flex were previously dropped;
