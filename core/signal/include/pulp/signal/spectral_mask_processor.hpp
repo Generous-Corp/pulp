@@ -8,8 +8,10 @@
 /// `SpectralBandLayoutT` through `publish_layout()`. The audio owner adopts
 /// only the latest complete table at a spectral-frame boundary and interpolates
 /// from its current gain curve over the table's requested transition length.
-/// No allocation, locks, or table compilation occur in `process()` or
-/// `process_frame()` after a successful `prepare()`.
+/// No allocation or locks occur in `process()` or `process_frame()` after a
+/// successful `prepare()`. An audio-owner may also stage the latest layout with
+/// `set_layout_rt()`; fixed-capacity compilation and adoption happen at the next
+/// spectral-frame boundary without a control-thread round trip.
 
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
@@ -135,6 +137,18 @@ public:
         return true;
     }
 
+    /// Stage a layout from the single audio owner. The layout is copied into
+    /// prepared fixed-capacity storage and compiled at the next spectral-frame
+    /// boundary. This path is deliberately separate from publish_layout(): it
+    /// never joins the control-side TripleBuffer writer contract and therefore
+    /// cannot race a UI/state-restore publication.
+    [[nodiscard]] bool set_layout_rt(const Layout& layout) noexcept {
+        if (!state_ || !valid_layout_geometry_(layout)) return false;
+        state_->audio_layout = layout;
+        state_->audio_layout_pending = true;
+        return true;
+    }
+
     /// Process one prepared planar block. The dry path is delayed by the exact
     /// WOLA latency before mixing, so any mix below 100% cannot leak an early
     /// unfiltered signal around an isolation mask.
@@ -173,6 +187,7 @@ public:
         }
 
         adopt_latest_table_();
+        adopt_audio_layout_();
         advance_transition_();
         if (!apply_spectral_mask(frames, state_->config.frame.channels,
                                  num_bins, state_->frame_table)) {
@@ -244,6 +259,8 @@ private:
         std::unique_ptr<runtime::TripleBuffer<PublishedTable>> publication;
         Table frame_table{};
         Table target_table{};
+        Layout audio_layout{};
+        Table audio_table{};
         std::array<SampleType, kSpectralBandMaskMaximumBins> transition_start{};
         runtime::SeqLock<std::uint64_t> published_generation;
         runtime::SeqLock<std::uint64_t> active_generation;
@@ -252,6 +269,7 @@ private:
         std::uint64_t retained_bytes = 0;
         std::uint32_t transition_total = 0;
         std::uint32_t transition_position = 0;
+        bool audio_layout_pending = false;
     };
 
     static std::optional<std::uint64_t> checked_retained_bytes_(
@@ -310,6 +328,19 @@ private:
         return true;
     }
 
+    bool valid_layout_geometry_(const Layout& layout) const noexcept {
+        if (!std::isfinite(layout.min_hz) || !std::isfinite(layout.max_hz)
+            || layout.min_hz < SampleType{0}
+            || layout.max_hz <= layout.min_hz
+            || layout.active_bands == 0
+            || layout.active_bands > layout.bands.size())
+            return false;
+        for (std::size_t band = 0; band < layout.active_bands; ++band) {
+            if (!std::isfinite(layout.bands[band].gain_db)) return false;
+        }
+        return true;
+    }
+
     bool valid_audio_block_(const SampleType* const* input,
                             SampleType* const* output,
                             int num_samples) const noexcept {
@@ -335,6 +366,26 @@ private:
         state_->transition_total = publication.table.transition_frames;
         state_->transition_position = 0;
         if (state_->transition_total == 0) state_->frame_table = publication.table;
+    }
+
+    void adopt_audio_layout_() noexcept {
+        if (!state_->audio_layout_pending) return;
+        state_->audio_layout_pending = false;
+        if (!build_spectral_mask(state_->audio_layout,
+                                 state_->config.frame.fft_size,
+                                 state_->config.sample_rate,
+                                 state_->audio_table)
+            || !valid_table_(state_->audio_table))
+            return;
+
+        std::copy_n(state_->frame_table.gain_linear.begin(),
+                    state_->frame_table.num_bins,
+                    state_->transition_start.begin());
+        state_->target_table = state_->audio_table;
+        state_->transition_total = state_->audio_table.transition_frames;
+        state_->transition_position = 0;
+        if (state_->transition_total == 0)
+            state_->frame_table = state_->audio_table;
     }
 
     void advance_transition_() noexcept {

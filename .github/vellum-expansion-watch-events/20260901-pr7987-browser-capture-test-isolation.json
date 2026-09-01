@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260901-pr7987-browser-capture-test-isolation",
+  "created_at": "2026-09-01T05:05:12Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Record test-only scheduling isolation for Pulp's browser-capture validation. The seven process-lifecycle cases and the real-browser integration entry now run without concurrent CTest work, while the remaining 126 dependency-free Node cases stay parallel and all existing timeouts stay unchanged. Production browser capture, design ingest, captured output, rendering, packaging, the accepted expansion boundary, and Vellum source authority are unchanged.",
+  "tests": [
+    "python3 tools/scripts/test_ci_throughput_workflows.py (33 cases)",
+    "node --test tools/import-design/browser_capture/browser_process.test.mjs (7 cases)",
+    "node --test --test-name-pattern='a pointer drawn straight up survives the capture' tools/import-design/browser_capture/capture.integration.test.mjs (1 case)",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD",
+    "python3 tools/scripts/test_vellum_expansion_watch_check.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

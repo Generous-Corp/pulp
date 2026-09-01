@@ -1888,6 +1888,54 @@ TEST_CASE("Processor resize handlers are isolated per editor owner",
     REQUIRE_FALSE(p.request_editor_resize(800, 600));
 }
 
+// Logic can remove a closed AU v2 editor from its window while retaining the
+// returned NSView. Reopening then briefly leaves two registered owners even
+// though only one editor is attached. The detached retained view must not make
+// the live editor look ambiguous; two genuinely attached editors still must.
+TEST_CASE("Processor resize routing ignores detached retained editor owners",
+          "[view_bridge][editor-resize]") {
+    StubProcessor p;
+    int old_owner = 0;
+    int reopened_owner = 0;
+    bool old_attached = true;
+    bool reopened_attached = true;
+    int old_calls = 0;
+    int reopened_calls = 0;
+
+    p.set_editor_resize_handler(
+        &old_owner,
+        [&](uint32_t, uint32_t) { ++old_calls; return true; },
+        [&] { return old_attached; });
+    p.set_editor_resize_handler(
+        &reopened_owner,
+        [&](uint32_t, uint32_t) { ++reopened_calls; return true; },
+        [&] { return reopened_attached; });
+
+    // Two visible editors are genuinely ambiguous.
+    REQUIRE_FALSE(p.request_editor_resize(900, 700));
+    CHECK(old_calls == 0);
+    CHECK(reopened_calls == 0);
+
+    // Logic closed the old window but retained its NSView: route the reopen.
+    old_attached = false;
+    REQUIRE(p.request_editor_resize(900, 700));
+    CHECK(old_calls == 0);
+    CHECK(reopened_calls == 1);
+
+    // The rule follows attachment, not registration order.
+    old_attached = true;
+    reopened_attached = false;
+    REQUIRE(p.request_editor_resize(800, 600));
+    CHECK(old_calls == 1);
+    CHECK(reopened_calls == 1);
+
+    old_attached = false;
+    REQUIRE_FALSE(p.request_editor_resize(800, 600));
+
+    p.set_editor_resize_handler(&old_owner, nullptr);
+    p.set_editor_resize_handler(&reopened_owner, nullptr);
+}
+
 // If abnormal teardown skips the adapter's normal handler clear, an allocator
 // may later place a new Processor at the same address. Construction must clear
 // that stale slot before the replacement can accidentally invoke the old host.
@@ -2084,15 +2132,28 @@ TEST_CASE("AU v2 editor resize commits only an exact native Cocoa size",
 
     int native_calls = 0;
     int viewport_commits = 0;
+    int lifetime_leases = 0;
+    bool grant_lifetime = true;
+    struct LifetimeProbe {
+        explicit LifetimeProbe(int& live) : live_(live) { ++live_; }
+        ~LifetimeProbe() { --live_; }
+        int& live_;
+    };
     const void* owner = &native_calls;
     format::au::editor_resize_detail::install_editor_resize_handler(
         p, owner, bridge,
+        [&]() -> std::shared_ptr<void> {
+            if (!grant_lifetime || lifetime_leases != 0) return {};
+            return std::make_shared<LifetimeProbe>(lifetime_leases);
+        },
         [&](uint32_t w, uint32_t h) {
             ++native_calls;
+            CHECK(lifetime_leases == 1);
             return w == 900 && h == 700;
         },
         [&](uint32_t w, uint32_t h) {
             ++viewport_commits;
+            CHECK(lifetime_leases == 1);
             CHECK(w == 900);
             CHECK(h == 700);
         });
@@ -2100,6 +2161,7 @@ TEST_CASE("AU v2 editor resize commits only an exact native Cocoa size",
     REQUIRE(p.request_editor_resize(900, 700));
     CHECK(native_calls == 1);
     CHECK(viewport_commits == 1);
+    CHECK(lifetime_leases == 0);
     CHECK(bridge.size_hints().preferred_width == 900);
     CHECK(bridge.size_hints().preferred_height == 700);
 
@@ -2107,6 +2169,17 @@ TEST_CASE("AU v2 editor resize commits only an exact native Cocoa size",
     REQUIRE_FALSE(p.request_editor_resize(800, 600));
     CHECK(native_calls == 2);
     CHECK(viewport_commits == 1);
+    CHECK(lifetime_leases == 0);
+    CHECK(bridge.size_hints().preferred_width == 900);
+    CHECK(bridge.size_hints().preferred_height == 700);
+
+    // A stale/off-thread/reentrant callback that cannot acquire the AU editor
+    // lifetime must fail before mutating bridge hints or calling native code.
+    grant_lifetime = false;
+    REQUIRE_FALSE(p.request_editor_resize(700, 500));
+    CHECK(native_calls == 2);
+    CHECK(viewport_commits == 1);
+    CHECK(lifetime_leases == 0);
     CHECK(bridge.size_hints().preferred_width == 900);
     CHECK(bridge.size_hints().preferred_height == 700);
 
@@ -2115,6 +2188,7 @@ TEST_CASE("AU v2 editor resize commits only an exact native Cocoa size",
 }
 
 // ── Toggle parameter gestures ───────────────────────────────────────────────
+// ── AU v2 editor geometry ────────────────────────────────────────────────
 //
 // A Toggle was the one interactive widget wire_callbacks() never handed to
 // wire_parameter_gestures(): Knob, Fader and RangeSlider all did, Toggle did

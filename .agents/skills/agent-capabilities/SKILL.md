@@ -144,6 +144,14 @@ For an existing capability change:
 - Keep numeric parameter ranges/defaults/choices in `forge-catalog.json`; use a
   `forge_descriptor` reference instead of copying them.
 
+For realtime capability implementations, do not treat a short-range
+`std::stable_sort` as allocation-free merely because the macOS/libc++ probe is
+green. libstdc++ may allocate scratch space for every non-empty range while
+libc++ keeps small trivially-copyable ranges in place. Prefer a bounded
+in-place stable ordering algorithm when the capability already declares a
+fixed maximum, and size the allocation negative control beyond libc++'s short
+in-place threshold so either standard library can expose a regression.
+
 For removal:
 
 1. First publish the live capability as `status: deprecated` with a matching
@@ -184,6 +192,16 @@ Prepare it off the audio thread, publish layouts or compiled tables from a
 control thread, and call `process()` or `process_frame()` on the audio thread.
 The processor owns frame-boundary table adoption, gain interpolation,
 overlap-add reconstruction, latency reporting, and latency-aligned dry/wet.
+
+Sample-scheduled host automation is the bounded exception to control-thread
+publication. A single audio owner may call `set_layout_rt()` with the latest
+fixed-capacity layout while applying events at their block offsets. The
+processor copies that layout into prepared storage and compiles/adopts it only
+at the next spectral-frame boundary, without allocation, locks, or a
+control-thread round trip. Do not call `set_layout_rt()` from multiple writers
+or use it as a replacement for UI/state-restore `publish_layout()`; the two
+paths deliberately keep separate writer contracts and converge only at the
+audio owner's frame-boundary adoption point.
 
 Use categorical mask entries for true mute: a muted bin is multiplied by exact
 zero, not represented by a finite decibel floor. Reuse this processor for

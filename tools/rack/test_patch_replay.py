@@ -12,6 +12,7 @@ import unittest
 from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
+SILENT_OUTPUT_FIXTURE = HERE / "test_fixtures/silent-live-output"
 sys.path.insert(0, str(HERE))
 
 import patch  # noqa: E402
@@ -63,6 +64,50 @@ class PatchResponseReplay(unittest.TestCase):
             self.assertIsNone(shortfall)
             retained = pathlib.Path(root) / "attempt01-model-response.txt"
             self.assertEqual(response_text, retained.read_text())
+
+    def test_retained_m5_response_repairs_silence_without_provider_call(self):
+        final_patch = json.loads(
+            (SILENT_OUTPUT_FIXTURE / "unfinished.vcv").read_text())
+        silent_report = (SILENT_OUTPUT_FIXTURE / "gate-report.txt").read_text()
+        inventory = {
+            "AudibleInstruments": {"name": "Audible Instruments", "modules": {"Tides2": {
+                "name": "Tidal Modulator 2",
+                "outputs": ["Channel 1", "Channel 2", "Channel 3", "Channel 4"],
+                "roles_out": ["Audio", "Audio", "Audio", "Audio"],
+            }}},
+            "Core": {"name": "Core", "modules": {"AudioInterface2": {
+                "name": "Audio 2",
+                "inputs": ["Left", "Right"], "roles_in": ["Audio", "Audio"],
+            }}},
+        }
+        measured = []
+
+        def gate(candidate, checkpoints=None):
+            output = next(cable["outputId"] for cable in candidate["cables"]
+                          if cable["id"] == 6)
+            measured.append(output)
+            return ((patch.SILENT, silent_report) if output == 0 else
+                    (patch.AUDIBLE, "patch gate passed"))
+
+        with tempfile.TemporaryDirectory() as root, \
+                mock.patch.dict(os.environ, {"FORGE_ATTEMPT_DIR": root}), \
+                mock.patch.object(
+                    patch, "find_claude",
+                    side_effect=AssertionError("provider resolution is forbidden")), \
+                mock.patch.object(
+                    patch, "prepare_and_lint",
+                    side_effect=lambda *_args, **_kwargs: (final_patch, [])), \
+                mock.patch.object(patch, "configure_audio", return_value=None), \
+                mock.patch.object(patch, "audibility", side_effect=gate):
+            got, _, shortfall = patch.generate(
+                "a simple utility patch", inventory, None, retries=0,
+                response_file=str(
+                    SILENT_OUTPUT_FIXTURE / "attempt01-model-response.txt"))
+
+        self.assertEqual([0, 1], measured)
+        self.assertEqual(1, next(cable["outputId"] for cable in got["cables"]
+                                 if cable["id"] == 6))
+        self.assertIsNone(shortfall)
 
     def test_saved_response_refines_the_immutable_base_in_one_call(self):
         base = {"version": "2.6.6", "modules": [

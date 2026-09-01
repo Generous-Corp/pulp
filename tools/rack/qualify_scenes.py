@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from typing import Callable, Iterable
@@ -63,6 +64,126 @@ def _digest(value: object) -> str:
 
 def _file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _binary_identity(_resources: Path, binary: Path) -> str:
+    """Hash executable content without executing candidate-owned code.
+
+    A Developer ID signature is replaceable publication metadata. Zero its
+    load-command fields and exclude its blob, matching Forge's release
+    identity contract while keeping this verifier entirely reviewer-owned.
+    """
+    try:
+        data = bytearray(binary.read_bytes())
+        if len(data) < 28:
+            return hashlib.sha256(data).hexdigest()
+        magic = bytes(data[:4])
+        if magic == b"\xcf\xfa\xed\xfe":
+            endian, header_size = "<", 32
+        elif magic == b"\xfe\xed\xfa\xcf":
+            endian, header_size = ">", 32
+        elif magic == b"\xce\xfa\xed\xfe":
+            endian, header_size = "<", 28
+        elif magic == b"\xfe\xed\xfa\xce":
+            endian, header_size = ">", 28
+        else:
+            return hashlib.sha256(data).hexdigest()
+
+        command_count = struct.unpack_from(endian + "I", data, 16)[0]
+        offset = header_size
+        signature_range = None
+        signature_command_range = None
+        non_linkedit_end = 0
+        linkedit_ranges = []
+        linkedit_size_fields = []
+        for _ in range(command_count):
+            if offset + 8 > len(data):
+                raise ValueError("truncated Mach-O load commands")
+            command, size = struct.unpack_from(endian + "II", data, offset)
+            if size < 8 or offset + size > len(data):
+                raise ValueError("invalid Mach-O load command")
+            if command == 0x1D:  # LC_CODE_SIGNATURE
+                if size < 16:
+                    raise ValueError("truncated LC_CODE_SIGNATURE")
+                if signature_range is not None:
+                    raise ValueError("multiple LC_CODE_SIGNATURE commands")
+                signature_range = struct.unpack_from(
+                    endian + "II", data, offset + 8)
+                signature_command_range = (offset + 8, offset + 16)
+            elif command in (0x1, 0x19):
+                if size < 40:
+                    raise ValueError("truncated Mach-O segment command")
+                segment_name = bytes(
+                    data[offset + 8:offset + 24]).rstrip(b"\0")
+                if command == 0x19:  # LC_SEGMENT_64
+                    if size < 56:
+                        raise ValueError("truncated LC_SEGMENT_64")
+                    file_offset, file_size = struct.unpack_from(
+                        endian + "QQ", data, offset + 40)
+                    size_fields = ((offset + 32, offset + 40),
+                                   (offset + 48, offset + 56))
+                else:  # LC_SEGMENT
+                    file_offset, file_size = struct.unpack_from(
+                        endian + "II", data, offset + 32)
+                    size_fields = ((offset + 28, offset + 32),
+                                   (offset + 36, offset + 40))
+                file_end = file_offset + file_size
+                if file_end > len(data):
+                    raise ValueError(
+                        "Mach-O segment extends beyond end of file")
+                if segment_name == b"__LINKEDIT":
+                    linkedit_ranges.append((file_offset, file_end))
+                    linkedit_size_fields.extend(size_fields)
+                else:
+                    non_linkedit_end = max(non_linkedit_end, file_end)
+            offset += size
+        if signature_range is not None:
+            signature_offset, signature_size = signature_range
+            signature_end = signature_offset + signature_size
+            if not signature_size or signature_offset < offset:
+                raise ValueError(
+                    "code signature overlaps Mach-O load commands")
+            if not non_linkedit_end:
+                raise ValueError(
+                    "signed Mach-O has no file-backed executable segment")
+            if signature_end != len(data):
+                raise ValueError(
+                    "code signature is not the terminal Mach-O blob")
+            if signature_offset < non_linkedit_end:
+                raise ValueError(
+                    "code signature overlaps file-backed executable data")
+            if linkedit_ranges and not any(
+                    start <= signature_offset and signature_end <= end
+                    for start, end in linkedit_ranges):
+                raise ValueError("code signature is outside __LINKEDIT")
+            assert signature_command_range is not None
+            data[slice(*signature_command_range)] = b"\0" * 8
+            for start, end in linkedit_size_fields:
+                data[start:end] = b"\0" * (end - start)
+            data = data[:signature_offset]
+        identity = hashlib.sha256(data).hexdigest()
+    except (OSError, ValueError, struct.error) as exc:
+        raise QualificationError(
+            f"cannot identify Forge binary {binary}: {exc}") from exc
+    if not HEX64.fullmatch(identity):
+        raise QualificationError(
+            f"Forge binary identity is not one exact SHA-256: {binary}")
+    return identity
+
+
+def _is_packaged_resources_layout(build_info: Path, toolchain: Path) -> bool:
+    """Recognize only the signed app bundle's non-duplicated helper layout."""
+    resources = build_info.parent
+    contents = resources.parent
+    app_bundle = contents.parent
+    return (
+        build_info.name == "FORGE_BUILD_INFO" and
+        resources.name == "Resources" and
+        contents.name == "Contents" and
+        app_bundle.suffix == ".app" and
+        app_bundle.is_dir() and
+        toolchain == (resources / "tools" / "rack").resolve()
+    )
 
 
 def _completed_response(path: Path) -> bool:
@@ -420,17 +541,19 @@ def prepare_inputs(*, toolchain: Path, settings: Path, build_info: Path,
     if not decoder.is_file() or not os.access(decoder, os.X_OK):
         raise QualificationError(
             f"Forge Modular Rack saved-patch decoder is not executable: {decoder}")
-    decoder_identity = _file_digest(decoder)
+    decoder_identity = _binary_identity(build_info.parent, decoder)
     executing_decoder = toolchain / "rack_patch_decode"
-    if (not executing_decoder.is_file() or
-            not os.access(executing_decoder, os.X_OK)):
-        raise QualificationError(
-            "executing Rack saved-patch decoder is missing or not executable: "
-            f"{executing_decoder}")
-    if _file_digest(executing_decoder) != decoder_identity:
-        raise QualificationError(
-            "executing Rack saved-patch decoder does not match the candidate "
-            "executable")
+    packaged_resources = _is_packaged_resources_layout(build_info, toolchain)
+    if not packaged_resources or executing_decoder.exists():
+        if (not executing_decoder.is_file() or
+                not os.access(executing_decoder, os.X_OK)):
+            raise QualificationError(
+                "executing Rack saved-patch decoder is missing or not executable: "
+                f"{executing_decoder}")
+        if _binary_identity(build_info.parent, executing_decoder) != decoder_identity:
+            raise QualificationError(
+                "executing Rack saved-patch decoder does not match the candidate "
+                "executable")
     if stamped_decoder is not None and stamped_decoder != decoder_identity:
         raise QualificationError(
             "FORGE_TOOLCHAIN_STAMP decoder identity does not match the "

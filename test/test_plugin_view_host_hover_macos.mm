@@ -31,6 +31,36 @@
 
 using namespace pulp::view;
 
+namespace {
+
+class CursorDragView final : public View {
+public:
+    bool wants_mouse_input() const override { return true; }
+
+    void on_mouse_down(pulp::view::Point) override {
+        set_cursor(CursorStyle::grabbing);
+    }
+
+    void on_mouse_up(pulp::view::Point) override {
+        set_cursor(CursorStyle::grab);
+    }
+};
+
+NSEvent* mouse_event(NSEventType type, NSView* view, NSPoint local) {
+    const NSPoint window_point = [view convertPoint:local toView:nil];
+    return [NSEvent mouseEventWithType:type
+                              location:window_point
+                         modifierFlags:0
+                             timestamp:0
+                          windowNumber:view.window.windowNumber
+                               context:nil
+                           eventNumber:0
+                            clickCount:1
+                              pressure:type == NSEventTypeLeftMouseUp ? 0.0 : 1.0];
+}
+
+}  // namespace
+
 TEST_CASE("hover dispatch fires the registered callback",
           "[view][hover][macos]") {
     // A child that arms an on_hover_enter callback the way WidgetBridge's
@@ -88,6 +118,58 @@ TEST_CASE("hosted plugin view opts its window into mouse-moved delivery",
         // the hover tracking area's -mouseMoved: (and hence simulate_hover) can
         // actually fire in the hosted editor.
         REQUIRE(window.acceptsMouseMovedEvents);
+
+        host->detach();
+    }
+}
+
+TEST_CASE("hosted plugin view applies hover and drag cursors",
+          "[view][cursor][hover][macos]") {
+    @autoreleasepool {
+        View root;
+        root.set_bounds({0, 0, 320, 200});
+        auto child = std::make_unique<CursorDragView>();
+        child->set_bounds({0, 0, 320, 200});
+        auto* child_ptr = child.get();
+        root.add_child(std::move(child));
+
+        auto host = PluginViewHost::create(root, PluginViewHost::Size{320, 200});
+        REQUIRE(host != nullptr);
+
+        NSWindow* window = [[NSWindow alloc]
+            initWithContentRect:NSMakeRect(0, 0, 320, 200)
+                      styleMask:NSWindowStyleMaskBorderless
+                        backing:NSBackingStoreBuffered
+                          defer:NO];
+        REQUIRE(window != nil);
+        REQUIRE(window.contentView != nil);
+        host->attach_to_parent((__bridge void*) window.contentView);
+        REQUIRE(host->is_attached());
+
+        NSView* native_view = (__bridge NSView*) host->native_handle();
+        REQUIRE(native_view != nil);
+        const NSPoint point = NSMakePoint(80, 80);
+
+        child_ptr->set_cursor(View::CursorStyle::crosshair);
+        [native_view mouseMoved:mouse_event(NSEventTypeMouseMoved, native_view, point)];
+        REQUIRE([NSCursor currentCursor] == [NSCursor crosshairCursor]);
+
+        child_ptr->set_cursor(View::CursorStyle::horizontal_resize);
+        [native_view mouseMoved:mouse_event(NSEventTypeMouseMoved, native_view, point)];
+        REQUIRE([NSCursor currentCursor] == [NSCursor resizeLeftRightCursor]);
+
+        child_ptr->set_cursor(View::CursorStyle::grab);
+        [native_view mouseMoved:mouse_event(NSEventTypeMouseMoved, native_view, point)];
+        REQUIRE([NSCursor currentCursor] == [NSCursor openHandCursor]);
+
+        [native_view mouseDown:mouse_event(NSEventTypeLeftMouseDown, native_view, point)];
+        REQUIRE([NSCursor currentCursor] == [NSCursor closedHandCursor]);
+
+        [native_view mouseDragged:mouse_event(NSEventTypeLeftMouseDragged, native_view, point)];
+        REQUIRE([NSCursor currentCursor] == [NSCursor closedHandCursor]);
+
+        [native_view mouseUp:mouse_event(NSEventTypeLeftMouseUp, native_view, point)];
+        REQUIRE([NSCursor currentCursor] == [NSCursor openHandCursor]);
 
         host->detach();
     }

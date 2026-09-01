@@ -719,7 +719,7 @@ EXPORTS = [
             include="pulp/midi/strum.hpp",
             qualified_name="pulp::midi::Strum<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:bb5df51eb73e754c6493881a22103f6a43ba0957982e590f606052134f5dda75",
+            header_fingerprint="sha256:71b3bfba299503c2dfff38864f7fc8aede43d7e2f3cfb6474e5cfdebb4a0bf67",
         )],
         _link_probes=[{
             "role": "entrypoint",

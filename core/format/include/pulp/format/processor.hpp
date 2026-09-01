@@ -55,8 +55,12 @@ inline std::mutex& editor_resize_mutex() {
 }
 using EditorResizeHandler =
     std::function<bool(uint32_t, uint32_t)>;
+struct EditorResizeHandlerEntry {
+    EditorResizeHandler handler;
+    std::function<bool()> is_active;
+};
 using EditorResizeHandlerSet =
-    std::unordered_map<const void*, EditorResizeHandler>;
+    std::unordered_map<const void*, EditorResizeHandlerEntry>;
 
 inline std::unordered_map<const void*, EditorResizeHandlerSet>&
 editor_resize_handlers() {
@@ -513,19 +517,38 @@ public:
     /// NOT a data member, so this capability adds nothing to `sizeof(Processor)`
     /// and stays ABI-compatible with prebuilt libraries.
     bool request_editor_resize(uint32_t width, uint32_t height) {
-        std::function<bool(uint32_t, uint32_t)> handler;
+        std::vector<detail::EditorResizeHandlerEntry> candidates;
         {
             std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
             auto& table = detail::editor_resize_handlers();
             auto it = table.find(this);
-            // A Processor can have multiple simultaneous editor views. With
-            // no view identity in this processor-level API, selecting one
-            // would resize the wrong window. Refuse while ambiguous; once all
-            // but one view close, that remaining handler becomes active.
-            if (it == table.end() || it->second.size() != 1) return false;
-            handler = it->second.begin()->second;
+            if (it == table.end()) return false;
+            candidates.reserve(it->second.size());
+            for (const auto& [owner, entry] : it->second) {
+                (void)owner;
+                candidates.push_back(entry);
+            }
         }
-        return handler(width, height);
+
+        // Hosts may retain an editor object after detaching it from its
+        // window. Such a stale-but-live registration must not make a reopened
+        // editor look ambiguous. Evaluate attachment predicates outside the
+        // side-table mutex: they are host callbacks and may re-enter teardown.
+        // Two genuinely active views remain ambiguous and are refused.
+        detail::EditorResizeHandler handler;
+        for (const auto& candidate : candidates) {
+            bool active = true;
+            if (candidate.is_active) {
+                // Format adapters own this predicate and must keep it
+                // non-throwing: Processor is also compiled by exception-free
+                // targets such as WebCLAP.
+                active = candidate.is_active();
+            }
+            if (!active) continue;
+            if (handler) return false;
+            handler = candidate.handler;
+        }
+        return handler ? handler(width, height) : false;
     }
 
     /// Called when the host's transport state transitions between
@@ -824,12 +847,14 @@ public:
     /// of several simultaneous views cannot disable another live view.
     void set_editor_resize_handler(
         const void* editor_owner,
-        std::function<bool(uint32_t, uint32_t)> handler) {
+        std::function<bool(uint32_t, uint32_t)> handler,
+        std::function<bool()> is_active = {}) {
         if (!editor_owner) return;
         std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
         auto& table = detail::editor_resize_handlers();
         if (handler) {
-            table[this][editor_owner] = std::move(handler);
+            table[this][editor_owner] = {
+                std::move(handler), std::move(is_active)};
         } else {
             auto it = table.find(this);
             if (it == table.end()) return;

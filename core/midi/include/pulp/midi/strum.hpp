@@ -303,25 +303,46 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
         slot.event = shaped;
     }
 
+    /// Stable ordering that cannot allocate.
+    ///
+    /// `std::stable_sort` is permitted to take scratch space, and libstdc++
+    /// does so for every non-empty range — an `operator new` on the audio
+    /// thread. libc++ has an in-place path for short ranges, so the same call
+    /// is silently real-time safe on one standard library and not on the other.
+    /// A cluster is bounded by `MaximumClusterNotes`, so an insertion sort is
+    /// stable, in place, and small enough to prefer outright.
+    template <typename Less>
+    static void stable_order(std::array<Slot*, MaximumClusterNotes>& members, std::size_t count,
+                             Less less) noexcept {
+        for (std::size_t i = 1; i < count; ++i) {
+            Slot* const held = members[i];
+            std::size_t j = i;
+            // Strictly-less keeps equal keys in their original order.
+            while (j > 0 && less(held, members[j - 1])) {
+                members[j] = members[j - 1];
+                --j;
+            }
+            members[j] = held;
+        }
+    }
+
     void order_members(std::array<Slot*, MaximumClusterNotes>& members,
                        std::size_t count) noexcept {
         switch (effective_direction()) {
         case StrumDirection::AsPlayed:
             // Arrival order is already the buffer order; ties keep input order.
-            std::stable_sort(members.begin(), members.begin() + static_cast<std::ptrdiff_t>(count),
-                             [](const Slot* a, const Slot* b) { return a->arrival < b->arrival; });
+            stable_order(members, count,
+                         [](const Slot* a, const Slot* b) { return a->arrival < b->arrival; });
             return;
         case StrumDirection::Up:
-            std::stable_sort(members.begin(), members.begin() + static_cast<std::ptrdiff_t>(count),
-                             [](const Slot* a, const Slot* b) {
-                                 return a->event.note() < b->event.note();
-                             });
+            stable_order(members, count, [](const Slot* a, const Slot* b) {
+                return a->event.note() < b->event.note();
+            });
             return;
         case StrumDirection::Down:
-            std::stable_sort(members.begin(), members.begin() + static_cast<std::ptrdiff_t>(count),
-                             [](const Slot* a, const Slot* b) {
-                                 return a->event.note() > b->event.note();
-                             });
+            stable_order(members, count, [](const Slot* a, const Slot* b) {
+                return a->event.note() > b->event.note();
+            });
             return;
         case StrumDirection::Random:
             break;
@@ -330,10 +351,9 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
         }
         // Random: a seeded key per member gives a stable permutation for this
         // cluster coordinate without any mutable generator state.
-        std::stable_sort(members.begin(), members.begin() + static_cast<std::ptrdiff_t>(count),
-                         [this](const Slot* a, const Slot* b) {
-                             return random_key(*a) < random_key(*b);
-                         });
+        stable_order(members, count, [this](const Slot* a, const Slot* b) {
+            return random_key(*a) < random_key(*b);
+        });
     }
 
     StrumDirection effective_direction() const noexcept {

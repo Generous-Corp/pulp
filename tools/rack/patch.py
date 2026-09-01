@@ -37,10 +37,12 @@ import shutil
 import re
 import time
 import sys
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 import attempt_artifacts
+import cv_depth
 import maker_intent
+import run_state
 from module_kinds import is_audio_interface
 
 
@@ -1881,6 +1883,14 @@ def explain(patch: dict, inv: dict, why: dict | None = None) -> str:
         n = len(patch.get("modules", []))
         return (f"{n} module(s), nothing patched together yet — "
                 f"no cables in this file.") if n else "empty patch"
+    # Edges that reach an input whose depth control is at zero carry nothing.
+    # These rest on a name heuristic, so they are told to the reader rather
+    # than used to reject the patch.
+    quiet = cv_depth.advisory_notes(patch, inv)
+    if quiet:
+        out.append("MODULATION THAT MAY NOT BE HEARD")
+        out.extend(f"  {note}" for note in quiet)
+        out.append("")
     return "\n".join(out).rstrip()
 
 
@@ -2190,6 +2200,18 @@ def prepare_and_lint(patch: dict, inv: dict,
     physical_errs = place_physical_targets(patch, inv)
     materialize_module_state(
         patch, inv, compiled_state_baseline=base_patch)
+    # A cable into a CV input carries nothing while its depth control sits at
+    # zero, and nothing structural distinguishes that patch from a working
+    # one. Open the controls this patch never spoke about, before anything
+    # judges it.
+    cv_depth.open_depth_controls(patch, inv)
+    # A module saved with its run flag false makes no sound, and when it is
+    # the master clock that is the whole patch rather than one branch. A
+    # person who stops a clock and saves meant to; a generator has no such
+    # habit, so an emitted `false` here is the defect and not the intent.
+    # Runs after materialize_module_state, whose data_defaults are applied
+    # with setdefault and therefore do NOT displace an authored false.
+    run_state.start_stopped_modules(patch, inv, module_state_rules())
     patch = reflow(patch, inv)
     return patch, list(dict.fromkeys(physical_errs + lint(patch, inv)))
 
@@ -2414,6 +2436,11 @@ def lint(patch: dict, inv: dict) -> list[str]:
     errs.extend(module_state_contract_errors(patch, inv))
     errs.extend(pitch_step_domain_errors(patch, inv))
     errs.extend(module_activation_contract_errors(patch, inv))
+    # Blocking dead edges only. An association a name heuristic proposed is
+    # reported by explain(), never here: a guess must not reject a patch.
+    errs.extend(cv_depth.dead_edge_errors(patch, inv))
+    errs.extend(run_state.stopped_run_flag_errors(patch, inv,
+                                                  module_state_rules()))
 
     # A patch that reaches no audio interface makes no sound, which is a far
     # more common generated failure than a malformed file.
@@ -4790,6 +4817,80 @@ def audibility(patch: dict,
         os.unlink(tmp)
 
 
+def audition_silent_output_repair(
+        patch: dict, inv: dict, verdict: str, report: str,
+        checkpoints: list[float] | None = None,
+        attempt: int = 1, why: dict | None = None,
+        *,
+        qualify: Callable[[dict, str, list[tuple[str, str]]], list[str]],
+) -> tuple[dict, str, str]:
+    """Try exact-role live sibling outputs, retaining every measured result.
+
+    The gate is the authority at both ends: its first report proves the chosen
+    output silent while a sibling is active, and a fresh run over the edited
+    patch must prove audio reaches the interface. An active trace row by itself
+    never becomes a success claim.
+    """
+    if verdict != SILENT:
+        return patch, verdict, report
+    import deterministic_repair
+    finding = silence_cause(report, patch, inv)
+    repairs, refusal = deterministic_repair.alternate_output_repairs(
+        patch, inv, finding)
+    if not repairs:
+        if refusal:
+            keep_deterministic_repair(
+                patch, None,
+                "alternate-output repair refused:\n" +
+                "\n".join(f"  - {reason}" for reason in refusal) + "\n",
+                attempt, "alternate-output")
+        return patch, verdict, report
+
+    best_audible = None
+    for index, repair in enumerate(repairs, 1):
+        candidate_verdict, candidate_report = audibility(
+            repair.patch, checkpoints=checkpoints)
+        action = repair.actions[0]
+        evidence = (f"candidate {index}: {action}\n"
+                    f"verdict: {candidate_verdict}\n{candidate_report}")
+        blockers = []
+        if candidate_verdict == AUDIBLE:
+            blockers = qualify(
+                repair.patch, candidate_report, repair.endpoint_rewrites)
+            if blockers:
+                evidence += "\nqualification blockers:\n" + "\n".join(
+                    f"  - {error}" for error in blockers)
+        keep_deterministic_repair(
+            patch, repair.patch, evidence, attempt,
+            f"alternate-output-{index}")
+        if candidate_verdict == AUDIBLE and not blockers:
+            if why is not None:
+                for old_key, new_key in repair.endpoint_rewrites:
+                    note = why.pop(old_key, None)
+                    if note is not None:
+                        why[new_key] = note
+            print(f"  deterministic output repair: {action}", flush=True)
+            return repair.patch, candidate_verdict, candidate_report
+        if candidate_verdict == AUDIBLE and (
+                best_audible is None or
+                len(blockers) < len(best_audible[0])):
+            best_audible = (blockers, repair, candidate_report)
+        if candidate_verdict == UNMEASURED:
+            # A broken instrument cannot rank later candidates honestly.
+            break
+    if best_audible is not None:
+        _, repair, candidate_report = best_audible
+        if why is not None:
+            for old_key, new_key in repair.endpoint_rewrites:
+                note = why.pop(old_key, None)
+                if note is not None:
+                    why[new_key] = note
+        print("  deterministic output repair retained an audible candidate "
+              "that remains unfinished", flush=True)
+        return repair.patch, AUDIBLE, candidate_report
+    return patch, verdict, report
+
+
 INVENTORY_BEGIN = "<<<FORGE-INVENTORY-BEGIN>>>"
 INVENTORY_END = "<<<FORGE-INVENTORY-END>>>"
 CODEX_INLINE_INVENTORY_CHAR_LIMIT = 128 * 1024
@@ -6534,16 +6635,16 @@ def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
     activity = {m.get("id"): (m, outs) for m, outs in named}
     if not activity:
         return None
-    incoming: dict[int, list[tuple[int, int, int]]] = {}
+    incoming: dict[int, list[tuple[int, int, int, int]]] = {}
     listener_sources = []
     modules = {m.get("id"): m for m in patch.get("modules", [])}
     for c in patch.get("cables", []):
         src = (c.get("outputModuleId"), c.get("outputId"))
         incoming.setdefault(c.get("inputModuleId"), []).append(
-            (*src, c.get("inputId")))
+            (*src, c.get("inputId"), c.get("id")))
         dst = modules.get(c.get("inputModuleId")) or {}
         if is_audio_interface(dst):
-            listener_sources.append(src)
+            listener_sources.append((src, c.get("id")))
 
     def value(pair):
         got = activity.get(pair[0])
@@ -6579,23 +6680,30 @@ def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
             return role in ("gate", "trigger") or "gate" in name or "trig" in name
         return False
 
-    def walk(pair, seen):
+    def walk(pair, seen, outgoing_cable_id):
         if pair in seen or value(pair) != 0.0:
             return None
         seen = seen | {pair}
-        for source_module, source_output, input_id in incoming.get(pair[0], []):
+        for (source_module, source_output, input_id,
+             cable_id) in incoming.get(pair[0], []):
             if not causal_input(pair[0], input_id):
                 continue
-            found = walk((source_module, source_output), seen)
+            found = walk((source_module, source_output), seen, cable_id)
             if found:
                 return found
-        return pair
+        return pair, outgoing_cable_id
 
     pair = None
-    for source in listener_sources:
-        pair = walk(source, set())
-        if pair:
-            break
+    causal_cable_ids = set()
+    for source, listener_cable_id in listener_sources:
+        found = walk(source, set(), listener_cable_id)
+        if not found:
+            continue
+        candidate_pair, cable_id = found
+        if pair is None:
+            pair = candidate_pair
+        if candidate_pair == pair and isinstance(cable_id, int):
+            causal_cable_ids.add(cable_id)
     if pair is None:
         return None
     module, outs = activity[pair[0]]
@@ -6609,6 +6717,7 @@ def dead_output(report: str, patch: dict, inv: dict) -> dict | None:
     return {"id": module.get("id"), "plugin": module.get("plugin"),
             "model": module.get("model"), "outs": outs, "output": output,
             "output_label": label, "whole_module": whole,
+            "causal_cable_ids": sorted(causal_cable_ids),
             "key": base if whole else f"{base} out{output}"}
 
 
@@ -7099,6 +7208,64 @@ def diagnose_module_contract_intent(prompt: str, patch: dict, inv: dict,
     bound = idiom_check.bound_modifiers(prompt, idioms[claimed.slug])
     modifiers = idiom_check.check_modifiers(patch, inv, bound)
     return IntentDiagnosis(None, [], [], [], modifiers)
+
+
+def diagnose_static_candidate(prompt: str, patch: dict, inv: dict, claimed,
+                              effective_claimed, idioms: dict,
+                              module_idiom_contract,
+                              quality_contract) -> IntentDiagnosis:
+    """One complete static diagnosis, reusable after a bounded rewrite."""
+    if module_idiom_contract is None:
+        diagnosis = diagnose_intent(
+            prompt, patch, inv, effective_claimed, idioms)
+    else:
+        diagnosis = diagnose_module_contract_intent(
+            prompt, patch, inv, claimed, idioms)
+    quality_structure = runtime_quality_static_errors(
+        patch, inv, quality_contract)
+    if quality_structure:
+        diagnosis = diagnosis._replace(
+            behaviour=diagnosis.behaviour + quality_structure)
+    return diagnosis
+
+
+def output_repair_qualification_errors(
+        prompt: str, candidate: dict, inv: dict, report: str, claimed,
+        effective_claimed, idioms: dict, module_idiom_contract,
+        quality_contract: RuntimeQualityContract,
+        checkpoints: list[float] | None, why: dict | None,
+        endpoint_rewrites: list[tuple[str, str]],
+        semantic_runtime_errors: Callable[[dict], list[str]] | None = None,
+        ) -> list[str]:
+    """Run every blocking generator qualification over one output rewrite."""
+    candidate_why = copy.deepcopy(why)
+    if candidate_why is not None:
+        for old_key, new_key in endpoint_rewrites:
+            note = candidate_why.pop(old_key, None)
+            if note is not None:
+                candidate_why[new_key] = note
+    diagnosis = diagnose_static_candidate(
+        prompt, candidate, inv, claimed, effective_claimed, idioms,
+        module_idiom_contract, quality_contract)
+    errors = list(diagnosis.defects)
+    errors += lint_why(candidate, inv, candidate_why)
+    errors += module_runtime_contract_errors(candidate, inv, report)
+    runtime_idiom = idioms.get(
+        diagnosis.built or effective_claimed.slug, {}) \
+        if effective_claimed.gating else {}
+    errors += idiom_runtime_contract_errors(candidate, runtime_idiom, report)
+    if checkpoints:
+        errors += long_horizon_evolution_errors(
+            report, quality_contract,
+            runtime_quality_layer_paths(candidate, inv))
+    # The synchronized semantic harness has the same preconditions as its
+    # normal generator call below: its tap plan is meaningful only after the
+    # patch's static and ordinary runtime contracts hold. A prerequisite
+    # failure therefore ranks as that exact failure, not as a guessed semantic
+    # verdict from an invalid tap plan.
+    if not errors and semantic_runtime_errors is not None:
+        errors += semantic_runtime_errors(candidate)
+    return errors
 
 
 def _patch_semantics(patch: dict) -> dict:
@@ -7603,17 +7770,9 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
         # static side for EVERY lint-clean patch, before audio can short-circuit
         # it as SILENT. This also means a gate crash cannot hide a topology or
         # authored-value defect that was fully readable from the patch.
-        if module_idiom_contract is None:
-            diagnosis = diagnose_intent(
-                prompt, patch, inv, effective_claimed, idioms)
-        else:
-            diagnosis = diagnose_module_contract_intent(
-                prompt, patch, inv, claimed, idioms)
-        quality_structure = runtime_quality_static_errors(
-            patch, inv, quality_contract)
-        if quality_structure:
-            diagnosis = diagnosis._replace(
-                behaviour=diagnosis.behaviour + quality_structure)
+        diagnosis = diagnose_static_candidate(
+            prompt, patch, inv, claimed, effective_claimed, idioms,
+            module_idiom_contract, quality_contract)
 
         # Point the audio interface somewhere audible before running DSP, so
         # the thing measured is the thing that will be opened.
@@ -7630,6 +7789,62 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
             verdict, report = audibility(patch, checkpoints=checkpoints)
         else:
             verdict, report = audibility(patch)
+        output_repair_acid_results = {}
+        if base_patch is None:
+            measured_patch = patch
+            acid_candidate_index = 0
+
+            def qualify_output_repair_acid(candidate: dict) -> list[str]:
+                nonlocal acid_candidate_index
+                if not (claimed.slug == "acid-voice"
+                        and module_idiom_contract is None):
+                    return []
+                import acid_runtime_gate
+                acid_candidate_index += 1
+                proof_dir = os.path.join(
+                    attempts_dir(),
+                    f"attempt{attempt + 1:02d}-output-repair-"
+                    f"{acid_candidate_index:02d}-acid-proof")
+                acid = acid_runtime_gate.evaluate(candidate, inv, proof_dir)
+                output_repair_acid_results[
+                    json.dumps(candidate, sort_keys=True)] = (acid, proof_dir)
+                acid_verdict = acid.get(
+                    "verdict", acid_runtime_gate.acid_taps.UNMEASURED)
+                reasons = [str(reason) for reason in acid.get("reasons") or []]
+                if acid_verdict == acid_runtime_gate.acid_taps.PASS:
+                    return []
+                if acid_verdict == acid_runtime_gate.acid_taps.FAIL:
+                    return ["acid behavior FAIL: " + reason
+                            for reason in reasons]
+                reason = "; ".join(reasons) or \
+                    "the synchronized acid proof did not produce a verdict"
+                return [f"acid behavior is UNMEASURED: {reason}; proof: "
+                        f"{proof_dir}"]
+
+            def qualify_output_repair(
+                    candidate: dict, candidate_report: str,
+                    endpoint_rewrites: list[tuple[str, str]]) -> list[str]:
+                return output_repair_qualification_errors(
+                    prompt, candidate, inv, candidate_report, claimed,
+                    effective_claimed, idioms, module_idiom_contract,
+                    quality_contract, checkpoints, why, endpoint_rewrites,
+                    qualify_output_repair_acid)
+
+            patch, verdict, report = audition_silent_output_repair(
+                patch, inv, verdict, report, checkpoints, attempt + 1, why,
+                qualify=qualify_output_repair)
+            if patch is not measured_patch:
+                # Output labels can distinguish same-role siblings (left/right,
+                # wave shapes, and other port-specific intent). Re-run every
+                # static intent check against the exact patch that the fresh
+                # DSP gate accepted rather than carrying the pre-repair result.
+                diagnosis = diagnose_static_candidate(
+                    prompt, patch, inv, claimed, effective_claimed, idioms,
+                    module_idiom_contract, quality_contract)
+                why_errors = lint_why(patch, inv, why)
+                if why_errors:
+                    diagnosis = diagnosis._replace(
+                        behaviour=diagnosis.behaviour + why_errors)
         runtime_errors = module_runtime_contract_errors(patch, inv, report)
         runtime_idiom = idioms.get(
             diagnosis.built or effective_claimed.slug, {}) \
@@ -7687,9 +7902,14 @@ def _generate(prompt: str, inv: dict, prefer: str | None, retries: int = 0,
                 and not diagnosis.modifiers
                 and verdict == AUDIBLE):
             import acid_runtime_gate
-            proof_dir = os.path.join(
-                attempts_dir(), f"attempt{attempt + 1:02d}-acid-proof")
-            acid = acid_runtime_gate.evaluate(patch, inv, proof_dir)
+            cached_acid = output_repair_acid_results.get(
+                json.dumps(patch, sort_keys=True))
+            if cached_acid is None:
+                proof_dir = os.path.join(
+                    attempts_dir(), f"attempt{attempt + 1:02d}-acid-proof")
+                acid = acid_runtime_gate.evaluate(patch, inv, proof_dir)
+            else:
+                acid, proof_dir = cached_acid
             acid_verdict = acid.get("verdict", acid_runtime_gate.acid_taps.UNMEASURED)
             acid_reasons = [str(reason) for reason in acid.get("reasons") or []]
             print(f"  acid behavior: {acid_verdict} — proof: {proof_dir}",

@@ -303,6 +303,16 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_param_designator_order.py")
     set_tests_properties(param-designator-order PROPERTIES TIMEOUT 120)
 
+    # CTest manifests parse. Most of test/cmake/ sits behind an option(), and a
+    # manifest guarded by one that no lane enables alongside PULP_BUILD_TESTS=ON
+    # is never read — so a syntax error in it is invisible. Four Scene3D
+    # manifests carried an unbalanced paren on main for eight weeks that way.
+    # Parses each file under `if(FALSE)` via `cmake -P`, so no project context is
+    # needed; about a second for the whole tree.
+    add_test(NAME cmake-manifest-parse COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_cmake_manifest_parse.py")
+    set_tests_properties(cmake-manifest-parse PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test

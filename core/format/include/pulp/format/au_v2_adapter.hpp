@@ -187,6 +187,8 @@ public:
     OSStatus SetParameter(AudioUnitParameterID inID, AudioUnitScope inScope,
                           AudioUnitElement inElement, Float32 inValue,
                           UInt32 inBufferOffsetInFrames) override;
+    OSStatus ScheduleParameter(const AudioUnitParameterEvent* events,
+                               UInt32 num_events) override;
 
     OSStatus GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope inScope,
                              AudioUnitElement inElement, UInt32& outDataSize,
@@ -220,6 +222,11 @@ public:
     Float64 GetLatency() override;
 
 protected:
+    OSStatus ProcessScheduledSlice(void* user_data,
+                                   UInt32 start_frame_in_buffer,
+                                   UInt32 slice_frames,
+                                   UInt32 total_buffer_frames) override;
+
     /// Drain host-facing name changes on the caller's control/main thread.
     void publish_parameter_display_changes();
 
@@ -289,12 +296,11 @@ private:
     state::ListenerToken ui_push_listener_;
     ParameterDisplayNamePublisher parameter_display_names_;
 
-    // Parameter-event sidecar, set on the Processor each block so the
-    // param-events contract is uniform across formats. AU v2's AUEffectBase
-    // has no scheduled/ramped parameter event source today, so this queue is
-    // empty: host parameter changes still reach the Processor through `store_`
-    // exactly as before.
+    // Parameter-event sidecar, set on the Processor each block. During a
+    // scheduled AU render slice it contains slice-relative immediate/ramp
+    // events translated from AudioUnitParameterEvent; otherwise it is empty.
     state::ParameterEventQueue param_events_;
+    bool scheduled_slice_active_ = false;
 
     // Per-block MIDI I/O. Hoisted to members (not constructed per render call)
     // and given reserved, realtime-capacity-limited storage in Initialize() so

@@ -180,6 +180,33 @@ class CoveragercTests(unittest.TestCase):
                 ],
             )
 
+    def test_report_source_files_prunes_generated_trees(self) -> None:
+        """A packaging `build/` under a source root is gitignored, so CI never sees it.
+        A developer who has built that package locally would otherwise measure a
+        different denominator than the gate: setuptools stages a duplicate copy of
+        every module into `build/lib/`, and those copies are never imported, so they
+        report as uncovered and pull the local number below CI's."""
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            for rel_path in (
+                "tools/audio/quality-lab/quality_lab/cli.py",
+                "tools/audio/quality-lab/build/lib/quality_lab/cli.py",
+                "tools/audio/quality-lab/build-cov/lib/quality_lab/cli.py",
+            ):
+                path = root / rel_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("print('staged')\n", encoding="utf-8")
+
+            with mock.patch.object(rpc, "REPO_ROOT", root):
+                files = rpc._report_source_files(["tools"], [])
+
+            # The real source must survive, or this would also pass for a walk that
+            # returned nothing at all.
+            self.assertEqual(
+                [path.relative_to(root).as_posix() for path in files],
+                ["tools/audio/quality-lab/quality_lab/cli.py"],
+            )
+
     def test_report_source_files_accepts_file_roots_and_dedupes(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)

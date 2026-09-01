@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 65,
+  "inventory_version": 66,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1026,7 +1026,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
-      "fingerprint": "sha256:5d62d1ef328c7a47103efcc0910ef48928ca844213c6a4a8579cdf8e9f15a234",
+      "fingerprint": "sha256:b5c08f132df70323065b1d7c1d9109ddfc95ed8baeacb0c595fd5eb21771dbe8",
       "include": "pulp/audio/voice_modulation_sources.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1486,7 +1486,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/step_player.hpp",
-      "fingerprint": "sha256:cf6c0351ed35ac6f18c1e8cd0885de8c077779e40356aafa7f211a30bfd29913",
+      "fingerprint": "sha256:840cc4783c205d1e0416d1115c74a1a2ac3dd15fbea9185cdcbfb679a9898cd7",
       "include": "pulp/midi/step_player.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1497,7 +1497,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/strum.hpp",
-      "fingerprint": "sha256:bb5df51eb73e754c6493881a22103f6a43ba0957982e590f606052134f5dda75",
+      "fingerprint": "sha256:71b3bfba299503c2dfff38864f7fc8aede43d7e2f3cfb6474e5cfdebb4a0bf67",
       "include": "pulp/midi/strum.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3924,7 +3924,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
-      "fingerprint": "sha256:424014c924770f60d35e16b7179b552ca1b4747381734186fb15d6fb7bd94247",
+      "fingerprint": "sha256:322800ed271065a445d0040f3e2b8305884476f3e70fce49787f718e87a709e0",
       "include": "pulp/signal/spectral_mask_processor.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
