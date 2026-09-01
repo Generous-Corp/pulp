@@ -56,7 +56,16 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.110.0 (current pin) — adds schema-v3 changed-surface execution, binding
+# v0.143.0 (current pin) — adds the default-off, receipt-fenced
+#   `shipyard runner zero-job-recover` command used by Pulp's protected-main
+#   macOS recovery worker. It accepts only the exact current queued
+#   `pull_request` attempt for `.github/workflows/build.yml`, requires an
+#   exhaustive zero-job census, refuses duplicate/conflicting receipts and any
+#   existing `macos` recovery, and dispatches without cancelling the source
+#   run. Activation remains separately serialized and canary-gated; the pin
+#   does not authorize a generic stale-run sweeper or a second merge scheduler.
+#
+# v0.110.0 (earlier pin) — adds schema-v3 changed-surface execution, binding
 #   selected tests to their exact producer build targets and replacing build +
 #   test only as one authenticated transaction. `--resume-from test` cannot
 #   skip that producer build: Shipyard performs one read-only protected-base
@@ -157,7 +166,7 @@
 #   rather than double-running the PR). This is why Pulp moves to this pin —
 #   it removes a whole class of "wedged same-PR ship" stalls. Bundles #349
 #   (self-hosted empty-log diagnostics point at the ctest artifact).
-version = "v0.110.0"
+version = "v0.143.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
