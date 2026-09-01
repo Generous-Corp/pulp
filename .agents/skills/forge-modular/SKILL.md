@@ -545,6 +545,67 @@ module, so essentially every measurement over that corpus is about a rack with
 missing modules, whatever else it also says. Check `otool -L` before trusting
 any generation-era audio result.
 
+## A licensed module runs, writes zeros, and logs nothing
+
+A VCV Library module resolves its entitlement from a cached key at
+`<asset::userDir>/licenses/<plugin>.vcvkey`. Nothing sets `userDir` for you. In
+a harness that only calls `dlopen` it is empty, so the lookup goes to
+`/licenses/...`, finds nothing, and the module **constructs normally, runs its
+DSP, and writes 0 to every output**. No exception, no failed load, no log line.
+
+That is externally indistinguishable from a module that is genuinely dead,
+which is the whole problem. A gate that measures outputs reports SILENT, the
+generation believes the module is broken, and it spends its retries replacing a
+part that works.
+
+**The ordering is load-bearing:**
+
+```
+asset::userDir = <the Rack user dir>  ->  rack::asset::init()  ->  first dlopen
+```
+
+`asset::init()` called after the first `dlopen` does nothing. The key is read
+while the plugin initialises, not when it is asked for its output.
+
+The control that separates "unlicensed" from "dead":
+
+```bash
+ls ~/Library/Application\ Support/Rack2/licenses/*.vcvkey | wc -l
+# non-zero, or the comparison below proves nothing
+```
+
+Then measure the same patch with and without `userDir` set. A verdict that
+**changes** is a licence; a verdict that **holds** is a real defect. Do not
+skip the first line: on a machine with no keys, both halves agree for a reason
+that has nothing to do with the patch.
+
+Every harness that loads plugins has to do this, not only the audibility gate.
+`test_patch.py` asserts it, so a new loader that forgets is caught there rather
+than by a run of patches that read as silent for a reason nobody can see.
+
+### `nm` cannot tell you whether a plugin links libRack
+
+The obvious check for the missing-`-lRack` defect above is to look at the
+symbols, and it does not work. `nm -m plugin.dylib | grep _ZN4rack` reports
+**118 undefined for a correct build and a broken one alike**; shipped
+third-party plugins report 165. Undefined `rack::` symbols are normal, because
+they are exactly what the flat namespace resolves at load. Only `otool -L`
+names the load command, and a missing load command is the defect.
+
+## The gate is seeded from the clock, so a single flip is noise
+
+`patch_gate` calls `rack::random::init()`, which seeds from the clock inside
+libRack, so two identical passes over the same patch can disagree. Measured
+over a corpus it is rare and real: one disagreement in 500 patch-measurements,
+and always one patch flipping rather than a set.
+
+So a replay or an A/B that reports **one** changed verdict has reported noise.
+Run the same binary twice before comparing two binaries, and state that floor
+beside the result. An effect has to clear it to mean anything, and the ceiling
+matters too: if only 13 patches in the corpus can possibly change, a result of
+8 is inside a band of 2 to 13, not a rate.
+
+
 ## Intent anchors are constraints, not decoration
 
 `@Maker` and plain role words are retrieval guidance unless the user says
