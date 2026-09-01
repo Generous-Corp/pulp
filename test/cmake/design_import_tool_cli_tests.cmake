@@ -37,6 +37,18 @@ if(_PULP_NODE_FOR_TESTS)
     list(REMOVE_ITEM _PULP_BROWSER_CAPTURE_NODE_TESTS
          ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
 
+    # Process-group custody tests launch detached helpers, deliver real signals,
+    # and wait for macOS to reap the complete tree. Under the broad `ctest -j8`
+    # gate they used to run inside Node's multi-file worker aggregate while the
+    # real-browser integration suite was also launching Chrome. The assertions
+    # finished, but the overloaded worker missed the aggregate's 180-second
+    # boundary and failed an unrelated merge group. Isolate only this seven-case
+    # lifecycle file; the remaining dependency-free Node cases stay parallel.
+    set(_PULP_BROWSER_CAPTURE_PROCESS_LIFECYCLE_TEST
+        ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/browser_process.test.mjs)
+    list(REMOVE_ITEM _PULP_BROWSER_CAPTURE_NODE_TESTS
+         ${_PULP_BROWSER_CAPTURE_PROCESS_LIFECYCLE_TEST})
+
     # Canonicalization invokes esbuild and the JSX contract audit imports the
     # locked Babel parser. The required Linux lane installs this directory's
     # dependencies; source-only/offline configurations keep the dependency-free
@@ -55,10 +67,24 @@ if(_PULP_NODE_FOR_TESTS)
         TIMEOUT 180
         LABELS "parser-import;browser-capture;node")
 
+    add_test(NAME pulp-browser-capture-process-lifecycle
+             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+                     ${_PULP_BROWSER_CAPTURE_PROCESS_LIFECYCLE_TEST})
+    set_tests_properties(pulp-browser-capture-process-lifecycle PROPERTIES
+        RUN_SERIAL TRUE
+        TIMEOUT 60
+        LABELS "parser-import;browser-capture;node")
+
     add_test(NAME pulp-browser-capture-node-integration
              COMMAND ${_PULP_NODE_FOR_TESTS} --test
                      ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
+    # Real Chrome capture is itself load-sensitive: in production a screenshot
+    # CDP call crossed its bounded 20-second deadline while unrelated CTest work
+    # shared the VM, even though the same suite normally finishes cleanly. Make
+    # the isolation independent of the caller's `-j` width; retaining the 600s
+    # outer timeout keeps a genuine capture hang bounded and named.
     set_tests_properties(pulp-browser-capture-node-integration PROPERTIES
+        RUN_SERIAL TRUE
         TIMEOUT 600
         LABELS "parser-import;browser-capture;node")
 
