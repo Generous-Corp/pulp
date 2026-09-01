@@ -7,7 +7,7 @@
 // ancestor pixel sits behind an absolutely-positioned popover.
 //
 // The prop-applier contract this test pins:
-//   - `overlay: true`  → call claimOverlay(id)
+//   - `overlay: true`  → call claimOverlay(id, true)
 //   - `overlay: false` → call releaseOverlay(id)
 //   - prop removed     → call releaseOverlay(id) on commitUpdate
 //   - prop never set   → no claim/release call
@@ -43,7 +43,7 @@ describe('@pulp/react prop-applier — overlay routing', () => {
         applyAllProps({ ...makeInstance('p1'), props: { overlay: true } });
         const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
         expect(claims.length).toBe(1);
-        expect(claims[0].args).toEqual(['p1']);
+        expect(claims[0].args).toEqual(['p1', true]);
         // releaseOverlay must NOT fire on the mount-claim path.
         expect(bridge.calls.some((c) => c.fn === 'releaseOverlay')).toBe(false);
     });
@@ -70,7 +70,7 @@ describe('@pulp/react prop-applier — overlay routing', () => {
         );
         const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
         expect(claims.length).toBe(1);
-        expect(claims[0].args).toEqual(['p4']);
+        expect(claims[0].args).toEqual(['p4', true]);
     });
 
     it('commitUpdate flips overlay true → false via releaseOverlay', () => {
@@ -128,22 +128,28 @@ describe('@pulp/react prop-applier — overlay routing', () => {
         applyAllProps(withProps('m1', { role: 'dialog' }));
         const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
         expect(claims.length).toBe(1);
-        expect(claims[0].args).toEqual(['m1']);
+        expect(claims[0].args).toEqual(['m1', true]);
     });
 
     it('role="alertdialog" auto-claims overlay', () => {
         applyAllProps(withProps('m2', { role: 'alertdialog' }));
-        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+        const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
+        expect(claims.length).toBe(1);
+        expect(claims[0].args).toEqual(['m2', true]);
     });
 
     it('role="menu" auto-claims overlay (dropdown menu pattern)', () => {
         applyAllProps(withProps('m3', { role: 'menu' }));
-        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+        const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
+        expect(claims.length).toBe(1);
+        expect(claims[0].args).toEqual(['m3', true]);
     });
 
     it('role="listbox" auto-claims overlay (combobox/picker pattern)', () => {
         applyAllProps(withProps('m4', { role: 'listbox' }));
-        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+        const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
+        expect(claims.length).toBe(1);
+        expect(claims[0].args).toEqual(['m4', true]);
     });
 
     it('role="button" does NOT auto-claim overlay (not a popup role)', () => {
@@ -153,12 +159,16 @@ describe('@pulp/react prop-applier — overlay routing', () => {
 
     it('aria-modal="true" auto-claims overlay', () => {
         applyAllProps(withProps('m6', { 'aria-modal': 'true' }));
-        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+        const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
+        expect(claims.length).toBe(1);
+        expect(claims[0].args).toEqual(['m6', true]);
     });
 
     it('aria-modal={true} (boolean) auto-claims overlay', () => {
         applyAllProps(withProps('m7', { 'aria-modal': true }));
-        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+        const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
+        expect(claims.length).toBe(1);
+        expect(claims[0].args).toEqual(['m7', true]);
     });
 
     it('aria-modal="false" does NOT auto-claim', () => {

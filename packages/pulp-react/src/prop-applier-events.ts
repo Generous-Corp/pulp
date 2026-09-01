@@ -25,7 +25,7 @@ export function applyEventProp(
         // releaseOverlay is emitted by applyChangedProps when the prop flips
         // off, and by detach() at unmount.
         case 'overlay':
-            if (value) { call('claimOverlay', id); return true; }
+            if (value) { call('claimOverlay', id, true); return true; }
             call('releaseOverlay', id);
             return true;
 
@@ -46,14 +46,14 @@ export function applyEventProp(
         case 'role': {
             const r = typeof value === 'string' ? value.toLowerCase() : '';
             if (r === 'dialog' || r === 'alertdialog' || r === 'menu' || r === 'listbox') {
-                call('claimOverlay', id);
+                call('claimOverlay', id, true);
                 return true;
             }
             return true;
         }
         case 'aria-modal': {
             const truthy = value === true || value === 'true' || value === '';
-            if (truthy) { call('claimOverlay', id); return true; }
+            if (truthy) { call('claimOverlay', id, true); return true; }
             return true;
         }
 
