@@ -4595,6 +4595,14 @@ the last inventory refresh, leaving main's contract three registrations stale
 until the next unrelated full proof exposed it. Treat changes to discovered test
 sources exactly like explicit `add_test` changes for this refresh requirement.
 
+If two independent exact-head full proofs report the same inventory counts and
+digest while the candidate diff adds, removes, or renames no CTest registration,
+treat that agreement as current-main inventory drift rather than warm-build
+contamination. Derive the canonical manifest from either configured build,
+refresh all four mirrors above together, and rerun the inventory self-test. Do
+not spend another unchanged full-suite admission: a 2026-09-01 pair of proofs
+repeated the same 191-registration delta before this distinction was recorded.
+
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued

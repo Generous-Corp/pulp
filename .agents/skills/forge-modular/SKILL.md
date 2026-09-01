@@ -123,6 +123,18 @@ A **different** dead module, or a different requirement, is progress and must
 never be called a repeat: escalating on a run that is improving tells the model
 to throw away a fix that worked.
 
+### A live module can still feed the one output that stays silent
+
+Do not send another model call when the full Rack gate proves that a patch's
+listener path is silent but the source module has a measured-live sibling
+output. `deterministic_repair.py` may audition that sibling only when its exact
+semantic role set matches the silent output, and it may change only cables on
+the listener path. Activity is not acceptance: rerun the full DSP/audibility
+gate and keep the repair only when the patch becomes measured audible. If no
+same-role sibling qualifies, or the replacement remains silent, preserve the
+original patch and its honest failure. This is a general output-selection
+repair, never a module-identity exception.
+
 `render_inventory` has the same honesty rule: a module with no recorded jacks
 prints `ports: UNKNOWN`, and inputs and outputs are independent. It used to
 emit both only `if m.get("inputs")`, so an uncartographed module and one with
@@ -1171,6 +1183,165 @@ generated DSP and provide actionable retry context.
 using as `FORGE_MODULAR_TOOLCHAIN_ROOT` — CMake refuses a dirty toolchain and
 the next Forge configure fails.
 
+### A cable into a CV input carries nothing while its depth control is zero
+
+The patch-side twin of the inert-input case above, and it is worse, because
+nothing in the patch distinguishes the broken version from the working one.
+
+Measured, not reasoned: the same edge into `Fundamental/VCF` `in:0` reads
+CAUSAL at **1206x** the detection floor with the depth control open, and
+NOT_CAUSAL at **0.00x** with it at its default of zero. Same cable, same
+analyzer, structurally identical patches. A label reader calls both a
+modulation edge, and every structural check in `lint()` passes on both. So a
+patch that cables a CV input without opening its depth control **looks
+correct, lints clean, and does nothing** — the person who asked for it gets no
+error, just a result that is inexplicably boring.
+
+Module authors default depth controls to zero because that is the safe
+default, so this is ordinary rather than exotic. Measured over 184 generated
+patches (69 prompts), **21.7% of prompt families shipped at least one dead
+edge** — and they were the modulation prompts: *slow vibrato on a sustained
+note* built LFO → attenuator (set to a careful 0.06) → VCO `Frequency
+modulation`, and left `FM amount` at 0. There is no vibrato in that patch.
+
+`tools/rack/cv_depth.py` handles both halves, and only one of them needs
+evidence:
+
+- **`open_depth_controls`** is the fix, and it runs inside `prepare_and_lint`
+  before anything judges the patch. Cable a CV input, get a nonzero depth.
+  **Nonzero by default, never nonzero by force** — a value the model or the
+  prompt authored is left exactly as written, *including a deliberate zero*.
+  Opening a control is benign, so a nominated association is good enough to
+  act on.
+- **`dead_edge_errors`** is the report, and it can reject a patch, so it only
+  does that where a witness receipt rendered audio
+  (`cv-depth-receipts.json`). Everything else reaches the reader through
+  `explain()` and fails nothing.
+
+**Three verdicts, never collapsed.** `FAIL` needs a witness that graded
+blocking. `ADVISORY` is a name heuristic — its precision beyond the ground
+truth it was built from is UNMEASURED, which is exactly why it may not
+reject a user's patch. `UNEVALUATED` means the module has depth controls and
+we do not know which one governs this input; failing a patch for a gap in our
+own coverage would punish the user for our missing measurement.
+
+`Nominated.blocking` returns a literal `False` and the class carries no field
+that reaches it. That is deliberate: a guess must be **structurally** unable
+to reject a patch, not merely policy-bound not to. `test_cv_depth.py` asserts
+it at confidences past anything the rules emit.
+
+**Every association rule abstains rather than guess.** Two candidate controls
+for one input is an abstention, not a coin flip — that is how a heuristic
+acquires confident wrong answers. The consequence is real coverage loss:
+`Cutoff CV (1V/oct)` and `Frequency modulation` defeat word matching, so a
+`sole-candidate` rule pairs by counting when a module offers exactly one
+modulation input and exactly one depth control. It reaches the two commonest
+dead edges in the corpus and is still NOMINATED.
+
+**What this does NOT reach.** The rule only fills a control the patch never
+mentioned. Where the model explicitly writes the depth param to `0.0` — which
+is *8 of the 9 dead edges surviving the fix* — the rule correctly stands down
+and the edge is only reported. That residue is a prompt-contract problem, not
+a default-value one.
+
+**Coverage is the honest caveat.** An association is known for only ~9% of
+cable-fed inputs, so 21.7% is a floor, not an estimate. Before quoting any
+dead-edge rate, print how many edges were evaluable: a low number here is
+usually the instrument, not the world.
+
+### A module saved with its run flag false silences the patch
+
+The sibling of the dead-edge rule, and the one with evidence at scale. Measured
+as a census over every silent corpus patch carrying a stopped module: the
+unmodified control held silent **62/70**, flipping the run flag to true **woke
+22**, and a sham arm flipping the same number of blob booleans on keys that are
+*not* run-shaped woke **1/70** — a 25x contrast. The modules that woke are
+dominated by **master clocks**, so one flag silences the whole patch rather
+than one branch.
+
+The state lives in each module's saved `data` blob, which decodes as ordinary
+JSON with self-describing keys. `running` is the commonest.
+
+**An allowlist writes; a heuristic only reports.** Name shape was the right
+instrument for *measuring* a corpus of other people's patches, where the module
+set is unbounded. It is the wrong one for a **writer**: the generator knows
+exactly which modules it emits, so it can be exact. Two off-valued keys, both
+found by *reading* a family's key set rather than by pattern, show why:
+
+- **`ImpromptuModular/clockMaster: false` marks the clocks that are NOT the
+  master.** Setting several true creates a conflict — and this is the same
+  plugin whose clocks dominate the wake list, so it is inside the blast radius
+  rather than at the edge of it.
+- **`Valley/frozen: false` is a reverb's healthy state.** True silences the
+  patch. The same shape as the `bypass` inversion.
+
+From a name, `running` on an unread family is indistinguishable from
+`clockMaster`. So `TRANSPORT_RUN_KEYS` (plus any run field the curated registry
+declares) is what may be **written**; a run-shaped key anywhere else is
+reported as `SUSPECTED` and left alone. Extending the allowlist is a short read,
+not a guess: key counts look prohibitive only because one concept is indexed per
+track or step (`manualBeat-0-3`, `id_t3_fadeRate`), and collapsing the index
+takes 364 keys to 91 and 692 to 100 — Impromptu, CountModula and Valley are 30,
+20 and 8.
+
+**Three sign errors, each of which INVERTS a result rather than weakening it:**
+
+1. **`bypass` and `muted` are not run flags.** `bypass: false` is the *healthy*
+   state; folding it in makes a writer switch every healthy module into bypass.
+   Note where the exclusion actually bites: the run-word set is narrow enough
+   that a bare `bypass` never qualifies anyway, so `NOT_RUN_WORDS` earns its
+   keep only on **compound** keys like `bypassRunning`. The same argument keeps
+   `enabled`, `active` and `on` out — a false there is routinely the legitimate
+   default of an optional feature. **`clockMaster` and `frozen` are denied by
+   NAME as well**, because the word set happening to contain neither CLOCK nor
+   FROZEN today is an accident: widen it and the exclusion would vanish
+   silently. Proven rather than asserted — widening `RUN_WORDS` to include
+   CLOCK/MASTER/FROZEN leaves the suite green, and only dropping the by-name
+   denial as well turns it red.
+2. **A list value is refused.** A per-channel `[true] × 24`, or a `run: [1]`,
+   must not read as stopped. Held in two independent places, so breaking either
+   one alone leaves the behaviour correct.
+3. **The saved type is preserved on write.** A module that stored `0`/`1` may
+   ignore a JSON boolean — a **silent no-op** presenting as *"starting it does
+   nothing"*, which is a false null rather than a visible failure.
+
+**Why this is a writer and not an audit, and why that reading is the OPPOSITE
+of the dead-edge rule's.** `cv_depth` treats an authored zero as intent and
+stands down. `run_state` treats an authored `false` as the defect and flips it.
+The difference is whose patch it is: a person who stops a clock and saves meant
+to, and their saved patch is evidence of a choice; a generator has no such
+habit and no way to notice it emitted one. The single channel that *can* ask
+for a stopped module is `module-state-overrides.json`, and only a value
+declared **stopped** there is honoured.
+
+**The registry does not close this on its own — verified, not assumed.**
+`materialize_module_state` applies `data_defaults` with `setdefault`, so it
+fills an ABSENT key and never displaces one the model already wrote:
+
+```
+AS/SEQ16 registry declares running: true
+  authored {"running": false} → after materialize_module_state → false   (!)
+  authored key absent          → after materialize_module_state → true   (control)
+```
+
+So the one entry that exists to force that sequencer running is defeated by the
+model writing the field itself. `run_state.start_stopped_modules` runs after
+materialization and closes it.
+
+**It never invents a run key.** Where a module carries no run-shaped key we do
+not know the key's name, its type, or whether the module has one — and writing
+a guessed key into a saved-state blob is exactly the silent no-op of sign error
+3. That case is UNEVALUATED.
+
+**And UNEVALUATED is nearly all of it.** Across 183 generated patches: 107
+clock/sequencer instances, of which **only 5 carry any run-shaped key**. The
+other 102 are decided by the module's constructor default, which no patch-side
+analysis can see. The generator emits almost no saved state at all — three
+distinct `data` keys across 1350 modules — so this class is *nearly not
+expressible* in its output. The rule is a guard against a defect the model can
+introduce and against the registry gap above, not a fix for something currently
+happening. Before quoting a rate here, print how many modules were evaluable.
+
 ### A guard nothing runs goes stale silently, and this one did
 
 That test was written, was correct, and exited 1 — and **nothing ever ran it**.
@@ -1273,6 +1444,21 @@ patches.
 - Over SSH the model CLI cannot reach its credential in the login keychain, so
   the CLI surface on a remote machine needs a window there or an unlocked
   keychain. That is a real blocker, not a flake.
+
+The signed app's qualification inputs use a deliberately non-duplicated helper
+layout: `FORGE_BUILD_INFO` and `build/rack_patch_decode` are under `Resources`,
+while the executing Python toolchain is `Resources/tools/rack`. Qualification
+may treat that decoder as the executing candidate only when the build-info file
+has its exact name and the paths resolve beneath a real
+`*.app/Contents/Resources` boundary. An installed or developer toolchain outside
+that exact bundle layout must still carry its own `rack_patch_decode`,
+identical to the candidate by the canonical content identity, so a missing
+helper cannot pass merely because some bundle was named. Decoder identity comes
+from the bundled
+`examples/forge-modular/binary_identity.py`, not a raw file digest: Developer
+ID signing replaces the Mach-O signature after the stamp is authored. Raw bytes
+may differ only in that excluded signature; executable-content drift must still
+fail qualification.
 
 ## The seam: the app's sources live here, the build happens in Forge
 

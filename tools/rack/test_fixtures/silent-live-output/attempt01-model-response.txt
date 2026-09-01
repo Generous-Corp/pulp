@@ -1,0 +1,31 @@
+```json patch
+{
+  "version": "2.6.6",
+  "modules": [
+    {"id": 1, "plugin": "Befaco", "model": "Muxlicer", "pos": [0, 0], "params": [{"id": 0, "value": 1}, {"id": 3, "value": 0.42}]},
+    {"id": 2, "plugin": "CVfunk", "model": "Picus", "pos": [16, 0], "params": [{"id": 28, "value": 1}, {"id": 29, "value": 0}, {"id": 30, "value": 0}, {"id": 31, "value": 1}, {"id": 32, "value": 0}, {"id": 33, "value": 0}, {"id": 34, "value": 1}, {"id": 35, "value": 0}, {"id": 38, "value": 1}, {"id": 45, "value": 5}, {"id": 47, "value": 1}]},
+    {"id": 3, "plugin": "ForgeModular", "model": "SEQ", "pos": [34, 0], "params": [{"id": 0, "physical": 0, "unit": "V"}, {"id": 1, "physical": -0.417, "unit": "V"}, {"id": 2, "physical": -0.75, "unit": "V"}, {"id": 3, "physical": -0.167, "unit": "V"}, {"id": 4, "physical": 0, "unit": "V"}, {"id": 5, "physical": -0.583, "unit": "V"}, {"id": 6, "physical": -0.25, "unit": "V"}, {"id": 7, "physical": -0.917, "unit": "V"}]},
+    {"id": 4, "plugin": "Bogaudio", "model": "Bogaudio-DADSRH", "pos": [50, 0], "params": [{"id": 0, "value": 0}, {"id": 1, "value": 0.03}, {"id": 2, "value": 0.2}, {"id": 3, "value": 0.35}, {"id": 4, "value": 0.25}, {"id": 5, "value": 0.08}, {"id": 10, "value": 0}, {"id": 11, "value": 0}, {"id": 13, "value": 1}]},
+    {"id": 5, "plugin": "AudibleInstruments", "model": "Tides2", "pos": [60, 0], "params": [{"id": 0, "value": 1}, {"id": 1, "value": 0}, {"id": 2, "value": 0}, {"id": 3, "value": -24}, {"id": 4, "value": 0.38}, {"id": 5, "value": 0.62}, {"id": 6, "value": 0.5}, {"id": 7, "value": 0.5}, {"id": 11, "value": 0.85}]},
+    {"id": 6, "plugin": "Core", "model": "AudioInterface2", "pos": [74, 0]}
+  ],
+  "cables": [
+    {"id": 1, "outputModuleId": 1, "outputId": 0, "inputModuleId": 2, "inputId": 0, "color": "#ffb437"},
+    {"id": 2, "outputModuleId": 2, "outputId": 0, "inputModuleId": 3, "inputId": 0, "color": "#ffb437"},
+    {"id": 3, "outputModuleId": 2, "outputId": 0, "inputModuleId": 4, "inputId": 0, "color": "#ffb437"},
+    {"id": 4, "outputModuleId": 3, "outputId": 0, "inputModuleId": 5, "inputId": 2, "color": "#8b4ade"},
+    {"id": 5, "outputModuleId": 4, "outputId": 0, "inputModuleId": 5, "inputId": 4, "color": "#3695ef"},
+    {"id": 6, "outputModuleId": 5, "outputId": 0, "inputModuleId": 6, "inputId": 0, "color": "#f3374b"}
+  ]
+}
+```
+
+```json why
+{
+  "1:0>2:0": "the master pulse keeps the distributed pattern anchored",
+  "2:0>3:0": "Euclidean hits advance an evolving eight-note bass contour",
+  "2:0>4:0": "the same sparse hits articulate each note consistently",
+  "3:0>5:2": "varied step voltages turn repetition into melodic evolution",
+  "4:0>5:4": "each hit briefly reshapes the oscillator's harmonic character"
+}
+```

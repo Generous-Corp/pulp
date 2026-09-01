@@ -18,10 +18,13 @@ SPEC.loader.exec_module(MODULE)
 
 
 def macho(code: bytes, signature: bytes) -> bytes:
-    header = struct.pack("<IiiIIIII", 0xFEEDFACF, 0, 0, 2, 1, 16, 0, 0)
-    signature_offset = len(header) + 16 + len(code)
+    header = struct.pack("<IiiIIIII", 0xFEEDFACF, 0, 0, 2, 2, 88, 0, 0)
+    signature_offset = len(header) + 72 + 16 + len(code)
+    segment = struct.pack(
+        "<II16sQQQQIIII", 0x19, 72, b"__TEXT", 0, signature_offset,
+        0, signature_offset, 7, 5, 0, 0)
     command = struct.pack("<IIII", 0x1D, 16, signature_offset, len(signature))
-    return header + command + code + signature
+    return header + segment + command + code + signature
 
 
 class BinaryIdentityTest(unittest.TestCase):
@@ -44,6 +47,26 @@ class BinaryIdentityTest(unittest.TestCase):
             self.assertNotEqual(
                 MODULE.content_sha256(str(first)), MODULE.content_sha256(str(second))
             )
+
+    def test_signature_offset_cannot_hide_executable_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            candidate = Path(td) / "candidate"
+            data = bytearray(macho(b"executable code", b"signature"))
+            signature_command = 32 + 72
+            forged_offset = signature_command + 16
+            struct.pack_into("<II", data, signature_command + 8,
+                             forged_offset, len(data) - forged_offset)
+            candidate.write_bytes(data)
+            with self.assertRaisesRegex(ValueError,
+                                        "file-backed executable data"):
+                MODULE.content_sha256(str(candidate))
+
+    def test_signature_blob_must_be_terminal(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            candidate = Path(td) / "candidate"
+            candidate.write_bytes(macho(b"code", b"signature") + b"tail")
+            with self.assertRaisesRegex(ValueError, "terminal Mach-O blob"):
+                MODULE.content_sha256(str(candidate))
 
     @unittest.skipUnless(platform.system() == "Darwin", "requires macOS codesign")
     def test_real_codesign_replacement_is_identity_invariant(self) -> None:

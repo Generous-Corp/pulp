@@ -157,6 +157,14 @@ For an existing capability change:
 - Keep numeric parameter ranges/defaults/choices in `forge-catalog.json`; use a
   `forge_descriptor` reference instead of copying them.
 
+For realtime capability implementations, do not treat a short-range
+`std::stable_sort` as allocation-free merely because the macOS/libc++ probe is
+green. libstdc++ may allocate scratch space for every non-empty range while
+libc++ keeps small trivially-copyable ranges in place. Prefer a bounded
+in-place stable ordering algorithm when the capability already declares a
+fixed maximum, and size the allocation negative control beyond libc++'s short
+in-place threshold so either standard library can expose a regression.
+
 For removal:
 
 1. First publish the live capability as `status: deprecated` with a matching
@@ -408,6 +416,44 @@ sequence rather than one checklist. Make all four edits before running it:
    **do not edit those** — history is append-only.
 4. **Both counters** — `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`,
    reported as two separate errors.
+
+### `rederive.py` alone leaves `contract-history.json` at the protected base
+
+`agent_capability_rederive.py` prints `wrote ... contract-history.json` and then
+`reset N generated artifact(s) to the protected base`. The reset wins: the
+history file ends up matching the base, carrying **none** of the new keys, while
+the manifest and surface files do carry them.
+
+Nothing catches this. `--check` reports `fresh`, `test_agent_capability_manifest.py`
+passes all its checks, and `gates.sh` is green — the history is append-only
+evidence, not a validated input, so no gate reads it. The transaction only looks
+complete.
+
+Run `agent_capability_manifest.py --write` **after** `rederive.py`, then prove
+the history actually moved before believing the transaction is done:
+
+```sh
+git diff --stat HEAD -- tools/agent-capabilities/contract-history.json   # must be non-empty
+grep -c "<your.new-key>" tools/agent-capabilities/contract-history.json  # must be >= 1
+```
+
+Use an already-published key as the control for that grep — a brand-new key from
+the previous transaction returns 1, so a 0 on yours is a real absence rather
+than a broken pattern.
+
+### A catalog-bound header must NOT also get a `REVIEWED_HEADERS` row
+
+A header named by a `binding(...)` in a catalog is already a capability
+entrypoint. Adding a `capability_support` row for it in `REVIEWED_HEADERS` fails
+with `headers cannot be both capability entrypoints and separately reviewed`,
+and that failure arrives from `rederive.py` as a *surface* problem, which reads
+like a fingerprint issue rather than a duplicate-registration one.
+
+For a new kernel header, `REVIEWED_MINIMAL_TARGETS` is the only registry edit it
+needs. `REVIEWED_HEADERS` rows are for headers that no catalog binds: shared
+vocabulary headers (whose `capability_keys` list names the kernels expressed
+over them) and `infrastructure` headers such as a private `detail/` helper,
+which bind no key of their own.
 
 ### `header_fingerprint` is not the SHA-256 of the header file
 
