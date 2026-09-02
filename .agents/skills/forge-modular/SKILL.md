@@ -1092,6 +1092,86 @@ knowledge about the ~40% of the library CARTOG cannot reach because nobody has
 it installed. It is a prior, never a measurement, and must never override a
 real scan.
 
+### The support count is only as good as the identity behind it
+
+`usage-priors` admits a port hint only when several **distinct contributors**
+independently wire a jack the same way, so one contributor cannot corroborate
+themselves by uploading twice. That makes the contributor identity, not the
+floor, the part that decides whether the lane can ever admit anything.
+
+An identity that reads a field the stored evidence does not carry does not
+error. Every observation falls into the same anonymous bucket, support pins at
+exactly 1, and any floor above 1 becomes unreachable. The lane then prints
+`corroborated priors: 0` with a four-figure quarantine, which reads as a
+finding about the corpus rather than a broken instrument, and the honest-looking
+number invites the wrong fix: lowering the floor. The floor was never the
+problem.
+
+So the lane now reports `degenerate_support` and prints a warning when *every*
+observation has support exactly 1, because a corpus that genuinely lacks
+corroboration still shows a spread of support counts. When you change anything
+about how contributors are told apart, re-run the sensitivity control rather
+than reading the headline: run it once each at `--min-support 1`, `2` and `3` and compare. A
+real corpus decays (many at 1, fewer at 2, fewer at 3); a broken identity falls
+off a cliff (everything at 1, nothing above it).
+
+The identity is a comparison token, never a label: contributor names are hashed
+before they are counted, so nothing downstream can print or persist one even by
+accident. Tests for this must be shaped like the **stored** records rather than
+like the writer's output, since a fixture that supplies whichever field the code
+happens to read agrees with it by construction and proves nothing.
+
+### What the prior is actually worth, measured
+
+`corpus_audit.py prior-accuracy` scores the inference where the answer is
+already known. The lane infers an unmapped port's class from the mapped end of
+a cable, and by construction nothing can check that: the port is unmapped
+because there is no scan of it. A cable with **both** ends mapped is the
+held-out case, so run the same inference there and compare against the port's
+own class.
+
+Measured over the current corpus:
+
+| min-support | scored | correct | wrong |
+|---|---|---|---|
+| 1 | 400 | 324 (81.0%) | 76 |
+| 2 | 128 | 117 (91.4%) | 11 |
+| 3 | 60 | 59 (98.3%) | 1 |
+| 5 | 16 | 16 (100%) | 0 |
+
+Two things follow. The admission floor of 3 is not arbitrary: it is where a
+four-in-five guess becomes a fifty-to-one one. And accuracy climbing with
+support is the **control on the support count itself** - if contributors were
+not really being told apart, support would be noise and the line would be flat.
+`prior-accuracy` warns when it stops climbing, for exactly that reason.
+
+Read the number as an upper bound and say so when quoting it. A port has a
+known class here only because it is mapped, and mapped ports are plausibly
+better named than the unmapped ports the lane actually serves. This scores the
+inference, never the module: a prior remains a hint that a real scan overrides.
+
+### Nothing consumes the priors yet, and the port map is the wrong home
+
+Say this plainly before quoting the accuracy table at anyone: the report is
+proposal-only and **no code reads it**. Count the readers rather than assuming
+one exists. The lane produces good hints that currently go nowhere, so the
+remaining work is a consumer, not more inference.
+
+When that consumer is built, it does not belong in the port map, and the port
+map's own docstring says why. `portmap_merge.hpp` folds a fresh scan in by
+replacing a re-measured module's whole block, so anything inferred that is
+stored there is erased the moment somebody scans the module. Ranges belong
+there because they ARE the scanner's fact; a classification is not, which is
+exactly why affordances are kept in their own cache instead. A prior is
+inferred, so it follows the affordance precedent, not the range one.
+
+The precedence a consumer has to preserve, strongest first: this machine's own
+scan, then the shipped seed, then a prior. A prior may only answer where the
+port map has no answer at all. It never fills a gap inside an entry the
+scanner already replaced, because "the scanner looked and found nothing" and
+"nobody has looked" are different answers and merging them is how an inference
+comes to outrank a measurement.
+
 ## The reading corpus has an index, and retrieval is not admission
 
 The source shelf is large enough that opening books one by one is no longer a

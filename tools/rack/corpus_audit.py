@@ -11,6 +11,7 @@ happened to fail; this asks thousands of real cables the same question at once.
     corpus_audit.py coverage       # how much of the corpus we can even judge
     corpus_audit.py cables         # what real patches actually connect
     corpus_audit.py usage-priors   # corroborated hints for unmapped ports
+    corpus_audit.py prior-accuracy # score those hints where truth is known
 
 WHY CABLES AND NOT PATCHES. A patch is one datapoint and carries the whole
 idiom-resolution machinery on top; a cable is a datapoint about exactly one
@@ -30,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import json
 import os
 import sys
@@ -297,6 +299,35 @@ def _signal(name: str, role, direction: str) -> str | None:
     return None
 
 
+def _contributor_key(row: dict) -> str:
+    """An opaque per-contributor token used only to count distinct sources.
+
+    Support is the number of distinct tokens behind a fact, so this decides
+    whether corroboration is possible at all. A key derived from a field the
+    evidence store does not carry collapses every observation into one bucket,
+    caps support at 1, and makes any floor above 1 structurally unreachable --
+    which reads as "the corpus corroborates nothing" rather than as a broken
+    instrument. So prefer a numeric contributor id, fall back to a hash of the
+    contributor name, and only then collapse to a single anonymous bucket.
+
+    The name is hashed rather than carried: this token exists to be compared
+    for equality, never to be read, so nothing downstream can print or persist
+    an identity even by accident.
+    """
+    author_id = row.get("source_author_id")
+    if isinstance(author_id, int) and not isinstance(author_id, bool):
+        # An id the source did record is authoritative in both directions: a
+        # positive id identifies a contributor, and a non-positive one is the
+        # source stating the upload is unattributed, which no accompanying name
+        # may override. Only a missing id leaves the question open.
+        return f"contributor:{author_id}" if author_id > 0 else "contributor:unknown"
+    name = (row.get("source_author") or "").strip().lower()
+    if name:
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+        return f"contributor-digest:{digest}"
+    return "contributor:unknown"
+
+
 def usage_prior_report(rows: list, min_support: int = 3) -> dict:
     """Corroborated, non-authoritative port hints for unscanned modules.
 
@@ -307,13 +338,7 @@ def usage_prior_report(rows: list, min_support: int = 3) -> dict:
     """
     evidence: dict[tuple, set] = collections.defaultdict(set)
     for row in rows:
-        author_id = row.get("source_author_id")
-        # Deduplication only: this string is added to a set whose length is
-        # the support count, and never reaches the report. Known ids stay
-        # distinct from each other and anonymous uploads collapse to one.
-        evidence_key = (f"contributor:{author_id}"
-                        if isinstance(author_id, int) and not isinstance(author_id, bool)
-                        and author_id > 0 else "contributor:unknown")
+        evidence_key = _contributor_key(row)
         if row["s"] is None and row["d"] is not None:
             signal = _signal(row["d"][0], row["d"][1], "in")
             if signal:
@@ -329,6 +354,7 @@ def usage_prior_report(rows: list, min_support: int = 3) -> dict:
     for plugin, model, direction, index, signal in evidence:
         by_port[(plugin, model, direction, index)].add(signal)
 
+    supports = [len(sources) for sources in evidence.values()]
     admitted, quarantine = [], []
     for key, patches_seen in sorted(evidence.items(), key=lambda item:
                                     (-len(item[1]), item[0])):
@@ -355,6 +381,7 @@ def usage_prior_report(rows: list, min_support: int = 3) -> dict:
         "minimum_distinct_author_support": min_support,
         "admitted": admitted,
         "quarantine": quarantine,
+        "degenerate_support": bool(supports) and max(supports) == 1 and len(supports) > 1,
     }
 
 
@@ -367,16 +394,104 @@ def cmd_usage_priors(rows: list, min_support: int, json_path: str = "") -> None:
               f"{row['direction']}[{row['index']}] -> {row['signal']}")
     if not report["admitted"]:
         print("    (none clear the admission floor)")
+    if report.get("degenerate_support"):
+        # Distinguish the two ways this lane reports nothing. A corpus that
+        # genuinely lacks corroboration still shows a spread of support counts;
+        # every observation landing on exactly 1 means the identity behind the
+        # count read a field the evidence carries under another name, so the
+        # floor could never have fired. Say so, rather than let an instrument
+        # fault read as a finding about the corpus.
+        print("    WARNING: every observation has support exactly 1 across "
+              f"{len(report['quarantine'])} observations.")
+        print("    That is the signature of a contributor identity resolving "
+              "to one bucket, not of an uncorroborated corpus.")
     if json_path:
         with open(json_path, "w") as f:
             json.dump(report, f, indent=2, sort_keys=True)
         print(f"  wrote proposal-only report: {json_path}")
 
 
+def prior_accuracy(rows: list, floors=(1, 2, 3, 5)) -> list:
+    """Score the usage prior where the answer is already known.
+
+    The lane infers an unmapped port's class from the mapped end of a cable,
+    and by construction nothing can check it: the port is unmapped because we
+    have no scan of it. A cable with BOTH ends mapped is the held-out case --
+    run the same inference and compare against the port's own class.
+
+    This measures the assumption the whole lane rests on, that a cable's two
+    ends carry the same class of signal, and it measures what the admission
+    floor is buying. Accuracy that climbs with support is the control: a
+    contributor identity that could not tell sources apart would give a flat
+    line, because the support count would then be noise.
+
+    Read it as an upper bound. A port has a known class here only because it
+    is mapped, and mapped ports are plausibly better named than the unmapped
+    ports the lane actually serves.
+    """
+    evidence: dict[tuple, set] = collections.defaultdict(set)
+    truth: dict[tuple, str] = {}
+    for row in rows:
+        source = _contributor_key(row)
+        s, d = row["s"], row["d"]
+        if s is None or d is None:
+            continue
+        s_signal = _signal(s[0], s[1], "out")
+        d_signal = _signal(d[0], d[1], "in")
+        if d_signal:
+            key = (*row["src"], "output", row["s_index"])
+            evidence[(key, d_signal)].add(source)
+            if s_signal:
+                truth[key] = s_signal
+        if s_signal:
+            key = (*row["dst"], "input", row["d_index"])
+            evidence[(key, s_signal)].add(source)
+            if d_signal:
+                truth[key] = d_signal
+
+    by_port: dict[tuple, set[str]] = collections.defaultdict(set)
+    for key, signal in evidence:
+        by_port[key].add(signal)
+
+    out = []
+    for floor in floors:
+        hit = miss = unscored = 0
+        for (key, signal), sources in evidence.items():
+            if len(by_port[key]) > 1 or len(sources) < floor:
+                continue
+            if key not in truth:
+                unscored += 1
+            elif truth[key] == signal:
+                hit += 1
+            else:
+                miss += 1
+        scored = hit + miss
+        out.append({"min_support": floor, "scored": scored, "correct": hit,
+                    "wrong": miss, "unscored": unscored,
+                    "accuracy": (hit / scored) if scored else None})
+    return out
+
+
+def cmd_prior_accuracy(rows: list) -> None:
+    report = prior_accuracy(rows)
+    print("  held-out accuracy (both cable ends mapped, so truth is known)")
+    for entry in report:
+        accuracy = ("    n/a" if entry["accuracy"] is None
+                    else f"{100 * entry['accuracy']:6.1f}%")
+        print(f"    min-support {entry['min_support']}: scored "
+              f"{entry['scored']:5d}  correct {entry['correct']:5d} "
+              f"({accuracy})  wrong {entry['wrong']:4d}")
+    scored = [e for e in report if e["accuracy"] is not None]
+    if len(scored) > 1 and scored[-1]["accuracy"] <= scored[0]["accuracy"]:
+        print("    WARNING: accuracy does not improve with corroboration.")
+        print("    Support is not behaving like evidence; check that "
+              "contributors are actually being told apart.")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("cmd", choices=["jacks", "coverage", "cables",
-                                    "usage-priors"])
+                                    "usage-priors", "prior-accuracy"])
     ap.add_argument("--min-support", type=int, default=3,
                     help="distinct patch bodies required for a usage prior")
     ap.add_argument("--json", default="",
@@ -395,7 +510,8 @@ def main() -> int:
         cmd_usage_priors(rows, a.min_support, a.json)
     else:
         ({"jacks": cmd_jacks, "coverage": cmd_coverage,
-          "cables": cmd_cables}[a.cmd])(rows)
+          "cables": cmd_cables,
+          "prior-accuracy": cmd_prior_accuracy}[a.cmd])(rows)
     return 0
 
 
