@@ -43,6 +43,7 @@ class ProducerTest(unittest.TestCase):
         run(self.root, "git", "init", "-q")
         run(self.root, "git", "config", "user.name", "A2T Test")
         run(self.root, "git", "config", "user.email", "a2t@example.invalid")
+        run(self.root, "git", "config", "commit.gpgsign", "false")
         for relative in (
             MODULE.VERIFIER_PATH, MODULE.ISSUER_PATH, MODULE.WORKFLOW_PATH,
             MODULE.SCHEMA_PATH, *set(MODULE.EXECUTED_DEPENDENCIES.values()),
