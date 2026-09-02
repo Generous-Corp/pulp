@@ -13,12 +13,13 @@ found that way in a single day, each costing an investigation.
     patch_corpus.py fetch [N]     # add up to N patches to the corpus
     patch_corpus.py status        # what is held, and under which licences
 
-TERMS. Patchstorage publishes no Terms of Service -- there is no such page and
-none is linked. What governs instead:
+TERMS. Which third party a fetch talks to, and the terms that govern it, are
+recorded with the evidence rather than here -- see `provider()` below. What
+holds for any provider:
 
-  * `robots.txt` is `User-agent: * / Crawl-delay: 10` with NO Disallow, so
-    automated access is permitted and the delay is honoured here to the second.
-  * The Beta API is public and documented for querying.
+  * `robots.txt` governs. The crawl delay it asks for is honoured to the
+    second, and a `Disallow` means no fetch happens at all.
+  * Only a public, documented query API is used.
   * Every patch carries its OWN licence, which the index records. That is a
     statement from the person who holds the rights, which is worth more than a
     site-wide policy: it travels with each patch and can be filtered on.
@@ -27,8 +28,8 @@ We analyse; we do not redistribute. Everything retained here remains private
 research material regardless of its licence. Nothing fetched here is ever
 packaged or emitted by the public exporter: the corpus lives beside the
 reference library under Application Support, outside the repository, because a
-`.gitignore` has no authority over a file copy and 113 MB of somebody else's
-books reached a signed installer that way once.
+`.gitignore` has no authority over a file copy and 113 MB of third-party
+reference material reached a signed installer that way once.
 """
 
 from __future__ import annotations
@@ -42,23 +43,59 @@ import time
 import urllib.error
 import urllib.request
 
-API = "https://patchstorage.com/api/beta"
-VCV_PLATFORM = 745
-
-# Their robots.txt asks for ten seconds between requests. It is the only rate
-# statement they publish, so it is the one we keep -- including on the API,
-# where we could argue a different norm applies and would rather not.
-CRAWL_DELAY = float(os.environ.get("FORGE_CORPUS_DELAY", "10"))
-
-# Identifying, with a way to be told to stop. An anonymous scraper is the
-# thing a site defends itself against; a named one can be asked to leave.
-UA = ("pulp-forge-research/1.0 (VCV patch analysis, not redistribution; "
-      "contact daniel.raffel@gmail.com)")
-
-ROOT = os.path.expanduser(
-    "~/Library/Application Support/Forge Modular/corpus/patchstorage")
+ROOT = os.path.expanduser(os.environ.get(
+    "FORGE_CORPUS_ROOT",
+    "~/Library/Application Support/Forge Modular/corpus/patches"))
 INDEX = os.path.join(ROOT, "index.json")
 PATCH_DIR = os.path.join(ROOT, "patches")
+
+# WHERE A FETCH GOES IS NOT WRITTEN DOWN HERE. A descriptor names one specific
+# third party: its query API, the platform id that selects VCV patches, the
+# delay its robots.txt asks for, and the contact a fetch identifies itself
+# with. That is acquisition provenance, so it is kept beside the evidence it
+# acquired instead of in this repository, and nothing public names or
+# advertises a source. Reading and auditing a corpus that already exists needs
+# no descriptor; only fetching more does.
+PROVIDER = os.path.join(ROOT, "provider.json")
+PROVIDER_KEYS = ("api", "platform", "user_agent")
+
+# Absent a descriptor, ten seconds: slower than any robots.txt is likely to
+# ask, which is the safe direction to be wrong in.
+DEFAULT_CRAWL_DELAY = 10.0
+
+_provider: dict | None = None
+
+
+def provider() -> dict:
+    """The acquisition descriptor, read from the private corpus root."""
+    global _provider
+    if _provider is None:
+        try:
+            with open(PROVIDER) as f:
+                doc = json.load(f)
+        except OSError as e:
+            raise SystemExit(
+                f"no acquisition descriptor at {PROVIDER}. Fetching needs one; "
+                f"reading the held corpus does not.") from e
+        missing = [k for k in PROVIDER_KEYS if not doc.get(k)]
+        if missing:
+            raise SystemExit(
+                f"{PROVIDER} is missing {', '.join(missing)}")
+        _provider = doc
+    return _provider
+
+
+def crawl_delay() -> float:
+    """Seconds between requests: the environment, then the descriptor, then 10."""
+    override = os.environ.get("FORGE_CORPUS_DELAY")
+    if override:
+        return float(override)
+    if os.path.exists(PROVIDER):
+        try:
+            return float(provider().get("crawl_delay") or DEFAULT_CRAWL_DELAY)
+        except (SystemExit, TypeError, ValueError):
+            return DEFAULT_CRAWL_DELAY
+    return DEFAULT_CRAWL_DELAY
 
 # A patch's wiring is kilobytes; anything far past this is bundled audio.
 MAX_PATCH_BYTES = 8 * 1024 * 1024
@@ -69,10 +106,11 @@ _last_request = 0.0
 def _get(url: str) -> bytes:
     """One request, never sooner than the crawl delay since the last."""
     global _last_request
-    wait = CRAWL_DELAY - (time.time() - _last_request)
+    wait = crawl_delay() - (time.time() - _last_request)
     if wait > 0:
         time.sleep(wait)
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    req = urllib.request.Request(
+        url, headers={"User-Agent": provider()["user_agent"]})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             return r.read()
@@ -151,7 +189,7 @@ def read_patch(path: str) -> dict | None:
 
 def load_index() -> dict:
     if not os.path.exists(INDEX):
-        return {"source": "patchstorage.com", "patches": {}}
+        return {"patches": {}}
     with open(INDEX) as f:
         return json.load(f)
 
@@ -165,13 +203,14 @@ def save_index(index: dict) -> None:
 
 
 def listing(page: int, per_page: int = 100) -> list:
-    url = (f"{API}/patches?platforms={VCV_PLATFORM}"
+    p = provider()
+    url = (f"{p['api']}/patches?platforms={p['platform']}"
            f"&per_page={per_page}&page={page}")
     return json.loads(_get(url))
 
 
 def detail(patch_id: int) -> dict:
-    return json.loads(_get(f"{API}/patches/{patch_id}"))
+    return json.loads(_get(f"{provider()['api']}/patches/{patch_id}"))
 
 
 def fetch(limit: int) -> int:
@@ -328,8 +367,9 @@ def main(argv: list[str]) -> int:
         status()
         return 0
     limit = int(args[1]) if len(args) > 1 else 50
-    print(f"fetching up to {limit} VCV patches, {CRAWL_DELAY:g}s apart "
-          f"(~{limit * CRAWL_DELAY * 2 / 60:.0f} min)", flush=True)
+    delay = crawl_delay()
+    print(f"fetching up to {limit} VCV patches, {delay:g}s apart "
+          f"(~{limit * delay * 2 / 60:.0f} min)", flush=True)
     added = fetch(limit)
     print(f"\nadded {added}")
     status()

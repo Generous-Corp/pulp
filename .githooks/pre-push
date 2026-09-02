@@ -153,6 +153,7 @@ COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
+YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
 
 BASE="${PULP_PREPUSH_BASE:-origin/main}"
 
@@ -479,6 +480,19 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
         0) ;;
         1) echo "[pre-push] conflict-marker guard: committed conflict marker(s) — run \`python3 tools/scripts/conflict_marker_check.py\` for the file:line list." >&2; fail=1 ;;
         *) echo "[pre-push] conflict_marker_check: internal error" >&2 ;;
+    esac
+fi
+
+# Yoga oracle/pin lockstep — the web-compat harness reports any CSS property
+# missing from a hand-transcribed table of one Yoga release as out-of-scope, so
+# a Yoga pin bump without a table refresh hides real gaps behind an improving
+# coverage number. Whole-tree, offline, sub-second.
+if [ -f "$YOGA_ORACLE_PIN" ]; then
+    run_gate_captured "$PYTHON" "$YOGA_ORACLE_PIN"
+    case $? in
+        0) ;;
+        1) echo "[pre-push] yoga-oracle lockstep: the compat oracle no longer describes the pinned Yoga — run \`python3 tools/scripts/check_yoga_oracle_pin.py\` for both values." >&2; fail=1 ;;
+        *) echo "[pre-push] check_yoga_oracle_pin: internal error" >&2 ;;
     esac
 fi
 

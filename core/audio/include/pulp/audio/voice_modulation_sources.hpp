@@ -149,25 +149,23 @@ public:
     bool prepared() const noexcept { return prepared_; }
     const VoiceModulationSourcesConfig& config() const noexcept { return config_; }
 
-    /// RT-safe after prepare. Retunes every voice's LFO in place, leaving
-    /// phase, lifecycle, and random streams untouched.
+    /// RT-safe after prepare. Retunes every voice's LFO, preserving phase and
+    /// the lifecycle stage.
     ///
-    /// `prepare()` is the configure-time path: it re-prepares each voice's
-    /// LFO, which rewinds phase to zero and re-seeds. A consumer that drives
-    /// wave, rate, or depth from live parameters cannot reach the bank
-    /// through it — an LFO re-prepared whenever a parameter moves never
-    /// advances at all. These setters are that live path. A later
-    /// `prepare()` overwrites all three.
-    void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {
-        config_.lfo.wave = wave;
-        for (auto& lfo : lfos_)
-            lfo.set_wave(wave);
-    }
-
-    /// Rejects a non-finite or non-positive rate exactly as `prepare()`
-    /// validates one, leaving the current rate in place.
+    /// Rate is an automation destination in every synth that has an LFO at all
+    /// — it is what a "LFO Rate" knob writes to — so it cannot be reachable
+    /// only through `prepare()`. `prepare()` allocates, is control-thread only,
+    /// and restarts phase; sweeping a rate knob through it would stall the LFO
+    /// at phase 0 for the whole sweep.
+    ///
+    /// Rejects a non-finite or non-positive rate — the rates `prepare()`
+    /// refuses — and reports whether the rate was taken. The shipped LFO
+    /// clamps a non-positive rate up into its own legal range rather than
+    /// refusing it, so accepting one here would leave `config()` holding a
+    /// rate that `prepare(config())` then rejects: the bank and the config it
+    /// reports would disagree.
     bool set_lfo_rate_hz(double rate_hz) noexcept {
-        if (!std::isfinite(rate_hz) || !(rate_hz > 0.0))
+        if (!prepared() || !std::isfinite(rate_hz) || !(rate_hz > 0.0))
             return false;
         config_.lfo.rate_hz = rate_hz;
         for (auto& lfo : lfos_)
@@ -175,14 +173,38 @@ public:
         return true;
     }
 
-    /// Bipolar output scale, applied when a lane is rendered. Negative values
-    /// negate the output; they do not shift phase. Rejects a non-finite
-    /// depth, leaving the current depth in place.
+    /// RT-safe after prepare. Rescales every voice's bipolar LFO output.
+    ///
+    /// Negative values invert the wave, which is the documented way to express
+    /// a source whose convention is the inverse of this one's. Depth is the
+    /// other half of a live LFO's automation surface, and has the same reason
+    /// as the rate for not living behind `prepare()`.
+    ///
+    /// Rejects a non-finite depth, leaving the current depth in place, and
+    /// reports whether the depth was taken.
     bool set_lfo_depth(float depth) noexcept {
-        if (!std::isfinite(depth))
+        if (!prepared() || !std::isfinite(depth))
             return false;
         config_.lfo.depth = depth;
         return true;
+    }
+
+    /// RT-safe after prepare. Reshapes every voice's LFO, preserving phase and
+    /// the lifecycle stage.
+    ///
+    /// A shape selector is a control a player turns, so it belongs with the
+    /// rate and depth rather than behind `prepare()`. Leaving it prepare-only
+    /// forces a caller whose shape is authored per patch to re-prepare a bank
+    /// the audio thread may be reading from, which is a data race the caller
+    /// then has to invent a publication scheme to avoid. Random streams are not
+    /// reseeded, so switching away from `sh_random` and back resumes the same
+    /// stream rather than replaying it.
+    void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {
+        if (!prepared())
+            return;
+        config_.lfo.wave = wave;
+        for (auto& lfo : lfos_)
+            lfo.set_wave(wave);
     }
 
     /// RT-safe after prepare. Note-on retriggers that voice's LFO per its

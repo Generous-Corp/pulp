@@ -566,87 +566,34 @@ TEST_CASE("Live retune leaves LFO phase running where prepare would rewind it",
     CHECK(differs);
 }
 
-TEST_CASE("Retuning rate before render matches configuring that rate outright",
-          "[audio][voice-mod-sources]") {
-    VoiceModulationSources<2> configured;
-    REQUIRE(configured.prepare(sine_config(400.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false)));
-    const auto expected = render_audio_rate_lfo(configured, 0, 48);
-
-    VoiceModulationSources<2> retuned;
-    REQUIRE(retuned.prepare(sine_config(120.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false)));
-    REQUIRE(retuned.set_lfo_rate_hz(400.0));
-    const auto actual = render_audio_rate_lfo(retuned, 0, 48);
-
-    for (std::size_t i = 0; i < expected.size(); ++i)
-        CHECK_THAT(actual[i], WithinAbs(expected[i], 1.0e-6));
-    CHECK(retuned.config().lfo.rate_hz == 400.0);
-}
-
-TEST_CASE("Switching wave mid-render keeps the phase it had reached",
-          "[audio][voice-mod-sources]") {
-    auto triangle_config = sine_config(120.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false);
-    triangle_config.lfo.wave = pulp::signal::Lfo::Wave::triangle;
-
-    // Phase increment depends only on rate, so a bank that ran 16 frames as a
-    // sine sits at the same phase as one that ran 16 frames as a triangle.
-    VoiceModulationSources<2> reference;
-    REQUIRE(reference.prepare(triangle_config));
-    const auto whole = render_audio_rate_lfo(reference, 0, 32);
-
-    VoiceModulationSources<2> switched;
-    REQUIRE(switched.prepare(sine_config(120.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false)));
-    (void)render_audio_rate_lfo(switched, 0, 16);
-    switched.set_lfo_wave(pulp::signal::Lfo::Wave::triangle);
-    const auto tail = render_audio_rate_lfo(switched, 0, 16);
-
-    for (std::size_t i = 0; i < 16; ++i)
-        CHECK_THAT(tail[i], WithinAbs(whole[16 + i], 1.0e-6));
-    CHECK(switched.config().lfo.wave == pulp::signal::Lfo::Wave::triangle);
-}
-
-TEST_CASE("Live depth scales the lane and a negative depth negates it",
-          "[audio][voice-mod-sources]") {
-    const auto config = sine_config(120.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false);
-
-    VoiceModulationSources<2> unity;
-    REQUIRE(unity.prepare(config));
-    const auto plain = render_audio_rate_lfo(unity, 0, 24);
-
-    VoiceModulationSources<2> negated;
-    REQUIRE(negated.prepare(config));
-    REQUIRE(negated.set_lfo_depth(-1.0f));
-    const auto flipped = render_audio_rate_lfo(negated, 0, 24);
-
-    for (std::size_t i = 0; i < plain.size(); ++i)
-        CHECK_THAT(flipped[i], WithinAbs(-plain[i], 1.0e-6));
-}
-
-TEST_CASE("Live setters reject the values prepare rejects and change nothing",
+TEST_CASE("Live retune refuses a non-positive rate and leaves the lane alone",
           "[audio][voice-mod-sources]") {
     const auto config = sine_config(120.0, 0.5f, VoiceLfoPhasePolicy::FreeRunning, false);
     VoiceModulationSources<2> sources;
     REQUIRE(sources.prepare(config));
 
     const double kept_rate = sources.config().lfo.rate_hz;
-    const float kept_depth = sources.config().lfo.depth;
 
+    // The shipped LFO clamps a non-positive rate up into its own legal range
+    // rather than refusing it, so a setter that took one would leave config()
+    // reporting a rate prepare() rejects.
     CHECK_FALSE(sources.set_lfo_rate_hz(0.0));
     CHECK_FALSE(sources.set_lfo_rate_hz(-10.0));
-    CHECK_FALSE(sources.set_lfo_rate_hz(std::numeric_limits<double>::quiet_NaN()));
-    CHECK_FALSE(sources.set_lfo_rate_hz(std::numeric_limits<double>::infinity()));
-    CHECK_FALSE(sources.set_lfo_depth(std::numeric_limits<float>::quiet_NaN()));
-    CHECK_FALSE(sources.set_lfo_depth(std::numeric_limits<float>::infinity()));
-
     CHECK(sources.config().lfo.rate_hz == kept_rate);
-    CHECK(sources.config().lfo.depth == kept_depth);
 
-    // A rejected value must also leave the rendered lane untouched.
+    // A refused rate leaves the rendered lane untouched.
     VoiceModulationSources<2> untouched;
     REQUIRE(untouched.prepare(config));
     const auto expected = render_audio_rate_lfo(untouched, 0, 16);
     const auto actual = render_audio_rate_lfo(sources, 0, 16);
+    REQUIRE(expected.size() == 16);
     for (std::size_t i = 0; i < expected.size(); ++i)
         CHECK_THAT(actual[i], WithinAbs(expected[i], 1.0e-6));
+
+    // ...and the config it still reports stays one prepare() accepts, which is
+    // the invariant the refusal exists to hold.
+    VoiceModulationSources<2> round_trip;
+    CHECK(round_trip.prepare(sources.config()));
 }
 
 TEST_CASE("Realtime paths allocate nothing after prepare", "[audio][voice-mod-sources]") {
@@ -672,9 +619,97 @@ TEST_CASE("Realtime paths allocate nothing after prepare", "[audio][voice-mod-so
                 .write_voice(3, buffer, VoiceModulationTarget::Aux0, VoiceModulationTarget::Gain,
                              VoiceModulationRate::Constant, 32)
                 .ok);
-    sources.set_lfo_wave(pulp::signal::Lfo::Wave::triangle);
     REQUIRE(sources.set_lfo_rate_hz(311.0));
-    REQUIRE(sources.set_lfo_depth(-0.25f));
+    REQUIRE(sources.set_lfo_depth(-0.4f));
+    sources.set_lfo_wave(pulp::signal::Lfo::Wave::sh_random);
+    sources.set_lfo_wave(pulp::signal::Lfo::Wave::triangle);
     sources.note_off(3);
     REQUIRE_FALSE(probe.saw_allocation());
+}
+
+TEST_CASE("Rate changes retune every voice without disturbing phase",
+          "[audio][voice-mod-sources]") {
+    VoiceModulationSources<2> sources;
+    REQUIRE(sources.prepare(sine_config(100.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false)));
+
+    const auto before = render_audio_rate_lfo(sources, 0, 32);
+    REQUIRE(before.size() == 32);
+
+    REQUIRE(sources.set_lfo_rate_hz(400.0));
+    REQUIRE_THAT(sources.config().lfo.rate_hz, WithinAbs(400.0, 0.0));
+
+    // The sweep continues from the phase the first block left behind rather
+    // than restarting, which is the whole reason this is not `prepare()`.
+    const double carried = wrap01(32.0 * 100.0 / kSampleRate);
+    const auto after = render_audio_rate_lfo(sources, 0, 16);
+    for (std::uint32_t frame = 0; frame < 16; ++frame) {
+        const double phase = wrap01(carried + static_cast<double>(frame) * 400.0 / kSampleRate);
+        REQUIRE_THAT(static_cast<double>(after[frame]),
+                     WithinAbs(std::sin(kTwoPi * phase), 2.0e-6));
+    }
+}
+
+TEST_CASE("Negative depth inverts the wave exactly", "[audio][voice-mod-sources]") {
+    auto config = sine_config(250.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false);
+    config.lfo.wave = pulp::signal::Lfo::Wave::triangle;
+
+    VoiceModulationSources<2> sources;
+    REQUIRE(sources.prepare(config));
+    const auto positive = render_audio_rate_lfo(sources, 0, 48);
+
+    sources.reset();
+    REQUIRE(sources.set_lfo_depth(-1.0f));
+    const auto inverted = render_audio_rate_lfo(sources, 0, 48);
+
+    REQUIRE(inverted.size() == positive.size());
+    bool saw_nonzero = false;
+    for (std::size_t frame = 0; frame < positive.size(); ++frame) {
+        REQUIRE(inverted[frame] == -positive[frame]);
+        saw_nonzero = saw_nonzero || positive[frame] != 0.0f;
+    }
+    // Without this the identity above would hold trivially on a silent lane.
+    REQUIRE(saw_nonzero);
+}
+
+TEST_CASE("Wave changes reshape every voice without disturbing phase",
+          "[audio][voice-mod-sources]") {
+    VoiceModulationSources<2> sources;
+    REQUIRE(sources.prepare(sine_config(100.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false)));
+
+    const auto sine = render_audio_rate_lfo(sources, 0, 32);
+    REQUIRE(sine.size() == 32);
+
+    sources.set_lfo_wave(pulp::signal::Lfo::Wave::triangle);
+    REQUIRE(sources.config().lfo.wave == pulp::signal::Lfo::Wave::triangle);
+
+    // The triangle picks up at the phase the sine left behind. A reshape that
+    // restarted phase would be a discontinuity on a slow LFO, which is exactly
+    // what re-preparing the bank would do.
+    const double carried = wrap01(32.0 * 100.0 / kSampleRate);
+    const auto triangle = render_audio_rate_lfo(sources, 0, 16);
+    for (std::uint32_t frame = 0; frame < 16; ++frame) {
+        const double phase = wrap01(carried + static_cast<double>(frame) * 100.0 / kSampleRate);
+        const double expected = phase < 0.5 ? -1.0 + 4.0 * phase : 3.0 - 4.0 * phase;
+        REQUIRE_THAT(static_cast<double>(triangle[frame]), WithinAbs(expected, 2.0e-6));
+    }
+    // The two shapes have to actually differ, or the comparison above would
+    // pass against an unchanged sine.
+    REQUIRE(triangle[0] != sine[0]);
+}
+
+TEST_CASE("Live setters refuse unprepared banks and non-finite values",
+          "[audio][voice-mod-sources]") {
+    VoiceModulationSources<2> sources;
+    REQUIRE_FALSE(sources.set_lfo_rate_hz(120.0));
+    REQUIRE_FALSE(sources.set_lfo_depth(0.25f));
+    sources.set_lfo_wave(pulp::signal::Lfo::Wave::square);
+    REQUIRE_FALSE(sources.prepared());
+    REQUIRE_THAT(sources.config().lfo.rate_hz, WithinAbs(5.0, 0.0));
+    REQUIRE(sources.config().lfo.wave == pulp::signal::Lfo::Wave::sine);
+
+    REQUIRE(sources.prepare(sine_config(100.0, 0.5f, VoiceLfoPhasePolicy::FreeRunning, false)));
+    REQUIRE_FALSE(sources.set_lfo_rate_hz(std::numeric_limits<double>::quiet_NaN()));
+    REQUIRE_FALSE(sources.set_lfo_depth(std::numeric_limits<float>::infinity()));
+    REQUIRE_THAT(sources.config().lfo.rate_hz, WithinAbs(100.0, 0.0));
+    REQUIRE_THAT(static_cast<double>(sources.config().lfo.depth), WithinAbs(0.5, 0.0));
 }

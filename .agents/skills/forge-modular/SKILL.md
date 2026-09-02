@@ -80,10 +80,19 @@ Rules it follows, each of which was a wrong answer first:
 ## A table is not a fact, and a retry cannot see the run
 
 Two lessons from the run kept in `tools/rack/test_fixtures/silent-oscillator/`.
-A correctly-wired patch was silent because one oscillator produced 0.000 V, and
-the model kept that oscillator for **four consecutive attempts**, adjusting its
-knobs. Its params were all in range and none at a silencing zero, so retuning
-was never going to work.
+A correctly-wired patch read silent because one oscillator reported 0.000 V,
+and the model kept that oscillator for **four consecutive attempts**, adjusting
+its knobs. Its params were all in range and none at a silencing zero, so
+retuning was never going to work.
+
+That oscillator was not broken. It was licensed, and the gate of the day never
+resolved licence keys, so it wrote zeros: this run is an instance of "A
+licensed module runs, writes zeros, and logs nothing" below, and the replay in
+`tools/rack/licence-fix-replay.json` carries both of its patches moving silent
+to audible under the fixed gate. **That changes the cause and not one of the
+lessons.** The retry could not see the harness, only the readings, so naming
+the first module in the chain reading zero was still the right move and the
+right answer was still Zephyr.
 
 **The information was already there and was not usable.** The retry context
 carried the entire per-module table and told the model to "find the FIRST
@@ -545,6 +554,67 @@ module, so essentially every measurement over that corpus is about a rack with
 missing modules, whatever else it also says. Check `otool -L` before trusting
 any generation-era audio result.
 
+## A licensed module runs, writes zeros, and logs nothing
+
+A VCV Library module resolves its entitlement from a cached key at
+`<asset::userDir>/licenses/<plugin>.vcvkey`. Nothing sets `userDir` for you. In
+a harness that only calls `dlopen` it is empty, so the lookup goes to
+`/licenses/...`, finds nothing, and the module **constructs normally, runs its
+DSP, and writes 0 to every output**. No exception, no failed load, no log line.
+
+That is externally indistinguishable from a module that is genuinely dead,
+which is the whole problem. A gate that measures outputs reports SILENT, the
+generation believes the module is broken, and it spends its retries replacing a
+part that works.
+
+**The ordering is load-bearing:**
+
+```
+asset::userDir = <the Rack user dir>  ->  rack::asset::init()  ->  first dlopen
+```
+
+`asset::init()` called after the first `dlopen` does nothing. The key is read
+while the plugin initialises, not when it is asked for its output.
+
+The control that separates "unlicensed" from "dead":
+
+```bash
+ls ~/Library/Application\ Support/Rack2/licenses/*.vcvkey | wc -l
+# non-zero, or the comparison below proves nothing
+```
+
+Then measure the same patch with and without `userDir` set. A verdict that
+**changes** is a licence; a verdict that **holds** is a real defect. Do not
+skip the first line: on a machine with no keys, both halves agree for a reason
+that has nothing to do with the patch.
+
+Every harness that loads plugins has to do this, not only the audibility gate.
+`test_patch.py` asserts it, so a new loader that forgets is caught there rather
+than by a run of patches that read as silent for a reason nobody can see.
+
+### `nm` cannot tell you whether a plugin links libRack
+
+The obvious check for the missing-`-lRack` defect above is to look at the
+symbols, and it does not work. `nm -m plugin.dylib | grep _ZN4rack` reports
+**118 undefined for a correct build and a broken one alike**; shipped
+third-party plugins report 165. Undefined `rack::` symbols are normal, because
+they are exactly what the flat namespace resolves at load. Only `otool -L`
+names the load command, and a missing load command is the defect.
+
+## The gate is seeded from the clock, so a single flip is noise
+
+`patch_gate` calls `rack::random::init()`, which seeds from the clock inside
+libRack, so two identical passes over the same patch can disagree. Measured
+over a corpus it is rare and real: one disagreement in 500 patch-measurements,
+and always one patch flipping rather than a set.
+
+So a replay or an A/B that reports **one** changed verdict has reported noise.
+Run the same binary twice before comparing two binaries, and state that floor
+beside the result. An effect has to clear it to mean anything, and the ceiling
+matters too: if only 13 patches in the corpus can possibly change, a result of
+8 is inside a band of 2 to 13, not a rate.
+
+
 ## Intent anchors are constraints, not decoration
 
 `@Maker` and plain role words are retrieval guidance unless the user says
@@ -951,20 +1021,28 @@ detector measures nothing however impressive the sample size.
 ## Where the patch corpus lives, and what it was actually worth
 
 ```
-~/Library/Application Support/Forge Modular/corpus/patchstorage/
+~/Library/Application Support/Forge Modular/corpus/patches/
+    provider.json  the acquisition descriptor: which third party, its query
+                   API, the delay its robots.txt asks for, contact string
     index.json     per patch: id, title, author, url, licence, licence slug,
                    sha256, tags, categories, fetched_at
     patches/*.vcv  the bodies — Zstandard, `tar --zstd -xf … patch.json`
 ```
 
-**Outside the repo entirely, and deliberately so** — `ditto` copies a directory
-rather than git's view of it, which is how 113 MB of reference books once
-reached a signed installer.
+**The source is named in `provider.json`, not in the repository.** Which third
+party the corpus came from, and the terms that governed the fetch, are
+acquisition provenance and live with the evidence. `FORGE_CORPUS_ROOT`
+overrides the location; `tools/rack/patch_corpus.py` refuses to fetch without a
+descriptor and needs none to read what is already held.
 
-**Licence never opens the public-export boundary.** RackDocs and Patchstorage
-PDFs, images, patch bodies, titles, uploader identities, URLs, ids, hashes,
-source prose, and full per-patch module/cable topology remain private regardless
-of their licence. `tools/rack/corpus_export.py` is not a backup command: it
+**Outside the repo entirely, and deliberately so** — `ditto` copies a directory
+rather than git's view of it, which is how 113 MB of third-party reference
+material once reached a signed installer.
+
+**Licence never opens the public-export boundary.** Third-party PDFs, images,
+patch bodies, titles, uploader identities, URLs, ids, hashes, source prose, and
+full per-patch module/cable topology remain private regardless of their
+licence. `tools/rack/corpus_export.py` is not a backup command: it
 writes one fixed-schema report containing only source-neutral aggregate counts,
 abstract functional-role vocabulary, independently worded criteria, and
 corroborated generic signal-prior buckets. It refuses an existing destination
@@ -974,12 +1052,13 @@ tools continue to read the machine-local corpus directly. Keep
 `rack-corpus-export` registered and its malicious synthetic fixtures green when
 changing this boundary.
 
-Fetched via the public beta API. Patchstorage publishes **no Terms of Service**;
-`robots.txt` carries `Crawl-delay: 10` and no `Disallow`, and **every patch
-carries its own licence in the API response**, which is a stronger permission
-signal than a site-wide document because it comes from the rights holder. The
-crawl delay is honoured and the licence is recorded per patch, so anything
-non-permissive can be excluded from storage later without re-fetching.
+Fetched via a public, documented query API under the terms recorded in
+`provider.json`. `robots.txt` governs: the delay it asks for is honoured to the
+second and a `Disallow` means no fetch at all. **Every patch carries its own
+licence in the API response**, which is a stronger permission signal than a
+site-wide document because it comes from the rights holder. The licence is
+recorded per patch, so anything non-permissive can be excluded from storage
+later without re-fetching.
 
 **What it was predicted to find:** port-matching defects in bulk, over real
 usage.
