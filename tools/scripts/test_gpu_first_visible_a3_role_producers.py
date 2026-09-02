@@ -1164,6 +1164,16 @@ def main() -> int:
         ]
         for role, mutation, smoke, needle in negatives:
             completed, receipt = run_role(root, evidence, role, mutation=mutation, smoke=smoke)
+            if sys.platform != "darwin" and receipt["dependencies"] == [
+                "source-build-isolation:macos-sandbox"
+            ]:
+                assert completed.returncode == 2
+                assert receipt["outcome"] == "inconclusive"
+                assert receipt["reason"] == (
+                    "independent source proof requires the macOS sandbox used by the M5 campaign"
+                )
+                assert not any(receipt["artifacts"].values())
+                continue
             assert completed.returncode == 1, (role, mutation, completed.stderr, receipt)
             assert receipt["outcome"] == "fail"
             assert needle in receipt["reason"], (mutation, receipt["reason"])
