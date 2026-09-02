@@ -781,6 +781,20 @@ class CleanAgentHarnessTests(unittest.TestCase):
             base_revision = init_repo(root, {"source.txt": "base\n"})
             (root / "source.txt").write_text("candidate\n", encoding="utf-8")
             run("git", "commit", "-qam", "candidate", cwd=root)
+            candidate_revision = run("git", "rev-parse", "HEAD", cwd=root)
+            candidate_tree = run("git", "rev-parse", "HEAD^{tree}", cwd=root)
+            synthetic = subprocess.run(
+                [
+                    "git", "commit-tree", candidate_tree,
+                    "-p", base_revision, "-p", candidate_revision,
+                ],
+                cwd=root,
+                input="synthetic merge group\n",
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            run("git", "reset", "--hard", synthetic, cwd=root)
             head_revision = run("git", "rev-parse", "HEAD", cwd=root)
             run("git", "update-ref", "-d", "refs/remotes/origin/main", cwd=root)
             event_path = fixture / "event.json"
@@ -804,25 +818,83 @@ class CleanAgentHarnessTests(unittest.TestCase):
 
             valid = {
                 "repository": {"full_name": "Generous-Corp/pulp"},
-                "merge_group": {"base_sha": base_revision},
+                "merge_group": {
+                    "base_ref": "refs/heads/main",
+                    "base_sha": base_revision,
+                },
             }
             derived = identity(valid)
             self.assertEqual(derived["origin_main"], base_revision)
             self.assertEqual(derived["revision"], head_revision)
             self.assertNotEqual(derived["origin_main"], derived["revision"])
+            pull_request = {
+                "repository": {"full_name": "Generous-Corp/pulp"},
+                "pull_request": {"base": {"ref": "main", "sha": base_revision}},
+            }
+            self.assertEqual(
+                identity(pull_request, event_name="pull_request")["origin_main"],
+                base_revision,
+            )
+            wrong_pull_base = json.loads(json.dumps(pull_request))
+            wrong_pull_base["pull_request"]["base"]["ref"] = "develop"
+            with self.assertRaisesRegex(trust.TrustError, "canonical main"):
+                identity(wrong_pull_base, event_name="pull_request")
+
+            prior_candidate = subprocess.run(
+                ["git", "commit-tree", candidate_tree, "-p", base_revision],
+                cwd=root, input="prior candidate\n", check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            cumulative_base = subprocess.run(
+                [
+                    "git", "commit-tree", candidate_tree,
+                    "-p", base_revision, "-p", prior_candidate,
+                ],
+                cwd=root, input="prior cumulative group\n", check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            cumulative_head = subprocess.run(
+                [
+                    "git", "commit-tree", candidate_tree,
+                    "-p", cumulative_base, "-p", candidate_revision,
+                ],
+                cwd=root, input="cumulative synthetic group\n", check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            run("git", "reset", "--hard", cumulative_head, cwd=root)
+            cumulative_event = json.loads(json.dumps(valid))
+            cumulative_event["merge_group"]["base_sha"] = cumulative_base
+            self.assertEqual(
+                identity(cumulative_event, event_head=cumulative_head)["origin_main"],
+                base_revision,
+            )
+            run("git", "reset", "--hard", head_revision, cwd=root)
 
             invalid_payloads = (
                 {
                     "repository": {"full_name": "attacker/pulp"},
-                    "merge_group": {"base_sha": base_revision},
+                    "merge_group": {
+                        "base_ref": "refs/heads/main",
+                        "base_sha": base_revision,
+                    },
                 },
                 {
                     "repository": {"full_name": "Generous-Corp/pulp"},
-                    "merge_group": {"base_sha": "f" * 40},
+                    "merge_group": {
+                        "base_ref": "refs/heads/main",
+                        "base_sha": "f" * 40,
+                    },
                 },
                 {
                     "repository": {"full_name": "Generous-Corp/pulp"},
-                    "merge_group": {},
+                    "merge_group": {"base_ref": "refs/heads/main"},
+                },
+                {
+                    "repository": {"full_name": "Generous-Corp/pulp"},
+                    "merge_group": {
+                        "base_ref": "refs/heads/develop",
+                        "base_sha": base_revision,
+                    },
                 },
             )
             for payload in invalid_payloads:

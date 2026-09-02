@@ -264,9 +264,31 @@ def _github_event_protected_base(
         raise TrustError(f"GitHub {event_name} payload is unavailable")
     if event_name == "pull_request":
         base = event.get("base")
-        candidate = base.get("sha") if isinstance(base, dict) else None
+        if not isinstance(base, dict) or base.get("ref") != "main":
+            raise TrustError("GitHub pull request does not target canonical main")
+        candidate = base.get("sha")
     else:
-        candidate = event.get("base_sha")
+        if event.get("base_ref") != "refs/heads/main":
+            raise TrustError("GitHub merge group does not target canonical main")
+        group_base = event.get("base_sha")
+        if not isinstance(group_base, str) or SHA40_RE.fullmatch(group_base) is None:
+            raise TrustError("GitHub event has no exact protected-base commit identity")
+        revision = _text(_git(root, "rev-parse", "HEAD"))
+        group_parents = _text(_git(root, "show", "-s", "--format=%P", revision)).split()
+        if len(group_parents) != 2 or group_parents[0] != group_base:
+            raise TrustError("GitHub merge group has an unsupported synthetic-head shape")
+        candidate_parents = _text(
+            _git(root, "show", "-s", "--format=%P", group_parents[1])
+        ).split()
+        if len(candidate_parents) != 1:
+            raise TrustError("GitHub merge-group candidate is not one exact commit")
+        candidate = candidate_parents[0]
+        if candidate != group_base:
+            cumulative_parents = _text(
+                _git(root, "show", "-s", "--format=%P", group_base)
+            ).split()
+            if len(cumulative_parents) != 2 or cumulative_parents[0] != candidate:
+                raise TrustError("GitHub merge-group base is not a supported cumulative group")
     if not isinstance(candidate, str) or SHA40_RE.fullmatch(candidate) is None:
         raise TrustError("GitHub event has no exact protected-base commit identity")
     event_head = os.environ.get("GITHUB_SHA", "")
