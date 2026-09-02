@@ -59,8 +59,8 @@ struct StepPlayerStep {
     std::uint8_t gate_percent = 100;
     std::uint8_t probability_percent = 100;
     std::uint8_t ratchet_count = 1;
-    /// Signed micro-timing nudge in ticks, applied to this step's hits and to
-    /// their releases together so the gate length is preserved.
+    /// Micro-timing nudge in ticks, applied to this step's hits and to their
+    /// releases together so the gate length is preserved.
     ///
     /// This is what lets a caller place a hit off the grid. Swing, a groove
     /// table and a per-step nudge are all deterministic functions of the step's
@@ -69,9 +69,17 @@ struct StepPlayerStep {
     /// a caller wanting swing has to run its own scheduler, which is the
     /// duplication this kernel exists to remove.
     ///
-    /// Keep it smaller than the step interval. A nudge larger than the interval
-    /// reorders steps against each other, which the kernel does not attempt to
-    /// resolve.
+    /// The nudge is late-only, and a negative value is refused rather than
+    /// honoured. A step is discovered when its own interval opens, so pulling
+    /// it earlier would ask it to sound before the block that found it —
+    /// whether it survived would then depend on where the host happened to put
+    /// its callback boundaries, and the kernel's whole timing contract is that
+    /// it does not. A caller wanting a symmetric groove biases the lane late
+    /// and varies around that bias, which costs one constant and stays exact.
+    ///
+    /// A nudge is held inside the step's own interval at fire time, so it can
+    /// never reach the next step's grid position and the sequence cannot be
+    /// reordered against itself.
     std::int32_t timing_offset_ticks = 0;
     bool tie = false;
     bool slide = false;
@@ -315,8 +323,7 @@ class StepPlayer {
             return StepPlayerError::InvalidRatchetCount;
         if (step.pitch_offset < -48 || step.pitch_offset > 48)
             return StepPlayerError::InvalidPitchOffset;
-        if (step.timing_offset_ticks < -kMaximumTimingOffsetTicks ||
-            step.timing_offset_ticks > kMaximumTimingOffsetTicks)
+        if (step.timing_offset_ticks < 0 || step.timing_offset_ticks > kMaximumTimingOffsetTicks)
             return StepPlayerError::InvalidTimingOffset;
         return StepPlayerError::None;
     }
@@ -387,6 +394,7 @@ class StepPlayer {
         }
 
         current_block_ = &block;
+        update_anchor(block);
         steps_this_block_ = 0;
         const bool discontinuity = detects_discontinuity(block);
         if (discontinuity) {
@@ -569,24 +577,46 @@ class StepPlayer {
     }
 
     std::int64_t sample_for_tick(timebase::TickPosition tick) const noexcept {
-        const auto& block = *current_block_;
-        long double delta = 0.0L;
-        if (block.tempo_map != nullptr) {
-            const auto event_sample = block.tempo_map->fractional_ticks_to_samples(
-                static_cast<long double>(tick.value));
-            const auto anchor_sample = block.tempo_map->fractional_ticks_to_samples(
-                static_cast<long double>(block.tick_start.value));
-            delta = event_sample - anchor_sample;
-        } else {
-            const auto tick_delta = step_player_detail::difference_as_long_double(
-                tick.value, block.tick_start.value);
-            delta = tick_delta * block.sample_rate.as_long_double() * 60.0L /
-                    (static_cast<long double>(block.tempo_bpm) *
-                     static_cast<long double>(timebase::kTicksPerQuarter));
-        }
+        return saturating_sample_of(static_cast<long double>(anchor_sample_) +
+                                    (tick_axis(*current_block_, tick.value) - anchor_axis_));
+    }
+
+    /// A tick's position along the transport's sample axis, in fractional
+    /// samples. Only differences between two calls are meaningful; the origin
+    /// is whatever the tempo map or the constant-tempo formula uses.
+    long double tick_axis(const StepPlayerBlock& block, std::int64_t tick) const noexcept {
+        if (block.tempo_map != nullptr)
+            return block.tempo_map->fractional_ticks_to_samples(static_cast<long double>(tick));
+        return step_player_detail::difference_as_long_double(tick, 0) *
+               block.sample_rate.as_long_double() * 60.0L /
+               (static_cast<long double>(block.tempo_bpm) *
+                static_cast<long double>(timebase::kTicksPerQuarter));
+    }
+
+    /// Pins tick→sample projection to one point per transport segment.
+    ///
+    /// A block's `tick_start` is a rounded tick, so projecting relative to it
+    /// leaves a sub-tick residual that differs from block to block — enough to
+    /// tip a tick sitting near a half-sample onto either side and hand the same
+    /// event two different samples under two callback partitions. Holding the
+    /// anchor still across a segment makes the projection depend only on the
+    /// tick. A block whose own sample/tick pair no longer sits on the anchored
+    /// correspondence is a reposition, and re-anchors: a seek is free to put
+    /// the tick timeline anywhere against the running sample clock.
+    void update_anchor(const StepPlayerBlock& block) noexcept {
+        const auto axis = tick_axis(block, block.tick_start.value);
+        const auto offset = static_cast<long double>(block.sample_start.value) - axis;
+        if (anchored_ &&
+            std::fabs(offset - (static_cast<long double>(anchor_sample_) - anchor_axis_)) <= 0.5L)
+            return;
+        anchor_sample_ = block.sample_start.value;
+        anchor_axis_ = axis;
+        anchored_ = true;
+    }
+
+    static std::int64_t saturating_sample_of(long double absolute) noexcept {
         constexpr auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
         constexpr auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
-        const auto absolute = static_cast<long double>(block.sample_start.value) + delta;
         if (absolute <= minimum)
             return std::numeric_limits<std::int64_t>::min();
         if (absolute >= maximum)
@@ -645,7 +675,7 @@ class StepPlayer {
                 if (!clocks_[lane].initialized || !spec_.lanes[lane].enabled ||
                     (parked & (std::uint32_t{1} << lane)) != 0)
                     continue;
-                const auto sample = sample_for_tick(clocks_[lane].next_tick);
+                const auto sample = next_onset_sample(lane);
                 if (best_lane == spec_.lane_count || sample < best_sample) {
                     best_lane = lane;
                     best_sample = sample;
@@ -732,6 +762,42 @@ class StepPlayer {
         return 0;
     }
 
+    /// How far a step asks to be displaced off its grid position, in ticks.
+    ///
+    /// The authored offset is held inside the step's own interval. A
+    /// displacement that reached the next grid position would reorder the
+    /// sequence against itself, and one that reached past this block's end
+    /// would make the step's survival depend on where the host put its
+    /// callback boundary. Bounding it here means sequencing and firing ask the
+    /// same question and get the same answer from one place.
+    std::int64_t bounded_timing_offset(const StepPlayerStep& step,
+                                       std::int64_t interval_ticks) const noexcept {
+        if (!step.on || step.timing_offset_ticks <= 0)
+            return 0;
+        return std::min<std::int64_t>(static_cast<std::int64_t>(step.timing_offset_ticks),
+                                      std::max<std::int64_t>(0, interval_ticks - 1));
+    }
+
+    /// The sample a lane's next step actually speaks at, displacement included.
+    ///
+    /// Sequencing has to ask the displaced question rather than the grid one.
+    /// A step found by its grid tick but sounding after the render limit would
+    /// otherwise be advanced past without ever speaking, and whether that
+    /// happened would depend on the callback partition.
+    std::int64_t next_onset_sample(std::size_t lane_index) const noexcept {
+        const auto& lane = spec_.lanes[lane_index];
+        const auto tick = clocks_[lane_index].next_tick;
+        if (lane.step_count == 0 || lane.step_duration.value <= 0)
+            return sample_for_tick(tick);
+        const auto ordinal = step_player_detail::floor_div(tick.value, lane.step_duration.value);
+        const auto cycle = static_cast<std::uint64_t>(
+            step_player_detail::floor_div(ordinal, static_cast<std::int64_t>(lane.step_count)));
+        const auto index = walk_index(lane, ordinal, tick, lane_index, cycle);
+        const auto offset =
+            bounded_timing_offset(steps_[lane_index * MaxSteps + index], lane.step_duration.value);
+        return sample_for_tick({utility_detail::saturating_sample_add(tick.value, offset)});
+    }
+
     bool fire_step(std::size_t lane_index, std::int64_t step_sample, std::int64_t absolute_limit,
                    MidiBuffer& output, MidiUtilityProcessReport& report) noexcept {
         const auto& lane = spec_.lanes[lane_index];
@@ -762,10 +828,19 @@ class StepPlayer {
         const auto pitch = static_cast<std::uint8_t>(std::clamp(
             static_cast<int>(lane.base_note) + static_cast<int>(step.pitch_offset), 0, 127));
         const auto interval_ticks = following_tick.value - step_tick.value;
+        // The step's grid coordinate stays where it was authored — the walk
+        // index, the cycle and the probability draw above all read it — and
+        // only the moment it speaks moves. A displacement therefore cannot
+        // accumulate into drift.
+        const auto onset_tick = timebase::TickPosition{utility_detail::saturating_sample_add(
+            step_tick.value, bounded_timing_offset(step, interval_ticks))};
+        // The gate is measured from the interval the step was authored on, not
+        // from what a displacement leaves of it, so a nudged step keeps the
+        // length it was written with.
         const auto gate_ticks = std::max<std::int64_t>(
             1, step_player_detail::saturating_multiply(interval_ticks, step.gate_percent) / 100);
         const auto step_release_tick =
-            timebase::TickPosition{utility_detail::saturating_sample_add(step_tick.value,
+            timebase::TickPosition{utility_detail::saturating_sample_add(onset_tick.value,
                                                                          gate_ticks)};
 
         // Tie, slide, and choke are step-onset policies; they apply exactly
@@ -788,7 +863,7 @@ class StepPlayer {
                 const auto overlap_sample =
                     std::max(step_sample + 1,
                              sample_for_tick({utility_detail::saturating_sample_add(
-                                 step_tick.value, 1)}));
+                                 onset_tick.value, 1)}));
                 for (auto& sounding : sounding_)
                     if (sounding.active && sounding.lane == lane_index && sounding.note != pitch)
                         sounding.release_sample =
@@ -802,10 +877,13 @@ class StepPlayer {
 
         std::array<timebase::TickPosition, MaxRatchetHits> hits{};
         std::size_t hit_count = 1;
-        hits[0] = step_tick;
+        hits[0] = onset_tick;
         if (step.ratchet_count > 1) {
+            // A burst subdivides what the displacement leaves of the interval,
+            // so every hit stays inside the step that owns it however far the
+            // onset was nudged.
             const auto projection = timebase::project_ratchet_interval<MaxRatchetHits>(
-                step_tick, following_tick, step.ratchet_count, step_tick, following_tick,
+                onset_tick, following_tick, step.ratchet_count, onset_tick, following_tick,
                 std::span<timebase::TickPosition>(hits.data(), hits.size()));
             if (projection && projection.event_count > 0)
                 hit_count = projection.event_count;
@@ -816,16 +894,11 @@ class StepPlayer {
             std::max<std::int64_t>(1, gate_ticks / static_cast<std::int64_t>(hit_count));
 
         for (std::size_t hit = clock.hits_done; hit < hit_count; ++hit) {
-            // The nudge moves the attack and its release by the same amount,
-            // so a step keeps the gate length it was authored with.
-            const auto nudge = static_cast<std::int64_t>(step.timing_offset_ticks);
-            const auto hit_tick = timebase::TickPosition{
-                utility_detail::saturating_sample_add(hits[hit].value, nudge)};
+            const auto hit_tick = hits[hit];
             auto release_tick = timebase::TickPosition{utility_detail::saturating_sample_add(
                 hit_tick.value, hit_gate_ticks)};
             if (hit + 1 < hit_count) {
-                const auto next_tick =
-                    utility_detail::saturating_sample_add(hits[hit + 1].value, nudge);
+                const auto next_tick = hits[hit + 1].value;
                 if (next_tick <= release_tick.value)
                     release_tick = {std::max(next_tick - 1, hit_tick.value)};
             }
@@ -932,6 +1005,9 @@ class StepPlayer {
     std::array<LaneClock, MaxLanes> clocks_{};
     std::array<SoundingNote, kMaximumSoundingNotes> sounding_{};
     const StepPlayerBlock* current_block_ = nullptr;
+    bool anchored_ = false;
+    std::int64_t anchor_sample_ = 0;
+    long double anchor_axis_ = 0.0L;
     std::int64_t last_sample_end_ = 0;
     std::int64_t projected_tick_end_ = 0;
     bool last_playing_ = false;

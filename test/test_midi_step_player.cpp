@@ -811,12 +811,21 @@ TEST_CASE("StepPlayer rejects a timing offset beyond its declared bound",
 
     step.timing_offset_ticks = midi::StepPlayer<>::kMaximumTimingOffsetTicks;
     CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::None);
-    step.timing_offset_ticks = -midi::StepPlayer<>::kMaximumTimingOffsetTicks;
-    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::None);
 
     // One past the bound is refused rather than silently honoured, because a
     // nudge that large reorders the grid against itself.
     step.timing_offset_ticks = midi::StepPlayer<>::kMaximumTimingOffsetTicks + 1;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
+
+    // An early nudge is refused, not clamped. A step is discovered when its own
+    // interval opens, so pulling it earlier asks it to sound before the block
+    // that found it — and whether it then survived would depend on where the
+    // host put its callback boundaries, which is what this kernel promises not
+    // to depend on. Refusing says so at authoring time instead of producing a
+    // stream that is right at one block size and wrong at another.
+    step.timing_offset_ticks = -1;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
+    step.timing_offset_ticks = -midi::StepPlayer<>::kMaximumTimingOffsetTicks;
     CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
 
     // The bound must be wide enough to express swing on a sixteenth grid, which
@@ -848,4 +857,59 @@ TEST_CASE("StepPlayer with a zero timing offset is unchanged", "[midi][step-play
         CHECK(without[index].sample == with_zero[index].sample);
     for (std::size_t index = 0; index < without.size(); ++index)
         CHECK(without[index].sample == static_cast<std::int64_t>(index) * kStepSamples);
+}
+
+TEST_CASE("StepPlayer nudged steps are exact across callback partitions",
+          "[midi][step-player][partition][grid]") {
+    // One sample spans 29.4 ticks at 120 bpm / 48 kHz, so sweeping the nudge
+    // walks a step's onset across every sub-sample phase — including the half
+    // sample where rounding decides between two neighbouring samples. A host
+    // is free to hand the same transport to the kernel in any block sizes it
+    // likes, so the phase a nudged onset lands on must not depend on where the
+    // callback boundaries happen to fall.
+    const auto map = constant_tempo_map();
+    const auto build = [](std::int32_t nudge) {
+        PlayerFixture<> fixture(1);
+        auto player = fixture.make();
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            step.pitch_offset = static_cast<std::int8_t>(index);
+            // Offsets are late-only, so a groove nudges the off-beats and
+            // leaves the down-beats on the grid — the shape a swing plus a
+            // groove table produces.
+            step.timing_offset_ticks = index % 2 == 1 ? nudge : 0;
+            REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+        }
+        return player;
+    };
+
+    constexpr std::int64_t kTotal = 24'000;
+    const std::array single{std::int32_t{24'000}};
+    const std::array even{std::int32_t{512}};
+    const std::array odd{std::int32_t{137}, std::int32_t{999}, std::int32_t{4'096},
+                         std::int32_t{1}};
+
+    // The last two exceed a sixteenth's own interval, so they exercise the bound
+    // as well as the projection: an over-wide nudge is held inside the step it
+    // belongs to rather than reaching the next one.
+    for (const std::int32_t nudge : {1, 7, 14, 15, 22, 29, 30, 44, 59, 100, 1'471, 44'100, 176'400,
+                                     midi::StepPlayer<>::kMaximumTimingOffsetTicks}) {
+        INFO("nudge ticks = " << nudge);
+        auto whole = build(nudge);
+        const auto reference = render(whole, map, kTotal, single);
+        auto fine = build(nudge);
+        const auto chopped = render(fine, map, kTotal, even);
+        auto ragged = build(nudge);
+        const auto uneven = render(ragged, map, kTotal, odd);
+
+        REQUIRE(reference.size() == chopped.size());
+        REQUIRE(reference.size() == uneven.size());
+        for (std::size_t index = 0; index < reference.size(); ++index) {
+            INFO("event index = " << index << " reference sample = " << reference[index].sample
+                                  << " even sample = " << chopped[index].sample
+                                  << " ragged sample = " << uneven[index].sample);
+            CHECK(reference[index].identity() == chopped[index].identity());
+            CHECK(reference[index].identity() == uneven[index].identity());
+        }
+    }
 }
