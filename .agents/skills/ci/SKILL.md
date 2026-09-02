@@ -14,13 +14,14 @@ Validate branches and ship code safely. This skill handles all CI workflows for 
 
 ## A2T structural evidence is produced only by the required macOS PR job
 
-An A2T evidence PR that adds or modifies the exact tracked
+An A2T evidence PR targeting `Generous-Corp/pulp` `main` that adds or modifies the exact tracked
 `evidence/receipt.json` gets
 one additional fail-closed step in the native `macos` matrix child. The step
 runs `tools/scripts/a2t_structural_verification_ci.py`, which executes the
 reviewed offline verifier with bounded stdout/stderr and uploads one immutable
 `a2t-structural-verification-<PR-head>` attestation. The attestation is
-structural and nonterminal: it binds only execution-time `S`/`E`, Git blobs,
+structural and nonterminal: it binds the protected target repository/ref,
+execution-time `S`/`E`, Git blobs,
 digests, command, workflow revision, run attempt, job key, step, and result.
 Its closed producer contract is
 `docs/validation/gpu-trace-overhead/a2t-structural-verifier-attestation-v1.schema.json`;
@@ -42,6 +43,8 @@ The planning validator must recover and authenticate those later from GitHub.
 The event-pinned base/head tree diff, not path existence, gates this work. An
 unrelated PR that merely inherits a historical receipt skips it, including a
 later tool-only change. A receipt add/modify on a PR runs and publishes; the
+same change targeting `develop/**` or another repository verifies without
+issuing or uploading protected-main attestation authority. The
 same change in a merge group or protected-main push reruns structural
 verification but cannot issue or upload PR attestation authority. An exact
 event revision that cannot be hydrated, an ambiguous receipt diff, or a

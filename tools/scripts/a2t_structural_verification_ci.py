@@ -18,6 +18,7 @@ from typing import Any, Mapping
 
 
 REPOSITORY_NAME = "Generous-Corp/pulp"
+PROTECTED_TARGET_REF = "main"
 RECEIPT_PATH = Path("evidence/receipt.json")
 VERIFIER_PATH = Path("tools/scripts/verify_gpu_trace_overhead_acceptance.py")
 ISSUER_PATH = Path("tools/scripts/a2t_structural_verification_ci.py")
@@ -174,11 +175,17 @@ def _event_revisions(environment: Mapping[str, str]) -> tuple[str, str, bool, st
         base = pull_request.get("base")
         head = pull_request.get("head")
         _require(isinstance(base, dict) and isinstance(head, dict), "GitHub event has no exact PR revisions")
+        base_repository = base.get("repo")
+        target_is_protected = (
+            isinstance(base_repository, dict)
+            and base_repository.get("full_name") == REPOSITORY_NAME
+            and base.get("ref") == PROTECTED_TARGET_REF
+        )
         evidence_head = _exact_sha(head.get("sha"), "PR head")
         return (
             _exact_sha(base.get("sha"), "PR base"),
             _exact_sha(environment.get("GITHUB_SHA"), "PR merge head"),
-            True,
+            target_is_protected,
             evidence_head,
         )
     if event_name == "merge_group":
@@ -247,6 +254,20 @@ def _event_head(environment: Mapping[str, str]) -> str:
     revisions = _event_revisions(environment)
     _require(revisions is not None, "GitHub event is not an A2T verification event")
     return revisions[3]
+
+
+def _protected_pr_target(environment: Mapping[str, str]) -> dict[str, str]:
+    event = _event_payload(environment)
+    pull_request = event.get("pull_request")
+    base = pull_request.get("base") if isinstance(pull_request, dict) else None
+    repository = base.get("repo") if isinstance(base, dict) else None
+    _require(
+        isinstance(repository, dict)
+        and repository.get("full_name") == REPOSITORY_NAME
+        and base.get("ref") == PROTECTED_TARGET_REF,
+        "issuer requires a pull request targeting protected main",
+    )
+    return {"repository": REPOSITORY_NAME, "ref": PROTECTED_TARGET_REF}
 
 
 def _limit_output_files() -> None:
@@ -378,6 +399,7 @@ def canonical_golden_attestation() -> dict[str, Any]:
             "head_sha": evidence,
             "workflow_sha": workflow_revision,
         },
+        "target": {"repository": REPOSITORY_NAME, "ref": PROTECTED_TARGET_REF},
         "job": {"key": JOB_KEY, "check_name": CHECK_NAME},
         "step": {
             "name": STEP_NAME,
@@ -405,15 +427,13 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
     _require(environment.get("GITHUB_ACTIONS") == "true", "issuer may run only in GitHub Actions")
     if create_attestation:
         _require(environment.get("GITHUB_EVENT_NAME") == "pull_request", "issuer may issue only for a pull_request event")
+        target = _protected_pr_target(environment)
     else:
-        _require(environment.get("GITHUB_EVENT_NAME") in {"merge_group", "push"}, "verify-only mode requires merge_group or push")
+        _require(environment.get("GITHUB_EVENT_NAME") in {"pull_request", "merge_group", "push"}, "verify-only mode requires a supported event")
+        target = None
     _require(environment.get("GITHUB_REPOSITORY") == REPOSITORY_NAME, "issuer is running for the wrong repository")
     _require(environment.get("RUNNER_OS") == "macOS", "issuer may run only on macOS")
-    expected_job = (
-        JOB_KEY
-        if create_attestation or environment.get("GITHUB_EVENT_NAME") == "merge_group"
-        else VERIFY_ONLY_JOB_KEY
-    )
+    expected_job = VERIFY_ONLY_JOB_KEY if environment.get("GITHUB_EVENT_NAME") == "push" else JOB_KEY
     _require(environment.get("GITHUB_JOB") == expected_job, "issuer is not running in the authorized native job")
     _require(environment.get("A2T_CHECK_NAME") == CHECK_NAME, "issuer is not running in the required macos check")
     _require(environment.get("A2T_STEP_NAME") == STEP_NAME, "issuer step identity is wrong")
@@ -506,6 +526,7 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
         "receipt": {**_binding(evidence_head, RECEIPT_PATH, receipt_blob), "sha256": _sha256(receipt_bytes)},
         "trace_sha256": trace_sha256,
         "run": {"id": run_id, "attempt": run_attempt, "event": "pull_request", "head_sha": evidence_head, "workflow_sha": workflow_revision},
+        "target": target,
         "job": {"key": JOB_KEY, "check_name": CHECK_NAME},
         "step": {"name": STEP_NAME, "issuer_command": ISSUER_COMMAND, "verifier_command": VERIFIER_COMMAND},
         "result": {"exit_code": 0, "error_count": 0, "stdout_sha256": _sha256(stdout), "stderr_sha256": _sha256(stderr)},

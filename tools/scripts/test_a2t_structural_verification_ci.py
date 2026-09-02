@@ -103,7 +103,11 @@ class ProducerTest(unittest.TestCase):
         self.pr_merge = self.make_merge_head(self.source, self.evidence)
         self.event = self.root / "event.json"
         self.event.write_text(json.dumps({"pull_request": {
-            "base": {"sha": self.source}, "head": {"sha": self.evidence},
+            "base": {
+                "sha": self.source, "ref": MODULE.PROTECTED_TARGET_REF,
+                "repo": {"full_name": MODULE.REPOSITORY_NAME},
+            },
+            "head": {"sha": self.evidence},
         }}), encoding="utf-8")
         self.environment = {
             "GITHUB_ACTIONS": "true",
@@ -145,7 +149,11 @@ class ProducerTest(unittest.TestCase):
         self.environment["GITHUB_EVENT_NAME"] = "pull_request"
         self.environment["GITHUB_SHA"] = self.make_merge_head(base, head)
         self.event.write_text(json.dumps({"pull_request": {
-            "base": {"sha": base}, "head": {"sha": head},
+            "base": {
+                "sha": base, "ref": MODULE.PROTECTED_TARGET_REF,
+                "repo": {"full_name": MODULE.REPOSITORY_NAME},
+            },
+            "head": {"sha": head},
         }}), encoding="utf-8")
 
     def test_issues_execution_facts_without_future_or_self_authentication(self) -> None:
@@ -159,6 +167,10 @@ class ProducerTest(unittest.TestCase):
             self.assertEqual(payload["dependencies"][name]["commit"], self.source)
             self.assertEqual(payload["dependencies"][name]["path"], path.as_posix())
         self.assertEqual(payload["run"]["attempt"], 2)
+        self.assertEqual(payload["target"], {
+            "repository": MODULE.REPOSITORY_NAME,
+            "ref": MODULE.PROTECTED_TARGET_REF,
+        })
         self.assertEqual(payload["step"]["verifier_command"], MODULE.VERIFIER_COMMAND)
         encoded = json.dumps(payload)
         for forbidden in ("artifact_id", "artifact_digest", "artifact_size", "conclusion", "integration"):
@@ -214,6 +226,28 @@ class ProducerTest(unittest.TestCase):
                     (True, False, self.evidence),
                 )
 
+    def test_develop_or_foreign_target_cannot_issue_attestation(self) -> None:
+        for target_ref, repository in (
+            ("develop/next", MODULE.REPOSITORY_NAME),
+            (MODULE.PROTECTED_TARGET_REF, "fork/pulp"),
+        ):
+            with self.subTest(ref=target_ref, repository=repository):
+                self.event.write_text(json.dumps({"pull_request": {
+                    "base": {
+                        "sha": self.source, "ref": target_ref,
+                        "repo": {"full_name": repository},
+                    },
+                    "head": {"sha": self.evidence},
+                }}), encoding="utf-8")
+                self.assertEqual(
+                    MODULE.receipt_change_decision(self.root, self.environment),
+                    (True, False, self.evidence),
+                )
+                with self.assertRaisesRegex(
+                    MODULE.IssuerError, "targeting protected main",
+                ):
+                    MODULE.issue(self.root, self.root / "out", self.environment)
+
     def test_protected_push_runs_verify_only_without_attestation(self) -> None:
         self.environment["GITHUB_EVENT_NAME"] = "push"
         self.environment["GITHUB_JOB"] = MODULE.VERIFY_ONLY_JOB_KEY
@@ -252,7 +286,11 @@ class ProducerTest(unittest.TestCase):
         self.environment["GITHUB_EVENT_NAME"] = "pull_request"
         self.environment["GITHUB_SHA"] = merge_head
         self.event.write_text(json.dumps({"pull_request": {
-            "base": {"sha": self.evidence}, "head": {"sha": stale_head},
+            "base": {
+                "sha": self.evidence, "ref": MODULE.PROTECTED_TARGET_REF,
+                "repo": {"full_name": MODULE.REPOSITORY_NAME},
+            },
+            "head": {"sha": stale_head},
         }}), encoding="utf-8")
         self.assertEqual(
             MODULE.receipt_change_decision(self.root, self.environment),
@@ -294,7 +332,11 @@ class ProducerTest(unittest.TestCase):
             (True, True, self.evidence),
         )
         self.event.write_text(json.dumps({"pull_request": {
-            "base": {"sha": "f" * 40}, "head": {"sha": self.evidence},
+            "base": {
+                "sha": "f" * 40, "ref": MODULE.PROTECTED_TARGET_REF,
+                "repo": {"full_name": MODULE.REPOSITORY_NAME},
+            },
+            "head": {"sha": self.evidence},
         }}), encoding="utf-8")
         with self.assertRaisesRegex(MODULE.IssuerError, "cannot hydrate exact event commit"):
             MODULE.receipt_change_decision(shallow, self.environment)
@@ -302,7 +344,11 @@ class ProducerTest(unittest.TestCase):
     def test_event_sha_is_data_not_shell_input(self) -> None:
         marker = self.root / "injected"
         self.event.write_text(json.dumps({"pull_request": {
-            "base": {"sha": f"$(touch {marker})"},
+            "base": {
+                "sha": f"$(touch {marker})",
+                "ref": MODULE.PROTECTED_TARGET_REF,
+                "repo": {"full_name": MODULE.REPOSITORY_NAME},
+            },
             "head": {"sha": self.evidence},
         }}), encoding="utf-8")
         with self.assertRaisesRegex(MODULE.IssuerError, "not an exact commit"):
