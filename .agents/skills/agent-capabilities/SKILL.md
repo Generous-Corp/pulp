@@ -444,6 +444,27 @@ Use an already-published key as the control for that grep — a brand-new key fr
 the previous transaction returns 1, so a 0 on yours is a real absence rather
 than a broken pattern.
 
+Whether `rederive.py` appends depends on the state it starts from, so **measure
+the append rather than following either rule blindly**. Starting from a tree
+whose four generated artifacts already sit at the protected base — which is
+where the reset-and-regenerate-once recovery leaves you — `rederive.py` alone
+bumps `SURFACE_INVENTORY_VERSION`, appends exactly one entry, and `--check`
+reports `fresh`; adding `--write` after it appends a *second* entry for one
+logical change and the append-only check rejects it. Starting from a tree that
+already carries a `--write` from earlier in the branch, the reset described
+above wins and the trailing `--write` is what moves the history.
+
+So the invariant to hold is the count, not the command sequence: after
+regenerating, compare entry counts against the protected base and require a
+delta of exactly 1, then stop. Run `--write` only if that delta is 0.
+
+`rederive.py` also refuses outright while a merge is in progress when the
+incoming commit is not the protected base, because the base resolver would step
+back to the merge base and derive a stale counter. That is why the conflict
+sequence commits the merge before re-deriving — a version bump staged into the
+merge commit itself is rejected as `inventory_version changed without a surface
+change`, since the surface document has not been regenerated yet.
+
 ### A catalog-bound header must NOT also get a `REVIEWED_HEADERS` row
 
 A header named by a `binding(...)` in a catalog is already a capability
