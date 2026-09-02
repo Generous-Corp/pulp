@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Issue a nonterminal A2T verifier attestation inside the required macOS PR job."""
+"""Gate and run A2T structural verification in the required macOS job."""
 
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ OUTPUT_NAME = "attestation.json"
 STEP_NAME = "Verify A2T structural receipt"
 CHECK_NAME = "macos"
 JOB_KEY = "build"
+VERIFY_ONLY_JOB_KEY = "a2t-protected-event"
 ISSUER_COMMAND = ["python3", ISSUER_PATH.as_posix()]
 VERIFIER_COMMAND = [
     "python3", VERIFIER_PATH.as_posix(), "../evidence/receipt.json",
@@ -147,7 +148,7 @@ def _json_object(data: bytes, label: str) -> dict[str, Any]:
     return value
 
 
-def _event_head(environment: Mapping[str, str]) -> str:
+def _event_payload(environment: Mapping[str, str]) -> dict[str, Any]:
     event_path = environment.get("GITHUB_EVENT_PATH")
     _require(bool(event_path), "GITHUB_EVENT_PATH is missing")
     path = Path(str(event_path))
@@ -156,12 +157,96 @@ def _event_head(environment: Mapping[str, str]) -> str:
     except OSError as error:
         raise IssuerError(f"cannot inspect GitHub event: {error}") from error
     _require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= MAX_JSON_BYTES, "GitHub event has an invalid file shape")
-    event = _json_object(path.read_bytes(), "GitHub event")
-    pull_request = event.get("pull_request")
-    head = pull_request.get("head") if isinstance(pull_request, dict) else None
-    sha = head.get("sha") if isinstance(head, dict) else None
-    _require(isinstance(sha, str) and SHA1.fullmatch(sha) is not None, "GitHub event has no exact PR head")
-    return sha
+    return _json_object(path.read_bytes(), "GitHub event")
+
+
+def _exact_sha(value: Any, label: str) -> str:
+    _require(isinstance(value, str) and SHA1.fullmatch(value) is not None, f"{label} is not an exact commit")
+    return value
+
+
+def _event_revisions(environment: Mapping[str, str]) -> tuple[str, str, bool, str] | None:
+    event_name = environment.get("GITHUB_EVENT_NAME")
+    event = _event_payload(environment)
+    if event_name == "pull_request":
+        pull_request = event.get("pull_request")
+        _require(isinstance(pull_request, dict), "GitHub event has no pull request")
+        base = pull_request.get("base")
+        head = pull_request.get("head")
+        _require(isinstance(base, dict) and isinstance(head, dict), "GitHub event has no exact PR revisions")
+        evidence_head = _exact_sha(head.get("sha"), "PR head")
+        return (
+            _exact_sha(base.get("sha"), "PR base"),
+            _exact_sha(environment.get("GITHUB_SHA"), "PR merge head"),
+            True,
+            evidence_head,
+        )
+    if event_name == "merge_group":
+        merge_group = event.get("merge_group")
+        _require(isinstance(merge_group, dict), "GitHub event has no merge group")
+        head = _exact_sha(merge_group.get("head_sha"), "merge-group head")
+        return (_exact_sha(merge_group.get("base_sha"), "merge-group base"), head, False, head)
+    if event_name == "push":
+        _require(event.get("ref") == "refs/heads/main", "A2T push verification is restricted to main")
+        head = _exact_sha(event.get("after"), "push after")
+        return (_exact_sha(event.get("before"), "push before"), head, False, head)
+    return None
+
+
+def _ensure_commit(repository: Path, revision: str) -> None:
+    present = subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}^{{commit}}"], cwd=repository,
+        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if present.returncode == 0:
+        return
+    fetched = subprocess.run(
+        ["git", "fetch", "--no-tags", "--depth=1", "origin", revision],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    _require(fetched.returncode == 0, f"cannot hydrate exact event commit {revision}")
+    verified = subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}^{{commit}}"], cwd=repository,
+        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    _require(verified.returncode == 0, f"hydrated event commit is unavailable: {revision}")
+
+
+def receipt_change_decision(repository: Path, environment: Mapping[str, str], *, hydrate: bool = True) -> tuple[bool, bool, str]:
+    revisions = _event_revisions(environment)
+    if revisions is None:
+        return False, False, ""
+    base, comparison_head, issue_attestation, evidence_head = revisions
+    if hydrate:
+        _ensure_commit(repository, base)
+        _ensure_commit(repository, comparison_head)
+        _ensure_commit(repository, evidence_head)
+    if issue_attestation:
+        commit = str(_git(repository, "cat-file", "commit", comparison_head))
+        parents = [
+            line.removeprefix("parent ")
+            for line in commit.splitlines()
+            if line.startswith("parent ")
+        ]
+        _require(
+            parents == [base, evidence_head],
+            "PR merge head does not bind the exact event base and PR head",
+        )
+    changed = _git(repository, "diff-tree", "--no-commit-id", "--name-status", "-r", "--no-renames", base, comparison_head, "--", RECEIPT_PATH.as_posix())
+    lines = [line for line in str(changed).splitlines() if line]
+    if not lines:
+        return False, False, evidence_head
+    _require(len(lines) == 1, "receipt diff is ambiguous")
+    fields = lines[0].split("\t")
+    _require(len(fields) == 2 and fields[1] == RECEIPT_PATH.as_posix(), "receipt diff has an invalid path")
+    _require(fields[0] in {"A", "M"}, f"receipt change {fields[0]} cannot be structurally verified")
+    return True, issue_attestation, evidence_head
+
+
+def _event_head(environment: Mapping[str, str]) -> str:
+    revisions = _event_revisions(environment)
+    _require(revisions is not None, "GitHub event is not an A2T verification event")
+    return revisions[3]
 
 
 def _limit_output_files() -> None:
@@ -315,13 +400,21 @@ def canonical_golden_bytes() -> bytes:
     ).encode()
 
 
-def issue(repository: Path, output_directory: Path, environment: Mapping[str, str]) -> Path:
+def issue(repository: Path, output_directory: Path, environment: Mapping[str, str], *, create_attestation: bool = True) -> Path | None:
     repository = repository.resolve()
     _require(environment.get("GITHUB_ACTIONS") == "true", "issuer may run only in GitHub Actions")
-    _require(environment.get("GITHUB_EVENT_NAME") == "pull_request", "issuer may run only for a pull_request event")
+    if create_attestation:
+        _require(environment.get("GITHUB_EVENT_NAME") == "pull_request", "issuer may issue only for a pull_request event")
+    else:
+        _require(environment.get("GITHUB_EVENT_NAME") in {"merge_group", "push"}, "verify-only mode requires merge_group or push")
     _require(environment.get("GITHUB_REPOSITORY") == REPOSITORY_NAME, "issuer is running for the wrong repository")
     _require(environment.get("RUNNER_OS") == "macOS", "issuer may run only on macOS")
-    _require(environment.get("GITHUB_JOB") == JOB_KEY, "issuer is not running in the native build job")
+    expected_job = (
+        JOB_KEY
+        if create_attestation or environment.get("GITHUB_EVENT_NAME") == "merge_group"
+        else VERIFY_ONLY_JOB_KEY
+    )
+    _require(environment.get("GITHUB_JOB") == expected_job, "issuer is not running in the authorized native job")
     _require(environment.get("A2T_CHECK_NAME") == CHECK_NAME, "issuer is not running in the required macos check")
     _require(environment.get("A2T_STEP_NAME") == STEP_NAME, "issuer step identity is wrong")
 
@@ -332,7 +425,7 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
     run_attempt = _positive_int(environment.get("GITHUB_RUN_ATTEMPT"), "GITHUB_RUN_ATTEMPT")
 
     receipt_blob, receipt_bytes = _tracked_file(repository, evidence_head, RECEIPT_PATH)
-    _require(_working_regular_file(repository, RECEIPT_PATH, MAX_JSON_BYTES) == receipt_bytes, "working receipt differs from exact PR-head blob")
+    _require(_working_regular_file(repository, RECEIPT_PATH, MAX_JSON_BYTES) == receipt_bytes, "working receipt differs from exact event-head blob")
     receipt = _json_object(receipt_bytes, "A2T receipt")
     source_revision = receipt.get("source_revision")
     _require(isinstance(source_revision, str) and SHA1.fullmatch(source_revision) is not None, "receipt source_revision is not exact")
@@ -396,6 +489,9 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
     _require(stdout == EXPECTED_STDOUT, "A2T structural verifier stdout is not canonical")
     _require(stderr == b"", "A2T structural verifier wrote stderr")
 
+    if not create_attestation:
+        return None
+
     workflow_semantics = _workflow_semantics(evidence_head)
     semantic_bytes = json.dumps(workflow_semantics, sort_keys=True, separators=(",", ":")).encode()
     attestation = {
@@ -425,6 +521,20 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
 
 def main() -> int:
     if len(sys.argv) > 1:
+        if sys.argv[1] == "--classify-receipt-change" and len(sys.argv) == 2:
+            try:
+                verify, issue_attestation, head = receipt_change_decision(Path.cwd(), os.environ)
+                output = os.environ.get("GITHUB_OUTPUT")
+                _require(bool(output), "GITHUB_OUTPUT is missing")
+                with Path(str(output)).open("a", encoding="utf-8") as handle:
+                    handle.write(f"verify={'true' if verify else 'false'}\n")
+                    handle.write(f"issue={'true' if issue_attestation else 'false'}\n")
+                    handle.write(f"head={head}\n")
+            except (IssuerError, OSError, subprocess.SubprocessError) as error:
+                print(f"a2t-structural-verification-ci: FAIL: {error}", file=sys.stderr)
+                return 1
+            print(f"a2t-structural-verification-ci: receipt-change verify={str(verify).lower()} issue={str(issue_attestation).lower()}")
+            return 0
         if sys.argv[1] == "--write-golden" and len(sys.argv) in {2, 3}:
             output = (
                 Path(sys.argv[2])
@@ -434,21 +544,24 @@ def main() -> int:
             output.write_bytes(canonical_golden_bytes())
             print(f"a2t-structural-verification-ci: wrote canonical golden ({output})")
             return 0
-        print(
-            "a2t-structural-verification-ci: FAIL: expected --write-golden [path]",
-            file=sys.stderr,
-        )
-        return 1
+        if sys.argv[1] == "--verify-only" and len(sys.argv) == 2:
+            pass
+        else:
+            print(
+                "a2t-structural-verification-ci: FAIL: expected --classify-receipt-change, --verify-only, or --write-golden [path]",
+                file=sys.stderr,
+            )
+            return 1
     output_root = os.environ.get("A2T_ATTESTATION_DIR")
     if not output_root:
         print("a2t-structural-verification-ci: FAIL: A2T_ATTESTATION_DIR is missing", file=sys.stderr)
         return 1
     try:
-        output = issue(Path.cwd(), Path(output_root), os.environ)
+        output = issue(Path.cwd(), Path(output_root), os.environ, create_attestation="--verify-only" not in sys.argv)
     except (IssuerError, OSError, subprocess.SubprocessError) as error:
         print(f"a2t-structural-verification-ci: FAIL: {error}", file=sys.stderr)
         return 1
-    print(f"a2t-structural-verification-ci: ok ({output})")
+    print("a2t-structural-verification-ci: ok" + (f" ({output})" if output else " (verify-only)"))
     return 0
 
 

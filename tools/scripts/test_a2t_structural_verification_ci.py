@@ -100,11 +100,15 @@ class ProducerTest(unittest.TestCase):
         run(self.root, "git", "add", ".")
         run(self.root, "git", "commit", "-qm", "evidence")
         self.evidence = run(self.root, "git", "rev-parse", "HEAD")
+        self.pr_merge = self.make_merge_head(self.source, self.evidence)
         self.event = self.root / "event.json"
-        self.event.write_text(json.dumps({"pull_request": {"head": {"sha": self.evidence}}}), encoding="utf-8")
+        self.event.write_text(json.dumps({"pull_request": {
+            "base": {"sha": self.source}, "head": {"sha": self.evidence},
+        }}), encoding="utf-8")
         self.environment = {
             "GITHUB_ACTIONS": "true",
             "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_SHA": self.pr_merge,
             "GITHUB_REPOSITORY": MODULE.REPOSITORY_NAME,
             "GITHUB_EVENT_PATH": str(self.event),
             "GITHUB_WORKFLOW_SHA": self.evidence,
@@ -121,7 +125,28 @@ class ProducerTest(unittest.TestCase):
 
     def issue(self) -> dict:
         path = MODULE.issue(self.root, self.root / "out", self.environment)
+        assert path is not None
         return json.loads(path.read_text())
+
+    def commit_tree(self, tree_revision: str, *parents: str) -> str:
+        command = ["git", "commit-tree", f"{tree_revision}^{{tree}}"]
+        for parent in parents:
+            command.extend(("-p", parent))
+        completed = subprocess.run(
+            command, cwd=self.root, input="synthetic event commit\n",
+            check=True, capture_output=True, text=True,
+        )
+        return completed.stdout.strip()
+
+    def make_merge_head(self, base: str, head: str, *, tree: str | None = None) -> str:
+        return self.commit_tree(tree or head, base, head)
+
+    def set_pull_request_event(self, base: str, head: str) -> None:
+        self.environment["GITHUB_EVENT_NAME"] = "pull_request"
+        self.environment["GITHUB_SHA"] = self.make_merge_head(base, head)
+        self.event.write_text(json.dumps({"pull_request": {
+            "base": {"sha": base}, "head": {"sha": head},
+        }}), encoding="utf-8")
 
     def test_issues_execution_facts_without_future_or_self_authentication(self) -> None:
         payload = self.issue()
@@ -171,6 +196,118 @@ class ProducerTest(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(output.read_bytes(), GOLDEN.read_bytes())
+
+    def test_receipt_addition_runs_and_issues_only_on_pull_request(self) -> None:
+        self.assertEqual(
+            MODULE.receipt_change_decision(self.root, self.environment),
+            (True, True, self.evidence),
+        )
+        for event_name, payload in (
+            ("merge_group", {"merge_group": {"base_sha": self.source, "head_sha": self.evidence}}),
+            ("push", {"ref": "refs/heads/main", "before": self.source, "after": self.evidence}),
+        ):
+            with self.subTest(event=event_name):
+                self.environment["GITHUB_EVENT_NAME"] = event_name
+                self.event.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertEqual(
+                    MODULE.receipt_change_decision(self.root, self.environment),
+                    (True, False, self.evidence),
+                )
+
+    def test_protected_push_runs_verify_only_without_attestation(self) -> None:
+        self.environment["GITHUB_EVENT_NAME"] = "push"
+        self.environment["GITHUB_JOB"] = MODULE.VERIFY_ONLY_JOB_KEY
+        self.event.write_text(json.dumps({
+            "ref": "refs/heads/main", "before": self.source,
+            "after": self.evidence,
+        }), encoding="utf-8")
+        output = MODULE.issue(
+            self.root, self.root / "out", self.environment,
+            create_attestation=False,
+        )
+        self.assertIsNone(output)
+        self.assertFalse((self.root / "out").exists())
+
+    def test_inherited_unchanged_receipt_skips_unrelated_and_tool_only_heads(self) -> None:
+        for relative in (Path("README.md"), MODULE.ISSUER_PATH):
+            with self.subTest(path=relative.as_posix()):
+                target = self.root / relative
+                original = target.read_bytes() if target.exists() else b""
+                target.write_bytes(original + b"\n# later change\n")
+                run(self.root, "git", "add", relative.as_posix())
+                run(self.root, "git", "commit", "-qm", "later unrelated change")
+                head = run(self.root, "git", "rev-parse", "HEAD")
+                self.set_pull_request_event(self.evidence, head)
+                self.assertEqual(
+                    MODULE.receipt_change_decision(self.root, self.environment),
+                    (False, False, head),
+                )
+                self.evidence = head
+
+    def test_stale_pr_skips_receipt_added_only_on_current_base(self) -> None:
+        stale_head = self.commit_tree(self.source, self.source)
+        merge_head = self.make_merge_head(
+            self.evidence, stale_head, tree=self.evidence,
+        )
+        self.environment["GITHUB_EVENT_NAME"] = "pull_request"
+        self.environment["GITHUB_SHA"] = merge_head
+        self.event.write_text(json.dumps({"pull_request": {
+            "base": {"sha": self.evidence}, "head": {"sha": stale_head},
+        }}), encoding="utf-8")
+        self.assertEqual(
+            MODULE.receipt_change_decision(self.root, self.environment),
+            (False, False, stale_head),
+        )
+
+    def test_modified_receipt_runs_but_deletion_fails_closed(self) -> None:
+        receipt = self.root / MODULE.RECEIPT_PATH
+        receipt.write_bytes(receipt.read_bytes() + b"\n")
+        run(self.root, "git", "add", receipt.as_posix())
+        run(self.root, "git", "commit", "-qm", "modify receipt")
+        modified = run(self.root, "git", "rev-parse", "HEAD")
+        self.set_pull_request_event(self.evidence, modified)
+        self.assertEqual(
+            MODULE.receipt_change_decision(self.root, self.environment),
+            (True, True, modified),
+        )
+        receipt.unlink()
+        run(self.root, "git", "add", receipt.as_posix())
+        run(self.root, "git", "commit", "-qm", "delete receipt")
+        deleted = run(self.root, "git", "rev-parse", "HEAD")
+        self.set_pull_request_event(modified, deleted)
+        with self.assertRaisesRegex(MODULE.IssuerError, "cannot be structurally verified"):
+            MODULE.receipt_change_decision(self.root, self.environment)
+
+    def test_shallow_checkout_hydrates_exact_base_and_unavailable_base_fails(self) -> None:
+        shallow = self.root / "decision-shallow"
+        run(self.root, "git", "clone", "--quiet", "--depth=1", f"file://{self.root}", str(shallow))
+        self.assertNotEqual(
+            subprocess.run(
+                ["git", "cat-file", "-e", f"{self.source}^{{commit}}"],
+                cwd=shallow, capture_output=True,
+            ).returncode,
+            0,
+        )
+        self.set_pull_request_event(self.source, self.evidence)
+        self.assertEqual(
+            MODULE.receipt_change_decision(shallow, self.environment),
+            (True, True, self.evidence),
+        )
+        self.event.write_text(json.dumps({"pull_request": {
+            "base": {"sha": "f" * 40}, "head": {"sha": self.evidence},
+        }}), encoding="utf-8")
+        with self.assertRaisesRegex(MODULE.IssuerError, "cannot hydrate exact event commit"):
+            MODULE.receipt_change_decision(shallow, self.environment)
+
+    def test_event_sha_is_data_not_shell_input(self) -> None:
+        marker = self.root / "injected"
+        self.event.write_text(json.dumps({"pull_request": {
+            "base": {"sha": f"$(touch {marker})"},
+            "head": {"sha": self.evidence},
+        }}), encoding="utf-8")
+        with self.assertRaisesRegex(MODULE.IssuerError, "not an exact commit"):
+            MODULE.receipt_change_decision(self.root, self.environment, hydrate=False)
+        self.assertFalse(marker.exists())
 
     def test_rejects_receipt_not_identical_to_pr_head_blob(self) -> None:
         (self.root / MODULE.RECEIPT_PATH).write_text("{}", encoding="utf-8")
@@ -227,7 +364,7 @@ class ProducerTest(unittest.TestCase):
 
     def test_rejects_wrong_job_boundary(self) -> None:
         self.environment["GITHUB_JOB"] = "linux"
-        with self.assertRaisesRegex(MODULE.IssuerError, "native build job"):
+        with self.assertRaisesRegex(MODULE.IssuerError, "authorized native job"):
             self.issue()
 
     def test_rejects_issuer_changed_after_reviewed_source(self) -> None:
@@ -235,10 +372,7 @@ class ProducerTest(unittest.TestCase):
         run(self.root, "git", "add", ".")
         run(self.root, "git", "commit", "-qm", "mutate issuer after source")
         changed_head = run(self.root, "git", "rev-parse", "HEAD")
-        self.event.write_text(
-            json.dumps({"pull_request": {"head": {"sha": changed_head}}}),
-            encoding="utf-8",
-        )
+        self.set_pull_request_event(self.source, changed_head)
         self.environment["GITHUB_WORKFLOW_SHA"] = changed_head
         with self.assertRaisesRegex(MODULE.IssuerError, "issuer changed between S and E"):
             self.issue()
@@ -252,10 +386,7 @@ class ProducerTest(unittest.TestCase):
                 run(self.root, "git", "add", path.as_posix())
                 run(self.root, "git", "commit", "-qm", f"mutate {path.name} after source")
                 changed_head = run(self.root, "git", "rev-parse", "HEAD")
-                self.event.write_text(
-                    json.dumps({"pull_request": {"head": {"sha": changed_head}}}),
-                    encoding="utf-8",
-                )
+                self.set_pull_request_event(self.source, changed_head)
                 self.environment["GITHUB_WORKFLOW_SHA"] = changed_head
                 with self.assertRaisesRegex(
                     MODULE.IssuerError, f"executed dependency {path} changed"
@@ -265,19 +396,23 @@ class ProducerTest(unittest.TestCase):
                 run(self.root, "git", "add", path.as_posix())
                 run(self.root, "git", "commit", "-qm", f"restore {path.name}")
                 restored_head = run(self.root, "git", "rev-parse", "HEAD")
-                self.event.write_text(
-                    json.dumps({"pull_request": {"head": {"sha": restored_head}}}),
-                    encoding="utf-8",
-                )
+                self.set_pull_request_event(self.source, restored_head)
                 self.environment["GITHUB_WORKFLOW_SHA"] = restored_head
 
     def test_workflow_wires_exact_required_macos_producer(self) -> None:
         workflow = (ROOT / MODULE.WORKFLOW_PATH).read_text(encoding="utf-8")
         self.assertIn("name: Verify A2T structural receipt", workflow)
         self.assertIn("python3 tools/scripts/a2t_structural_verification_ci.py", workflow)
-        self.assertIn("refs/remotes/origin/a2t-evidence-head:evidence/receipt.json", workflow)
+        self.assertIn("--classify-receipt-change", workflow)
+        self.assertIn("needs.classify.outputs.a2t_receipt_verification_required == 'true'", workflow)
+        self.assertNotIn("hashFiles('evidence/receipt.json')", workflow)
+        self.assertIn("needs.classify.outputs.a2t_receipt_attestation_required == 'true'", workflow)
         self.assertIn('git fetch --no-tags --depth=1 origin "$source_revision"', workflow)
-        self.assertIn("name: a2t-structural-verification-${{ github.event.pull_request.head.sha }}", workflow)
+        self.assertIn("name: a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}", workflow)
+        self.assertIn("a2t-protected-event:", workflow)
+        self.assertIn("python3 tools/scripts/a2t_structural_verification_ci.py --verify-only", workflow)
+        self.assertIn("macos receipt reuse disabled: A2T receipt changed", workflow)
+        self.assertIn("a2t_receipt_verification_required=true", workflow)
         self.assertIn("runner.os == 'macOS'", workflow)
         self.assertIn("matrix.key == 'macos'", workflow)
         self.assertIn("github.event_name == 'pull_request'", workflow)

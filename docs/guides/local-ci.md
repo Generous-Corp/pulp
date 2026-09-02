@@ -1470,7 +1470,8 @@ artifact contract and keep the existing hosted-runner trust boundary.
 
 ## A2T evidence receipts get a nonterminal required-job attestation
 
-When a pull-request head carries the exact tracked `evidence/receipt.json`, the
+When a pull-request head adds or modifies the exact tracked
+`evidence/receipt.json`, the
 native macOS matrix child runs the A2T structural verifier after the ordinary
 build and test gate. It fetches the event-pinned head and the receipt's exact
 source revision, then runs the verifier from a detached checkout whose live
@@ -1480,8 +1481,15 @@ loading or executing Python, the issuer authenticates the issuer's schema
 validator and all four verifier dependencies as byte-identical `S`/`E` Git
 blobs, rejects any working-file mismatch, bounds verifier stdout and stderr,
 and uploads one
-`a2t-structural-verification-<head>` attestation. A present receipt cannot be
+`a2t-structural-verification-<head>` attestation. A changed receipt cannot be
 silently skipped: verifier failure or noncanonical output fails `macos`.
+The gate authenticates the event's exact base and head trees and compares only
+that receipt path. An unrelated or later tool-only PR that inherits an
+unchanged historical receipt skips verification. A receipt add/modify in a
+merge group or direct protected-main push reruns the same structural check but
+does not issue or upload PR attestation authority. Missing exact history,
+ambiguous path state, deletion, and other indeterminate relevant changes fail
+closed; shallow checkouts hydrate the two event commits by exact SHA first.
 The producer validates the artifact against the closed
 `a2t-structural-verifier-attestation-v1.schema.json` contract before writing
 it. The schema, issuer, verifier, and every dynamically loaded dependency are

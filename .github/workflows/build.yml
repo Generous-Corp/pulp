@@ -130,6 +130,7 @@ jobs:
       linux_route_reason: ${{ steps.resolve.outputs.linux_route_reason }}
       linux_configured_selector_json: ${{ steps.resolve.outputs.linux_configured_selector_json }}
       linux_event_authorized_selector_json: ${{ steps.resolve.outputs.linux_event_authorized_selector_json }}
+      macos_runs_on_json: ${{ steps.resolve.outputs.macos_runs_on_json }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -823,6 +824,7 @@ jobs:
           with output_path.open("a", encoding="utf-8") as handle:
               handle.write(f"provider={REQUESTED}\n")
               handle.write(f"matrix_json={json.dumps(matrix)}\n")
+              handle.write(f"macos_runs_on_json={macos_runs_on}\n")
               handle.write(f"linux_route_reason={linux_route_reason}\n")
               handle.write(
                   "linux_configured_selector_json="
@@ -854,6 +856,9 @@ jobs:
       native_build_required: ${{ steps.classify.outputs.native_build_required }}
       ios_compile_required: ${{ steps.classify.outputs.ios_compile_required }}
       agent_capability_installed_sdk_required: ${{ steps.classify.outputs.agent_capability_installed_sdk_required }}
+      a2t_receipt_verification_required: ${{ steps.classify.outputs.verify }}
+      a2t_receipt_attestation_required: ${{ steps.classify.outputs.issue }}
+      a2t_evidence_head: ${{ steps.classify.outputs.head }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -883,6 +888,15 @@ jobs:
           # up front and use it for every parser in this job.
           export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
           ci_python="$(python3 tools/ci/find_python311.py)"
+          a2t_decision="$(
+            "$ci_python" tools/scripts/a2t_structural_verification_ci.py \
+              --classify-receipt-change
+          )"
+          echo "$a2t_decision"
+          a2t_receipt_verification_required=false
+          if [[ "$a2t_decision" == *"verify=true"* ]]; then
+            a2t_receipt_verification_required=true
+          fi
           base="$("$ci_python" tools/scripts/resolve_classify_base.py)"
           native_build_required=true
           ios_compile_required=true
@@ -901,6 +915,9 @@ jobs:
               "$ci_python" -c 'import json,sys; print(str(json.load(sys.stdin)["native_build_required"]).lower())' \
                 <<<"$classification"
             )
+            if [ "$a2t_receipt_verification_required" = true ]; then
+              native_build_required=true
+            fi
             candidate_agent_capability_installed_sdk_required=$(
               "$ci_python" -c 'import json,sys; value=json.load(sys.stdin).get("agent_capability_installed_sdk_required", True); print("false" if value is False else "true")' \
                 <<<"$classification" 2>/dev/null || true
@@ -1039,6 +1056,7 @@ jobs:
           ORIGINAL_MATRIX: ${{ needs.resolve-provider.outputs.matrix_json }}
           NATIVE_BUILD_REQUIRED: ${{ needs.classify.outputs.native_build_required }}
           RECEIPT_TOKEN: ${{ github.token }}
+          A2T_RECEIPT_VERIFICATION_REQUIRED: ${{ needs.classify.outputs.a2t_receipt_verification_required }}
         shell: bash
         run: |
           set -u
@@ -1054,6 +1072,11 @@ jobs:
             elif git show "$base:tools/scripts/protected_merge_receipt.py" \
               > "$RUNNER_TEMP/protected_merge_receipt.py"; then
               for target in macos linux; do
+                if [ "$target" = macos ] \
+                    && [ "$A2T_RECEIPT_VERIFICATION_REQUIRED" = true ]; then
+                  echo "::notice::macos receipt reuse disabled: A2T receipt changed"
+                  continue
+                fi
                 artifact_name="protected-validation-${target}-${head}-${base}"
                 receipt_path="$RUNNER_TEMP/${target}-receipt.json"
                 decision_path="$RUNNER_TEMP/${target}-decision.json"
@@ -1095,6 +1118,41 @@ jobs:
             echo "build_required=$build_required"
             echo "macos_reused=$macos_reused"
           } >> "$GITHUB_OUTPUT"
+
+  # Protected pushes normally omit macOS. Allocate this independent leg only
+  # when the authenticated before/after diff changed the A2T receipt. Merge
+  # groups instead retain the required native macOS leg above. Neither path can
+  # publish the PR-only attestation authority.
+  a2t-protected-event:
+    needs: [resolve-provider, classify]
+    if: >-
+      !inputs.local_proof
+      && github.event_name == 'push'
+      && needs.resolve-provider.result == 'success'
+      && needs.classify.result == 'success'
+      && needs.classify.outputs.a2t_receipt_verification_required == 'true'
+    runs-on: ${{ fromJSON(needs.resolve-provider.outputs.macos_runs_on_json) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          lfs: false
+      - name: Test A2T structural receipt issuer
+        run: python3 tools/scripts/test_a2t_structural_verification_ci.py
+      - name: Verify A2T structural receipt
+        shell: bash
+        env:
+          A2T_ATTESTATION_DIR: ${{ runner.temp }}/a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}
+          A2T_CHECK_NAME: macos
+          A2T_STEP_NAME: Verify A2T structural receipt
+        run: |
+          set -euo pipefail
+          source_revision="$(
+            git show '${{ needs.classify.outputs.a2t_evidence_head }}:evidence/receipt.json' \
+              | python3 -c 'import json, re, sys; value=json.load(sys.stdin).get("source_revision"); sys.stdout.write(value + "\n") if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) else sys.exit(1)'
+          )"
+          git fetch --no-tags --depth=1 origin "$source_revision"
+          python3 tools/scripts/a2t_structural_verification_ci.py --verify-only
 
   build:
     needs: [resolve-provider, classify, protected-receipt-reuse]
@@ -1695,30 +1753,33 @@ jobs:
         if: >-
           runner.os == 'macOS'
           && matrix.key == 'macos'
-          && github.event_name == 'pull_request'
-          && hashFiles('evidence/receipt.json') != ''
+          && needs.classify.outputs.a2t_receipt_verification_required == 'true'
         shell: bash
         env:
-          A2T_ATTESTATION_DIR: ${{ runner.temp }}/a2t-structural-verification-${{ github.event.pull_request.head.sha }}
+          A2T_ATTESTATION_DIR: ${{ runner.temp }}/a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}
           A2T_CHECK_NAME: macos
           A2T_STEP_NAME: Verify A2T structural receipt
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin \
-            "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/origin/a2t-evidence-head"
           source_revision="$(
-            git show 'refs/remotes/origin/a2t-evidence-head:evidence/receipt.json' \
+            git show '${{ needs.classify.outputs.a2t_evidence_head }}:evidence/receipt.json' \
               | python3 -c 'import json, re, sys; value=json.load(sys.stdin).get("source_revision"); sys.stdout.write(value + "\n") if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) else sys.exit(1)'
           )"
           git fetch --no-tags --depth=1 origin "$source_revision"
-          python3 tools/scripts/a2t_structural_verification_ci.py
+          if [ '${{ needs.classify.outputs.a2t_receipt_attestation_required }}' = true ]; then
+            python3 tools/scripts/a2t_structural_verification_ci.py
+          else
+            python3 tools/scripts/a2t_structural_verification_ci.py --verify-only
+          fi
 
       - name: Publish A2T structural verification
-        if: steps.a2t_structural_verification.outcome == 'success'
+        if: >-
+          steps.a2t_structural_verification.outcome == 'success'
+          && needs.classify.outputs.a2t_receipt_attestation_required == 'true'
         uses: actions/upload-artifact@v5
         with:
-          name: a2t-structural-verification-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/a2t-structural-verification-${{ github.event.pull_request.head.sha }}/attestation.json
+          name: a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}
+          path: ${{ runner.temp }}/a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}/attestation.json
           if-no-files-found: error
           retention-days: 30
           compression-level: 0

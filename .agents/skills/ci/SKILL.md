@@ -14,7 +14,8 @@ Validate branches and ship code safely. This skill handles all CI workflows for 
 
 ## A2T structural evidence is produced only by the required macOS PR job
 
-An A2T evidence PR that carries the exact tracked `evidence/receipt.json` gets
+An A2T evidence PR that adds or modifies the exact tracked
+`evidence/receipt.json` gets
 one additional fail-closed step in the native `macos` matrix child. The step
 runs `tools/scripts/a2t_structural_verification_ci.py`, which executes the
 reviewed offline verifier with bounded stdout/stderr and uploads one immutable
@@ -38,8 +39,13 @@ It intentionally cannot claim the future protected merge, its own Actions
 artifact ID/digest/size, the final job conclusion, or terminal acceptance.
 The planning validator must recover and authenticate those later from GitHub.
 
-The issuer is skipped everywhere except a real macOS pull-request build with
-that exact receipt path. A present receipt that is untracked, symlinked,
+The event-pinned base/head tree diff, not path existence, gates this work. An
+unrelated PR that merely inherits a historical receipt skips it, including a
+later tool-only change. A receipt add/modify on a PR runs and publishes; the
+same change in a merge group or protected-main push reruns structural
+verification but cannot issue or upload PR attestation authority. An exact
+event revision that cannot be hydrated, an ambiguous receipt diff, or a
+receipt deletion fails closed. A receipt that is untracked, symlinked,
 different from the PR-head blob, bound to a different schema/issuer/verifier,
 dynamically loaded dependency, trace, or source,
 or produces noncanonical verifier output fails the required check. Linux and
