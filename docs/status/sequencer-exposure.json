@@ -1882,7 +1882,7 @@
     },
     {
       "id": "imp-092-linear-step-player",
-      "title": "Linear multi-lane step player kernel (survey entry 092)",
+      "title": "Linear multi-lane step player kernel with per-step micro-timing (survey entry 092)",
       "classification": "public_sdk",
       "delivery_state": "pending",
       "claim_id": "8bed1566-ea24-4ae5-a9b7-3bf860b28be5",
@@ -1898,20 +1898,22 @@
           "needles": [
             "class StepPlayer {",
             "MidiUtilityProcessReport process(const MidiBuffer& input, MidiBuffer& output,",
-            "MidiUtilityProcessReport flush_transport(MidiBuffer& output) noexcept"
+            "MidiUtilityProcessReport flush_transport(MidiBuffer& output) noexcept",
+            "std::int32_t timing_offset_ticks = 0;"
           ]
         }
       ],
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding.",
+          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid \u2014 swing, a groove table or a per-step nudge \u2014 without running its own scheduler beside the kernel.",
           "evidence": [
             {
               "kind": "sdk_header",
               "path": "core/midi/include/pulp/midi/step_player.hpp",
               "needles": [
-                "class StepPlayer {"
+                "class StepPlayer {",
+                "std::int32_t timing_offset_ticks = 0;"
               ]
             }
           ]
@@ -1945,7 +1947,7 @@
     },
     {
       "id": "audio-voice-modulation-sources",
-      "title": "Per-voice modulation source bank",
+      "title": "Per-voice modulation source bank with live LFO wave, rate, and depth (survey entry 071)",
       "classification": "public_sdk",
       "delivery_state": "pending",
       "claim_id": "audio-voice-modulation-sources-20260830",
@@ -1960,20 +1962,26 @@
           "path": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
           "needles": [
             "class VoiceModulationSources",
-            "VoiceModulationResult append_lfo_lane("
+            "VoiceModulationResult append_lfo_lane(",
+            "void set_lfo_rate_hz(double rate_hz) noexcept {",
+            "void set_lfo_depth(float depth) noexcept {",
+            "void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {"
           ]
         }
       ],
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio.",
+          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations \u2014 which is every LFO a musician can reach \u2014 no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from.",
           "evidence": [
             {
               "kind": "sdk_header",
               "path": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
               "needles": [
-                "class VoiceModulationSources"
+                "class VoiceModulationSources",
+                "void set_lfo_rate_hz(double rate_hz) noexcept {",
+                "void set_lfo_depth(float depth) noexcept {",
+                "void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {"
               ]
             }
           ]

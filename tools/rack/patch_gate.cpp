@@ -257,11 +257,30 @@ std::vector<std::string> elements(const std::string& doc, const std::string& arr
 ///
 /// The engine is set to the rate this harness actually steps at, so a module
 /// that caches coefficients at construction caches the right ones.
-void install_rack_context(const std::string& patch_path) {
+///
+/// The asset paths are part of that same expectation and are the difference
+/// between measuring a commercial module and measuring its licence check.
+/// Plugins bought through the VCV Library resolve a cached key at
+/// `<asset::userDir>/licenses/<plugin>.vcvkey`; `asset::userDir` is empty until
+/// `asset::init()` runs, so the lookup goes to `/licenses/...`, finds nothing,
+/// and the module runs its DSP writing zero to every output. It logs nothing
+/// and constructs fine, so from outside it is indistinguishable from a module
+/// that genuinely emits nothing -- and a whole commercial plugin then reads as
+/// a dead patch. `user_dir` is a harness-owned directory whose `licenses` is a
+/// symlink to Rack's, so keys resolve where Rack resolves them without this
+/// process writing anything into Rack's own directory. Empty means measure
+/// unlicensed, which is a legitimate mode but a different measurement.
+void install_rack_context(const std::string& patch_path,
+                          const std::string& user_dir) {
     // Deprecated only in the sense of "internal to Rack". This harness IS
     // standing in for Rack, so it is the one caller entitled to use them.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    if (!user_dir.empty()) {
+        rack::asset::userDir = user_dir;
+        rack::asset::systemDir = user_dir;
+        rack::asset::init();
+    }
     rack::random::init();
     auto* ctx = new rack::Context;
     rack::contextSet(ctx);
@@ -359,14 +378,15 @@ struct Cable {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::printf("usage: patch-gate <patch.vcv> <plugin-dir>\n");
+        std::printf("usage: patch-gate <patch.vcv> <plugin-dir> [user-dir]\n");
         return 2;
     }
     const std::string doc = slurp(argv[1]);
     const std::string dir = argv[2];
+    const std::string user_dir = argc > 3 ? argv[3] : "";
 
     // Before any dlopen: a plugin's own init() may touch APP too.
-    install_rack_context(argv[1]);
+    install_rack_context(argv[1], user_dir);
 
     std::vector<Node> nodes;
     for (const std::string& e : elements(doc, "modules")) {

@@ -743,3 +743,269 @@ TEST_CASE("StepPlayer process path allocates nothing after capacity preparation"
     CHECK_FALSE(allocations.saw_allocation());
     CHECK(report.complete);
 }
+
+TEST_CASE("StepPlayer nudges a step off the grid by its timing offset",
+          "[midi][step-player][grid][oracle]") {
+    // The offset is what lets a caller express swing, a groove table or a
+    // per-step nudge without running its own scheduler. A quarter is 705'600
+    // ticks and a sixteenth step is 176'400, which is exactly 6'000 samples at
+    // 120 bpm / 48 kHz, so a nudge of kStepTicks/4 is exactly 1'500 samples.
+    constexpr std::int32_t kNudgeTicks = static_cast<std::int32_t>(kStepTicks / 4);
+    constexpr std::int64_t kNudgeSamples = kStepSamples / 4;
+    STATIC_REQUIRE(kNudgeTicks == 44'100);
+
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(1);
+    auto player = fixture.make();
+    // Alternate steps are pushed late, which is the shape swing has.
+    for (std::size_t index = 0; index < 4; ++index) {
+        auto step = basic_step();
+        step.timing_offset_ticks = (index % 2 == 1) ? kNudgeTicks : 0;
+        REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+    }
+
+    const std::array partitions{std::int32_t{24'000}};
+    const auto events = render(player, map, 24'000, partitions);
+    const auto attacks = attacks_of(events);
+    REQUIRE(attacks.size() == 4);
+    for (std::size_t index = 0; index < 4; ++index) {
+        const std::int64_t grid = static_cast<std::int64_t>(index) * kStepSamples;
+        const std::int64_t expected = grid + (index % 2 == 1 ? kNudgeSamples : 0);
+        CHECK(attacks[index].sample == expected);
+    }
+    // Sensitivity control: the nudged steps really did move off the grid, so a
+    // kernel that ignored the field could not satisfy the assertions above.
+    CHECK(attacks[1].sample != 1 * kStepSamples);
+    CHECK(attacks[3].sample != 3 * kStepSamples);
+}
+
+TEST_CASE("StepPlayer keeps a nudged step's gate length", "[midi][step-player][grid]") {
+    // The release moves with the attack. A step nudged late must not be
+    // shortened into the next step's boundary.
+    constexpr std::int32_t kNudgeTicks = static_cast<std::int32_t>(kStepTicks / 4);
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(1);
+    fixture.spec.lanes[0].step_count = 2;
+    auto player = fixture.make();
+    for (std::size_t index = 0; index < 2; ++index) {
+        auto step = basic_step();
+        step.gate_percent = 50;
+        step.timing_offset_ticks = kNudgeTicks;
+        REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+    }
+    const std::array partitions{std::int32_t{12'000}};
+    const auto events = render(player, map, 12'000, partitions);
+    const auto attacks = attacks_of(events);
+    const auto releases = releases_of(events);
+    REQUIRE(attacks.size() >= 1);
+    REQUIRE(releases.size() >= 1);
+    // A 50% gate on a 6'000-sample step is 3'000 samples, regardless of nudge.
+    CHECK(releases[0].sample - attacks[0].sample == kStepSamples / 2);
+}
+
+TEST_CASE("StepPlayer rejects a timing offset beyond its declared bound",
+          "[midi][step-player][parity]") {
+    PlayerFixture<> fixture(1);
+    auto player = fixture.make();
+    auto step = basic_step();
+
+    step.timing_offset_ticks = midi::StepPlayer<>::kMaximumTimingOffsetTicks;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::None);
+
+    // One past the bound is refused rather than silently honoured, because a
+    // nudge that large reorders the grid against itself.
+    step.timing_offset_ticks = midi::StepPlayer<>::kMaximumTimingOffsetTicks + 1;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
+
+    // An early nudge is refused, not clamped. A step is discovered when its own
+    // interval opens, so pulling it earlier asks it to sound before the block
+    // that found it — and whether it then survived would depend on where the
+    // host put its callback boundaries, which is what this kernel promises not
+    // to depend on. Refusing says so at authoring time instead of producing a
+    // stream that is right at one block size and wrong at another.
+    step.timing_offset_ticks = -1;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
+    step.timing_offset_ticks = -midi::StepPlayer<>::kMaximumTimingOffsetTicks;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
+
+    // The bound must be wide enough to express swing on a sixteenth grid, which
+    // a 16-bit field could not: it would cap at 32'767 of the 176'400 ticks a
+    // sixteenth spans.
+    STATIC_REQUIRE(midi::StepPlayer<>::kMaximumTimingOffsetTicks > kStepTicks / 2);
+}
+
+TEST_CASE("StepPlayer with a zero timing offset is unchanged", "[midi][step-player][parity]") {
+    // The bypass identity: adding the field must not move anything that does
+    // not ask to be moved.
+    const auto map = constant_tempo_map();
+    auto run = [&](bool set_offset) {
+        PlayerFixture<> fixture(1);
+        auto player = fixture.make();
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            if (set_offset)
+                step.timing_offset_ticks = 0;
+            player.set_step(0, index, step);
+        }
+        const std::array partitions{std::int32_t{24'000}};
+        return attacks_of(render(player, map, 24'000, partitions));
+    };
+    const auto without = run(false);
+    const auto with_zero = run(true);
+    REQUIRE(without.size() == with_zero.size());
+    for (std::size_t index = 0; index < without.size(); ++index)
+        CHECK(without[index].sample == with_zero[index].sample);
+    for (std::size_t index = 0; index < without.size(); ++index)
+        CHECK(without[index].sample == static_cast<std::int64_t>(index) * kStepSamples);
+}
+
+TEST_CASE("StepPlayer nudged steps are exact across callback partitions",
+          "[midi][step-player][partition][grid]") {
+    // One sample spans 29.4 ticks at 120 bpm / 48 kHz, so sweeping the nudge
+    // walks a step's onset across every sub-sample phase — including the half
+    // sample where rounding decides between two neighbouring samples. A host
+    // is free to hand the same transport to the kernel in any block sizes it
+    // likes, so the phase a nudged onset lands on must not depend on where the
+    // callback boundaries happen to fall.
+    const auto map = constant_tempo_map();
+    const auto build = [](std::int32_t nudge) {
+        PlayerFixture<> fixture(1);
+        auto player = fixture.make();
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            step.pitch_offset = static_cast<std::int8_t>(index);
+            // Offsets are late-only, so a groove nudges the off-beats and
+            // leaves the down-beats on the grid — the shape a swing plus a
+            // groove table produces.
+            step.timing_offset_ticks = index % 2 == 1 ? nudge : 0;
+            REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+        }
+        return player;
+    };
+
+    constexpr std::int64_t kTotal = 24'000;
+    const std::array single{std::int32_t{24'000}};
+    const std::array even{std::int32_t{512}};
+    const std::array odd{std::int32_t{137}, std::int32_t{999}, std::int32_t{4'096},
+                         std::int32_t{1}};
+
+    // The last two exceed a sixteenth's own interval, so they exercise the bound
+    // as well as the projection: an over-wide nudge is held inside the step it
+    // belongs to rather than reaching the next one.
+    for (const std::int32_t nudge : {1, 7, 14, 15, 22, 29, 30, 44, 59, 100, 1'471, 44'100, 176'400,
+                                     midi::StepPlayer<>::kMaximumTimingOffsetTicks}) {
+        INFO("nudge ticks = " << nudge);
+        auto whole = build(nudge);
+        const auto reference = render(whole, map, kTotal, single);
+        auto fine = build(nudge);
+        const auto chopped = render(fine, map, kTotal, even);
+        auto ragged = build(nudge);
+        const auto uneven = render(ragged, map, kTotal, odd);
+
+        REQUIRE(reference.size() == chopped.size());
+        REQUIRE(reference.size() == uneven.size());
+        for (std::size_t index = 0; index < reference.size(); ++index) {
+            INFO("event index = " << index << " reference sample = " << reference[index].sample
+                                  << " even sample = " << chopped[index].sample
+                                  << " ragged sample = " << uneven[index].sample);
+            CHECK(reference[index].identity() == chopped[index].identity());
+            CHECK(reference[index].identity() == uneven[index].identity());
+        }
+    }
+}
+
+TEST_CASE("StepPlayer holds an over-wide nudge inside the step that owns it",
+          "[midi][step-player][grid]") {
+    // The declared bound is a quarter note, but a step on a sixteenth grid owns
+    // only a sixteenth of it. A nudge wider than the step's own interval is
+    // accepted at authoring time and held at fire time, so an authored groove
+    // can never push one step past the next one's grid position — which is what
+    // would reorder the sequence against itself.
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(1);
+    auto player = fixture.make();
+    for (std::size_t index = 0; index < 4; ++index) {
+        auto step = basic_step();
+        step.pitch_offset = static_cast<std::int8_t>(index);
+        step.timing_offset_ticks = midi::StepPlayer<>::kMaximumTimingOffsetTicks;
+        REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+    }
+
+    const std::array whole{std::int32_t{30'000}};
+    const auto attacks = attacks_of(render(player, map, 30'000, whole));
+
+    // Four steps' displaced onsets fall inside this window; the fifth lands on
+    // the limit and belongs to the next call. Asserting the count first means a
+    // clamp that swallowed a step could not make the ordering below look right.
+    REQUIRE(attacks.size() == 4);
+    for (std::size_t index = 0; index < attacks.size(); ++index) {
+        const auto grid = static_cast<std::int64_t>(index) * kStepSamples;
+        INFO("step " << index << " attack sample = " << attacks[index].sample);
+        // Displaced off its own grid position, and no further than the next
+        // one. The bound is strict in ticks, which is the kernel's coordinate;
+        // one interval short of a sixteenth is 176'399 of 176'400 ticks, and
+        // that rounds onto the next grid sample rather than past it.
+        CHECK(attacks[index].sample > grid);
+        CHECK(attacks[index].sample <= grid + kStepSamples);
+        if (index > 0)
+            CHECK(attacks[index].sample > attacks[index - 1].sample);
+    }
+}
+
+TEST_CASE("StepPlayer places a nudged onset independently of where a block begins",
+          "[midi][step-player][partition][grid]") {
+    // A block reports its own start in both samples and ticks, and the two do
+    // not name the same instant. A tick is finer than a sample here -- 29.4 of
+    // them span one -- so many ticks map to the same sample, and the tick a
+    // host reports is the first of them. That start therefore sits up to half a
+    // sample below where the block actually begins, by an amount that depends
+    // on the sample it began on. Projecting an onset relative to it folds that
+    // offset into the answer, which is enough to move the onset by a whole
+    // sample depending only on where the host chose to break its callbacks.
+    // Sweeping the leading block size walks the boundary through every residue
+    // and so through the offset's full range.
+    //
+    // The grid alone cannot show this: a sixteenth is exactly 6'000 samples, so
+    // an un-nudged onset always lands dead on one and has half a sample of room
+    // on either side. It takes a nudge to move an onset close enough to a
+    // sample boundary for the offset to carry it across, which is why this
+    // arrived with the offset.
+    const auto map = constant_tempo_map();
+    const auto build = [](std::int32_t nudge) {
+        PlayerFixture<> fixture(1);
+        auto player = fixture.make();
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            step.pitch_offset = static_cast<std::int8_t>(index);
+            step.timing_offset_ticks = nudge;
+            REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+        }
+        return player;
+    };
+
+    constexpr std::int64_t kTotal = 24'000;
+    const std::array single{std::int32_t{24'000}};
+
+    // Each of these lands the second step's onset within the offset's reach of
+    // the boundary between two samples, so a projection that carries the offset
+    // reports a different sample from one that does not.
+    for (const std::int32_t nudge : {30, 59, 89, 118, 177, 176'443}) {
+        INFO("nudge ticks = " << nudge);
+        auto whole = build(nudge);
+        const auto reference = render(whole, map, kTotal, single);
+        REQUIRE(!reference.empty());
+
+        for (std::int32_t phase = 1; phase <= 40; ++phase) {
+            const std::array partitions{phase, std::int32_t{4'096}};
+            auto shifted = build(nudge);
+            const auto observed = render(shifted, map, kTotal, partitions);
+            INFO("leading block = " << phase);
+            REQUIRE(observed.size() == reference.size());
+            for (std::size_t index = 0; index < reference.size(); ++index) {
+                INFO("event index = " << index << " reference sample = " << reference[index].sample
+                                      << " observed sample = " << observed[index].sample);
+                CHECK(reference[index].identity() == observed[index].identity());
+            }
+        }
+    }
+}

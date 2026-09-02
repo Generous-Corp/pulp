@@ -109,6 +109,20 @@ public:
     // Load and execute a UI script
     void load_script(const std::string& code);
 
+    /// Deliver one typed host-owned message to a named receiver in this UI
+    /// realm. Arguments cross the engine binding directly; no JavaScript source
+    /// is generated or evaluated. This pumps microtasks and ensures the host
+    /// has one repaint request, without duplicating a request already made by
+    /// the receiver, but deliberately leaves requestAnimationFrame callbacks
+    /// for the host's next frame tick. The receiver must be a global function
+    /// with the shape `(type, payload, id)`.
+    void dispatch_native_message(
+        std::string_view receiver,
+        std::string_view type,
+        const choc::value::Value& payload,
+        std::string_view id = {},
+        std::string_view context = "native message dispatch");
+
     /// Set reviewed local roots used by JS asset loading for relative URLs.
     /// These are scoped to this bridge instance and are intended for
     /// post-review UI-kit assets copied under `pulp-kits/<kit-id>/`.
@@ -707,6 +721,7 @@ private:
                                 BindingTarget target, BindingOutcome outcome);
 
     std::function<void()> repaint_callback_;
+    std::uint64_t repaint_request_generation_ = 0;
 
 #ifdef PULP_BENCHMARK
     render::bench::PerfCounters* bench_counters_ = nullptr;
