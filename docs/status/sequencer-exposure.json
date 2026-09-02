@@ -1899,21 +1899,27 @@
             "class StepPlayer {",
             "MidiUtilityProcessReport process(const MidiBuffer& input, MidiBuffer& output,",
             "MidiUtilityProcessReport flush_transport(MidiBuffer& output) noexcept",
-            "std::int32_t timing_offset_ticks = 0;"
+            "std::int32_t timing_offset_ticks = 0;",
+            "struct StepPlayerCoordinate {",
+            "std::optional<StepPlayerCoordinate> coordinate_at(std::size_t lane,",
+            "std::optional<StepPlayerCoordinate> upcoming_coordinate(std::size_t lane) const noexcept {"
           ]
         }
       ],
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid \u2014 swing, a groove table or a per-step nudge \u2014 without running its own scheduler beside the kernel.",
+          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid — swing, a groove table or a per-step nudge — without running its own scheduler beside the kernel. The header also exposes the scheduling coordinate itself: coordinate_at(lane, tick) answers which step a lane's walk selects at a grid coordinate and upcoming_coordinate(lane) answers the step it will fire next, so a UI or a test can read the pipeline stage without pushing audio through the player.",
           "evidence": [
             {
               "kind": "sdk_header",
               "path": "core/midi/include/pulp/midi/step_player.hpp",
               "needles": [
                 "class StepPlayer {",
-                "std::int32_t timing_offset_ticks = 0;"
+                "std::int32_t timing_offset_ticks = 0;",
+                "struct StepPlayerCoordinate {",
+                "std::optional<StepPlayerCoordinate> coordinate_at(std::size_t lane,",
+                "std::optional<StepPlayerCoordinate> upcoming_coordinate(std::size_t lane) const noexcept {"
               ]
             }
           ]
@@ -1972,7 +1978,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations \u2014 which is every LFO a musician can reach \u2014 no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from.",
+          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations — which is every LFO a musician can reach — no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from.",
           "evidence": [
             {
               "kind": "sdk_header",
