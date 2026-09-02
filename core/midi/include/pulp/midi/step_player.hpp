@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 
 namespace pulp::midi {
@@ -215,6 +216,22 @@ constexpr bool valid_direction(StepPlayerDirection direction) noexcept {
 }
 
 } // namespace step_player_detail
+
+/// A lane's authored coordinate at one grid tick.
+///
+/// `ordinal` counts step intervals from the tick origin, `cycle` counts
+/// completed passes over the lane, and `index` is the step the lane's walk
+/// selects. All three are pure functions of the lane's immutable spec and the
+/// tick, so a caller can ask which cell is about to speak and author it before
+/// `process()` rather than mirroring the walk and drifting from it.
+struct StepPlayerCoordinate {
+    timebase::TickPosition step_tick{};
+    timebase::TickPosition following_tick{};
+    std::int64_t ordinal = 0;
+    std::uint64_t cycle = 0;
+    std::size_t index = 0;
+    constexpr auto operator<=>(const StepPlayerCoordinate&) const = default;
+};
 
 /// Fixed-capacity, sample-accurate multi-lane linear step player.
 ///
@@ -471,6 +488,29 @@ class StepPlayer {
             note = {};
         last_block_valid_ = false;
         return report;
+    }
+
+    /// The coordinate a lane's grid selects at `tick`.
+    ///
+    /// Pure in the lane's authored spec and the tick: it consults no playback
+    /// state and advances nothing, so a caller may ask ahead of `process()`
+    /// which cell is about to speak. `std::nullopt` means the lane does not
+    /// exist or carries no steps.
+    std::optional<StepPlayerCoordinate> coordinate_at(std::size_t lane,
+                                                      timebase::TickPosition tick) const noexcept {
+        if (!valid_ || lane >= spec_.lane_count || spec_.lanes[lane].step_count == 0 ||
+            spec_.lanes[lane].step_duration.value <= 0)
+            return std::nullopt;
+        return coordinate_for(spec_.lanes[lane], lane, tick);
+    }
+
+    /// The coordinate a lane will fire next, or `std::nullopt` before the
+    /// lane's clock has been placed by a transport block.
+    std::optional<StepPlayerCoordinate> upcoming_coordinate(std::size_t lane) const noexcept {
+        if (!valid_ || lane >= spec_.lane_count || spec_.lanes[lane].step_count == 0 ||
+            spec_.lanes[lane].step_duration.value <= 0 || !clocks_[lane].initialized)
+            return std::nullopt;
+        return coordinate_for(spec_.lanes[lane], lane, clocks_[lane].next_tick);
     }
 
   private:
@@ -765,6 +805,23 @@ class StepPlayer {
         return 0;
     }
 
+    /// The grid coordinate a lane selects at `tick`.
+    ///
+    /// Sequencing, firing and the public queries all read the walk from here,
+    /// so the three cannot disagree about which cell a tick names.
+    StepPlayerCoordinate coordinate_for(const StepPlayerLaneSpec& lane, std::size_t lane_index,
+                                        timebase::TickPosition tick) const noexcept {
+        StepPlayerCoordinate coordinate{};
+        coordinate.step_tick = tick;
+        coordinate.following_tick = timebase::TickPosition{
+            utility_detail::saturating_sample_add(tick.value, lane.step_duration.value)};
+        coordinate.ordinal = step_player_detail::floor_div(tick.value, lane.step_duration.value);
+        coordinate.cycle = static_cast<std::uint64_t>(step_player_detail::floor_div(
+            coordinate.ordinal, static_cast<std::int64_t>(lane.step_count)));
+        coordinate.index = walk_index(lane, coordinate.ordinal, tick, lane_index, coordinate.cycle);
+        return coordinate;
+    }
+
     /// How far a step asks to be displaced off its grid position, in ticks.
     ///
     /// The authored offset is held inside the step's own interval. A
@@ -792,12 +849,9 @@ class StepPlayer {
         const auto tick = clocks_[lane_index].next_tick;
         if (lane.step_count == 0 || lane.step_duration.value <= 0)
             return sample_for_tick(tick);
-        const auto ordinal = step_player_detail::floor_div(tick.value, lane.step_duration.value);
-        const auto cycle = static_cast<std::uint64_t>(
-            step_player_detail::floor_div(ordinal, static_cast<std::int64_t>(lane.step_count)));
-        const auto index = walk_index(lane, ordinal, tick, lane_index, cycle);
-        const auto offset =
-            bounded_timing_offset(steps_[lane_index * MaxSteps + index], lane.step_duration.value);
+        const auto coordinate = coordinate_for(lane, lane_index, tick);
+        const auto offset = bounded_timing_offset(
+            steps_[lane_index * MaxSteps + coordinate.index], lane.step_duration.value);
         return sample_for_tick({utility_detail::saturating_sample_add(tick.value, offset)});
     }
 
@@ -805,14 +859,11 @@ class StepPlayer {
                    MidiBuffer& output, MidiUtilityProcessReport& report) noexcept {
         const auto& lane = spec_.lanes[lane_index];
         auto& clock = clocks_[lane_index];
-        const auto step_tick = clock.next_tick;
-        const auto following_tick = timebase::TickPosition{utility_detail::saturating_sample_add(
-            step_tick.value, lane.step_duration.value)};
-        const auto ordinal =
-            step_player_detail::floor_div(step_tick.value, lane.step_duration.value);
-        const auto cycle = static_cast<std::uint64_t>(
-            step_player_detail::floor_div(ordinal, static_cast<std::int64_t>(lane.step_count)));
-        const auto index = walk_index(lane, ordinal, step_tick, lane_index, cycle);
+        const auto coordinate = coordinate_for(lane, lane_index, clock.next_tick);
+        const auto step_tick = coordinate.step_tick;
+        const auto following_tick = coordinate.following_tick;
+        const auto cycle = coordinate.cycle;
+        const auto index = coordinate.index;
         const auto& step = steps_[lane_index * MaxSteps + index];
         if (!step.on)
             return true;
