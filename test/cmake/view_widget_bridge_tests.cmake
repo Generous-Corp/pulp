@@ -27,6 +27,11 @@ catch_discover_tests(pulp-test-hot-reload
         RESOURCE_LOCK hot-reload-file-watcher
         LABELS slow)
 
+# The model/provider registrations in this owner file are intentionally visible
+# when the optional Inspector component is disabled. Inspector-only fixtures in
+# the file retain their own PULP_ENABLE_INSPECTOR guard.
+include(${CMAKE_CURRENT_LIST_DIR}/gpu_health_tests.cmake)
+
 # Inspector component tests exist only when the optional SDK component is
 # present. A gate-off build must not compile inspector implementation sources
 # back into its test artifacts.
@@ -393,6 +398,7 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
     target_compile_definitions(pulp-test-control-broker-daemon PRIVATE
         PULP_CONTROL_TRUSTED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-e2e-fixture>"
         PULP_CONTROL_BROKER_DAEMON="$<TARGET_FILE:pulp-control-broker>"
+        PULP_TEST_INSTALLED_CONTROL_GPU_HEALTH=$<BOOL:${PULP_ENABLE_GPU}>
         $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>
         PULP_CONTROL_BROKER_CRASH_FIXTURE="$<TARGET_FILE:pulp-control-broker-crash-fixture>")
     add_dependencies(pulp-test-control-broker-daemon

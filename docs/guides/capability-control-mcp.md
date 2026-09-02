@@ -12,6 +12,7 @@ artifact ACL checks all remain owned by the installed broker and shared
 Every broker-authorizable frozen `dev.pulp.*@1` operation is exposed as a stable
 `pulp_control_*` tool generated from the canonical operation registry. For
 example, `dev.pulp.state/read@1` becomes `pulp_control_state_read`,
+`dev.pulp.gpu/health.read@1` becomes `pulp_control_gpu_health_read`,
 `dev.pulp.state/parameter-gesture@1` becomes
 `pulp_control_state_parameter_gesture`, and
 `dev.pulp.runtime/evaluate@1` becomes `pulp_control_runtime_evaluate`.
@@ -39,6 +40,16 @@ progress observations. `pulp_control_cancel` sends the canonical cancellation
 envelope. `pulp_control_artifact_read` returns broker-ACL-checked chunks rather
 than writing arbitrary local paths.
 
+`pulp_control_gpu_health_read` takes the usual exact `instance_id`, grant or
+read-only profile, deadline, and an empty operation `input` object. Its typed
+output is the same installed `pulp.gpu-health-read-result.v1` schema used by
+the C++ control executor. The result is useful only when that exact live host
+advertises a real product provider; tool listing alone is not proof that startup
+measurement, Perfetto correlation, or a final optimization disposition is
+available. Agents should preserve null evidence IDs and incomplete/event-loss
+states rather than searching for a newest trace or substituting another live
+instance.
+
 MCP resources expose exact instance metadata and ACL-checked artifacts under
 `pulp-control://`. They are read resources, not lifecycle subscriptions;
 broker-backed live telemetry subscriptions use the generated
@@ -55,6 +66,14 @@ trusted composition root and rejects absent or replayed decisions. Critical
 operations, including runtime evaluation, require an explicit broker-issued
 grant backed by a single-use broker-owned consent decision; the MCP adapter
 does not auto-grant them and has no argument that can claim approval.
+An interactive consent decision is single-use when the broker issues a grant,
+but capabilities on that grant retain their established reusable operation
+behavior except for GPU startup-health reads. An interactive
+`dev.pulp.gpu/health.read@1` approval may admit one fresh idempotency identity,
+then permits only durable receipt replay of that exact operation. A different
+GPU-health operation requires new consent. Reusing the exact operation after
+reconnect does not execute it again and does not create a second receipt. An
+explicit existing-user policy may authorize reusable GPU-health reads.
 Revocation, expiry, publication changes, and instance teardown remain effective
 during a call because the adapter sends the canonical grant and instance
 lineage and reports the broker's terminal receipt rather than assuming success.

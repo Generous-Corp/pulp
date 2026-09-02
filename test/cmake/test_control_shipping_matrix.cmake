@@ -78,6 +78,8 @@ add_shipping_artifact(TestStandalone test-deterministic
     "dev.pulp.instance/read@1" Standalone)
 add_shipping_artifact(SupportStandalone support-diagnostics
     "dev.pulp.diagnostics/read@1;dev.pulp.logs/read@1" Standalone)
+add_shipping_artifact(SupportGpuStandalone support-diagnostics
+    "dev.pulp.gpu/health.read@1" Standalone)
 add_shipping_artifact(ResearchStandalone research-unsafe
     "dev.pulp.session/control@1;dev.pulp.ui/input@1;dev.pulp.trace/control@1;dev.pulp.trace/session-control@1;dev.pulp.runtime/reload@1;dev.pulp.runtime/evaluate@1;dev.pulp.artifact/read@1;dev.pulp.unavailable/operation@1" Standalone)
 ]=])
@@ -111,9 +113,9 @@ endif()
 
 file(GLOB _reports "${_matrix_build}/*control-shipping-report.json")
 list(LENGTH _reports _report_count)
-if(NOT _report_count EQUAL 12)
+if(NOT _report_count EQUAL 13)
     message(FATAL_ERROR
-        "control shipping matrix emitted ${_report_count} reports instead of 12")
+        "control shipping matrix emitted ${_report_count} reports instead of 13")
 endif()
 foreach(_report IN LISTS _reports)
     file(READ "${_report}" _report_content)
@@ -228,6 +230,50 @@ string(FIND "${_missing_output}${_missing_error}"
 if(_missing_reason LESS 0)
     message(FATAL_ERROR
         "missing implementation failed for the wrong reason: ${_missing_output}${_missing_error}")
+endif()
+
+# A GPU-health declaration must be backed by its exact retained component
+# marker. Keeping only the endpoint marker proves the scanner rejects a
+# declaration that outruns the linked implementation.
+set(_missing_gpu_source "${FIXTURE_DIR}/missing-gpu-health-source")
+set(_missing_gpu_build "${FIXTURE_DIR}/missing-gpu-health-build")
+file(MAKE_DIRECTORY "${_missing_gpu_source}")
+file(WRITE "${_missing_gpu_source}/main.cpp"
+    "#if defined(_MSC_VER)\n#define USED __declspec(dllexport)\n#else\n#define USED __attribute__((used, visibility(\"default\")))\n#endif\nextern \"C\" USED const volatile char endpoint[] = \"PULP_INSPECT_SHIPPING_MANIFEST_V1\";\nint main() { return endpoint[0] == 'P' ? 0 : 1; }\n")
+file(WRITE "${_missing_gpu_source}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.24)
+project(MissingGpuHealthImplementation LANGUAGES CXX)
+include("@HELPER@/PulpControlShipping.cmake")
+_pulp_cache_control_declarations(MissingGpu developer-local
+    "dev.pulp.gpu/health.read@1" FALSE)
+_pulp_configure_control_shipping(MissingGpu
+    "com.pulp.test.missing-gpu" "Missing GPU Health")
+add_executable(MissingGpu main.cpp)
+_pulp_attach_control_shipping(MissingGpu MissingGpu Standalone)
+]=])
+file(READ "${_missing_gpu_source}/CMakeLists.txt" _missing_gpu_cmake)
+string(REPLACE "@HELPER@" "${_installed_helper_dir}"
+    _missing_gpu_cmake "${_missing_gpu_cmake}")
+file(WRITE "${_missing_gpu_source}/CMakeLists.txt" "${_missing_gpu_cmake}")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_missing_gpu_source}"
+    -B "${_missing_gpu_build}" -DCMAKE_BUILD_TYPE=Release
+    RESULT_VARIABLE _missing_gpu_configure OUTPUT_QUIET ERROR_QUIET)
+if(NOT _missing_gpu_configure EQUAL 0)
+    message(FATAL_ERROR "could not configure missing GPU-health implementation fixture")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${_missing_gpu_build}"
+    --config Release RESULT_VARIABLE _missing_gpu_result
+    OUTPUT_VARIABLE _missing_gpu_output ERROR_VARIABLE _missing_gpu_error)
+if(_missing_gpu_result EQUAL 0)
+    message(FATAL_ERROR "GPU-health declaration without its component marker was accepted")
+endif()
+string(FIND "${_missing_gpu_output}${_missing_gpu_error}"
+    "declared capability marker is absent: dev.pulp.gpu/health.read@1"
+    _missing_gpu_reason)
+if(_missing_gpu_reason LESS 0)
+    message(FATAL_ERROR
+        "missing GPU-health marker failed for the wrong reason: "
+        "${_missing_gpu_output}${_missing_gpu_error}")
 endif()
 
 function(expect_leak_blocked case_name leak_source)

@@ -4,6 +4,21 @@ Domain knowledge for investigating GPU-side cost in a Pulp trace. Pulp renders
 through Skia Graphite on a Dawn (WebGPU) backend; `gpu` spans cover the record
 → submit → present tail of the frame pipeline.
 
+Start agentic investigation with the closed named questions when applicable:
+`gpu-startup`, `gpu-health`, and `gpu-probe`. They rank the same checked-in
+views an expert can inspect in Perfetto and expose a bounded evidence ID for
+correlation. An `unavailable` result means the category/evidence is absent or
+incomplete; it is never evidence of a healthy GPU path.
+
+For `gpu-startup`, compare `cold_start_contributors` with
+`steady_state_contributors` rather than mixing initialization into recurring
+cost. A contributor's `cpu_running_ns`, `non_running_ns`, and
+`execution_state` are authoritative only when
+`scheduler_evidence_available:true`, which requires complete `thread_state`
+coverage for the contributor. Partial/absent coverage proves wall time but not
+blocking; follow the emitted platform-harness action. Do not fold `unknown`
+unindexed rows into either cold or steady conclusions.
+
 ## CPU submit time vs real GPU time — the distinction that matters
 
 Most plugin frameworks only see **CPU submit time** — how long the CPU spent
@@ -26,6 +41,16 @@ drain a previous frame or for the swapchain to release an image. Apply the
 harness rule: check whether the span was running or blocked. A blocked present
 is fixed by reducing GPU work per frame or adjusting frame pacing — not by
 optimizing the code inside the span.
+
+The trace can localize the delayed stage without revealing the platform state
+machine that caused it. In one resize investigation, paint averaged about one
+millisecond while acquire/present and compositor timing consumed roughly one
+refresh interval. That ruled out paint optimization. The cause was established
+only after a platform harness reproduced a redundant same-size resize callback
+that released retained content before the queued frame became visible. Use
+Perfetto to falsify and localize, then an event-order harness plus a planted
+regression to prove platform causality. A recording or interaction check
+validates the resulting UX; it does not replace the deterministic harness.
 
 ```sql
 -- Per-pass GPU cost ranking:

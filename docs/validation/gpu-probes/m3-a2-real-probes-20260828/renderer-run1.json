@@ -1,0 +1,101 @@
+{
+  "schema": "pulp.gpu-probe-result.v1",
+  "version": 1,
+  "gpu_evidence_id": "9ff607f78aa13ee222c2ebee85e98b15",
+  "recipe_id": "renderer3d.hardcoded-cube.v1",
+  "source_digest": "d66c9d9583d3e6db88c9cf7c98b7aba0949975ad637e9158d74d6554a4d4f06e",
+  "signature_digest": "5763aa0f9cb77f28a5ea2a7539da8aaa9d15e557af02ef418777db3e5dccad3e",
+  "dimensions": {
+    "width": 128,
+    "height": 128,
+    "work_items": 16384
+  },
+  "seed": 5928230539327963137,
+  "clock": "fixed-step-0",
+  "input_format": "rgba32float",
+  "output_format": "rgba8-srgb",
+  "encoding": "png",
+  "tolerance": {
+    "absolute": 0.00392156862745098,
+    "relative": 0.0
+  },
+  "adapter_policy": "hardware-preferred",
+  "adapter": {
+    "status": "unverified",
+    "class": "unknown",
+    "backend": "Dawn/WebGPU",
+    "name": "Native Dawn Adapter (Metal)",
+    "vendor": "Dawn",
+    "architecture": "Metal",
+    "device": null
+  },
+  "numeric_sample_count": 0,
+  "mutation": null,
+  "verdict": "pass",
+  "passes": [
+    {
+      "sequence": 0,
+      "name": "adapter",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "adapter_acquired"
+    },
+    {
+      "sequence": 1,
+      "name": "render",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "render_submitted"
+    },
+    {
+      "sequence": 2,
+      "name": "readback",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "readback_completed"
+    },
+    {
+      "sequence": 3,
+      "name": "content",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "metal_fingerprint_match"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "content-oracle.json",
+      "kind": "json",
+      "mime": "application/json",
+      "bytes": 180,
+      "sha256": "bba5189ed63ae37b0a1ab26d22da9e8164aa68918b70ac7640574fa39b424e2d"
+    },
+    {
+      "name": "final.png",
+      "kind": "image",
+      "mime": "image/png",
+      "bytes": 7212,
+      "sha256": "497f86ed7c374b21c3d4a16f5cd4dc5c590f588b579e03e80ff52c691ea3d832"
+    },
+    {
+      "name": "observed.rgba8",
+      "kind": "image",
+      "mime": "application/octet-stream",
+      "bytes": 65536,
+      "sha256": "c38c57fae2bc2d5480a91b7b7cf12b599f43087100ed82e479cb5008661b4b12"
+    }
+  ],
+  "recommendations": []
+}

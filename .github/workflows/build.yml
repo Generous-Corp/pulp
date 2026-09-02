@@ -739,6 +739,28 @@ jobs:
               "--namespace-setting-name", "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
           ])
 
+          # Labels identify a compatible runner, but they do not cross an
+          # organization runner-group boundary. Merge-group runners live in
+          # `pulp-trusted-build`, so the real matrix job must request both the
+          # protected group and the event-class labels. PR-head and dispatch
+          # jobs intentionally retain their existing label-array selector.
+          if EVENT_NAME == "merge_group":
+              try:
+                  parsed_macos_runs_on = json.loads(macos_runs_on)
+              except (json.JSONDecodeError, TypeError):
+                  parsed_macos_runs_on = None
+              if (
+                  isinstance(parsed_macos_runs_on, list)
+                  and "self-hosted" in parsed_macos_runs_on
+              ):
+                  macos_runs_on = json.dumps(
+                      {
+                          "group": "pulp-trusted-build",
+                          "labels": parsed_macos_runs_on,
+                      },
+                      separators=(",", ":"),
+                  )
+
           include = []
           if EVENT_NAME not in PUSH_ONLY_CACHE_EVENTS:
               include.append({
@@ -1166,6 +1188,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           lfs: false
+          # GPU provenance self-tests use HEAD^ and exact historical receipts.
+          # Keep normal checkout shallow; the bounded hydration step below
+          # fetches only the authority commits named by checked-in evidence.
+          fetch-depth: 2
           # Self-hosted runner reuses its workspace across runs so ccache,
           # FetchContent caches, and CMake configure persist between PRs.
           # GitHub-hosted runners get a fresh VM each run anyway, so the
@@ -1191,6 +1217,10 @@ jobs:
           else
             git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
           fi
+
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
 
       - name: Set up Namespace macOS cache
         if: runner.os == 'macOS' && contains(matrix.runs_on_json, 'namespace-profile')

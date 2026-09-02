@@ -1,0 +1,41 @@
+{
+  "dependencies": {
+    "a2t_receipt": null,
+    "a3_budget_id": null,
+    "a3_receipt": null
+  },
+  "disposition": null,
+  "eligible_for_policy": false,
+  "evidence_kind": "measured",
+  "experiment_id": "a4-m3-preflight-20260828-319a64a1",
+  "forge_sha": "36ed776426a137397f5ad02187d3bb00bf49c661",
+  "matrix": {
+    "manifest_sha256": "df3b6dc505c41c52855a0210e6075044c78294e6a9bdfe31f7f5d42090d66f46",
+    "modes": [
+      "exact",
+      "configured_max",
+      "adaptive_simulation"
+    ],
+    "requested_dprs": [
+      1,
+      1.5,
+      2,
+      3
+    ],
+    "scenario_ids": [
+      "dense-text-thin-strokes",
+      "shader-heavy-controls",
+      "meters-waveforms",
+      "threejs-audio-reactive",
+      "forge-modular-native",
+      "forge-modular-daw",
+      "super-convolver-web"
+    ]
+  },
+  "observations": [],
+  "plan_revision": "0758a1d45c37fb8d6ae31245e62996b8214d5948",
+  "pulp_sha": "319a64a11602e417404bfe2b592fdaf6b846d7cb",
+  "schema": "pulp.gpu-dpr-experiment.v1",
+  "status": "incomplete",
+  "version": 1
+}

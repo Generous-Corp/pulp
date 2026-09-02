@@ -37,6 +37,10 @@ from sdk_provenance import ProvenanceError, verify_build_info_text
 
 
 DEFAULT_MATRIX_PATH = Path(__file__).with_name("release_product_matrix.json")
+GPU_RECIPE_CATALOG_MEMBERS = (
+    "pulp-sdk/share/pulp/gpu-recipes.yaml",
+    "pulp-sdk/share/pulp/gpu-recipes.schema.json",
+)
 LEGACY_CLI_BINARY_STEMS = frozenset({"pulp", "pulp-cpp", "pulp-mcp"})
 IMPORT_DESIGN_CLI_FLOOR = "0.764.0"
 PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS = LEGACY_CLI_BINARY_STEMS | {
@@ -97,6 +101,20 @@ CONTROL_STANDALONE_HOST_MANIFEST_FIELDS = frozenset(
         "capabilities",
     }
 )
+THREEJS_RUNTIME_SDK_MEMBERS = frozenset(
+    {
+        "pulp-sdk/share/pulp/threejs/build/three.core.js",
+        "pulp-sdk/share/pulp/threejs/build/three.module.js",
+        "pulp-sdk/share/pulp/threejs/build/three.webgpu.js",
+        "pulp-sdk/share/pulp/threejs/examples/jsm/controls/OrbitControls.js",
+        "pulp-sdk/share/pulp/threejs/examples/jsm/loaders/GLTFLoader.js",
+        "pulp-sdk/share/pulp/threejs/examples/jsm/utils/BufferGeometryUtils.js",
+        "pulp-sdk/share/pulp/threejs/examples/jsm/utils/SkeletonUtils.js",
+        "pulp-sdk/share/pulp/threejs/LICENSE",
+        "pulp-sdk/share/pulp/threejs/package.json",
+        "pulp-sdk/share/pulp/threejs/threejs-runtime-manifest.json",
+    }
+)
 
 
 class ContentError(RuntimeError):
@@ -142,6 +160,14 @@ class ProductMatrix:
     control_standalone_host_floor: str
     node_runtime_floor: str
     gpu_health_contract_floor: str
+    gpu_probe_contract_floor: str
+    gpu_recipe_catalog_floor: str
+    gpu_recipe_catalog_sha256: dict[str, str]
+    threejs_runtime_floor: str
+    gpu_health_read_contract_floor: str
+    gpu_dpr_experiment_contract_floor: str
+    gpu_dpr_experiment_v2_contract_floor: str
+    gpu_trace_human_review_contract_floor: str
     platforms: tuple[str, ...]
     # The subset of `platforms` a release currently BUILDS and PUBLISHES.
     # `platforms` stays the full historical inventory (per-platform archive
@@ -204,6 +230,33 @@ class ProductMatrix:
                 ),
                 gpu_health_contract_floor=str(
                     doc.get("gpu_health_contract_floor", "999999.0.0")
+                ),
+                gpu_probe_contract_floor=str(
+                    doc.get("gpu_probe_contract_floor", "999999.0.0")
+                ),
+                gpu_recipe_catalog_floor=str(
+                    doc.get("gpu_recipe_catalog_floor", "999999.0.0")
+                ),
+                gpu_recipe_catalog_sha256={
+                    str(key): str(value)
+                    for key, value in doc.get("gpu_recipe_catalog_sha256", {}).items()
+                },
+                threejs_runtime_floor=str(
+                    doc.get("threejs_runtime_floor", "999999.0.0")
+                ),
+                gpu_health_read_contract_floor=str(
+                    doc.get("gpu_health_read_contract_floor", "999999.0.0")
+                ),
+                gpu_dpr_experiment_contract_floor=str(
+                    doc.get("gpu_dpr_experiment_contract_floor", "999999.0.0")
+                ),
+                gpu_dpr_experiment_v2_contract_floor=str(
+                    doc.get("gpu_dpr_experiment_v2_contract_floor", "999999.0.0")
+                ),
+                gpu_trace_human_review_contract_floor=str(
+                    doc.get(
+                        "gpu_trace_human_review_contract_floor", "999999.0.0"
+                    )
                 ),
                 platforms=tuple(doc["platforms"]),
                 active_platforms=tuple(
@@ -578,6 +631,64 @@ def required_sdk_members(
         required.add(
             "pulp-sdk/share/pulp/contracts/gpu-health-result-v1.schema.json"
         )
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.gpu_probe_contract_floor)
+    ):
+        required.add(
+            "pulp-sdk/share/pulp/contracts/gpu-probe-result-v1.schema.json"
+        )
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.gpu_recipe_catalog_floor)
+    ):
+        required.update(
+            {
+                "pulp-sdk/share/pulp/gpu-recipes.yaml",
+                "pulp-sdk/share/pulp/gpu-recipes.schema.json",
+            }
+        )
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.threejs_runtime_floor)
+    ):
+        required.update(THREEJS_RUNTIME_SDK_MEMBERS)
+    if (
+        version is not None
+        and version_tuple(version) >=
+        version_tuple(matrix.gpu_health_read_contract_floor)
+    ):
+        required.add(
+            "pulp-sdk/share/pulp/contracts/gpu-health-read-result-v1.schema.json"
+        )
+    if (
+        version is not None
+        and version_tuple(version)
+        >= version_tuple(matrix.gpu_dpr_experiment_contract_floor)
+    ):
+        required.add(
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v1.schema.json"
+        )
+    if (
+        version is not None
+        and version_tuple(version)
+        >= version_tuple(matrix.gpu_dpr_experiment_v2_contract_floor)
+    ):
+        required.update({
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-corpus-v2-template.json",
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v2.schema.json",
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-live-verification-v1.schema.json",
+            "pulp-sdk/share/pulp/contracts/gpu-vellum-package-terminal-v1.schema.json",
+        })
+    if (
+        version is not None
+        and version_tuple(version)
+        >= version_tuple(matrix.gpu_trace_human_review_contract_floor)
+    ):
+        required.add(
+            "pulp-sdk/share/pulp/contracts/"
+            "gpu-trace-human-review-v1.schema.json"
+        )
     return frozenset(required)
 
 
@@ -775,6 +886,15 @@ def verify_sdk_archive(
         missing = sorted(required - names)
         if missing:
             raise ContentError(f"{path.name}: missing SDK product(s): {missing}")
+        if version_tuple(version) >= version_tuple(matrix.gpu_recipe_catalog_floor):
+            if set(matrix.gpu_recipe_catalog_sha256) != set(GPU_RECIPE_CATALOG_MEMBERS):
+                raise ContentError("GPU recipe catalog digests are missing from the product matrix")
+            for member in GPU_RECIPE_CATALOG_MEMBERS:
+                actual = hashlib.sha256(archive.read(member)).hexdigest()
+                if actual != matrix.gpu_recipe_catalog_sha256[member]:
+                    raise ContentError(
+                        f"{path.name}: {member} differs from the selected release catalog digest"
+                    )
         if (
             CONTROL_BROKER_SDK_MEMBER in names
             and not control_broker_required(platform, matrix, version)

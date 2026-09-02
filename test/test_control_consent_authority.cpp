@@ -80,6 +80,53 @@ TEST_CASE("broker consent authority approves only an exact bounded user decision
     CHECK(second.decision_id != approved.decision_id);
 }
 
+TEST_CASE("broker consent prompt leads with exact GPU health one-time scope",
+          "[inspect][control][consent][ux]") {
+    auto now = std::chrono::steady_clock::time_point{10s};
+    std::uint8_t entropy = 1;
+    auto gpu_request = request();
+    gpu_request.grant.capabilities = {InspectorCapability::GpuHealthRead};
+    gpu_request.selector_id = "dev.pulp.gpu/health.read@1";
+    auto config = config_for(ControlConsentPromptResult::Approved, now, entropy);
+    config.prompt = [](const ControlConsentPrompt& prompt, std::chrono::milliseconds) {
+        CHECK(prompt.primary_message ==
+              "Read GPU startup health once for dev.pulp.plugin");
+        CHECK(prompt.requested_operations_display == "dev.pulp.gpu/health.read@1");
+        CHECK(prompt.approve_label == "Allow GPU Health Once");
+        CHECK(prompt.technical_details_display.starts_with(
+            "Requester executable: dev.pulp.cli\nRequester publisher: pulp-test"));
+        CHECK(prompt.technical_details_display.find(std::string(64, 'b')) !=
+              std::string::npos);
+        return ControlConsentPromptResult::Approved;
+    };
+    ControlBrokerConsentAuthority authority{std::move(config)};
+    CHECK(authority.decide(gpu_request).approved);
+}
+
+TEST_CASE("broker consent prompt discloses reusable and mixed grant lifetime",
+          "[inspect][control][consent][ux]") {
+    for (const bool mixed : {false, true}) {
+        auto now = std::chrono::steady_clock::time_point{10s};
+        std::uint8_t entropy = 1;
+        auto reusable_request = request();
+        if (mixed)
+            reusable_request.grant.capabilities.push_back(InspectorCapability::GpuHealthRead);
+        auto config = config_for(ControlConsentPromptResult::Approved, now, entropy);
+        config.prompt = [mixed](const ControlConsentPrompt& prompt, std::chrono::milliseconds) {
+            CHECK(prompt.primary_message ==
+                  (mixed
+                       ? "Allow 2 requested capabilities for up to 15 minutes for "
+                         "dev.pulp.plugin. GPU startup health can be read once"
+                       : "Allow 1 requested capability for up to 15 minutes for "
+                         "dev.pulp.plugin"));
+            CHECK(prompt.approve_label == "Allow for 15 minutes");
+            return ControlConsentPromptResult::Approved;
+        };
+        ControlBrokerConsentAuthority authority{std::move(config)};
+        CHECK(authority.decide(reusable_request).approved);
+    }
+}
+
 TEST_CASE("broker consent authority fails closed on deny timeout and expired approval",
           "[inspect][control][consent]") {
     for (const auto result :

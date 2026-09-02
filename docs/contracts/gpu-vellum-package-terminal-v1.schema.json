@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-vellum-package-terminal-v1.schema.json",
+  "title": "Pulp GPU/Vellum terminal package receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "id",
+    "package_id",
+    "status",
+    "disposition",
+    "repository",
+    "revision",
+    "installed_revisions",
+    "dependencies",
+    "payload"
+  ],
+  "properties": {
+    "schema": {"const": "pulp.gpu-vellum-package-terminal.v1"},
+    "version": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{2,127}$"},
+    "package_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{2,95}$"},
+    "status": {"const": "terminal"},
+    "disposition": {"enum": ["pass", "no-change"]},
+    "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+    "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "installed_revisions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pulp", "forge", "vellum", "provider"],
+      "properties": {
+        "pulp": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "forge": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "vellum": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "provider": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "sha256"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "payload": {"type": "object"}
+  }
+}

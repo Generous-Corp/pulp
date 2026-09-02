@@ -1461,12 +1461,16 @@ omitting it preserves fail-closed unambiguous selection. Rust exposes no
 alternate discovery, publication-selection, or raw host/port path.
 Production remains default-denied when no authorized control session can be
 opened. Offline
-`query --trace`, `fetch`, `doctor`, and `open` are wholly offline.
+`query --trace`, the three named GPU questions, `fetch`, `doctor`, and `open`
+are wholly offline.
 
 ```bash
 pulp trace start --instance INSTANCE_ID --categories dsp,render --ring-mb 128
 pulp trace stop --instance INSTANCE_ID               # → prints the .pftrace path
 pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" --trace /tmp/x.pftrace
+pulp trace gpu-startup --trace /tmp/x.pftrace --json  # ranked, unverified until A3 budget
+pulp trace gpu-health --trace /tmp/x.pftrace --json   # pass/fail/unavailable
+pulp trace gpu-probe --trace /tmp/x.pftrace --json    # bounded evidence correlation
 pulp trace doctor                                 # offline trace_processor readiness
 pulp trace fetch                                  # download the pinned trace_processor (zero-install offline query)
 pulp trace open /tmp/x.pftrace                    # serve on loopback + open in the Perfetto UI
@@ -1487,9 +1491,37 @@ Subcommands:
 | `start [--instance ID] [--categories LIST] [--ring-mb 1..512]` | canonical `dev.pulp.trace/session-control@1` | Begin a broker-authorized session recording selected span categories into a bounded in-process ring. The host owns the flushed trace destination. |
 | `stop [--instance ID]` | canonical `dev.pulp.trace/session-control@1` | Flush the broker-authorized session and print the `.pftrace` path. |
 | `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format table` is the only explicit format. |
+| `gpu-startup --trace FILE.pftrace` | checked-in `pulp_gpu_startup_breakdown` view | Rank proven cold/setup separately from steady-state contributors; unanchored work remains unknown. Complete scheduler coverage distinguishes CPU-running from non-running wall time; the verdict remains `unverified` until A3 defines a measured budget. |
+| `gpu-health --trace FILE.pftrace` | checked-in `pulp_gpu_health_transitions` view | Return typed pass/fail health and device-loss evidence. |
+| `gpu-probe --trace FILE.pftrace` | checked-in `pulp_gpu_probe_correlation` view | Correlate bounded probe/readback evidence and return typed pass/fail. |
 | `doctor` | client-side | Report offline `trace_processor` readiness. |
 | `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |
 | `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
+
+Named GPU analysis emits `pulp.trace-gpu-analysis.v1`: a verdict, capture
+completeness, ranked contributors, stable evidence IDs, concrete next actions,
+and a Perfetto UI open command/search terms. Startup exposes separate
+`cold_start_contributors` and `steady_state_contributors`; contributor CPU and
+non-running durations/classification appear only when scheduler `thread_state`
+intervals cover the complete contributor; partial coverage remains unavailable.
+Unindexed spans without a first-frame temporal anchor use phase `unknown`.
+`capture_integrity` records
+whole-trace slice, unfinished-slice, data-loss, and no-flush counts.
+`observed_categories` is derived independently from the parsed trace, never
+supplied by a scenario adapter. `category_scope` binds those categories to the
+single evidence ID and stable Perfetto process instance (`process_upid` plus
+OS PID) selected by the named question; categories from another process or
+evidence cohort cannot satisfy an acceptance requirement. Probe diagnostics
+`cpu_oracle_mismatch` and `magnitude_dispatch_failed` are closed causal
+failures even if an inconsistent producer also labels adapter health healthy.
+Every tooling-owned `gpu_probe*`/`gpu_readback*` candidate must carry an
+evidence ID; an untagged tooling candidate invalidates the cohort while generic
+untagged backend spans remain allowed.
+Empty/never-flushed files, processor-reported truncation, positive data-loss/no-flush stats, missing
+categories, unfinished slices, and invalid probe correlation return
+`unavailable` with exit 2; they do not silently pass. Long acquire/present wall
+time without scheduler evidence is not labeled blocking. `gpu-health` and
+`gpu-probe` use exit 0/1 for pass/fail.
 
 The span category taxonomy is `dsp`, `dsp.node`, `render`, `layout`, `canvas`,
 `text`, `js`, `gpu`, `state`, `io`. Tracing is a dev-only tool: never ship a
@@ -2511,6 +2543,103 @@ process, and publishing mutates public releases.
 `pulp minos measure` is also exposed to agents over MCP as the `pulp_minos`
 tool; `sweep`, `update`, and `publish-runbook` are CLI-only because they clone,
 build, and (optionally) open PRs across many repositories.
+
+### gpu
+
+**Status**: usable
+
+Run a bounded numeric or image-content probe through Pulp's existing GPU seams:
+
+```bash
+pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts artifacts/gpu/magnitude
+pulp gpu probe --recipe renderer3d.hardcoded-cube.v1 --artifacts artifacts/gpu/cube --json
+pulp gpu probe --recipe threejs.multi-pass.v1 --artifacts artifacts/gpu/threejs --json
+pulp gpu probe --recipe gpu-compute.magnitude.v1 --artifacts artifacts/gpu/mutated \
+  --negative-control --json
+```
+
+Discover the canonical catalog before choosing a probe, including recipes that
+this matched build cannot currently run:
+
+```bash
+pulp gpu recipes list
+pulp gpu recipes list --symptom compute-readback-mismatch --json
+pulp gpu recipes show threejs.multi-pass.v1 --json
+mkdir -p "$PWD/artifacts/gpu"
+pulp gpu recipes scaffold gpu-compute.magnitude.v1 \
+  --output "$PWD/artifacts/gpu/magnitude-workspace" --json
+```
+
+An unfiltered `list` includes the four canonical IDs; filtered lists and `show`
+return only their matched subset. Every row reports `callable` from the matched
+native recipe registry. Thus a standard QuickJS release explains
+the V8 plus pinned-runtime requirements for `threejs.multi-pass.v1` without
+advertising it as runnable. `show` of a known conditional row succeeds because
+metadata availability is not execution evidence. Bad arguments, unknown IDs,
+and unknown symptom tokens return 2; catalog or scaffold I/O failures return 1.
+The scaffold command accepts only an absolute, nonexistent, symlink-free output
+path whose parent directory already exists. It generates an evidence-workspace
+receipt, README, and empty artifacts directory from the catalog row. It does
+not copy a renderer or create another recipe authority.
+
+Every recipe declares deterministic inputs, dimensions, clock, source and
+signature digests, semantic pass names, tolerances, adapter policy, and strict
+artifact byte/count bounds. The result uses
+[`pulp.gpu-probe-result.v1`](../contracts/gpu-probe-result-v1.schema.json) and
+includes a 128-bit `gpu_evidence_id` for later Perfetto and control correlation.
+Execution-capable results require a freshly random identifier; if the entropy
+provider fails, the CLI emits an `unverified` exit-2 result with a
+correlation-only identifier and does not run the recipe. Numeric recipes
+compare real GPU readback against an independent CPU oracle. The Renderer3D
+recipe uses an exact known fingerprint only on its
+declared backend and a portable structural content oracle elsewhere; it never
+claims cross-backend pixel identity.
+
+Every build exposes `renderer3d.hardcoded-cube.v1`,
+`gpu-compute.magnitude.v1`, and `gpu-audio.stft.v1`. A build configured with
+both V8 and the pinned Three.js runtime also exposes `threejs.multi-pass.v1`;
+other builds omit that ID from probe help, the callable registry, and the MCP
+probe enum. Recipe metadata discovery still returns the conditional row with
+`callable: false`. The Three.js
+recipe evaluates the SDK's hash-verified
+pinned `three.webgpu.js` runtime through V8 and the native Dawn bridge. It
+captures background, intermediate swatch, and final swatch passes from one
+renderer, then applies an independent C++ color-region oracle. Its seeded
+negative control changes the final material channel while preserving Three.js
+initialization, GPU submission, and readback, so only the intended oracle pass
+fails. A CLI without V8 or authentic hardware identity returns exit 2 rather
+than treating unavailable work as a pass.
+
+The default standalone CLI release remains QuickJS-only and does not advertise
+the Three.js recipe. Publishing it there is follow-up work: the release must
+ship a sealed V8 provider and the Rust self-upgrader must preserve the nested
+Three.js runtime, rather than installing a new delegate without its runtime.
+
+`--negative-control` changes real shader/output behavior without bypassing GPU
+submission or readback. Detection is deliberately reported as a typed `fail`
+with exit 1, proving that the oracle can catch the class of error. Exit 2 means
+the requested evidence is unavailable or unverified, never that skipped work
+passed. Exit 1 is reserved for a validated, completed measurement; recipe
+runtime exceptions, invalid internal results, and artifact-publication failures
+return exit 2. With `--json`, those command failures remain a valid typed v1
+`unverified` result rather than masquerading as a measured failure. Artifact
+publication validates hashes and bounds before writing, refuses symlinked
+paths, and renames bounded temporary files atomically relative to a pinned
+directory identity.
+
+Use `pulp doctor gpu` first for broad environment and adapter health. Use
+`pulp gpu probe` when you need to localize a wrong value, pass, or intermediate
+artifact. These commands remain Pulp tooling over Dawn/WebGPU; they do not add
+a second renderer or change Vellum's future authority over generic rendering
+primitives.
+
+For an already-running exact product instance, the separate unified-control
+snapshot is `pulp control call --instance <exact-id>
+dev.pulp.gpu/health.read@1 --profile inspect-readonly --params '{}' --json`
+(or MCP `pulp_control_gpu_health_read`). It reports live first-frame health but
+does not run a recipe, render, trace, or prove that a canonical recipe is
+callable. Conversely, a callable catalog row does not prove that a host exposes
+the live operation.
 
 ### clean
 

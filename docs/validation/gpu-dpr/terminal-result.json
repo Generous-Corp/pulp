@@ -1,0 +1,75 @@
+{
+  "schema": "pulp.gpu-dpr-experiment.v2",
+  "version": 2,
+  "status": "inconclusive",
+  "evidence_kind": "structural-nonterminal",
+  "experiment_id": "a4-v2-protocol-bootstrap-20260829",
+  "plan_revision": "7d7c262a69baebd8ec5d279eb6d607eea2b6b819",
+  "pulp_sha": "6ae6e319a649db155ff1278957d92795aa31b40a",
+  "forge_sha": "0750a88dea3af7fca927a8c02887e071109407ae",
+  "authority": {
+    "manifest_sha256": "d1fdf0fb98fe7562865200652de28f09488f3f7c1e21e783512e5058a02ca391",
+    "product_policy_id": null,
+    "product_policy_blob": null,
+    "a3_receipt_sha256": null,
+    "a2t_receipt_sha256": null,
+    "a3_runtime_receipt_sha256": null,
+    "runner_receipts_sha256": null,
+    "trace_analyzer_sha256": null,
+    "timer_noise_p95_ns": null,
+    "memory_sampler_resolution_bytes": null,
+    "collection_authorized": false
+  },
+  "matrix": {
+    "scenario_ids": [
+      "dense-text-thin-strokes",
+      "shader-heavy-controls",
+      "meters-waveforms",
+      "threejs-audio-reactive",
+      "forge-modular-native",
+      "forge-modular-daw",
+      "super-convolver-web"
+    ],
+    "modes": ["exact", "configured_max", "adaptive_simulation"],
+    "requested_dprs": [1, 1.5, 2, 3],
+    "cell_count": 84,
+    "repeat_cell_count": 84
+  },
+  "cells": [],
+  "repeat_cells": [],
+  "analysis": {
+    "computed": false,
+    "comparisons": [],
+    "class_support": {
+      "Pulp-native": false,
+      "Forge-native/DAW": false,
+      "web": false
+    },
+    "disposition": null,
+    "reasons": [
+      "blocked-product-policy",
+      "blocked-required-coverage",
+      "zero-v2-cells-collected",
+      "repeat-campaign-not-collected",
+      "protected-main-publication-not-verified"
+    ]
+  },
+  "publication": {
+    "status": "nonterminal",
+    "repository": "Generous-Corp/pulp",
+    "revision": null,
+    "path": "docs/validation/gpu-dpr/terminal-result.json",
+    "protected_main_verified": false,
+    "required_checks_green": false
+  },
+  "b5_gate": {
+    "status": "inconclusive",
+    "requires": [
+      "terminal-a3-product-policy-and-seven-role-campaign",
+      "84-original-and-84-repeat-cells",
+      "deterministic-v2-disposition",
+      "protected-pulp-main-publication"
+    ],
+    "authorizes_policy_change": false
+  }
+}

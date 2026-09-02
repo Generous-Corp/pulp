@@ -244,9 +244,20 @@ bool validate_schema_definition(ValueView schema, std::size_t depth, std::size_t
             valid = value.isString() &&
                     value.getString() == "https://json-schema.org/draft/2020-12/schema";
         } else if (name == "type") {
-            static const std::set<std::string_view> types{"object", "array",   "string",
-                                                          "number", "integer", "boolean"};
-            valid = value.isString() && types.contains(value.getString());
+            static const std::set<std::string_view> types{
+                "object", "array", "string", "number", "integer", "boolean", "null"};
+            if (value.isString()) {
+                valid = types.contains(value.getString());
+            } else if (value.isArray() && value.size() > 0) {
+                std::set<std::string_view> selected_types;
+                for (std::uint32_t index = 0; valid && index < value.size(); ++index) {
+                    valid = value[index].isString() &&
+                            types.contains(value[index].getString()) &&
+                            selected_types.insert(value[index].getString()).second;
+                }
+            } else {
+                valid = false;
+            }
         } else if (name == "properties") {
             valid = value.isObject();
             if (valid) {
@@ -354,13 +365,19 @@ bool validate_instance(ValueView instance, ValueView schema,
         goto validation_failed;
 
     if (schema.hasObjectMember("type")) {
-        const auto type = schema["type"].getString();
-        const bool correct = (type == "object" && instance.isObject()) ||
-                             (type == "array" && instance.isArray()) ||
-                             (type == "string" && instance.isString()) ||
-                             (type == "number" && is_number(instance)) ||
-                             (type == "integer" && is_json_integer(instance)) ||
-                             (type == "boolean" && instance.isBool());
+        const auto matches_type = [&](std::string_view type) {
+            return (type == "object" && instance.isObject()) ||
+                   (type == "array" && instance.isArray()) ||
+                   (type == "string" && instance.isString()) ||
+                   (type == "number" && is_number(instance)) ||
+                   (type == "integer" && is_json_integer(instance)) ||
+                   (type == "boolean" && instance.isBool()) ||
+                   (type == "null" && instance.isVoid());
+        };
+        const auto type = schema["type"];
+        bool correct = type.isString() && matches_type(type.getString());
+        for (std::uint32_t index = 0; type.isArray() && !correct && index < type.size(); ++index)
+            correct = matches_type(type[index].getString());
         if (!correct)
             goto validation_failed;
     }

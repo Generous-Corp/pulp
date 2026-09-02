@@ -374,9 +374,9 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
 
     def test_contract_pins_registration_multiset_not_unique_names(self) -> None:
         self.assertEqual(self.contract["schema_version"], 1)
-        self.assertEqual(self.contract["registration_count"], 21_147)
-        self.assertEqual(self.contract["unique_name_count"], 21_088)
-        self.assertEqual(self.contract["unique_composite_count"], 21_147)
+        self.assertEqual(self.contract["registration_count"], 21_227)
+        self.assertEqual(self.contract["unique_name_count"], 21_168)
+        self.assertEqual(self.contract["unique_composite_count"], 21_227)
         self.assertEqual(self.contract["duplicate_name_group_count"], 55)
         self.assertEqual(self.contract["duplicate_name_excess_count"], 59)
         self.assertEqual(self.contract["duplicate_composite_group_count"], 0)

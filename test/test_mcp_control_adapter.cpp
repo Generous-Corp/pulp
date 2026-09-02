@@ -563,7 +563,17 @@ TEST_CASE("MCP protocol advertises control resources and removed Inspector tools
     const auto tools = pulp_mcp::server::handle_request(
         R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})");
     REQUIRE(tools.find("pulp_control_state_read") != std::string::npos);
+    REQUIRE(tools.find("pulp_control_gpu_health_read") != std::string::npos);
     REQUIRE(tools.find("pulp_control_runtime_evaluate") != std::string::npos);
+    const auto gpu_health =
+        tools.find("\"name\":\"pulp_control_gpu_health_read\"");
+    REQUIRE(gpu_health != std::string::npos);
+    REQUIRE(tools.find("\"readOnlyHint\":true", gpu_health) !=
+            std::string::npos);
+    REQUIRE(tools.find("\"idempotentHint\":true", gpu_health) !=
+            std::string::npos);
+    REQUIRE(tools.find("pulp.gpu-health-read-result.v1", gpu_health) !=
+            std::string::npos);
     const auto state_read = tools.find("\"name\":\"pulp_control_state_read\"");
     const auto gesture = tools.find("\"name\":\"pulp_control_state_parameter_gesture\"");
     REQUIRE(tools.find("\"idempotentHint\":true", state_read) < gesture);

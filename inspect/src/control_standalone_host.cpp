@@ -1,6 +1,9 @@
 #include <pulp/inspect/control_standalone_host.hpp>
 
 #include <pulp/inspect/control_host_preflight.hpp>
+#include <pulp/inspect/control_gpu_health_provider.hpp>
+#include <pulp/inspect/control_gpu_health_read_executor.hpp>
+#include <pulp/inspect/control_gpu_health_view_adapter.hpp>
 #include <pulp/inspect/console_capture.hpp>
 #include <pulp/inspect/control_installed_host.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
@@ -14,6 +17,8 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/render/gpu_surface.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/motion.hpp>
@@ -26,6 +31,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -68,6 +74,7 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
         "PULP_INSPECT_CAPABILITY_UI_INPUT_V1\0"
         "PULP_INSPECT_CAPABILITY_TRACE_CONTROL_V1\0"
         "PULP_INSPECT_CAPABILITY_TRACE_SESSION_CONTROL_V1\0"
+        "PULP_INSPECT_CAPABILITY_GPU_HEALTH_READ_V1\0"
         "PULP_INSPECT_CAPABILITY_STATE_WRITE_V1\0"
         "PULP_INSPECT_CAPABILITY_TEST_INPUT_V1\0"
         "PULP_INSPECT_CAPABILITY_AUTHORING_TWEAKS_V1\0"
@@ -77,6 +84,15 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
 
 bool has_capability(const ControlManifest& manifest, InspectorCapability capability) {
     return std::ranges::find(manifest.capabilities, capability) != manifest.capabilities.end();
+}
+
+std::optional<std::string> random_evidence_id() noexcept {
+    try {
+        const auto bytes = runtime::secure_random_bytes(16);
+        return bytes ? std::optional<std::string>{runtime::hex_encode(*bytes)} : std::nullopt;
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 std::atomic<detail::StandaloneRuntimeEvaluatorFactory>& evaluator_factory() {
@@ -273,6 +289,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         test_input_ = test_input;
         sample_rate_ = sample_rate;
         main_thread_ = std::this_thread::get_id();
+        const auto editor_open_requested_at = std::chrono::steady_clock::now();
 
         const bool needs_ui = has_capability(*manifest, InspectorCapability::CaptureImage) ||
                               has_capability(*manifest, InspectorCapability::UiRead) ||
@@ -280,7 +297,15 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                               has_capability(*manifest, InspectorCapability::AuthoringTweaks) ||
                               has_capability(*manifest, InspectorCapability::UiInput) ||
                               has_capability(*manifest, InspectorCapability::TraceControl) ||
-                              has_capability(*manifest, InspectorCapability::RuntimeEval);
+                              has_capability(*manifest, InspectorCapability::RuntimeEval) ||
+                              has_capability(*manifest, InspectorCapability::GpuHealthRead);
+        const bool needs_ui_executor =
+            has_capability(*manifest, InspectorCapability::CaptureImage) ||
+            has_capability(*manifest, InspectorCapability::UiInput) ||
+            has_capability(*manifest, InspectorCapability::RuntimeEval);
+        const bool needs_ui_targets =
+            has_capability(*manifest, InspectorCapability::CaptureImage) ||
+            has_capability(*manifest, InspectorCapability::UiInput);
         if (needs_ui && ui_mode == format::StandaloneControlUiMode::DeferToEditor &&
             !view_bridge_) {
             pending_bootstrap_ = std::move(bootstrap);
@@ -323,15 +348,44 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             });
         ControlMainThreadExecutor main_state_write(rpc_, std::move(state_write));
         auto fenced_state_write = main_state_write.executor();
+        if (has_capability(*manifest, InspectorCapability::GpuHealthRead)) {
+            gpu_health_evidence_id_ = random_evidence_id();
+            if (const auto trace_id = random_evidence_id())
+                gpu_health_trace_id_ = "trace-" + *trace_id;
+            gpu_health_provider_ = std::make_shared<ControlGpuHealthProvider>(
+                ControlGpuHealthProvider::Config{
+                    .pulp_build_id = manifest->build_id,
+                    .gpu_evidence_id = gpu_health_evidence_id_,
+                    .trace_evidence_id = gpu_health_trace_id_,
+                    .seed_blank_first_frame =
+                        std::getenv("PULP_GPU_HEALTH_SEED_BLANK_FRAME") != nullptr});
+            if (!gpu_health_provider_->begin_editor_open(
+                    ControlGpuHealthProvider::CacheState::cold, editor_open_requested_at))
+                return false;
+        }
+        auto gpu_health_read = make_control_gpu_health_read_executor(
+            [provider = gpu_health_provider_](const ControlAdmissionPlan& plan)
+                -> std::optional<ControlGpuHealthReadSource> {
+                if (!provider)
+                    return std::nullopt;
+                return ControlGpuHealthReadSource{
+                    .registration_id = plan.registration_id,
+                    .instance_id = plan.instance_id,
+                    .publication_id = plan.publication_id,
+                    .read_result = [provider] { return provider->snapshot(); }};
+            });
         ControlOperationExecutor state_executor =
             [state_read = std::move(state_read),
-             state_write = std::move(fenced_state_write)](
+             state_write = std::move(fenced_state_write),
+             gpu_health_read = std::move(gpu_health_read)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                 const ControlExecutionContext& context) {
                 if (request.operation_id == "dev.pulp.state/read@1")
                     return state_read(plan, request, context);
                 if (request.operation_id == "dev.pulp.state/parameter-gesture@1")
                     return state_write(plan, request, context);
+                if (request.operation_id == "dev.pulp.gpu/health.read@1")
+                    return gpu_health_read(plan, request, context);
                 return unavailable_operation();
             };
 
@@ -380,6 +434,61 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                 !scrubber_.load_fixture(author_hooks_.motion_fixture_path))
                 return false;
 
+            if (gpu_health_provider_) {
+                gpu_health_view_adapter_ = ControlGpuHealthViewAdapter::create({
+                    .provider = gpu_health_provider_,
+                    .capture_back_buffer_png = [this] {
+                        return window_ ? window_->capture_back_buffer_png()
+                                       : std::vector<std::uint8_t>{};
+                    },
+                    .frame_evidence = [this] {
+                        ControlGpuHealthProvider::FrameObservation frame;
+                        frame.lifecycle_id = gpu_health_lifecycle_id_;
+                        frame.observed_cache_state =
+                            ControlGpuHealthProvider::CacheState::cold;
+                        frame.cache_provenance =
+                            ControlGpuHealthProvider::CacheProvenance::fresh_process;
+                        frame.trace_evidence_id = gpu_health_trace_id_;
+                        frame.missing_trace_categories = {
+                            "gpu_submission", "native_present_timing", "pipeline_compile",
+                            "resource_upload", "shader_identity", "source_identity"};
+                        const auto* surface = window_ ? window_->gpu_surface() : nullptr;
+                        if (!surface)
+                            return frame;
+                        const auto adapter = surface->adapter_info();
+                        using SurfaceAdapterType = render::GpuSurface::AdapterType;
+                        using ControlAdapterType =
+                            ControlGpuHealthProvider::AdapterIdentity::Type;
+                        const auto adapter_type = [type = adapter.adapter_type] {
+                            switch (type) {
+                                case SurfaceAdapterType::integrated_gpu:
+                                    return ControlAdapterType::integrated_gpu;
+                                case SurfaceAdapterType::discrete_gpu:
+                                    return ControlAdapterType::discrete_gpu;
+                                case SurfaceAdapterType::cpu:
+                                    return ControlAdapterType::cpu;
+                                case SurfaceAdapterType::unknown:
+                                    return ControlAdapterType::unknown;
+                            }
+                            return ControlAdapterType::unknown;
+                        }();
+                        frame.adapter = ControlGpuHealthProvider::AdapterIdentity{
+                            .available = adapter.available,
+                            .native_bridge = adapter.native_bridge,
+                            .type = adapter_type,
+                            .null_backend = adapter.null_backend,
+                            .backend = adapter.backend_type,
+                            .name = adapter.name,
+                            .vendor = adapter.vendor,
+                            .architecture = adapter.architecture,
+                        };
+                        return frame;
+                    },
+                });
+                if (!gpu_health_view_adapter_)
+                    return false;
+            }
+
             if (has_capability(*manifest, InspectorCapability::RuntimeEval)) {
                 if (!manifest->unsafe_runtime_eval_acknowledged)
                     return false;
@@ -391,33 +500,37 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                 evaluator_ = std::move(evaluator);
             }
 
-            ui = ControlInstalledHostUiConfig{
-                .manifest = *manifest,
-                .make_targets = [this](const ControlHostOpenResult& binding)
-                    -> std::optional<ControlInstalledHostUiTargets> {
-                    if (!root_ || !window_)
-                        return std::nullopt;
-                    ui_adapter_ = ControlStandaloneUiAdapter::create({
-                        .root = *root_,
-                        .window = *window_,
-                        .instance_id = binding.instance_id,
-                        .instance_generation = binding.instance_generation,
-                        .view_generation = binding.publication_id,
-                        .capture_scale = 1.0f,
-                    });
-                    if (!ui_adapter_)
-                        return std::nullopt;
-                    return ControlInstalledHostUiTargets{
-                        .capture_source = ui_adapter_,
-                        .target_adapter = ui_adapter_,
-                        .view_generation = binding.publication_id,
+            if (needs_ui_executor) {
+                ControlInstalledHostUiConfig ui_config{
+                    .manifest = *manifest,
+                    .runtime_evaluator = evaluator_,
+                    .redact_runtime_eval_result = [](std::string_view) {
+                        return std::optional<std::string>{R"({"redacted":true})"};
+                    },
+                };
+                if (needs_ui_targets)
+                    ui_config.make_targets = [this](const ControlHostOpenResult& binding)
+                        -> std::optional<ControlInstalledHostUiTargets> {
+                        if (!root_ || !window_)
+                            return std::nullopt;
+                        ui_adapter_ = ControlStandaloneUiAdapter::create({
+                            .root = *root_,
+                            .window = *window_,
+                            .instance_id = binding.instance_id,
+                            .instance_generation = binding.instance_generation,
+                            .view_generation = binding.publication_id,
+                            .capture_scale = 1.0f,
+                        });
+                        if (!ui_adapter_)
+                            return std::nullopt;
+                        return ControlInstalledHostUiTargets{
+                            .capture_source = ui_adapter_,
+                            .target_adapter = ui_adapter_,
+                            .view_generation = binding.publication_id,
+                        };
                     };
-                },
-                .runtime_evaluator = evaluator_,
-                .redact_runtime_eval_result = [](std::string_view) {
-                    return std::optional<std::string>{R"({"redacted":true})"};
-                },
-            };
+                ui = std::move(ui_config);
+            }
 
             console_ = std::make_shared<ConsoleCapture>();
             view_bridge_->visit_scripted_ui([this](view::ScriptedUiSession* scripted) {
@@ -571,6 +684,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             stop();
             return false;
         }
+        if (gpu_health_provider_)
+            gpu_health_lifecycle_id_ = installed_->binding().instance_id;
         return true;
     }
 
@@ -586,6 +701,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     }
 
     void stop() noexcept override {
+        if (gpu_health_provider_ && gpu_health_provider_->awaiting_frame())
+            (void)gpu_health_provider_->record_instance_lost();
         if (installed_)
             installed_->stop();
         installed_.reset();
@@ -599,6 +716,11 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         log_subscription_ = 0;
         console_.reset();
         ui_adapter_.reset();
+        gpu_health_view_adapter_.reset();
+        gpu_health_provider_.reset();
+        gpu_health_lifecycle_id_.clear();
+        gpu_health_evidence_id_.reset();
+        gpu_health_trace_id_.reset();
         evaluator_.reset();
         motion_.reset();
         if (owned_root_ && root_)
@@ -645,6 +767,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             (void)view_bridge_->poll_editor_reload();
         }
         const auto now = std::chrono::steady_clock::now();
+        if (gpu_health_view_adapter_)
+            gpu_health_view_adapter_->poll(now);
         if (last_frame_tick_) {
             const auto elapsed = std::chrono::duration<double>(now - *last_frame_tick_).count();
             if (elapsed > 0.0)
@@ -659,6 +783,11 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     std::shared_ptr<InspectorMainThreadRpc> rpc_;
     std::shared_ptr<ControlTelemetryTap> telemetry_;
     std::shared_ptr<ControlStandaloneUiAdapter> ui_adapter_;
+    std::shared_ptr<ControlGpuHealthProvider> gpu_health_provider_;
+    std::unique_ptr<ControlGpuHealthViewAdapter> gpu_health_view_adapter_;
+    std::string gpu_health_lifecycle_id_;
+    std::optional<std::string> gpu_health_evidence_id_;
+    std::optional<std::string> gpu_health_trace_id_;
     std::shared_ptr<RuntimeEvaluator> evaluator_;
     std::shared_ptr<ConsoleCapture> console_;
     view::ScriptedUiSession* log_session_ = nullptr;

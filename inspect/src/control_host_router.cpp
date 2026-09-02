@@ -248,7 +248,8 @@ class ControlHostRouter::Impl {
                        .retry = completed.retry,
                        .explanation = completed.explanation,
                        .detail_json = completed.detail_json,
-                       .cancellation_reason = completed.cancellation_reason}};
+                       .cancellation_reason = completed.cancellation_reason,
+                       .evidence_ids = completed.evidence_ids}};
         if (!completed.artifact_publications.empty()) {
             std::size_t aggregate = 0;
             for (const auto& publication : completed.artifact_publications) {

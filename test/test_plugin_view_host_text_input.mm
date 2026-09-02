@@ -562,6 +562,7 @@ TEST_CASE("PluginViewHost (mac CPU) — right click routes to the painted overla
     }
 }
 
+#ifdef PULP_HAS_SKIA
 TEST_CASE("PluginViewHost (mac GPU) — right click routes to the painted overlay",
           "[plugin-view-host][context-menu][overlay][mac][gpu]") {
     @autoreleasepool {
@@ -611,6 +612,7 @@ TEST_CASE("PluginViewHost (mac GPU) — right click routes to the painted overla
         [window close];
     }
 }
+#endif
 
 TEST_CASE("PluginViewHost (mac CPU) — outside right click repaints dismissal",
           "[plugin-view-host][context-menu][overlay][dismiss][mac][cpu]") {

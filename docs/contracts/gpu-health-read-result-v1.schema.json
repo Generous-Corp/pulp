@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema", "version", "health", "startup"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "pulp.gpu-health-read-result.v1" },
+    "version": { "const": 1 },
+    "health": {
+      "type": "object",
+      "required": ["schema", "version", "run_id", "render_requested", "verdict", "health_state", "probes", "recommendations"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "pulp.gpu-health-result.v1" },
+        "version": { "const": 1 },
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "render_requested": { "type": "boolean" },
+        "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+        "health_state": { "enum": ["healthy", "failed", "unavailable", "unverified", "lost"] },
+        "probes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": ["probe_id", "required", "verdict", "adapter", "measurements", "events"],
+            "additionalProperties": false,
+            "properties": {
+              "probe_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "required": { "type": "boolean" },
+              "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+              "adapter": {
+                "type": "object",
+                "required": ["status", "class", "backend", "name", "vendor", "architecture", "device"],
+                "additionalProperties": false,
+                "properties": {
+                  "status": { "enum": ["authentic", "unverified", "unavailable"] },
+                  "class": { "enum": ["hardware", "software", "null", "unknown"] },
+                  "backend": { "type": ["string", "null"] },
+                  "name": { "type": ["string", "null"] },
+                  "vendor": { "type": ["string", "null"] },
+                  "architecture": { "type": ["string", "null"] },
+                  "device": { "type": ["string", "null"] }
+                }
+              },
+              "measurements": {
+                "type": "object",
+                "required": ["command_submitted", "readback_completed", "pixel_output_produced", "content_floor_passed", "compute_initialized", "compute_oracle_passed", "device_lost", "non_transparent_pixel_count", "distinct_color_count", "rgba_fingerprint"],
+                "additionalProperties": false,
+                "properties": {
+                  "command_submitted": { "type": ["boolean", "null"] },
+                  "readback_completed": { "type": ["boolean", "null"] },
+                  "pixel_output_produced": { "type": ["boolean", "null"] },
+                  "content_floor_passed": { "type": ["boolean", "null"] },
+                  "compute_initialized": { "type": ["boolean", "null"] },
+                  "compute_oracle_passed": { "type": ["boolean", "null"] },
+                  "device_lost": { "type": ["boolean", "null"] },
+                  "non_transparent_pixel_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 9223372036854775807 },
+                  "distinct_color_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 9223372036854775807 },
+                  "rgba_fingerprint": { "type": ["integer", "null"], "minimum": 0, "maximum": 9223372036854775807 }
+                }
+              },
+              "events": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 10,
+                "items": {
+                  "type": "object",
+                  "required": ["sequence", "stage", "verdict", "code", "detail"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "sequence": { "type": "integer", "minimum": 0 },
+                    "stage": { "enum": ["configuration", "adapter", "shader_compile", "pipeline_create", "render", "submit", "readback", "content", "compute", "device_state"] },
+                    "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "gpu.adapter.fail", "gpu.adapter.null", "gpu.adapter.pass", "gpu.adapter.unavailable", "gpu.adapter.unverified",
+                        "gpu.compute.fail", "gpu.compute.pass", "gpu.compute.unavailable", "gpu.compute.unverified",
+                        "gpu.configuration.fail", "gpu.configuration.pass", "gpu.configuration.unavailable", "gpu.configuration.unverified",
+                        "gpu.content.fail", "gpu.content.pass", "gpu.content.unavailable", "gpu.content.unverified",
+                        "gpu.device_state.fail", "gpu.device_state.pass", "gpu.device_state.unavailable", "gpu.device_state.unverified",
+                        "gpu.pipeline_create.fail", "gpu.pipeline_create.pass", "gpu.pipeline_create.unavailable", "gpu.pipeline_create.unverified",
+                        "gpu.readback.fail", "gpu.readback.pass", "gpu.readback.unavailable", "gpu.readback.unverified",
+                        "gpu.render.fail", "gpu.render.pass", "gpu.render.unavailable", "gpu.render.unverified",
+                        "gpu.shader_compile.fail", "gpu.shader_compile.pass", "gpu.shader_compile.unavailable", "gpu.shader_compile.unverified",
+                        "gpu.submit.fail", "gpu.submit.pass", "gpu.submit.unavailable", "gpu.submit.unverified",
+                        "gpu_compute_adapter_acquired", "gpu_compute_adapter_identity_unverified", "gpu_compute_device_lost",
+                        "gpu_compute_execution_failed", "gpu_compute_initialization_unavailable", "gpu_compute_not_built",
+                        "gpu_compute_oracle_mismatch", "gpu_compute_oracle_passed", "render_not_requested",
+                        "renderer3d_adapter_unavailable", "renderer3d_blank_output", "renderer3d_content_floor_passed",
+                        "renderer3d_not_compiled", "renderer3d_setup_failed", "renderer3d_readback_completed",
+                        "renderer3d_readback_failed", "renderer3d_render_completed", "renderer3d_submit_completed",
+                        "skia_graphite_content_floor_passed", "skia_graphite_content_mismatch", "skia_graphite_frame_failed",
+                        "skia_graphite_readback_completed", "skia_graphite_render_completed", "skia_graphite_unavailable",
+                        "wgsl.async_uncaptured_error"
+                      ]
+                    },
+                    "detail": { "type": "string", "minLength": 1, "maxLength": 1024 }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "recommendations": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "startup": {
+      "type": "object",
+      "required": ["status", "verdict", "measurement_endpoint", "budget", "correlation", "capture", "identity", "trials", "observed_percentile_ms", "interaction_hitch_percentile_ms", "pipeline_contribution", "causal_attribution", "disposition"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["complete", "incomplete", "unavailable", "unverified"] },
+        "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+        "measurement_endpoint": {
+          "enum": ["native-compositor-presentation", "headless-capture-complete"]
+        },
+        "budget": {
+          "type": "object",
+          "required": ["budget_id", "version", "status", "clock_origin", "endpoint", "interaction_hitch_metric", "trial_count", "cold_trial_count", "warm_trial_count", "percentile", "threshold_ms", "threshold_source", "reference_hosts"],
+          "additionalProperties": false,
+          "properties": {
+            "budget_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "version": { "const": 1 },
+            "status": { "enum": ["ratified", "unratified"] },
+            "clock_origin": { "const": "editor_open_requested" },
+            "endpoint": { "const": "first_nonblank_presented_frame" },
+            "interaction_hitch_metric": { "const": "max_present_interval_before_first_nonblank_ms" },
+            "trial_count": { "type": "integer", "minimum": 2, "maximum": 64 },
+            "cold_trial_count": { "type": "integer", "minimum": 1, "maximum": 63 },
+            "warm_trial_count": { "type": "integer", "minimum": 1, "maximum": 63 },
+            "percentile": { "type": "number", "minimum": 50, "maximum": 100 },
+            "threshold_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
+            "threshold_source": { "type": ["string", "null"], "minLength": 1, "maxLength": 512 },
+            "reference_hosts": {
+              "type": "array",
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "required": ["host_id", "refresh_rate_hz"],
+                "additionalProperties": false,
+                "properties": {
+                  "host_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "refresh_rate_hz": { "type": "number", "minimum": 1, "maximum": 1000 }
+                }
+              }
+            }
+          }
+        },
+        "correlation": {
+          "type": "object",
+          "required": ["gpu_evidence_id", "trace_evidence_id"],
+          "additionalProperties": false,
+          "properties": {
+            "gpu_evidence_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+            "trace_evidence_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "capture": {
+          "type": "object",
+          "required": ["event_capacity", "event_count", "dropped_event_count", "truncated", "missing_trace_categories"],
+          "additionalProperties": false,
+          "properties": {
+            "event_capacity": { "type": "integer", "minimum": 1, "maximum": 4096 },
+            "event_count": { "type": "integer", "minimum": 0, "maximum": 4096 },
+            "dropped_event_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+            "truncated": { "type": "boolean" },
+            "missing_trace_categories": {
+              "type": "array",
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+            }
+          }
+        },
+        "identity": {
+          "type": "object",
+          "required": ["pulp_build_id", "vellum_revision", "source_signature_sha256", "shader_signature_sha256", "expected_target_signature_sha256", "adapter_class"],
+          "additionalProperties": false,
+          "properties": {
+            "pulp_build_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "vellum_revision": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+            "source_signature_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+            "shader_signature_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+            "expected_target_signature_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+            "adapter_class": { "enum": ["hardware", "software", "null", "unknown"] }
+          }
+        },
+        "trials": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["sequence", "cache_state", "lifecycle_id", "cache_provenance", "editor_open_to_first_nonblank_ms", "interaction_hitch_ms", "shader_compile_ms", "upload_ms", "hidden_frame_ms", "present_ms", "observed_target_signature_sha256", "content_floor_passed", "visible_state", "verdict", "diagnostic_code"],
+            "additionalProperties": false,
+            "properties": {
+              "sequence": { "type": "integer", "minimum": 0, "maximum": 63 },
+              "cache_state": { "enum": ["cold", "warm"] },
+              "lifecycle_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+              "cache_provenance": { "enum": ["unknown", "fresh-process", "explicit-cache-reset", "same-process-editor-reopen"] },
+              "editor_open_to_first_nonblank_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
+              "interaction_hitch_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
+              "shader_compile_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
+              "upload_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
+              "hidden_frame_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
+              "present_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
+              "observed_target_signature_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+              "content_floor_passed": { "type": ["boolean", "null"] },
+              "visible_state": { "enum": ["prepared", "fallback", "unknown"] },
+              "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+              "diagnostic_code": {
+                "enum": [
+                  "gpu.startup.pass",
+                  "gpu.startup.blank",
+                  "gpu.startup.budget_exceeded",
+                  "gpu.startup.event_loss",
+                  "gpu.startup.timeout",
+                  "gpu.startup.instance_lost",
+                  "gpu.startup.trace_incomplete",
+                  "gpu.startup.unavailable",
+                  "gpu.startup.unverified"
+                ]
+              }
+            }
+          }
+        },
+        "observed_percentile_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
+        "interaction_hitch_percentile_ms": { "type": ["number", "null"], "minimum": 0, "maximum": 300000 },
+        "pipeline_contribution": { "enum": ["material", "not_material", "unattributed", "unverified"] },
+        "causal_attribution": { "enum": ["complete", "incomplete", "unavailable", "unverified"] },
+        "disposition": { "type": ["string", "null"], "enum": ["queue-B4", "queue-B4-investigation", "no-change", null] }
+      }
+    }
+  }
+}

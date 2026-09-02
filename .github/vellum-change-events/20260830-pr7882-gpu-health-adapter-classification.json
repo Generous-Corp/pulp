@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260830-pr7882-gpu-health-adapter-classification",
+  "kind": "change",
+  "created_at": "2026-08-30T16:04:19Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "Pulp's Control GPU-health integration must distinguish a hardware adapter from Dawn's CPU and Null validation adapters so product diagnostics cannot report software or API-validation execution as hardware-backed rendering. This change exposes Dawn/WebGPU's existing adapter-type and backend facts through the existing GpuSurface adapter-info snapshot; it does not change adapter selection, device creation, rendering, presentation, generic lifecycle instrumentation, or the render-skia-dawn ownership boundary. The fields are consumed only by Pulp-owned health classification and fail closed when unavailable, so this is Pulp-only product diagnostics integration with no named immutable Vellum framework commit to backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-control-gpu-health-provider",
+    "pulp-test-renderer3d"
+  ],
+  "disposition": "pulp-only"
+}

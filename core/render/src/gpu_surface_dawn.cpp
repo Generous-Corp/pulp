@@ -44,6 +44,19 @@ std::string dawn_backend_type_name(wgpu::BackendType type) {
     }
 }
 
+GpuSurface::AdapterType dawn_adapter_type(wgpu::AdapterType type) {
+    switch (type) {
+        case wgpu::AdapterType::IntegratedGPU:
+            return GpuSurface::AdapterType::integrated_gpu;
+        case wgpu::AdapterType::DiscreteGPU:
+            return GpuSurface::AdapterType::discrete_gpu;
+        case wgpu::AdapterType::CPU:
+            return GpuSurface::AdapterType::cpu;
+        default:
+            return GpuSurface::AdapterType::unknown;
+    }
+}
+
 std::string dawn_texture_format_name(wgpu::TextureFormat format) {
     switch (format) {
         case wgpu::TextureFormat::BGRA8Unorm: return "bgra8unorm";
@@ -380,6 +393,8 @@ public:
 
         wgpu::AdapterInfo dawn_info{};
         adapter_.GetInfo(&dawn_info);
+        info.adapter_type = dawn_adapter_type(dawn_info.adapterType);
+        info.null_backend = dawn_info.backendType == wgpu::BackendType::Null;
         info.backend_type = dawn_backend_type_name(dawn_info.backendType);
         info.architecture = info.backend_type;
         info.name = "Native Dawn Adapter (" + info.backend_type + ")";
@@ -610,6 +625,19 @@ std::string wgpu_backend_type_name(WGPUBackendType type) {
     }
 }
 
+GpuSurface::AdapterType wgpu_adapter_type(WGPUAdapterType type) {
+    switch (type) {
+        case WGPUAdapterType_IntegratedGPU:
+            return GpuSurface::AdapterType::integrated_gpu;
+        case WGPUAdapterType_DiscreteGPU:
+            return GpuSurface::AdapterType::discrete_gpu;
+        case WGPUAdapterType_CPU:
+            return GpuSurface::AdapterType::cpu;
+        default:
+            return GpuSurface::AdapterType::unknown;
+    }
+}
+
 std::string wgpu_string_view_to_string(WGPUStringView view) {
     if (view.data == nullptr || view.length == 0) {
         return {};
@@ -696,6 +724,8 @@ public:
         if (adapter_) {
             WGPUAdapterInfo adapter_info{};
             if (wgpuAdapterGetInfo(adapter_, &adapter_info) == WGPUStatus_Success) {
+                info.adapter_type = wgpu_adapter_type(adapter_info.adapterType);
+                info.null_backend = adapter_info.backendType == WGPUBackendType_Null;
                 info.backend_type = wgpu_backend_type_name(adapter_info.backendType);
                 info.architecture = info.backend_type;
                 const auto device = wgpu_string_view_to_string(adapter_info.device);

@@ -2,6 +2,8 @@
 
 #include <pulp/runtime/crypto.hpp>
 
+#include "control_gpu_health_read_result_schema.hpp"
+
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -67,6 +69,8 @@ constexpr auto kControlOperations =
             R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"include_catalog":{"default":true,"type":"boolean"},"include_sensitive":{"default":false,"type":"boolean"},"parameter_ids":{"items":{"maximum":4294967295,"minimum":0,"type":"integer"},"maxItems":4096,"type":"array","uniqueItems":true}},"type":"object"})",
             R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"anyOf":[{"required":["generation"]},{"required":["state_generation","catalog_generation","catalog_included","redacted_count"]}],"properties":{"catalog_generation":{"minimum":0,"type":"integer"},"catalog_included":{"type":"boolean"},"generation":{"minimum":0,"type":"integer"},"parameters":{"items":{"additionalProperties":false,"properties":{"default":{"type":"number"},"designation":{"enum":["none","bypass","reset"]},"display":{"maxLength":1024,"type":"string","x-pulp-maxUtf8Bytes":1024},"groupId":{"type":"integer"},"id":{"maximum":4294967295,"minimum":0,"type":"integer"},"isTrigger":{"type":"boolean"},"kind":{"enum":["continuous","integer","toggle","enum"]},"labels":{"items":{"maxLength":256,"type":"string","x-pulp-maxUtf8Bytes":256},"maxItems":4096,"type":"array"},"max":{"type":"number"},"min":{"type":"number"},"modulated":{"type":"number"},"name":{"maxLength":256,"type":"string","x-pulp-maxUtf8Bytes":256},"normalized":{"maximum":1,"minimum":0,"type":"number"},"rate":{"enum":["control","audio"]},"sensitive":{"type":"boolean"},"skew":{"minimum":0,"type":"number"},"step":{"minimum":0,"type":"number"},"symmetricSkew":{"type":"boolean"},"unit":{"maxLength":64,"type":"string","x-pulp-maxUtf8Bytes":64},"value":{"type":"number"}},"required":["id","normalized","sensitive"],"type":"object"},"maxItems":4096,"type":"array"},"redacted_count":{"maximum":4096,"minimum":0,"type":"integer"},"state_generation":{"minimum":0,"type":"integer"}},"required":["parameters"],"type":"object"})",
             "response"),
+        PULP_OPERATION(GpuHealthRead, "gpu/health.read", PULP_SCHEMA_EMPTY,
+                       detail::kGpuHealthReadResultSchema, "response"),
         PULP_PRODUCED_ARTIFACT_OPERATION(
             RenderOffline, "render/offline",
             R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"input_artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"max_frames":{"maximum":11520000,"minimum":1,"type":"integer"},"timeout_ms":{"maximum":300000,"minimum":1,"type":"integer"}},"required":["input_artifact_id","max_frames","timeout_ms"],"type":"object"})",
@@ -531,6 +535,7 @@ ControlManifestValidation validate_control_manifest_detailed(const ControlManife
         constexpr std::array allowed{
             InspectorCapability::SessionDescribe,
             InspectorCapability::StateRead,
+            InspectorCapability::GpuHealthRead,
             InspectorCapability::DiagnosticsRead,
             InspectorCapability::LogsRead,
         };

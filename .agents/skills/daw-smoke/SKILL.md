@@ -213,6 +213,97 @@ way and say plainly that this rung is unproven.
   believing any verdict. Until the key names are fixed, use `--format au`.
 - **SKIP is never PASS.** Exit codes: 0 PASS / 1 FAIL / 2 SKIP (REAPER absent) /
   3 INCONCLUSIVE. A gate must treat SKIP/INCONCLUSIVE as not-passed.
+- **A4 DPR v2 evidence requires all three format-qualified editor passes for
+  every Forge DAW cell:** AUv2 in Logic, plus VST3 and CLAP in REAPER. Bind each
+  subreceipt to the exact A3 lifecycle, plugin binary, host, and aggregate DPR
+  matrix cell. All three must agree on terminal verdict, gates, and identity;
+  their metrics remain independently retained. SKIP/INCONCLUSIVE,
+  absence from the portable scan cache, or a different format being inserted
+  leaves the aggregate cell incomplete. Keep the file-handshake rule above; DPR evidence
+  does not authorize screen-driving.
+  Drive or ingest that cell through `tools/scripts/gpu_dpr_runner.py`; the DAW
+  adapter must emit the exact format, binary, scan-cache, raw-sample, artifact,
+  and machine receipts. Metrics must retain measured/derived/unavailable
+  provenance, and the input expectation must come from the frozen scenario—not
+  from the DAW producer that reports the observed event/hit. Two same-content
+  image artifacts and numeric fidelity oracles replace producer-authored pass
+  booleans. Timeout is INCONCLUSIVE and durable for resumption.
+  In v2, the runner snapshots the AUv2/VST3/CLAP product executable and all
+  eight cell artifacts before acceptance, binds the actual adapter producer PID
+  plus product/fresh-process IDs, and rejects reused paths/inodes. A DAW receipt
+  outside the runner root, a script presented as the product, or an identity
+  document that merely claims the expected host/format cannot complete a cell.
+  Finalization accepts only the runner directory and fixed terminal A2T/A3
+  receipts; follow `docs/validation/gpu-dpr/README.md`.
 - **REAPER license is a secret** (`~/.config/pulp/secrets/reaper-license.txt`,
   personal non-commercial) — never commit, echo, or bake into a TartCI golden. Local
   Macs (m1/m3/m5) are already serialized; local is the primary lane.
+
+## GPU-health DAW evidence
+
+For a product declaring `gpu.health.read`, bind the response to the exact DAW
+instance/publication and preserve the returned snapshot. A valid response is
+not automatically a passing startup trial. A visible DAW campaign must declare
+`native-compositor-presentation` and bind an independent compositor timestamp;
+capture completion cannot substitute. Missing source/shader or stage timings
+are instrumentation coverage rather than event loss and remain nullable only
+under the closed A3 verifier's passing no-change or failing investigation rules.
+Preserve the correlated A2T trace. Produce the seeded blank receipt with the
+focused real-Standalone test command in
+`docs/validation/gpu-first-visible-a3-acceptance.md`; merely setting
+`PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` does not bind a control artifact. Keep
+SKIP/INCONCLUSIVE and absent format scans as pending, never PASS.
+
+Use `reaper_smoke.py --mode editor-open --reaper-bin /exact/REAPER` as the exact-format prerequisite for a
+DAW A3 adapter, then execute that adapter through
+`gpu_first_visible_a3_campaign.py run-role --role daw`. The smoke result cannot
+be copied into the campaign: the adapter still owes 10 real cold and 10 real
+warm editor lifecycles, independent native presentation timing, exact product
+and host artifacts, the same-instance trace, and durable cache provenance.
+Translate REAPER's `--format au` identity to the receipt's `auv2`; VST3 and CLAP
+retain their names. An adapter timeout, SKIP, or INCONCLUSIVE produces a
+nonterminal `run.json`, never a passing campaign.
+
+Use the checked-in `gpu_first_visible_a3_external_adapter.py` as the immutable
+envelope and select `gpu_first_visible_a3_reaper_producer.py`. Configure its
+exact source-bound smoke/Lua helpers, REAPER, plugin binary/bundle, role driver,
+checked-in source-bound trace analyzer, embedded-build verifier, and
+digest-bound product build attestation/receipt. Also configure a reviewed
+source-build driver from the exact clean revision; it must reproduce the
+measured plugin executable and complete bundle in a fresh output without being
+given the measured path. The analyzer is a sealed prepared binary, and every
+REAPER lifecycle answers the producer's live-host nonce with exact executable
+and start identity;
+the driver must resolve to the reviewed file at the requested clean Pulp
+revision. The producer runs the qualified-format preflight and then requires
+the driver to perform all 20 editor opens, bind the trace to one challenged
+live REAPER PID, and terminate every reported REAPER PID. It retains and rehashes those inputs with the
+exact driver request/receipt in the host evidence tar. Missing automation,
+build provenance, analyzer replay, or native-present truth is nonterminal;
+the producer cannot promote the `editor-open` smoke or a screenshot completion
+into campaign evidence.
+
+The measured plugin executable must carry the canonical embedded build marker,
+and the source-bound analyzer must preserve structural `unverified` separately
+from the campaign budget verdict. Before terminal A3, also run the four-state
+product trace-producer overhead protocol in the acceptance guide. Its exact
+pre-change, compile-out, compiled-in idle, and active measurements require zero
+xruns/audio-thread trace events; the DAW role campaign alone does not waive it.
+
+For the DAW-selected overhead row, run the same reviewed REAPER lifecycle
+driver through `gpu_first_visible_a3_trace_producer_overhead.py collect-state`;
+do not time the smoke wrapper or relabel its editor-open result. Every one of
+the 55 samples/state must answer the collector while the challenged REAPER PID
+and exact plug-in executable are alive, then terminate cleanly. Active replay
+must find the health producer and bind the complete b4ba exact 20-signature
+`state`/`render`/`js` package from the A3 acceptance guide.
+`gpu_acquire`/`gpu_submit`/`gpu_present` are mandatory per sample; every other
+signature remains counted and a zero count is reported not-covered, not
+zero-cost. Require zero xruns and zero producer events on the audio TIDs.
+Pin the candidate-relative `state_build_driver` too. The collector exports and
+default-deny rebuilds the exact source row without the measured plug-in,
+ambient build tree, or network, then requires identical executable bytes and
+the requested tracing sentinel state. Keep its source/build/toolchain artifacts
+with the campaign; an already-built bundle or receipt assertion is not proof.
+
+A3 v2 additionally binds each DAW campaign's sample provenance and exact trace bytes, then reruns the prepared analyzer and checks campaign, instance, process, GPU-evidence, trace-evidence, category, and completeness identity. A JSON sidecar alone is never terminal proof.

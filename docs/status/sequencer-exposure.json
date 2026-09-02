@@ -2164,6 +2164,59 @@
       }
     },
     {
+      "id": "gpu-health-installed-sdk-projection",
+      "title": "GPU health contracts and provider model install with the selected SDK",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "gpu-ux-installed-sdk-20260828",
+      "owned_paths": [
+        "tools/cmake/PulpInstallRules.cmake"
+      ],
+      "evidence": [
+        {
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "pulp-tool-gpu-health-model",
+            "gpu-health-read-result-v1.schema.json",
+            "control_gpu_health_read_executor.hpp"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The selected SDK installs the CPU-only GPU health model target, typed health and control contracts, and exact GPU-health provider and executor headers needed by installed diagnostics without a source checkout.",
+          "evidence": [
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "pulp-tool-gpu-health-model",
+                "gpu-health-read-result-v1.schema.json",
+                "control_gpu_health_read_executor.hpp"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "GPU diagnostic packaging adds no Timeline command, argument, or handler."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "GPU diagnostic packaging adds no Timeline MCP operation, schema, or handler."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Installed GPU diagnostic assets do not add or widen a sequencer live-control grant."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This packaging row records installed artifacts and does not alter the sequencer design-time capability manifest."
+        }
+      }
+    },
+    {
       "id": "authoring-capsule-substrate",
       "title": "Portable authoring-capsule substrate",
       "classification": "public_sdk",

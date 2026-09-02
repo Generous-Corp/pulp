@@ -163,7 +163,7 @@ constexpr std::string_view kHostManifest = R"({
   "product_name": "Pulp Trusted Host E2E Fixture",
   "bundle_id": "dev.pulp.test.trusted-host-e2e-fixture",
   "build_id": "build:0123456789abcdef0123456789abcdef",
-  "registry_digest": "b3bfbc17c377a58531c0689ce961d33d43d7504c61f8db979cd1a0df678409bc",
+  "registry_digest": "9a32256a646ab2612cfe0c8f50a77afe9a4353b94c1504749ab855a8dc9c64a8",
   "endpoint_included": true,
   "unsafe_runtime_eval_acknowledged": false,
   "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
@@ -1007,7 +1007,15 @@ TEST_CASE("installed broker launches only its named ordinary Standalone host",
                  "dev.pulp.telemetry/subscribe@1", "dev.pulp.runtime/evaluate@1"})
             CHECK(encoded.find(capability) != std::string::npos);
     } else {
+#if PULP_TEST_INSTALLED_CONTROL_GPU_HEALTH
+        REQUIRE(instance["capabilities"].size() == 3);
+        CHECK(choc::json::toString(instance["capabilities"], false)
+                  .find("dev.pulp.gpu/health.read@1") != std::string::npos);
+#else
         REQUIRE(instance["capabilities"].size() == 2);
+        CHECK(choc::json::toString(instance["capabilities"], false)
+                  .find("dev.pulp.gpu/health.read@1") == std::string::npos);
+#endif
     }
     const int installed_host_process_id =
         author_host_environment ? -1 : wait_for_only_child_process(daemon_process.process_id());
@@ -1307,14 +1315,35 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         const auto acquired_controller =
             invoke("dev.pulp.session/control@1", R"({"action":"acquire"})");
         REQUIRE(acquired_controller.succeeded());
+        REQUIRE(acquired_controller.response->state == ControlReceiptState::Completed);
+        REQUIRE_FALSE(acquired_controller.response->result_code);
         auto controller_lease_id = std::string(
             choc::json::parse(acquired_controller.response->detail_json)["lease_id"].getString());
         REQUIRE_FALSE(controller_lease_id.empty());
+        const auto require_controller_lease =
+            [&](const ControlClientReceiptResult& operation) {
+                REQUIRE(operation.succeeded());
+                REQUIRE(operation.response);
+                INFO("controller lease receipt state: "
+                     << control_receipt_state_id(operation.response->state));
+                if (operation.response->result_code)
+                    INFO("controller lease result code: "
+                         << control_result_code_id(*operation.response->result_code));
+                INFO("controller lease explanation: " << operation.response->explanation);
+                REQUIRE(operation.response->state == ControlReceiptState::Completed);
+                REQUIRE_FALSE(operation.response->result_code);
+                const auto lease_detail =
+                    choc::json::parse(operation.response->detail_json);
+                REQUIRE(lease_detail["lease_id"].isString());
+                CHECK(lease_detail["lease_id"].getString() == controller_lease_id);
+            };
+        const auto renew_controller_lease = [&] {
+            require_controller_lease(
+                invoke("dev.pulp.session/control@1", R"({"action":"renew"})"));
+        };
         const auto renewed_controller =
             invoke("dev.pulp.session/control@1", R"({"action":"renew"})");
-        REQUIRE(renewed_controller.succeeded());
-        CHECK(choc::json::parse(renewed_controller.response->detail_json)["lease_id"].getString() ==
-              controller_lease_id);
+        require_controller_lease(renewed_controller);
 
         const auto renewal_granted =
             connection.manage("grant-request", choc::json::toString(grant, false));
@@ -1326,9 +1355,7 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         const auto renewed_under_new_grant = invoke(
             "dev.pulp.session/control@1", R"({"action":"renew"})", std::nullopt,
             renewal_grant_id);
-        REQUIRE(renewed_under_new_grant.succeeded());
-        CHECK(choc::json::parse(renewed_under_new_grant.response->detail_json)["lease_id"]
-                  .getString() == controller_lease_id);
+        require_controller_lease(renewed_under_new_grant);
         auto revoke_previous = choc::value::createObject("");
         revoke_previous.addMember("grant_id", choc::value::createString(request.grant_id));
         REQUIRE(connection.manage("revoke", choc::json::toString(revoke_previous, false))
@@ -1336,10 +1363,7 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         request.grant_id = renewal_grant_id;
         const auto renewed_after_previous_grant_ended =
             invoke("dev.pulp.session/control@1", R"({"action":"renew"})");
-        REQUIRE(renewed_after_previous_grant_ended.succeeded());
-        CHECK(choc::json::parse(renewed_after_previous_grant_ended.response->detail_json)
-                  ["lease_id"]
-                      .getString() == controller_lease_id);
+        require_controller_lease(renewed_after_previous_grant_ended);
 
         const auto read_json_artifact = [&](const ControlClientReceiptResult& operation) {
             REQUIRE(operation.succeeded());
@@ -1472,6 +1496,7 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         CHECK(choc::json::toString(cli_detail, false) ==
               choc::json::toString(mcp_detail, false));
 
+        renew_controller_lease();
         const auto window_capture =
             invoke("dev.pulp.ui/capture@1", R"({"target":"window","format":"png"})");
         INFO(window_capture.explanation);
@@ -1518,6 +1543,7 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         input(target_prefix +
               R"(,"kind":"pointer","event":{"phase":"up","x":30,"y":30,"button":0}})");
 
+        renew_controller_lease();
         const auto motion_start = invoke(
             "dev.pulp.trace/control@1",
             R"({"action":"motion-start-trace","metrics":[{"kind":"geometry","node_id":"author-input"},{"kind":"scroll-geometry","node_id":"author-scroll","properties":["contentOffsetY"]}]})");
@@ -1556,6 +1582,7 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
                 std::to_string(motion_trace_id) + "}");
         REQUIRE(motion_stop.succeeded());
 
+        renew_controller_lease();
         const auto trace_start = invoke("dev.pulp.trace/session-control@1",
                                         R"({"action":"start","ring_mb":9})");
         REQUIRE(trace_start.succeeded());
@@ -1580,11 +1607,10 @@ TEST_CASE("installed SDK ordinary author Standalone full parity aggregate",
         CHECK(telemetry["samples"].size() <= 2);
         CHECK(telemetry["dropped"].getWithDefault<std::int64_t>(-1) > 0);
 
+        renew_controller_lease();
         const auto released_for_cli_eval =
             invoke("dev.pulp.session/control@1", R"({"action":"release"})");
-        REQUIRE(released_for_cli_eval.succeeded());
-        CHECK(choc::json::parse(released_for_cli_eval.response->detail_json)["lease_id"]
-                  .getString() == controller_lease_id);
+        require_controller_lease(released_for_cli_eval);
 
         const auto cli_controller = run_installed_client(
             cli_environment, root.runtime,

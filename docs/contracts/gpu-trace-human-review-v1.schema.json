@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-trace-human-review-v1.schema.json",
+  "title": "Pulp independent GPU trace human review v1",
+  "description": "Closed structural contract for an independently authored, same-artifact Perfetto UI review. This document is evidence only and never grants terminal acceptance authority.",
+  "type": "object",
+  "required": [
+    "schema",
+    "question",
+    "artifact_sha256",
+    "review_authority",
+    "reviewed_utc",
+    "ui_revision",
+    "delivery",
+    "observed_spans"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pulp.gpu-trace-human-review.v1"
+    },
+    "question": {
+      "const": "gpu-startup"
+    },
+    "artifact_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "review_authority": {
+      "type": "object",
+      "required": [
+        "kind",
+        "reviewer_kind",
+        "reviewer",
+        "git_commit_author",
+        "attestation"
+      ],
+      "properties": {
+        "kind": {
+          "const": "independent-human-same-artifact-review"
+        },
+        "reviewer_kind": {
+          "const": "human"
+        },
+        "reviewer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "git_commit_author": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 320
+        },
+        "attestation": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 2000
+        }
+      },
+      "additionalProperties": false
+    },
+    "reviewed_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "ui_revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "delivery": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "observed_spans": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "duration_ns",
+          "gpu_evidence_id",
+          "frame_index",
+          "sequence",
+          "health_state"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^gpu_.+"
+          },
+          "duration_ns": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "gpu_evidence_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "frame_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "health_state": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "failed",
+              "unavailable",
+              "unverified",
+              "lost"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

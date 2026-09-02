@@ -446,6 +446,7 @@ TEST_CASE("output capture respects max byte limits",
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output == "abc");
     REQUIRE(r.stderr_output == "123");
+    REQUIRE(r.output_limit_exceeded);
 }
 
 TEST_CASE("zero max output bytes drains without capturing lines",
@@ -476,9 +477,29 @@ TEST_CASE("zero max output bytes drains without capturing lines",
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.empty());
     REQUIRE(r.stderr_output.empty());
+    REQUIRE_FALSE(r.output_limit_exceeded);
     REQUIRE(stdout_lines.empty());
     REQUIRE(stderr_lines.empty());
 }
+
+#ifndef _WIN32
+TEST_CASE("continuous output cannot starve the child process timeout",
+          "[child_process][edge]") {
+    ProcessOptions opts;
+    opts.timeout_ms = 100;
+    opts.max_output_bytes = 16;
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = ChildProcess::run(
+        "/bin/sh", {"-c", "while :; do printf 0123456789abcdef; done"}, opts);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    REQUIRE(result.timed_out);
+    REQUIRE(result.output_limit_exceeded);
+    REQUIRE(result.stdout_output.size() == opts.max_output_bytes);
+    REQUIRE(elapsed < std::chrono::seconds(2));
+}
+#endif
 
 TEST_CASE("stderr line callback fires independently",
           "[child_process][edge][issue-640]") {

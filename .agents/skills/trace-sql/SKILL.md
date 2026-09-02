@@ -1,6 +1,6 @@
 ---
 name: trace-sql
-description: SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. Ships the Pulp trace-stdlib (pulp_slowest_frames, pulp_dsp_node_cost, pulp_frames_over_budget, pulp_xruns, pulp_layout_vs_paint, pulp_motion_join). TRIGGER when writing or debugging SQL over a .pftrace, when `pulp trace query` returns wrong/empty rows, or when the trace-analysis skill needs a query primitive.
+description: SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. Ships Pulp's CPU/UI trace stdlib plus closed GPU startup, health, and probe views. TRIGGER when writing or debugging SQL over a .pftrace, when `pulp trace query` returns wrong/empty rows, or when the trace-analysis skill needs a query primitive.
 requires:
   - .agents/skills/trace-sql/pulp_slowest_frames.sql
   - .agents/skills/trace-sql/pulp_dsp_node_cost.sql
@@ -8,6 +8,9 @@ requires:
   - .agents/skills/trace-sql/pulp_xruns.sql
   - .agents/skills/trace-sql/pulp_layout_vs_paint.sql
   - .agents/skills/trace-sql/pulp_motion_join.sql
+  - .agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql
+  - .agents/skills/trace-sql/pulp_gpu_health_transitions.sql
+  - .agents/skills/trace-sql/pulp_gpu_probe_correlation.sql
 ---
 
 # trace-sql — querying Pulp traces with `trace_processor`
@@ -80,11 +83,26 @@ default; `--format table` is the only accepted explicit format. The global
 `--json` flag wraps that table as an escaped `output` string for agents;
 `--format json|csv` is rejected rather than mislabeling native output.
 
+The three named GPU analyses add a bounded subprocess boundary around this
+tool: at most 512 MiB of trace input, 120 seconds of wall time, and 4 MiB of
+combined stdout/stderr, with full process-tree termination on failure. Keep
+named-view output selective and bounded. If a query approaches those limits,
+reduce its columns/rows or shorten the capture; never weaken the runner to make
+an accidentally unbounded query appear successful. Free-form `trace query`
+does not yet inherit these same bounds and must be treated as a follow-up
+hardening surface rather than proof of the named analyzer's safety contract.
+The named analyzer opens without following the final symlink/reparse point and
+without blocking on a Unix FIFO/device replacement, verifies a regular-file
+handle, then snapshots those bytes into an exclusive private file (mode 0600
+on Unix). It rejects replacement or growth using handle-derived filesystem
+identity (device/inode on Unix, volume/file ID on Windows) and passes only the
+snapshot path to `trace_processor`.
+
 ---
 
 ## The Pulp trace-stdlib (query named primitives, not re-derived SQL)
 
-Six authored `CREATE OR REPLACE PERFETTO` definitions ship next to this skill.
+Nine authored `CREATE OR REPLACE PERFETTO` definitions ship next to this skill.
 Load the ones you need, then `SELECT` from them — do not re-derive the joins by
 hand each time. Each `.sql` file carries a header comment explaining its shape.
 
@@ -96,6 +114,88 @@ hand each time. Each `.sql` file carries a header comment explaining its shape.
 | `pulp_xruns` | xrun / deadline-miss instant events | `pulp trace xruns` |
 | `pulp_layout_vs_paint` | frame-pipeline cost split, one row per stage | `pulp trace layout-vs-paint` |
 | `pulp_motion_join` | frames joined to their motion `trace_id` | `--preset motion-join` |
+| `pulp_gpu_startup_breakdown` | ranked startup GPU/render stages | `pulp trace gpu-startup` |
+| `pulp_gpu_health_transitions` | health/device-loss evidence | `pulp trace gpu-health` |
+| `pulp_gpu_probe_correlation` | probe/readback evidence correlation | `pulp trace gpu-probe` |
+
+A3 product spans supply low-cardinality debug annotations such as
+`debug.gpu_evidence_id` and `debug.trace_evidence_id`; the C++ trace macro call
+uses the unprefixed annotation name and Perfetto exposes it under `debug.*`.
+Keep SQL joins on the exact GPU ID and stable process instance. The named
+`/trace gpu-startup|gpu-health|gpu-probe --trace FILE` surface must resolve to
+these checked-in views through the same installed analyzer used by A2T. Do not
+replace a missing named result with one-off SQL in a terminal receipt.
+
+The producer behind `PULP_A3_CAMPAIGN_PRODUCER` owns the raw trace capture for
+its real role and must preserve the health response's GPU and trace evidence
+IDs. `gpu_first_visible_a3_external_adapter.py` pins that producer and passes
+its digest-bound artifacts onward; it is not another analyzer and cannot turn
+an empty named view, a different process cohort, or hand-written SQL into a
+passing campaign analysis.
+The checked-in role producers additionally pin the external lifecycle driver
+and checked-in source-bound analyzer wrapper and retain the closed driver
+request/receipt. The wrapper prepares one exact analyzer in a fresh,
+config-free Cargo home/target, strips ambient Cargo/Rust runners and flags, and
+retains toolchain/source/output digests. The driver supplies the trace, not a
+trusted analysis sidecar; the producer runs the named query plus an invalid-
+trace negative and accepts only the exact health evidence ID, recorded host
+UPID, and PID that answered the producer's live-host nonce challenge before the
+shared verifier consumes the derived analysis. Its
+structural `unverified` result is distinct from the campaign budget verdict.
+
+Do not let the offline A2T no-producer classification hide the real A3 product
+health-transition spans. Terminal acceptance also consumes the derived
+pre-change/compile-out/compiled-in-idle/active overhead receipt from
+`gpu_first_visible_a3_trace_producer_overhead.py`. Each active sample is replayed
+from its session metadata and real producer span with exact process-start,
+binary, session-config, xrun, and audio-thread facts. Arbitrary trace bytes are
+rejected, and the final active binary must equal one measured role product.
+
+The four-state collector accepts production binary Perfetto only and replays it
+through Pulp's exact v57.2 platform SHA pin. Chrome JSON is planted-fixture-only.
+Reject unfinished slices, loss/no-flush stats, foreign UPIDs, reused session
+challenges, mismatched host PIDs, xruns, or producer spans on declared audio
+TIDs. Active queries must find `gpu_health_transition_first_visible`, require
+`gpu_acquire` → `gpu_submit` → `gpu_present` per sample, and count the complete
+b4ba exact 20-signature `state`/`render`/`js` inventory. A zero count for one of
+the other 17 signatures is reported not-covered, never zero-cost; absence of a
+mandatory stage is missing evidence.
+Each row also has a source-bound `state_build_driver`: the collector exports the
+exact revision, rebuilds under a default-deny/no-network sandbox, and requires
+rebuilt executable bytes plus the tracing sentinel state to match measurement.
+The retained source/build/toolchain artifacts are part of offline replay; SQL
+truth cannot compensate for missing product provenance.
+
+**Closed GPU cohort boundary.** The named GPU analyses do not currently accept
+an evidence-ID selector, so the SQL must not flatten unrelated runs. Startup
+selects the earliest valid render-frame lifecycle carrying `frame_index = 0`
+and returns that lifecycle's unindexed/frame-zero cold work separately from its
+later indexed steady-state rows; the single-ID fallback exists only for legacy
+traces with no indexed render frame. Startup joins `slice → thread_track` on
+the stable `utid` and intersects overlapping `thread_state` rows when scheduler
+evidence exists; CPU/non-running attribution is exposed only when those
+intervals cover the complete slice. Partial or absent coverage remains NULL
+rather than becoming a blocking claim. Unindexed work is cold only when a
+correlated frame-zero anchor proves that it began before first-frame completion;
+later unindexed work is `unknown`. Tooling-owned correlation rows are selected
+from candidates that carry an evidence ID; generic Dawn/Skia backend spans may
+remain untagged because they are not allowed to supply the cohort. The selected
+rows return no result when their tagged candidates carry multiple IDs or lack
+one valid 32-lowercase-hex ID. The closed analyzer interprets an empty mixed-ID
+result as unavailable. A future multi-run UX should add an
+explicit evidence-ID selector rather than weakening this singleton boundary.
+Category discovery follows the same boundary: join slices through
+`thread_track.utid` to the stable `thread.upid`, and accept categories only
+when the question rows and category rows resolve to one evidence ID and one
+UPID/PID process instance. Never union global trace categories into a scoped
+answer. Probe verdict SQL also owns a closed causal-failure diagnostic set;
+`cpu_oracle_mismatch` and `magnitude_dispatch_failed` remain failures even if
+the same row inconsistently reports `health_state=healthy`. Any tooling-owned
+`gpu_probe*` or `gpu_readback*` candidate without an evidence ID invalidates the
+whole probe cohort; a healthy tagged row cannot hide it. Generic untagged
+backend work such as `gpu_submit*` remains allowed but cannot supply the cohort.
+Do not generalize the diagnostic rule to every nonempty diagnostic because
+healthy diagnostics are valid.
 
 **One definition, three surfaces.** The L0 CLI preset names map **1:1** onto
 these views: `slowest-frames → pulp_slowest_frames`, `xruns → pulp_xruns`,
@@ -259,6 +359,9 @@ GROUP BY name ORDER BY avg_all_us DESC;
 - `.agents/skills/trace-sql/pulp_xruns.sql`
 - `.agents/skills/trace-sql/pulp_layout_vs_paint.sql`
 - `.agents/skills/trace-sql/pulp_motion_join.sql`
+- `.agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql`
+- `.agents/skills/trace-sql/pulp_gpu_health_transitions.sql`
+- `.agents/skills/trace-sql/pulp_gpu_probe_correlation.sql`
 - `core/runtime/include/pulp/runtime/trace.hpp` — the macro surface + category taxonomy
 - `docs/guides/tracing.md` — the guide, tiers, and worked use cases
 
@@ -352,3 +455,5 @@ validation on every machine whose adapter happened to offer timestamps.
 If you need per-recording GPU time in a capture, enable it explicitly on the
 host's Options. If a trace shows no `gpu_render_time`, check that flag before
 suspecting the adapter.
+
+A3 v2 terminal evidence is analyzer-derived rather than sidecar-attested. The pinned replay must bind the exact trace digest, role/campaign/instance/build identity, GPU and trace evidence IDs, process PID/UPID, the closed category set, zero drops, and a completed flush.

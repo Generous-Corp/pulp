@@ -20,6 +20,12 @@ enum class ControlConsentPromptResult : std::uint8_t {
 
 struct ControlConsentPrompt {
     ControlGrantConsentRequest request;
+    /// User-facing action and exact grant scope. GPU-health-only grants are
+    /// one-shot; reusable capabilities disclose their requested TTL.
+    std::string primary_message;
+    std::string requested_operations_display;
+    std::string technical_details_display;
+    std::string approve_label;
     std::string client_executable_display;
     std::string client_publisher_display;
     std::string plugin_display;

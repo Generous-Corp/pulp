@@ -49,6 +49,7 @@ sweep:
     - tools/audio
   include_paths:
     - tools/scripts/figma_import_diff.py
+    - tools/scripts/gpu_trace_overhead_acceptance.py
     - tools/scripts/render-figma-import.sh
 
 tools:
@@ -547,6 +548,18 @@ tools:
     availability: always
     skill: screenshot
     docs: guides/testing-advanced.md
+
+  - name: gpu-trace-overhead-acceptance
+    path: tools/scripts/gpu_trace_overhead_acceptance.py
+    category: harness
+    use_when: Measure installed CLI/MCP GPU trace-analysis latency and prove both surfaces consume one sibling artifact pair.
+    invocation: python3 tools/scripts/gpu_trace_overhead_acceptance.py --help
+    inputs: An installed sibling pulp/pulp-mcp pair, one flushed .pftrace, and the SDK-matched trace_processor_shell.
+    outputs: Raw 5-warmup/30-paired/20-fresh-start samples, identity and digest provenance, p95/noise/confidence summaries, and semantic parity.
+    caveat: Measures offline analyzer overhead only. It cannot grade trace-producer capture cost; new producer call sites require separate compile-out, idle-session, and active-capture product trials.
+    availability: always
+    skill: trace-analysis
+    docs: validation/gpu-trace-overhead/README.md
 
   # ── Audio measurement ─────────────────────────────────────────────────────
   - name: audio-validate

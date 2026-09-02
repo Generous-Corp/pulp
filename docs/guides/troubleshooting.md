@@ -65,6 +65,23 @@ git clone --depth 1 --branch AudioUnitSDK-1.4.0 \
 
 ## Environment Issues
 
+### Named GPU trace analysis returns `unavailable`
+
+This is a capture/evidence result, not a pass. Re-capture the exact authorized
+instance with `render,gpu`, reproduce the operation, and stop the session so
+the trace is fully flushed. Then rerun the same closed question:
+
+```bash
+pulp trace gpu-startup --trace /tmp/pulp.pftrace --json
+pulp trace gpu-health --trace /tmp/pulp.pftrace --json
+pulp trace gpu-probe --trace /tmp/pulp.pftrace --json
+```
+
+The JSON `unavailable_reason` distinguishes a missing question category,
+unfinished capture, and invalid probe evidence correlation. Use the returned
+`ui_correlation.open_command` and search terms to inspect the identical trace
+in Perfetto; do not replace this path with a live selector or MCP-supplied SQL.
+
 ### `pulp doctor` reports failures
 
 Run `pulp doctor --fix` to auto-resolve what it can:

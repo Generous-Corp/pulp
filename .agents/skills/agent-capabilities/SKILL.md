@@ -56,6 +56,19 @@ not make them agent-capability rows: keep runtime-control operations and policy
 out of `agent-capabilities.json`, and keep the capability surface ledger focused
 on the design-time public-header contract.
 
+The A3 GPU startup-health surface is a concrete example. The installed
+`ControlGpuHealthProvider`, `ControlGpuHealthViewAdapter`,
+`ControlGpuHealthReadExecutor`, and `pulp.gpu-health-read-result.v1` types are
+runtime control plumbing. Do not add `dev.pulp.gpu/health.read@1`, its grants,
+instances, receipts, measurement campaigns, or B4 disposition to
+`agent-capabilities.json`. A public-header ledger classification, where one is
+required by the covered roots, records only that the header was reviewed; it
+must not turn this runtime operation into a generator-facing design capability.
+The checkout-only `gpu_first_visible_a3_campaign.py` runner is also runtime
+acceptance tooling, not an installed SDK capability: do not add its adapter
+request/receipt schemas, 10+10 lifecycle ledger, or source-binding receipt to
+the design-time capability catalog.
+
 ## Classify the change
 
 For a new public header or symbol:
@@ -300,6 +313,12 @@ source SHA, importer hash, capability hash, and schema-invalid documents.
 and adjacent policy self-tests. When adding a new Python policy test there,
 register the test explicitly in the same change; merely creating a
 `tools/ci/test_*.py` file does not make CTest execute it.
+
+That registry also runs the browser DPR adapter self-test. Keep its exact
+Playwright-version, artifact-confinement, product-digest, typed-metric, timer
+calibration, logical-input, and same-content fidelity negatives registered;
+an executable measurement script without the CTest entry is not maintained
+evidence tooling.
 
 That registry also carries the trusted Vellum merge self-test. Keep its clean
 base+head positive control and real content-conflict negative control together:
@@ -707,6 +726,8 @@ no line carries two statements.
 
 Extract codes from every return form, including ternaries (`return c ? 0 : N;`) — a naive
 `grep -oE "return [0-9]+;"` misses those and manufactures phantom collisions.
+
+For A3 v2 terminal acceptance, never treat receipt fields as publication or trace proof. The verifier must derive protected `main`, the canonical receipt blob, required check identities/results, and artifact digests live, then replay the pinned analyzer over the exact trace bytes.
 
 ## `PulpInstallRules.cmake` fires this gate for reasons that have nothing to do with capabilities
 

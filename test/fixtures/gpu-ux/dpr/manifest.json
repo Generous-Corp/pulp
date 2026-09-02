@@ -1,0 +1,176 @@
+{
+  "schema": "pulp.gpu-dpr-corpus.v1",
+  "version": 1,
+  "requested_dprs": [1, 1.5, 2, 3],
+  "modes": ["exact", "configured_max", "adaptive_simulation"],
+  "configured_max_dpr": 2,
+  "v2_protocol": {
+    "id": "a4-dpr-experiment-v2",
+    "status": "blocked-product-policy",
+    "product_policy": null,
+    "seed_encoding": "utf8-length-prefixed-u64be-v1",
+    "prng": "sha256-counter-mode-u64be-v1",
+    "bootstrap": {
+      "method": "paired-percentile-bootstrap-v1",
+      "resamples": 10000,
+      "confidence_interval": 0.95,
+      "sample_unit": "aligned-trial-p95",
+      "percentile_method": "nearest-rank"
+    },
+    "repeat_scope": "all-84-cells",
+    "daw_agreement": "terminal-verdict-gates-and-identity",
+    "terminal_publication": "protected-pulp-main-with-green-required-checks"
+  },
+  "adaptive_profile": {
+    "id": "a4-latency-guard-simulation-v1",
+    "shipping": false,
+    "scale_ladder": [1, 1.5, 2, 3],
+    "downshift_after_over_budget_frames": 5,
+    "upshift_after_under_budget_frames": 120,
+    "upshift_budget_fraction": 0.7
+  },
+  "trial_contract": {
+    "warmups": 5,
+    "measured_trials": 30,
+    "fresh_process_first_frame_trials": 20,
+    "frames_per_warm_measured_trial": 240,
+    "workload_sequence_id": "a4-steady-state-workload-v1",
+    "timer_noise_p95_ns": null,
+    "memory_sampler_resolution_bytes": null,
+    "capture_similarity_minimum": 0.99,
+    "small_text_luminance_stddev_minimum": 1.0,
+    "thin_stroke_coverage_minimum": 0.001,
+    "gpu_timer_calibration_trials": 5,
+    "gpu_timer_extra_work_multiplier": 8,
+    "required_trace_categories": ["render", "gpu", "text", "js", "layout"],
+    "required_metrics": [
+      "cpu_frame_time", "gpu_frame_time", "first_frame_time",
+      "interaction_latency", "render_target_bytes", "resident_bytes",
+      "upload_bytes"
+    ],
+    "fidelity_gates": [
+      "content_floor_passed", "capture_similarity", "small_text_legible",
+      "thin_strokes_preserved", "logical_input_correct"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "dense-text-thin-strokes",
+      "policy_class": "Pulp-native",
+      "a3_role": "pulp-standalone",
+      "frame_budget_ns": null,
+      "required_provider": "Dawn/WebGPU",
+      "required_host": "pulp-standalone",
+      "kind": "pulp_screenshot",
+      "source": "dense-text-thin-strokes.ui.js",
+      "source_sha256": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "logical_size": { "width": 640, "height": 360 },
+      "logical_input_oracle": { "point": [8, 8], "target": "view:root" },
+      "fidelity_oracle": {
+        "small_text_roi": { "x": 24, "y": 24, "width": 592, "height": 105 },
+        "thin_stroke_roi": { "x": 24, "y": 155, "width": 592, "height": 145 }
+      },
+      "required_oracles": ["content_floor", "capture_similarity", "small_text", "thin_strokes", "logical_input"]
+    },
+    {
+      "id": "shader-heavy-controls",
+      "policy_class": "Pulp-native",
+      "a3_role": "pulp-standalone",
+      "frame_budget_ns": null,
+      "required_provider": "Dawn/WebGPU",
+      "required_host": "pulp-standalone",
+      "kind": "pulp_screenshot_gpu",
+      "source": "shader-heavy-controls.ui.js",
+      "source_sha256": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "logical_size": { "width": 640, "height": 360 },
+      "logical_input_oracle": { "point": [8, 8], "target": "view:root" },
+      "required_oracles": ["content_floor", "capture_similarity", "logical_input", "authentic_gpu"]
+    },
+    {
+      "id": "meters-waveforms",
+      "policy_class": "Pulp-native",
+      "a3_role": "pulp-standalone",
+      "frame_budget_ns": null,
+      "required_provider": "Dawn/WebGPU",
+      "required_host": "pulp-standalone",
+      "kind": "pulp_screenshot_gpu",
+      "source": "meters-waveforms.ui.js",
+      "source_sha256": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "logical_size": { "width": 640, "height": 360 },
+      "logical_input_oracle": { "point": [8, 8], "target": "view:root" },
+      "required_oracles": ["content_floor", "capture_similarity", "logical_input", "authentic_gpu"]
+    },
+    {
+      "id": "threejs-audio-reactive",
+      "policy_class": "Pulp-native",
+      "a3_role": "pulp-standalone",
+      "frame_budget_ns": null,
+      "required_provider": "Dawn/WebGPU",
+      "required_host": "pulp-standalone",
+      "kind": "maintained_native_canary",
+      "source": "examples/threejs-native-demo/main.cpp",
+      "logical_size": { "width": 900, "height": 600 },
+      "logical_input_oracle": { "point": [8, 8], "target": "view:pulp-dpr-threejs-canvas" },
+      "required_oracles": ["content_floor", "capture_similarity", "logical_input", "authentic_gpu", "audio_thread_excluded"]
+    },
+    {
+      "id": "forge-modular-native",
+      "policy_class": "Forge-native/DAW",
+      "a3_role": "forge-modular-standalone",
+      "frame_budget_ns": null,
+      "required_provider": "Dawn/WebGPU",
+      "required_host": "forge-modular-standalone",
+      "kind": "external_forge_canary",
+      "source": "Generous-Corp/Forge:modular",
+      "logical_size": { "width": 1280, "height": 820 },
+      "logical_input_oracle": { "point": [640, 410], "target": "forge-center-hit" },
+      "fidelity_oracle": {
+        "small_text_roi": { "x": 32, "y": 24, "width": 520, "height": 96 },
+        "thin_stroke_roi": { "x": 24, "y": 136, "width": 1232, "height": 620 }
+      },
+      "required_oracles": ["content_floor", "capture_similarity", "small_text", "thin_strokes", "logical_input", "authentic_gpu", "exact_binary_identity"]
+    },
+    {
+      "id": "forge-modular-daw",
+      "policy_class": "Forge-native/DAW",
+      "a3_role": "forge-modular-auv2-logic",
+      "frame_budget_ns": null,
+      "required_provider": "Dawn/WebGPU",
+      "required_host": "logic-and-reaper-aggregate",
+      "required_daw_subreceipts": [
+        {"format": "auv2", "host": "logic", "a3_role": "forge-modular-auv2-logic"},
+        {"format": "vst3", "host": "reaper", "a3_role": "forge-modular-vst3-reaper"},
+        {"format": "clap", "host": "reaper", "a3_role": "forge-modular-clap-reaper"}
+      ],
+      "kind": "external_forge_daw_canary",
+      "source": "Generous-Corp/Forge:modular",
+      "logical_size": { "width": 1280, "height": 820 },
+      "logical_input_oracle": { "point": [640, 410], "target": "forge-center-hit" },
+      "required_oracles": ["content_floor", "logical_input", "authentic_gpu", "exact_binary_identity", "exact_plugin_format", "audio_thread_excluded"]
+    },
+    {
+      "id": "super-convolver-web",
+      "policy_class": "web",
+      "a3_role": "pulp-standalone",
+      "frame_budget_ns": null,
+      "required_provider": "WebGL2",
+      "required_host": "super-convolver-web",
+      "kind": "maintained_web_canary",
+      "source": "examples/web-demos/super-convolver-ui/browser-test/validate.mjs",
+      "logical_size": { "width": 760, "height": 520 },
+      "logical_input_oracle": { "point": [139, 448], "target": "parameter:1" },
+      "fidelity_oracle": {
+        "small_text_roi": { "x": 28, "y": 24, "width": 480, "height": 112 },
+        "thin_stroke_roi": { "x": 52, "y": 360, "width": 656, "height": 132 }
+      },
+      "required_oracles": ["content_floor", "capture_similarity", "small_text", "thin_strokes", "logical_input", "authentic_webgl"]
+    }
+  ],
+  "stop_rules": [
+    "a2t-receipt-missing", "a3-budget-missing", "a3-receipt-missing",
+    "content-digest-drift", "logical-size-drift", "trace-category-missing",
+    "trace-incomplete", "cpu-gpu-substitution", "small-text-oracle-missing",
+    "logical-input-oracle-missing", "forge-identity-unverified",
+    "daw-format-unverified", "audio-thread-work-detected"
+  ]
+}

@@ -141,6 +141,18 @@ A headless `render_to_png(root, w, h, scale, ScreenshotBackend::skia)` (or an
 example's `--screenshot`) is the cheapest proof the Skia pipeline links + runs
 without opening a window.
 
+For terminal A4 native DPR measurements, a normal GPU build is insufficient:
+configure a separate Release build with both `PULP_BENCHMARK=ON` and
+`PULP_TRACING=ON`, then build only
+`pulp-gpu-dpr-native-measurement` through `tools/ci/governed-build.sh`. The
+producer opts into GPU timing on its public editor surface, refuses non-hardware
+Dawn adapters, and reports incomplete when timestamp queries or authentic
+counter evidence are unavailable. Its empirical timer floor is derived from
+positive samples and must distinguish five baseline trials from five trials
+with eight times the known GPU work; a quantized nonzero timer with no detectable
+control is not valid measurement. Do not reuse this dev tracing build as a
+shipping artifact.
+
 ## Gotchas (each cost real time)
 
 - **Release Skia archives require `SK_RELEASE` in every consumer, including
@@ -325,6 +337,30 @@ must be registered and then *proven* to draw.
 
 ## GPU bundles MUST be relocatable (the libwgpu_native.dylib rpath footgun)
 
+## Start debugging from the installed recipe catalog
+
+Use `pulp gpu recipes list --json` or an exact `--symptom` filter before
+choosing a probe. The catalog always explains all four canonical workflows,
+while `callable` is derived from the matched native registry. In particular,
+Three.js metadata can be visible in a QuickJS release without claiming that
+the V8-only recipe can run. `pulp_gpu_recipes` is the read-only MCP equivalent;
+it projects the linked CPU-only model directly, so GPU-disabled installations
+do not need a sibling `pulp-cpp` merely to discover the catalog. GPU-disabled
+builds report every execution recipe non-callable, and Renderer3D stays
+non-callable until Scene3D is compiled.
+use CLI `recipes scaffold` only when an explicit local evidence workspace is
+wanted. Run two baselines and the seeded negative control before treating a
+pass as useful localization evidence.
+
+The Catch2 native-recipe suite deliberately skips when no real adapter is
+available; this keeps GPU-less build lanes viable and is not terminal evidence.
+For fail-closed real-work proof, build and run the EXCLUDE_FROM_ALL
+`pulp-gpu-probe-native-acceptance` and
+`pulp-gpu-probe-stft-native-acceptance` executables on a suitable host, then
+validate the digest-bound receipt with `gpu-probe-current-acceptance`. Those
+surfaces reject unavailable evidence. There is no compile-time
+`PULP_GPU_PROBE_REQUIRE_WORK` policy branch in the portable unit suite.
+
 A GPU plugin/app links `libwgpu_native.dylib`. The upstream WebGPU FetchContent
 copies the dylib INTO the bundle's `Contents/MacOS` but rpaths the binary only at
 the **build cache** (`~/Library/Caches/Pulp/fetchcontent-src/.../lib`). On the
@@ -484,3 +520,86 @@ to CoreGraphics, you need a live GPU window of native UI (e.g. the
 `ink-signal-showcase` / `gpu-demo` examples), or a GPU plugin/app loads on the
 build machine but crashes / shows no UI on another Mac (the dylib rpath footgun
 above).
+
+## A3 first-visible evidence
+
+GPU startup health has two independent axes. `dropped_event_count` and
+`truncated` describe capture integrity; `missing_trace_categories` describes
+instrumentation coverage. Never turn a missing Vellum event into loss or a
+zero-valued duration. Visible Standalone/DAW/Forge campaigns bind
+`native-compositor-presentation`; only the constrained headless campaign binds
+`headless-capture-complete`. The closed A3 verifier permits nullable causal
+fields only for passing no-change or a budget-miss investigation with every
+missing event, argument, interval, and transferred route named.
+
+Run real roles through `tools/scripts/gpu_first_visible_a3_campaign.py
+run-role`. Its adapter request fixes the role endpoint and requires 10 cold plus
+10 warm trials with explicit lifecycle, process, and cache provenance; it never
+derives cold/warm from elapsed time. The runner snapshots the adapter and
+ratified budget, validates product/host/health/trace artifacts, and preserves
+timeout, SKIP, or INCONCLUSIVE as nonterminal. Use `--require-controls` on one
+real role to bind the blank negative and external audio-thread exclusion. The
+existing Standalone product test remains a one-observation wiring preflight,
+not a 20-trial campaign. When the adapter owns the controls, use the two
+receipt-producing focused test invocations in
+`docs/validation/gpu-first-visible-a3-acceptance.md`; setting a seed alone is
+not durable evidence. Set `PULP_A3_CONTROL_SOURCE_ROOT` to the clean exact Pulp
+revision that built both native control targets. The adapter verifies each
+embedded target/source/revision/blob/build identity and retains the executable
+and provenance refs; a copied script or shape-valid receipt fails closed.
+
+The checked-in `gpu_first_visible_a3_external_adapter.py` is the reusable
+Pulp-owned envelope for those roles. Configure the exact role producer with
+`PULP_A3_CAMPAIGN_PRODUCER`; for the one controls run, also configure the two
+focused built test binaries documented in the acceptance guide. The envelope
+pins all three executables and fails closed on missing configuration or
+protocol drift. It does not provide generic present/cache instrumentation and
+must not be used to relabel capture completion as native presentation.
+Select the checked-in standalone, constrained-headless, REAPER, or Forge role
+producer rather than an undocumented producer path. The adapter pins the role
+entry point and its checked-in support from the exact Pulp source root. Each
+role entry point pins the configured product, host, lifecycle driver,
+source-build driver, sealed source-bound trace analyzer, embedded-build
+verifier, and supplemental build attestation/receipt. The source-build driver
+receives clean exact-revision roots and a fresh output directory, never the
+measured product path; rebuilt executable and DAW/Forge bundle digests must
+match the measurement. Every lifecycle row answers a producer nonce while the
+exact host is alive, named replay selects that challenged trace-host PID, and
+all reported processes must then be gone before replay and PASS. The lifecycle
+driver remains an explicit
+external prerequisite wherever the current Dawn/AppKit/host seam cannot expose
+native presentation without Vellum-owned work.
+
+Terminal A3 also requires the four-state product trace-producer overhead control
+from the acceptance guide. Compare the exact pre-producer parent with final-head
+compile-out, compiled-in idle, and active 128 MiB capture using one host,
+workload, build family, and source-bound driver. The compiled-in idle and active
+states use identical executable bytes; every state requires zero xruns and
+audio-thread trace events. A passing role campaign or offline A2T no-producer
+classification does not waive this control.
+
+Use the acceptance guide's `collect-state` command for every row. It wraps the
+source-bound product driver with 55 independent live-process challenges, keeps
+compiled-in idle and active executable bytes identical, and replays active
+binary Perfetto traces with the exact pinned processor. Acceptance binds both
+the health-first-visible producer and the complete b4ba exact 20-signature
+`state`/`render`/`js` package. Acquire/submit/present are mandatory per active
+sample; every other signature is counted and a zero is reported not-covered,
+not zero-cost. Raw driver JSON or Chrome trace cannot stand in for the
+collector receipt.
+The same request pins a candidate-relative `state_build_driver`. The collector
+exports the exact row revision, rebuilds it under default-deny/no-network
+confinement without the measured product or ambient build tree, byte-compares
+the rebuilt executable, and verifies the compile-in sentinel. Retain its source
+archive, closed build request/receipt, product, logs, and exact toolchain
+snapshots; an existing Skia/Dawn build directory is not source proof.
+
+If a validated B4 disposition routes follow-up to Vellum, test a bounded
+Graphite `PipelineManager` `SkExecutor` supplied through `ContextOptions` before
+designing custom prewarm. Trace pipeline queued/start/end, cache hit/miss,
+signature, and render wait over the exact 10-cold/10-warm workload; keep work
+off the audio thread and bound executor ownership, lifetime, and shutdown. Ship
+only a causal, material improvement, otherwise record `no-change`. A generic
+Vellum-installed `SkLogHandler` is a later diagnostic producer, not Horizon A.
+
+A3 v2 terminal proof also requires digest-bound blank-frame and external audio-thread controls plus the derived four-state trace-producer overhead receipt. Keep the checked-in receipt blocked until all controls, seven campaigns, pinned trace replays, and fresh protected-main publication verification pass.

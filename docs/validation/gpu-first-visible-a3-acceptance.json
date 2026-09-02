@@ -1,0 +1,52 @@
+{
+  "$schema": "../contracts/gpu-first-visible-a3-acceptance-v2.schema.json",
+  "schema": "dev.pulp.gpu-first-visible-a3-acceptance",
+  "version": 2,
+  "status": "blocked-product-policy",
+  "recorded_at": "2026-08-30T00:20:13Z",
+  "implementation_head": null,
+  "plan": {
+    "document": "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md",
+    "revision": "bec7fb85c6f8886d32fac0a34be491eb6821a741",
+    "lines": "949-1118",
+    "sha256": "84fbdf513d17027d86407970bbf154aef8b5dd9e91086dff03a578c54be0ccf4"
+  },
+  "product_policy": {
+    "status": "missing",
+    "authority": null,
+    "validation": null,
+    "required_coverage": "missing"
+  },
+  "protocol": {
+    "clock": "mach_continuous_time",
+    "reference_host_id": "m5",
+    "ring_mib": 128,
+    "timer_noise_pairs": 10000,
+    "warmup_trials_per_state": 5,
+    "warm_trials_per_state": 30,
+    "cold_trials_per_state": 20,
+    "states": ["baseline-tracing-off", "candidate-tracing-off", "candidate-compiled-in-idle", "candidate-active-session"],
+    "trace_categories": ["dsp", "gpu", "metadata", "render", "js", "state"],
+    "roles": [
+      {"role_id": "pulp-standalone", "host_kind": "pulp-standalone", "application_kind": "pulp-standalone-canary", "plugin_format": "standalone", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "forge-modular-standalone", "host_kind": "forge-modular-standalone", "application_kind": "forge-modular", "plugin_format": "standalone", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "forge-modular-auv2-logic", "host_kind": "logic-pro", "application_kind": "forge-modular", "plugin_format": "auv2", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "forge-modular-vst3-reaper", "host_kind": "reaper", "application_kind": "forge-modular", "plugin_format": "vst3", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "forge-modular-clap-reaper", "host_kind": "reaper", "application_kind": "forge-modular", "plugin_format": "clap", "measurement_endpoint": "native-compositor-presentation"},
+      {"role_id": "headless-reference", "host_kind": "headless-capture", "application_kind": "pulp-standalone-canary", "plugin_format": "headless", "measurement_endpoint": "headless-capture-complete"},
+      {"role_id": "constrained-adapter", "host_kind": "pulp-standalone", "application_kind": "pulp-standalone-canary", "plugin_format": "standalone", "measurement_endpoint": "native-compositor-presentation"}
+    ]
+  },
+  "campaigns": [],
+  "blank_negative": {"status": "missing", "receipt": null},
+  "audio_thread_exclusion": {"status": "missing", "receipt": null},
+  "trace_producer_overhead": {
+    "status": "unavailable",
+    "reason": "No implementation-bound four-state overhead campaign exists while product policy and required coverage remain blocked.",
+    "receipt": null
+  },
+  "publication": null,
+  "disposition": null,
+  "observations": [],
+  "blockers": ["product-policy", "required-coverage"]
+}

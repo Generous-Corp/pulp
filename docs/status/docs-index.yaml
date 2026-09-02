@@ -653,6 +653,11 @@ docs:
     kind: reference
     summary: Tom-only whole-voice profiling result, measured fast-ladder opt-in, quality evidence, and direct usage
 
+  - slug: gpu-first-visible-acceptance
+    path: validation/gpu-first-visible-a3-acceptance.md
+    kind: guide
+    summary: Fail-closed A3 receipt generation, verification, evidence binding, and terminal GPU first-visible acceptance requirements
+
   # Policies
   - slug: code-style
     path: policies/code-style.md
