@@ -2,6 +2,37 @@ if(NOT DEFINED PULP_CLI OR NOT DEFINED ARTIFACT_ROOT)
     message(FATAL_ERROR "PULP_CLI and ARTIFACT_ROOT are required")
 endif()
 
+function(is_gpu_compute_adapter_unavailable result_json output_variable)
+    set(is_expected_unavailable FALSE)
+    string(JSON result_schema ERROR_VARIABLE result_schema_error
+        GET "${result_json}" schema)
+    string(JSON result_verdict ERROR_VARIABLE result_verdict_error
+        GET "${result_json}" verdict)
+    string(JSON result_code ERROR_VARIABLE result_code_error
+        GET "${result_json}" passes 0 code)
+    if(NOT result_schema_error AND NOT result_verdict_error AND NOT result_code_error AND
+       result_schema STREQUAL "pulp.gpu-probe-result.v1" AND
+       result_verdict STREQUAL "unavailable" AND
+       result_code STREQUAL "gpu_compute_adapter_unavailable")
+        set(is_expected_unavailable TRUE)
+    endif()
+    set(${output_variable} ${is_expected_unavailable} PARENT_SCOPE)
+endfunction()
+
+# Keep the narrow headless-Linux allowance fail-closed: another typed exit-2
+# result (for example, a runtime failure) must not impersonate adapter absence.
+set(adapter_unavailable_fixture
+    [[{"schema":"pulp.gpu-probe-result.v1","verdict":"unavailable","passes":[{"code":"gpu_compute_adapter_unavailable"}]}]])
+is_gpu_compute_adapter_unavailable("${adapter_unavailable_fixture}"
+    exact_adapter_unavailable_fixture)
+string(REPLACE "gpu_compute_adapter_unavailable" "probe_runtime_failed"
+    unrelated_exit_two_fixture "${adapter_unavailable_fixture}")
+is_gpu_compute_adapter_unavailable("${unrelated_exit_two_fixture}"
+    unrelated_exit_two_accepted)
+if(NOT exact_adapter_unavailable_fixture OR unrelated_exit_two_accepted)
+    message(FATAL_ERROR "adapter-unavailable result classifier is not fail-closed")
+endif()
+
 file(REMOVE_RECURSE "${ARTIFACT_ROOT}")
 file(MAKE_DIRECTORY "${ARTIFACT_ROOT}")
 
@@ -201,10 +232,9 @@ if(positive_rc EQUAL 0)
         endif()
     endforeach()
 elseif(UNIX AND NOT APPLE AND positive_rc EQUAL 2)
-    string(JSON positive_code ERROR_VARIABLE positive_code_error
-        GET "${positive_json}" passes 0 code)
-    if(positive_code_error OR NOT positive_verdict STREQUAL "unavailable" OR
-       NOT positive_code STREQUAL "gpu_compute_adapter_unavailable")
+    is_gpu_compute_adapter_unavailable("${positive_json}"
+        positive_adapter_unavailable)
+    if(NOT positive_adapter_unavailable)
         message(FATAL_ERROR
             "headless Linux probe did not emit exact typed unavailable evidence: "
             "${positive_stderr}")
@@ -310,14 +340,29 @@ execute_process(
     RESULT_VARIABLE negative_rc
     OUTPUT_VARIABLE negative_json
     ERROR_VARIABLE negative_stderr)
-if(NOT negative_rc EQUAL 1)
+string(JSON negative_schema ERROR_VARIABLE negative_schema_error
+    GET "${negative_json}" schema)
+string(JSON negative_verdict ERROR_VARIABLE negative_verdict_error
+    GET "${negative_json}" verdict)
+if(negative_rc EQUAL 1)
+    if(negative_schema_error OR negative_verdict_error OR
+       NOT negative_schema STREQUAL "pulp.gpu-probe-result.v1" OR
+       NOT negative_verdict STREQUAL "fail")
+        message(FATAL_ERROR
+            "negative control was not detected with typed fail evidence: "
+            "${negative_verdict_error}")
+    endif()
+elseif(UNIX AND NOT APPLE AND negative_rc EQUAL 2)
+    is_gpu_compute_adapter_unavailable("${negative_json}"
+        negative_adapter_unavailable)
+    if(NOT negative_adapter_unavailable)
+        message(FATAL_ERROR
+            "headless Linux negative control did not emit exact typed "
+            "adapter-unavailable evidence: ${negative_stderr}")
+    endif()
+else()
     message(FATAL_ERROR
         "negative control must fail with exit 1, got ${negative_rc}: ${negative_stderr}")
-endif()
-string(JSON negative_verdict ERROR_VARIABLE negative_json_error
-    GET "${negative_json}" verdict)
-if(negative_json_error OR NOT negative_verdict STREQUAL "fail")
-    message(FATAL_ERROR "negative control was not detected: ${negative_json_error}")
 endif()
 
 execute_process(
