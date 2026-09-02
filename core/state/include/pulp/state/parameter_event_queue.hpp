@@ -35,6 +35,41 @@ struct ParameterEvent {
     int32_t ramp_duration_sample_frames = 0;
 };
 
+/// Timestamped host modulation event. Unlike StateStore's block-scoped
+/// modulation offset, this preserves the CLAP event sample position so a
+/// processor can apply modulation at the exact frame it was received.
+struct ModulationEvent {
+    ParamID param_id = 0;
+    int32_t sample_offset = 0;
+    float amount = 0.0f;
+};
+
+class ModulationEventQueue {
+public:
+    static constexpr std::size_t kCapacity = 1024;
+    bool push(const ModulationEvent& e) {
+        if (size_ >= events_.size()) { ++dropped_events_; return false; }
+        events_[size_++] = e; return true;
+    }
+    void clear() { size_ = 0; dropped_events_ = 0; }
+    std::size_t size() const { return size_; }
+    bool overflowed() const { return dropped_events_ != 0; }
+    std::span<const ModulationEvent> events() const { return {events_.data(), size_}; }
+    void sort() {
+        for (std::size_t i = 1; i < size_; ++i) {
+            auto current = events_[i]; auto j = i;
+            while (j > 0 && events_[j - 1].sample_offset > current.sample_offset) {
+                events_[j] = events_[j - 1]; --j;
+            }
+            events_[j] = current;
+        }
+    }
+private:
+    std::array<ModulationEvent, kCapacity> events_{};
+    std::size_t size_ = 0;
+    std::uint32_t dropped_events_ = 0;
+};
+
 struct ParameterEventQueueTelemetry {
     std::size_t size = 0;
     std::size_t capacity = 0;

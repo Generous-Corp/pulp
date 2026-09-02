@@ -94,7 +94,11 @@ public:
     void process(audio::BufferView<float>&,
                  const audio::BufferView<const float>&,
                  midi::MidiBuffer&, midi::MidiBuffer&,
-                 const ProcessContext&) override {}
+                 const ProcessContext&) override {
+        const auto* mods = modulation_events();
+        captured_modulation_count = mods ? mods->size() : 0;
+        if (mods && !mods->events().empty()) captured_modulation = mods->events().front();
+    }
 
     std::vector<uint8_t> serialize_plugin_state() const override {
         return {opaque_state.begin(), opaque_state.end()};
@@ -107,6 +111,8 @@ public:
 
     inline static HostValidationProcessor* last_instance = nullptr;
     std::string opaque_state;
+    std::size_t captured_modulation_count = 0;
+    state::ModulationEvent captured_modulation{};
 };
 
 std::unique_ptr<Processor> make_host_validation() {
@@ -299,6 +305,25 @@ TEST_CASE("CLAP modulation does not bleed across blocks",
     REQUIRE(inst.run_block(nullptr) == CLAP_PROCESS_CONTINUE);
     const auto value_after_clear = inst.plugin.store.get_modulated(kParamGain);
     REQUIRE_THAT(static_cast<double>(value_after_clear), WithinAbs(0.0, 1e-9));
+}
+
+TEST_CASE("CLAP modulation preserves event sample offset",
+          "[clap][host-validation][modulation][sample-accurate]") {
+    ClapInstance inst(make_host_validation);
+    clap_event_param_mod_t mod{};
+    mod.header = make_hdr(sizeof(mod), CLAP_EVENT_PARAM_MOD);
+    mod.header.time = 37;
+    mod.param_id = kParamGain;
+    mod.amount = 0.25;
+    OneEventInput in(mod);
+    REQUIRE(inst.run_block(&in.vt) == CLAP_PROCESS_CONTINUE);
+    auto* processor = HostValidationProcessor::last_instance;
+    REQUIRE(processor != nullptr);
+    REQUIRE(processor->captured_modulation_count == 1);
+    REQUIRE(processor->captured_modulation.param_id == kParamGain);
+    REQUIRE(processor->captured_modulation.sample_offset == 37);
+    REQUIRE_THAT(static_cast<double>(processor->captured_modulation.amount),
+                 WithinAbs(0.25, 1e-6));
 }
 
 TEST_CASE("CLAP non-core event namespace is ignored",
