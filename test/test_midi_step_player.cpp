@@ -951,3 +951,56 @@ TEST_CASE("StepPlayer holds an over-wide nudge inside the step that owns it",
             CHECK(attacks[index].sample > attacks[index - 1].sample);
     }
 }
+
+TEST_CASE("StepPlayer places a nudged onset independently of where a block begins",
+          "[midi][step-player][partition][grid]") {
+    // A block reports its own start in both samples and ticks, and the tick is
+    // rounded: 29.4 ticks span a sample here, so a block start carries up to
+    // 0.4 of a tick of rounding error. Projecting a nudged onset relative to
+    // that rounded start folds the error into the answer, which is enough to
+    // tip an onset sitting near a half sample onto either of two samples
+    // depending on where the host began the block. Sweeping the leading block
+    // size walks the boundary through every residue and so through the
+    // rounding error's full range.
+    //
+    // The grid alone cannot show this: a sixteenth is exactly 6'000 samples, so
+    // an un-nudged onset never sits near a half sample. It takes a nudge to put
+    // one there, which is why this arrived with the offset.
+    const auto map = constant_tempo_map();
+    const auto build = [](std::int32_t nudge) {
+        PlayerFixture<> fixture(1);
+        auto player = fixture.make();
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            step.pitch_offset = static_cast<std::int8_t>(index);
+            step.timing_offset_ticks = nudge;
+            REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+        }
+        return player;
+    };
+
+    constexpr std::int64_t kTotal = 24'000;
+    const std::array single{std::int32_t{24'000}};
+
+    // Half a sample is 14.7 ticks, so these land an onset within the rounding
+    // error's reach of the boundary between two samples.
+    for (const std::int32_t nudge : {15, 44, 103, 162, 176'443}) {
+        INFO("nudge ticks = " << nudge);
+        auto whole = build(nudge);
+        const auto reference = render(whole, map, kTotal, single);
+        REQUIRE(!reference.empty());
+
+        for (std::int32_t phase = 1; phase <= 40; ++phase) {
+            const std::array partitions{phase, std::int32_t{4'096}};
+            auto shifted = build(nudge);
+            const auto observed = render(shifted, map, kTotal, partitions);
+            INFO("leading block = " << phase);
+            REQUIRE(observed.size() == reference.size());
+            for (std::size_t index = 0; index < reference.size(); ++index) {
+                INFO("event index = " << index << " reference sample = " << reference[index].sample
+                                      << " observed sample = " << observed[index].sample);
+                CHECK(reference[index].identity() == observed[index].identity());
+            }
+        }
+    }
+}
