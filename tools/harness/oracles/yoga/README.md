@@ -34,7 +34,18 @@ Schema:
 
 The oracle is hand-maintained for now. To refresh:
 
-1. Bump the Yoga pin in `CMakeLists.txt`.
+1. Bump the Yoga pin in `tools/cmake/PulpDependencies.cmake` (both the
+   `pulp_register_fetchcontent_source ... REF` and the `FetchContent_Declare`
+   `GIT_TAG`).
 2. Walk Yoga's `YGEnums.h` and `YGStyle.h` for new fields / values.
-3. Mirror changes into `yoga-supported.json` and bump `version`.
+3. Mirror changes into `yoga-supported.json`, and restamp both `version` and the
+   `facebook/yoga@<ref>` citation in `source`.
 4. Run `python3 tools/harness/verifier.py --surface=yoga` and review the drift list.
+
+Steps 1 and 3 have to move together. `tools/harness/adapters/yoga.py` reports
+any property missing from this table as out-of-scope rather than as a gap, so a
+table left behind a bumped pin hides real gaps behind an improving coverage
+number. `python3 tools/scripts/check_yoga_oracle_pin.py` fails when the stamps
+and the pin disagree; it runs in `gates.sh`, the pre-push hook, and the
+`yoga-oracle-pin-lockstep` ctest. Restamping without re-reading `YGEnums.h`
+satisfies the check and re-hides the gap — step 2 is the work.

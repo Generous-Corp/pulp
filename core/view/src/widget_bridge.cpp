@@ -399,6 +399,38 @@ static void eval_or_throw(ScriptEngine& engine, const char* name, const std::str
     }
 }
 
+static void invoke_or_throw(ScriptEngine& engine,
+                            std::string_view receiver,
+                            std::string_view type,
+                            const choc::value::Value& payload,
+                            std::string_view id,
+                            std::string_view context) {
+    const std::string label = context.empty()
+        ? std::string{"native message dispatch"}
+        : std::string{context};
+    try {
+        engine.invoke(receiver, std::string{type}, payload, std::string{id});
+    } catch (const choc::javascript::Error& e) {
+        runtime::log_error(
+            "PULP_INVOKE_THROW: name={} receiver={} choc_error={}",
+            label, receiver, e.what());
+        throw std::runtime_error(
+            "failed to invoke " + label + ": " + e.what());
+    } catch (const std::exception& e) {
+        runtime::log_error(
+            "PULP_INVOKE_THROW: name={} receiver={} std_error={}",
+            label, receiver, e.what());
+        throw std::runtime_error(
+            "failed to invoke " + label + ": " + e.what());
+    } catch (...) {
+        runtime::log_error(
+            "PULP_INVOKE_THROW: name={} receiver={} unknown_exception",
+            label, receiver);
+        throw std::runtime_error(
+            "failed to invoke " + label + ": unknown exception");
+    }
+}
+
 // Static registry of live WidgetBridges. Platform hosts iterate this to
 // deliver key events and document-level events without each app needing
 // to wire its own `View::on_global_key` lambda.
@@ -792,6 +824,7 @@ void WidgetBridge::set_bench_counters(render::bench::PerfCounters* counters) {
 
 void WidgetBridge::request_repaint() {
     PULP_TRACE_SCOPE_NAMED("render", "repaint_request");
+    ++repaint_request_generation_;
     if (repaint_callback_) repaint_callback_();
 }
 
@@ -858,6 +891,23 @@ void WidgetBridge::load_script(const std::string& code) {
         service_frame_callbacks();
     // Flush any pending requestAnimationFrame callbacks
     eval_or_throw(engine_, "flush_frames", "if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
+}
+
+void WidgetBridge::dispatch_native_message(
+    std::string_view receiver,
+    std::string_view type,
+    const choc::value::Value& payload,
+    std::string_view id,
+    std::string_view context) {
+    if (receiver.empty()) {
+        throw std::invalid_argument(
+            "native message receiver must not be empty");
+    }
+    const auto repaint_generation_before = repaint_request_generation_;
+    invoke_or_throw(engine_, receiver, type, payload, id, context);
+    engine_.pump_message_loop();
+    if (repaint_request_generation_ == repaint_generation_before)
+        request_repaint();
 }
 
 void WidgetBridge::load_script(const std::string& code,

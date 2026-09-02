@@ -204,7 +204,9 @@ EXPORTS = [
         summary=(
             "Prepared fixed-memory bank of per-voice LFO and AHDSR envelope sources with "
             "free-running or retriggered phase policy and per-voice unison phase spread, "
-            "feeding constant or audio-rate voice modulation lanes."
+            "feeding constant or audio-rate voice modulation lanes. LFO wave, rate, and "
+            "depth are live automation destinations, settable from the audio thread "
+            "without restarting phase."
         ),
         rt_class="audio",
         lifecycle={
@@ -238,7 +240,7 @@ EXPORTS = [
             include="pulp/audio/voice_modulation_sources.hpp",
             qualified_name="pulp::audio::VoiceModulationSources<4>",
             target="Pulp::audio",
-            header_fingerprint="sha256:b5c08f132df70323065b1d7c1d9109ddfc95ed8baeacb0c595fd5eb21771dbe8",
+            header_fingerprint="sha256:5d62d1ef328c7a47103efcc0910ef48928ca844213c6a4a8579cdf8e9f15a234",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -429,7 +431,7 @@ EXPORTS = [
             include="pulp/midi/step_player.hpp",
             qualified_name="pulp::midi::StepPlayer<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:840cc4783c205d1e0416d1115c74a1a2ac3dd15fbea9185cdcbfb679a9898cd7",
+            header_fingerprint="sha256:5e5912901dcfee1158610015a28b1fa3bd9fdbdd1674637eb3413b7e191b5239",
         )],
         _link_probes=[{
             "role": "entrypoint",
