@@ -238,7 +238,7 @@ EXPORTS = [
             include="pulp/audio/voice_modulation_sources.hpp",
             qualified_name="pulp::audio::VoiceModulationSources<4>",
             target="Pulp::audio",
-            header_fingerprint="sha256:b5c08f132df70323065b1d7c1d9109ddfc95ed8baeacb0c595fd5eb21771dbe8",
+            header_fingerprint="sha256:a52813d1b300296eaa5cd919c398ca3a632e9c74ede451c6d38b1a55dfd8acfb",
         )],
         _link_probes=[{
             "role": "entrypoint",
