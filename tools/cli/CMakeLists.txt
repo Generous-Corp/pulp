@@ -77,6 +77,8 @@ add_executable(pulp-cli
     cmd_design_subcommands.cpp
     cmd_doctor.cpp
     cmd_doctor_gpu.cpp
+    cmd_gpu.cpp
+    gpu_artifact_publication.cpp
     cmd_docs.cpp
     cmd_authority.cpp
     authority_navigation.cpp
@@ -150,8 +152,11 @@ add_executable(pulp-cli
     "${_pulp_migration_index_src}")
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_sources(pulp-cli PRIVATE cmd_seq.cpp)
+    target_link_libraries(pulp-cli PRIVATE pulp::project-package)
 endif()
-target_include_directories(pulp-cli PRIVATE ${CMAKE_SOURCE_DIR}/inspect/include)
+target_include_directories(pulp-cli PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_SOURCE_DIR}/inspect/include)
 # The C++ CLI was historically the user-facing `pulp` binary. The Rust
 # binary now takes the `pulp` slot and this target emits `pulp-cpp`.
 # Rollback for users: `PULP_USE_CPP=1 pulp ...` execs into `pulp-cpp`
@@ -164,12 +169,15 @@ target_link_libraries(pulp-cli PRIVATE
     pulp::runtime pulp::tool-audio pulp::audio-analysis
     pulp::ship pulp::view pulp::render pulp::format pulp::host
     pulp::tool-gpu-health-probes)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/PulpCliGpuProbeLink.cmake)
+pulp_link_cli_gpu_probe_recipes(pulp-cli)
 target_link_libraries(pulp-cli PRIVATE pulp::inspect-protocol)
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_link_libraries(pulp-cli PRIVATE pulp::tool-timeline)
 endif()
 target_compile_definitions(pulp-cli PRIVATE
-    PULP_ENABLE_PROJECT_PACKAGE=$<BOOL:${PULP_ENABLE_PROJECT_PACKAGE}>)
+    PULP_ENABLE_PROJECT_PACKAGE=$<BOOL:${PULP_ENABLE_PROJECT_PACKAGE}>
+    PULP_CLI_GPU_PROBE_TEST_FAULTS=$<BOOL:${PULP_BUILD_TESTS}>)
 if(TARGET pulp::inspect-client)
     target_link_libraries(pulp-cli PRIVATE pulp::inspect-client)
     target_compile_definitions(pulp-cli PRIVATE PULP_CLI_HAS_CONTROL_HEALTH=1)
@@ -251,8 +259,41 @@ if(NOT _pulp_cli_install_bindir)
 endif()
 install(TARGETS pulp-cli RUNTIME DESTINATION "${_pulp_cli_install_bindir}")
 
+# A standalone CLI install must carry the same public discovery material as the
+# embedded GPU catalog.  The A5 clean-agent gate derives this tree from the
+# installed binary and denies source-checkout reads, so these are product
+# inputs rather than test fixtures.  The catalog files duplicate the full SDK
+# install rule intentionally: tools/cli/cmake_install.cmake is also a supported
+# narrow staging surface for the standalone CLI.
+install(FILES
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
+    "${CMAKE_SOURCE_DIR}/docs/status/gpu-recipes.schema.json"
+    DESTINATION "share/pulp"
+    COMPONENT gpu-clean-agent-public)
+install(FILES "${CMAKE_SOURCE_DIR}/docs/guides/gpu-validation-checklist.md"
+    DESTINATION "share/pulp/docs/guides"
+    COMPONENT gpu-clean-agent-public)
+install(FILES "${CMAKE_SOURCE_DIR}/docs/reference/cli.md"
+    DESTINATION "share/pulp/docs/reference"
+    COMPONENT gpu-clean-agent-public)
+
 # Integration tests for CLI commands
 if(PULP_BUILD_TESTS)
+    add_executable(pulp-test-cli-gpu-artifact-publication
+        ${CMAKE_SOURCE_DIR}/test/test_cli_gpu_artifact_publication.cpp
+        gpu_artifact_publication.cpp)
+    target_include_directories(pulp-test-cli-gpu-artifact-publication PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(pulp-test-cli-gpu-artifact-publication PRIVATE
+        PULP_GPU_ARTIFACT_PUBLICATION_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/gpu_artifact_publication.cpp")
+    target_compile_features(pulp-test-cli-gpu-artifact-publication PRIVATE cxx_std_20)
+    target_link_libraries(pulp-test-cli-gpu-artifact-publication PRIVATE
+        Catch2::Catch2WithMain)
+    add_test(NAME pulp-test-cli-gpu-artifact-publication
+        COMMAND pulp-test-cli-gpu-artifact-publication)
+    set_tests_properties(pulp-test-cli-gpu-artifact-publication PROPERTIES
+        LABELS "gpu;gpu-probe;cli")
+
     add_executable(pulp-test-cli-au-info-plist
         ${CMAKE_SOURCE_DIR}/test/test_cli_au_info_plist.cpp
         au_info_plist.cpp)
@@ -359,6 +400,51 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-doctor PROPERTIES
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
         PASS_REGULAR_EXPRESSION "Pulp Doctor")
+
+    if(PULP_ENABLE_GPU)
+        add_test(NAME cli-gpu-probe-contract
+            COMMAND ${CMAKE_COMMAND}
+                -DPULP_CLI=$<TARGET_FILE:pulp-cli>
+                -DARTIFACT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/gpu-probe-contract-artifacts
+                -DPULP_ENABLE_PROJECT_PACKAGE=${PULP_ENABLE_PROJECT_PACKAGE}
+                -P ${CMAKE_SOURCE_DIR}/test/cmake/gpu_probe_cli_tests.cmake)
+        set_tests_properties(cli-gpu-probe-contract PROPERTIES
+            LABELS "gpu;gpu-probe;cli"
+            RESOURCE_LOCK pulp_gpu)
+
+        if(APPLE AND PULP_ENABLE_PROJECT_PACKAGE)
+            get_property(_pulp_gpu_clean_agent_multi_config GLOBAL
+                PROPERTY GENERATOR_IS_MULTI_CONFIG)
+            if(_pulp_gpu_clean_agent_multi_config)
+                set(_pulp_gpu_clean_agent_multi_config TRUE)
+                set(_pulp_gpu_clean_agent_build_configuration Release)
+            else()
+                set(_pulp_gpu_clean_agent_multi_config FALSE)
+                set(_pulp_gpu_clean_agent_build_configuration $<CONFIG>)
+            endif()
+            add_test(NAME cli-gpu-clean-agent-preparer-contract
+                COMMAND ${CMAKE_COMMAND}
+                    -DPULP_CLI=$<TARGET_FILE:pulp-cli>
+                    -DCLI_INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake
+                    -DBUILD_CONFIGURATION=${_pulp_gpu_clean_agent_build_configuration}
+                    -DSELECTED_BUILD_CONFIGURATION=$<CONFIG>
+                    -DGENERATOR_IS_MULTI_CONFIG=${_pulp_gpu_clean_agent_multi_config}
+                    -DV8_RUNTIME_LIBRARY=${V8_RUNTIME_LIBRARY}
+                    -DWEBGPU_RUNTIME_LIB=${WEBGPU_RUNTIME_LIB}
+                    -DPYTHON=${Python3_EXECUTABLE}
+                    -DJOURNEY_SCRIPT=${CMAKE_SOURCE_DIR}/tools/scripts/gpu_clean_agent_journey.py
+                    -DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+                    -DBUILD_ROOT=${CMAKE_BINARY_DIR}
+                    -P ${CMAKE_SOURCE_DIR}/test/cmake/gpu_clean_agent_journey_test.cmake)
+            set_tests_properties(cli-gpu-clean-agent-preparer-contract PROPERTIES
+                LABELS "gpu;gpu-probe;cli;clean-agent-preparer"
+                RESOURCE_LOCK pulp_gpu)
+            if(_pulp_gpu_clean_agent_multi_config)
+                set_tests_properties(cli-gpu-clean-agent-preparer-contract PROPERTIES
+                    CONFIGURATIONS Release)
+            endif()
+        endif()
+    endif()
 
     add_test(NAME cli-doctor-widgetbridge-generated-api
         COMMAND pulp-cli doctor --only WidgetBridge

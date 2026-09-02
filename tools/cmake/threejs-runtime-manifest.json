@@ -1,0 +1,16 @@
+{
+  "schema": "pulp.threejs-runtime.v1",
+  "revision": "077dd13c0e869d9f3dbe55875686f920367de457",
+  "package_version": "0.183.1",
+  "files": {
+    "build/three.core.js": "1e79048d841b9377116730404385c1fd429942042f0261d44846bccb5e75d658",
+    "build/three.module.js": "37eb6eda102d61f1d56235bed8556624cc01f6317696baabce255d13a2ef987a",
+    "build/three.webgpu.js": "90eb928d841cfcdf00cc6e0f922ccf8e5d1ffafc922e3c854a24e653a9c97004",
+    "examples/jsm/controls/OrbitControls.js": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93",
+    "examples/jsm/loaders/GLTFLoader.js": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
+    "examples/jsm/utils/BufferGeometryUtils.js": "fda7e946b8e0b5ab39b779206589e7a1079a22eb24efb89d7223e03fdfb1f751",
+    "examples/jsm/utils/SkeletonUtils.js": "0761b1e003917b215d25dd81439d854b36034b5a57ce84c2cfe3b02428d7b253",
+    "LICENSE": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc",
+    "package.json": "504d6225ce206e8517137e70533455c13a0a54c563e59312b9c5baf8036416f8"
+  }
+}

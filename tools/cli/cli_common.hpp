@@ -174,6 +174,7 @@ int cmd_ship(const std::vector<std::string>& args);
 int cmd_bake(const std::vector<std::string>& args);
 int cmd_doctor(const std::vector<std::string>& args);
 int cmd_doctor_gpu(const std::vector<std::string>& args);
+int cmd_gpu(const std::vector<std::string>& args);
 int cmd_create(const std::vector<std::string>& args);
 int cmd_docs(const std::vector<std::string>& args);
 int cmd_authority(const std::vector<std::string>& args);

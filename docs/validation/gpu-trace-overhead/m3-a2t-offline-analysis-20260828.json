@@ -1,0 +1,849 @@
+{
+  "acceptance": {
+    "human_perfetto_ui_correlation": "pass",
+    "offline_latency_budget": "unverified-no-ratified-budget",
+    "producer_overhead_budget": "not-applicable-horizon-a-no-producer-delta",
+    "same_installed_prefix": "pass",
+    "semantic_parity": "pass",
+    "xrun_check": "not-applicable-offline-no-audio-thread"
+  },
+  "adapter_relevance": "recorded for host provenance only; saved-trace analysis performs no GPU work",
+  "artifacts": {
+    "cli": {
+      "bytes": 4540064,
+      "role": "installed-prefix/bin/pulp",
+      "sha256": "7ddeb3a6f376af990ba2c4aa9ac77d1dfd276b1777156625b2e7954e402918a8"
+    },
+    "install_prefix_role": "isolated-measurement-prefix",
+    "mcp": {
+      "bytes": 3606520,
+      "role": "installed-prefix/bin/pulp-mcp",
+      "sha256": "443933471749d4b52baaa953089ccc239cb203a1e354aa4cfe955baf0c109cab"
+    },
+    "sibling_binding": {
+      "mechanism": "pulp-mcp resolves installed-prefix/bin/pulp from its own absolute executable identity; PATH excludes the prefix and checkout binaries",
+      "verified_same_resolved_parent": true
+    },
+    "trace": {
+      "bytes": 692,
+      "role": "repository/test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
+      "sha256": "9fd7cf0d179d2c2be60cf58e812f1922abb384ff328635e9608f2cd65262a334"
+    },
+    "trace_processor": {
+      "bytes": 12704456,
+      "role": "pulp-home pinned v57.2 trace_processor_shell",
+      "sha256": "98a41b80e9f60da0373d64aff6455681f8c26b7c391ae5736324a5b11e3dacc2"
+    }
+  },
+  "fresh_start": {
+    "cli": {
+      "count": 20,
+      "mad_ms": 1.195687,
+      "max_ms": 31.249917,
+      "median_ms": 23.717146,
+      "min_ms": 21.718333,
+      "p95_ms": 27.419912
+    },
+    "mcp_process_initialize_request_shutdown": {
+      "count": 20,
+      "mad_ms": 0.844791,
+      "max_ms": 33.017625,
+      "median_ms": 30.581834,
+      "min_ms": 28.869709,
+      "p95_ms": 32.406537
+    },
+    "raw_samples": [
+      {
+        "cli_duration_ns": 24486792,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30947208,
+        "order": "cli-first",
+        "trial": 1
+      },
+      {
+        "cli_duration_ns": 23479375,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30585125,
+        "order": "mcp-first",
+        "trial": 2
+      },
+      {
+        "cli_duration_ns": 22514500,
+        "mcp_process_initialize_request_shutdown_duration_ns": 33017625,
+        "order": "cli-first",
+        "trial": 3
+      },
+      {
+        "cli_duration_ns": 25067166,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29796834,
+        "order": "mcp-first",
+        "trial": 4
+      },
+      {
+        "cli_duration_ns": 25009583,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30049959,
+        "order": "cli-first",
+        "trial": 5
+      },
+      {
+        "cli_duration_ns": 22528417,
+        "mcp_process_initialize_request_shutdown_duration_ns": 32374375,
+        "order": "mcp-first",
+        "trial": 6
+      },
+      {
+        "cli_duration_ns": 24931833,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30683750,
+        "order": "cli-first",
+        "trial": 7
+      },
+      {
+        "cli_duration_ns": 27218333,
+        "mcp_process_initialize_request_shutdown_duration_ns": 32150084,
+        "order": "mcp-first",
+        "trial": 8
+      },
+      {
+        "cli_duration_ns": 31249917,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30053000,
+        "order": "cli-first",
+        "trial": 9
+      },
+      {
+        "cli_duration_ns": 22061375,
+        "mcp_process_initialize_request_shutdown_duration_ns": 28869709,
+        "order": "mcp-first",
+        "trial": 10
+      },
+      {
+        "cli_duration_ns": 24077541,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30184041,
+        "order": "cli-first",
+        "trial": 11
+      },
+      {
+        "cli_duration_ns": 23333833,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29592333,
+        "order": "mcp-first",
+        "trial": 12
+      },
+      {
+        "cli_duration_ns": 24261709,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30639583,
+        "order": "cli-first",
+        "trial": 13
+      },
+      {
+        "cli_duration_ns": 23988584,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31795917,
+        "order": "mcp-first",
+        "trial": 14
+      },
+      {
+        "cli_duration_ns": 23364750,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30271958,
+        "order": "cli-first",
+        "trial": 15
+      },
+      {
+        "cli_duration_ns": 22369083,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29013458,
+        "order": "mcp-first",
+        "trial": 16
+      },
+      {
+        "cli_duration_ns": 23488542,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31536292,
+        "order": "cli-first",
+        "trial": 17
+      },
+      {
+        "cli_duration_ns": 21878042,
+        "mcp_process_initialize_request_shutdown_duration_ns": 29392459,
+        "order": "mcp-first",
+        "trial": 18
+      },
+      {
+        "cli_duration_ns": 21718333,
+        "mcp_process_initialize_request_shutdown_duration_ns": 30578542,
+        "order": "cli-first",
+        "trial": 19
+      },
+      {
+        "cli_duration_ns": 23945750,
+        "mcp_process_initialize_request_shutdown_duration_ns": 31486416,
+        "order": "mcp-first",
+        "trial": 20
+      }
+    ]
+  },
+  "generated_utc": "2026-08-28T09:41:07Z",
+  "human_perfetto_ui_correlation": {
+    "artifact_sha256": "9fd7cf0d179d2c2be60cf58e812f1922abb384ff328635e9608f2cd65262a334",
+    "delivery": "official localhost embedding protocol; localOnly browser-memory trace",
+    "observed_spans": [
+      {
+        "category": "gpu",
+        "duration_ns": 1800000,
+        "frame_index": 0,
+        "gpu_evidence_id": "44444444444444444444444444444444",
+        "health_state": "healthy",
+        "name": "gpu_pipeline_prepare",
+        "sequence": 1
+      },
+      {
+        "category": "gpu",
+        "duration_ns": 900000,
+        "frame_index": 0,
+        "gpu_evidence_id": "44444444444444444444444444444444",
+        "health_state": "healthy",
+        "name": "gpu_resource_upload",
+        "sequence": 2
+      }
+    ],
+    "reviewed_utc": "2026-08-28T05:34:54Z",
+    "reviewer": "Codex visual acceptance agent",
+    "ui_revision": "v58.3-11fbaed836361258f23604daf67c837f3034e663"
+  },
+  "machine": {
+    "architecture": "arm64",
+    "chip": "Apple M3 Ultra",
+    "gpu_adapters": [
+      {
+        "metal_support": null,
+        "name": "Apple M3 Ultra",
+        "vendor": "sppci_vendor_Apple"
+      }
+    ],
+    "model_identifier": "Mac15,14",
+    "model_name": "Mac Studio",
+    "operating_system": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "python": "3.13.7"
+  },
+  "mcp_source_revision": "146716041f20e9cd5e599f11f4697369d3218519",
+  "measured": {
+    "cli": {
+      "count": 30,
+      "mad_ms": 0.649416,
+      "max_ms": 26.295708,
+      "median_ms": 23.820062,
+      "min_ms": 22.370959,
+      "p95_ms": 25.109821
+    },
+    "confidence": {
+      "ci_high_ms": -0.565458,
+      "ci_low_ms": -1.302958,
+      "confidence_level": 0.95,
+      "delta_interpretation": "measurable",
+      "mcp_minus_cli_median_ms": -0.977645,
+      "method": "paired bootstrap median delta, 10000 resamples, deterministic seed 0xA2",
+      "noise_floor_method": "maximum within-surface median absolute deviation",
+      "noise_floor_ms": 0.649416
+    },
+    "persistent_mcp_request": {
+      "count": 30,
+      "mad_ms": 0.455395,
+      "max_ms": 25.461959,
+      "median_ms": 22.730542,
+      "min_ms": 20.305708,
+      "p95_ms": 24.769575
+    },
+    "raw_samples": [
+      {
+        "cli_duration_ns": 23238291,
+        "mcp_duration_ns": 22718958,
+        "order": "cli-first",
+        "trial": 1
+      },
+      {
+        "cli_duration_ns": 24038917,
+        "mcp_duration_ns": 22742125,
+        "order": "mcp-first",
+        "trial": 2
+      },
+      {
+        "cli_duration_ns": 22950000,
+        "mcp_duration_ns": 22548958,
+        "order": "cli-first",
+        "trial": 3
+      },
+      {
+        "cli_duration_ns": 24476625,
+        "mcp_duration_ns": 23444125,
+        "order": "mcp-first",
+        "trial": 4
+      },
+      {
+        "cli_duration_ns": 24789000,
+        "mcp_duration_ns": 22068042,
+        "order": "cli-first",
+        "trial": 5
+      },
+      {
+        "cli_duration_ns": 25318208,
+        "mcp_duration_ns": 25461959,
+        "order": "mcp-first",
+        "trial": 6
+      },
+      {
+        "cli_duration_ns": 22633500,
+        "mcp_duration_ns": 23504166,
+        "order": "cli-first",
+        "trial": 7
+      },
+      {
+        "cli_duration_ns": 24652375,
+        "mcp_duration_ns": 20305708,
+        "order": "mcp-first",
+        "trial": 8
+      },
+      {
+        "cli_duration_ns": 26295708,
+        "mcp_duration_ns": 23067625,
+        "order": "cli-first",
+        "trial": 9
+      },
+      {
+        "cli_duration_ns": 23177792,
+        "mcp_duration_ns": 22390417,
+        "order": "mcp-first",
+        "trial": 10
+      },
+      {
+        "cli_duration_ns": 24717417,
+        "mcp_duration_ns": 22780333,
+        "order": "cli-first",
+        "trial": 11
+      },
+      {
+        "cli_duration_ns": 23660584,
+        "mcp_duration_ns": 24327833,
+        "order": "mcp-first",
+        "trial": 12
+      },
+      {
+        "cli_duration_ns": 23760333,
+        "mcp_duration_ns": 23054375,
+        "order": "cli-first",
+        "trial": 13
+      },
+      {
+        "cli_duration_ns": 24855125,
+        "mcp_duration_ns": 22956000,
+        "order": "mcp-first",
+        "trial": 14
+      },
+      {
+        "cli_duration_ns": 24502834,
+        "mcp_duration_ns": 25131000,
+        "order": "cli-first",
+        "trial": 15
+      },
+      {
+        "cli_duration_ns": 23549333,
+        "mcp_duration_ns": 22474625,
+        "order": "mcp-first",
+        "trial": 16
+      },
+      {
+        "cli_duration_ns": 23749875,
+        "mcp_duration_ns": 21138875,
+        "order": "cli-first",
+        "trial": 17
+      },
+      {
+        "cli_duration_ns": 24392584,
+        "mcp_duration_ns": 21464458,
+        "order": "mcp-first",
+        "trial": 18
+      },
+      {
+        "cli_duration_ns": 23793500,
+        "mcp_duration_ns": 22620292,
+        "order": "cli-first",
+        "trial": 19
+      },
+      {
+        "cli_duration_ns": 23846625,
+        "mcp_duration_ns": 22537500,
+        "order": "mcp-first",
+        "trial": 20
+      },
+      {
+        "cli_duration_ns": 24204250,
+        "mcp_duration_ns": 20487583,
+        "order": "cli-first",
+        "trial": 21
+      },
+      {
+        "cli_duration_ns": 22370959,
+        "mcp_duration_ns": 23179833,
+        "order": "mcp-first",
+        "trial": 22
+      },
+      {
+        "cli_duration_ns": 23098291,
+        "mcp_duration_ns": 22175500,
+        "order": "cli-first",
+        "trial": 23
+      },
+      {
+        "cli_duration_ns": 24171083,
+        "mcp_duration_ns": 22269042,
+        "order": "mcp-first",
+        "trial": 24
+      },
+      {
+        "cli_duration_ns": 24103833,
+        "mcp_duration_ns": 22978917,
+        "order": "cli-first",
+        "trial": 25
+      },
+      {
+        "cli_duration_ns": 22742666,
+        "mcp_duration_ns": 22150042,
+        "order": "mcp-first",
+        "trial": 26
+      },
+      {
+        "cli_duration_ns": 24277458,
+        "mcp_duration_ns": 23954584,
+        "order": "cli-first",
+        "trial": 27
+      },
+      {
+        "cli_duration_ns": 23572750,
+        "mcp_duration_ns": 22832083,
+        "order": "mcp-first",
+        "trial": 28
+      },
+      {
+        "cli_duration_ns": 22482375,
+        "mcp_duration_ns": 23447292,
+        "order": "cli-first",
+        "trial": 29
+      },
+      {
+        "cli_duration_ns": 22864125,
+        "mcp_duration_ns": 22325833,
+        "order": "mcp-first",
+        "trial": 30
+      }
+    ]
+  },
+  "measurement_environment": {
+    "interpretation": "shared-host contention is retained in raw samples; no latency budget is inferred",
+    "load_average_end": [
+      26.0966796875,
+      31.47802734375,
+      30.291015625
+    ],
+    "load_average_start": [
+      27.32421875,
+      31.80712890625,
+      30.39892578125
+    ]
+  },
+  "producer_overhead_disposition": {
+    "evidence": {
+      "added_or_changed_producer_paths": [],
+      "implementation_revisions": [
+        {
+          "added_or_changed_producer_paths": [],
+          "changed_path_count": 29,
+          "changed_paths": [
+            ".agents/skills/trace-analysis/SKILL.md",
+            ".agents/skills/trace-analysis/references/hints_gpu.md",
+            ".agents/skills/trace-sql/SKILL.md",
+            ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+            ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+            ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+            "docs/guides/tracing.md",
+            "docs/guides/troubleshooting.md",
+            "docs/reference/cli.md",
+            "docs/status/cli-commands.yaml",
+            "experimental/pulp-rs/src/cmd/mod.rs",
+            "experimental/pulp-rs/src/cmd/trace.rs",
+            "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+            "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+            "experimental/pulp-rs/src/cmd/trace_parse_tests.rs",
+            "experimental/pulp-rs/src/main.rs",
+            "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+            "test/fixtures/perfetto-gpu/compile-failure.pftrace",
+            "test/fixtures/perfetto-gpu/healthy.pftrace",
+            "test/fixtures/perfetto-gpu/incomplete.pftrace",
+            "test/fixtures/perfetto-gpu/wrong-category.pftrace",
+            "test/test_mcp_server.cpp",
+            "tools/mcp/CMakeLists.txt",
+            "tools/mcp/mcp_tools.hpp",
+            "tools/mcp/mcp_tools_internal.cpp",
+            "tools/mcp/mcp_tools_internal.hpp",
+            "tools/mcp/mcp_trace_tools.cpp",
+            "tools/mcp/pulp_mcp.cpp",
+            "tools/scripts/cli_mcp_parity_baseline.json"
+          ],
+          "implementation_revision": "b7c118d0c98aa4e3d1c7b874ee704c8053a01bf5",
+          "method": "git diff-tree --no-commit-id --name-only -r",
+          "no_added_producer_call_sites": true,
+          "patch_equivalent_revisions": [
+            {
+              "revision": "69059fa0bf8f8878a735909115bb2dc2831c2907",
+              "stable_patch_id": "a5d5850162385c1cbcb2cf34344fea2511636353"
+            }
+          ],
+          "producer_prefixes_checked": [
+            "core/runtime/",
+            "core/render/",
+            "core/view/",
+            "core/format/",
+            "inspect/"
+          ],
+          "stable_patch_id": "a5d5850162385c1cbcb2cf34344fea2511636353"
+        },
+        {
+          "added_or_changed_producer_paths": [],
+          "changed_path_count": 16,
+          "changed_paths": [
+            ".agents/skills/trace-sql/SKILL.md",
+            ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+            ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+            ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+            "docs/validation/gpu-trace-overhead/README.md",
+            "experimental/pulp-rs/CMakeLists.txt",
+            "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+            "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+            "test/fixtures/perfetto-gpu/unavailable-state.pftrace",
+            "test/fixtures/perfetto-gpu/unverified-state.pftrace",
+            "test/test_mcp_server.cpp",
+            "tools/mcp/mcp_gpu_tools.cpp",
+            "tools/mcp/mcp_trace_tools.cpp",
+            "tools/mcp/pulp_mcp.cpp",
+            "tools/scripts/gpu_trace_overhead_acceptance.py",
+            "tools/scripts/test_gpu_trace_overhead_acceptance.py"
+          ],
+          "implementation_revision": "9ac043abad1035ed129e0a65a91649e0b9b3f35c",
+          "method": "git diff-tree --no-commit-id --name-only -r",
+          "no_added_producer_call_sites": true,
+          "producer_prefixes_checked": [
+            "core/runtime/",
+            "core/render/",
+            "core/view/",
+            "core/format/",
+            "inspect/"
+          ],
+          "stable_patch_id": "1a63b4630a41c430edd89fc88a82ecef9ed5964a"
+        },
+        {
+          "added_or_changed_producer_paths": [],
+          "changed_path_count": 5,
+          "changed_paths": [
+            "docs/validation/gpu-trace-overhead/README.md",
+            "tools/scripts/gpu_first_visible_a3_acceptance.py",
+            "tools/scripts/gpu_trace_overhead_acceptance.py",
+            "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+            "tools/scripts/test_gpu_trace_overhead_acceptance.py"
+          ],
+          "implementation_revision": "e4170505b970b919f9cef9ac027338224872e7c4",
+          "method": "git diff-tree --no-commit-id --name-only -r",
+          "no_added_producer_call_sites": true,
+          "producer_prefixes_checked": [
+            "core/runtime/",
+            "core/render/",
+            "core/view/",
+            "core/format/",
+            "inspect/"
+          ],
+          "stable_patch_id": "df0e59bdb08d3b86aa4b6cc0f8dbf707980ae4e0"
+        }
+      ],
+      "method": "per-commit git diff-tree inventory",
+      "no_added_producer_call_sites": true
+    },
+    "formal_plan_note": "The canonical plan accepts the no-added-producer disposition for Horizon A and preserves the full product producer/xrun protocol for B6; offline timing remains analyzer evidence, not product-capture evidence.",
+    "formal_plan_revision": "641649b7e7fece6baae34380b6e719904506af22",
+    "formal_plan_sha256": "00bdb8bd55fb90fb42d98a09442d2b168505a23a4208cb5b9edb67b01de69f07",
+    "formal_plan_status": "accepted-canonical-plan",
+    "reason": "A2T adds offline analysis and no generic render producer call sites, so Horizon A adds no producer runtime work to grade.",
+    "required_followup": "B6 must run the three-state 5-warmup/30-trial and 20 fresh-process protocol when Vellum producer instrumentation is added.",
+    "routing_inventory": {
+      "changes": [
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-analysis/SKILL.md",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-analysis/references/hints_gpu.md",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-sql/SKILL.md",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "docs/guides/tracing.md",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "docs/guides/troubleshooting.md",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "docs/reference/cli.md",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "docs/status/cli-commands.yaml",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/cmd/mod.rs",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/cmd/trace.rs",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/cmd/trace_parse_tests.rs",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/src/main.rs",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/perfetto-gpu/compile-failure.pftrace",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/perfetto-gpu/healthy.pftrace",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/perfetto-gpu/incomplete.pftrace",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/fixtures/perfetto-gpu/wrong-category.pftrace",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "test/test_mcp_server.cpp",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/mcp/CMakeLists.txt",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/mcp/mcp_tools.hpp",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/mcp/mcp_tools_internal.cpp",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/mcp/mcp_tools_internal.hpp",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/mcp/mcp_trace_tools.cpp",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/mcp/pulp_mcp.cpp",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        },
+        {
+          "cell_roles": [],
+          "owner": "Generous-Corp/pulp",
+          "path": "tools/scripts/cli_mcp_parity_baseline.json",
+          "repository": "Generous-Corp/pulp",
+          "route_kind": "repository-default"
+        }
+      ],
+      "decision": "single-owner",
+      "expansion_id": "full-design-import-render-v1",
+      "kind": "pulp-vellum-change-route",
+      "owners": [
+        "Generous-Corp/pulp"
+      ],
+      "route_set_sha256": "5bb857c44cdba4cf4e2d584b49ea197960e9b1b490703ce3500c649dc9995028",
+      "schema_version": 1
+    },
+    "status": "not-applicable-no-added-producer-cost"
+  },
+  "protocol": {
+    "environment_path": "/usr/bin:/bin:/usr/sbin:/sbin",
+    "fresh_start_paired_trials": 20,
+    "mcp_lifecycle": "persistent trials exclude initialize; fresh trials include process launch, initialize, request, and graceful shutdown",
+    "measured_paired_trials": 30,
+    "order": "alternating cli-first/mcp-first",
+    "question": "gpu-startup",
+    "warmups": 5
+  },
+  "schema": "pulp.gpu-trace-overhead-acceptance.v1",
+  "scope": "offline-installed-cli-mcp-analysis",
+  "semantic_result": {
+    "capture_complete": true,
+    "contributors": [
+      {
+        "duration_ns": 1800000,
+        "evidence_id": "44444444444444444444444444444444",
+        "frame_index": 0,
+        "health_state": "healthy",
+        "rank": 1,
+        "sequence": 1,
+        "stage": "pipeline-prepare"
+      },
+      {
+        "duration_ns": 900000,
+        "evidence_id": "44444444444444444444444444444444",
+        "frame_index": 0,
+        "health_state": "healthy",
+        "rank": 2,
+        "sequence": 2,
+        "stage": "resource-upload"
+      },
+      {
+        "duration_ns": 300000,
+        "evidence_id": "44444444444444444444444444444444",
+        "frame_index": 0,
+        "health_state": "healthy",
+        "rank": 3,
+        "sequence": 3,
+        "stage": "frame"
+      }
+    ],
+    "dominant_stage": "pipeline-prepare",
+    "evidence_ids": [
+      "44444444444444444444444444444444"
+    ],
+    "next_actions": [
+      {
+        "code": "inspect-pipeline-signature",
+        "fix": "Correlate the cited pipeline-prepare span with its source/signature digest; do not add prewarm policy until A3 measures a product budget."
+      }
+    ],
+    "question": "gpu-startup",
+    "schema": "pulp.trace-gpu-analysis.v1",
+    "ui_correlation": {
+      "open_command": "pulp trace open test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
+      "search_terms": [
+        "pipeline-prepare",
+        "resource-upload",
+        "frame",
+        "44444444444444444444444444444444"
+      ]
+    },
+    "verdict": "unverified"
+  },
+  "source_revision": "146716041f20e9cd5e599f11f4697369d3218519"
+}

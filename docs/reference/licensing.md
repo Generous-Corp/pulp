@@ -17,6 +17,7 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **Brotli** | MIT | Decompression backend for native WOFF2 font registration used by Chromium-materialized imports | [github.com/google/brotli](https://github.com/google/brotli) |
 | **Catch2** | BSL-1.0 | Unit testing framework | [github.com/catchorg/Catch2](https://github.com/catchorg/Catch2) |
 | **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
+| **command-group** | Apache-2.0 | Cross-platform process-tree containment for bounded Rust CLI trace analysis | [github.com/watchexec/command-group](https://github.com/watchexec/command-group) |
 | **cpp-httplib** | MIT | HTTP client (GET/POST/download) used by `pulp-runtime` | [github.com/yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) |
 | **dr_libs** | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (`dr_flac`, `dr_mp3`, `dr_wav`) | [github.com/mackron/dr_libs](https://github.com/mackron/dr_libs) |
 | **Highway** | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | [github.com/google/highway](https://github.com/google/highway) |
@@ -214,7 +215,7 @@ packages are installed on demand via `npm`.
 | **Remotion** | Remotion License (source-available; free under their tier, paid company license above it) | Developer-only desktop video-proof composer (`tools/local-ci`); turns automation run bundles into short annotated MP4s. `npm`-installed on demand — never bundled or shipped in plugins. Companies over Remotion's free tier need a license | [github.com/remotion-dev/remotion](https://github.com/remotion-dev/remotion) |
 | **scheduler** | MIT | Cooperative-scheduling runtime pulled in transitively by `react-reconciler` for `@pulp/react`; npm-installed | [github.com/facebook/react](https://github.com/facebook/react) |
 | **simdjson** | Apache-2.0 | JSON parser used by fastgltf; fetched only when `PULP_ENABLE_SCENE3D=ON` | [github.com/simdjson/simdjson](https://github.com/simdjson/simdjson) |
-| **three.js** | MIT | Native WebGPU bridge demos and tests; fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON | [github.com/mrdoob/three.js](https://github.com/mrdoob/three.js) |
+| **three.js** | MIT | Pinned native WebGPU runtime for demos, tests, and installed-SDK consumers; fetched or supplied through `PULP_THREEJS_RUNTIME_DIR` when `PULP_ENABLE_THREEJS_RUNTIME=ON` (the default with GPU support) | [github.com/mrdoob/three.js](https://github.com/mrdoob/three.js) |
 | **V8** | BSD-3-Clause | Optional JS engine backend, selected with `PULP_JS_ENGINE=v8` (default is QuickJS; JSC is opt-in on Apple with `PULP_JS_ENGINE=jsc`). Sealed prebuilt `libv8` (bundles ICU/zlib/Abseil internally — see NOTICE.md); fetched per-platform via `tools/scripts/fetch_v8_for_release.py`. V8 is unavailable as a Pulp iOS runtime; the m153 jitless simulator framework is retained only for provider/header provenance validation | [github.com/danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) |
 
 ### Developer-Only Tooling (not shipped)

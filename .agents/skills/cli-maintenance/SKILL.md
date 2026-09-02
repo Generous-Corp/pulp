@@ -123,6 +123,87 @@ stack into `pulp-mcp` or parse human output. Keep these surfaces synchronized:
 This subcommand fits the existing CLI-maintenance, Skia GPU build, and routing
 skills; adding a separate GPU-doctor skill would duplicate their ownership.
 
+### A3 campaign scripts are acceptance tooling, not shipped CLI verbs
+
+`tools/scripts/gpu_first_visible_a3_campaign.py` and
+`gpu_first_visible_a3_acceptance.py` are checkout-only evidence tools. Do not
+register them in the Rust/C++ command tables, CLI manifest, MCP tool list, or
+slash-command inventory. Their stable automation surface is the exact Python
+argv and closed JSON adapter/receipt contracts documented in
+`docs/validation/gpu-first-visible-a3-acceptance.md`. A future installed verb
+requires the full checklist below; a convenient script invocation is not that
+authorization.
+
+### `pulp gpu probe` is a closed callable evidence catalog
+
+`pulp gpu probe --recipe <id> --artifacts <absolute-dir> [--negative-control]
+[--json]` localizes GPU correctness through the existing Dawn/WebGPU seams.
+Advertise a recipe only after the native CLI can run it end to end with an
+independent oracle, bounded hash-declared artifacts, authentic adapter
+identity, and a real seeded mutation. A pinned runtime or registry row alone is
+not callable capability. Exit 0 means verified pass, exit 1 means completed
+measured failure, and exit 2 means unavailable or unverified. Reserve exit 1
+for a validated completed measurement: recipe runtime exceptions, invalid
+internal results, and artifact-publication failures are typed `unverified`
+results with exit 2 when `--json` is requested.
+
+The Rust front delegates to its matched `pulp-cpp` sibling. The
+`pulp_gpu_probe` MCP tool must spawn that sibling with an argv API rather than a
+shell string, preserve typed exit 0/1/2 evidence, bind a requested negative
+control to the recipe's exact mutation, and work outside a checkout. Keep these
+surfaces synchronized:
+
+- `tools/cli/gpu_probe/**`, native recipe implementations, C++/Rust help and
+  delegation tests
+- `tools/mcp/mcp_gpu_tools.cpp`, tools-list/dispatch/required-argument and
+  fake-sibling invocation coverage, and CLI/MCP parity
+- `docs/contracts/gpu-probe-result-v1.schema.json`, installed-SDK byte parity,
+  release-product floors and missing-member negative controls
+- `docs/status/cli-commands.yaml`, `docs/reference/cli.md`, the Claude plugin
+  MCP table, and the Pulp-Vellum tooling disposition
+
+The top-level `gpu` command has the required `/gpu` workflow in
+`.claude/commands/gpu.md`. It starts with `pulp doctor gpu --json` and closed
+recipe discovery, then runs a selected `pulp gpu probe` recipe and optionally
+correlates the evidence through `/trace`. The typed `pulp_gpu_recipes` and
+`pulp_gpu_probe` MCP tools expose the same discovery and probe workflow to MCP
+clients. Keep the command file, this guidance, and the slash-command inventory
+in sync; `tools/scripts/cli_sync_check.py` enforces `gpu` in
+`REQUIRED_SLASH_COMMANDS`.
+`pulp_gpu_recipes` links the CPU-only catalog model directly and must remain
+usable without a sibling `pulp-cpp`, including in `PULP_ENABLE_GPU=OFF` builds.
+Those builds keep every canonical ID visible but report execution recipes as
+not callable; Renderer3D is callable only when both GPU and Scene3D were
+compiled into the matched build.
+An unfiltered `pulp gpu recipes list` projects all four canonical rows from the
+exact configure-time embedded `docs/status/gpu-recipes.yaml` bytes; filtered
+lists and `show` project their matched subset. Every row derives
+`callable` only from the native registry; `scaffold` creates a new bounded
+evidence workspace beneath an existing parent, never a copied implementation
+authority. Install the
+catalog and schema byte-for-byte under `share/pulp`, keep the release floor and
+missing-member negative control current, and preserve unknown-input exit 2.
+This stays in the existing CLI, GPU build, Three.js, trace, and routing skills;
+do not add a duplicate generic GPU-probe skill.
+
+The Catch2 native-recipe suite is portable unit/integration coverage: it emits a
+loud SKIP when a real adapter is unavailable so GPU-less build lanes remain
+usable. Fail-closed real-work acceptance belongs to the two EXCLUDE_FROM_ALL
+native acceptance executables and the digest-bound
+`gpu-probe-current-acceptance` receipt verifier, all of which reject
+unavailable evidence. Do not add a compile-time "require work" switch to the
+portable suite; that creates an unselected policy branch rather than a reachable
+acceptance surface.
+
+The public GPU tooling namespaces also carry an enforced Doxygen content
+contract in `health_result.hpp` and `probe_result.hpp`: ownership/lifetime,
+thread and real-time safety, determinism/units, and unavailable/error/result
+semantics. `gpu_health` is installed; `gpu_probe` remains a documented
+source-only build interface listed in
+`docs/doxygen/installed-public-header-policy.json`. Update the namespace
+contract and granular declaration docs when behavior changes. Do not install
+the probe headers merely to satisfy Doxygen parity.
+
 ### Testing a doctor-gated behaviour: stub `gh`, or the test is vacuous
 
 These checks query live GitHub state, so a test asserting "the command succeeds"
@@ -250,7 +331,7 @@ sync with `tools/scripts/cli_sync_check.py` and
 `tools/scripts/cli_mcp_parity_baseline.json`.
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
-build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, seq, audio-harness, audio-inspect, audio-compare
+build, test, run, validate, ship, version, doctor, gpu, create, docs, status, design, import-design, inspect, control, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, seq, audio-harness, audio-inspect, audio-compare
 
 `/seq` is the agent workflow for the top-level `pulp seq` timeline command. It
 wraps schema discovery, validate, explain, typed-command apply, import, and
@@ -436,6 +517,14 @@ must require a caller-supplied exact instance ID and must never point to
 broker-owned ordinary Standalone host when inventory is empty.
 
 ### 8. Decide: does this need an MCP tool?
+
+GPU recipe discovery is capability-independent. Keep every canonical recipe ID
+visible in CLI help, the installed catalog, and the MCP schema even when the
+selected build lacks an optional provider. Execution then returns a typed
+`pulp.gpu-probe-result.v1` `unavailable` verdict with exit 2. Do not compile the
+ID out of the registry or turn missing V8/Three.js support into an unknown
+recipe or exception; agents need to distinguish an invalid ID from a valid
+workflow that requires another SDK capability.
 
 Every top-level CLI command is checked for MCP parity by
 `tools/scripts/check_cli_mcp_parity.py`. The check enforces an
@@ -644,6 +733,15 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
 
 ### Rust CLI cutover path convention
 
+Rust CLI commands that spawn an external analyzer over caller-supplied
+artifacts must bound the complete resource boundary: reject oversized input
+before launch, cap combined stdout/stderr, enforce one monotonic deadline, and
+terminate the complete descendant tree (Unix process group or Windows Job
+Object) without an unbounded reap or pipe-reader join. The named GPU analyzer
+in `trace_gpu_analysis.rs` is the reference implementation: 512 MiB input,
+4 MiB combined output, and 120 seconds. Preserve its oversize, hanging-child,
+flooding-child, and planted-negative controls when changing subprocess code.
+
 `pulp control` is the canonical capability-control namespace. It is a C++
 delegate listed in Rust help and reached through the single installed sibling
 fallthrough. It accepts exact `--instance` IDs and typed registry operations;
@@ -653,6 +751,10 @@ remain connection-bound through `ControlClient`. The installed broker may
 rebind its client ID and bounded grants across separate CLI processes only after
 every new connection independently passes kernel and static-code authentication;
 never persist a bearer token or accept a client-supplied durable principal.
+The `/control` slash command is its discovery and safe-operation workflow. Keep
+it exact-instance and typed: it may guide profiles, instances, status, grants,
+call/watch, revoke, trace, and audit, but must not add a generic raw method,
+host/port selector, newest-instance heuristic, or design-time capability claim.
 `cmd_control.cpp` must also remain compilable when `PULP_ENABLE_INSPECTOR=OFF`,
 where the `pulp::inspect-client` target is intentionally absent. Guard broker /
 client headers, helpers, and live execution with the target-derived availability
@@ -3003,6 +3105,19 @@ archive-extraction containment. It is still lexical-only; its callers currently
 pass pre-canonicalized paths, but it is the same fail-open shape if that ever
 stops being true.
 
+## DPR measurement CLI targets use typed evidence
+
+`pulp-gpu-dpr-native-measurement` is a tooling-only target, but its request and
+receipt are still a versioned CLI protocol. Keep manifest expectations
+independent from observations: the request freezes the logical point and target;
+the producer reports the physical event, recovered logical point, and actual
+hit. Every raw metric declares `measured`, `derived`, or `unavailable`, and an
+unavailable metric has no samples or invented percentile. GPU timing requires
+five baseline plus five eight-times-known-work calibration trials. Fidelity
+requires two independently hashed same-content captures and numeric similarity,
+text, and stroke observations. Update the runner, both adapters, contract tests,
+and the mapped validation/skill docs together when this protocol changes.
+
 ## A new browser-capture module must be registered for `pulp upgrade`
 
 `tools/import-design/browser_capture/` is a module graph the capture imports at
@@ -3020,6 +3135,16 @@ during a capture — which reads as a broken import rather than a short manifest
 The array's size is a literal beside the literal list, so bump both. Two tests
 hold the line: one compares the C++ list against the on-disk manifest, the
 other resolves the installed graph.
+
+The A3 v2 verifier is fail-closed evidence tooling: its terminal result requires the canonical receipt on fresh protected `main`; caller-supplied head, protection, or check assertions are invalid input, not an offline mode.
+
+The A5 clean-agent preparer has an exact Release-provenance boundary, while
+Pulp's required macOS gate intentionally configures Debug. Its CTest contract
+must therefore prove that a non-Release tree is rejected and run the complete
+preparer journey only from a Release configuration. Do not relax the journey's
+Release check to make the Debug gate green. Pass the generator kind and selected
+CTest configuration explicitly: single-config Debug proves rejection, while a
+multi-config registration is Release-only and installs Release explicitly.
 
 ## An SDK profile that enables a feature must also stage that feature's payload
 

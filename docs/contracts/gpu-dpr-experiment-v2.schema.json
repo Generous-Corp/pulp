@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-dpr-experiment-v2.schema.json",
+  "title": "Pulp GPU DPR experiment result v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "version", "status", "evidence_kind", "experiment_id",
+    "plan_revision", "pulp_sha", "forge_sha", "authority", "matrix",
+    "cells", "repeat_cells", "analysis", "publication", "b5_gate"
+  ],
+  "properties": {
+    "schema": {"const": "pulp.gpu-dpr-experiment.v2"},
+    "version": {"const": 2},
+    "status": {"enum": ["inconclusive", "complete"]},
+    "evidence_kind": {"enum": ["measured", "structural-nonterminal"]},
+    "experiment_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,95}$"},
+    "plan_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "pulp_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "forge_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+    "authority": {"$ref": "#/$defs/authority"},
+    "matrix": {"$ref": "#/$defs/matrix"},
+    "cells": {"type": "array", "maxItems": 84, "items": {"$ref": "#/$defs/cell"}},
+    "repeat_cells": {"type": "array", "maxItems": 84, "items": {"$ref": "#/$defs/cell"}},
+    "analysis": {"$ref": "#/$defs/analysis"},
+    "publication": {"$ref": "#/$defs/publication"},
+    "b5_gate": {"$ref": "#/$defs/b5Gate"}
+  },
+  "$defs": {
+    "authority": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "manifest_sha256", "product_policy_id", "product_policy_blob",
+        "a3_receipt_sha256", "a2t_receipt_sha256",
+        "a3_runtime_receipt_sha256", "runner_receipts_sha256", "trace_analyzer_sha256", "timer_noise_p95_ns",
+        "memory_sampler_resolution_bytes", "collection_authorized"
+      ],
+      "properties": {
+        "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "product_policy_id": {"type": ["string", "null"], "minLength": 1},
+        "product_policy_blob": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "a3_receipt_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "a2t_receipt_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "a3_runtime_receipt_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "runner_receipts_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "trace_analyzer_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "timer_noise_p95_ns": {"type": ["integer", "null"], "minimum": 1},
+        "memory_sampler_resolution_bytes": {"type": ["integer", "null"], "minimum": 1},
+        "collection_authorized": {"type": "boolean"}
+      }
+    },
+    "matrix": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenario_ids", "modes", "requested_dprs", "cell_count", "repeat_cell_count"],
+      "properties": {
+        "scenario_ids": {"type": "array", "minItems": 7, "maxItems": 7, "uniqueItems": true, "items": {"type": "string"}},
+        "modes": {"type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": {"enum": ["exact", "configured_max", "adaptive_simulation"]}},
+        "requested_dprs": {"type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": {"enum": [1, 1.5, 2, 3]}},
+        "cell_count": {"const": 84},
+        "repeat_cell_count": {"const": 84}
+      }
+    },
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["machine_id", "provider", "adapter", "adapter_sha256", "build_sha", "host", "format", "app", "producer_process_id", "process_id", "instance_id", "product_sha256"],
+      "properties": {
+        "machine_id": {"type": "string", "minLength": 1},
+        "provider": {"type": "string", "minLength": 1},
+        "adapter": {"type": "string", "minLength": 1},
+        "adapter_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "build_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "host": {"type": "string", "minLength": 1},
+        "format": {"type": "string", "minLength": 1},
+        "app": {"type": "string", "minLength": 1},
+        "producer_process_id": {"type": "integer", "minimum": 1},
+        "process_id": {"type": "integer", "minimum": 1},
+        "instance_id": {"type": "string", "minLength": 1},
+        "product_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "trial": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "trial_index", "mode_order", "frame_count", "gpu_p95_ns",
+        "cpu_median_ns", "cpu_p95_ns", "first_frame_median_ns",
+        "first_frame_p95_ns", "interaction_median_ns", "interaction_p95_ns",
+        "render_target_p95_bytes", "resident_p95_bytes", "upload_p95_bytes",
+        "frame_misses", "xruns", "affected", "sequence_sha256"
+      ],
+      "properties": {
+        "trial_index": {"type": "integer", "minimum": 0},
+        "mode_order": {"type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": {"enum": ["exact", "configured_max", "adaptive_simulation"]}},
+        "frame_count": {"type": "integer", "minimum": 240},
+        "gpu_p95_ns": {"type": "integer", "minimum": 0},
+        "cpu_median_ns": {"type": "integer", "minimum": 0},
+        "cpu_p95_ns": {"type": "integer", "minimum": 0},
+        "first_frame_median_ns": {"type": "integer", "minimum": 0},
+        "first_frame_p95_ns": {"type": "integer", "minimum": 0},
+        "interaction_median_ns": {"type": "integer", "minimum": 0},
+        "interaction_p95_ns": {"type": "integer", "minimum": 0},
+        "render_target_p95_bytes": {"type": "integer", "minimum": 0},
+        "resident_p95_bytes": {"type": "integer", "minimum": 0},
+        "upload_p95_bytes": {"type": "integer", "minimum": 0},
+        "frame_misses": {"type": "integer", "minimum": 0},
+        "xruns": {"type": "integer", "minimum": 0},
+        "affected": {"type": "boolean"},
+        "sequence_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "freshTrial": {
+      "type": "object", "additionalProperties": false,
+      "required": ["trial_index", "pid", "first_nonblank_present_ns", "started_at_highest_eligible_rung", "counters_zero", "sequence_sha256"],
+      "properties": {
+        "trial_index": {"type": "integer", "minimum": 0},
+        "pid": {"type": "integer", "minimum": 1},
+        "first_nonblank_present_ns": {"type": "integer", "minimum": 0},
+        "started_at_highest_eligible_rung": {"const": true},
+        "counters_zero": {"const": true},
+        "sequence_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "gate": {"enum": [true, false, "not-applicable-by-manifest"]},
+    "fidelity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["capture_similarity", "small_text_luminance_stddev", "thin_stroke_coverage", "content_floor", "logical_input_exact", "identity"],
+      "properties": {
+        "capture_similarity": {"type": "number", "minimum": 0, "maximum": 1},
+        "small_text_luminance_stddev": {"type": ["number", "string"], "minimum": 0},
+        "thin_stroke_coverage": {"type": ["number", "string"], "minimum": 0, "maximum": 1},
+        "content_floor": {"$ref": "#/$defs/gate"},
+        "logical_input_exact": {"$ref": "#/$defs/gate"},
+        "identity": {"$ref": "#/$defs/gate"}
+      }
+    },
+    "dawReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["format", "host", "a3_role", "outcome", "gates_passed", "identity_sha256", "receipt_sha256"],
+      "properties": {
+        "format": {"enum": ["auv2", "vst3", "clap"]},
+        "host": {"enum": ["logic", "reaper"]},
+        "a3_role": {"type": "string", "minLength": 1},
+        "outcome": {"enum": ["pass", "fail"]},
+        "gates_passed": {"type": "boolean"},
+        "identity_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "path", "sha256", "bytes", "binding_sha256"],
+      "properties": {
+        "kind": {"enum": ["raw_trials", "frame_sequences", "capture", "reference_capture", "trace", "input_receipt", "identity_receipt", "product"]},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "binding_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "cell": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "campaign", "scenario_id", "policy_class", "mode", "requested_dpr", "observed_dpr",
+        "attempt_nonce", "outcome", "identity", "logical_size", "physical_size", "physical_dimensions_verified", "trace",
+        "warmup_count", "measured_trials", "adaptive_summary",
+        "fresh_process_trials", "fidelity", "daw_subreceipts", "artifacts"
+      ],
+      "properties": {
+        "campaign": {"enum": ["original", "repeat"]},
+        "scenario_id": {"type": "string", "minLength": 1},
+        "policy_class": {"enum": ["Pulp-native", "Forge-native/DAW", "web"]},
+        "mode": {"enum": ["exact", "configured_max", "adaptive_simulation"]},
+        "requested_dpr": {"enum": [1, 1.5, 2, 3]},
+        "observed_dpr": {"enum": [1, 1.5, 2, 3]},
+        "attempt_nonce": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "outcome": {"enum": ["pass", "fail"]},
+        "identity": {"$ref": "#/$defs/identity"},
+        "logical_size": {"$ref": "#/$defs/size"},
+        "physical_size": {"$ref": "#/$defs/size"},
+        "physical_dimensions_verified": {"const": true},
+        "trace": {"type": "object"},
+        "warmup_count": {"const": 5},
+        "measured_trials": {"type": "array", "minItems": 30, "maxItems": 30, "items": {"$ref": "#/$defs/trial"}},
+        "fresh_process_trials": {"type": "array", "minItems": 20, "maxItems": 20, "items": {"$ref": "#/$defs/freshTrial"}},
+        "adaptive_summary": {"type": ["object", "null"], "additionalProperties": false, "required": ["initial_rung", "counters_zero", "min_applied_dpr", "max_applied_dpr", "all_transitions_one_rung", "no_state_leakage"], "properties": {"initial_rung": {"enum": [1, 1.5, 2, 3]}, "counters_zero": {"const": true}, "min_applied_dpr": {"enum": [1, 1.5, 2, 3]}, "max_applied_dpr": {"enum": [1, 1.5, 2, 3]}, "all_transitions_one_rung": {"const": true}, "no_state_leakage": {"const": true}}},
+        "fidelity": {"$ref": "#/$defs/fidelity"},
+        "daw_subreceipts": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/dawReceipt"}},
+        "artifacts": {"type": "array", "minItems": 8, "maxItems": 8, "items": {"$ref": "#/$defs/artifact"}}
+      }
+    },
+    "size": {
+      "type": "object", "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {"width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}}
+    },
+    "comparison": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenario_id", "requested_dpr", "candidate_mode", "seed_sha256", "resamples", "point_estimate_ns", "ci_low_ns", "ci_high_ns", "affected", "time_material", "memory_material", "regression_gates_passed", "repeat_passed"],
+      "properties": {
+        "scenario_id": {"type": "string", "minLength": 1},
+        "requested_dpr": {"enum": [1, 1.5, 2, 3]},
+        "candidate_mode": {"enum": ["configured_max", "adaptive_simulation", "adaptive-vs-configured"]},
+        "seed_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "resamples": {"const": 10000},
+        "point_estimate_ns": {"type": "number"},
+        "ci_low_ns": {"type": "number"},
+        "ci_high_ns": {"type": "number"},
+        "affected": {"type": "boolean"},
+        "time_material": {"type": "boolean"},
+        "memory_material": {"type": "boolean"},
+        "regression_gates_passed": {"type": "boolean"},
+        "repeat_passed": {"type": "boolean"}
+      }
+    },
+    "analysis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["computed", "comparisons", "class_support", "disposition", "reasons"],
+      "properties": {
+        "computed": {"type": "boolean"},
+        "comparisons": {"type": "array", "items": {"$ref": "#/$defs/comparison"}},
+        "class_support": {"type": "object", "additionalProperties": false, "required": ["Pulp-native", "Forge-native/DAW", "web"], "properties": {"Pulp-native": {"type": "boolean"}, "Forge-native/DAW": {"type": "boolean"}, "web": {"type": "boolean"}}},
+        "disposition": {"type": ["string", "null"], "enum": [null, "no-change", "configured-max-candidate", "adaptive-candidate"]},
+        "reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "publication": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "repository", "revision", "path", "protected_main_verified", "required_checks_green"],
+      "properties": {
+        "status": {"enum": ["nonterminal", "candidate-awaiting-live-proof"]},
+        "repository": {"const": "Generous-Corp/pulp"},
+        "revision": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "path": {"const": "docs/validation/gpu-dpr/terminal-result.json"},
+        "protected_main_verified": {"const": false},
+        "required_checks_green": {"const": false}
+      }
+    },
+    "b5Gate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "requires", "authorizes_policy_change"],
+      "properties": {
+        "status": {"enum": ["inconclusive", "cancelled-no-change", "waiting-trigger"]},
+        "requires": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "authorizes_policy_change": {"const": false}
+      }
+    }
+  }
+}

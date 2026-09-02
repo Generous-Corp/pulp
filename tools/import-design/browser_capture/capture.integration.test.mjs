@@ -108,14 +108,17 @@ test("escapeRegExp preserves arbitrary text as a literal pattern", () => {
   assert.doesNotMatch(`${literal}suffix`, pattern);
 });
 
-// PULP_DESIGN_BROWSER names the browser the rest of the import lane resolves,
-// and is how a provisioned, version-pinned build is handed to this suite. It
-// outranks the conventional installations so the capture cases exercise the
-// browser they were given rather than whatever Chrome the machine carries.
-async function installedBrowser(env = process.env) {
-  const candidates = [
-    env.PULP_DESIGN_BROWSER,
-    env.PULP_BROWSER,
+function browserCandidates(environment = process.env) {
+  // Match the product and documented CI selection contract. The required
+  // macOS gate installs a pinned Chrome-for-Testing build here. An explicit
+  // but inaccessible override must fail closed instead of silently exercising
+  // whichever mutable system Chrome happens to be installed.
+  if (environment.PULP_DESIGN_BROWSER)
+    return [environment.PULP_DESIGN_BROWSER];
+  return [
+    // Retain the test-only legacy override for local callers that already use
+    // it when the canonical product setting is absent.
+    environment.PULP_BROWSER,
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/usr/bin/google-chrome",
@@ -123,6 +126,22 @@ async function installedBrowser(env = process.env) {
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
   ].filter(Boolean);
+}
+
+test("browser integration fails closed for an inaccessible pinned browser", async () => {
+  const environment = {
+    PULP_DESIGN_BROWSER: "/inaccessible/pinned/chrome",
+    PULP_BROWSER: "/legacy/chrome",
+  };
+  assert.deepEqual(
+    browserCandidates(environment),
+    ["/inaccessible/pinned/chrome"],
+  );
+  assert.equal(await installedBrowser(environment), "");
+});
+
+async function installedBrowser(environment = process.env) {
+  const candidates = browserCandidates(environment);
   for (const candidate of candidates) {
     try {
       await access(candidate);
@@ -154,11 +173,10 @@ test("installedBrowser prefers a provisioned browser over system installations",
       assert.equal(
         await installedBrowser({ PULP_BROWSER: provisioned }), provisioned);
 
-      // Control: an unreadable override falls through to the conventional
-      // installations, so the assertions above measure preference within one
-      // access-checked list rather than a variable that bypasses the check.
+      // Control: an unreadable pinned override fails closed rather than
+      // silently measuring a mutable conventional installation.
       assert.equal(
-        await installedBrowser({ PULP_DESIGN_BROWSER: absent }), conventional);
+        await installedBrowser({ PULP_DESIGN_BROWSER: absent }), "");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

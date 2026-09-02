@@ -392,6 +392,7 @@ else()
         dev.pulp.instance/read@1
         dev.pulp.session/control@1
         dev.pulp.state/read@1
+        dev.pulp.gpu/health.read@1
         dev.pulp.render/offline@1
         dev.pulp.ui/observe@1
         dev.pulp.diagnostics/read@1
@@ -409,8 +410,8 @@ else()
         dev.pulp.artifact/read@1
         dev.pulp.unavailable/operation@1)
     set(_capability_markers
-        SESSION_DESCRIBE SESSION_CONTROL STATE_READ RENDER_OFFLINE UI_READ
-        DIAGNOSTICS_READ LOGS_READ CAPTURE_IMAGE UI_INPUT TRACE_CONTROL
+        SESSION_DESCRIBE SESSION_CONTROL STATE_READ GPU_HEALTH_READ RENDER_OFFLINE
+        UI_READ DIAGNOSTICS_READ LOGS_READ CAPTURE_IMAGE UI_INPUT TRACE_CONTROL
         TRACE_SESSION_CONTROL STATE_WRITE TEST_INPUT AUTHORING_TWEAKS
         TELEMETRY_STREAM RUNTIME_RELOAD RUNTIME_EVAL ARTIFACT_READ UNAVAILABLE)
     set(_declared_marker_count 0)

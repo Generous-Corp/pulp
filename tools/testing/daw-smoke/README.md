@@ -85,6 +85,8 @@ loop wrap AND one seek, observed note activity, and no dropout.
 > `test_reaper_smoke.py`, including a negative drift/dropout case.
 
 Add `--check-config` to honor the opt-in toggle (SKIP unless enabled) — CI/gate use.
+Use `--reaper-bin /Applications/REAPER.app/Contents/MacOS/REAPER` when a receipt
+must bind one exact host executable; an invalid or symlinked path fails closed.
 
 ## Audio etiquette
 This launches REAPER with a Pulp plugin on a track and may press Play, so audio

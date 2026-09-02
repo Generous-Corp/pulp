@@ -164,7 +164,13 @@ bool valid_host_complete(const ControlHostCompleteEnvelope& message) {
         !valid_text(message.cancellation_reason, kControlReceiptMaximumCancellationReasonBytes) ||
         !valid_control_json_bytes(message.detail_json, kControlMaximumResultDetailBytes,
                                   kMaximumResultJsonNodes) ||
+        message.evidence_ids.size() > kControlReceiptMaximumEvidenceIds ||
         message.artifact_publications.size() > kControlHostMaximumArtifactPublications)
+        return false;
+    if (!std::ranges::all_of(message.evidence_ids, [](const auto& evidence_id) {
+            return valid_text(evidence_id, kControlReceiptMaximumEvidenceIdBytes) &&
+                   !evidence_id.empty();
+        }))
         return false;
     if (!std::ranges::all_of(message.artifact_publications,
                              valid_host_artifact_publication))
@@ -418,8 +424,8 @@ decode_host_control_payload(std::string_view kind, ValueView payload,
     }
 
     if (!only_fields(payload,
-                     {"artifact_publications", "cancellation_reason", "detail", "explanation",
-                      "result_code", "retry", "route_id", "state"},
+                     {"artifact_publications", "cancellation_reason", "detail", "evidence_ids",
+                      "explanation", "result_code", "retry", "route_id", "state"},
                      error))
         return std::nullopt;
     ControlHostCompleteEnvelope message;
@@ -481,6 +487,25 @@ decode_host_control_payload(std::string_view kind, ValueView payload,
         }
     }
     message.detail_json = choc::json::toString(canonical_value(payload["detail"]), false);
+    if (payload.hasObjectMember("evidence_ids")) {
+        const auto evidence_ids = payload["evidence_ids"];
+        if (!evidence_ids.isArray() ||
+            evidence_ids.size() > kControlReceiptMaximumEvidenceIds) {
+            error = {ControlProtocolError::LimitExceeded,
+                     "host evidence id count exceeds its bound"};
+            return std::nullopt;
+        }
+        for (std::uint32_t i = 0; i < evidence_ids.size(); ++i) {
+            const auto value = evidence_ids[i];
+            if (!value.isString() || value.getString().empty() ||
+                value.getString().size() > kControlReceiptMaximumEvidenceIdBytes) {
+                error = {ControlProtocolError::InvalidValue,
+                         "host evidence id is malformed or oversized"};
+                return std::nullopt;
+            }
+            message.evidence_ids.emplace_back(value.getString());
+        }
+    }
     if (payload.hasObjectMember("artifact_publications")) {
         const auto publications = payload["artifact_publications"];
         if (!publications.isArray()) {

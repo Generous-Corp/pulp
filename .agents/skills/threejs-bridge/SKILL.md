@@ -41,27 +41,43 @@ Not supported by this skill:
 
 ## Critical Build Requirements
 
-1. **V8 engine required** — Three.js needs typed arrays, promises, and full ES module support. Use Homebrew `node@24` on macOS for this lane. The unversioned `node` formula may point at a newer V8 ABI; `libnode.147.dylib` has compiled but aborted during embedded V8 / Three.js evaluation. Configure with:
+1. **V8 engine required** — Three.js needs typed arrays, promises, and full ES
+   module support. Use Pulp's pinned, sealed v8-builder provider; do not use a
+   Homebrew `libnode` for acceptance. Fetch the matched platform asset once and
+   enable the strict provider gate:
    ```bash
+   python3 tools/scripts/fetch_v8_for_release.py darwin-arm64
    cmake -S . -B build -DPULP_JS_ENGINE=v8 \
-     -DV8_INCLUDE_DIR=/opt/homebrew/opt/node@24/include/node \
-     -DV8_LIB_DIR=/opt/homebrew/opt/node@24/lib \
-     -DV8_LIBRARY_PATH=/opt/homebrew/opt/node@24/lib/libnode.137.dylib \
+     -DPULP_VALIDATE_V8_PROVIDER_STRICT=ON \
      -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=ON
    ```
-   Verify the linked dylib before trusting a local Three.js failure:
+   Verify the linked dylib and run the no-skip identity/capture gate before
+   trusting a local Three.js result:
    ```bash
-   otool -L build/test/web-compat/pulp-test-threejs-bridge | grep libnode
+   otool -L build/examples/threejs-native-demo/pulp-threejs-native-demo | grep libv8
+   ctest --test-dir build -R '^v8_provider_identity_strict$' --output-on-failure
    ```
+   `V8_DIR` may select a baked sealed provider. The legacy `V8_INCLUDE_DIR`,
+   `V8_LIB_DIR`, and `V8_LIBRARY_PATH` overrides are for explicit local
+   experimentation only; results from Homebrew `libnode` are not acceptance
+   evidence because its external ICU/Abseil surface can collide with Skia.
 
 2. **gpu_surface MUST be passed to WidgetBridge** — The native GPU bridge only initializes when WidgetBridge receives a non-null GpuSurface pointer. Without it, Three.js gets no WebGPU device and the 3D canvas renders black. This is the `attach_gpu_surface()` call in the demo.
 
-3. **Three.js fetched via FetchContent** — `PULP_HAS_THREEJS` is set automatically
-   when GPU plus tests are enabled, or for an eligible native examples build
-   (`PULP_BUILD_EXAMPLES=ON`; not Android, iOS, Emscripten, or WASI). The latter
-   is the narrow release-path provider-identity cube lane.
+3. **Three.js defaults to the pinned FetchContent source** —
+   `PULP_ENABLE_THREEJS_RUNTIME` follows the GPU default and sets
+   `PULP_HAS_THREEJS` after validating the complete runtime payload.
 
-4. **Bind runtime demo fixtures at configure time** — ccache may prefix-map
+4. **Release and installed-SDK work must select the shipped runtime** — GPU
+   SDKs publish the pinned resolver payload at `share/pulp/threejs` and expose
+   it through `PULP_THREEJS_RUNTIME_DIR` in `PulpConfig.cmake`. For an
+   installed-runtime proof, configure with
+   `-DPULP_THREEJS_RUNTIME_DIR=$PULP_SDK_DIR/share/pulp/threejs`; do not accept a
+   FetchContent cache or source-tree path as equivalent evidence. Configuration
+   fails when the WebGPU module, core modules, supported addons, license, or
+   package metadata is incomplete.
+
+5. **Bind runtime demo fixtures at configure time** — ccache may prefix-map
    `__FILE__` to a cache-owned diagnostic path. Files such as
    `demo.js.template` must use a CMake-provided source-directory definition;
    never derive runtime asset paths from `__FILE__` or from the fetched
@@ -169,6 +185,16 @@ cmake --build build --target pulp-test-threejs-resources pulp-test-threejs-bridg
 ctest --test-dir build -R "threejs|Three.js|pulp_bundle_threejs_for_jsc_smoke" --output-on-failure
 ```
 
+For release packaging work, also run the install-layout test from the configured
+build and the release-content negative controls. The install-layout test creates
+a separate `find_package(Pulp)` consumer and checks that the runtime resolves
+inside the selected install prefix:
+
+```bash
+ctest --test-dir build -R '^pulp_install_layout$' --output-on-failure
+python3 tools/scripts/test_release_artifact_contents.py
+```
+
 Do not rerun broad unrelated suites when a focused bridge/demo tag is enough.
 
 ### 4. Always capture the real native demo for visible changes
@@ -223,6 +249,30 @@ For native Three.js work, verify:
 - docs do not overclaim DOM/addon/runtime parity
 - screenshot output still matches the claimed visible result
 
+For agent-readable correctness evidence, run:
+
+```bash
+pulp gpu probe --recipe threejs.multi-pass.v1 \
+  --artifacts artifacts/gpu/threejs --json
+pulp gpu probe --recipe threejs.multi-pass.v1 \
+  --artifacts artifacts/gpu/threejs-mutated --negative-control --json
+```
+
+These commands require a build configured with V8 and the pinned Three.js
+runtime. Other builds expose its metadata row as `callable: false`, while
+omitting it from probe help, the callable registry, and the MCP probe enum.
+Default standalone releases remain QuickJS-only; executing this recipe
+there is follow-up work that must ship sealed V8 and preserve the nested runtime
+through Rust self-upgrades.
+
+The recipe loads the SDK's hash-verified pinned `three.webgpu.js` runtime
+through V8 and the native Dawn bridge. It records background, intermediate,
+and final RGBA readbacks plus an independent C++ color-region oracle. A valid
+negative control keeps adapter acquisition, module initialization, rendering,
+and readback successful while the final oracle fails with exit 1. Exit 2 means
+V8, authentic hardware identity, or the pinned runtime was unavailable; it is
+not acceptable proof of rendering correctness.
+
 For the audio-reactive `spectrum` demo, `VisualizationBridge::process()` only
 captures audio and meters on the realtime thread. The UI-side spectrum source
 must call `bridge.poll()` before `read_spectrum()`; snapshot reads no longer run
@@ -241,6 +291,34 @@ If the workflow grows stable enough for broader reuse, keep this skill aligned
 with the actual shipped demo modes and focused validation commands.
 
 ## Benchmark Mode
+
+### A4 DPR campaign producer
+
+The A4 DPR matrix uses the dedicated, non-default
+`pulp-gpu-dpr-native-measurement` target for the maintained
+`threejs-audio-reactive` canary. Configure it with `PULP_BENCHMARK=ON`,
+`PULP_TRACING=ON`, and V8, then pass the exact binary through
+`PULP_DPR_NATIVE_MEASUREMENT_BIN` to
+`tools/scripts/gpu_dpr_pulp_native_adapter.py`. The producer loads the pinned
+`three.webgpu.js` and `three.core.js` bytes, verifies both digests, and renders
+through the real native WebGPU canvas on the same `WidgetBridge` tree used for
+the Pulp capture and input oracle.
+
+Keep screenshot readbacks outside the steady timing loop. A readback can
+finalize the Skia recording before `SkiaSurface::end_frame()` attaches its GPU
+elapsed-time callback. `gpu_render_time_ms() == 0` is the documented
+no-sample sentinel, not a fast frame; the producer and evidence verifier must
+both reject it. Only strictly positive, same-process GPU samples can make a
+cell terminal.
+
+Positive alone is not sufficient: the producer records an empirical timestamp
+resolution and must distinguish five one-frame baseline trials from five trials
+that sum eight frames of known work. Every metric declares
+measured/derived/unavailable provenance. The frozen scenario supplies the
+independent logical input point/target, fidelity uses two hashed same-content
+captures plus numeric text/stroke observations, and adaptive mode records the
+measured samples and actual scale transitions rather than echoing requested
+metadata.
 
 When `PULP_BENCHMARK=ON`, `pulp-threejs-native-demo` exposes a
 headless benchmark that drives the JS→GPU upload path without a
@@ -297,6 +375,13 @@ new `PerfCounters` fields (`base64_decode_total_us`,
 merged for future workload-specific re-evaluations.
 
 ## JSC iOS lane
+
+Before invoking `threejs.multi-pass.v1`, inspect it with `pulp gpu recipes show
+threejs.multi-pass.v1 --json`. The canonical row remains discoverable on
+QuickJS, but `callable:false` is expected unless the matched native build has
+both V8 and the pinned Three.js runtime. Do not treat catalog presence or an
+installed runtime directory as callable capability; only the native registry
+controls `pulp gpu probe` and its MCP enum.
 
 Pulp ships Three.js inside an AUv3 `.appex` on iOS via JSC (system framework, no V8 build). The full bring-up is in `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md`.
 

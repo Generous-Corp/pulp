@@ -44,6 +44,25 @@ def _load_module():
 rs = _load_module()
 
 
+class ExactReaperSelection(unittest.TestCase):
+    def test_exact_regular_executable_is_selected_without_fallback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = pathlib.Path(temporary) / "REAPER"
+            binary.write_bytes(b"fixture")
+            binary.chmod(0o755)
+            self.assertEqual(rs.exact_reaper(str(binary)), binary.resolve())
+
+    def test_relative_and_symlinked_reaper_paths_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = pathlib.Path(temporary) / "REAPER"
+            binary.write_bytes(b"fixture")
+            binary.chmod(0o755)
+            link = pathlib.Path(temporary) / "REAPER-link"
+            link.symlink_to(binary)
+            self.assertIsNone(rs.exact_reaper("REAPER"))
+            self.assertIsNone(rs.exact_reaper(str(link)))
+
+
 def blk(host, seq, active=1, jump=0, dropout=0):
     return (f"[seq-loop] blk host_qn={host:.3f} seq_qn={seq:.3f} "
             f"active={active} jump={jump} dropout={dropout}")

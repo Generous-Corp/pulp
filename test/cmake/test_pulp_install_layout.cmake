@@ -99,6 +99,162 @@ if(NOT _gpu_health_schema_compare_rc EQUAL 0)
         "Installed GPU health result schema differs from the source contract.")
 endif()
 
+set(_installed_gpu_trace_human_review_schema
+    "${_prefix}/share/pulp/contracts/gpu-trace-human-review-v1.schema.json")
+if(NOT EXISTS "${_installed_gpu_trace_human_review_schema}")
+    message(FATAL_ERROR
+        "GPU trace human-review schema is missing from the installed SDK:\n"
+        "${_installed_gpu_trace_human_review_schema}")
+endif()
+set(_source_gpu_trace_human_review_schema
+    "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-trace-human-review-v1.schema.json")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${_source_gpu_trace_human_review_schema}"
+            "${_installed_gpu_trace_human_review_schema}"
+    RESULT_VARIABLE _gpu_trace_human_review_schema_compare_rc)
+if(NOT _gpu_trace_human_review_schema_compare_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed GPU trace human-review schema differs from the source contract.")
+endif()
+
+set(_installed_gpu_probe_schema
+    "${_prefix}/share/pulp/contracts/gpu-probe-result-v1.schema.json")
+if(NOT EXISTS "${_installed_gpu_probe_schema}")
+    message(FATAL_ERROR
+        "GPU probe result schema is missing from the installed SDK:\n"
+        "${_installed_gpu_probe_schema}")
+endif()
+set(_source_gpu_probe_schema
+    "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-probe-result-v1.schema.json")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${_source_gpu_probe_schema}" "${_installed_gpu_probe_schema}"
+    RESULT_VARIABLE _gpu_probe_schema_compare_rc)
+if(NOT _gpu_probe_schema_compare_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed GPU probe result schema differs from the source contract.")
+endif()
+
+foreach(_gpu_recipe_catalog_name IN ITEMS gpu-recipes.yaml gpu-recipes.schema.json)
+    set(_installed_gpu_recipe_catalog_file
+        "${_prefix}/share/pulp/${_gpu_recipe_catalog_name}")
+    set(_source_gpu_recipe_catalog_file
+        "${CMAKE_CURRENT_LIST_DIR}/../../docs/status/${_gpu_recipe_catalog_name}")
+    if(NOT EXISTS "${_installed_gpu_recipe_catalog_file}")
+        message(FATAL_ERROR
+            "GPU recipe catalog file is missing from the installed SDK:\n"
+            "${_installed_gpu_recipe_catalog_file}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${_source_gpu_recipe_catalog_file}"
+                "${_installed_gpu_recipe_catalog_file}"
+        RESULT_VARIABLE _gpu_recipe_catalog_compare_rc)
+    if(NOT _gpu_recipe_catalog_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed ${_gpu_recipe_catalog_name} differs from the source catalog.")
+    endif()
+endforeach()
+unset(_gpu_recipe_catalog_compare_rc)
+unset(_gpu_recipe_catalog_name)
+unset(_installed_gpu_recipe_catalog_file)
+unset(_source_gpu_recipe_catalog_file)
+
+set(_installed_gpu_health_read_schema
+    "${_prefix}/share/pulp/contracts/gpu-health-read-result-v1.schema.json")
+if(NOT EXISTS "${_installed_gpu_health_read_schema}")
+    message(FATAL_ERROR
+        "GPU health-read result schema is missing from the installed SDK:\n"
+        "${_installed_gpu_health_read_schema}")
+endif()
+set(_source_gpu_health_read_schema
+    "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-health-read-result-v1.schema.json")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${_source_gpu_health_read_schema}"
+            "${_installed_gpu_health_read_schema}"
+    RESULT_VARIABLE _gpu_health_read_schema_compare_rc)
+if(NOT _gpu_health_read_schema_compare_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed GPU health-read result schema differs from the source contract.")
+endif()
+
+foreach(_gpu_health_model_header IN ITEMS health_result.hpp health_read_result.hpp)
+    set(_installed_gpu_health_model_header
+        "${_prefix}/include/pulp_tooling/gpu_health/${_gpu_health_model_header}")
+    set(_source_gpu_health_model_header
+        "${CMAKE_CURRENT_LIST_DIR}/../../tools/cli/gpu_health/include/pulp_tooling/gpu_health/${_gpu_health_model_header}")
+    if(NOT EXISTS "${_installed_gpu_health_model_header}")
+        message(FATAL_ERROR
+            "GPU health model header is missing from the installed SDK:\n"
+            "${_installed_gpu_health_model_header}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${_source_gpu_health_model_header}"
+                "${_installed_gpu_health_model_header}"
+        RESULT_VARIABLE _gpu_health_model_header_compare_rc)
+    if(NOT _gpu_health_model_header_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed GPU health model header differs from source: "
+            "${_gpu_health_model_header}")
+    endif()
+endforeach()
+unset(_gpu_health_model_header)
+unset(_installed_gpu_health_model_header)
+unset(_source_gpu_health_model_header)
+unset(_gpu_health_model_header_compare_rc)
+
+foreach(_gpu_dpr_schema_version IN ITEMS v1 v2)
+    set(_installed_gpu_dpr_schema
+        "${_prefix}/share/pulp/contracts/gpu-dpr-experiment-${_gpu_dpr_schema_version}.schema.json")
+    if(NOT EXISTS "${_installed_gpu_dpr_schema}")
+        message(FATAL_ERROR
+            "GPU DPR experiment schema is missing from the installed SDK:\n"
+            "${_installed_gpu_dpr_schema}")
+    endif()
+    set(_source_gpu_dpr_schema
+        "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-dpr-experiment-${_gpu_dpr_schema_version}.schema.json")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${_source_gpu_dpr_schema}" "${_installed_gpu_dpr_schema}"
+        RESULT_VARIABLE _gpu_dpr_schema_compare_rc)
+    if(NOT _gpu_dpr_schema_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed GPU DPR experiment schema differs from the source contract.")
+    endif()
+endforeach()
+unset(_gpu_dpr_schema_version)
+
+foreach(_gpu_dpr_v2_contract IN ITEMS
+        gpu-dpr-corpus-v2-template.json
+        gpu-dpr-live-verification-v1.schema.json
+        gpu-vellum-package-terminal-v1.schema.json)
+    set(_installed_gpu_dpr_v2_contract
+        "${_prefix}/share/pulp/contracts/${_gpu_dpr_v2_contract}")
+    set(_source_gpu_dpr_v2_contract
+        "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/${_gpu_dpr_v2_contract}")
+    if(NOT EXISTS "${_installed_gpu_dpr_v2_contract}")
+        message(FATAL_ERROR
+            "GPU DPR v2 authority contract is missing from the installed SDK: "
+            "${_installed_gpu_dpr_v2_contract}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${_source_gpu_dpr_v2_contract}" "${_installed_gpu_dpr_v2_contract}"
+        RESULT_VARIABLE _gpu_dpr_v2_contract_compare_rc)
+    if(NOT _gpu_dpr_v2_contract_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed GPU DPR v2 authority contract differs from source: "
+            "${_gpu_dpr_v2_contract}")
+    endif()
+endforeach()
+unset(_gpu_dpr_v2_contract)
+unset(_installed_gpu_dpr_v2_contract)
+unset(_source_gpu_dpr_v2_contract)
+unset(_gpu_dpr_v2_contract_compare_rc)
+
 set(_gpu_health_front_args
     --prefix "${_prefix}")
 if(PULP_EXPECT_GPU_CLI)
@@ -210,6 +366,160 @@ if(NOT _installed_config_text MATCHES "PulpMinOs\\.cmake")
     message(FATAL_ERROR
         "Installed PulpConfig.cmake does not include PulpMinOs.cmake — the "
         "min-OS floor would not be pinned for find_package(Pulp) consumers.")
+endif()
+
+# A configured Three.js runtime is part of the installed SDK, not a source-tree
+# convenience. Prove the complete resolver payload exists, then configure a
+# consumer in a separate directory and require find_package(Pulp) to resolve the
+# runtime back into this exact installation prefix.
+file(STRINGS "${PULP_BUILD_DIR}/CMakeCache.txt" _threejs_runtime_cache
+    REGEX "^PULP_ENABLE_THREEJS_RUNTIME:BOOL=")
+if(_threejs_runtime_cache MATCHES "=ON$")
+    set(_threejs_runtime_root "${_prefix}/share/pulp/threejs")
+    set(_threejs_bundler
+        "${_pulp_cmake_dir}/scripts/bundle_threejs_for_jsc.mjs")
+    set(_threejs_shim
+        "${_pulp_cmake_dir}/scripts/web-compat-three-shim.js")
+    foreach(_threejs_build_asset IN ITEMS "${_threejs_bundler}" "${_threejs_shim}")
+        if(NOT EXISTS "${_threejs_build_asset}")
+            message(FATAL_ERROR
+                "Installed Three.js AUv3 build asset is missing: ${_threejs_build_asset}")
+        endif()
+    endforeach()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${CMAKE_CURRENT_LIST_DIR}/../../tools/cmake/threejs-runtime-manifest.json"
+            "${_threejs_runtime_root}/threejs-runtime-manifest.json"
+        RESULT_VARIABLE _threejs_manifest_compare_rc)
+    if(NOT _threejs_manifest_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed Three.js runtime manifest differs from the pinned source manifest.")
+    endif()
+
+    set(_threejs_consumer_source
+        "${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-installed-consumer")
+    set(_threejs_consumer_build
+        "${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-installed-consumer-build")
+    file(REMOVE_RECURSE "${_threejs_consumer_source}" "${_threejs_consumer_build}")
+    file(MAKE_DIRECTORY "${_threejs_consumer_source}")
+    file(WRITE "${_threejs_consumer_source}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.24)
+project(PulpThreeJsInstalledConsumer LANGUAGES CXX)
+find_package(Pulp CONFIG REQUIRED)
+if(NOT PULP_HAS_THREEJS_RUNTIME)
+    message(FATAL_ERROR "Installed Pulp package did not advertise Three.js runtime")
+endif()
+file(REAL_PATH "${PULP_THREEJS_RUNTIME_DIR}" _runtime_real)
+file(REAL_PATH "${EXPECTED_RUNTIME_DIR}" _expected_real)
+if(NOT _runtime_real STREQUAL _expected_real)
+    message(FATAL_ERROR
+        "Three.js runtime resolved outside selected SDK: "
+        "${_runtime_real} != ${_expected_real}")
+endif()
+if(NOT PULP_THREEJS_RUNTIME_REVISION STREQUAL "${EXPECTED_THREEJS_REVISION}")
+    message(FATAL_ERROR
+        "Unexpected Three.js revision: ${PULP_THREEJS_RUNTIME_REVISION}")
+endif()
+foreach(_asset_var IN ITEMS PULP_THREEJS_BUNDLER_SCRIPT PULP_THREEJS_WEB_COMPAT_SHIM)
+    if(NOT EXISTS "${${_asset_var}}")
+        message(FATAL_ERROR "Installed Three.js AUv3 asset did not resolve: ${_asset_var}")
+    endif()
+endforeach()
+]=])
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}"
+            -S "${_threejs_consumer_source}"
+            -B "${_threejs_consumer_build}"
+            "-DCMAKE_PREFIX_PATH=${_prefix}"
+            -DPULP_ALLOW_DEBUG_SDK=ON
+            "-DEXPECTED_RUNTIME_DIR=${_threejs_runtime_root}"
+            "-DEXPECTED_THREEJS_REVISION=077dd13c0e869d9f3dbe55875686f920367de457"
+        RESULT_VARIABLE _threejs_consumer_rc
+        OUTPUT_VARIABLE _threejs_consumer_stdout
+        ERROR_VARIABLE _threejs_consumer_stderr)
+    if(NOT _threejs_consumer_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed Three.js consumer configure failed:\n"
+            "${_threejs_consumer_stdout}${_threejs_consumer_stderr}")
+    endif()
+
+    # On Apple hosts, configure the public iOS AUv3 helper from the installed
+    # package and prove its generated build rule references only installed,
+    # verified Three.js inputs plus the packaged bundler/shim. Configure-only is
+    # intentional: this host SDK's archives are macOS artifacts, while the
+    # boundary under test is downstream helper generation and asset routing.
+    if(CMAKE_HOST_APPLE)
+        find_program(_threejs_xcrun NAMES xcrun)
+        if(_threejs_xcrun)
+            execute_process(
+                COMMAND "${_threejs_xcrun}" --sdk iphonesimulator --show-sdk-path
+                RESULT_VARIABLE _threejs_ios_sdk_rc
+                OUTPUT_QUIET ERROR_QUIET)
+        endif()
+        if(_threejs_xcrun AND _threejs_ios_sdk_rc EQUAL 0)
+            set(_threejs_ios_consumer_source
+                "${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-ios-installed-consumer")
+            set(_threejs_ios_consumer_build
+                "${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-ios-installed-consumer-build")
+            file(REMOVE_RECURSE
+                "${_threejs_ios_consumer_source}" "${_threejs_ios_consumer_build}")
+            file(MAKE_DIRECTORY "${_threejs_ios_consumer_source}")
+            file(WRITE "${_threejs_ios_consumer_source}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.24)
+project(PulpThreeJsIosInstalledConsumer LANGUAGES C CXX OBJC OBJCXX)
+# This configure-only helper proof consumes a macOS SDK install while selecting
+# the iOS toolchain. Its mac-gpu Skia archive is intentionally not an iOS slice;
+# provide only the imported target name needed to validate generated build rules.
+add_library(skia::skia INTERFACE IMPORTED)
+find_package(Pulp CONFIG REQUIRED)
+pulp_add_ios_auv3(
+    NAME InstalledThreeJs
+    BUNDLE_ID com.pulp.tests.host.InstalledThreeJs
+    MANUFACTURER Pulp
+    MANUFACTURER_CODE Pulp
+    SUBTYPE_CODE ItJs
+    AU_TYPE aumu
+    VERSION 1.0.0)
+]=])
+            execute_process(
+                COMMAND "${CMAKE_COMMAND}"
+                    -S "${_threejs_ios_consumer_source}"
+                    -B "${_threejs_ios_consumer_build}"
+                    -G Xcode
+                    -DCMAKE_SYSTEM_NAME=iOS
+                    -DCMAKE_OSX_SYSROOT=iphonesimulator
+                    -DCMAKE_OSX_ARCHITECTURES=arm64
+                    -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4
+                    "-DCMAKE_PREFIX_PATH=${_prefix}"
+                    "-DPulp_DIR=${_pulp_cmake_dir}"
+                    -DPULP_ALLOW_DEBUG_SDK=ON
+                    "-D_PULP_NODE_EXE=${CMAKE_COMMAND}"
+                RESULT_VARIABLE _threejs_ios_consumer_rc
+                OUTPUT_VARIABLE _threejs_ios_consumer_stdout
+                ERROR_VARIABLE _threejs_ios_consumer_stderr)
+            if(NOT _threejs_ios_consumer_rc EQUAL 0)
+                message(FATAL_ERROR
+                    "Installed Three.js iOS AUv3 consumer configure failed:\n"
+                    "${_threejs_ios_consumer_stdout}${_threejs_ios_consumer_stderr}")
+            endif()
+            file(READ
+                "${_threejs_ios_consumer_build}/PulpThreeJsIosInstalledConsumer.xcodeproj/project.pbxproj"
+                _threejs_ios_project)
+            foreach(_threejs_expected_build_input IN ITEMS
+                    "${_threejs_runtime_root}/build/three.webgpu.js"
+                    "${_threejs_runtime_root}/examples/jsm/controls/OrbitControls.js"
+                    "${_threejs_bundler}"
+                    "${_threejs_shim}")
+                string(FIND "${_threejs_ios_project}"
+                    "${_threejs_expected_build_input}" _threejs_input_offset)
+                if(_threejs_input_offset EQUAL -1)
+                    message(FATAL_ERROR
+                        "Installed iOS AUv3 rule omitted Three.js input: "
+                        "${_threejs_expected_build_input}")
+                endif()
+            endforeach()
+        endif()
+    endif()
 endif()
 
 # Pulp's installed Windows archives are built with the static MSVC runtime.
@@ -339,5 +649,6 @@ message(STATUS
     "Install layout: PulpUtils.cmake at ${_pulp_utils}, encoder at "
     "${_installed_encoder} (${_installed_size} bytes), PulpMinOs.cmake + "
     "min_os.json bundled and wired into PulpConfig.cmake, pulp::osc header + "
-    "target exported; GPU health contract installed byte-exactly; Ableton Link "
+    "target exported; GPU health contract and configured Three.js runtime "
+    "installed outside the source tree; Ableton Link "
     "header, target, and SDK path absent. All present.")

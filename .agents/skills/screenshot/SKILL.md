@@ -173,6 +173,30 @@ missing comparison backend, not proof that the rendered PNG was empty.
 
 ## Capture options at a glance
 
+For a bounded Renderer3D diagnostic, use the canonical
+`renderer3d.hardcoded-cube.v1` recipe rather than substituting an arbitrary
+screenshot:
+
+```bash
+mkdir -p "$PWD/artifacts/gpu/cube"
+pulp gpu probe --recipe renderer3d.hardcoded-cube.v1 \
+  --artifacts "$PWD/artifacts/gpu/cube" --json
+```
+
+The recipe drives native Dawn/WebGPU rendering and readback, then checks a
+deterministic cube fingerprint on its declared backend or a portable structural
+content oracle elsewhere. A pass proves only that bounded recipe on the
+reported adapter; it is not cross-backend pixel identity, visible-window or
+compositor evidence, screenshot fidelity, input behavior, or product-scene
+coverage. Use the capture surfaces below for those separate claims.
+
+Exit 0 is a completed pass, exit 1 is a completed content/readback failure, and
+exit 2 is unavailable or unverified evidence, never a pass. To verify the
+oracle rather than the renderer, rerun with `--negative-control`: GPU work and
+readback must still complete while the planted content mutation produces a
+typed failure. A nonblank artifact alone is insufficient; trust the recipe's
+bounded evidence/result contract and adapter disclosure.
+
 - **`render_to_png` / `render_to_file`** (`screenshot.hpp`) — headless raster of
   a `View` tree, no window. macOS/iOS have native backends; Linux/Windows use
   the built-in Skia raster path when `PULP_HAS_SKIA=1`, otherwise they need a
@@ -391,3 +415,65 @@ where each backend is available.
 death-test child and macOS lldb has no follow-fork-mode, so `b trap_now` + `run`
 just hangs. Add `backtrace_symbols_fd` to `trap_now` in
 `rt_intercept_test_support.cpp` and read the stack off stderr instead.
+
+## DPR experiment captures are evidence, not policy
+
+For A4 DPR v2 trials, start from `test/fixtures/gpu-ux/dpr/manifest.json` only
+after its protected A3 policy status is `authorized`, and use the exact
+requested scale for each capture. Keep logical size, fixture bytes,
+and logical input coordinates identical while the physical backing size changes
+with DPR. Record every applied DPR and exact rounded physical dimension in the
+raw frame-sequence artifact bound by the v2 result contract.
+
+`passes_content_floor` remains a required blank-frame guard, but it does not
+prove small-text legibility, thin-stroke fidelity, or input correctness. Record
+those oracles separately. A planned, v1, or synthetic capture is automation
+proof only and must not select a scale-policy candidate.
+
+Use `tools/scripts/gpu_dpr_runner.py` to execute or ingest a matrix cell. A
+screenshot adapter must return the raw capture and content/fidelity oracles in
+the cell directory; SKIP, INCONCLUSIVE, timeout, or a rejected receipt remains
+resumable incomplete evidence.
+
+In terminal v2, a capture path string is never evidence. The runner snapshots
+both PNGs as unique owned regular files, verifies every PNG chunk and physical
+dimension, hashes exact bytes, and recomputes similarity/text/stroke fidelity
+from the retained pair. The capture/reference paths may not escape the run
+root, traverse a symlink, share an inode with another artifact/cell, or change
+between receipt and snapshot. `finalize-v2` accepts no caller draft and replays
+all 84 plus 84 snapshot pairs; see `docs/validation/gpu-dpr/README.md`.
+
+For the frozen Pulp-native fixtures,
+`tools/scripts/gpu_dpr_pulp_native_adapter.py` accepts either a capture-only
+preflight or the dedicated `pulp-gpu-dpr-native-measurement` producer. Build
+that target with `PULP_BENCHMARK=ON` and `PULP_TRACING=ON`, then set
+`PULP_DPR_NATIVE_MEASUREMENT_BIN` to its absolute path. Terminal first-frame
+samples require 20 fresh processes whose typed rows bind attempt nonce/number,
+unique PID, producer/content/build digests, exact Dawn adapter, and sample. The
+same WidgetBridge/editor-surface session owns capture, logical input, 30 steady
+metrics, and the correlated trace. With only `PULP_DPR_SCREENSHOT_BIN`, the
+adapter retains a real preflight but deliberately returns INCONCLUSIVE; never
+rename subprocess wall time to CPU/frame/interaction time.
+
+Terminal DPR evidence additionally requires all 84 original plus all 84 repeat
+cells and the named trace answers to report
+one `category_scope` whose evidence ID and stable Perfetto process instance are
+shared across startup, health, and probe. Global or unrelated-process trace
+categories cannot complete a cell.
+
+Treat the two fidelity images as independent evidence artifacts: hash both,
+bind them to the same content/state token, and compute numeric pixel similarity,
+small-text luminance variation, and thin-stroke coverage inside the frozen
+scenario-specific logical ROIs. Whole-frame variance/coverage and a producer-authored
+boolean is not an oracle. Logical input is equally independent: take the
+expected logical point/target from the frozen scenario, then compare it with the
+physical pointer event and hit target reported by the runtime. Every metric must
+name `measured`, `derived`, or `unavailable`; unavailable values have no samples
+or fake percentiles and cannot select policy. Preserve superseded captures as
+`NONCOUNTED` in `docs/validation/gpu-dpr/instrument-validity-state.json`.
+
+The runner caps each adapter stdout and stderr stream at 1 MiB and terminates
+the adapter process group when either cap is crossed. The Pulp-native adapter
+applies the same per-stream cap to its product measurement producer. An output
+cap or timeout is resumable incomplete evidence; inspect the nonce-specific
+logs instead of increasing the cap to accommodate sample data.

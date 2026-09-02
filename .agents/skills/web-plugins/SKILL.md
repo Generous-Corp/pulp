@@ -1030,6 +1030,45 @@ and collapses on a phone).
 
 A full-canvas editor lays itself out in code, so a phone-width bug (overlapping header,
 sheared slider labels) never surfaces in a unit test — only in a browser, at that width.
+### A4 browser DPR evidence
+
+The maintained `super-convolver-web` A4 cells use
+`tools/scripts/gpu_dpr_web_adapter.py` with the exact executable
+`tools/scripts/gpu_dpr_web_measurement.mjs`. Set
+`PULP_DPR_WEB_MEASUREMENT_BIN`, `PULP_DPR_BROWSER_BIN`, and
+`PULP_DPR_WEB_BUILD_DIR` to absolute paths before passing the adapter to
+`gpu_dpr_runner.py`. The build directory must contain the exact
+`PulpSuperConvolverUi.js`/wasm output for the planned Pulp SHA.
+
+This lane requires hardware WebGL2, `EXT_disjoint_timer_query_webgl2`, 30
+strictly positive timer-query samples, 20 unique Chrome process IDs, WebGL call
+instrumentation for upload/resident-byte ledgers, real pointer delivery, PNG
+fidelity, and nonce-scoped DevTools user-timing spans from one renderer PID.
+SwiftShader/software renderers, zero timings, repeated browser PIDs, mixed
+trace PIDs/nonces, native adapters, or handwritten category claims are invalid.
+The checked-in Python tests prove those rejection paths; they do not replace a
+real browser run.
+
+The terminal v2 runner must invoke and snapshot the exact executable adapter,
+bind its actual producer PID, and retain eight unique files for every original
+and repeat web cell: JSON projections, both real PNGs, the real DevTools trace,
+and the exact wasm/Mach-O/ELF/PE product bytes. A filename, data string, or
+producer-authored `pass` claim cannot substitute for those bytes. Only
+`finalize-v2 --run-dir ...` may derive the candidate, and only fixed-path Git
+blobs plus `verify-live-v2` establish protected-main publication.
+
+Install exactly `playwright-core@1.61.1` in the isolated measurement package;
+the producer records and verifies that version and rejects drift. Each metric
+declares measured/derived/unavailable provenance. WebGL timing includes five
+baseline and five eight-times-known-work query trials and must detect the extra
+work above its empirical resolution. The scenario manifest—not the page—owns
+the expected logical point/target; the page reports the actual pointer event and
+parameter hit. Compare a CPU reference PNG with a WebGL canvas PNG at identical
+content/state, bind both hashes to one token, and retain numeric similarity,
+small-text luminance variation, and thin-stroke coverage. Adaptive mode must
+record real DPR overrides and measured scale transitions. Old incompatible
+receipts remain `SUPERSEDED`/`NONCOUNTED` in the checked-in instrument state.
+
 Every full-canvas editor MUST handle these, all learned the hard way on SuperConvolver:
 
 - **Narrow breakpoint.** The UI `scale()` keys off HEIGHT, so a tall skinny phone canvas
@@ -1055,6 +1094,35 @@ Every full-canvas editor MUST handle these, all learned the hard way on SuperCon
 - **Live readouts:** reserve their height (two lines if they can wrap) and WRAP rather than
   truncate, so flipping state never bumps the page; debounce fast-toggling values (~0.8s
   hysteresis) so a single dropped poll doesn't strobe the text.
+
+### A3/A4 GPU evidence on the maintained web canary
+
+Do not treat a successful browser mount, responsive screenshot, or native Dawn
+receipt as web GPU evidence. The maintained UI canary is Skia Ganesh/WebGL2,
+while browser GPU-audio uses a separate emdawnwebgpu worker; record which lane
+each observation actually exercised.
+
+For the A4 DPR experiment, the web owner supplies all 12 browser cells for the
+`web-canary` scenario: DPR `1`, `1.5`, `2`, and `3` across exact, configured-max,
+and non-shipping adaptive simulations. Each independently produced receipt must
+bind the browser/build/adapter identity and issued attempt nonce, and retain 30
+steady samples plus 20 fresh browser-process first-frame trials, capture
+similarity, small-text legibility, logical-input correctness, interaction
+latency, and bounded artifacts. Use the real browser canvas and browser input
+path; a native producer or synthetic receipt is not a substitute. A zero timing
+sample is unavailable evidence, never a fast frame.
+
+Ingest through `tools/scripts/gpu_dpr_runner.py ingest` and require its closed
+checks before counting a cell. `finalize` remains forbidden until all 84 cells
+and exact A2T/A3 dependency receipts exist. The experiment may select
+`no-change`, `configured-max-candidate`, or `adaptive-candidate`; none of those
+changes current web DPR policy in Horizon A.
+
+The current runtime control GPU-health provider is Standalone-only. Do not claim
+that `dev.pulp.gpu/health.read@1` works in WAM/WebCLAP until an actual browser
+product endpoint, exact-instance receipt, and mapped control tests exist. A3's
+web relevance today is the transferable trace/evidence vocabulary and the rule
+that missing browser producers remain explicit, not a fabricated pass.
 
 ### Verifying the GPU-AUDIO path on macOS: use REAL Safari, not Playwright WebKit
 

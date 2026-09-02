@@ -60,10 +60,20 @@ struct WinPipe {
     }
 };
 
-bool drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
-                size_t max_bytes,
-                std::function<void(std::string_view)>* line_cb) {
-    if (fd == INVALID_HANDLE_VALUE) return true;
+struct DrainResult {
+    bool callback_ok = true;
+    bool output_limit_exceeded = false;
+
+    operator bool() const noexcept { return callback_ok; }
+};
+
+DrainResult drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
+                       size_t max_bytes,
+                       std::function<void(std::string_view)>* line_cb) {
+    if (fd == INVALID_HANDLE_VALUE) return {};
+    DrainResult result;
+    std::size_t drained_bytes = 0;
+    constexpr std::size_t maximum_bytes_per_drain = 64 * 1024;
     while (true) {
         DWORD avail = 0;
         if (!PeekNamedPipe(fd, nullptr, 0, nullptr, &avail, nullptr) || avail == 0)
@@ -75,10 +85,17 @@ bool drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
         if (!ReadFile(fd, chunk, to_read, &bytes_read, nullptr) || bytes_read == 0)
             break;
 
+        drained_bytes += bytes_read;
+        if (max_bytes > 0 &&
+            static_cast<size_t>(bytes_read) > max_bytes - std::min(full_output.size(), max_bytes))
+            result.output_limit_exceeded = true;
+
         if (full_output.size() < max_bytes)
             full_output.append(chunk, std::min<size_t>(bytes_read, max_bytes - full_output.size()));
         if (line_cb && *line_cb && line_buf.size() < max_bytes)
             line_buf.append(chunk, std::min<size_t>(bytes_read, max_bytes - line_buf.size()));
+        if (result.output_limit_exceeded && drained_bytes >= maximum_bytes_per_drain)
+            break;
     }
 
     if (line_cb && *line_cb && !line_buf.empty()) {
@@ -95,13 +112,14 @@ bool drain_pipe(HANDLE fd, std::string& full_output, std::string& line_buf,
             } catch (...) {
                 *line_cb = {};
                 line_buf.clear();
-                return false;
+                result.callback_ok = false;
+                return result;
             }
             pos = nl + 1;
         }
         if (pos > 0) line_buf.erase(0, pos);
     }
-    return true;
+    return result;
 }
 
 std::string quote_windows_arg(const std::string& arg) {
@@ -453,18 +471,22 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         while ((ready = completed.wait_for(std::chrono::milliseconds(1))) !=
                    std::future_status::ready &&
                std::chrono::steady_clock::now() < deadline) {
-            const bool stdout_ok =
+            const auto stdout_drain =
                 drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
                            impl_->stdout_lines_buf, options.max_output_bytes,
                            &impl_->options.on_stdout_line);
+            impl_->result.output_limit_exceeded |= stdout_drain.output_limit_exceeded;
+            const bool stdout_ok = stdout_drain;
             if (!stdout_ok) {
                 impl_->options.on_stdout_line = {};
                 impl_->options.on_stderr_line = {};
             }
-            const bool stderr_ok =
+            const auto stderr_drain =
                 drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
                            impl_->stderr_lines_buf, options.max_output_bytes,
                            &impl_->options.on_stderr_line);
+            impl_->result.output_limit_exceeded |= stderr_drain.output_limit_exceeded;
+            const bool stderr_ok = stderr_drain;
             if (!stdout_ok || !stderr_ok) {
                 output_drain_failed = true;
                 impl_->result.was_cancelled = true;
@@ -535,17 +557,21 @@ ProcessResult ChildProcess::wait() {
     auto max_bytes = impl_->options.max_output_bytes;
 
     while (true) {
-        const bool stdout_ok =
+        const auto stdout_drain =
             drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
                        impl_->stdout_lines_buf, max_bytes, &impl_->options.on_stdout_line);
+        impl_->result.output_limit_exceeded |= stdout_drain.output_limit_exceeded;
+        const bool stdout_ok = stdout_drain;
         if (!stdout_ok) {
             impl_->options.on_stdout_line = {};
             impl_->options.on_stderr_line = {};
         }
-        const bool stderr_ok =
+        const auto stderr_drain =
             drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
                        impl_->stderr_lines_buf, max_bytes,
                        &impl_->options.on_stderr_line);
+        impl_->result.output_limit_exceeded |= stderr_drain.output_limit_exceeded;
+        const bool stderr_ok = stderr_drain;
         if (!stdout_ok || !stderr_ok) {
             impl_->result.was_cancelled = true;
             impl_->options.on_stdout_line = {};
@@ -556,18 +582,22 @@ ProcessResult ChildProcess::wait() {
 
         if (WaitForSingleObject(impl_->process, 0) != WAIT_TIMEOUT) {
             // Final drain
-            const bool final_stdout_ok =
+            const auto final_stdout_drain =
                 drain_pipe(impl_->stdout_pipe.read_end, impl_->stdout_full,
                            impl_->stdout_lines_buf, max_bytes,
                            &impl_->options.on_stdout_line);
+            impl_->result.output_limit_exceeded |= final_stdout_drain.output_limit_exceeded;
+            const bool final_stdout_ok = final_stdout_drain;
             if (!final_stdout_ok) {
                 impl_->options.on_stdout_line = {};
                 impl_->options.on_stderr_line = {};
             }
-            const bool final_stderr_ok =
+            const auto final_stderr_drain =
                 drain_pipe(impl_->stderr_pipe.read_end, impl_->stderr_full,
                            impl_->stderr_lines_buf, max_bytes,
                            &impl_->options.on_stderr_line);
+            impl_->result.output_limit_exceeded |= final_stderr_drain.output_limit_exceeded;
+            const bool final_stderr_ok = final_stderr_drain;
             if (!final_stdout_ok || !final_stderr_ok) {
                 impl_->result.was_cancelled = true;
                 impl_->options.on_stdout_line = {};

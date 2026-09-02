@@ -102,6 +102,22 @@ set_tests_properties(cmake-js-engine-selection PROPERTIES
     LABELS "cmake;view;js-engine"
     TIMEOUT 30)
 
+# The Linux CLI's Scene3D archives need a render/scene rescan without placing
+# the higher-level recipe archive in that group. The latter depends back through
+# view and gpu-audio, which makes CMake reject the generated target graph.
+add_test(NAME cmake-cli-gpu-probe-link-group
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-gpu-probe-link-group
+        "-DPULP_GENERATOR=${CMAKE_GENERATOR}"
+        "-DPULP_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+        "-DPULP_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+        "-DPULP_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_cli_gpu_probe_link_group.cmake)
+set_tests_properties(cmake-cli-gpu-probe-link-group PROPERTIES
+    LABELS "cmake;cli;gpu;scene3d;link"
+    TIMEOUT 30)
+
 # The iOS-only public helper bypasses pulp_add_plugin(), but its AUv3 target
 # still carries the ordinary production control-shipping declaration.
 add_test(NAME cmake-ios-auv3-control-shipping
@@ -226,6 +242,14 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     # but pays a configure-amortised cost — pull it out of fast-CI.
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
+
+add_test(NAME cmake-pulp-gpu-recipe-catalog-install-layout
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_gpu_recipe_catalog_install_layout.cmake)
+set_tests_properties(cmake-pulp-gpu-recipe-catalog-install-layout PROPERTIES
+    LABELS "cmake;gpu;install")
 
 # Installed Creative Timeline Engine consumer. The fixture requests the
 # optional project-package component, so a package-stripped SDK correctly omits

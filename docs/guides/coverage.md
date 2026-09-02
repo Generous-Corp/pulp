@@ -145,6 +145,8 @@ Output:
   artifact.
 - `build-coverage/coverage/coverage.lcov` — LCOV produced by
   `llvm-cov export`.
+- `build-coverage/coverage/llvm-profdata-inputs.txt` — the complete raw-profile
+  shard manifest passed to the native profile merge.
 - `build-coverage/coverage.cobertura.xml` — Cobertura XML converted
   from the LCOV via the vendored `tools/scripts/lcov_cobertura.py`.
 - `build-coverage/python/html/index.html` — HTML drilldown for
@@ -170,6 +172,12 @@ source-based coverage, not gcov. See
 `llvm-profdata` and `llvm-cov` must be on PATH — on macOS, export the
 Xcode toolchain:
 `export PATH="$(xcrun -f llvm-cov | xargs dirname):$PATH"`.
+
+The native lane writes every discovered `.profraw` shard to the input manifest,
+then passes that manifest to one `llvm-profdata merge` invocation. This keeps
+the command line bounded without allowing a large shard set to be split across
+multiple writes that would overwrite earlier merge output. The merge still
+fails closed when no shards exist or invalid shards are systemic.
 
 Build and test parallelism are independently tunable. This matters on
 memory-constrained coverage runners: instrumented links may need a low

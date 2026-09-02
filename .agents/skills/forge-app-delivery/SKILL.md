@@ -415,3 +415,102 @@ apply to any Forge shell. What tends to differ per app is the generator's
 external toolchain (Forge Modular needs the Rack SDK and a C++ compiler) and what
 "the runtime" means for it — enumerate that first, because it is the thing most
 likely to be left out of the installer.
+
+## Forge evidence in DPR trials
+
+The A4 DPR matrix requires the exact Forge Modular native shell, not a Pulp
+example standing in for it. Use a fresh Forge worktree, record both Forge and
+Pulp SHAs, and preserve binary identity with the result artifacts. Exercise the
+same logical fixture at each requested DPR and mode; a rebuilt or substituted
+payload is a different trial. Do not publish a scale-policy conclusion from a
+planned/synthetic run or before the A2T trace and A3 budget dependencies exist.
+
+Register each real Forge shell with `tools/scripts/gpu_dpr_runner.py` as its
+scenario-specific executable adapter. The adapter receipt must bind the exact
+Forge/Pulp SHAs and binary; missing native, DAW, or browser legs stay explicit
+dependencies and must not be replaced with a Pulp example.
+
+For terminal v2, initialize only after the fixed A2T, A3 product-policy, and A3
+runtime receipts are terminal on protected Pulp main. The runner snapshots the
+actual Forge adapter, exact executable product, producer/product/fresh-process
+identities, and all eight artifacts for each original/repeat cell. Do not pass
+a Forge-authored manifest, draft result, or disposition to `finalize-v2`; it
+derives them from the terminal dependencies and 168 accepted nonce receipts.
+Protected publication is a separate fixed-path Git-blob verification step.
+
+The Forge producer must also use the shared instrument-validity contract: each
+metric declares measured/derived/unavailable provenance; timer samples carry a
+detectable known-extra-work calibration; the expected logical point/target
+comes from the frozen scenario while Forge reports the actual event and hit;
+and two same-content captures supply numeric similarity, text, and stroke
+oracles. Preserve any older self-satisfying or constant-valued receipts as
+`SUPERSEDED`/`NONCOUNTED`, not as partial terminal cells.
+
+## Forge GPU-health canary
+
+Forge shells may reuse `ControlGpuHealthViewAdapter` by supplying their real
+back-buffer capture and `GpuSurface` callbacks. The provider is Pulp-owned and
+bounded, but a Forge canary still needs exact Forge/Pulp binary identity and a
+correlated trace. Forge is a visible role: declare
+`native-compositor-presentation` and supply an independent compositor timestamp;
+capture completion is only an upper bound. Missing causal instrumentation stays
+nullable and named rather than becoming fabricated Vellum evidence. Leave an
+unratified startup budget unverified; never substitute a Pulp example
+for the requested Forge product. Exercise the receipt-producing seeded blank
+control documented in `docs/validation/gpu-first-visible-a3-acceptance.md`
+before accepting a real-machine result.
+
+For the A3 terminal campaign, invoke the exact Forge-shell adapter through
+`gpu_first_visible_a3_campaign.py run-role --role forge`. Its identity JSON must
+use `plugin_format: standalone` and bind exact Pulp and Forge revisions; a DAW
+plugin format or Pulp example is rejected even if its pixels match. The adapter
+owns the real 10-cold/10-warm shell lifecycle and native presentation source.
+The runner owns the immutable adapter/budget snapshot and closed artifact
+validation. Preserve timeout, unavailable shell delivery, and missing
+post-Vellum instrumentation as explicit dependencies rather than substituting
+another executable.
+
+For the executable handoff, use
+`gpu_first_visible_a3_external_adapter.py` with the checked-in
+`gpu_first_visible_a3_forge_producer.py`. Configure clean exact-revision Pulp
+and Forge roots, the exact app executable for both product and host identity,
+the product-specific lifecycle driver, checked-in source-bound trace analyzer,
+embedded-build verifier, and the digest-bound Forge build
+attestation/receipt. Configure a reviewed Pulp- or Forge-owned source-build
+driver as well; it must reproduce the executable and complete `.app` tree from
+clean exact-revision sources without receiving the measured path. Both trees
+must bind `CFBundleExecutable`, `CFBundleIdentifier`, and `CFBundleName` to the
+request. The producer pins and rehashes
+those inputs; the driver must resolve to reviewed source at the declared clean
+Pulp or Forge revision. It requires 10+10 reopen/reset rows, producer-observed
+live executable/start identities, independent native presentation, terminated
+owned Forge PIDs, and named replay on the challenged trace-host PID. A missing driver,
+provenance, dirty/wrong source head, different Forge build, or Pulp demo stays
+nonterminal or fails closed.
+
+The exact Forge executable must carry the canonical embedded build marker. Its
+role campaign cost includes active product spans, but terminal A3 also requires
+the separate four-state pre-change/compile-out/compiled-in-idle/active product
+overhead receipt with zero xruns and audio-thread trace events. Keep the
+analyzer's structural `unverified` result distinct from the campaign budget
+verdict; neither an offline A2T classification nor a passing Forge role waives
+the overhead control.
+
+Run that control through `gpu_first_visible_a3_trace_producer_overhead.py
+collect-state` with the exact Forge executable and reviewed Forge lifecycle
+driver. Each state requires 55 live challenges; the source-built `.app` and
+measured executable identities remain exact, and idle/active reuse identical
+bytes. Active binary Perfetto replay covers both the health producer and the
+complete b4ba exact 20-signature `state`/`render`/`js` inventory from the A3
+guide. Acquire/submit/present are mandatory; all other signatures are counted
+and an unobserved one stays not-covered, not zero-cost. Require zero
+xruns/audio-thread producer events. A direct driver result or Pulp example is
+nonterminal.
+Also pin the candidate-relative `state_build_driver`. The collector exports the
+exact source row and default-deny rebuilds it without the measured `.app`,
+ambient build output, or network, then byte-compares the rebuilt executable and
+checks its tracing sentinel. Retain source archive, closed build
+request/receipt, product, logs, and toolchain snapshots; a pre-existing Forge
+bundle cannot satisfy this proof.
+
+Forge A3 v2 campaigns must retain producer/sample provenance and exact trace/analyzer artifacts. Terminal validation reruns the prepared analyzer and binds the result to the Forge revision, role, host process, evidence cohort, categories, and capture completeness.

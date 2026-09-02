@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -7,10 +8,18 @@
 #include <iostream>
 #include <iterator>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <cerrno>
+#include <csignal>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 #include "mcp_server_test_support.hpp"
 
@@ -25,16 +34,65 @@
 #include "timeline_mcp_tools.h"
 #endif
 
+#include <choc/text/choc_JSON.h>
 #include <pulp/inspect/agent_request_queue.hpp>
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/protocol.hpp>
-#include <choc/text/choc_JSON.h>
+#include <pulp_tooling/gpu_probe/probe_result.hpp>
 
 namespace {
 
 using namespace mcp_test;
 using namespace pulp_mcp;
 using namespace pulp_mcp::server;
+namespace gp = pulp::tooling::gpu_probe;
+
+gp::ProbeResult gpu_probe_evidence(gp::Verdict verdict, bool negative_control = false,
+                                   std::string_view recipe_id = "gpu-compute.magnitude.v1") {
+    const auto* recipe = gp::find_recipe(recipe_id);
+    if (recipe == nullptr)
+        throw std::runtime_error("missing GPU probe recipe");
+    gp::ProbeResult result;
+    result.gpu_evidence_id = "0123456789abcdef0123456789abcdef";
+    result.recipe_id = std::string(recipe->id);
+    result.source_digest = std::string(64, 'a');
+    result.signature_digest = std::string(64, 'b');
+    result.dimensions = recipe->dimensions;
+    result.seed = recipe->seed;
+    result.clock = std::string(recipe->clock);
+    result.input_format = std::string(recipe->input_format);
+    result.output_format = std::string(recipe->output_format);
+    result.encoding = std::string(recipe->encoding);
+    result.tolerance = recipe->tolerance;
+    result.adapter_policy = recipe->adapter_policy;
+    result.adapter.status = verdict == gp::Verdict::pass ? gp::IdentityStatus::authentic
+                                                         : gp::IdentityStatus::unavailable;
+    result.adapter.classification =
+        verdict == gp::Verdict::pass ? gp::AdapterClass::hardware : gp::AdapterClass::unknown;
+    result.adapter.backend = "test-backend";
+    result.numeric_sample_count = std::min<std::uint32_t>(16, recipe->bounds.max_numeric_samples);
+    result.verdict = verdict;
+    for (std::size_t i = 0; i < recipe->semantic_passes.size(); ++i) {
+        const auto pass_verdict =
+            i + 1 == recipe->semantic_passes.size() ? verdict : gp::Verdict::pass;
+        result.passes.push_back({static_cast<std::uint32_t>(i),
+                                 std::string(recipe->semantic_passes[i]),
+                                 pass_verdict,
+                                 pass_verdict == gp::Verdict::pass,
+                                 {},
+                                 {},
+                                 {},
+                                 "gpu.probe.test"});
+    }
+    if (negative_control)
+        result.mutation = std::string(recipe->negative_mutation);
+    result.artifacts.push_back(
+        {"values.json", gp::ArtifactKind::json, "application/json", 16, std::string(64, 'c')});
+    std::string error;
+    if (!gp::validate(result, &error))
+        throw std::runtime_error("invalid test GPU probe evidence: " + error);
+    return result;
+}
 
 class ScopedStreamRedirect {
   public:
@@ -90,6 +148,18 @@ class ScopedEnvVar {
     std::string name_;
     std::string previous_;
     bool had_previous_ = false;
+};
+
+class ScopedTraceAnalyzeProcessLimits {
+  public:
+    explicit ScopedTraceAnalyzeProcessLimits(TraceAnalyzeProcessLimits limits) {
+        configure_trace_analyze_process_limits_for_testing(limits);
+    }
+    ~ScopedTraceAnalyzeProcessLimits() {
+        configure_trace_analyze_process_limits_for_testing(std::nullopt);
+    }
+    ScopedTraceAnalyzeProcessLimits(const ScopedTraceAnalyzeProcessLimits&) = delete;
+    ScopedTraceAnalyzeProcessLimits& operator=(const ScopedTraceAnalyzeProcessLimits&) = delete;
 };
 
 // Several tests below shell out to `git -C <tempdir> …` on throwaway repos.
@@ -486,8 +556,7 @@ TEST_CASE("MCP resolves the running image independently of argv0 and cwd",
     const auto executable = current_process_executable_path("pulp-mcp");
     REQUIRE(executable.is_absolute());
     REQUIRE(std::filesystem::is_regular_file(executable));
-    REQUIRE(executable.filename().string().find("pulp-test-mcp-server") !=
-            std::string::npos);
+    REQUIRE(executable.filename().string().find("pulp-test-mcp-server") != std::string::npos);
 }
 
 TEST_CASE("MCP shell exec returns stdout and failure diagnostics", "[mcp][shell]") {
@@ -536,8 +605,9 @@ TEST_CASE("MCP protocol handles initialize ping notification and unknown methods
     auto initialize = handle_request(R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON");
     require_contains(initialize, R"JSON("id":1)JSON");
     require_contains(initialize, R"JSON("protocolVersion":"2024-11-05")JSON");
-    require_contains(initialize,
-                     R"JSON("capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}})JSON");
+    require_contains(
+        initialize,
+        R"JSON("capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}})JSON");
     // serverInfo.version now tracks PROJECT_VERSION (via
     // tools/mcp/pulp_mcp_version.h.in). Hard-coding "0.1.0" caused
     // every CLI release to look identical from the plugin side.
@@ -685,6 +755,11 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_audio_render")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_compare")JSON");
     require_contains(tools, R"JSON("name":"pulp_gpu_doctor")JSON");
+    require_contains(tools, R"JSON("name":"pulp_gpu_probe")JSON");
+    require_contains(tools, R"JSON("name":"pulp_gpu_recipes")JSON");
+    require_contains(tools, "Every canonical row is visible");
+    require_contains(tools, R"JSON("gpu-compute.magnitude.v1")JSON");
+    require_contains(tools, R"JSON("artifacts":{"type":"string")JSON");
     require_contains(tools, R"JSON("no_render":{"type":"boolean")JSON");
     require_contains(tools, R"JSON("outputSchema":{"type":"object")JSON");
     require_contains(tools, R"JSON("exit_code":{"type":"integer","enum":[0,1,2])JSON");
@@ -735,8 +810,7 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(unknown, "Unknown tool: pulp_does_not_exist");
 }
 
-TEST_CASE("MCP GPU doctor preserves typed evidence and status",
-          "[mcp][tools][gpu-doctor]") {
+TEST_CASE("MCP GPU doctor preserves typed evidence and status", "[mcp][tools][gpu-doctor]") {
     TempDir install;
     const auto bin = install.path / "bin";
     std::filesystem::create_directories(bin);
@@ -748,9 +822,9 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status",
     const auto cli = bin / "pulp-cpp";
 #endif
     const auto evidence_path = bin / "gpu-health-evidence.json";
+    const auto argv_path = bin / "gpu-health-argv.txt";
     const auto write_cli = [&](int status, const std::string& fixture_name) {
-        std::ifstream fixture(repo_root_path() / "test" / "fixtures" / "gpu-ux" /
-                              fixture_name);
+        std::ifstream fixture(repo_root_path() / "test" / "fixtures" / "gpu-ux" / fixture_name);
         REQUIRE(fixture);
         std::ofstream evidence(evidence_path, std::ios::trunc);
         evidence << fixture.rdbuf();
@@ -758,10 +832,13 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status",
         std::ofstream script(cli, std::ios::trunc);
 #if defined(_WIN32)
         script << "@echo off\r\n"
+               << "(for %%A in (%*) do @echo %%~A)> \"" << argv_path.string() << "\"\r\n"
                << "type \"" << evidence_path.string() << "\"\r\n"
                << "exit /b " << status << "\r\n";
 #else
         script << "#!/bin/sh\n"
+               << "printf '%s\\n' \"$@\" > " << pulp_mcp::shell_quote(argv_path.string())
+               << "\n"
                << "cat " << pulp_mcp::shell_quote(evidence_path.string()) << "\n"
                << "exit " << status << "\n";
 #endif
@@ -777,7 +854,12 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status",
     const auto unrelated_cwd = install.path / "unrelated" / "working-directory";
     std::filesystem::create_directories(unrelated_cwd);
     ScopedCurrentPath cwd(unrelated_cwd);
-    struct Outcome { int status; const char* fixture; const char* verdict; bool no_render; };
+    struct Outcome {
+        int status;
+        const char* fixture;
+        const char* verdict;
+        bool no_render;
+    };
     const std::array<Outcome, 3> outcomes = {
         Outcome{0, "pass-hardware.json", "pass", false},
         Outcome{1, "fail-async-invalid-wgsl.json", "fail", false},
@@ -796,6 +878,11 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status",
             REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
         else
             require_contains(response, R"JSON("isError":true)JSON");
+        std::ifstream argv(argv_path);
+        const std::string invoked{std::istreambuf_iterator<char>(argv),
+                                  std::istreambuf_iterator<char>()};
+        REQUIRE(invoked == std::string{"doctor\ngpu\n--json\n"} +
+                               (outcome.no_render ? "--no-render\n" : ""));
     }
 
     const auto invalid =
@@ -810,36 +897,459 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status",
     REQUIRE(unknown.find(R"JSON("structuredContent")JSON") == std::string::npos);
 
     write_cli(2, "pass-hardware.json");
-    const auto exit_mismatch = handle_request(
-        tool_call("54", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
+    const auto exit_mismatch =
+        handle_request(tool_call("54", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
     require_contains(exit_mismatch, "incoherent-cli-output");
     REQUIRE(exit_mismatch.find(R"JSON("structuredContent")JSON") == std::string::npos);
 
     write_cli(0, "pass-hardware.json");
-    const auto mode_mismatch = handle_request(
-        tool_call("55", "pulp_gpu_doctor", R"JSON({"no_render":true})JSON"));
+    const auto mode_mismatch =
+        handle_request(tool_call("55", "pulp_gpu_doctor", R"JSON({"no_render":true})JSON"));
     require_contains(mode_mismatch, "incoherent-cli-output");
 
     std::ofstream(evidence_path, std::ios::trunc) << "{}\n";
-    const auto malformed = handle_request(
-        tool_call("56", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
+    const auto malformed =
+        handle_request(tool_call("56", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
     require_contains(malformed, "malformed-cli-output");
     REQUIRE(malformed.find(R"JSON("structuredContent")JSON") == std::string::npos);
 
-    auto wrong_version = std::ifstream(repo_root_path() / "test" / "fixtures" /
-                                       "gpu-ux" / "pass-hardware.json");
+    auto wrong_version =
+        std::ifstream(repo_root_path() / "test" / "fixtures" / "gpu-ux" / "pass-hardware.json");
     REQUIRE(wrong_version);
     std::string wrong_json{std::istreambuf_iterator<char>(wrong_version),
                            std::istreambuf_iterator<char>()};
     const auto version_offset = wrong_json.find("\"version\": 1");
     REQUIRE(version_offset != std::string::npos);
-    wrong_json.replace(version_offset, std::string("\"version\": 1").size(),
-                       "\"version\": 2");
+    wrong_json.replace(version_offset, std::string("\"version\": 1").size(), "\"version\": 2");
     std::ofstream(evidence_path, std::ios::trunc) << wrong_json;
-    const auto unsupported = handle_request(
-        tool_call("57", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
+    const auto unsupported =
+        handle_request(tool_call("57", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
     require_contains(unsupported, "malformed-cli-output");
+
+    std::ifstream pass_fixture(repo_root_path() / "test" / "fixtures" / "gpu-ux" /
+                               "pass-hardware.json");
+    REQUIRE(pass_fixture);
+    std::ofstream(evidence_path, std::ios::trunc) << pass_fixture.rdbuf();
+    std::filesystem::copy_file(PULP_TEST_GPU_PROBE_FAKE_CLI, cli,
+                               std::filesystem::copy_options::overwrite_existing);
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", evidence_path.string());
+    ScopedEnvVar argv_env("PULP_TEST_GPU_PROBE_ARGV", argv_path.string());
+    ScopedEnvVar capped_status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+    ScopedEnvVar capped_output_env("PULP_TEST_GPU_PROBE_STDOUT_TRAILING_BYTES",
+                                   std::to_string((1 << 20) + 4096));
+    const auto capped =
+        handle_request(tool_call("58", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
+    require_contains(capped, "cli-output-limit");
+    require_contains(capped, R"JSON("isError":true)JSON");
+    REQUIRE(capped.find(R"JSON("structuredContent")JSON") == std::string::npos);
 }
+
+TEST_CASE("MCP GPU probe preserves argv and typed status evidence", "[mcp][tools][gpu-probe]") {
+    const auto advertised =
+        handle_request(R"JSON({"jsonrpc":"2.0","id":57,"method":"tools/list"})JSON");
+    const auto recipes_offset = advertised.find(R"JSON("name":"pulp_gpu_recipes")JSON");
+    REQUIRE(recipes_offset != std::string::npos);
+    const auto probe_offset = advertised.find(R"JSON("name":"pulp_gpu_probe")JSON");
+    REQUIRE(probe_offset != std::string::npos);
+    require_contains(advertised.substr(recipes_offset, probe_offset - recipes_offset),
+                     R"JSON("outputSchema":{"type":"object")JSON");
+    const auto advertised_json = choc::json::parse(advertised);
+    const auto tools = advertised_json["result"]["tools"];
+    choc::value::Value probe_tool;
+    for (uint32_t index = 0; index < tools.size(); ++index)
+        if (tools[index]["name"].getString() == "pulp_gpu_probe")
+            probe_tool = tools[index];
+    REQUIRE(probe_tool.isObject());
+    const auto recipe_enum = probe_tool["inputSchema"]["properties"]["recipe"]["enum"];
+    const auto native_recipes = gp::recipes();
+    REQUIRE(native_recipes.size() == 4);
+    REQUIRE(recipe_enum.size() == native_recipes.size());
+    for (uint32_t index = 0; index < recipe_enum.size(); ++index)
+        REQUIRE(recipe_enum[index].getString() == native_recipes[index].id);
+
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+#if defined(_WIN32)
+    const auto mcp = bin / "pulp-mcp.exe";
+    const auto cli = bin / "pulp-cpp.exe";
+#else
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp-cpp";
+#endif
+    const auto evidence_path = install.path / "evidence.json";
+    const auto argv_path = install.path / "argv.txt";
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", evidence_path.string());
+    ScopedEnvVar argv_env("PULP_TEST_GPU_PROBE_ARGV", argv_path.string());
+    configure_gpu_doctor_executable(mcp.string());
+
+    {
+        const auto response = handle_request(
+            tool_call("56", "pulp_gpu_recipes", R"JSON({"action":"list"})JSON"));
+        require_contains(response, R"JSON("schema":"pulp.gpu-recipes-discovery.v1")JSON");
+        for (const auto& recipe : gp::recipes())
+            require_contains(response, std::string(recipe.id));
+        REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
+        REQUIRE_FALSE(std::filesystem::exists(argv_path));
+    }
+
+    {
+        const auto response = handle_request(
+            tool_call("57", "pulp_gpu_recipes",
+                      R"JSON({"action":"list","symptom":"compute-readback-mismatch"})JSON"));
+        require_contains(response, R"JSON("schema":"pulp.gpu-recipes-discovery.v1")JSON");
+        require_contains(response, R"JSON("structuredContent":{"schema")JSON");
+        require_contains(response, "gpu-compute.magnitude.v1");
+        REQUIRE(response.find("renderer3d.hardcoded-cube.v1") == std::string::npos);
+        REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
+        const auto unknown_discovery = handle_request(
+            tool_call("60", "pulp_gpu_recipes",
+                      R"JSON({"action":"list","symptom":"unknown-symptom"})JSON"));
+        require_contains(unknown_discovery, "not-found");
+        REQUIRE(unknown_discovery.find(R"JSON("structuredContent")JSON") == std::string::npos);
+    }
+    require_contains(
+        handle_request(tool_call("61", "pulp_gpu_recipes", R"JSON({"action":"show"})JSON")),
+        "recipe is required for show");
+
+    std::filesystem::copy_file(PULP_TEST_GPU_PROBE_FAKE_CLI, cli);
+    const auto artifacts = (install.path / "artifacts %PULP_MCP_EXPAND% & quoted").string();
+    const auto params =
+        "{\"recipe\":\"gpu-compute.magnitude.v1\",\"artifacts\":" + json_string(artifacts) +
+        ",\"negative_control\":false}";
+    struct Outcome {
+        gp::Verdict verdict;
+        int status;
+        const char* name;
+    };
+    const std::array<Outcome, 4> outcomes{{
+        {gp::Verdict::pass, 0, "pass"},
+        {gp::Verdict::fail, 1, "fail"},
+        {gp::Verdict::unavailable, 2, "unavailable"},
+        {gp::Verdict::unverified, 2, "unverified"},
+    }};
+    for (const auto& outcome : outcomes) {
+        std::ofstream(evidence_path, std::ios::trunc)
+            << gp::to_json(gpu_probe_evidence(outcome.verdict));
+        ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", std::to_string(outcome.status));
+        const auto response = handle_request(tool_call("58", "pulp_gpu_probe", params));
+        require_contains(response, "\"exit_code\":" + std::to_string(outcome.status));
+        require_contains(response, "\"verdict\":\"" + std::string(outcome.name) + "\"");
+        if (outcome.status == 0)
+            REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
+        else
+            require_contains(response, R"JSON("isError":true)JSON");
+    }
+
+    std::ifstream recorded(argv_path);
+    const std::string argv{std::istreambuf_iterator<char>(recorded),
+                           std::istreambuf_iterator<char>()};
+    require_contains(argv, "gpu\nprobe\n--recipe\ngpu-compute.magnitude.v1\n");
+    require_contains(argv, "--artifacts\n" + artifacts + "\n--json\n");
+
+    std::ofstream(evidence_path, std::ios::trunc)
+        << gp::to_json(gpu_probe_evidence(gp::Verdict::fail, true));
+    ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", "1");
+    const auto negative =
+        handle_request(tool_call("59", "pulp_gpu_probe",
+                                 "{\"recipe\":\"gpu-compute.magnitude.v1\",\"artifacts\":" +
+                                     json_string(artifacts) + ",\"negative_control\":true}"));
+    require_contains(negative, R"JSON("mutation":"wgsl-imaginary-weight")JSON");
+    std::ifstream recorded_negative(argv_path);
+    const std::string negative_argv{std::istreambuf_iterator<char>(recorded_negative),
+                                    std::istreambuf_iterator<char>()};
+    require_contains(negative_argv, "--negative-control\n");
+
+    std::ofstream(evidence_path, std::ios::trunc) << gp::to_json(gpu_probe_evidence(
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+        gp::Verdict::pass,
+#else
+        gp::Verdict::unavailable,
+#endif
+        false, "threejs.multi-pass.v1"));
+    ScopedEnvVar threejs_status_env(
+        "PULP_TEST_GPU_PROBE_STATUS",
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+        "0"
+#else
+        "2"
+#endif
+    );
+    const auto threejs = handle_request(tool_call(
+        "60", "pulp_gpu_probe",
+        "{\"recipe\":\"threejs.multi-pass.v1\",\"artifacts\":" + json_string(artifacts) + "}"));
+    require_contains(threejs, R"JSON("recipe_id":"threejs.multi-pass.v1")JSON");
+#if PULP_GPU_PROBE_THREEJS_CALLABLE
+    REQUIRE(threejs.find(R"JSON("isError":true)JSON") == std::string::npos);
+#else
+    require_contains(threejs, R"JSON("verdict":"unavailable")JSON");
+    require_contains(threejs, R"JSON("exit_code":2)JSON");
+    require_contains(threejs, R"JSON("isError":true)JSON");
+#endif
+
+    std::ofstream(evidence_path, std::ios::trunc)
+        << gp::to_json(gpu_probe_evidence(gp::Verdict::pass));
+    ScopedEnvVar capped_status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+    ScopedEnvVar capped_output_env("PULP_TEST_GPU_PROBE_STDOUT_TRAILING_BYTES",
+                                   std::to_string((1 << 20) + 4096));
+    const auto capped = handle_request(tool_call("61", "pulp_gpu_probe", params));
+    require_contains(capped, "cli-output-limit");
+    require_contains(capped, R"JSON("isError":true)JSON");
+    REQUIRE(capped.find(R"JSON("structuredContent")JSON") == std::string::npos);
+}
+
+TEST_CASE("MCP trace analyzer preserves typed verdicts and closed questions",
+          "[mcp][tools][trace]") {
+    const auto advertised =
+        handle_request(R"JSON({"jsonrpc":"2.0","id":57,"method":"tools/list"})JSON");
+    const auto trace_offset = advertised.find(R"JSON("name":"pulp_trace_analyze")JSON");
+    REQUIRE(trace_offset != std::string::npos);
+    require_contains(advertised.substr(trace_offset),
+                     R"JSON("outputSchema":{"type":"object")JSON");
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+#if defined(_WIN32)
+    const auto mcp = bin / "pulp-mcp.exe";
+    const auto cli = bin / "pulp.exe";
+#else
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp";
+#endif
+    const auto result_path = bin / "trace-result.json";
+    const auto argv_path = bin / "trace-argv.txt";
+    std::filesystem::copy_file(PULP_TEST_GPU_PROBE_FAKE_CLI, cli);
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", result_path.string());
+    ScopedEnvVar argv_env("PULP_TEST_GPU_PROBE_ARGV", argv_path.string());
+    const auto write_cli = [&](const std::string& question, const std::string& verdict) {
+        std::ofstream(result_path, std::ios::trunc)
+            << "{\"schema\":\"pulp.trace-gpu-analysis.v1\",\"question\":\"" << question
+            << "\",\"verdict\":\"" << verdict
+            << "\",\"capture_complete\":true,\"capture_integrity\":{},"
+               "\"scheduler_evidence_available\":false,"
+               "\"cold_start_contributors\":[],\"steady_state_contributors\":[],"
+               "\"contributors\":[],"
+               "\"evidence_ids\":[],\"next_actions\":[],\"ui_correlation\":{}}\n";
+    };
+
+    configure_trace_analyze_executable(mcp.string());
+    const auto unrelated_cwd = install.path / "unrelated";
+    std::filesystem::create_directories(unrelated_cwd);
+    ScopedCurrentPath cwd(unrelated_cwd);
+    struct Outcome {
+        int status;
+        const char* question;
+        const char* verdict;
+        const char* trace;
+    };
+    const std::array<Outcome, 3> outcomes = {
+        Outcome{0, "gpu-health", "pass",
+                R"(C:\Users\Example User\Pulp Traces\ordinary capture.pftrace)"},
+        Outcome{1, "gpu-probe", "fail",
+                R"(C:\Pulp Traces\a "quoted" capture & whoami | more <nul >nul ^()%!.pftrace)"},
+        Outcome{2, "gpu-startup", "unverified", "/tmp/input trace.pftrace"},
+    };
+    for (const auto& outcome : outcomes) {
+        write_cli(outcome.question, outcome.verdict);
+        ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", std::to_string(outcome.status));
+        const auto response =
+            handle_request(tool_call("58", "pulp_trace_analyze",
+                                     "{\"question\":" +
+                                         json_string(outcome.question) + ",\"trace\":" +
+                                         json_string(outcome.trace) + "}"));
+        require_contains(response, R"JSON("schema":"pulp.trace-gpu-analysis.v1")JSON");
+        require_contains(response, "\"verdict\":\"" + std::string(outcome.verdict) + "\"");
+        require_contains(response, R"JSON("structuredContent":)JSON");
+        if (outcome.status == 0)
+            REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
+        else
+            require_contains(response, R"JSON("isError":true)JSON");
+
+        std::ifstream argv(argv_path);
+        const std::string invoked{std::istreambuf_iterator<char>(argv),
+                                  std::istreambuf_iterator<char>()};
+        REQUIRE(invoked == "trace\n" + std::string(outcome.question) + "\n--trace\n" +
+                               outcome.trace + "\n--json\n");
+    }
+
+    for (const auto& malformed_result : {
+             std::string{
+                 R"JSON({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-health","verdict":"pass"})JSON"},
+             std::string{
+                 R"JSON({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-health","verdict":"pass","capture_complete":"yes"})JSON"},
+         }) {
+        std::ofstream(result_path, std::ios::trunc) << malformed_result << '\n';
+        ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+        const auto response = handle_request(tool_call(
+            "61", "pulp_trace_analyze",
+            R"JSON({"question":"gpu-health","trace":"x.pftrace"})JSON"));
+        require_contains(response, "malformed-cli-output");
+        REQUIRE(response.find(R"JSON("structuredContent")JSON") == std::string::npos);
+    }
+
+    const auto invalid_question = handle_request(tool_call(
+        "59", "pulp_trace_analyze",
+        R"JSON({"question":"startup","trace":"x.pftrace"})JSON"));
+    require_contains(invalid_question, "invalid-arguments");
+    REQUIRE(invalid_question.find(R"JSON("structuredContent")JSON") == std::string::npos);
+    const auto freeform_sql = handle_request(tool_call(
+        "60", "pulp_trace_analyze",
+        R"JSON({"question":"gpu-health","trace":"x.pftrace","sql":"select 1"})JSON"));
+    require_contains(freeform_sql, "invalid-arguments");
+    REQUIRE(freeform_sql.find(R"JSON("structuredContent")JSON") == std::string::npos);
+}
+
+TEST_CASE("MCP trace analyzer leaves time and output headroom for CLI-owned cleanup",
+          "[mcp][tools][trace]") {
+    const auto production = trace_analyze_process_limits();
+    REQUIRE(production.timeout_ms > 122 * 1000);
+    REQUIRE(production.max_output_bytes > 4 * 1024 * 1024);
+
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+#if defined(_WIN32)
+    const auto mcp = bin / "pulp-mcp.exe";
+    const auto cli = bin / "pulp.exe";
+#else
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp";
+#endif
+    const auto result_path = bin / "trace-result.json";
+    const auto argv_path = bin / "trace-argv.txt";
+    std::filesystem::copy_file(PULP_TEST_GPU_PROBE_FAKE_CLI, cli);
+    std::ofstream(result_path)
+        << R"JSON({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-health","verdict":"pass","capture_complete":true,"capture_integrity":{},"scheduler_evidence_available":false,"cold_start_contributors":[],"steady_state_contributors":[]})JSON";
+    configure_trace_analyze_executable(mcp.string());
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", result_path.string());
+    ScopedEnvVar argv_env("PULP_TEST_GPU_PROBE_ARGV", argv_path.string());
+    ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+    ScopedEnvVar delay_env("PULP_TEST_GPU_PROBE_DELAY_MS", "150");
+    ScopedEnvVar flood_env("PULP_TEST_GPU_PROBE_STDERR_BYTES", "131072");
+    ScopedTraceAnalyzeProcessLimits scaled_limits({500, 256 * 1024});
+
+    const auto response = handle_request(tool_call(
+        "62", "pulp_trace_analyze",
+        R"JSON({"question":"gpu-health","trace":"headroom.pftrace"})JSON"));
+    require_contains(response, R"JSON("verdict":"pass")JSON");
+    REQUIRE(response.find("cli-timeout") == std::string::npos);
+    REQUIRE(response.find("cli-output-limit") == std::string::npos);
+}
+
+TEST_CASE("MCP trace analyzer rejects output beyond its retained cap",
+          "[mcp][tools][trace]") {
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+#if defined(_WIN32)
+    const auto mcp = bin / "pulp-mcp.exe";
+    const auto cli = bin / "pulp.exe";
+#else
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp";
+#endif
+    const auto result_path = bin / "trace-result.json";
+    const auto argv_path = bin / "trace-argv.txt";
+    std::filesystem::copy_file(PULP_TEST_GPU_PROBE_FAKE_CLI, cli);
+    std::ofstream(result_path)
+        << R"JSON({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-health","verdict":"pass","capture_complete":true,"capture_integrity":{},"scheduler_evidence_available":false,"cold_start_contributors":[],"steady_state_contributors":[]})JSON";
+    configure_trace_analyze_executable(mcp.string());
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", result_path.string());
+    ScopedEnvVar argv_env("PULP_TEST_GPU_PROBE_ARGV", argv_path.string());
+    ScopedEnvVar status_env("PULP_TEST_GPU_PROBE_STATUS", "0");
+    ScopedEnvVar flood_env("PULP_TEST_GPU_PROBE_STDERR_BYTES", "300000");
+    ScopedTraceAnalyzeProcessLimits scaled_limits({1000, 256 * 1024});
+
+    const auto response = handle_request(tool_call(
+        "64", "pulp_trace_analyze",
+        R"JSON({"question":"gpu-health","trace":"overflow.pftrace"})JSON"));
+    require_contains(response, "cli-output-limit");
+    REQUIRE(response.find(R"JSON("structuredContent")JSON") == std::string::npos);
+}
+
+#if !defined(_WIN32)
+TEST_CASE("MCP trace analyzer permits CLI-owned hanging descendant cleanup",
+          "[mcp][tools][trace]") {
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp";
+    const auto result_path = bin / "trace-result.json";
+    const auto pid_path = bin / "descendant.pid";
+    std::ofstream(result_path)
+        << R"JSON({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-health","verdict":"pass","capture_complete":true,"capture_integrity":{},"scheduler_evidence_available":false,"cold_start_contributors":[],"steady_state_contributors":[]})JSON";
+    std::ofstream(cli)
+        << "#!/bin/sh\n"
+           "sleep 30 &\n"
+           "child=$!\n"
+           "printf '%s\\n' \"$child\" > \"$PULP_TEST_TRACE_DESCENDANT_PID\"\n"
+           "sleep 0.15\n"
+           "kill \"$child\"\n"
+           "wait \"$child\" 2>/dev/null || true\n"
+           "cat \"$PULP_TEST_GPU_PROBE_EVIDENCE\"\n";
+    std::filesystem::permissions(cli, std::filesystem::perms::owner_exec |
+                                          std::filesystem::perms::owner_read |
+                                          std::filesystem::perms::owner_write);
+    configure_trace_analyze_executable(mcp.string());
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", result_path.string());
+    ScopedEnvVar pid_env("PULP_TEST_TRACE_DESCENDANT_PID", pid_path.string());
+    ScopedTraceAnalyzeProcessLimits scaled_limits({500, 256 * 1024});
+
+    const auto response = handle_request(tool_call(
+        "63", "pulp_trace_analyze",
+        R"JSON({"question":"gpu-health","trace":"hanging-child.pftrace"})JSON"));
+    require_contains(response, R"JSON("verdict":"pass")JSON");
+    std::ifstream pid_file(pid_path);
+    pid_t descendant = -1;
+    pid_file >> descendant;
+    REQUIRE(descendant > 0);
+    errno = 0;
+    REQUIRE(::kill(descendant, 0) == -1);
+    REQUIRE(errno == ESRCH);
+}
+
+TEST_CASE("MCP trace output overflow waits for CLI descendant cleanup",
+          "[mcp][tools][trace]") {
+    TempDir install;
+    const auto bin = install.path / "bin";
+    std::filesystem::create_directories(bin);
+    const auto mcp = bin / "pulp-mcp";
+    const auto cli = bin / "pulp";
+    const auto result_path = bin / "trace-result.json";
+    const auto pid_path = bin / "overflow-descendant.pid";
+    std::ofstream(result_path)
+        << R"JSON({"schema":"pulp.trace-gpu-analysis.v1","question":"gpu-health","verdict":"pass","capture_complete":true,"capture_integrity":{},"scheduler_evidence_available":false,"cold_start_contributors":[],"steady_state_contributors":[]})JSON";
+    std::ofstream(cli)
+        << "#!/bin/sh\n"
+           "sleep 30 &\n"
+           "child=$!\n"
+           "printf '%s\\n' \"$child\" > \"$PULP_TEST_TRACE_DESCENDANT_PID\"\n"
+           "cat \"$PULP_TEST_GPU_PROBE_EVIDENCE\"\n"
+           "dd if=/dev/zero bs=131072 count=1 2>/dev/null | tr '\\000' ' '\n"
+           "kill \"$child\"\n"
+           "wait \"$child\" 2>/dev/null || true\n";
+    std::filesystem::permissions(cli, std::filesystem::perms::owner_exec |
+                                          std::filesystem::perms::owner_read |
+                                          std::filesystem::perms::owner_write);
+    configure_trace_analyze_executable(mcp.string());
+    ScopedEnvVar evidence_env("PULP_TEST_GPU_PROBE_EVIDENCE", result_path.string());
+    ScopedEnvVar pid_env("PULP_TEST_TRACE_DESCENDANT_PID", pid_path.string());
+    ScopedTraceAnalyzeProcessLimits scaled_limits({1000, 64 * 1024});
+
+    const auto response = handle_request(tool_call(
+        "65", "pulp_trace_analyze",
+        R"JSON({"question":"gpu-health","trace":"overflow-child.pftrace"})JSON"));
+    require_contains(response, "cli-output-limit");
+    std::ifstream pid_file(pid_path);
+    pid_t descendant = -1;
+    pid_file >> descendant;
+    REQUIRE(descendant > 0);
+    errno = 0;
+    REQUIRE(::kill(descendant, 0) == -1);
+    REQUIRE(errno == ESRCH);
+}
+#endif
 
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
 TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][tools][timeline]") {
@@ -1052,12 +1562,12 @@ TEST_CASE("MCP exposes canonical profiles and retains the dated inspector alias"
     REQUIRE(canonical.substr(canonical.find("\"structuredContent\":")) ==
             alias.substr(alias.find("\"structuredContent\":")));
 
-    const auto tools = handle_request(
-        R"JSON({"jsonrpc":"2.0","id":603,"method":"tools/list","params":{}})JSON");
+    const auto tools =
+        handle_request(R"JSON({"jsonrpc":"2.0","id":603,"method":"tools/list","params":{}})JSON");
     require_contains(tools, "Deprecated compatibility alias for pulp_control_profiles");
     require_contains(tools, "Pulp 0.800.0 on 2026-10-01");
-    for (const char* removed : {"pulp_inspect_list", "pulp_inspect_capabilities",
-                                "pulp_inspect_doctor"}) {
+    for (const char* removed :
+         {"pulp_inspect_list", "pulp_inspect_capabilities", "pulp_inspect_doctor"}) {
         REQUIRE(tools.find(std::string(R"JSON("name":")JSON") + removed + '"') ==
                 std::string::npos);
         const auto response = handle_request(tool_call("603", removed));
@@ -2633,15 +3143,12 @@ TEST_CASE("MCP canonical trace lifecycle is default denied", "[mcp][tools][trace
     const auto trace_schema = tools.substr(trace_start, trace_stop - trace_start);
     require_contains(trace_schema, R"("minimum":1)");
     require_contains(trace_schema, R"("maximum":512)");
-    REQUIRE(trace_schema.find(R"JSON("session_id":{"type":"string")JSON") ==
-            std::string::npos);
-    REQUIRE(trace_schema.find(R"JSON("instance_id":{"type":"string")JSON") ==
-            std::string::npos);
-    REQUIRE(trace_schema.find(R"JSON("publication_id":{"type":"string")JSON") ==
-            std::string::npos);
+    REQUIRE(trace_schema.find(R"JSON("session_id":{"type":"string")JSON") == std::string::npos);
+    REQUIRE(trace_schema.find(R"JSON("instance_id":{"type":"string")JSON") == std::string::npos);
+    REQUIRE(trace_schema.find(R"JSON("publication_id":{"type":"string")JSON") == std::string::npos);
     REQUIRE(trace_schema.find(R"("out_path")") == std::string::npos);
-    const auto trace_stop_schema = tools.substr(
-        trace_stop, tools.find(R"("name":"pulp_minos")", trace_stop) - trace_stop);
+    const auto trace_stop_schema =
+        tools.substr(trace_stop, tools.find(R"("name":"pulp_minos")", trace_stop) - trace_stop);
     REQUIRE(trace_stop_schema.find(R"JSON("required":[)JSON") == std::string::npos);
 
     auto query = handle_request(tool_call(std::to_string(id++), "pulp_trace_query",
@@ -2665,8 +3172,7 @@ TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods", "[mcp][tools
     const std::string src = buf.str();
 
     REQUIRE(src.find("run_control_trace_command") != std::string::npos);
-    for (const char* removed : {"pulp_trace_snapshot", "pulp_trace_query",
-                                "pulp_trace_explain"}) {
+    for (const char* removed : {"pulp_trace_snapshot", "pulp_trace_query", "pulp_trace_explain"}) {
         REQUIRE(src.find(std::string("\"name\":\"") + removed + "\"") == std::string::npos);
     }
 }

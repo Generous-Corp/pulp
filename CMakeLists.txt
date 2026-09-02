@@ -83,6 +83,9 @@ option(PULP_CHANGED_SURFACE_INVENTORY_TARGET
        "Validate the exact filtered CTest inventory for Shipyard's declared shadow-selection target"
        OFF)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
+option(PULP_ENABLE_THREEJS_RUNTIME
+       "Stage the pinned Three.js WebGPU runtime for installed-SDK consumers"
+       ${PULP_ENABLE_GPU})
 option(PULP_ENABLE_PROJECT_PACKAGE
        "Build and export the durable project-package subsystem and dependent C++ timeline authoring tools"
        ON)
@@ -444,6 +447,11 @@ endfunction()
 _pulp_configure_standalone_target(pulp-standalone pulp::view)
 _pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
 
+# The GPU-health contracts are CPU-only and back Inspector's typed read
+# executor, so define the model before the optional Inspector runtime on every
+# supported SDK configuration. Native probes remain desktop-tooling-only.
+add_subdirectory(tools/cli/gpu_health)
+
 # The control manifest and protocol registry are CPU-only audit data and remain
 # available even when live Inspector support is disabled. inspect/CMakeLists.txt
 # returns after that foundation in production-stripped configurations.
@@ -523,8 +531,16 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND
         pulp::inspect-standalone-runtime pulp::standalone)
     target_link_options(pulp-control-standalone-host PRIVATE
         "LINKER:-dead_strip_dylibs")
+    set(_pulp_control_standalone_capabilities
+        "dev.pulp.instance/read@1;dev.pulp.state/read@1")
+    if(PULP_ENABLE_GPU)
+        list(APPEND _pulp_control_standalone_capabilities
+            "dev.pulp.gpu/health.read@1")
+    endif()
     _pulp_cache_control_declarations(pulp-control-standalone-host
-        developer-local "dev.pulp.instance/read@1;dev.pulp.state/read@1" FALSE)
+        developer-local
+        "${_pulp_control_standalone_capabilities}"
+        FALSE)
     _pulp_configure_control_shipping(pulp-control-standalone-host
         "dev.pulp.control-standalone-host" "Pulp Control Standalone Host")
     _pulp_attach_control_shipping(pulp-control-standalone-host
@@ -581,11 +597,12 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
 endif()
 
-# ── CPU-only GPU-health contract model (desktop tooling) ──────────────────
+# ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
 # MCP remains available in GPU-disabled/package-stripped configurations, so
-# its closed result parser must not be hidden behind the native CLI/GPU guard.
+# the probe's closed result parser must not be hidden behind the native
+# CLI/GPU guard. GPU-health is defined above because Inspector also consumes it.
 if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
-    add_subdirectory(tools/cli/gpu_health)
+    add_subdirectory(tools/cli/gpu_probe)
 endif()
 
 # ── CLI Tool (desktop only) ────────────────────────────────────────────────

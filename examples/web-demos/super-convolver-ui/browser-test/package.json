@@ -1,0 +1,12 @@
+{
+  "name": "pulp-super-convolver-browser-test",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright-core": "1.61.1"
+  }
+}

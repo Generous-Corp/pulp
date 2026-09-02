@@ -1,0 +1,1 @@
+{"traceEvents":[{"name":"gpu_pipeline_prepare","cat":"gpu","ph":"X","ts":1000,"dur":800,"pid":1,"tid":1,"args":{"debug.gpu_evidence_id":"0123456789abcdef0123456789abcdef","debug.health_state":"healthy","debug.sequence":1,"debug.frame_index":0}},

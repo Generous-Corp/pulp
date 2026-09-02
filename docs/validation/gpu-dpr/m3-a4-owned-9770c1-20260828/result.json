@@ -1,0 +1,4602 @@
+{
+  "dependencies": {
+    "a2t_receipt": null,
+    "a3_budget_id": null,
+    "a3_receipt": null
+  },
+  "disposition": null,
+  "eligible_for_policy": false,
+  "evidence_kind": "measured",
+  "experiment_id": "a4-owned-terminal-9770c1-20260828",
+  "forge_sha": "0750a88dea3af7fca927a8c02887e071109407ae",
+  "matrix": {
+    "manifest_sha256": "fb0644e32e599f2069405d81deea7d5668089aaafd67b07fad6537b482de6213",
+    "modes": [
+      "exact",
+      "configured_max",
+      "adaptive_simulation"
+    ],
+    "requested_dprs": [
+      1,
+      1.5,
+      2,
+      3
+    ],
+    "scenario_ids": [
+      "dense-text-thin-strokes",
+      "shader-heavy-controls",
+      "meters-waveforms",
+      "threejs-audio-reactive",
+      "forge-modular-native",
+      "forge-modular-daw",
+      "super-convolver-web"
+    ]
+  },
+  "observations": [
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-1/b4ac3b10bcffdfd278573ef280b9dd8d/capture.png",
+          "sha256": "5fc2c4b92e1a5aff1a81681666f17d6a2f64fe94734391cf2d39cff75b66b063"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-1/b4ac3b10bcffdfd278573ef280b9dd8d/input_receipt.json",
+          "sha256": "20a572140fc22672fa0db86afb61809d1b19e2c7826eb97d5cecd683047e8764"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-1/b4ac3b10bcffdfd278573ef280b9dd8d/raw_samples.json",
+          "sha256": "b19f0f6a10904de5bdfc1f4ef2f32b55dfe0bb31e22fcd78c65f541a7fc1997e"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-1/b4ac3b10bcffdfd278573ef280b9dd8d/trace.pftrace",
+          "sha256": "2863a38de7e20aec7df2c33c747ffedb34ac6cf99ef6fa6bc858642ded8a2484"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.28460399999999997,
+          "p95": 0.454917,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 64.890646,
+          "p95": 73.330416,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.28570850000000003,
+          "p95": 0.45575,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "b4ac3b10bcffdfd278573ef280b9dd8d"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-1.5/62408af26ad7aec76d2f12cd03790a5e/capture.png",
+          "sha256": "bac248ff8e44e9120903420fa27164e874df2ceae9a9d8c7f305ccb2b91b7ee1"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-1.5/62408af26ad7aec76d2f12cd03790a5e/input_receipt.json",
+          "sha256": "20d42072ac0012279856c8ee861bb78e927ea083b5ffa9f49ef0cbbb4af4c125"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-1.5/62408af26ad7aec76d2f12cd03790a5e/raw_samples.json",
+          "sha256": "370587c76431de1ad8706ac0d4ec8bb6b4d5a44a4c41197705c3faf0ba657db7"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-1.5/62408af26ad7aec76d2f12cd03790a5e/trace.pftrace",
+          "sha256": "acb6824f2692faa9ef44d059280ca8a302b228df23549d285e1fb1f5fd37bcd4"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.29522950000000003,
+          "p95": 0.429959,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 64.160979,
+          "p95": 69.268875,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.2961045,
+          "p95": 0.430917,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 540,
+        "width": 960
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "62408af26ad7aec76d2f12cd03790a5e"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-2/c6deca95a97ab09d4168d4aa32bfebc7/capture.png",
+          "sha256": "6999e729e0352440116a662e598a43674801b7edbbfef34961746826b98ad1f9"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-2/c6deca95a97ab09d4168d4aa32bfebc7/input_receipt.json",
+          "sha256": "2e78d3c7a9fa27ad62204a18f78e2f9324049f4ab8cb09c96f53ef36b165505c"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-2/c6deca95a97ab09d4168d4aa32bfebc7/raw_samples.json",
+          "sha256": "b23fd538ec9c80adc0b0da02e6f96a501213a5a51f5d9e77e0082003e62dd110"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-2/c6deca95a97ab09d4168d4aa32bfebc7/trace.pftrace",
+          "sha256": "9bc60de8aa200b631674fde0981db7985707fa76b6cd4bcf0b20a27f8f1a7260"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.290083,
+          "p95": 0.451667,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 63.6366665,
+          "p95": 71.191708,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.2908545,
+          "p95": 0.4525,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "c6deca95a97ab09d4168d4aa32bfebc7"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-3/771f55e7f5316367ee1bd97492fc0754/capture.png",
+          "sha256": "b0a8846b94ee48f7acc8d0c56245c8e9ddd01b8b88a613ce186c420941f8c583"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-3/771f55e7f5316367ee1bd97492fc0754/input_receipt.json",
+          "sha256": "44cb27a8a3efd38e0d627e419aa027beaf53952ac3f41970e5a35dfbcacf5fc7"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-3/771f55e7f5316367ee1bd97492fc0754/raw_samples.json",
+          "sha256": "d43594e63574c44306c110a972a02a73b1d1f5e5a20ca35ae82093e95b3e5a96"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__exact__dpr-3/771f55e7f5316367ee1bd97492fc0754/trace.pftrace",
+          "sha256": "1633305124b91c4b40f9fe58a3d2f2240cf990f13c4b73d6e3426c4687a04189"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.3172915,
+          "p95": 0.456708,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 68.9952085,
+          "p95": 72.603,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.31820899999999996,
+          "p95": 0.457667,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 3,
+      "physical_size": {
+        "height": 1080,
+        "width": 1920
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "771f55e7f5316367ee1bd97492fc0754"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-1/07d89c444e5f3c42125993ff60facee7/capture.png",
+          "sha256": "5fc2c4b92e1a5aff1a81681666f17d6a2f64fe94734391cf2d39cff75b66b063"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-1/07d89c444e5f3c42125993ff60facee7/input_receipt.json",
+          "sha256": "77a225b896237bcb5e528cdcd112f409a18084ce2e11f95df8e4179f9c0c4bec"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-1/07d89c444e5f3c42125993ff60facee7/raw_samples.json",
+          "sha256": "b4873e235a4d21ec410fc7a3d64aada41ab77a1a7f5898a8c52cd61e52501d95"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-1/07d89c444e5f3c42125993ff60facee7/trace.pftrace",
+          "sha256": "972c4c329337fcd268e7d8875af9641a73394ac83d5dcec362406b3098806b10"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.31043699999999996,
+          "p95": 0.5275,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 70.662917,
+          "p95": 118.757958,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.311333,
+          "p95": 0.530542,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "07d89c444e5f3c42125993ff60facee7"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-1.5/8c7d4eca1ec07cfee4b8355963817063/capture.png",
+          "sha256": "bac248ff8e44e9120903420fa27164e874df2ceae9a9d8c7f305ccb2b91b7ee1"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-1.5/8c7d4eca1ec07cfee4b8355963817063/input_receipt.json",
+          "sha256": "bcc807e349fc9eb7a45eacdf25c061fada40f696e4ef87d9d2b341948e78601e"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-1.5/8c7d4eca1ec07cfee4b8355963817063/raw_samples.json",
+          "sha256": "954055e2991d84d9dac2e4ad1af4855f0d1b3bc2ebbf984c110ef60100b4f8c1"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-1.5/8c7d4eca1ec07cfee4b8355963817063/trace.pftrace",
+          "sha256": "067f42b75ee67f7fac733b824215933fc00a3c1eb836ac3a721c709b1c48fd9a"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.30091650000000003,
+          "p95": 0.423416,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 65.04641649999999,
+          "p95": 69.714208,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3018335,
+          "p95": 0.424208,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 540,
+        "width": 960
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "8c7d4eca1ec07cfee4b8355963817063"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-2/1f5fd32c3359ed138b2c7ff2893482d1/capture.png",
+          "sha256": "6999e729e0352440116a662e598a43674801b7edbbfef34961746826b98ad1f9"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-2/1f5fd32c3359ed138b2c7ff2893482d1/input_receipt.json",
+          "sha256": "65408182dd1ea135e73da7eb8fb1812fef96fb2c2a90694777f5b8a1d337b43f"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-2/1f5fd32c3359ed138b2c7ff2893482d1/raw_samples.json",
+          "sha256": "3cbff957dd1fc795d6410c75a3574c6adb825665c49f82036ace1d95364ec42d"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-2/1f5fd32c3359ed138b2c7ff2893482d1/trace.pftrace",
+          "sha256": "a768160c10592bd0d9f199bb9252a9e0445b6e54e97657fc1389213a8494d7d3"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.290354,
+          "p95": 0.414708,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 60.3047295,
+          "p95": 64.866334,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.29225,
+          "p95": 0.41575,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "1f5fd32c3359ed138b2c7ff2893482d1"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-3/22a29c299cd218471795460d019b4b0a/capture.png",
+          "sha256": "6999e729e0352440116a662e598a43674801b7edbbfef34961746826b98ad1f9"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-3/22a29c299cd218471795460d019b4b0a/input_receipt.json",
+          "sha256": "9f9e64ab26e04e291d6a5aa03a60dc3385618a93a9b767d4cffcdc6accd6c1f1"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-3/22a29c299cd218471795460d019b4b0a/raw_samples.json",
+          "sha256": "465a1369bb67cd78def0b0665e2b3803c2fb656f60a644981b6881b8bf127417"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__configured_max__dpr-3/22a29c299cd218471795460d019b4b0a/trace.pftrace",
+          "sha256": "b2398eaad932ee0a8dda030cd1ebfcecec10db409734ba9300afb13fcd563e64"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.310667,
+          "p95": 0.405792,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 62.181646,
+          "p95": 66.279542,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.31147899999999995,
+          "p95": 0.406583,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "22a29c299cd218471795460d019b4b0a"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-1/3edc8ea401ec74d950881a53f85137fe/capture.png",
+          "sha256": "5fc2c4b92e1a5aff1a81681666f17d6a2f64fe94734391cf2d39cff75b66b063"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-1/3edc8ea401ec74d950881a53f85137fe/input_receipt.json",
+          "sha256": "d1622f62013909dbd262eb9dff933d9f6ff56f40bf206db36045da3c32cbbcbc"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-1/3edc8ea401ec74d950881a53f85137fe/raw_samples.json",
+          "sha256": "b919dd462429ca050a3cfe49d739316295192a12f3b5c8fd98b9fbc67618d9fa"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-1/3edc8ea401ec74d950881a53f85137fe/trace.pftrace",
+          "sha256": "837e4caccd74bc0c0c5b3263b2a01c871ac6f9788b24348c6529ea788280e6db"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.3361875,
+          "p95": 0.426583,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 63.855562500000005,
+          "p95": 72.743875,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.338166,
+          "p95": 0.4275,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "3edc8ea401ec74d950881a53f85137fe"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-1.5/e1a3dffe765f4b0f4c32f532ac98dd2f/capture.png",
+          "sha256": "bac248ff8e44e9120903420fa27164e874df2ceae9a9d8c7f305ccb2b91b7ee1"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-1.5/e1a3dffe765f4b0f4c32f532ac98dd2f/input_receipt.json",
+          "sha256": "e76fe01da38917d944d0cea746a47142d234735a46125b86088326dae1fb9ab8"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-1.5/e1a3dffe765f4b0f4c32f532ac98dd2f/raw_samples.json",
+          "sha256": "10b1c074bb479341e815e5e3633a2529f98287a53ac1eea1063e3d603a700ee9"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-1.5/e1a3dffe765f4b0f4c32f532ac98dd2f/trace.pftrace",
+          "sha256": "3909aa78c972ba2009168ef277db92c5ac094000ac715f26c339505f39b91d06"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.319479,
+          "p95": 0.540791,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 67.988833,
+          "p95": 70.561125,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.196608,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3205,
+          "p95": 0.544042,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 540,
+        "width": 960
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "e1a3dffe765f4b0f4c32f532ac98dd2f"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-2/4d7f45e1034901523438aaab8117af64/capture.png",
+          "sha256": "6999e729e0352440116a662e598a43674801b7edbbfef34961746826b98ad1f9"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-2/4d7f45e1034901523438aaab8117af64/input_receipt.json",
+          "sha256": "f69690af97d1360636f70ad753a64755c4790fa7550e54b2522eebb6919413d5"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-2/4d7f45e1034901523438aaab8117af64/raw_samples.json",
+          "sha256": "cbfc374e5e94b41d82663f814a49286b114ce920ebd5b46f8126e51861551173"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-2/4d7f45e1034901523438aaab8117af64/trace.pftrace",
+          "sha256": "9aad04d0f5b40bab9f64980ec3c85c1183bfcf26f7e7e1eaf97b3d6a6ff7880f"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.301542,
+          "p95": 0.4275,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 68.496021,
+          "p95": 77.612709,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3023755,
+          "p95": 0.428292,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "4d7f45e1034901523438aaab8117af64"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-3/ea35c8d201a96ab6cbcd9ecdfccc56de/capture.png",
+          "sha256": "b0a8846b94ee48f7acc8d0c56245c8e9ddd01b8b88a613ce186c420941f8c583"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-3/ea35c8d201a96ab6cbcd9ecdfccc56de/input_receipt.json",
+          "sha256": "7039ed3e2c90d1ef498ed06a1b51488cd0ecd35f67e6e4b6a3393a3d3a56ab82"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-3/ea35c8d201a96ab6cbcd9ecdfccc56de/raw_samples.json",
+          "sha256": "095fa3a86e4a297c03f1a5e049be904920530696731fd08031197a12895feae7"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-3/ea35c8d201a96ab6cbcd9ecdfccc56de/trace.pftrace",
+          "sha256": "2512aba0a17b56ce2e9837d30d5d96252b8e6e657423d6d3e22fa749994a5e60"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.298917,
+          "p95": 0.465791,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 63.036146,
+          "p95": 68.559458,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.2996455,
+          "p95": 0.46825,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 3,
+      "physical_size": {
+        "height": 1080,
+        "width": 1920
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "dense-text-thin-strokes",
+      "trace_evidence_ids": [
+        "ea35c8d201a96ab6cbcd9ecdfccc56de"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-1/104e24029399208779850217162d6c04/capture.png",
+          "sha256": "c09b5c66c7d155c98ce967ac73ce18fb7153d918e49800999be13b0d62eeab1e"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-1/104e24029399208779850217162d6c04/input_receipt.json",
+          "sha256": "87377c1442bd1812075c3a3a628150fb748c7ecc8bbec9544da253e42e745149"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-1/104e24029399208779850217162d6c04/raw_samples.json",
+          "sha256": "497b648de0a528dae0063f1f9ba6f084cc79c8b3c2370980180a59fd48aea6b4"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-1/104e24029399208779850217162d6c04/trace.pftrace",
+          "sha256": "eeeb4613204022e343ac216e516c7a0b5f41b13be872a4d57a1462a995386067"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.3840835,
+          "p95": 0.526667,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 64.63625,
+          "p95": 72.751334,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3856875,
+          "p95": 0.528584,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "104e24029399208779850217162d6c04"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-1.5/09efccb719a4d2a2429657a987a30f2c/capture.png",
+          "sha256": "a4359793d6e524970c70d19427ce5e450fef7c17d5dad45d53bff6908b557ceb"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-1.5/09efccb719a4d2a2429657a987a30f2c/input_receipt.json",
+          "sha256": "dbf8e239c2e85d39f804adb909d2d10cc7f338fb1390d6babda58cdecc96ca79"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-1.5/09efccb719a4d2a2429657a987a30f2c/raw_samples.json",
+          "sha256": "40a16785fcb9156d44d66837126b61fe8eec0080d711858977b0941a2c4eabf3"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-1.5/09efccb719a4d2a2429657a987a30f2c/trace.pftrace",
+          "sha256": "247e75cc8c391d764e6824d6025bf06dc6f6476d3365607b9809124d561a070a"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.3714375,
+          "p95": 0.458541,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 68.4512295,
+          "p95": 90.542959,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3723335,
+          "p95": 0.459541,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 540,
+        "width": 960
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "09efccb719a4d2a2429657a987a30f2c"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-2/de2c4538b54cbc208f1d348c00c44b3a/capture.png",
+          "sha256": "726ba24e26083755851e7e36b5d964d9b63b901f5ac91d9e16cc8225178d7d15"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-2/de2c4538b54cbc208f1d348c00c44b3a/input_receipt.json",
+          "sha256": "a843641c926e78bea864f9c9ce0eb21767a5754631fafd6bcec1ba0340df4987"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-2/de2c4538b54cbc208f1d348c00c44b3a/raw_samples.json",
+          "sha256": "037c1885b61e33f923ad49826768f5841e47a33a74849700ff519e5c8a2e14f4"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-2/de2c4538b54cbc208f1d348c00c44b3a/trace.pftrace",
+          "sha256": "9e07e2a77fd305b7cad2bc482b49714ab0785b0b319fa3b47ced088e33c39358"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.350729,
+          "p95": 0.570083,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 70.2320205,
+          "p95": 74.455792,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3518545,
+          "p95": 0.571125,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "de2c4538b54cbc208f1d348c00c44b3a"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-3/71051fd352222806a3a78940aa9f5464/capture.png",
+          "sha256": "23913648b02fdf6bdf74b5034390fe30a0d4138ea2e018d7d3a4e6878673776d"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-3/71051fd352222806a3a78940aa9f5464/input_receipt.json",
+          "sha256": "3dcbbc67e59e1904639a1e80e9153285198d084d4072681d9c597fe992ca8006"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-3/71051fd352222806a3a78940aa9f5464/raw_samples.json",
+          "sha256": "96e7aeff6873e5e5adb4a1172ee0980b584e0f08a66bd8506cade397fc791333"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__exact__dpr-3/71051fd352222806a3a78940aa9f5464/trace.pftrace",
+          "sha256": "9fdf602e2693d7d238aec67b5eeffb1c24a3c2c40e6fe089169b6f2de36beb0b"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.3403125,
+          "p95": 0.583458,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 68.400042,
+          "p95": 70.445208,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3414785,
+          "p95": 0.586667,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 3,
+      "physical_size": {
+        "height": 1080,
+        "width": 1920
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "71051fd352222806a3a78940aa9f5464"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-1/81bf50d9ad754d83db68c12c7b17e731/capture.png",
+          "sha256": "c09b5c66c7d155c98ce967ac73ce18fb7153d918e49800999be13b0d62eeab1e"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-1/81bf50d9ad754d83db68c12c7b17e731/input_receipt.json",
+          "sha256": "8aa2c4b13d14c23846f2f14ef18d575eee6284c2790abd30c63b9e01fbadb119"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-1/81bf50d9ad754d83db68c12c7b17e731/raw_samples.json",
+          "sha256": "24c928bd60f6371b68d058f405d16b683d41120e09cd72c2bfb39e9ec916e79c"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-1/81bf50d9ad754d83db68c12c7b17e731/trace.pftrace",
+          "sha256": "71c105677738215fa55e80a96f417b9288749bbc52a889653d6ad08c1e7217d9"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.355792,
+          "p95": 0.473167,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 60.88975,
+          "p95": 65.243,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3567705,
+          "p95": 0.473958,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "81bf50d9ad754d83db68c12c7b17e731"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-1.5/f169dd26ff14f37a499c93fb86abc1e1/capture.png",
+          "sha256": "a4359793d6e524970c70d19427ce5e450fef7c17d5dad45d53bff6908b557ceb"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-1.5/f169dd26ff14f37a499c93fb86abc1e1/input_receipt.json",
+          "sha256": "b266758faa03bee4218db71b61fc6a84a3dbcdcf32a21cf0d15a782b5a1eb1bf"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-1.5/f169dd26ff14f37a499c93fb86abc1e1/raw_samples.json",
+          "sha256": "1e7c3b2d63ada97ab9f6aae8b5d97e3e756156cbc6498acb43a4c02c87ad656b"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-1.5/f169dd26ff14f37a499c93fb86abc1e1/trace.pftrace",
+          "sha256": "2d4cc04a76b6a656536ef528ec988513f69c97d8f299445f90049298b3c93508"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.368166,
+          "p95": 0.585292,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 62.988958499999995,
+          "p95": 66.684167,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.369041,
+          "p95": 0.586375,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 540,
+        "width": 960
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "f169dd26ff14f37a499c93fb86abc1e1"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-2/89747c0345d721bbddcb61e4b1a3090a/capture.png",
+          "sha256": "726ba24e26083755851e7e36b5d964d9b63b901f5ac91d9e16cc8225178d7d15"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-2/89747c0345d721bbddcb61e4b1a3090a/input_receipt.json",
+          "sha256": "03193b8a1273c991223432cd755cf6e2a70f5bae486cde3801b01a7c7378db84"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-2/89747c0345d721bbddcb61e4b1a3090a/raw_samples.json",
+          "sha256": "c403ab893475a32b9cba1b4af07586d6f2eed4e4bded28d43914713b7e38ee0b"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-2/89747c0345d721bbddcb61e4b1a3090a/trace.pftrace",
+          "sha256": "c679843a90f098ae64d937b67b6acb383cd45fbc6a6156b55b19454a2fa574f6"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.351146,
+          "p95": 0.459291,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 62.1641875,
+          "p95": 67.947916,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.35210450000000004,
+          "p95": 0.460166,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "89747c0345d721bbddcb61e4b1a3090a"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-3/0ef3e30b50ed333a08d6fd76e07d847e/capture.png",
+          "sha256": "726ba24e26083755851e7e36b5d964d9b63b901f5ac91d9e16cc8225178d7d15"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-3/0ef3e30b50ed333a08d6fd76e07d847e/input_receipt.json",
+          "sha256": "99ba74a268f3f2d5f733e16753e0c8529f95dbd463ed0f7fb9c4588ff89cc3f4"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-3/0ef3e30b50ed333a08d6fd76e07d847e/raw_samples.json",
+          "sha256": "519587899989791447f624cd0407d6230a82c416cf85e17a7c8919700ce4094b"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__configured_max__dpr-3/0ef3e30b50ed333a08d6fd76e07d847e/trace.pftrace",
+          "sha256": "e1ee3f74138f1f87e777b16ce6470100b99b12f482c9db7c515dcb13dd62d15e"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.391104,
+          "p95": 0.485625,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 68.3997285,
+          "p95": 72.732708,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.39237500000000003,
+          "p95": 0.486666,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "0ef3e30b50ed333a08d6fd76e07d847e"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-1/d55d0c384ad087cad123b317527de2ca/capture.png",
+          "sha256": "c09b5c66c7d155c98ce967ac73ce18fb7153d918e49800999be13b0d62eeab1e"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-1/d55d0c384ad087cad123b317527de2ca/input_receipt.json",
+          "sha256": "119c37d1fe85f5d7da3bf1eb93e5c4a4bc150ef1a58121f1cd7e0115f8ccecb9"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-1/d55d0c384ad087cad123b317527de2ca/raw_samples.json",
+          "sha256": "c5ccb56353f029a63e2d134f0993a3e84a534a65db4e58550ba68028c8bc17f5"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-1/d55d0c384ad087cad123b317527de2ca/trace.pftrace",
+          "sha256": "dc484fb1f3d3616e5e80b9721ffdc0b13cb5137566d5c6ceca1df4702300c248"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.3746665,
+          "p95": 0.508584,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 67.79516699999999,
+          "p95": 71.474333,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.37575000000000003,
+          "p95": 0.509667,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "d55d0c384ad087cad123b317527de2ca"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-1.5/0a517429fc4062aba7b06c3590c0472b/capture.png",
+          "sha256": "a4359793d6e524970c70d19427ce5e450fef7c17d5dad45d53bff6908b557ceb"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-1.5/0a517429fc4062aba7b06c3590c0472b/input_receipt.json",
+          "sha256": "0bfc9fda9058795361f2a30bcf9dc4163a5b489fc73be1cf211b23f0ca64a070"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-1.5/0a517429fc4062aba7b06c3590c0472b/raw_samples.json",
+          "sha256": "3ddd92b6583e7d87d043a0ece23b3e2ddc456f6c3183495e7aa1d01f91346bf0"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-1.5/0a517429fc4062aba7b06c3590c0472b/trace.pftrace",
+          "sha256": "320e537b49a126d9ef2eceb9319f725d5e7047bd71650a6f2c727662da3b6225"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.376854,
+          "p95": 0.624291,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 68.941125,
+          "p95": 81.527792,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3785415,
+          "p95": 0.626916,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 540,
+        "width": 960
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "0a517429fc4062aba7b06c3590c0472b"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-2/fd9b9144f5b03fba545012e0b6713833/capture.png",
+          "sha256": "726ba24e26083755851e7e36b5d964d9b63b901f5ac91d9e16cc8225178d7d15"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-2/fd9b9144f5b03fba545012e0b6713833/input_receipt.json",
+          "sha256": "8801077865a885acda91d71df5d9773d4106cb5a7b3df0c01e64cda6d7c35b4d"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-2/fd9b9144f5b03fba545012e0b6713833/raw_samples.json",
+          "sha256": "e43098d5a901ae97d5b63ca4a1ae9f7bb2361b2ef7d8c51d0aefa1a2893c6616"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-2/fd9b9144f5b03fba545012e0b6713833/trace.pftrace",
+          "sha256": "5daa396399185f61714dac6b0345d11ae30264ebed6f129a04dd3ec0a695c53b"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.383791,
+          "p95": 0.652541,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 69.64360450000001,
+          "p95": 74.749333,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.3847085,
+          "p95": 0.653917,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "fd9b9144f5b03fba545012e0b6713833"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-3/c56ead5b64ef4c8f0ba46f7d50d8588e/capture.png",
+          "sha256": "23913648b02fdf6bdf74b5034390fe30a0d4138ea2e018d7d3a4e6878673776d"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-3/c56ead5b64ef4c8f0ba46f7d50d8588e/input_receipt.json",
+          "sha256": "837eb01e5050b041e06798a2a5f4ddac7bed23f41c2cdfdc3ccf38173189a9d4"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-3/c56ead5b64ef4c8f0ba46f7d50d8588e/raw_samples.json",
+          "sha256": "a2ced03282ee9d460c05b42d9c687ac308afd5542ce8e481357626bd4f2c407e"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/meters-waveforms__adaptive_simulation__dpr-3/c56ead5b64ef4c8f0ba46f7d50d8588e/trace.pftrace",
+          "sha256": "d29a05435685371b2869cd3d8b5a23fcdc635c680661302db97bc46be35e443b"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "53457603ddb3f354d58ef5332db399ed707fa572b96e46f19d1ab5fd0f55b2d5",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.3801255,
+          "p95": 0.621625,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 73.0796875,
+          "p95": 80.369875,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.38110449999999996,
+          "p95": 0.62325,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 3,
+      "physical_size": {
+        "height": 1080,
+        "width": 1920
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "meters-waveforms",
+      "trace_evidence_ids": [
+        "c56ead5b64ef4c8f0ba46f7d50d8588e"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-1/afeefc0fb5761cc467c008f43f2a091a/capture.png",
+          "sha256": "aae3359cd29efb88f74d4a1a190df544b469b0424ec08a10aa36020b9bcfe076"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-1/afeefc0fb5761cc467c008f43f2a091a/input_receipt.json",
+          "sha256": "84a64ec55a021a8f009f3d3ca803fa12ed2cbc5ab4be368163263c637a8d7998"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-1/afeefc0fb5761cc467c008f43f2a091a/raw_samples.json",
+          "sha256": "b8bab9e3f65d8acde6ae42b6d35b927e08dd5e5b6899ee5c50af05494425ffeb"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-1/afeefc0fb5761cc467c008f43f2a091a/trace.pftrace",
+          "sha256": "8d1108793cf136c38482cdd735e5c1eb970d6e682611e02c7f6aebd22d6ed8b3"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.257,
+          "p95": 0.348333,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 64.66429149999999,
+          "p95": 101.755958,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.257771,
+          "p95": 0.349167,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "afeefc0fb5761cc467c008f43f2a091a"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-1.5/aad2115c0772efb5963f50315c0ffac5/capture.png",
+          "sha256": "4bd62cec11934359491dcec9fa0fa470769d1fc4ae9b299057b2bc4772fe9973"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-1.5/aad2115c0772efb5963f50315c0ffac5/input_receipt.json",
+          "sha256": "257dc7bf2504f2b8105946a36adbcb955f712b5bf0ca1ab3ad7653fe221a3139"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-1.5/aad2115c0772efb5963f50315c0ffac5/raw_samples.json",
+          "sha256": "954414f93be8a8dc31b95ac68f7d0270533fa0425aac88ab1575df9fd149345b"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-1.5/aad2115c0772efb5963f50315c0ffac5/trace.pftrace",
+          "sha256": "467be27467bb6235d9ee816e6443ea5fd5d85ec5c766d1ab65747922e5c66038"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.212354,
+          "p95": 0.318916,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 66.816271,
+          "p95": 73.007459,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.2130835,
+          "p95": 0.319667,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 540,
+        "width": 960
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "aad2115c0772efb5963f50315c0ffac5"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-2/8d4dbfeebd440ca2b8d514d6d0963f70/capture.png",
+          "sha256": "856ab7ff413609125d93d9a3934eac575c8bc9722b641e23da17dde921c14283"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-2/8d4dbfeebd440ca2b8d514d6d0963f70/input_receipt.json",
+          "sha256": "2accf42d64506ad29ca3d5d2f1c6a14b38434c2c4ae8dbee684f56e6678b49a7"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-2/8d4dbfeebd440ca2b8d514d6d0963f70/raw_samples.json",
+          "sha256": "f3c23fcbd47813d18d9b78567b7a1db855e261443270b67bb63641fa95c96ebd"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-2/8d4dbfeebd440ca2b8d514d6d0963f70/trace.pftrace",
+          "sha256": "472a4a05b7eb3bf678a61a76a52e8b0b5c2dad4d15ab99245ae2c57e4dbb91cd"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.2280625,
+          "p95": 0.328542,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 66.5017085,
+          "p95": 67.756167,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.228792,
+          "p95": 0.329292,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "8d4dbfeebd440ca2b8d514d6d0963f70"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-3/8512550e1ad1db4dac167e5464999f01/capture.png",
+          "sha256": "539f820a8d83d0fb2f61298956580b82419be6cc2a525f1ee86b332afe5bf54e"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-3/8512550e1ad1db4dac167e5464999f01/input_receipt.json",
+          "sha256": "19abc97a84b352a03d04770a27abba0d0cf53e48d90ef94e5d25234bff2111dc"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-3/8512550e1ad1db4dac167e5464999f01/raw_samples.json",
+          "sha256": "ea7870b8cbcb12e07afd2af733f57833a3b9ed28e1d1798a8e0ddd538d77869e"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__exact__dpr-3/8512550e1ad1db4dac167e5464999f01/trace.pftrace",
+          "sha256": "903adc5212565863c00b6d200787c08a52a452e8c0ae612f26285fb096cb14c1"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.253583,
+          "p95": 0.372917,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 67.10639599999999,
+          "p95": 72.915417,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.254375,
+          "p95": 0.373667,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 3,
+      "physical_size": {
+        "height": 1080,
+        "width": 1920
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "8512550e1ad1db4dac167e5464999f01"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-1/c75928ec45f1c3f653ebd47e904f61cf/capture.png",
+          "sha256": "aae3359cd29efb88f74d4a1a190df544b469b0424ec08a10aa36020b9bcfe076"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-1/c75928ec45f1c3f653ebd47e904f61cf/input_receipt.json",
+          "sha256": "b78cdda1fbecd75c83b57de022bf7dc5853647277faebbf659eebb838c519998"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-1/c75928ec45f1c3f653ebd47e904f61cf/raw_samples.json",
+          "sha256": "666d24b4bc9455fe1e04733150c11ff4ebe40338039c6ceeeb3d86ea183ed16e"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-1/c75928ec45f1c3f653ebd47e904f61cf/trace.pftrace",
+          "sha256": "48f6c825a8912e4b8715bfed3b82cb0ff6230f5c332ee6626e4f3730ff4f48e6"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.226771,
+          "p95": 0.353959,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 62.0159795,
+          "p95": 64.340834,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.2276875,
+          "p95": 0.354875,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "c75928ec45f1c3f653ebd47e904f61cf"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-1.5/00b24d56e84d31ca73e3bfd37f9b3299/capture.png",
+          "sha256": "4bd62cec11934359491dcec9fa0fa470769d1fc4ae9b299057b2bc4772fe9973"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-1.5/00b24d56e84d31ca73e3bfd37f9b3299/input_receipt.json",
+          "sha256": "ead71f842fdc001b9b73967515ee12345c154b99086e797ec95a45cc757133d8"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-1.5/00b24d56e84d31ca73e3bfd37f9b3299/raw_samples.json",
+          "sha256": "c5d54803c7bca7218e3f003cb5a447f8dd326698e999550eefb99f6ed6c5d13a"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-1.5/00b24d56e84d31ca73e3bfd37f9b3299/trace.pftrace",
+          "sha256": "1b4781947d4f9c4187a8f3fe1a2d1ccee894ecc160af76d249663eba97bd2e02"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.2765415,
+          "p95": 0.44575,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 74.9394795,
+          "p95": 88.185833,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.279812,
+          "p95": 0.447041,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 540,
+        "width": 960
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "00b24d56e84d31ca73e3bfd37f9b3299"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-2/6f0cfed04fbd519a2c92e9a86a9fa21d/capture.png",
+          "sha256": "856ab7ff413609125d93d9a3934eac575c8bc9722b641e23da17dde921c14283"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-2/6f0cfed04fbd519a2c92e9a86a9fa21d/input_receipt.json",
+          "sha256": "8d97a82664098b7f211276dc853968d19d87a4abea498a409a6b1787f5a3468d"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-2/6f0cfed04fbd519a2c92e9a86a9fa21d/raw_samples.json",
+          "sha256": "eded1a555e977ec28272c98af8c91057de06d535741a7e7c878b8662d9e7b17e"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-2/6f0cfed04fbd519a2c92e9a86a9fa21d/trace.pftrace",
+          "sha256": "6f89f1824331910f1165446d30c0d0d50e2971eadc294660a43b84aa33d57060"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.253,
+          "p95": 0.355583,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 71.62950000000001,
+          "p95": 77.195459,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.254813,
+          "p95": 0.356292,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "6f0cfed04fbd519a2c92e9a86a9fa21d"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-3/031c4e93cc9ad6ee924dfc0a85a63f7b/capture.png",
+          "sha256": "856ab7ff413609125d93d9a3934eac575c8bc9722b641e23da17dde921c14283"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-3/031c4e93cc9ad6ee924dfc0a85a63f7b/input_receipt.json",
+          "sha256": "ae231a70ef5a53a2fd2d0d202cd4e37c2795d4a43e1c93ba41e9708ef74b3960"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-3/031c4e93cc9ad6ee924dfc0a85a63f7b/raw_samples.json",
+          "sha256": "33ebc24b2643d9b19edafbb8ca4d8256ccad4e9c56ba0e9dd3fb50eb5b0d578e"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__configured_max__dpr-3/031c4e93cc9ad6ee924dfc0a85a63f7b/trace.pftrace",
+          "sha256": "2d092bbd42629cd3a10079ff59570bfd92bfd1be4d6872c243fe9713dcf4e835"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.2295415,
+          "p95": 0.371833,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 71.279792,
+          "p95": 83.613,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.2304795,
+          "p95": 0.373833,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "031c4e93cc9ad6ee924dfc0a85a63f7b"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-1/297590e1327d96e100f841b8017ec74d/capture.png",
+          "sha256": "aae3359cd29efb88f74d4a1a190df544b469b0424ec08a10aa36020b9bcfe076"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-1/297590e1327d96e100f841b8017ec74d/input_receipt.json",
+          "sha256": "9538c932035c58d590f8d1118517b33722f737687746320fb654465943ab87a8"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-1/297590e1327d96e100f841b8017ec74d/raw_samples.json",
+          "sha256": "92a3045f0e7eb222e18308b3bd2417b444b0c52a43fc341f4a8fe2803bc024cb"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-1/297590e1327d96e100f841b8017ec74d/trace.pftrace",
+          "sha256": "f399332f5aceb63e98854e67cb73b4749d781a78d73c6a21b19db144a04a50a7"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.210021,
+          "p95": 0.297792,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 64.600104,
+          "p95": 68.494542,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.21066649999999998,
+          "p95": 0.298583,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 921600.0,
+          "p95": 921600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "297590e1327d96e100f841b8017ec74d"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-1.5/311360b9f78b3e118340c0eb5b865031/capture.png",
+          "sha256": "4bd62cec11934359491dcec9fa0fa470769d1fc4ae9b299057b2bc4772fe9973"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-1.5/311360b9f78b3e118340c0eb5b865031/input_receipt.json",
+          "sha256": "557813a1759a21f1aab6a982606ecf25c71a96df76c69c9080f189024d99b8fa"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-1.5/311360b9f78b3e118340c0eb5b865031/raw_samples.json",
+          "sha256": "e46dcc98e14afba2a4fdbd1f31b3caed69626d5acaa0dcc5a06ab69ce23a3350"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-1.5/311360b9f78b3e118340c0eb5b865031/trace.pftrace",
+          "sha256": "62618e0fe6c5b7a5ab4365701b17a53d850359e5e5561ebff09f15f07a29754e"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.2486875,
+          "p95": 0.386667,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 67.2022085,
+          "p95": 74.220917,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.065536,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.2495415,
+          "p95": 0.387625,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2073600.0,
+          "p95": 2073600.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 540,
+        "width": 960
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "311360b9f78b3e118340c0eb5b865031"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-2/c8080767e3c39a003b9d6c8adc56ebe2/capture.png",
+          "sha256": "856ab7ff413609125d93d9a3934eac575c8bc9722b641e23da17dde921c14283"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-2/c8080767e3c39a003b9d6c8adc56ebe2/input_receipt.json",
+          "sha256": "ebeea9459ace06f0fcba353f6f306f0b247c6d4784da9b86e225c3a44c598a61"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-2/c8080767e3c39a003b9d6c8adc56ebe2/raw_samples.json",
+          "sha256": "dbc301d0b57d6b231e40caf390c867abfd83273989bfbaf50616d914cfda9412"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-2/c8080767e3c39a003b9d6c8adc56ebe2/trace.pftrace",
+          "sha256": "27a7626843bbaf2d2dae240b9d0961ce1b49cd0e55709c67da921567e479f594"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.268208,
+          "p95": 0.480541,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 76.13318749999999,
+          "p95": 78.493833,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.269979,
+          "p95": 0.481791,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 3686400.0,
+          "p95": 3686400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 720,
+        "width": 1280
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "c8080767e3c39a003b9d6c8adc56ebe2"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-3/5796ec927ed2c881a6c3b90783e3e086/capture.png",
+          "sha256": "539f820a8d83d0fb2f61298956580b82419be6cc2a525f1ee86b332afe5bf54e"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-3/5796ec927ed2c881a6c3b90783e3e086/input_receipt.json",
+          "sha256": "eed1f0de5625dc2ef7e83c3fd385bb87aebd03b183ee64bbc78707a8b85de746"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-3/5796ec927ed2c881a6c3b90783e3e086/raw_samples.json",
+          "sha256": "37709763fe455c0ed8a307c4b09b4349aa1a82f17eafbe00ddbda29ef7774661"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/shader-heavy-controls__adaptive_simulation__dpr-3/5796ec927ed2c881a6c3b90783e3e086/trace.pftrace",
+          "sha256": "8e0c4e3eaacf13376db771de357b56963bb70a657c0f055023620f9656534172"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "dfbb402dff7562e9cd83b0d1f264a28c786a32c47139287338aac9d293e58b9f",
+      "fidelity": {
+        "capture_similarity": 1,
+        "content_floor_passed": true,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 360,
+        "width": 640
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 0.239167,
+          "p95": 0.327041,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 80.2610005,
+          "p95": 116.487708,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 0.2408335,
+          "p95": 0.327667,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8294400.0,
+          "p95": 8294400.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 0.0,
+          "p95": 0.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 3,
+      "physical_size": {
+        "height": 1080,
+        "width": 1920
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "shader-heavy-controls",
+      "trace_evidence_ids": [
+        "5796ec927ed2c881a6c3b90783e3e086"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-1/272a12a5eae89594146c1f0540c20f43/capture.png",
+          "sha256": "89029ea9a6ae0326c0df26a84e5f4a53e5726b758e8e7a95dd2146f7edd4c884"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-1/272a12a5eae89594146c1f0540c20f43/input_receipt.json",
+          "sha256": "9bd1e5306bf1b122571de2852a1a33bb090e5a99633effb12bff5d62390d5735"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-1/272a12a5eae89594146c1f0540c20f43/raw_samples.json",
+          "sha256": "b858151898d504ccaacff2b3cb34470ee62b1e885579563a10ac3d3c227a6d6f"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-1/272a12a5eae89594146c1f0540c20f43/trace.pftrace",
+          "sha256": "996a2379239f03f1d25dfd612a8faa6ed8835fb7a96620625a8fcd3b524d49d8"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 19.5635625,
+          "p95": 21.772042,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 166.75475,
+          "p95": 264.144,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 19.841437499999998,
+          "p95": 21.969542,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2160000.0,
+          "p95": 2160000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2160288.0,
+          "p95": 2160288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "272a12a5eae89594146c1f0540c20f43"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-1.5/3ad6eb93e054c2c8660ad645ae67ac5d/capture.png",
+          "sha256": "7a986253c3d89c310528ae22c0a67b7ad1f859d654feb0431146be29847ca7b2"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-1.5/3ad6eb93e054c2c8660ad645ae67ac5d/input_receipt.json",
+          "sha256": "f3ff86a9a70f5729c0aa2136cebbbee2c4e5ee436f473e01317eb25137e45dd5"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-1.5/3ad6eb93e054c2c8660ad645ae67ac5d/raw_samples.json",
+          "sha256": "e4403e3c766924b589b43df22a842bebb63dcef74a25ce6227cc4539e2663a1a"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-1.5/3ad6eb93e054c2c8660ad645ae67ac5d/trace.pftrace",
+          "sha256": "72d68899d3eb6f589e1a8d69ac4a95646d4a28f77574d5a12c0f603fb56885ea"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 21.717312999999997,
+          "p95": 23.298041,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 167.247729,
+          "p95": 171.997708,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.196608,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 21.871979,
+          "p95": 23.472708,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 4860000.0,
+          "p95": 4860000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 4860288.0,
+          "p95": 4860288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 900,
+        "width": 1350
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "3ad6eb93e054c2c8660ad645ae67ac5d"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-2/9138d7e85e99963329a4098734d6d30a/capture.png",
+          "sha256": "cc8daf73b2641e339beae9051b462841888ed3850756b14bbfabedd4cf01b3ca"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-2/9138d7e85e99963329a4098734d6d30a/input_receipt.json",
+          "sha256": "c9bd68cd3d093091cfe25d5c9752a48cdb0a7a2747496fa9288de5f4c74aed54"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-2/9138d7e85e99963329a4098734d6d30a/raw_samples.json",
+          "sha256": "f75ba742f52eef98218676217947f6d5ac458e45cecc5197a79e349d3b271eb9"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-2/9138d7e85e99963329a4098734d6d30a/trace.pftrace",
+          "sha256": "dc8aa9e12002a7e36c88fed343dfb57266d98f08c7a778275c12a75b6ede8043"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 20.5429375,
+          "p95": 28.059625,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 170.174896,
+          "p95": 189.256167,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 21.0033755,
+          "p95": 28.23575,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8640000.0,
+          "p95": 8640000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8640288.0,
+          "p95": 8640288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 1200,
+        "width": 1800
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "9138d7e85e99963329a4098734d6d30a"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-3/35894316cf3f07fdc6c25748d9f8eac5/capture.png",
+          "sha256": "a70934cbc34a0fb070d414b4dd94af9c7cdb62858111efa356f80b386665b703"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-3/35894316cf3f07fdc6c25748d9f8eac5/input_receipt.json",
+          "sha256": "f7d832fbc4dab0cb8f950e16967f6d8aff1a53757b5b50114afabf678045c1f9"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-3/35894316cf3f07fdc6c25748d9f8eac5/raw_samples.json",
+          "sha256": "0eef469d13d3d42a0cb562225e423f3708b61386d8b4709b69403e0097a2251d"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__exact__dpr-3/35894316cf3f07fdc6c25748d9f8eac5/trace.pftrace",
+          "sha256": "564d3ead1f386babd525a132c9037324136590874bfdc8c817ffa468bd7e4603"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 20.3410625,
+          "p95": 22.705583,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 172.106042,
+          "p95": 183.884625,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.196608,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 20.5294165,
+          "p95": 23.074417,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 19440000.0,
+          "p95": 19440000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 19440288.0,
+          "p95": 19440288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "exact",
+      "observed_dpr": 3,
+      "physical_size": {
+        "height": 1800,
+        "width": 2700
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "35894316cf3f07fdc6c25748d9f8eac5"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-1/f12e6dd225a4300974960df1964c4fec/capture.png",
+          "sha256": "89029ea9a6ae0326c0df26a84e5f4a53e5726b758e8e7a95dd2146f7edd4c884"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-1/f12e6dd225a4300974960df1964c4fec/input_receipt.json",
+          "sha256": "e6ede9e88aaa4532bde342f37957b4bba8fb9ff4671d4dd4b11b3b1f786194ea"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-1/f12e6dd225a4300974960df1964c4fec/raw_samples.json",
+          "sha256": "05375017de2a2ada3ba0dcef1c4f59c496d26c33e498c6f3f069030ed8ad5006"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-1/f12e6dd225a4300974960df1964c4fec/trace.pftrace",
+          "sha256": "33534102cae19c30989d6776e7acc96cfdb56753c8ea5efc64361db0ce613703"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 21.0777915,
+          "p95": 23.219208,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 166.50156249999998,
+          "p95": 176.320292,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 21.2451665,
+          "p95": 23.372834,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2160000.0,
+          "p95": 2160000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2160288.0,
+          "p95": 2160288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "f12e6dd225a4300974960df1964c4fec"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-1.5/239122cc75967bd9606babc04ab29283/capture.png",
+          "sha256": "7a986253c3d89c310528ae22c0a67b7ad1f859d654feb0431146be29847ca7b2"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-1.5/239122cc75967bd9606babc04ab29283/input_receipt.json",
+          "sha256": "73dd2102d1051bf2c9a19af1173b51939354a85ac9fadb8d538572b00ee4d787"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-1.5/239122cc75967bd9606babc04ab29283/raw_samples.json",
+          "sha256": "3402c0c1a9ec263d245d13ebb996567818a5faf827894592fa916e9704feb723"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-1.5/239122cc75967bd9606babc04ab29283/trace.pftrace",
+          "sha256": "04e5745eff526564ff723fd672ba8de7ab1b63e8304dfd1d47050dd680e54c7b"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 21.0203955,
+          "p95": 23.381542,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 166.3191045,
+          "p95": 187.361083,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 21.177791499999998,
+          "p95": 23.871875,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 4860000.0,
+          "p95": 4860000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 4860288.0,
+          "p95": 4860288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 900,
+        "width": 1350
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "239122cc75967bd9606babc04ab29283"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-2/d8c1a56f1f1c745ca42d3a7430ac88ee/capture.png",
+          "sha256": "cc8daf73b2641e339beae9051b462841888ed3850756b14bbfabedd4cf01b3ca"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-2/d8c1a56f1f1c745ca42d3a7430ac88ee/input_receipt.json",
+          "sha256": "9047e9aebbe1c4de02b7705f05e10efa0f479e2dd517ca96039cedfcd9ba7e5e"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-2/d8c1a56f1f1c745ca42d3a7430ac88ee/raw_samples.json",
+          "sha256": "4436163b44f1e63928489c238aa96f9d3a2098d01c7adcd492b9d8973628bd14"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-2/d8c1a56f1f1c745ca42d3a7430ac88ee/trace.pftrace",
+          "sha256": "9381c7a08ced31f1341d4eb02acb3fceedb24265ffe45d6c5c0febfaf25fe8c9"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 19.8205625,
+          "p95": 22.60275,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 166.30058350000002,
+          "p95": 172.539917,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 20.044438,
+          "p95": 22.764792,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8640000.0,
+          "p95": 8640000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8640288.0,
+          "p95": 8640288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 1200,
+        "width": 1800
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "d8c1a56f1f1c745ca42d3a7430ac88ee"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": null,
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-3/c0c85b7917153bb3a30a3e772484ef18/capture.png",
+          "sha256": "cc8daf73b2641e339beae9051b462841888ed3850756b14bbfabedd4cf01b3ca"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-3/c0c85b7917153bb3a30a3e772484ef18/input_receipt.json",
+          "sha256": "1bb1079ed2ccf600b0e1f46e8c5db3aadacf46f8f131ed065b217a5c8caac2bf"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-3/c0c85b7917153bb3a30a3e772484ef18/raw_samples.json",
+          "sha256": "08b90694d2981581c9c904e0c7ee3e968bfd6d8fe2e869b1d31f089d15988c4a"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__configured_max__dpr-3/c0c85b7917153bb3a30a3e772484ef18/trace.pftrace",
+          "sha256": "942b241735529da3c5ec3ea81ea3eae52212b95db8b0c2a71c8ac2bb2b2c1377"
+        }
+      ],
+      "configured_max_dpr": 2.0,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 20.594604500000003,
+          "p95": 22.386542,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 167.180187,
+          "p95": 176.439666,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 20.825604,
+          "p95": 22.558416,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8640000.0,
+          "p95": 8640000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8640288.0,
+          "p95": 8640288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "configured_max",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 1200,
+        "width": 1800
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "c0c85b7917153bb3a30a3e772484ef18"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-1/26300171ed86eadf83b35309535307c3/capture.png",
+          "sha256": "89029ea9a6ae0326c0df26a84e5f4a53e5726b758e8e7a95dd2146f7edd4c884"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-1/26300171ed86eadf83b35309535307c3/input_receipt.json",
+          "sha256": "5698af8ca9297a631542f0ea6126ba4ce2253c8f0f926db19ab0f150df369864"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-1/26300171ed86eadf83b35309535307c3/raw_samples.json",
+          "sha256": "e1a180d4ee832c92895be39f8d2003948b4d0b67385df22b144b88e66cad1042"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-1/26300171ed86eadf83b35309535307c3/trace.pftrace",
+          "sha256": "e7462d78598203b45b59209c4993e13e710e45692c400ac62e4a005daa69e1e5"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 20.497812500000002,
+          "p95": 23.700083,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 163.681792,
+          "p95": 166.093625,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 20.649604,
+          "p95": 23.902417,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 2160000.0,
+          "p95": 2160000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 2160288.0,
+          "p95": 2160288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 1,
+      "physical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "requested_dpr": 1.0,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "26300171ed86eadf83b35309535307c3"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-1.5/9cbc1e98b4d7f517f938a2066e66e78a/capture.png",
+          "sha256": "7a986253c3d89c310528ae22c0a67b7ad1f859d654feb0431146be29847ca7b2"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-1.5/9cbc1e98b4d7f517f938a2066e66e78a/input_receipt.json",
+          "sha256": "6045b36da40e3b050bf14041621c229d16c1ef7a34901311961343f2c06f6565"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-1.5/9cbc1e98b4d7f517f938a2066e66e78a/raw_samples.json",
+          "sha256": "4b68f31c1fcbba0cbc360f044760860f448ccc0825f1b90e1fe2346e6c605f66"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-1.5/9cbc1e98b4d7f517f938a2066e66e78a/trace.pftrace",
+          "sha256": "d01d02035ef58a34fdd5313d934ae7e4403aa555828d9f0dda28b3eddd6e6d8f"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 20.855312,
+          "p95": 23.54625,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 167.5415625,
+          "p95": 171.270125,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.065536,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 21.094521,
+          "p95": 23.734584,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 4860000.0,
+          "p95": 4860000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 4860288.0,
+          "p95": 4860288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 1.5,
+      "physical_size": {
+        "height": 900,
+        "width": 1350
+      },
+      "requested_dpr": 1.5,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "9cbc1e98b4d7f517f938a2066e66e78a"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-2/fe75453546dec4d23f557d77f977d3ab/capture.png",
+          "sha256": "cc8daf73b2641e339beae9051b462841888ed3850756b14bbfabedd4cf01b3ca"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-2/fe75453546dec4d23f557d77f977d3ab/input_receipt.json",
+          "sha256": "59c929739cb17535d1285117439ba806874c9dc638aa5d5b2bc58084e85d7de2"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-2/fe75453546dec4d23f557d77f977d3ab/raw_samples.json",
+          "sha256": "ffecb213c581e53449c3f50edc686935aa8a33be90a7d6d237d1302f712206f3"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-2/fe75453546dec4d23f557d77f977d3ab/trace.pftrace",
+          "sha256": "2588c5bc9151d2164512423609b4d5fc25261f3a55aebcd7af17f8944faa0696"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 20.458021,
+          "p95": 22.928416,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 169.34170799999998,
+          "p95": 174.621042,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.131072,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 20.6795415,
+          "p95": 23.531167,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 8640000.0,
+          "p95": 8640000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 8640288.0,
+          "p95": 8640288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 2,
+      "physical_size": {
+        "height": 1200,
+        "width": 1800
+      },
+      "requested_dpr": 2.0,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "fe75453546dec4d23f557d77f977d3ab"
+      ]
+    },
+    {
+      "adapter_class": "hardware",
+      "adaptive_profile_id": "a4-latency-guard-simulation-v1",
+      "artifacts": [
+        {
+          "kind": "capture",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-3/b50fa63ef3cc68fa1bcc737585813f51/capture.png",
+          "sha256": "a70934cbc34a0fb070d414b4dd94af9c7cdb62858111efa356f80b386665b703"
+        },
+        {
+          "kind": "input_receipt",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-3/b50fa63ef3cc68fa1bcc737585813f51/input_receipt.json",
+          "sha256": "90506c5171850e7399942d2a56f5532ceb0242861b032815b7be7fe3799a64a1"
+        },
+        {
+          "kind": "raw_samples",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-3/b50fa63ef3cc68fa1bcc737585813f51/raw_samples.json",
+          "sha256": "5f1b70766e0d04508f4d34a2b9fa56aaf5efdaab74615008be7219b884b10827"
+        },
+        {
+          "kind": "trace",
+          "path": "frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-3/b50fa63ef3cc68fa1bcc737585813f51/trace.pftrace",
+          "sha256": "6b9780d42447bd30aaeee1fcd0ad2277b50166d4e86d7f319ec4217ab47e8cda"
+        }
+      ],
+      "configured_max_dpr": null,
+      "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+      "fidelity": {
+        "capture_similarity": 0.0,
+        "content_floor_passed": false,
+        "logical_input_correct": true,
+        "small_text_legible": true,
+        "thin_strokes_preserved": true
+      },
+      "logical_size": {
+        "height": 600,
+        "width": 900
+      },
+      "machine_id": "Daniels-Mac-Studio.local:arm64",
+      "metrics": {
+        "cpu_frame_time": {
+          "median": 20.452958000000002,
+          "p95": 23.755041,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "first_frame_time": {
+          "median": 176.497375,
+          "p95": 253.260625,
+          "sample_count": 20,
+          "unit": "ms"
+        },
+        "gpu_frame_time": {
+          "median": 0.131072,
+          "p95": 0.196608,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "interaction_latency": {
+          "median": 20.680916500000002,
+          "p95": 24.093583,
+          "sample_count": 30,
+          "unit": "ms"
+        },
+        "render_target_bytes": {
+          "median": 19440000.0,
+          "p95": 19440000.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "resident_bytes": {
+          "median": 19440288.0,
+          "p95": 19440288.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        },
+        "upload_bytes": {
+          "median": 20968.0,
+          "p95": 20968.0,
+          "sample_count": 30,
+          "unit": "bytes"
+        }
+      },
+      "mode": "adaptive_simulation",
+      "observed_dpr": 3,
+      "physical_size": {
+        "height": 1800,
+        "width": 2700
+      },
+      "requested_dpr": 3.0,
+      "scenario_id": "threejs-audio-reactive",
+      "trace_evidence_ids": [
+        "b50fa63ef3cc68fa1bcc737585813f51"
+      ]
+    }
+  ],
+  "plan_revision": "641649b7e7fece6baae34380b6e719904506af22",
+  "pulp_sha": "9770c166338fc03a14c7724a9ffd220ec89735df",
+  "schema": "pulp.gpu-dpr-experiment.v1",
+  "status": "incomplete",
+  "version": 1
+}

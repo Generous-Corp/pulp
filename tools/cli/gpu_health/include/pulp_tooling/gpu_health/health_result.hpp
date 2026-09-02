@@ -7,14 +7,43 @@
 #include <string_view>
 #include <vector>
 
+/**
+ * @namespace pulp::tooling::gpu_health
+ * @brief Bounded, typed evidence returned by Pulp GPU health diagnostics.
+ *
+ * @par Ownership and lifetime
+ * Result objects own their strings, optionals, and vectors. Parsing returns an
+ * owning value. Views returned by `to_string` refer to static storage and must
+ * not be freed. Validation and serialization retain no references to inputs.
+ *
+ * @par Threading and real-time safety
+ * The value and serialization APIs provide no internal synchronization and may
+ * allocate. Use separate result objects on concurrent threads or synchronize
+ * shared access. Provider probes acquire GPU resources and block for submitted
+ * work, so every API in this namespace belongs on a control or worker thread,
+ * never an audio callback or another real-time thread.
+ *
+ * @par Determinism and units
+ * Event sequences are zero-based and contiguous across a result. Pixel and
+ * color fields are integer counts; fingerprints are opaque unsigned values.
+ * Optional measurements distinguish an absent observation from an observed
+ * `false` or zero. Serialization preserves the closed v1 field vocabulary.
+ *
+ * @par Results, unavailable evidence, and errors
+ * `pass` and `fail` mean requested work completed and was measured.
+ * `unavailable` means required work could not be acquired or executed, while
+ * `unverified` means the available evidence cannot support a claim. Neither is
+ * a pass. Validators and parsers return failure without throwing for malformed
+ * contract data and write a human diagnostic when an error output is supplied.
+ */
 namespace pulp::tooling::gpu_health {
 
+/// Closed JSON schema identity for HealthResult.
 inline constexpr std::string_view kSchema = "pulp.gpu-health-result.v1";
+/// Schema version serialized in HealthResult::version.
 inline constexpr std::uint32_t kVersion = 1;
 
-// Canonical v1 diagnostic-code registry. The JSON Schema enum and fixture
-// manifest are mechanically checked against this list so codes cannot drift
-// between native, CLI, MCP, and agent consumers.
+/// Canonical v1 diagnostic-code registry shared by native, CLI, MCP, and agents.
 inline constexpr std::array kEvidenceCodes{
     std::string_view{"gpu.adapter.fail"},
     std::string_view{"gpu.adapter.null"},
@@ -90,8 +119,15 @@ constexpr bool is_known_evidence_code(std::string_view code) {
     return false;
 }
 
-enum class Verdict { pass, fail, unavailable, unverified };
+/// Four-state outcome that keeps missing or inconclusive evidence out of pass.
+enum class Verdict {
+    pass,        ///< Requested work completed and satisfied its oracle.
+    fail,        ///< Requested work completed and failed a measured assertion.
+    unavailable, ///< Requested evidence or execution capability was unavailable.
+    unverified,  ///< Evidence exists but is insufficient to support a verdict.
+};
 
+/// Ordered semantic stage described by one EvidenceEvent.
 enum class Stage {
     configuration,
     adapter,
@@ -105,12 +141,16 @@ enum class Stage {
     device_state,
 };
 
+/// Adapter class proven by native identity, never inferred from backend alone.
 enum class AdapterClass { hardware, software, null_adapter, unknown };
 
+/// Aggregate device state derived from required probe evidence.
 enum class HealthState { healthy, failed, unavailable, unverified, lost };
 
+/// Authenticity state for the optional native adapter identity fields.
 enum class IdentityStatus { authentic, unverified, unavailable };
 
+/// Native adapter identity. Missing optional fields represent absent evidence.
 struct AdapterIdentity {
     IdentityStatus status = IdentityStatus::unavailable;
     AdapterClass classification = AdapterClass::unknown;
@@ -121,6 +161,10 @@ struct AdapterIdentity {
     std::optional<std::string> device;
 };
 
+/// Optional measurements produced by one probe.
+///
+/// Counts are unitless pixel/color counts. `rgba_fingerprint` is an opaque
+/// deterministic content fingerprint, not a color or duration.
 struct ProbeMeasurements {
     std::optional<bool> command_submitted;
     std::optional<bool> readback_completed;
@@ -134,6 +178,7 @@ struct ProbeMeasurements {
     std::optional<std::uint64_t> rgba_fingerprint;
 };
 
+/// One globally ordered stage observation with a registered diagnostic code.
 struct EvidenceEvent {
     std::uint32_t sequence = 0;
     Stage stage = Stage::configuration;
@@ -142,6 +187,7 @@ struct EvidenceEvent {
     std::string detail;
 };
 
+/// Evidence and aggregate verdict for one independently executed probe.
 struct ProbeEvidence {
     std::string probe_id;
     /// Whether this probe contributes to the top-level verdict. Optional
@@ -154,6 +200,7 @@ struct ProbeEvidence {
     std::vector<EvidenceEvent> events;
 };
 
+/// Closed v1 aggregate returned by the GPU health diagnostic.
 struct HealthResult {
     std::string schema{ kSchema };
     std::uint32_t version = kVersion;
@@ -165,26 +212,36 @@ struct HealthResult {
     std::vector<std::string> recommendations;
 };
 
+/// Return the canonical lowercase schema spelling from static storage.
 std::string_view to_string(Verdict value);
 std::string_view to_string(Stage value);
 std::string_view to_string(AdapterClass value);
 std::string_view to_string(HealthState value);
 std::string_view to_string(IdentityStatus value);
 
+/// Parse an exact canonical enum spelling; unknown text returns `std::nullopt`.
 std::optional<Verdict> verdict_from_string(std::string_view value);
 std::optional<Stage> stage_from_string(std::string_view value);
 std::optional<AdapterClass> adapter_class_from_string(std::string_view value);
 std::optional<HealthState> health_state_from_string(std::string_view value);
 std::optional<IdentityStatus> identity_status_from_string(std::string_view value);
 
-/// Validate relationships that JSON Schema cannot express, including event
-/// ordering and whether the top-level verdict is supported by probe evidence.
+/// Validate bounds and cross-field relationships that JSON Schema cannot express.
+///
+/// The function retains no input references. On failure, `error` receives a
+/// human diagnostic when non-null; callers must not treat that text as a stable
+/// machine-readable error code.
 bool validate(const HealthResult& result, std::string* error = nullptr);
 
+/// Serialize one validated or diagnostic result to the closed v1 JSON shape.
+///
+/// Serialization does not implicitly call validate().
 std::string to_json(const HealthResult& result, bool pretty = false);
 
-/// Parse only the v1 closed shape and apply the same semantic validation as
-/// `validate`. Unknown members and newer versions fail instead of being ignored.
+/// Parse only the v1 closed shape and apply validate() before returning a value.
+///
+/// Unknown members, malformed values, and newer versions return `std::nullopt`.
+/// When non-null, `error` receives a human diagnostic on failure.
 std::optional<HealthResult> from_json(std::string_view json,
                                       std::string* error = nullptr);
 

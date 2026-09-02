@@ -1,0 +1,16 @@
+{
+  "kind": "pulp.gpu-first-visible-a3-product-observation",
+  "format_version": 1,
+  "status": "nonterminal",
+  "source_revision": "c568198f356d4b961b4fb6bb68caa3d3ccebd3c4",
+  "operation_id": "dev.pulp.gpu/health.read@1",
+  "instance_id": "instance-4c200a8f2a640969e285d00ff599a46f",
+  "registration_id": "registration-095304f3e39add1f3e0152ec707ecf0c",
+  "publication_id": "publication-d16e42086f19c17deede627971f939e6",
+  "request_id": "a3-product-health-5",
+  "request_sha256": "875c31b7466a4e5810712e37c115f8b8a4d7c3abb42031aa015714ef52a706a8",
+  "receipt_id": "receipt-b3c1f99419f03ae1fbc5fb51a24349e6",
+  "response_sha256": "f6ef5145ada178fd078e4affd7e91203e5afd3f9fa8f3497958ee4815cd71192",
+  "fixture_sha256": "3b59c7661c184572770f0b514147c2c8559edb4f7372949885cc78cf53b32371",
+  "acceptance_disposition": "withheld"
+}

@@ -1248,6 +1248,11 @@ aggregate trials without reconstructing the originating agent. A receipt is
 alone does not prove both suites found the same failure. Receipt publication
 fsyncs both the file and containing directory.
 
+The checked-in macOS Debug inventory binds the exact filtered CTest census
+recorded in `.shipyard/changed-surface-inventory.json`. Any topology change
+must regenerate the canonical multiset contract and update the matching policy
+count together; editing only the count cannot satisfy the digest check.
+
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
 security, provenance, packaging, dependency, policy, and test-topology changes
@@ -1281,7 +1286,7 @@ required job: path-filtering the workflow or job would prevent the stable
 required context from reporting.
 
 CTest display names are not identities: the authoritative target currently has
-21,147 registrations but only 21,088 unique names. The inventory validator
+21,248 registrations but only 21,189 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned

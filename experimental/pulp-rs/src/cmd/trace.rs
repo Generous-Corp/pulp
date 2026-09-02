@@ -14,6 +14,7 @@
 //! | `start [--instance ID] [--categories …] [--ring-mb N]` | `Trace.startSession` |
 //! | `stop [--instance ID]`                 | `Trace.stopSession`    |
 //! | `query "<SQL>" --trace FILE.pftrace`   | `trace_processor` (offline) |
+//! | `gpu-startup\|gpu-health\|gpu-probe --trace FILE` | checked-in PerfettoSQL |
 //! | `fetch`                                | pinned `trace_processor` download |
 //!
 //! # Why lifecycle delegates to `pulp-cpp inspect`
@@ -27,6 +28,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::cmd::trace_gpu_analysis::{GpuAnalysisArgs, GpuQuestion};
 use crate::cmd::trace_open::OpenArgs;
 use crate::error::{CliError, Result};
 
@@ -92,6 +94,20 @@ pub enum Sub {
     /// `trace_processor_shell` into the Pulp home so `query --trace` works
     /// zero-install. Client-side, so [`dispatch`] runs `trace_fetch::run_fetch`.
     Fetch,
+    /// One closed GPU question over a flushed trace and its checked-in view.
+    GpuAnalysis(GpuAnalysisArgs),
+}
+
+/// Semantic process status for trace commands that successfully produced a
+/// typed result. This is separate from command/tool errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceCommandStatus {
+    /// The command or typed analysis passed.
+    Success,
+    /// The typed analysis found a causal failure.
+    Failed,
+    /// Evidence was missing, incomplete, or not yet governed by a budget.
+    Unavailable,
 }
 
 /// Shared flag state — flows into every [`dispatch`] call regardless
@@ -172,8 +188,46 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         "doctor" => no_args("doctor", &rest[1..]).map(|()| (Sub::Doctor, globals)),
         "fetch" => no_args("fetch", &rest[1..]).map(|()| (Sub::Fetch, globals)),
         "open" => parse_open(&rest[1..]).map(|s| (s, globals)),
+        value if GpuQuestion::parse(value).is_some() => {
+            parse_gpu_analysis(GpuQuestion::parse(value).expect("guarded"), &rest[1..])
+                .map(|s| (s, globals))
+        }
         _ => Err(CliError::UnknownSubcommand),
     }
+}
+
+fn parse_gpu_analysis(question: GpuQuestion, args: &[String]) -> Result<Sub> {
+    let mut trace = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--trace" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| CliError::BadUsage("--trace requires a value".to_owned()))?;
+                if trace.replace(PathBuf::from(value)).is_some() {
+                    return Err(CliError::BadUsage(
+                        "--trace may be specified only once".to_owned(),
+                    ));
+                }
+            }
+            other => {
+                return Err(CliError::BadUsage(format!(
+                    "pulp trace {}: unknown argument `{other}`",
+                    question.as_str()
+                )));
+            }
+        }
+        index += 1;
+    }
+    let trace = trace.ok_or_else(|| {
+        CliError::BadUsage(format!(
+            "pulp trace {}: --trace FILE.pftrace is required",
+            question.as_str()
+        ))
+    })?;
+    Ok(Sub::GpuAnalysis(GpuAnalysisArgs { question, trace }))
 }
 
 fn no_args(verb: &str, args: &[String]) -> Result<()> {
@@ -335,6 +389,19 @@ fn parse_open(args: &[String]) -> Result<Sub> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--" => {
+                i += 1;
+                let value = args.get(i).ok_or_else(|| {
+                    CliError::BadUsage("pulp trace open: -- requires <file.pftrace>".to_owned())
+                })?;
+                if file.is_some() || i + 1 != args.len() {
+                    return Err(CliError::BadUsage(
+                        "pulp trace open: only one .pftrace file is allowed".to_owned(),
+                    ));
+                }
+                file = Some(PathBuf::from(value));
+                break;
+            }
             "--no-browser" => no_browser = true,
             "--keep-alive-seconds" => {
                 i += 1;
@@ -387,7 +454,7 @@ pub fn to_control_call(sub: &Sub) -> Option<(&'static str, String, Option<&str>)
             "{}".to_owned(),
             s.instance_id.as_deref(),
         )),
-        Sub::Query(_) | Sub::Doctor | Sub::Open(_) | Sub::Fetch => None,
+        Sub::Query(_) | Sub::Doctor | Sub::Open(_) | Sub::Fetch | Sub::GpuAnalysis(_) => None,
     }
 }
 
@@ -466,6 +533,15 @@ pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(out)?;
     writeln!(out, "Offline analysis:")?;
+    writeln!(out, "  gpu-startup --trace FILE.pftrace       Rank startup GPU contributors (unverified until A3 budget)")?;
+    writeln!(
+        out,
+        "  gpu-health --trace FILE.pftrace        Explain health transitions and device loss"
+    )?;
+    writeln!(
+        out,
+        "  gpu-probe --trace FILE.pftrace         Correlate numeric probes by GPU evidence ID"
+    )?;
     writeln!(
         out,
         "  query \"<sql>\" --trace FILE.pftrace        Run SQL offline via trace_processor"

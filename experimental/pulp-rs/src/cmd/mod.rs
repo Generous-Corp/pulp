@@ -36,6 +36,7 @@ pub mod trace;
 pub(crate) mod trace_dispatch;
 pub(crate) mod trace_doctor;
 pub mod trace_fetch;
+pub(crate) mod trace_gpu_analysis;
 pub mod trace_open;
 pub mod trace_query;
 pub(crate) mod trace_response;

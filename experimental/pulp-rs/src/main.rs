@@ -44,6 +44,10 @@ enum Command {
     /// Environment diagnostics; Rust-native for `--versions --json`.
     Doctor(DoctorArgs),
 
+    /// Run deterministic GPU evidence probes. Delegates to C++.
+    #[command(disable_help_flag = true)]
+    Gpu(PkgTailArgs),
+
     /// Manage the `~/.pulp/projects.json` registry.
     Projects(ProjectsArgs),
 
@@ -830,6 +834,14 @@ fn real_main() -> Result<(), ExitCode> {
                 "pulp kit is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
             ))
         }
+        Command::Gpu(args) => {
+            let mut argv = vec!["gpu".to_owned()];
+            argv.extend(args.tail);
+            map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                &argv,
+                "pulp gpu is implemented by the C++ delegate. Build/install pulp-cpp to run GPU evidence probes.",
+            ))
+        }
         Command::Content(args) => {
             let mut argv = vec!["content".to_owned()];
             argv.extend(args.tail);
@@ -947,7 +959,7 @@ fn real_main() -> Result<(), ExitCode> {
             let (sub, flags) = cmd::trace::parse(&args.tail).map_err(|e| match e {
                 CliError::UnknownSubcommand => {
                     eprintln!("pulp trace: unknown subcommand");
-                    eprintln!("  supported: start, stop, query, doctor, fetch, open");
+                    eprintln!("  supported: start, stop, gpu-startup, gpu-health, gpu-probe, query, doctor, fetch, open");
                     ExitCode::from(2)
                 }
                 CliError::BadUsage(msg) => {
@@ -960,7 +972,12 @@ fn real_main() -> Result<(), ExitCode> {
                 }
             })?;
             let talker = cmd::trace::SystemInspector;
-            cmd::trace::dispatch(&sub, &flags, &talker, &mut out).map_err(|e| map_err(&e))
+            match cmd::trace::dispatch(&sub, &flags, &talker, &mut out) {
+                Ok(cmd::trace::TraceCommandStatus::Success) => Ok(()),
+                Ok(cmd::trace::TraceCommandStatus::Failed) => Err(ExitCode::from(1)),
+                Ok(cmd::trace::TraceCommandStatus::Unavailable) => Err(ExitCode::from(2)),
+                Err(error) => Err(map_err(&error)),
+            }
         }
     }
 }

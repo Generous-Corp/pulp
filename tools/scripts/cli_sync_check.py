@@ -45,7 +45,7 @@ SKIP_SLASH_COMMANDS = {
 # These agent workflows are deliberate product surfaces, not advisory parity.
 # Missing one is a strict sync failure even while historical slash-command
 # coverage remains warning-only.
-REQUIRED_SLASH_COMMANDS = {"seq"}
+REQUIRED_SLASH_COMMANDS = {"gpu", "seq"}
 
 
 def find_repo_root():

@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-dpr-experiment-v1.schema.json",
+  "title": "Pulp GPU DPR experiment result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "version", "evidence_kind", "status", "experiment_id",
+    "plan_revision", "pulp_sha", "forge_sha", "dependencies", "matrix",
+    "observations", "disposition", "eligible_for_policy"
+  ],
+  "properties": {
+    "schema": { "const": "pulp.gpu-dpr-experiment.v1" },
+    "version": { "const": 1 },
+    "evidence_kind": { "enum": ["measured", "synthetic_fixture"] },
+    "status": { "enum": ["planned", "incomplete", "complete"] },
+    "experiment_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,95}$" },
+    "plan_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "pulp_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "forge_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a2t_receipt", "a3_budget_id", "a3_receipt"],
+      "properties": {
+        "a2t_receipt": { "type": ["string", "null"], "minLength": 1 },
+        "a3_budget_id": { "type": ["string", "null"], "minLength": 1 },
+        "a3_receipt": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "matrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_sha256", "requested_dprs", "modes", "scenario_ids"],
+      "properties": {
+        "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "requested_dprs": {
+          "type": "array", "prefixItems": [
+            { "const": 1 }, { "const": 1.5 }, { "const": 2 }, { "const": 3 }
+          ], "items": false
+        },
+        "modes": {
+          "type": "array", "prefixItems": [
+            { "const": "exact" }, { "const": "configured_max" },
+            { "const": "adaptive_simulation" }
+          ], "items": false
+        },
+        "scenario_ids": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$" }
+        }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/observation" }
+    },
+    "disposition": {
+      "type": ["string", "null"],
+      "enum": [null, "no-change", "configured-max-candidate", "adaptive-candidate"]
+    },
+    "eligible_for_policy": { "type": "boolean" }
+  },
+  "$defs": {
+    "statistic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["unit", "provenance", "definition", "median", "p95", "sample_count"],
+      "properties": {
+        "unit": { "enum": ["ms", "bytes"] },
+        "provenance": { "enum": ["measured", "derived", "unavailable"] },
+        "definition": { "type": "string", "minLength": 1 },
+        "median": { "type": ["number", "null"], "minimum": 0 },
+        "p95": { "type": ["number", "null"], "minimum": 0 },
+        "sample_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "path", "sha256"],
+      "properties": {
+        "kind": { "enum": ["capture", "reference_capture", "trace", "raw_samples", "input_receipt"] },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "observation": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "scenario_id", "mode", "requested_dpr", "observed_dpr",
+        "configured_max_dpr", "adaptive_profile_id", "logical_size",
+        "physical_size", "content_digest", "machine_id", "adapter_class",
+        "metrics", "fidelity", "trace_evidence_ids", "artifacts"
+      ],
+      "properties": {
+        "scenario_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$" },
+        "mode": { "enum": ["exact", "configured_max", "adaptive_simulation"] },
+        "requested_dpr": { "enum": [1, 1.5, 2, 3] },
+        "observed_dpr": { "type": "number", "minimum": 0 },
+        "configured_max_dpr": { "type": ["number", "null"], "minimum": 0 },
+        "adaptive_profile_id": { "type": ["string", "null"], "minLength": 1 },
+        "logical_size": { "$ref": "#/$defs/size" },
+        "physical_size": { "$ref": "#/$defs/size" },
+        "content_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "machine_id": { "type": "string", "minLength": 1 },
+        "adapter_class": { "enum": ["hardware", "software", "unknown"] },
+        "metrics": {
+          "type": "object", "additionalProperties": false,
+          "required": [
+            "cpu_frame_time", "gpu_frame_time", "first_frame_time",
+            "interaction_latency", "render_target_bytes", "resident_bytes",
+            "upload_bytes"
+          ],
+          "properties": {
+            "cpu_frame_time": { "$ref": "#/$defs/statistic" },
+            "gpu_frame_time": { "$ref": "#/$defs/statistic" },
+            "first_frame_time": { "$ref": "#/$defs/statistic" },
+            "interaction_latency": { "$ref": "#/$defs/statistic" },
+            "render_target_bytes": { "$ref": "#/$defs/statistic" },
+            "resident_bytes": { "$ref": "#/$defs/statistic" },
+            "upload_bytes": { "$ref": "#/$defs/statistic" }
+          }
+        },
+        "fidelity": {
+          "type": "object", "additionalProperties": false,
+          "required": [
+            "content_floor_passed", "capture_similarity", "small_text_legible",
+            "thin_strokes_preserved", "logical_input_correct"
+          ],
+          "properties": {
+            "content_floor_passed": { "type": "boolean" },
+            "capture_similarity": { "type": "number", "minimum": 0, "maximum": 1 },
+            "small_text_legible": { "type": "boolean" },
+            "thin_strokes_preserved": { "type": "boolean" },
+            "logical_input_correct": { "type": "boolean" }
+          }
+        },
+        "trace_evidence_ids": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "artifacts": {
+          "type": "array", "minItems": 5,
+          "items": { "$ref": "#/$defs/artifact" }
+        }
+      }
+    },
+    "size": {
+      "type": "object", "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

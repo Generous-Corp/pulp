@@ -74,6 +74,10 @@ python3 tools/testing/daw-smoke/reaper_smoke.py \
   --check-config   # honor the opt-in toggle (SKIP unless enabled)
 ```
 
+Evidence-producing automation should also pass `--reaper-bin` with the exact
+absolute REAPER executable. An invalid, relative, or symlinked selection fails
+instead of silently falling back to another installed host.
+
 See [`tools/testing/daw-smoke/README.md`](../../tools/testing/daw-smoke/README.md).
 
 ## Guarantees (so it's safe to run anywhere)

@@ -21,9 +21,7 @@ using events::IpcTransport;
 ControlExecutionOutcome normalize_host_completion(
     ControlExecutionOutcome outcome,
     const std::vector<ControlHostArtifactPublication>& publications) {
-    const bool unsupported_outputs =
-        !outcome.result.evidence_ids.empty() ||
-        outcome.result.artifacts.size() != publications.size();
+    const bool unsupported_outputs = outcome.result.artifacts.size() != publications.size();
     const bool completed = outcome.terminal_state == ControlReceiptState::Completed &&
                            !outcome.result.result_code &&
                            outcome.result.cancellation_reason.empty();
@@ -61,6 +59,7 @@ ControlHostCompleteEnvelope completion(
         .explanation = std::move(outcome.result.explanation),
         .detail_json = std::move(outcome.result.detail_json),
         .cancellation_reason = std::move(outcome.result.cancellation_reason),
+        .evidence_ids = std::move(outcome.result.evidence_ids),
         .artifact_publications = std::move(publications),
     };
 }

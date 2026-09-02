@@ -1,0 +1,46 @@
+{
+  "schema": "pulp.gpu-dpr-evidence-validity.v1",
+  "version": 1,
+  "updated_at": "2026-08-29T05:16:29Z",
+  "entries": [
+    {
+      "id": "m3-a4-owned-9770c1-20260828",
+      "path": "docs/validation/gpu-dpr/m3-a4-owned-9770c1-20260828",
+      "implementation_head": "9770c166338fc03a14c7724a9ffd220ec89735df",
+      "terminal_receipts": 48,
+      "counted_cells": 0,
+      "validity": "SUPERSEDED",
+      "disposition_eligibility": "NONCOUNTED",
+      "reasons": [
+        "gpu-timer-resolution-and-known-extra-work-control-missing",
+        "metric-provenance-not-typed",
+        "logical-input-expectation-not-independently-frozen",
+        "capture-similarity-and-text-stroke-oracles-inoperative",
+        "adaptive-transition-observations-not-driven"
+      ]
+    },
+    {
+      "id": "web-diagnostic-81e717-dpr1",
+      "path": "/private/tmp/pulp-a4-web-run-81e7.NdeOfk/run/frozen-evidence/super-convolver-web__exact__dpr-1/08b2f4d7af553e7b83c9b3f647c6b4fa",
+      "implementation_head": "81e717b18c1976ab526715d47a6d7344b1717f5f",
+      "attempt_nonce": "08b2f4d7af553e7b83c9b3f647c6b4fa",
+      "producer_outcome": "fail",
+      "terminal_receipts": 1,
+      "counted_cells": 0,
+      "validity": "SUPERSEDED",
+      "disposition_eligibility": "NONCOUNTED",
+      "artifact_sha256": {
+        "capture": "5c13bef026ffd2e052385b5125737002b5d5c30e7d1cb1c5040847b59e2b40d5",
+        "trace": "ab4e6f4c4fb4005210288a08b07ac6e38441ae59d5f209ad4ccc0587447ca50d",
+        "raw_samples": "b869456d9096009eff88e4a8b70a2fa9a2726a231f176e2965cc9da0b096d9aa",
+        "input_receipt": "57307c668b0df278cab406002670ddebc1a98db41424fcff7ade643085afac52"
+      },
+      "reasons": [
+        "logical-input-expectation-not-independently-frozen",
+        "reference-and-final-capture-content-differed",
+        "adaptive-transition-observations-not-driven",
+        "metric-provenance-not-typed"
+      ]
+    }
+  ]
+}

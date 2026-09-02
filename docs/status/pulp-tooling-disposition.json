@@ -1789,6 +1789,90 @@
         ]
       },
       {
+        "name": "gpu",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "probe",
+            "arguments": [
+              {
+                "name": "--recipe",
+                "required": true
+              },
+              {
+                "name": "--artifacts",
+                "required": true
+              },
+              {
+                "name": "--negative-control",
+                "kind": "flag"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "recipes",
+            "arguments": [],
+            "subcommands": [
+              {
+                "name": "list",
+                "arguments": [
+                  {
+                    "name": "--symptom",
+                    "kind": "option"
+                  },
+                  {
+                    "name": "--json",
+                    "kind": "flag"
+                  }
+                ],
+                "subcommands": []
+              },
+              {
+                "name": "show",
+                "arguments": [
+                  {
+                    "name": "recipe-id",
+                    "kind": "positional",
+                    "required": true
+                  },
+                  {
+                    "name": "--json",
+                    "kind": "flag"
+                  }
+                ],
+                "subcommands": []
+              },
+              {
+                "name": "scaffold",
+                "arguments": [
+                  {
+                    "name": "recipe-id",
+                    "kind": "positional",
+                    "required": true
+                  },
+                  {
+                    "name": "--output",
+                    "kind": "option",
+                    "required": true
+                  },
+                  {
+                    "name": "--json",
+                    "kind": "flag"
+                  }
+                ],
+                "subcommands": []
+              }
+            ]
+          }
+        ]
+      },
+      {
         "name": "harness",
         "disposition": "candidate-shared-later",
         "arguments": [
@@ -3782,6 +3866,39 @@
             "subcommands": []
           },
           {
+            "name": "gpu-startup",
+            "arguments": [
+              {
+                "name": "--trace",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "gpu-health",
+            "arguments": [
+              {
+                "name": "--trace",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "gpu-probe",
+            "arguments": [
+              {
+                "name": "--trace",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "query",
             "arguments": [
               {
@@ -3998,6 +4115,10 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "control",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "coverage-diff",
         "disposition": "candidate-shared-later"
       },
@@ -4016,6 +4137,10 @@
       {
         "name": "doctor",
         "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "gpu",
+        "disposition": "pulp-owned"
       },
       {
         "name": "import-design",
@@ -4450,6 +4575,14 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "pulp_gpu_probe",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_gpu_recipes",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "pulp_inspect_pending_requests",
         "disposition": "candidate-shared-later"
       },
@@ -4519,6 +4652,10 @@
       },
       {
         "name": "pulp_test",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_trace_analyze",
         "disposition": "candidate-shared-later"
       },
       {

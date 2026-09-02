@@ -27,6 +27,44 @@ orphan blobs and interrupted private-publish files. Deletion audit records are
 bounded and contain only opaque artifact ID, hash, size, time, and reason; they
 never persist plugin text, consent text, paths, or tokens.
 
+### Correlated GPU startup response
+
+The `dev.pulp.gpu/health.read@1` response is receipt-bound JSON rather than a
+new artifact kind. Its `health` member preserves the standalone GPU-health
+evidence ID; `startup.correlation` may additionally carry the GPU measurement
+ID and Perfetto trace evidence ID. The executor copies non-null correlation IDs
+into the durable operation result's bounded `evidence_ids` while the receipt
+already binds the client, grant, registration, session, instance, publication,
+manifest, producer, operation, version, and deadline.
+
+Null correlation IDs mean unavailable or not-yet-integrated evidence, not a
+successful lookup by filename or timestamp. A truncated capture, dropped
+event, missing required trace category, unresolved trial, blank-content
+negative control, or unknown parent/call site cannot be promoted to a complete
+causal result. The response may retain measurements for investigation, but it
+must withhold final performance and pipeline-attribution claims.
+
+When a product provider is implemented, capture and analysis remain separate
+authorized steps. The trace operation produces the broker-owned trace artifact;
+the health snapshot records its opaque evidence ID but never turns that ID into
+a path. Retrieve the artifact through its original receipt/grant lineage, then
+use the existing offline Perfetto workflow:
+
+```sh
+pulp trace doctor
+pulp trace query "SELECT DISTINCT category FROM slice" --trace evidence.pftrace
+pulp trace query \
+  "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" \
+  --trace evidence.pftrace
+```
+
+Before causal analysis, compare the captured categories with
+`startup.capture.missing_trace_categories` and confirm dropped-event and
+truncation counts are zero. Shader compile, upload, hidden-frame, and present
+timings in the health response are correlation pivots, not substitutes for
+attributed trace spans. A missing category or unattributed parent/call site is
+an investigation disposition, not evidence for an optimization.
+
 ## T1 and T2a mutation
 
 `dev.pulp.state/parameter-gesture@1` resolves one exact admitted registration,

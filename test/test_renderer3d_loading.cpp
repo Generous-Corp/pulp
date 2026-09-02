@@ -103,7 +103,6 @@ TEST_CASE("GpuSurface can request the Dawn null backend for API-only probes",
     config.native_surface_handle = nullptr;
     config.backend_preference =
         GpuSurface::AdapterBackendPreference::null_backend;
-
     if (!gpu->initialize(config)) {
         SUCCEED("Dawn null backend unavailable in this environment");
         return;
@@ -111,6 +110,7 @@ TEST_CASE("GpuSurface can request the Dawn null backend for API-only probes",
 
     const auto info = gpu->adapter_info();
     REQUIRE(info.available);
+    REQUIRE(info.null_backend);
     REQUIRE(info.backend_type == "Null");
     REQUIRE(gpu->is_initialized());
     REQUIRE_FALSE(gpu->has_surface());

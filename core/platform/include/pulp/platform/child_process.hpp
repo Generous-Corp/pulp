@@ -21,6 +21,10 @@ struct ProcessResult {
     std::string stderr_output;
     bool timed_out = false;
     bool was_cancelled = false;
+    /// At least one captured stream produced more than max_output_bytes.
+    /// Retained output remains capped; the child is allowed to perform its own
+    /// descendant cleanup before the caller rejects the result.
+    bool output_limit_exceeded = false;
 };
 
 /// Options for child process execution.
