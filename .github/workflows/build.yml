@@ -1685,6 +1685,44 @@ jobs:
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure \
             -C Release --no-tests=error -R '^agent-capability-installed-sdk$'
 
+      - name: Test A2T structural receipt issuer
+        if: runner.os == 'macOS' && matrix.key == 'macos'
+        shell: bash
+        run: python3 tools/scripts/test_a2t_structural_verification_ci.py
+
+      - name: Verify A2T structural receipt
+        id: a2t_structural_verification
+        if: >-
+          runner.os == 'macOS'
+          && matrix.key == 'macos'
+          && github.event_name == 'pull_request'
+          && hashFiles('evidence/receipt.json') != ''
+        shell: bash
+        env:
+          A2T_ATTESTATION_DIR: ${{ runner.temp }}/a2t-structural-verification-${{ github.event.pull_request.head.sha }}
+          A2T_CHECK_NAME: macos
+          A2T_STEP_NAME: Verify A2T structural receipt
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin \
+            "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/origin/a2t-evidence-head"
+          source_revision="$(
+            git show 'refs/remotes/origin/a2t-evidence-head:evidence/receipt.json' \
+              | python3 -c 'import json, re, sys; value=json.load(sys.stdin).get("source_revision"); sys.stdout.write(value + "\n") if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) else sys.exit(1)'
+          )"
+          git fetch --no-tags --depth=1 origin "$source_revision"
+          python3 tools/scripts/a2t_structural_verification_ci.py
+
+      - name: Publish A2T structural verification
+        if: steps.a2t_structural_verification.outcome == 'success'
+        uses: actions/upload-artifact@v5
+        with:
+          name: a2t-structural-verification-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/a2t-structural-verification-${{ github.event.pull_request.head.sha }}/attestation.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
       - name: Surface ctest failures (non-Windows)
         # On a SELF-HOSTED runner the test step's log is not retrievable via
         # `gh run view --log` (you get only "Process completed with exit code
