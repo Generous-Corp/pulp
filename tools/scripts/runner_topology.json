@@ -1,5 +1,5 @@
 {
-  "$schema": "Declarative runner-routing contract. Each lane binds a GitHub repo variable (`*_RUNS_ON_JSON`) to the label set it is INTENDED to route to, and to the kind of runner expected to serve it. Consumed by tools/scripts/runner_topology_check.py, which reconciles this file against the LIVE repo variables and the LIVE registered runners. A lane whose labels no runner can satisfy is a routing black hole: jobs queue forever and GitHub reports no error. Editing a repo variable without editing its lane here is drift, and the checker fails on it. Docs: docs/guides/local-ci.md.",
+  "$schema": "Declarative runner-routing contract. Each lane binds a GitHub repo variable (`*_RUNS_ON_JSON`) to the label set it is INTENDED to route to, and to the kind of runner expected to serve it. Consumed by tools/scripts/runner_topology_check.py, which reconciles this file against the LIVE repo variables and LIVE registered runners, plus optional read-only TartCI profile/receipt/private-manifest fixtures. A lane whose labels no runner can satisfy is a routing black hole: jobs queue forever and GitHub reports no error. Editing a repo variable without editing its lane here is drift, and the checker fails on it. Docs: docs/guides/local-ci.md.",
   "_note_expect": "`expect` records the label set or declared off-switch sentinel the lane is CONTRACTED to use. It is the reviewed artifact: changing a repo variable is only legitimate when this file changes with it. `expect` is not automatically correct \u2014 a lane can be contracted to labels nothing serves, which is exactly the failure this checker exists to surface.",
   "github_hosted_labels": [
     "ubuntu-latest",
@@ -26,6 +26,39 @@
     }
   },
   "_note_routing_controls": "Exact-value controls that affect routing without being runs-on selectors. The overflow idle probe must target the same fast runner class as the required macOS selector; otherwise an idle rollback-only M1 can suppress overflow for work it cannot serve.",
+  "event_class_v2": {
+    "variable": "PULP_LOCAL_MACOS_RUNS_ON_JSON",
+    "repo": "Generous-Corp/pulp",
+    "lane_id": "pulp-gate",
+    "assignment_mode": "event-class-v2",
+    "omit_labels": [
+      "pulp-gate-fast"
+    ],
+    "classes": [
+      {
+        "event": "merge_group",
+        "label": "pulp-build-merge-group",
+        "workflow": "Build and Test",
+        "runner_group_id": 1,
+        "lease_priority": 110
+      },
+      {
+        "event": "pull_request",
+        "label": "pulp-build-pr-head",
+        "workflow": "Build and Test",
+        "runner_group_id": 1,
+        "lease_priority": 100
+      }
+    ],
+    "profiles": [
+      {
+        "name": "m3-macos-fleet",
+        "manifest_host": "m3",
+        "source_path": "profiles/m3-macos-fleet.toml"
+      }
+    ]
+  },
+  "_note_event_class_v2": "The repo variable remains the reviewed pre-dispatch selector. build.yml removes omit_labels and adds exactly one class label. TartCI source profiles declare assignment_mode, the post-transform base labels, and both tier rows, but no fixed priority: provider code derives 110 for merge-group and 100 for PR-head. Optional --fleet-profile/--fleet-receipt/--fleet-source-manifest fixtures let the checker reconcile source, installed receipt, and private desired-fleet evidence without querying a host or copying repo-specific labels into generic Shipyard/TartCI code.",
   "service_evidence": {
     "lookback_hours": 720,
     "runs_per_workflow": 20,

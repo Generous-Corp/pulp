@@ -39,6 +39,11 @@ incidents unless a section explicitly says otherwise. They are not the current
 required-gate topology. The authoritative declarative surface is
 `tools/scripts/runner_topology.json`; reconcile it with live variables using
 `python3 tools/scripts/runner_topology_check.py --mode=report`.
+The same checker accepts read-only `--fleet-profile`, `--fleet-receipt`, and
+`--fleet-source-manifest` fixtures. Use them to prove that a TartCI source
+profile serves both classes, the loaded receipt binds its exact digest, and the
+private desired-fleet manifest agrees. Keep Pulp labels and host declarations in
+those repo/private inputs, not generic Shipyard or TartCI code.
 
 The canonical `.github/workflows/build.yml` `Build and Test` pull-request run
 is excluded from broad stale-run and superseded-run janitors. Its narrow
@@ -6856,19 +6861,16 @@ drift; humans run `shipyard update` to apply.
   lacks `/opt/homebrew/bin` and reports Homebrew tools as missing — this
   produces a FALSE "tart is not installed" census result. Use
   `ssh host 'zsh -lc "…"'` for any host census.
-- **`TART_HOME` is per-host BY DESIGN — never default it.** Real VM homes
-  differ intentionally: m3 = `/Volumes/Workshop/VMs` (external SSD), m1 and
-  m5 = `~/VMs` (internal SSD). A default is an undeclared name wearing a
-  trench coat: on a VM host an unset `TART_HOME` must be a **loud hard
-  error naming the fix**, never a guess. The repo holds RULES; the host
-  holds VALUES — per-host truth belongs in the tartci host profile, not a
-  repo constant. `tools/ci/*.sh` currently carry contradictory hardcoded
-  defaults (`/Volumes/Workshop/VMs` in the tart-runner / run-job /
-  provision / runner-linux scripts, `$HOME/VMs` in `reap-stray-vms.sh` and
-  `setup-ci-host.sh`). The worst failure mode: on m3, `reap-stray-vms.sh`
-  defaults to `$HOME/VMs`, which is **empty** on that host — so the reaper
-  inspects the wrong universe, reaps nothing, and exits 0 reporting
-  success. A silent permanent no-op. Always pass `TART_HOME` explicitly.
+- **`TART_HOME` is per-host BY DESIGN — never default it.** Every Pulp VM tool
+  now resolves it through `tools/ci/lib/tart-home.sh`: explicit environment,
+  then the host profile's `vm_home`, otherwise a loud error. Do not restore a
+  host/path table or a guessed `$HOME/VMs`/`/Volumes/.../VMs` fallback. A bare
+  `tart list` using an unbound default store is not proof that the host is idle:
+  if `tart run` processes or guest setup exist simultaneously, the result is
+  **unknown**. Resolve the receipt-bound profile, query its exact store, and
+  corroborate process state before any active-work decision. Pulp's topology
+  checker can compare supplied profile/receipt/source-manifest fixtures; live
+  store/process reconciliation belongs in TartCI.
 
 ### Anti-pattern (legacy)
 
@@ -7071,7 +7073,7 @@ Key facts:
 
 Companion plan: `planning/2026-05-19-ci-optimization-plan.md`.
 
-## macOS runner routing — fast JIT primary, local-only overflow
+## macOS runner routing — event-class JIT primary, reviewed hosted overflow
 
 **A routing var describes REALITY; `build.yml`'s `||` default is only the
 fallback.** Read the live variable before reasoning about where a leg runs —
@@ -7088,9 +7090,10 @@ python3 tools/scripts/runner_topology_check.py --mode=report
 
 The contracted required gate is the M1/M3/M5 JIT pool. The JSON records the
 legacy base selector; `build.yml` replaces `pulp-gate-fast` with the exact PR or
-merge-group event class before assignment. macOS overflow is disabled with the
-`local-only` sentinel, and paid Namespace variables remain unset. Read both
-surfaces together for the effective selector.
+merge-group event class before assignment. The reviewed overflow contract is
+GitHub-hosted `macos-15`; `local-only` remains its explicit disable sentinel,
+and paid Namespace variables remain unset. Read both surfaces together for the
+effective selector.
 
 **Required/advisory isolation.** The `pulp-build*` and `pulp-preamble*` labels
 are reserved for required merge-gate work. Example validation and format

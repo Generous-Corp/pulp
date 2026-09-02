@@ -13,6 +13,8 @@ No network: every test drives the pure check() over injected state.
 from __future__ import annotations
 
 import importlib.util
+import copy
+import hashlib
 import json
 import os
 import plistlib
@@ -614,6 +616,292 @@ class TestShippedContract(unittest.TestCase):
                       self.c.must_remain_unset)
 
 
+class TestEventClassV2Evidence(unittest.TestCase):
+    def setUp(self):
+        self.c = gate.load_contract(HERE / "runner_topology.json")
+        self.profile_path = Path("profiles/m3-macos-fleet.toml")
+        self.profile = {
+            "schema": 1,
+            "name": "m3-macos-fleet",
+            "host": {
+                "id": "studio",
+                "tart_home": "/fixture/authoritative-vm-store",
+            },
+            "lane": [{
+                "id": "pulp-gate",
+                "repo": "Generous-Corp/pulp",
+                "runner_group_id": 1,
+                "assignment_mode": "event-class-v2",
+                "assignment_omit_labels": ["pulp-gate-fast"],
+                "supervisors": 2,
+                "vm_cores": 12,
+                "min_queued_age_seconds": 0,
+                "labels": [
+                    "self-hosted", "macOS", "ARM64", "pulp-build",
+                    "pulp-build-vm",
+                ],
+                "tier": [
+                    {
+                        "label": "pulp-build-merge-group",
+                        "workflow": "Build and Test",
+                        "runner_group_id": 1,
+                    },
+                    {
+                        "label": "pulp-build-pr-head",
+                        "workflow": "Build and Test",
+                        "runner_group_id": 1,
+                    },
+                ],
+            }],
+        }
+        self.manifest = {
+            "schema": 1,
+            "dynamic_selector": {
+                "base_labels": [
+                    "self-hosted", "macOS", "ARM64", "pulp-build",
+                    "pulp-build-vm", "pulp-gate-fast",
+                ],
+                "event_labels": {
+                    "merge_group": "pulp-build-merge-group",
+                    "pull_request": "pulp-build-pr-head",
+                },
+                "legacy_label_removed_before_dispatch": "pulp-gate-fast",
+            },
+            "hosts": {
+                "m3": {
+                    "host_id": "studio",
+                    "tart_home": "/fixture/authoritative-vm-store",
+                    "supervisors": 2,
+                    "vm_cores": 12,
+                    "min_queued_age_seconds": 0,
+                },
+            },
+            "lease_priority": {"merge_group": 110, "pull_request": 100},
+            "pulp_lane": {
+                "assignment_mode": "event-class-v2",
+                "base_labels": [
+                    "self-hosted", "macOS", "ARM64", "pulp-build",
+                    "pulp-build-vm",
+                ],
+                "omit_labels": ["pulp-gate-fast"],
+                "repo": "Generous-Corp/pulp",
+                "runner_group_id": 1,
+                "tiers": copy.deepcopy(self.profile["lane"][0]["tier"]),
+            },
+            "source_paths": {
+                "pulp_topology": "tools/scripts/runner_topology.json",
+                "tartci_profiles": ["profiles/m3-macos-fleet.toml"],
+            },
+        }
+
+    def test_shipped_contract_models_m3_serving_both_classes(self):
+        spec = self.c.event_class_v2
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec["assignment_mode"], "event-class-v2")
+        self.assertEqual(
+            [(row["label"], row["lease_priority"]) for row in spec["classes"]],
+            [("pulp-build-merge-group", 110), ("pulp-build-pr-head", 100)],
+        )
+        self.assertEqual(
+            [row["name"] for row in spec["profiles"]], ["m3-macos-fleet"])
+
+    def test_malformed_event_contract_is_typed_drift_not_a_crash(self):
+        contract = copy.deepcopy(self.c)
+        contract.event_class_v2 = []
+        findings = gate.check_event_class_evidence(contract)
+        self.assertEqual(kinds(findings), ["event-class-contract"])
+
+        contract = copy.deepcopy(self.c)
+        contract.event_class_v2["classes"] = 7
+        findings = gate.check_event_class_evidence(contract)
+        self.assertEqual(kinds(findings), ["event-class-contract"])
+
+        contract = copy.deepcopy(self.c)
+        contract.event_class_v2["profiles"] = [{"name": []}]
+        findings = gate.check_event_class_evidence(contract)
+        self.assertEqual(kinds(findings), ["event-class-contract"])
+
+        contract = copy.deepcopy(self.c)
+        contract.event_class_v2["classes"].pop()
+        findings = gate.check_event_class_evidence(contract)
+        self.assertEqual(kinds(findings), ["event-class-contract"])
+
+        contract = copy.deepcopy(self.c)
+        duplicate = copy.deepcopy(contract.event_class_v2["classes"][0])
+        duplicate["label"] = "duplicate-merge-group"
+        contract.event_class_v2["classes"].append(duplicate)
+        findings = gate.check_event_class_evidence(contract)
+        self.assertEqual(kinds(findings), ["event-class-contract"])
+
+        contract = copy.deepcopy(self.c)
+        contract.event_class_v2["assignment_mode"] = "typo"
+        findings = gate.check_event_class_evidence(contract)
+        self.assertEqual(kinds(findings), ["event-class-contract"])
+
+    def test_matching_profile_and_source_manifest_are_clean(self):
+        findings = gate.check_event_class_evidence(
+            self.c,
+            [(self.profile_path, self.profile)],
+            source_manifest=(Path("fleet/local-macos-desired.json"), self.manifest),
+        )
+        self.assertEqual(findings, [])
+
+    def test_profile_missing_pr_head_tier_is_drift(self):
+        profile = copy.deepcopy(self.profile)
+        profile["lane"][0]["tier"].pop()
+        findings = gate.check_event_class_evidence(
+            self.c, [(self.profile_path, profile)])
+        self.assertEqual(kinds(findings), ["profile-contract-drift"])
+        self.assertIn("tiers", findings[0].detail)
+
+    def test_profile_fixed_priority_is_drift(self):
+        profile = copy.deepcopy(self.profile)
+        profile["lane"][0]["priority"] = "gate"
+        findings = gate.check_event_class_evidence(
+            self.c, [(self.profile_path, profile)])
+        self.assertEqual(kinds(findings), ["profile-contract-drift"])
+        self.assertIn("fixed lane priority", findings[0].detail)
+
+    def test_structurally_invalid_tier_is_drift_not_a_crash(self):
+        profile = copy.deepcopy(self.profile)
+        profile["lane"][0]["tier"] = 7
+        findings = gate.check_event_class_evidence(
+            self.c, [(self.profile_path, profile)])
+        self.assertEqual(kinds(findings), ["profile-contract-drift"])
+        self.assertIn("tiers", findings[0].detail)
+
+    def test_boolean_numeric_fields_are_typed_drift(self):
+        profile = copy.deepcopy(self.profile)
+        profile["schema"] = True
+        profile["lane"][0]["runner_group_id"] = True
+        profile["lane"][0]["tier"][0]["runner_group_id"] = True
+        findings = gate.check_event_class_evidence(
+            self.c, [(self.profile_path, profile)])
+        self.assertEqual(kinds(findings), ["profile-contract-drift"])
+        self.assertIn("schema", findings[0].detail)
+        self.assertIn("runner_group_id", findings[0].detail)
+
+        manifest = copy.deepcopy(self.manifest)
+        manifest["schema"] = True
+        manifest["pulp_lane"]["runner_group_id"] = True
+        findings = gate.check_event_class_evidence(
+            self.c,
+            source_manifest=(Path("fleet/local-macos-desired.json"), manifest),
+        )
+        self.assertEqual(kinds(findings), ["source-manifest-drift"])
+        self.assertIn("schema", findings[0].detail)
+        self.assertIn("runner_group_id", findings[0].detail)
+
+    def test_non_string_profile_name_is_drift_not_a_crash(self):
+        profile = copy.deepcopy(self.profile)
+        profile["name"] = ["m3-macos-fleet"]
+        findings = gate.check_event_class_evidence(
+            self.c, [(self.profile_path, profile)])
+        self.assertEqual(kinds(findings), ["profile-contract-drift"])
+        self.assertIn("profile declaration", findings[0].detail)
+
+    def test_profile_requires_concrete_host_and_tart_home(self):
+        profile = copy.deepcopy(self.profile)
+        profile.pop("host")
+        findings = gate.check_event_class_evidence(
+            self.c, [(self.profile_path, profile)])
+        self.assertEqual(kinds(findings), ["profile-contract-drift"])
+        self.assertIn("host.id", findings[0].detail)
+        self.assertIn("host.tart_home", findings[0].detail)
+
+    def test_loaded_receipt_digest_must_match_source_profile(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "profiles" / "m3-macos-fleet.toml"
+            path.parent.mkdir()
+            path.write_text("name = 'm3-macos-fleet'\n")
+            receipt = {
+                "schema": 2,
+                "profile": "m3-macos-fleet",
+                "config_path": "/fixture/.config/tartci/macos-fleet-profile.toml",
+                "config_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+            clean = gate.check_event_class_evidence(
+                self.c, [(path, self.profile)], [(Path("receipt.json"), receipt)])
+            self.assertEqual(clean, [])
+            stale = {**receipt, "schema": 1}
+            stale_findings = gate.check_event_class_evidence(
+                self.c, [(path, self.profile)], [(Path("receipt.json"), stale)])
+            self.assertEqual(kinds(stale_findings), ["profile-receipt-drift"])
+            receipt["config_sha256"] = "0" * 64
+            drift = gate.check_event_class_evidence(
+                self.c, [(path, self.profile)], [(Path("receipt.json"), receipt)])
+        self.assertEqual(kinds(drift), ["profile-receipt-drift"])
+
+    def test_profile_fixture_must_match_declared_source_suffix(self):
+        findings = gate.check_event_class_evidence(
+            self.c,
+            [(Path("elsewhere/m3-macos-fleet.toml"), self.profile)],
+        )
+        self.assertEqual(kinds(findings), ["profile-contract-drift"])
+        self.assertIn("source_path", findings[0].detail)
+
+    def test_parseable_malformed_manifest_is_typed_drift(self):
+        manifest = copy.deepcopy(self.manifest)
+        manifest["dynamic_selector"] = 7
+        manifest["source_paths"] = 9
+        manifest["hosts"]["m3"] = 7
+        findings = gate.check_event_class_evidence(
+            self.c,
+            [(self.profile_path, self.profile)],
+            source_manifest=(Path("fleet/local-macos-desired.json"), manifest),
+        )
+        self.assertEqual(kinds(findings), ["source-manifest-drift"])
+        self.assertIn("dynamic_selector", findings[0].detail)
+        self.assertIn("source_paths", findings[0].detail)
+        self.assertIn("hosts.m3", findings[0].detail)
+
+    def test_malformed_hosts_is_drift_without_a_profile_fixture(self):
+        manifest = copy.deepcopy(self.manifest)
+        manifest["hosts"] = 7
+        findings = gate.check_event_class_evidence(
+            self.c,
+            source_manifest=(Path("fleet/local-macos-desired.json"), manifest),
+        )
+        self.assertEqual(kinds(findings), ["source-manifest-drift"])
+        self.assertIn("hosts", findings[0].detail)
+
+    def test_manifest_tart_home_must_match_profile(self):
+        manifest = copy.deepcopy(self.manifest)
+        manifest["hosts"]["m3"]["tart_home"] = "/wrong/default/store"
+        findings = gate.check_event_class_evidence(
+            self.c,
+            [(self.profile_path, self.profile)],
+            source_manifest=(Path("fleet/local-macos-desired.json"), manifest),
+        )
+        self.assertEqual(kinds(findings), ["source-manifest-drift"])
+        self.assertIn("tart_home", findings[0].detail)
+
+    def test_manifest_must_declare_topology_profile_and_host_sources(self):
+        manifest = copy.deepcopy(self.manifest)
+        manifest["source_paths"].pop("pulp_topology")
+        manifest["source_paths"]["tartci_profiles"] = []
+        manifest["hosts"] = {}
+        findings = gate.check_event_class_evidence(
+            self.c,
+            source_manifest=(Path("fleet/local-macos-desired.json"), manifest),
+        )
+        self.assertEqual(kinds(findings), ["source-manifest-drift"])
+        self.assertIn("pulp_topology", findings[0].detail)
+        self.assertIn("tartci_profiles", findings[0].detail)
+        self.assertIn("hosts.m3", findings[0].detail)
+
+    def test_manifest_priority_must_match_provider_code_contract(self):
+        manifest = copy.deepcopy(self.manifest)
+        manifest["lease_priority"]["merge_group"] = 100
+        findings = gate.check_event_class_evidence(
+            self.c,
+            [(self.profile_path, self.profile)],
+            source_manifest=(Path("fleet/local-macos-desired.json"), manifest),
+        )
+        self.assertEqual(kinds(findings), ["source-manifest-drift"])
+        self.assertIn("lease_priority", findings[0].detail)
+
+
 # ── Supervisors must register a label set something can select ──────────
 #
 # The lane checker above reconciles the ROUTING side: a repo variable pointed at
@@ -1033,6 +1321,17 @@ class TestCli(unittest.TestCase):
         }
         rc = self._run(LIVE_RUNNERS, variables, [], "hint")
         self.assertEqual(rc, 0)
+
+    def test_malformed_profile_fixture_is_an_input_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            profile = Path(td) / "broken.toml"
+            profile.write_text("not valid = [")
+            rc = gate.main(["--mode", "report", "--fleet-profile", str(profile)])
+        self.assertEqual(rc, 2)
+
+    def test_toml_parser_is_lazy_for_existing_cli_modes(self):
+        source = (HERE / "runner_topology_check.py").read_text()
+        self.assertNotRegex(source, r"(?m)^import tomli(?:b)?$")
 
 
 class TestSelectorParsing(unittest.TestCase):
