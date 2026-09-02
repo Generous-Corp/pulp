@@ -913,3 +913,41 @@ TEST_CASE("StepPlayer nudged steps are exact across callback partitions",
         }
     }
 }
+
+TEST_CASE("StepPlayer holds an over-wide nudge inside the step that owns it",
+          "[midi][step-player][grid]") {
+    // The declared bound is a quarter note, but a step on a sixteenth grid owns
+    // only a sixteenth of it. A nudge wider than the step's own interval is
+    // accepted at authoring time and held at fire time, so an authored groove
+    // can never push one step past the next one's grid position — which is what
+    // would reorder the sequence against itself.
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(1);
+    auto player = fixture.make();
+    for (std::size_t index = 0; index < 4; ++index) {
+        auto step = basic_step();
+        step.pitch_offset = static_cast<std::int8_t>(index);
+        step.timing_offset_ticks = midi::StepPlayer<>::kMaximumTimingOffsetTicks;
+        REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+    }
+
+    const std::array whole{std::int32_t{30'000}};
+    const auto attacks = attacks_of(render(player, map, 30'000, whole));
+
+    // Four steps' displaced onsets fall inside this window; the fifth lands on
+    // the limit and belongs to the next call. Asserting the count first means a
+    // clamp that swallowed a step could not make the ordering below look right.
+    REQUIRE(attacks.size() == 4);
+    for (std::size_t index = 0; index < attacks.size(); ++index) {
+        const auto grid = static_cast<std::int64_t>(index) * kStepSamples;
+        INFO("step " << index << " attack sample = " << attacks[index].sample);
+        // Displaced off its own grid position, and no further than the next
+        // one. The bound is strict in ticks, which is the kernel's coordinate;
+        // one interval short of a sixteenth is 176'399 of 176'400 ticks, and
+        // that rounds onto the next grid sample rather than past it.
+        CHECK(attacks[index].sample > grid);
+        CHECK(attacks[index].sample <= grid + kStepSamples);
+        if (index > 0)
+            CHECK(attacks[index].sample > attacks[index - 1].sample);
+    }
+}
