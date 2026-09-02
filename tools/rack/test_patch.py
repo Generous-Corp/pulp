@@ -4295,36 +4295,50 @@ def check_behaviour_is_measured() -> tuple:
                   "filter sweep each measure as themselves and as nothing "
                   "else, with no SDK anywhere")
 
-    # A HEADER EDIT MUST REBUILD THE GATE. The staleness check compared the
-    # binary's mtime against patch_gate.cpp alone, so once the measurement moved
-    # into headers beside it, editing one changed nothing a rebuild could see:
-    # the next run would silently test the previous binary while the change
-    # appeared to do nothing at all. Asserted against the real decision rather
-    # than by reading the source, so a later rewrite of it cannot pass by
-    # keeping the shape.
+    # ANY SOURCE-BYTE EDIT MUST SELECT A NEW GATE, EVEN WHEN ITS MTIME IS OLD.
+    # Installed releases preserve/copy source timestamps, so an updated source
+    # can legitimately be older than the binary cached by its predecessor.
+    # The former mtime gate then ran old measurement code forever. Exercise the
+    # real build decision in an isolated cache, and make the edited copy OLDER
+    # than the first binary so this fails under that implementation.
     ran += 1
     stale = []
-    for header in P.GATE_HEADERS:
-        if not os.path.exists(header):
-            stale.append(f"{os.path.basename(header)} does not exist")
-            continue
-        # A binary newer than every source, then a header touched past it.
-        newest = max(os.path.getmtime(p) for p in [P.GATE_SRC] + P.GATE_HEADERS)
-        os.makedirs(os.path.dirname(P.GATE_BIN), exist_ok=True)
-        with open(P.GATE_BIN, "a"):
-            os.utime(P.GATE_BIN, (newest + 10, newest + 10))
-        os.utime(header, (newest + 20, newest + 20))
-        if P.build_gate()[0] == P.GATE_BIN and \
-                os.path.getmtime(P.GATE_BIN) < os.path.getmtime(header):
-            stale.append(f"touching {os.path.basename(header)} reused the "
-                         f"binary built before it")
+    with tempfile.TemporaryDirectory(prefix="patch-gate-cache-") as root:
+        inputs = [P.GATE_SRC] + P.GATE_HEADERS
+        copies = []
+        for source in inputs:
+            target = os.path.join(root, os.path.basename(source))
+            shutil.copy2(source, target)
+            copies.append(target)
+        original = P.GATE_SRC, P.GATE_HEADERS, P.CACHE_DIR
+        try:
+            P.GATE_SRC, P.GATE_HEADERS, P.CACHE_DIR = \
+                copies[0], copies[1:], os.path.join(root, "cache")
+            first, why = P.build_gate()
+            if not first:
+                stale.append(f"baseline gate did not build: {why}")
+            else:
+                for changed in copies:
+                    with open(changed, "a", encoding="utf-8") as output:
+                        output.write("\n// source-identity negative control\n")
+                    os.utime(changed, (1, 1))
+                    rebuilt, why = P.build_gate()
+                    if not rebuilt:
+                        stale.append(f"{os.path.basename(changed)} did not "
+                                     f"rebuild: {why}")
+                    elif rebuilt == first:
+                        stale.append(f"editing {os.path.basename(changed)} "
+                                     "reused the old binary")
+                    first = rebuilt or first
+        finally:
+            P.GATE_SRC, P.GATE_HEADERS, P.CACHE_DIR = original
     if stale:
         bad += 1
-        print(f"  WRONG  the gate does not rebuild when its own sources change, "
+        print(f"  WRONG  the gate does not rebuild when its source bytes change, "
               f"so an edited measurement is silently never run: {stale}")
     else:
-        print(f"  ok     touching any of the gate's {len(P.GATE_HEADERS)} "
-              f"headers rebuilds it")
+        print(f"  ok     changing any of the gate's {1 + len(P.GATE_HEADERS)} "
+              f"source inputs selects a new binary despite older mtimes")
 
     # Every field a threshold names must be one the gate writes. A typo here
     # costs nothing at import and everything at run time: the field reads back

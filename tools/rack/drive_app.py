@@ -122,11 +122,15 @@ def generating() -> bool:
     generate.py` also matches any SHELL whose command line mentions it -- so a
     command that begins with `pkill -f generate.py` makes the check report the
     generator as running because it matched the shell doing the killing."""
-    for pattern in ("python3 generate.py", "python3 patch.py"):
-        if subprocess.run(["pgrep", "-f", pattern],
-                          capture_output=True).returncode == 0:
-            return True
-    return False
+    # The app launches the system/framework Python executable with an absolute
+    # script path, e.g. ``.../Python .../tools/rack/generate.py``. Matching the
+    # literal spelling ``python3 generate.py`` therefore misses the real run
+    # and lets the driver declare a live build dead (or start another one).
+    # Require a path separator before the script name so a shell command that
+    # merely mentions ``generate.py`` still does not match itself.
+    pattern = r"/(generate|patch)\.py([[:space:]]|$)"
+    return subprocess.run(["pgrep", "-f", pattern],
+                          capture_output=True).returncode == 0
 
 
 def instances() -> list[str]:
