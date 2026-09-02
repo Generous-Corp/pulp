@@ -821,6 +821,7 @@ class CleanAgentHarnessTests(unittest.TestCase):
                 "merge_group": {
                     "base_ref": "refs/heads/main",
                     "base_sha": base_revision,
+                    "head_sha": head_revision,
                 },
             }
             derived = identity(valid)
@@ -864,9 +865,10 @@ class CleanAgentHarnessTests(unittest.TestCase):
             run("git", "reset", "--hard", cumulative_head, cwd=root)
             cumulative_event = json.loads(json.dumps(valid))
             cumulative_event["merge_group"]["base_sha"] = cumulative_base
+            cumulative_event["merge_group"]["head_sha"] = cumulative_head
             self.assertEqual(
                 identity(cumulative_event, event_head=cumulative_head)["origin_main"],
-                base_revision,
+                cumulative_base,
             )
             run("git", "reset", "--hard", head_revision, cwd=root)
 

@@ -270,31 +270,15 @@ def _github_event_protected_base(
     else:
         if event.get("base_ref") != "refs/heads/main":
             raise TrustError("GitHub merge group does not target canonical main")
-        group_base = event.get("base_sha")
-        if not isinstance(group_base, str) or SHA40_RE.fullmatch(group_base) is None:
-            raise TrustError("GitHub event has no exact protected-base commit identity")
-        revision = _text(_git(root, "rev-parse", "HEAD"))
-        group_parents = _text(_git(root, "show", "-s", "--format=%P", revision)).split()
-        if len(group_parents) != 2 or group_parents[0] != group_base:
-            raise TrustError("GitHub merge group has an unsupported synthetic-head shape")
-        candidate_parents = _text(
-            _git(root, "show", "-s", "--format=%P", group_parents[1])
-        ).split()
-        if len(candidate_parents) != 1:
-            raise TrustError("GitHub merge-group candidate is not one exact commit")
-        candidate = candidate_parents[0]
-        if candidate != group_base:
-            cumulative_parents = _text(
-                _git(root, "show", "-s", "--format=%P", group_base)
-            ).split()
-            if len(cumulative_parents) != 2 or cumulative_parents[0] != candidate:
-                raise TrustError("GitHub merge-group base is not a supported cumulative group")
+        candidate = event.get("base_sha")
     if not isinstance(candidate, str) or SHA40_RE.fullmatch(candidate) is None:
         raise TrustError("GitHub event has no exact protected-base commit identity")
     event_head = os.environ.get("GITHUB_SHA", "")
     revision = _text(_git(root, "rev-parse", "HEAD"))
     if SHA40_RE.fullmatch(event_head) is None or event_head != revision:
         raise TrustError("GitHub event is not bound to the exact checkout HEAD")
+    if event_name == "merge_group" and event.get("head_sha") != event_head:
+        raise TrustError("GitHub merge group is not bound to the exact event head")
     resolved = _text(_git(root, "rev-parse", "--verify", f"{candidate}^{{commit}}"))
     if resolved != candidate:
         raise TrustError("GitHub event protected base is not the exact local commit object")
