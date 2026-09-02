@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 67,
+  "inventory_version": 68,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1026,7 +1026,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
-      "fingerprint": "sha256:5d62d1ef328c7a47103efcc0910ef48928ca844213c6a4a8579cdf8e9f15a234",
+      "fingerprint": "sha256:fcebd2eee1729ee806c369dd9e2696cc0c1aa8e6442afe01b9e84b2d3dd70da0",
       "include": "pulp/audio/voice_modulation_sources.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
