@@ -218,6 +218,7 @@ string(JSON positive_schema ERROR_VARIABLE positive_schema_error
     GET "${positive_json}" schema)
 string(JSON positive_verdict ERROR_VARIABLE positive_verdict_error
     GET "${positive_json}" verdict)
+set(positive_adapter_unavailable FALSE)
 if(positive_schema_error OR positive_verdict_error OR
    NOT positive_schema STREQUAL "pulp.gpu-probe-result.v1")
     message(FATAL_ERROR "positive probe did not emit typed v1 evidence")
@@ -355,10 +356,11 @@ if(negative_rc EQUAL 1)
 elseif(UNIX AND NOT APPLE AND negative_rc EQUAL 2)
     is_gpu_compute_adapter_unavailable("${negative_json}"
         negative_adapter_unavailable)
-    if(NOT negative_adapter_unavailable)
+    if(NOT positive_adapter_unavailable OR NOT negative_adapter_unavailable)
         message(FATAL_ERROR
-            "headless Linux negative control did not emit exact typed "
-            "adapter-unavailable evidence: ${negative_stderr}")
+            "headless Linux negative control may be unavailable only when the "
+            "positive probe established the same exact adapter-unavailable "
+            "state: ${negative_stderr}")
     endif()
 else()
     message(FATAL_ERROR
