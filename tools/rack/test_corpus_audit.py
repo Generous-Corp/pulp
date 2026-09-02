@@ -65,6 +65,45 @@ def main() -> int:
                for row in report["quarantine"])
     print("  ok  conflicting meanings quarantine the port instead of voting")
 
+    # The stored index records a contributor as a plain name and carries no
+    # numeric id, so an identity that reads the id alone finds nothing on every
+    # row, collapses all evidence into one bucket, and pins support at 1 -- a
+    # floor above 1 then cannot fire and the lane reports that the corpus
+    # corroborates nothing. Rows here are shaped like the store, not like the
+    # writer, so this fails if the identity ever narrows back to the id.
+    stored_shape = [{k: v for k, v in observation(name).items()
+                     if k != "source_author_id"}
+                    for name in ("alfa", "bravo", "charlie")]
+    assert all("source_author_id" not in row for row in stored_shape)
+    report = audit.usage_prior_report(stored_shape, min_support=3)
+    assert len(report["admitted"]) == 1, report
+    assert report["admitted"][0]["support"] == 3
+    print("  ok  named contributors corroborate when no numeric id is stored")
+
+    one_author = [{k: v for k, v in observation(name).items()
+                   if k != "source_author_id"} | {"source_author": "  Same  "}
+                  for name in ("alfa", "bravo", "charlie")]
+    report = audit.usage_prior_report(one_author, min_support=2)
+    assert not report["admitted"]
+    assert report["quarantine"][0]["support"] == 1
+    print("  ok  one named contributor stays one vote across several bodies")
+
+    blind = [dict(row, source_author="", source_author_id=None)
+             for row in stored_shape] + [
+        dict(observation("delta", "GATE", "Gate"), source_author="",
+             source_author_id=None, dst=("GATE", "Gate"))]
+    report = audit.usage_prior_report(blind, min_support=3)
+    assert report["degenerate_support"] is True, report
+    assert not report["admitted"]
+    report = audit.usage_prior_report(stored_shape, min_support=3)
+    assert report["degenerate_support"] is False, report
+    print("  ok  an identity that cannot tell contributors apart says so")
+
+    keys = {audit._contributor_key(row) for row in stored_shape}
+    assert len(keys) == 3
+    assert not any("alfa" in key for key in keys), keys
+    print("  ok  a contributor key compares equal without carrying a name")
+
     saved = (patch_corpus.ROOT, patch_corpus.PATCH_DIR, patch_corpus.load_index,
              patch_corpus.save_index, patch_corpus.listing,
              patch_corpus.detail, patch_corpus._get)

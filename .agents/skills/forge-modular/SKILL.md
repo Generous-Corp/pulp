@@ -1005,6 +1005,35 @@ knowledge about the ~40% of the library CARTOG cannot reach because nobody has
 it installed. It is a prior, never a measurement, and must never override a
 real scan.
 
+### The support count is only as good as the identity behind it
+
+`usage-priors` admits a port hint only when several **distinct contributors**
+independently wire a jack the same way, so one contributor cannot corroborate
+themselves by uploading twice. That makes the contributor identity, not the
+floor, the part that decides whether the lane can ever admit anything.
+
+An identity that reads a field the stored evidence does not carry does not
+error. Every observation falls into the same anonymous bucket, support pins at
+exactly 1, and any floor above 1 becomes unreachable. The lane then prints
+`corroborated priors: 0` with a four-figure quarantine, which reads as a
+finding about the corpus rather than a broken instrument, and the honest-looking
+number invites the wrong fix: lowering the floor. The floor was never the
+problem.
+
+So the lane now reports `degenerate_support` and prints a warning when *every*
+observation has support exactly 1, because a corpus that genuinely lacks
+corroboration still shows a spread of support counts. When you change anything
+about how contributors are told apart, re-run the sensitivity control rather
+than reading the headline: run it once each at `--min-support 1`, `2` and `3` and compare. A
+real corpus decays (many at 1, fewer at 2, fewer at 3); a broken identity falls
+off a cliff (everything at 1, nothing above it).
+
+The identity is a comparison token, never a label: contributor names are hashed
+before they are counted, so nothing downstream can print or persist one even by
+accident. Tests for this must be shaped like the **stored** records rather than
+like the writer's output, since a fixture that supplies whichever field the code
+happens to read agrees with it by construction and proves nothing.
+
 ## The reading corpus has an index, and retrieval is not admission
 
 The source shelf is large enough that opening books one by one is no longer a
