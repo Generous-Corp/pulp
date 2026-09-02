@@ -894,8 +894,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
           "state": "pulp-owned-retained",
-          "revision": "f9458b5333dc82dc3e9653dc2b48333706a32c61",
-          "object_id": "fe0c3d7e5c403db4e4ce24fedd232962b2ac1b9a",
+          "revision": "4c0aba424f28d08337ec323ed155c4ec39b79b37",
+          "object_id": "e33b8e3e6748ffaf1676103a0c06c008d9497de4",
           "object_type": "blob"
         }
       ],
