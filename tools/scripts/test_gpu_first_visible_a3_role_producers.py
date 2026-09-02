@@ -86,6 +86,22 @@ FORGE_ROLES = frozenset(role for role in PRODUCERS if role.startswith("forge-mod
 REAPER_ROLES = frozenset({"forge-modular-vst3-reaper", "forge-modular-clap-reaper"})
 
 
+def assert_non_darwin_source_build_inconclusive(
+    completed: subprocess.CompletedProcess[str], receipt: dict[str, Any],
+) -> bool:
+    if sys.platform == "darwin" or receipt.get("dependencies") != [
+        "source-build-isolation:macos-sandbox"
+    ]:
+        return False
+    assert completed.returncode == 2
+    assert receipt["outcome"] == "inconclusive"
+    assert receipt["reason"] == (
+        "independent source proof requires the macOS sandbox used by the M5 campaign"
+    )
+    assert not any(receipt["artifacts"].values())
+    return True
+
+
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1024,15 +1040,7 @@ def main() -> int:
                 assert receipt["outcome"] == "inconclusive"
                 assert receipt["dependencies"] == ["product-policy:required-coverage"]
                 continue
-            if sys.platform != "darwin" and receipt["dependencies"] == [
-                "source-build-isolation:macos-sandbox"
-            ]:
-                assert completed.returncode == 2
-                assert receipt["outcome"] == "inconclusive"
-                assert receipt["reason"] == (
-                    "independent source proof requires the macOS sandbox used by the M5 campaign"
-                )
-                assert not any(receipt["artifacts"].values())
+            if assert_non_darwin_source_build_inconclusive(completed, receipt):
                 continue
             assert completed.returncode == 0, (role, completed.stdout, completed.stderr, receipt)
             assert receipt["outcome"] == "pass"
@@ -1164,15 +1172,7 @@ def main() -> int:
         ]
         for role, mutation, smoke, needle in negatives:
             completed, receipt = run_role(root, evidence, role, mutation=mutation, smoke=smoke)
-            if sys.platform != "darwin" and receipt["dependencies"] == [
-                "source-build-isolation:macos-sandbox"
-            ]:
-                assert completed.returncode == 2
-                assert receipt["outcome"] == "inconclusive"
-                assert receipt["reason"] == (
-                    "independent source proof requires the macOS sandbox used by the M5 campaign"
-                )
-                assert not any(receipt["artifacts"].values())
+            if assert_non_darwin_source_build_inconclusive(completed, receipt):
                 continue
             assert completed.returncode == 1, (role, mutation, completed.stderr, receipt)
             assert receipt["outcome"] == "fail"
@@ -1186,14 +1186,16 @@ def main() -> int:
         assert receipt["dependencies"] == ["role-driver:pulp-standalone"]
 
         completed, receipt = run_role(root, evidence, "pulp-standalone", mutation="driver-nonpass")
-        assert completed.returncode == 2
-        assert receipt["outcome"] == "inconclusive"
-        assert receipt["dependencies"] == ["ui-driver:unavailable"]
+        if not assert_non_darwin_source_build_inconclusive(completed, receipt):
+            assert completed.returncode == 2
+            assert receipt["outcome"] == "inconclusive"
+            assert receipt["dependencies"] == ["ui-driver:unavailable"]
 
         completed, receipt = run_role(root, evidence, "forge-modular-vst3-reaper", smoke="skip")
-        assert completed.returncode == 3
-        assert receipt["outcome"] == "skip"
-        assert receipt["dependencies"] == ["reaper:editor-open-smoke"]
+        if not assert_non_darwin_source_build_inconclusive(completed, receipt):
+            assert completed.returncode == 3
+            assert receipt["outcome"] == "skip"
+            assert receipt["dependencies"] == ["reaper:editor-open-smoke"]
 
         print(
             "gpu-first-visible-a3-role-producers: "

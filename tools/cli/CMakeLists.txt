@@ -412,7 +412,7 @@ if(PULP_BUILD_TESTS)
             LABELS "gpu;gpu-probe;cli"
             RESOURCE_LOCK pulp_gpu)
 
-        if(PULP_ENABLE_PROJECT_PACKAGE)
+        if(APPLE AND PULP_ENABLE_PROJECT_PACKAGE)
             get_property(_pulp_gpu_clean_agent_multi_config GLOBAL
                 PROPERTY GENERATOR_IS_MULTI_CONFIG)
             if(_pulp_gpu_clean_agent_multi_config)
