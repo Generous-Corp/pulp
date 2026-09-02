@@ -1945,10 +1945,10 @@
     },
     {
       "id": "audio-voice-modulation-sources",
-      "title": "Per-voice modulation source bank",
+      "title": "Per-voice modulation source bank with live retune",
       "classification": "public_sdk",
       "delivery_state": "pending",
-      "claim_id": "audio-voice-modulation-sources-20260830",
+      "claim_id": "audio-voice-modulation-sources-live-retune-20260901",
       "owned_paths": [
         "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
         "test/cmake/late_core_tests.cmake",
@@ -1960,20 +1960,24 @@
           "path": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
           "needles": [
             "class VoiceModulationSources",
-            "VoiceModulationResult append_lfo_lane("
+            "VoiceModulationResult append_lfo_lane(",
+            "void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept",
+            "bool set_lfo_rate_hz(double rate_hz) noexcept",
+            "bool set_lfo_depth(float depth) noexcept"
           ]
         }
       ],
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio.",
+          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio, and now exposes the RT-safe live retune path that lets a consumer drive LFO wave, rate, and depth from moving parameters without re-preparing the bank and rewinding phase.",
           "evidence": [
             {
               "kind": "sdk_header",
               "path": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
               "needles": [
-                "class VoiceModulationSources"
+                "class VoiceModulationSources",
+                "bool set_lfo_rate_hz(double rate_hz) noexcept"
               ]
             }
           ]
