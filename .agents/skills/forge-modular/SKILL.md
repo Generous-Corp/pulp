@@ -148,6 +148,14 @@ missed requirements as unfinished with its exact errors; preserve the original
 patch only when no sibling became measured audible. This is a general
 output-selection repair, never a module-identity exception.
 
+The acceptance result has to remain bound to the candidate that was actually
+measured. `patch.py` may not reuse an earlier long-horizon result after a
+deterministic repair changes the patch, and a timeout or unavailable listener
+is `UNMEASURED`, never a pass. When the gate prints a completed artifact or a
+specific terminal failure, `drive_app.py` must classify that exact producer
+wording as PASS or FAIL rather than degrading it to INCONCLUSIVE. Keep producer
+and every reader pinned together with positive and negative fixtures.
+
 `render_inventory` has the same honesty rule: a module with no recorded jacks
 prints `ports: UNKNOWN`, and inputs and outputs are independent. It used to
 emit both only `if m.get("inputs")`, so an uncartographed module and one with
@@ -336,6 +344,15 @@ carry an exclusion to a different plugin version without fresh evidence. This
 is why `PathSet-Infinity/WarpDrive` 2.1.0 is excluded: a newly authored instance
 is silent without its opaque coil, LFO, and envelope sequences even though the
 module is installed and its ordinary Rack metadata looks sufficient.
+
+`Geodesics-Vultiverse/Hexaquark` 2.0.4 is excluded for the same class by
+different evidence. It requires an external clock, and its musical sequence is
+stored in an opaque roughly 32 KiB `data.state`; setting the visible Run or
+Scene parameters does not author that state. Keep it available when refining a
+validated saved patch, but do not offer or accept it for fresh generation until
+an exact-version state compiler has a three-arm proof: known preset state plus
+clock plays, the same state without clock does not, and blank state plus clock
+does not. A newer version needs fresh evidence rather than inheriting this row.
 
 Before a module-generation request can reach a model, it must select at least
 one direct primary DSP capability from

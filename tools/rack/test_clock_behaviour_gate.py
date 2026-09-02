@@ -131,6 +131,47 @@ int forge_width_param() { return -1; }
 int forge_reset_input() { return -1; }
 '''
 
+DIVIDER_RESET_FIXTURE = r'''
+#include <rack.hpp>
+
+struct DividerResetFixture final : rack::engine::Module {
+    enum { CLOCK_INPUT, RESET_INPUT, INPUTS };
+    enum { DIV2_OUTPUT, DIV4_OUTPUT, DIV8_OUTPUT, OUTPUTS };
+    bool clock_high = false;
+    bool reset_high = false;
+    unsigned count = 0;
+
+    DividerResetFixture() { config(0, INPUTS, OUTPUTS, 0); }
+
+    void process(const ProcessArgs&) override {
+        const bool reset = inputs[RESET_INPUT].getVoltage() >= 2.f;
+        const bool clock = inputs[CLOCK_INPUT].getVoltage() >= 2.f;
+        if (reset && !reset_high)
+            count = 0;
+        else if (clock && !clock_high)
+            ++count;
+        reset_high = reset;
+        clock_high = clock;
+        outputs[DIV2_OUTPUT].setVoltage((count % 2) == 0 ? 10.f : 0.f);
+        outputs[DIV4_OUTPUT].setVoltage((count % 4) == 0 ? 10.f : 0.f);
+        outputs[DIV8_OUTPUT].setVoltage((count % 8) == 0 ? 10.f : 0.f);
+    }
+};
+
+rack::engine::Module* forge_make_module() { return new DividerResetFixture; }
+const char* forge_module_slug() { return "DIVIDERRESET"; }
+bool forge_module_is_generator() { return true; }
+const char* forge_input_role(int i) { return i == 0 ? "Clock" : "Trigger"; }
+const char* forge_output_role(int) { return "Gate"; }
+const char* forge_output_name(int) { return "Divided clock"; }
+bool forge_require_clock_contract() { return false; }
+int forge_clock_output() { return -1; }
+int forge_phase_output() { return -1; }
+int forge_rate_param() { return -1; }
+int forge_width_param() { return -1; }
+int forge_reset_input() { return -1; }
+'''
+
 
 class ClockBehaviourGate(unittest.TestCase):
     @classmethod
@@ -192,6 +233,11 @@ class ClockBehaviourGate(unittest.TestCase):
         result = self.run_fixture(fixture_source=NORMALLED_CLOCK_FIXTURE)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("param 'Internal clock rate' affects the output", result.stdout)
+
+    def test_divider_reset_is_not_hidden_by_clock_phase_alignment(self) -> None:
+        result = self.run_fixture(fixture_source=DIVIDER_RESET_FIXTURE)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("input 1 affects the output", result.stdout)
 
 
 if __name__ == "__main__":
