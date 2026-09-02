@@ -1969,8 +1969,8 @@
           "needles": [
             "class VoiceModulationSources",
             "VoiceModulationResult append_lfo_lane(",
-            "void set_lfo_rate_hz(double rate_hz) noexcept {",
-            "void set_lfo_depth(float depth) noexcept {",
+            "bool set_lfo_rate_hz(double rate_hz) noexcept {",
+            "bool set_lfo_depth(float depth) noexcept {",
             "void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {"
           ]
         }
@@ -1978,15 +1978,15 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations — which is every LFO a musician can reach — no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from.",
+          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations — which is every LFO a musician can reach — no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from. set_lfo_rate_hz() and set_lfo_depth() report whether the value was taken and refuse the rates and depths prepare() refuses, so the config the bank reports stays one prepare() accepts.",
           "evidence": [
             {
               "kind": "sdk_header",
               "path": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
               "needles": [
                 "class VoiceModulationSources",
-                "void set_lfo_rate_hz(double rate_hz) noexcept {",
-                "void set_lfo_depth(float depth) noexcept {",
+                "bool set_lfo_rate_hz(double rate_hz) noexcept {",
+                "bool set_lfo_depth(float depth) noexcept {",
                 "void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {"
               ]
             }
