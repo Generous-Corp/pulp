@@ -1468,6 +1468,27 @@ report success only from the new subject-bound decision; a PR receipt alone can
 never satisfy the merge-group check. Fork PRs use the same public Actions
 artifact contract and keep the existing hosted-runner trust boundary.
 
+## A2T evidence receipts get a nonterminal required-job attestation
+
+When a pull-request head carries the exact tracked `evidence/receipt.json`, the
+native macOS matrix child runs the A2T structural verifier after the ordinary
+build and test gate. It fetches the event-pinned head and the receipt's exact
+source revision, rejects any working-file or Git-blob mismatch, bounds verifier
+stdout and stderr, and uploads one
+`a2t-structural-verification-<head>` attestation. A present receipt cannot be
+silently skipped: verifier failure or noncanonical output fails `macos`.
+
+This artifact is deliberately not authority by itself. It records only facts
+available during that PR job: clean source and evidence revisions, exact file
+blobs and SHA-256s, trace digest, semantic command, workflow revision, run and
+attempt, job key, step identity, and zero-error result. It does not predict the
+future protected merge, report its own Actions artifact metadata, copy a final
+job conclusion, or claim terminal acceptance. The planning-side validator
+later authenticates the completed check/job/step and artifact metadata through
+GitHub, derives the protected merge identity, and matches those live facts to
+the downloaded bytes. Linux and Windows stay advisory and never issue this
+attestation.
+
 ## Windows is gated by the merge queue, not by the PR head
 
 Windows is advisory and runs entirely on GitHub-hosted runners, and a single
