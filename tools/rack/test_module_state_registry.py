@@ -158,6 +158,34 @@ class RegistryShapeTest(unittest.TestCase):
                 self.assertTrue(all(key.split("/")))
 
 
+class PersistentAuthoringRefusalTest(unittest.TestCase):
+    """Opaque musical state is never mistaken for ordinary button params."""
+
+    def test_hexaquark_is_excluded_but_an_existing_patch_is_describable(
+            self) -> None:
+        inv = {
+            "Geodesics-Vultiverse": {
+                "name": "Geodesics Vultiverse", "version": "2.0.4",
+                "modules": {
+                    "Hexaquark": _module(
+                        "Hexaquark", tags=["Sequencer"],
+                        params=[{"id": 35, "name": "Scene 1"},
+                                {"id": 51, "name": "Run"}]),
+                    "Ions": _module("Ions", tags=["Utility"]),
+                },
+            },
+        }
+        fresh = P.render_inventory(inv)
+        refinement = P.render_inventory(inv, fresh_generation=False)
+        self.assertNotIn("Hexaquark", fresh)
+        self.assertIn("Ions", fresh)
+        self.assertIn("Hexaquark", refinement)
+        reason = P.fresh_generation_refusal(
+            "Geodesics-Vultiverse", "Hexaquark", inv)
+        self.assertIn("opaque module-owned state", reason)
+        self.assertIn("external clock", reason)
+
+
 class InstalledVersionPinTest(unittest.TestCase):
     """Every pin still names the exact version installed on this machine.
 

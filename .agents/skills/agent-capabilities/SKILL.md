@@ -461,62 +461,42 @@ which bind no key of their own.
 ### `header_fingerprint` IS the SHA-256 of the header file's bytes
 
 The surface document says so itself — `"fingerprint_algorithm":
-"sha256-file-bytes"` — and it holds for every reviewed header, with no
-exceptions:
+"sha256-file-bytes"` — and every one of the 453 declared fingerprints agrees
+with the file on disk:
 
-```sh
-python3 - <<'EOF'
-import hashlib, json, pathlib
-rows = json.load(open('docs/status/agent-capability-surface.json'))['headers']
-bad = [h['source'] for h in rows
-       if pathlib.Path(h['source']).exists()
-       and 'sha256:' + hashlib.sha256(pathlib.Path(h['source']).read_bytes()).hexdigest()
-           != h['fingerprint']]
-print(f"{len(rows) - len(bad)} match, {len(bad)} differ")
-EOF
-# 453 match, 0 differ
+```python
+import json, hashlib, pathlib
+d = json.load(open('docs/status/agent-capability-surface.json'))
+differ = [r['source'] for r in d['headers']
+          if 'sha256:' + hashlib.sha256(pathlib.Path(r['source']).read_bytes()).hexdigest()
+          != r['fingerprint']]
+print(len(d['headers']), 'headers,', len(differ), 'differ')   # 453 headers, 0 differ
 ```
 
-So when a check reports `public header fingerprint changed: <header>; expected
-<old>, got <new>`, `shasum -a 256 <header>` reproduces `<new>` exactly, and
-either source is equally good. Note the `sha256:` prefix the declared literal
-carries and `shasum` does not.
+The only real difference is the `sha256:` prefix the declared value carries and
+bare `shasum` output does not — which is what makes the two look unequal at a
+glance. Corrupt one declared value and the same loop reports it, so a clean run
+is a measurement rather than a tautology.
 
-An earlier revision of this skill claimed the two "legitimately differ" and told
-you not to hash the file. That was wrong, and it is the expensive kind of wrong:
-following it means discarding the value you already hold and hunting for a
-generator line, when the header in front of you is the whole input.
+An earlier revision of this section claimed the two "legitimately differ" and
+told you not to reconcile them by hashing the file. That was wrong, and it is
+the expensive kind of wrong: it reads as permission to paper over a genuine
+mismatch, when a mismatch means the header moved and the surface did not.
 
 ### `--write` cannot fix a fingerprint — it is authored, not generated
 
-The failure prints `Regenerate with: python3
-tools/scripts/agent_capability_manifest.py --write`, and that remedy is
-misleading for this one problem. The declared fingerprint is a hand-authored
-surface-change guard living in a `binding(...)` in a catalog source, so `--write`
-re-reads it, re-reports the same `INVALID`, and changes nothing — which reads as
-a broken generator rather than as "you are editing the wrong file". Edit the
-`header_fingerprint=` literal in `tools/scripts/agent_capability_catalog_*.py`
-first; only then does the generator have anything new to project.
+The fingerprint is declared in two places that must be edited by hand and kept
+equal: the `header_fingerprint=` literal in the capability's `EXPORTS` row in
+`tools/scripts/agent_capability_catalog_performance.py`, and the `fingerprint`
+field for that `source` in `docs/status/agent-capability-surface.json`.
+Regeneration checks them; it does not author them. So after changing a public
+capability header:
 
-The whole transaction for a header-body change is three steps and touches four
-files:
-
-```sh
-# 1. author the new value in the catalog source
-shasum -a 256 core/<...>/<header>.hpp        # -> paste as sha256:<digest>
-# 2. counters (rederive refuses while the surface has unresolved problems)
-python3 tools/scripts/agent_capability_rederive.py
-# 3. history — rederive resets it to the base, see the section above
-python3 tools/scripts/agent_capability_manifest.py --write
-python3 tools/scripts/agent_capability_manifest.py --check   # must say `fresh`
-```
-
-Expect the catalog source, `docs/status/agent-capability-surface.json`,
-`tools/agent-capabilities/contract-history.json` (one whole appended entry, not
-an edited line) and `SURFACE_INVENTORY_VERSION` in
-`agent_capability_manifest.py` to move — and `MANIFEST_REVISION` and
-`docs/status/agent-capabilities.json` to stay put, because no contract payload
-changed.
+1. `shasum -a 256 <header>` and prefix the digest with `sha256:`,
+2. write that value into both places above,
+3. bump `SURFACE_INVENTORY_VERSION` in `tools/scripts/agent_capability_manifest.py`
+   (surface axis — see the next section: this costs no contract bump),
+4. re-run `--check` and confirm it reports `fresh`.
 
 ### Adding a function to an existing capability header costs NO contract bump
 

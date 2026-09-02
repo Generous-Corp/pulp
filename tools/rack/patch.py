@@ -29,6 +29,7 @@ much smaller thing layered on top by the generator.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import os
@@ -3937,6 +3938,8 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict,
 
 
 GATE_SRC = os.path.join(HERE, "patch_gate.cpp")
+# Kept only as the pre-content-addressed cache location, so old installations
+# can coexist with the new cache without being mistaken for current output.
 GATE_BIN = os.path.join(CACHE_DIR, "patch-gate")
 #: The headers that come with the gate, so a change to the measurement rebuilds
 #: it. Comparing the binary against patch_gate.cpp alone left an edited
@@ -3951,6 +3954,32 @@ GATE_HEADERS = [os.path.join(HERE, n) for n in
 import fetch_sdk as _fetch_sdk
 
 SDK = _fetch_sdk.installed_at() or _fetch_sdk.DEST
+
+
+def gate_source_identity() -> str:
+    """Identity of the gate executable's actual build inputs.
+
+    An mtime comparison cannot identify copied release sources: packaging and
+    installation routinely preserve timestamps older than a gate compiled by
+    the previous release. That made a fixed ``patch_gate.cpp`` silently reuse
+    its predecessor forever. Source bytes are cheap to hash and unambiguous.
+    The Rack library stat also prevents carrying one SDK's executable across a
+    replaced SDK without hashing the whole dylib on every patch build.
+    """
+    h = hashlib.sha256(b"forge-patch-gate-v2\0")
+    for path in [GATE_SRC] + GATE_HEADERS:
+        h.update(os.path.basename(path).encode("utf-8") + b"\0")
+        with open(path, "rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                h.update(chunk)
+    rack_lib = os.path.join(SDK, "libRack.dylib")
+    try:
+        stat = os.stat(rack_lib)
+        h.update(os.path.realpath(SDK).encode("utf-8") + b"\0")
+        h.update(f"{stat.st_size}:{stat.st_mtime_ns}".encode("ascii"))
+    except OSError:
+        h.update(b"no-rack-library")
+    return h.hexdigest()
 
 
 def ensure_audibility_sdk(announce=print) -> str:
@@ -4003,24 +4032,36 @@ def build_gate() -> tuple[str | None, str]:
     cause sends the next hour to the wrong place.
     """
     import subprocess
-    newest_src = max(os.path.getmtime(p) for p in [GATE_SRC] + GATE_HEADERS
-                     if os.path.exists(p))
-    if os.path.exists(GATE_BIN) and os.path.getmtime(GATE_BIN) > newest_src:
-        return GATE_BIN, ""
     if not os.path.exists(os.path.join(SDK, "include", "rack.hpp")):
         return None, f"no Rack SDK at {SDK}"
+    try:
+        identity = gate_source_identity()
+    except OSError as error:
+        return None, f"cannot identify the gate sources: {error}"
     os.makedirs(CACHE_DIR, exist_ok=True)
+    gate_bin = os.path.join(CACHE_DIR, f"patch-gate-{identity[:24]}")
+    if os.path.exists(gate_bin):
+        return gate_bin, ""
     # Still one file against the SDK and nothing else. The behaviour headers sit
     # beside this one, which is what -I{HERE} finds; they pull in no library, so
     # the gate keeps the property that the ONLY thing standing between it and a
     # machine that can build it is the Rack SDK.
+    temporary = f"{gate_bin}.pending-{os.getpid()}"
     r = subprocess.run(
-        ["clang++", "-std=c++20", "-O1", "-o", GATE_BIN, GATE_SRC,
+        ["clang++", "-std=c++20", "-O1", "-o", temporary, GATE_SRC,
          f"-I{HERE}", f"-I{SDK}/include", f"-I{SDK}/dep/include", "-DARCH_MAC",
          os.path.join(SDK, "libRack.dylib")],
         capture_output=True, text=True)
     if r.returncode == 0:
-        return GATE_BIN, ""
+        # A process killed before this rename leaves only an untrusted pending
+        # file. Concurrent identical builders may both publish the same bytes;
+        # neither can publish a binary for a different source identity here.
+        os.replace(temporary, gate_bin)
+        return gate_bin, ""
+    try:
+        os.unlink(temporary)
+    except OSError:
+        pass
     return None, "the gate did not compile:\n" + (r.stderr or r.stdout).strip()
 
 
@@ -4240,7 +4281,8 @@ GATE_CRASHED = "the audibility gate CRASHED"
 LONG_HORIZON_MARKER = "FORGE_LONG_HORIZON_JSON: "
 
 
-def gate_crash_report(signal: int, patch: dict) -> str:
+def gate_crash_report(signal: int, patch: dict,
+                      gate_binary: str | None = None) -> str:
     """What to say when the gate dies instead of judging.
 
     Names the plugins it was asked to load, because the crash is in one of them
@@ -4254,7 +4296,7 @@ def gate_crash_report(signal: int, patch: dict) -> str:
             f"could not be run.\n"
             f"  It was loading: {', '.join(plugins)}\n"
             f"  Reproduce it with:\n"
-            f"    {os.path.join(CACHE_DIR, 'patch-gate')} <patch.vcv> "
+            f"    {gate_binary or GATE_BIN} <patch.vcv> "
             f"{plugin_dirs[0] if plugin_dirs else '<plugin dir>'}")
 
 
@@ -4863,7 +4905,8 @@ def audibility(patch: dict,
         # ended in "gave up after 3 attempts" with nothing anywhere saying a
         # process had died. Six generations were spent on that reading.
         if r.returncode < 0:
-            return UNMEASURED, gate_crash_report(-r.returncode, patch)
+            return UNMEASURED, gate_crash_report(
+                -r.returncode, patch, gate_binary=gate)
         # 2 is the gate refusing its own configuration -- a bad
         # PATCH_GATE_SET name, say. It never looked at the patch, so it has no
         # opinion about it, and reading that as silence would reject a good
