@@ -41,8 +41,9 @@ import idiom_check  # noqa: E402
 import patch as _patch  # noqa: E402
 import patch_corpus  # noqa: E402
 
-CORPUS = os.path.expanduser(
-    "~/Library/Application Support/Forge Modular/corpus/patchstorage")
+# One definition of where the corpus lives, so the audit and the fetcher
+# cannot drift apart when the root moves.
+CORPUS = patch_corpus.ROOT
 
 # The port kinds a jack could plausibly be, DERIVED rather than listed: a
 # hand-written list drifts from `_roles.json` the moment a kind is added or
@@ -307,9 +308,12 @@ def usage_prior_report(rows: list, min_support: int = 3) -> dict:
     evidence: dict[tuple, set] = collections.defaultdict(set)
     for row in rows:
         author_id = row.get("source_author_id")
-        evidence_key = (f"patchstorage-author:{author_id}"
+        # Deduplication only: this string is added to a set whose length is
+        # the support count, and never reaches the report. Known ids stay
+        # distinct from each other and anonymous uploads collapse to one.
+        evidence_key = (f"contributor:{author_id}"
                         if isinstance(author_id, int) and not isinstance(author_id, bool)
-                        and author_id > 0 else "patchstorage-author:unknown")
+                        and author_id > 0 else "contributor:unknown")
         if row["s"] is None and row["d"] is not None:
             signal = _signal(row["d"][0], row["d"][1], "in")
             if signal:
@@ -345,8 +349,8 @@ def usage_prior_report(rows: list, min_support: int = 3) -> dict:
         else:
             admitted.append(row)
     return {
-        "schema": "forge.patchstorage_usage_priors.v1",
-        "source": "patchstorage.com",
+        "schema": "forge.corpus_usage_priors.v1",
+        "source": "private-corpus",
         "policy": "inferred hints only; never override CARTOG or certify quality",
         "minimum_distinct_author_support": min_support,
         "admitted": admitted,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused checks for Patchstorage usage priors and their quarantine floor."""
+"""Focused checks for corpus usage priors and their quarantine floor."""
 
 from __future__ import annotations
 
@@ -46,6 +46,14 @@ def main() -> int:
     assert not report["admitted"]
     assert report["quarantine"][0]["support"] == 3
     print("  ok  a second body from one author does not inflate support")
+
+    anonymous = [observation("anon-a", author_id=0),
+                 observation("anon-b", author_id=0),
+                 observation("anon-c", author_id=0)]
+    report = audit.usage_prior_report(anonymous, min_support=2)
+    assert not report["admitted"]
+    assert report["quarantine"][0]["support"] == 1
+    print("  ok  uploads with no identified contributor count as one source")
 
     conflict = rows + [{
         **observation("four", "GATE", "Gate"),
