@@ -774,6 +774,66 @@ class CleanAgentHarnessTests(unittest.TestCase):
                     allowed_untracked=(root / "untracked.txt",),
                 )
 
+    def test_git_provenance_uses_only_exact_event_base_when_origin_main_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = pathlib.Path(raw).resolve()
+            root = fixture / "repo"
+            base_revision = init_repo(root, {"source.txt": "base\n"})
+            (root / "source.txt").write_text("candidate\n", encoding="utf-8")
+            run("git", "commit", "-qam", "candidate", cwd=root)
+            head_revision = run("git", "rev-parse", "HEAD", cwd=root)
+            run("git", "update-ref", "-d", "refs/remotes/origin/main", cwd=root)
+            event_path = fixture / "event.json"
+
+            def identity(
+                payload: dict, *, event_name: str = "merge_group",
+                event_head: str = head_revision,
+            ) -> dict:
+                event_path.write_text(json.dumps(payload), encoding="utf-8")
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        "GITHUB_EVENT_NAME": event_name,
+                        "GITHUB_EVENT_PATH": str(event_path),
+                        "GITHUB_SHA": event_head,
+                    },
+                ):
+                    return trust.git_repository_identity(
+                        root, expected_repository="Generous-Corp/pulp"
+                    )
+
+            valid = {
+                "repository": {"full_name": "Generous-Corp/pulp"},
+                "merge_group": {"base_sha": base_revision},
+            }
+            derived = identity(valid)
+            self.assertEqual(derived["origin_main"], base_revision)
+            self.assertEqual(derived["revision"], head_revision)
+            self.assertNotEqual(derived["origin_main"], derived["revision"])
+
+            invalid_payloads = (
+                {
+                    "repository": {"full_name": "attacker/pulp"},
+                    "merge_group": {"base_sha": base_revision},
+                },
+                {
+                    "repository": {"full_name": "Generous-Corp/pulp"},
+                    "merge_group": {"base_sha": "f" * 40},
+                },
+                {
+                    "repository": {"full_name": "Generous-Corp/pulp"},
+                    "merge_group": {},
+                },
+            )
+            for payload in invalid_payloads:
+                with self.subTest(payload=payload):
+                    with self.assertRaises(trust.TrustError):
+                        identity(payload)
+            with self.assertRaisesRegex(trust.TrustError, "supported GitHub event"):
+                identity(valid, event_name="workflow_dispatch")
+            with self.assertRaisesRegex(trust.TrustError, "exact checkout HEAD"):
+                identity(valid, event_head=base_revision)
+
     def test_build_install_provenance_replays_exact_cli_bytes_and_rejects_tamper(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw).resolve()

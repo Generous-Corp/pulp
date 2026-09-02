@@ -220,6 +220,65 @@ def _github_repository(url: str) -> str:
     return match.group(1)
 
 
+def _github_event_protected_base(
+    root: pathlib.Path, *, expected_repository: str,
+) -> str:
+    """Resolve an immutable protected base when CI has no origin/main ref.
+
+    GitHub merge-group checkouts do not consistently materialize the
+    ``refs/remotes/origin/main`` remote-tracking ref.  The event payload is the
+    only accepted substitute: it is outside the candidate checkout, names the
+    canonical repository, and pins the base by object ID.  Deliberately do not
+    infer a base from HEAD or its parents.
+    """
+
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    event_path_text = os.environ.get("GITHUB_EVENT_PATH", "")
+    if event_name not in {"pull_request", "merge_group"} or not event_path_text:
+        raise TrustError(
+            "Git repository has no exact origin/main identity or supported "
+            "GitHub event-pinned protected base"
+        )
+    event_path = pathlib.Path(event_path_text)
+    try:
+        resolved_event_path = event_path.resolve(strict=True)
+    except OSError as exc:
+        raise TrustError("GitHub event path is unavailable") from exc
+    if (
+        not event_path.is_absolute()
+        or resolved_event_path != event_path
+        or event_path.is_relative_to(root)
+    ):
+        raise TrustError("GitHub event path is not one exact absolute file")
+    try:
+        payload = json.loads(read_regular(event_path, 1024 * 1024))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise TrustError("GitHub event payload is not bounded valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise TrustError("GitHub event payload is not one JSON object")
+    repository = payload.get("repository")
+    if not isinstance(repository, dict) or repository.get("full_name") != expected_repository:
+        raise TrustError("GitHub event repository does not match the canonical Git origin")
+    event = payload.get(event_name)
+    if not isinstance(event, dict):
+        raise TrustError(f"GitHub {event_name} payload is unavailable")
+    if event_name == "pull_request":
+        base = event.get("base")
+        candidate = base.get("sha") if isinstance(base, dict) else None
+    else:
+        candidate = event.get("base_sha")
+    if not isinstance(candidate, str) or SHA40_RE.fullmatch(candidate) is None:
+        raise TrustError("GitHub event has no exact protected-base commit identity")
+    event_head = os.environ.get("GITHUB_SHA", "")
+    revision = _text(_git(root, "rev-parse", "HEAD"))
+    if SHA40_RE.fullmatch(event_head) is None or event_head != revision:
+        raise TrustError("GitHub event is not bound to the exact checkout HEAD")
+    resolved = _text(_git(root, "rev-parse", "--verify", f"{candidate}^{{commit}}"))
+    if resolved != candidate:
+        raise TrustError("GitHub event protected base is not the exact local commit object")
+    return candidate
+
+
 def _commit_signature(root: pathlib.Path) -> dict[str, str]:
     payload = _git(root, "log", "-1", "--format=%G?%x00%GS%x00%GF", "HEAD").stdout
     fields = payload.rstrip(b"\n").split(b"\x00")
@@ -262,7 +321,14 @@ def git_repository_identity(
         raise TrustError(
             f"Git origin is {origin_repository}, expected canonical {expected_repository}"
         )
-    origin_main = _text(_git(root, "rev-parse", "refs/remotes/origin/main"))
+    origin_main_result = _git(
+        root, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}", check=False
+    )
+    origin_main = _text(origin_main_result) if origin_main_result.returncode == 0 else ""
+    if not origin_main:
+        origin_main = _github_event_protected_base(
+            root, expected_repository=expected_repository
+        )
     if SHA40_RE.fullmatch(origin_main) is None:
         raise TrustError("Git repository has no exact origin/main identity")
     if require_origin_main and revision != origin_main:
