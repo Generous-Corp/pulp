@@ -1110,3 +1110,61 @@ TEST_CASE("StepPlayer coordinate query names the step the lane actually fires",
     // otherwise the check above would hold for any index the query invented.
     CHECK(predicted[0] != predicted[1]);
 }
+
+TEST_CASE("StepPlayer coordinate query names the step a random walk fires",
+          "[midi][step-player][coordinate]") {
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(2);
+    fixture.spec.random_seed = 0x5eed;
+    fixture.spec.lanes[1].direction = midi::StepPlayerDirection::Random;
+    auto player = fixture.make();
+    for (std::size_t lane = 0; lane < 2; ++lane)
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            // The pitch names the step, so a fired note identifies the index.
+            step.pitch_offset = static_cast<std::int8_t>(index);
+            REQUIRE(player.set_step(lane, index, step) == midi::StepPlayerError::None);
+        }
+
+    constexpr std::int64_t kOrdinals = 16;
+    std::vector<std::size_t> predicted;
+    for (std::int64_t ordinal = 0; ordinal < kOrdinals; ++ordinal) {
+        const auto coordinate = player.coordinate_at(1, {ordinal * kStepTicks});
+        REQUIRE(coordinate.has_value());
+        predicted.push_back(coordinate->index);
+    }
+
+    // The random walk reads the grid coordinate rather than consuming RNG
+    // state, so asking again — and out of order — must answer the same.
+    for (std::int64_t ordinal = kOrdinals - 1; ordinal >= 0; --ordinal) {
+        const auto repeat = player.coordinate_at(1, {ordinal * kStepTicks});
+        REQUIRE(repeat.has_value());
+        CHECK(repeat->index == predicted[static_cast<std::size_t>(ordinal)]);
+    }
+
+    const std::int32_t partitions[] = {256, 64, 512};
+    const auto samples = map.ticks_to_samples({kOrdinals * kStepTicks}).value;
+    const auto attacks = attacks_of(render(player, map, samples, partitions));
+
+    std::size_t ordinal = 0;
+    for (const auto& attack : attacks) {
+        if (attack.event.channel() != 1)
+            continue;
+        REQUIRE(ordinal < predicted.size());
+        const auto expected = static_cast<int>(fixture.spec.lanes[1].base_note) +
+                              static_cast<int>(predicted[ordinal]);
+        INFO("random ordinal " << ordinal);
+        CHECK(static_cast<int>(attack.event.note()) == expected);
+        ++ordinal;
+    }
+    // A lane that never spoke would pass the loop above vacuously.
+    CHECK(ordinal == static_cast<std::size_t>(kOrdinals));
+
+    // If the walk had degenerated to the forward modulo, agreeing with it
+    // would say nothing about the random branch the query has to reproduce.
+    bool differs = false;
+    for (std::int64_t index = 0; index < kOrdinals; ++index)
+        differs = differs || predicted[static_cast<std::size_t>(index)] !=
+                                 static_cast<std::size_t>(index % 4);
+    CHECK(differs);
+}
