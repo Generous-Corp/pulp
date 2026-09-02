@@ -1063,6 +1063,28 @@ known class here only because it is mapped, and mapped ports are plausibly
 better named than the unmapped ports the lane actually serves. This scores the
 inference, never the module: a prior remains a hint that a real scan overrides.
 
+### Nothing consumes the priors yet, and the port map is the wrong home
+
+Say this plainly before quoting the accuracy table at anyone: the report is
+proposal-only and **no code reads it**. Count the readers rather than assuming
+one exists. The lane produces good hints that currently go nowhere, so the
+remaining work is a consumer, not more inference.
+
+When that consumer is built, it does not belong in the port map, and the port
+map's own docstring says why. `portmap_merge.hpp` folds a fresh scan in by
+replacing a re-measured module's whole block, so anything inferred that is
+stored there is erased the moment somebody scans the module. Ranges belong
+there because they ARE the scanner's fact; a classification is not, which is
+exactly why affordances are kept in their own cache instead. A prior is
+inferred, so it follows the affordance precedent, not the range one.
+
+The precedence a consumer has to preserve, strongest first: this machine's own
+scan, then the shipped seed, then a prior. A prior may only answer where the
+port map has no answer at all. It never fills a gap inside an entry the
+scanner already replaced, because "the scanner looked and found nothing" and
+"nobody has looked" are different answers and merging them is how an inference
+comes to outrank a measurement.
+
 ## The reading corpus has an index, and retrieval is not admission
 
 The source shelf is large enough that opening books one by one is no longer a
