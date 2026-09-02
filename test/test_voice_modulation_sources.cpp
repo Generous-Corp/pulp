@@ -528,6 +528,127 @@ TEST_CASE("Invalid configs leave the bank unprepared", "[audio][voice-mod-source
     REQUIRE_FALSE(sources.prepared());
 }
 
+TEST_CASE("Live retune leaves LFO phase running where prepare would rewind it",
+          "[audio][voice-mod-sources]") {
+    const auto config = sine_config(120.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false);
+
+    // Reference: one uninterrupted 32-frame render.
+    VoiceModulationSources<2> reference;
+    REQUIRE(reference.prepare(config));
+    const auto whole = render_audio_rate_lfo(reference, 0, 32);
+
+    // Live path: retune to the SAME rate midway. A setter that does not touch
+    // phase must leave the second half bit-identical to the reference tail.
+    VoiceModulationSources<2> live;
+    REQUIRE(live.prepare(config));
+    const auto live_head = render_audio_rate_lfo(live, 0, 16);
+    REQUIRE(live.set_lfo_rate_hz(config.lfo.rate_hz));
+    const auto live_tail = render_audio_rate_lfo(live, 0, 16);
+    for (std::size_t i = 0; i < 16; ++i) {
+        CHECK_THAT(live_head[i], WithinAbs(whole[i], 1.0e-6));
+        CHECK_THAT(live_tail[i], WithinAbs(whole[16 + i], 1.0e-6));
+    }
+
+    // Negative control: the configure-time path at the same point DOES rewind.
+    // Without this the test above could pass on a bank that never advances.
+    VoiceModulationSources<2> reconfigured;
+    REQUIRE(reconfigured.prepare(config));
+    (void)render_audio_rate_lfo(reconfigured, 0, 16);
+    REQUIRE(reconfigured.prepare(config));
+    const auto rewound = render_audio_rate_lfo(reconfigured, 0, 16);
+    for (std::size_t i = 0; i < 16; ++i)
+        CHECK_THAT(rewound[i], WithinAbs(whole[i], 1.0e-6));
+    // ...and that rewound tail is genuinely different from the running one,
+    // so the two paths cannot be confused for one another.
+    bool differs = false;
+    for (std::size_t i = 0; i < 16 && !differs; ++i)
+        differs = std::fabs(rewound[i] - live_tail[i]) > 1.0e-3;
+    CHECK(differs);
+}
+
+TEST_CASE("Retuning rate before render matches configuring that rate outright",
+          "[audio][voice-mod-sources]") {
+    VoiceModulationSources<2> configured;
+    REQUIRE(configured.prepare(sine_config(400.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false)));
+    const auto expected = render_audio_rate_lfo(configured, 0, 48);
+
+    VoiceModulationSources<2> retuned;
+    REQUIRE(retuned.prepare(sine_config(120.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false)));
+    REQUIRE(retuned.set_lfo_rate_hz(400.0));
+    const auto actual = render_audio_rate_lfo(retuned, 0, 48);
+
+    for (std::size_t i = 0; i < expected.size(); ++i)
+        CHECK_THAT(actual[i], WithinAbs(expected[i], 1.0e-6));
+    CHECK(retuned.config().lfo.rate_hz == 400.0);
+}
+
+TEST_CASE("Switching wave mid-render keeps the phase it had reached",
+          "[audio][voice-mod-sources]") {
+    auto triangle_config = sine_config(120.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false);
+    triangle_config.lfo.wave = pulp::signal::Lfo::Wave::triangle;
+
+    // Phase increment depends only on rate, so a bank that ran 16 frames as a
+    // sine sits at the same phase as one that ran 16 frames as a triangle.
+    VoiceModulationSources<2> reference;
+    REQUIRE(reference.prepare(triangle_config));
+    const auto whole = render_audio_rate_lfo(reference, 0, 32);
+
+    VoiceModulationSources<2> switched;
+    REQUIRE(switched.prepare(sine_config(120.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false)));
+    (void)render_audio_rate_lfo(switched, 0, 16);
+    switched.set_lfo_wave(pulp::signal::Lfo::Wave::triangle);
+    const auto tail = render_audio_rate_lfo(switched, 0, 16);
+
+    for (std::size_t i = 0; i < 16; ++i)
+        CHECK_THAT(tail[i], WithinAbs(whole[16 + i], 1.0e-6));
+    CHECK(switched.config().lfo.wave == pulp::signal::Lfo::Wave::triangle);
+}
+
+TEST_CASE("Live depth scales the lane and a negative depth negates it",
+          "[audio][voice-mod-sources]") {
+    const auto config = sine_config(120.0, 1.0f, VoiceLfoPhasePolicy::FreeRunning, false);
+
+    VoiceModulationSources<2> unity;
+    REQUIRE(unity.prepare(config));
+    const auto plain = render_audio_rate_lfo(unity, 0, 24);
+
+    VoiceModulationSources<2> negated;
+    REQUIRE(negated.prepare(config));
+    REQUIRE(negated.set_lfo_depth(-1.0f));
+    const auto flipped = render_audio_rate_lfo(negated, 0, 24);
+
+    for (std::size_t i = 0; i < plain.size(); ++i)
+        CHECK_THAT(flipped[i], WithinAbs(-plain[i], 1.0e-6));
+}
+
+TEST_CASE("Live setters reject the values prepare rejects and change nothing",
+          "[audio][voice-mod-sources]") {
+    const auto config = sine_config(120.0, 0.5f, VoiceLfoPhasePolicy::FreeRunning, false);
+    VoiceModulationSources<2> sources;
+    REQUIRE(sources.prepare(config));
+
+    const double kept_rate = sources.config().lfo.rate_hz;
+    const float kept_depth = sources.config().lfo.depth;
+
+    CHECK_FALSE(sources.set_lfo_rate_hz(0.0));
+    CHECK_FALSE(sources.set_lfo_rate_hz(-10.0));
+    CHECK_FALSE(sources.set_lfo_rate_hz(std::numeric_limits<double>::quiet_NaN()));
+    CHECK_FALSE(sources.set_lfo_rate_hz(std::numeric_limits<double>::infinity()));
+    CHECK_FALSE(sources.set_lfo_depth(std::numeric_limits<float>::quiet_NaN()));
+    CHECK_FALSE(sources.set_lfo_depth(std::numeric_limits<float>::infinity()));
+
+    CHECK(sources.config().lfo.rate_hz == kept_rate);
+    CHECK(sources.config().lfo.depth == kept_depth);
+
+    // A rejected value must also leave the rendered lane untouched.
+    VoiceModulationSources<2> untouched;
+    REQUIRE(untouched.prepare(config));
+    const auto expected = render_audio_rate_lfo(untouched, 0, 16);
+    const auto actual = render_audio_rate_lfo(sources, 0, 16);
+    for (std::size_t i = 0; i < expected.size(); ++i)
+        CHECK_THAT(actual[i], WithinAbs(expected[i], 1.0e-6));
+}
+
 TEST_CASE("Realtime paths allocate nothing after prepare", "[audio][voice-mod-sources]") {
     auto config = sine_config(200.0, 0.8f, VoiceLfoPhasePolicy::Retrigger, true);
     config.envelope.enabled = true;
@@ -551,6 +672,9 @@ TEST_CASE("Realtime paths allocate nothing after prepare", "[audio][voice-mod-so
                 .write_voice(3, buffer, VoiceModulationTarget::Aux0, VoiceModulationTarget::Gain,
                              VoiceModulationRate::Constant, 32)
                 .ok);
+    sources.set_lfo_wave(pulp::signal::Lfo::Wave::triangle);
+    REQUIRE(sources.set_lfo_rate_hz(311.0));
+    REQUIRE(sources.set_lfo_depth(-0.25f));
     sources.note_off(3);
     REQUIRE_FALSE(probe.saw_allocation());
 }

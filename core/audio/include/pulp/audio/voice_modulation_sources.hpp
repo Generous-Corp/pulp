@@ -149,6 +149,42 @@ public:
     bool prepared() const noexcept { return prepared_; }
     const VoiceModulationSourcesConfig& config() const noexcept { return config_; }
 
+    /// RT-safe after prepare. Retunes every voice's LFO in place, leaving
+    /// phase, lifecycle, and random streams untouched.
+    ///
+    /// `prepare()` is the configure-time path: it re-prepares each voice's
+    /// LFO, which rewinds phase to zero and re-seeds. A consumer that drives
+    /// wave, rate, or depth from live parameters cannot reach the bank
+    /// through it — an LFO re-prepared whenever a parameter moves never
+    /// advances at all. These setters are that live path. A later
+    /// `prepare()` overwrites all three.
+    void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {
+        config_.lfo.wave = wave;
+        for (auto& lfo : lfos_)
+            lfo.set_wave(wave);
+    }
+
+    /// Rejects a non-finite or non-positive rate exactly as `prepare()`
+    /// validates one, leaving the current rate in place.
+    bool set_lfo_rate_hz(double rate_hz) noexcept {
+        if (!std::isfinite(rate_hz) || !(rate_hz > 0.0))
+            return false;
+        config_.lfo.rate_hz = rate_hz;
+        for (auto& lfo : lfos_)
+            lfo.set_rate_hz(rate_hz);
+        return true;
+    }
+
+    /// Bipolar output scale, applied when a lane is rendered. Negative values
+    /// negate the output; they do not shift phase. Rejects a non-finite
+    /// depth, leaving the current depth in place.
+    bool set_lfo_depth(float depth) noexcept {
+        if (!std::isfinite(depth))
+            return false;
+        config_.lfo.depth = depth;
+        return true;
+    }
+
     /// RT-safe after prepare. Note-on retriggers that voice's LFO per its
     /// phase policy (free-running ignores it) and restarts its envelope.
     void note_on(std::size_t voice_index) noexcept {
