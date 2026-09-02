@@ -164,31 +164,54 @@ def _run_verifier(
         evidence_directory = root / "evidence"
         evidence_directory.mkdir()
         (evidence_directory / "receipt.json").write_bytes(receipt_bytes)
-        clone = subprocess.run(
-            ["git", "clone", "--quiet", "--no-checkout", "--shared", str(repository), str(source_checkout)],
+        worktree_added = False
+        checkout = subprocess.run(
+            [
+                "git", "worktree", "add", "--quiet", "--detach",
+                str(source_checkout), source_revision,
+            ],
+            cwd=repository,
             check=False, capture_output=True, text=True,
         )
-        _require(clone.returncode == 0, f"cannot create exact source checkout: {clone.stderr.strip()}")
-        checkout = subprocess.run(
-            ["git", "checkout", "--quiet", "--detach", source_revision],
-            cwd=source_checkout, check=False, capture_output=True, text=True,
-        )
-        _require(checkout.returncode == 0, f"cannot check out exact source revision: {checkout.stderr.strip()}")
-        head = str(_git(source_checkout, "rev-parse", "HEAD")).strip()
-        _require(head == source_revision, "verifier checkout HEAD differs from source_revision")
-        stdout_path = root / "stdout"
-        stderr_path = root / "stderr"
-        with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
-            try:
-                completed = subprocess.run(
-                    VERIFIER_COMMAND, cwd=source_checkout, stdin=subprocess.DEVNULL,
-                    stdout=stdout_file, stderr=stderr_file, check=False,
-                    timeout=120, preexec_fn=_limit_output_files,
+        try:
+            _require(
+                checkout.returncode == 0,
+                f"cannot create exact source worktree: {checkout.stderr.strip()}",
+            )
+            worktree_added = True
+            head = str(_git(source_checkout, "rev-parse", "HEAD")).strip()
+            _require(
+                head == source_revision,
+                "verifier worktree HEAD differs from source_revision",
+            )
+            stdout_path = root / "stdout"
+            stderr_path = root / "stderr"
+            with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
+                try:
+                    completed = subprocess.run(
+                        VERIFIER_COMMAND, cwd=source_checkout,
+                        stdin=subprocess.DEVNULL, stdout=stdout_file,
+                        stderr=stderr_file, check=False, timeout=120,
+                        preexec_fn=_limit_output_files,
+                    )
+                except subprocess.TimeoutExpired as error:
+                    raise IssuerError(
+                        "A2T structural verifier exceeded 120 seconds"
+                    ) from error
+            stdout = stdout_path.read_bytes()
+            stderr = stderr_path.read_bytes()
+        finally:
+            if worktree_added:
+                active_error = sys.exc_info()[0]
+                removed = subprocess.run(
+                    ["git", "worktree", "remove", "--force", str(source_checkout)],
+                    cwd=repository, check=False, capture_output=True, text=True,
                 )
-            except subprocess.TimeoutExpired as error:
-                raise IssuerError("A2T structural verifier exceeded 120 seconds") from error
-        stdout = stdout_path.read_bytes()
-        stderr = stderr_path.read_bytes()
+                if removed.returncode != 0 and active_error is None:
+                    raise IssuerError(
+                        "cannot remove exact source worktree: "
+                        + removed.stderr.strip()
+                    )
     _require(len(stdout) <= MAX_CAPTURE_BYTES and len(stderr) <= MAX_CAPTURE_BYTES, "A2T verifier output exceeded its bound")
     return completed.returncode, stdout, stderr
 

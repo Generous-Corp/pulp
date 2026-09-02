@@ -176,6 +176,43 @@ class ProducerTest(unittest.TestCase):
                 self.issue()
         self.assertFalse((self.root / "out").exists())
 
+    def test_shallow_checkout_succeeds_without_local_shared_clone(self) -> None:
+        shallow = self.root / "shallow-checkout"
+        run(
+            self.root, "git", "clone", "--quiet", "--depth=2",
+            f"file://{self.root}", str(shallow),
+        )
+        self.assertEqual(run(shallow, "git", "rev-parse", "--is-shallow-repository"), "true")
+        original_run = subprocess.run
+
+        def reject_old_shared_clone(args, *positional, **keywords):
+            if list(args[:3]) == ["git", "clone", "--quiet"] and "--shared" in args:
+                return subprocess.CompletedProcess(
+                    args, 128, "", "fatal: source repository is shallow\n"
+                )
+            return original_run(args, *positional, **keywords)
+
+        with mock.patch.object(MODULE.subprocess, "run", side_effect=reject_old_shared_clone):
+            output = MODULE.issue(shallow, shallow / "out", self.environment)
+        payload = json.loads(output.read_text())
+        self.assertEqual(payload["source_revision"], self.source)
+        self.assertEqual(payload["evidence_head"], self.evidence)
+
+    def test_exact_source_worktree_is_removed_after_verifier_failure(self) -> None:
+        before = run(self.root, "git", "worktree", "list", "--porcelain")
+        with mock.patch.object(
+            MODULE, "VERIFIER_COMMAND",
+            ["python3", "-c", "raise SystemExit(7)"],
+        ):
+            exit_code, _stdout, _stderr = MODULE._run_verifier(
+                self.root, self.source,
+                (self.root / MODULE.RECEIPT_PATH).read_bytes(),
+            )
+        self.assertEqual(exit_code, 7)
+        self.assertEqual(
+            run(self.root, "git", "worktree", "list", "--porcelain"), before
+        )
+
     def test_rejects_wrong_job_boundary(self) -> None:
         self.environment["GITHUB_JOB"] = "linux"
         with self.assertRaisesRegex(MODULE.IssuerError, "native build job"):
