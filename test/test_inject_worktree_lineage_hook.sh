@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-hook="${repo_root}/hooks/scripts/inject-worktree-lineage.sh"
+hook="${PULP_LINEAGE_HOOK:-${repo_root}/hooks/scripts/inject-worktree-lineage.sh}"
 tmp="$(mktemp -d)"
 trap 'find "${tmp}" -depth -delete 2>/dev/null || true' EXIT
 
@@ -19,15 +19,51 @@ mkdir "${tmp}/markers"
 run_hook() {
     local session="$1"
     printf '{"cwd":"%s","session_id":"%s"}' "${tmp}" "${session}" |
-        TMPDIR="${tmp}/markers" bash "${hook}"
+        TMPDIR="${tmp}/markers" bash "${hook}" --hook-json
 }
+
+out="$(printf '{"cwd":"%s","session_id":"default-json"}' "${tmp}" |
+    TMPDIR="${tmp}/markers" bash "${hook}")"
+printf '%s' "${out}" | python3 -c '
+import json, sys
+ctx = json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+assert "UNCLASSIFIED" in ctx, ctx
+' || fail "default hook mode did not consume piped JSON"
+
+python3 - "${hook}" "${tmp}" <<'PY' || fail "plain mode read from open interactive stdin"
+import os
+import subprocess
+import sys
+
+hook, cwd = sys.argv[1:]
+read_fd, write_fd = os.pipe()
+try:
+    completed = subprocess.run(
+        ["bash", hook, "--plain"],
+        cwd=cwd,
+        env={**os.environ, "PULP_LINEAGE_CWD": cwd},
+        stdin=read_fd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=2,
+        check=False,
+    )
+finally:
+    os.close(read_fd)
+    os.close(write_fd)
+
+assert completed.returncode == 0, completed
+assert "UNCLASSIFIED" in completed.stderr, completed
+assert completed.stdout == "", completed
+PY
 
 out="$(run_hook unclassified)"
 printf '%s' "${out}" | python3 -c '
 import json, sys
 ctx = json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
 assert "UNCLASSIFIED" in ctx, ctx
-' || fail "unclassified worktree did not inject a warning"
+' || fail "explicit hook JSON mode did not consume piped JSON"
 
 head="$(git -C "${tmp}" rev-parse HEAD)"
 git -C "${tmp}" config --local branch.old-work.pulpWorktreeStatus active

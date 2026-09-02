@@ -3,7 +3,22 @@
 # The shared Git config is authoritative even when the branch predates this hook.
 set -u
 
-input="$(cat 2>/dev/null || true)"
+mode="${1:---hook-json}"
+input=""
+case "${mode}" in
+    --plain)
+        # Manual preflights inherit the caller's stdin. It may be an open
+        # terminal, so plain mode must never wait for hook input.
+        ;;
+    --hook-json|--claude-json)
+        input="$(cat 2>/dev/null || true)"
+        ;;
+    *)
+        echo "inject-worktree-lineage.sh: expected --plain or --hook-json" >&2
+        exit 2
+        ;;
+esac
+
 parsed=""
 if [[ -n "${input}" ]] && command -v python3 >/dev/null 2>&1; then
     parsed="$(printf '%s' "${input}" | python3 -c '
@@ -67,7 +82,7 @@ else
     [[ -z "${note}" ]] || message="${message} Note: ${note}"
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
+if [[ "${mode}" == "--plain" ]] || ! command -v python3 >/dev/null 2>&1; then
     printf '%s\n' "${message}" >&2
     exit 0
 fi
