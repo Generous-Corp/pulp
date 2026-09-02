@@ -595,14 +595,17 @@ class StepPlayer {
 
     /// Pins tick→sample projection to one point per transport segment.
     ///
-    /// A block's `tick_start` is a rounded tick, so projecting relative to it
-    /// leaves a sub-tick residual that differs from block to block — enough to
-    /// tip a tick sitting near a half-sample onto either side and hand the same
-    /// event two different samples under two callback partitions. Holding the
-    /// anchor still across a segment makes the projection depend only on the
-    /// tick. A block whose own sample/tick pair no longer sits on the anchored
-    /// correspondence is a reposition, and re-anchors: a seek is free to put
-    /// the tick timeline anywhere against the running sample clock.
+    /// A block's `tick_start` does not name the instant the block begins. A
+    /// tick is finer than a sample, so a whole run of ticks maps to each
+    /// sample and a host reports the first of them; the reported start sits up
+    /// to half a sample early, by an amount that depends on the sample it
+    /// began on. Projecting relative to it folds that offset into every onset
+    /// the block carries, which is enough to hand the same event two different
+    /// samples under two callback partitions. Holding the anchor still across
+    /// a segment makes the projection depend only on the tick. A block whose
+    /// own sample/tick pair no longer sits on the anchored correspondence is a
+    /// reposition, and re-anchors: a seek is free to put the tick timeline
+    /// anywhere against the running sample clock.
     void update_anchor(const StepPlayerBlock& block) noexcept {
         const auto axis = tick_axis(block, block.tick_start.value);
         const auto offset = static_cast<long double>(block.sample_start.value) - axis;
