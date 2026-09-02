@@ -951,20 +951,28 @@ detector measures nothing however impressive the sample size.
 ## Where the patch corpus lives, and what it was actually worth
 
 ```
-~/Library/Application Support/Forge Modular/corpus/patchstorage/
+~/Library/Application Support/Forge Modular/corpus/patches/
+    provider.json  the acquisition descriptor: which third party, its query
+                   API, the delay its robots.txt asks for, contact string
     index.json     per patch: id, title, author, url, licence, licence slug,
                    sha256, tags, categories, fetched_at
     patches/*.vcv  the bodies — Zstandard, `tar --zstd -xf … patch.json`
 ```
 
-**Outside the repo entirely, and deliberately so** — `ditto` copies a directory
-rather than git's view of it, which is how 113 MB of reference books once
-reached a signed installer.
+**The source is named in `provider.json`, not in the repository.** Which third
+party the corpus came from, and the terms that governed the fetch, are
+acquisition provenance and live with the evidence. `FORGE_CORPUS_ROOT`
+overrides the location; `tools/rack/patch_corpus.py` refuses to fetch without a
+descriptor and needs none to read what is already held.
 
-**Licence never opens the public-export boundary.** RackDocs and Patchstorage
-PDFs, images, patch bodies, titles, uploader identities, URLs, ids, hashes,
-source prose, and full per-patch module/cable topology remain private regardless
-of their licence. `tools/rack/corpus_export.py` is not a backup command: it
+**Outside the repo entirely, and deliberately so** — `ditto` copies a directory
+rather than git's view of it, which is how 113 MB of third-party reference
+material once reached a signed installer.
+
+**Licence never opens the public-export boundary.** Third-party PDFs, images,
+patch bodies, titles, uploader identities, URLs, ids, hashes, source prose, and
+full per-patch module/cable topology remain private regardless of their
+licence. `tools/rack/corpus_export.py` is not a backup command: it
 writes one fixed-schema report containing only source-neutral aggregate counts,
 abstract functional-role vocabulary, independently worded criteria, and
 corroborated generic signal-prior buckets. It refuses an existing destination
@@ -974,12 +982,13 @@ tools continue to read the machine-local corpus directly. Keep
 `rack-corpus-export` registered and its malicious synthetic fixtures green when
 changing this boundary.
 
-Fetched via the public beta API. Patchstorage publishes **no Terms of Service**;
-`robots.txt` carries `Crawl-delay: 10` and no `Disallow`, and **every patch
-carries its own licence in the API response**, which is a stronger permission
-signal than a site-wide document because it comes from the rights holder. The
-crawl delay is honoured and the licence is recorded per patch, so anything
-non-permissive can be excluded from storage later without re-fetching.
+Fetched via a public, documented query API under the terms recorded in
+`provider.json`. `robots.txt` governs: the delay it asks for is honoured to the
+second and a `Disallow` means no fetch at all. **Every patch carries its own
+licence in the API response**, which is a stronger permission signal than a
+site-wide document because it comes from the rights holder. The licence is
+recorded per patch, so anything non-permissive can be excluded from storage
+later without re-fetching.
 
 **What it was predicted to find:** port-matching defects in bulk, over real
 usage.
