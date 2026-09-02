@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260901-pr8005-yoga-oracle-pin-lockstep",
+  "created_at": "2026-09-01T21:28:28Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a documentation-only change inside the harness tree. The single tools/harness touch is tools/harness/oracles/yoga/README.md, which corrects the refresh procedure to name the file the Yoga pin actually lives in and states that the supported-property table must be restamped in lockstep with that pin. The new tools/scripts/check_yoga_oracle_pin.py enforces the lockstep and is wired into gates.sh, the pre-push hook, and a ctest; it reads the oracle table and the CMake pin and writes neither. No harness behaviour, oracle table content, captured output, design ingest, rendering, packaging, the accepted expansion boundary, or Vellum source authority changes.",
+  "tests": [
+    "python3 tools/scripts/test_check_yoga_oracle_pin.py",
+    "python3 tools/scripts/check_yoga_oracle_pin.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base 4e683d4e8081a4451ea431281267df850dbd1468 --head HEAD",
+    "python3 tools/scripts/vellum_freeze_check.py --base 4e683d4e8081a4451ea431281267df850dbd1468 --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
