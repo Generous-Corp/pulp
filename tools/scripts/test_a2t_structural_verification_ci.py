@@ -19,6 +19,10 @@ assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 ROOT = Path(__file__).parents[2]
+GOLDEN = (
+    ROOT / "docs/validation/gpu-trace-overhead/fixtures/"
+    "a2t-structural-verifier-attestation-v1.golden.json"
+)
 
 
 def run(repository: Path, *args: str) -> str:
@@ -35,6 +39,7 @@ class ProducerTest(unittest.TestCase):
         run(self.root, "git", "config", "user.email", "a2t@example.invalid")
         for relative in (
             MODULE.VERIFIER_PATH, MODULE.ISSUER_PATH, MODULE.WORKFLOW_PATH,
+            MODULE.SCHEMA_PATH,
             Path("test/fixtures/perfetto-gpu/fixture.pftrace"),
         ):
             (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
@@ -44,6 +49,9 @@ class ProducerTest(unittest.TestCase):
         )
         (self.root / MODULE.ISSUER_PATH).write_bytes(SCRIPT.read_bytes())
         (self.root / MODULE.WORKFLOW_PATH).write_text("name: Build and Test\n", encoding="utf-8")
+        (self.root / MODULE.SCHEMA_PATH).write_bytes(
+            (ROOT / MODULE.SCHEMA_PATH).read_bytes()
+        )
         self.trace = self.root / "test/fixtures/perfetto-gpu/fixture.pftrace"
         self.trace.write_bytes(b"bounded trace fixture")
         run(self.root, "git", "add", ".")
@@ -92,11 +100,30 @@ class ProducerTest(unittest.TestCase):
         payload = self.issue()
         self.assertEqual(payload["source_revision"], self.source)
         self.assertEqual(payload["evidence_head"], self.evidence)
+        self.assertEqual(payload["contract"]["commit"], self.source)
+        self.assertEqual(payload["issuer"]["commit"], self.source)
         self.assertEqual(payload["run"]["attempt"], 2)
         self.assertEqual(payload["step"]["verifier_command"], MODULE.VERIFIER_COMMAND)
         encoded = json.dumps(payload)
         for forbidden in ("artifact_id", "artifact_digest", "artifact_size", "conclusion", "integration"):
             self.assertNotIn(forbidden, encoded)
+
+    def test_golden_fixture_is_closed_v1_and_forbids_future_authority(self) -> None:
+        schema = json.loads((ROOT / MODULE.SCHEMA_PATH).read_text())
+        golden = json.loads(GOLDEN.read_text())
+        self.assertEqual(MODULE.json_schema_lite.validate(golden, schema), [])
+        self.assertEqual(
+            golden["schema"],
+            "pulp.gpu-trace-structural-verifier-attestation.v1",
+        )
+        for forbidden in (
+            "integration", "protected_merge", "artifact_id", "artifact_digest",
+            "artifact_size_in_bytes", "conclusion",
+        ):
+            self.assertNotIn(forbidden, json.dumps(golden))
+            mutated = dict(golden)
+            mutated[forbidden] = "future-or-self-claimed"
+            self.assertTrue(MODULE.json_schema_lite.validate(mutated, schema))
 
     def test_rejects_receipt_not_identical_to_pr_head_blob(self) -> None:
         (self.root / MODULE.RECEIPT_PATH).write_text("{}", encoding="utf-8")
@@ -117,6 +144,19 @@ class ProducerTest(unittest.TestCase):
     def test_rejects_wrong_job_boundary(self) -> None:
         self.environment["GITHUB_JOB"] = "linux"
         with self.assertRaisesRegex(MODULE.IssuerError, "native build job"):
+            self.issue()
+
+    def test_rejects_issuer_changed_after_reviewed_source(self) -> None:
+        (self.root / MODULE.ISSUER_PATH).write_text("# changed in E\n", encoding="utf-8")
+        run(self.root, "git", "add", ".")
+        run(self.root, "git", "commit", "-qm", "mutate issuer after source")
+        changed_head = run(self.root, "git", "rev-parse", "HEAD")
+        self.event.write_text(
+            json.dumps({"pull_request": {"head": {"sha": changed_head}}}),
+            encoding="utf-8",
+        )
+        self.environment["GITHUB_WORKFLOW_SHA"] = changed_head
+        with self.assertRaisesRegex(MODULE.IssuerError, "issuer changed between S and E"):
             self.issue()
 
     def test_workflow_wires_exact_required_macos_producer(self) -> None:

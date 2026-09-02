@@ -21,13 +21,18 @@ reviewed offline verifier with bounded stdout/stderr and uploads one immutable
 `a2t-structural-verification-<PR-head>` attestation. The attestation is
 structural and nonterminal: it binds only execution-time `S`/`E`, Git blobs,
 digests, command, workflow revision, run attempt, job key, step, and result.
+Its closed producer contract is
+`docs/validation/gpu-trace-overhead/a2t-structural-verifier-attestation-v1.schema.json`;
+the issuer validates every output against it, and the adjacent `fixtures/`
+golden is the stable cross-repository consumer example. The schema and issuer
+are bound to the reviewed `S` snapshot and must be byte-identical at `E`.
 It intentionally cannot claim the future protected merge, its own Actions
 artifact ID/digest/size, the final job conclusion, or terminal acceptance.
 The planning validator must recover and authenticate those later from GitHub.
 
 The issuer is skipped everywhere except a real macOS pull-request build with
 that exact receipt path. A present receipt that is untracked, symlinked,
-different from the PR-head blob, bound to a different verifier/trace/source,
+different from the PR-head blob, bound to a different schema/issuer/verifier/trace/source,
 or produces noncanonical verifier output fails the required check. Linux and
 Windows remain advisory and do not produce this authority.
 

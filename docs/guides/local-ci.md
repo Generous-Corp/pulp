@@ -1477,6 +1477,11 @@ source revision, rejects any working-file or Git-blob mismatch, bounds verifier
 stdout and stderr, and uploads one
 `a2t-structural-verification-<head>` attestation. A present receipt cannot be
 silently skipped: verifier failure or noncanonical output fails `macos`.
+The producer validates the artifact against the closed
+`a2t-structural-verifier-attestation-v1.schema.json` contract before writing
+it. The schema, issuer, and verifier are exact `S` bindings and must remain
+byte-identical through `E`; the adjacent golden fixture is the stable example
+for planning-side and other read-only consumers.
 
 This artifact is deliberately not authority by itself. It records only facts
 available during that PR job: clean source and evidence revisions, exact file

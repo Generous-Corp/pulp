@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/validation/gpu-trace-overhead/a2t-structural-verifier-attestation-v1.schema.json",
+  "title": "Pulp A2T structural verifier attestation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "source_revision", "evidence_head", "contract", "workflow",
+    "issuer", "verifier", "receipt", "trace_sha256", "run", "job", "step",
+    "result"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pulp.gpu-trace-structural-verifier-attestation.v1"
+    },
+    "source_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "evidence_head": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "path", "blob", "sha256"],
+      "properties": {
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "path": {
+          "const": "docs/validation/gpu-trace-overhead/a2t-structural-verifier-attestation-v1.schema.json"
+        },
+        "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "path", "blob", "sha256", "semantics_sha256"],
+      "properties": {
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "path": {"const": ".github/workflows/build.yml"},
+        "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "semantics_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "path", "blob", "sha256"],
+      "properties": {
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "path": {"const": "tools/scripts/a2t_structural_verification_ci.py"},
+        "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "path", "blob", "sha256"],
+      "properties": {
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "path": {"const": "tools/scripts/verify_gpu_trace_overhead_acceptance.py"},
+        "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "path", "blob", "sha256"],
+      "properties": {
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "path": {"const": "evidence/receipt.json"},
+        "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "trace_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "attempt", "event", "head_sha", "workflow_sha"],
+      "properties": {
+        "id": {"type": "integer", "minimum": 1},
+        "attempt": {"type": "integer", "minimum": 1},
+        "event": {"const": "pull_request"},
+        "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "workflow_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "check_name"],
+      "properties": {
+        "key": {"const": "build"},
+        "check_name": {"const": "macos"}
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "issuer_command", "verifier_command"],
+      "properties": {
+        "name": {"const": "Verify A2T structural receipt"},
+        "issuer_command": {
+          "const": ["python3", "tools/scripts/a2t_structural_verification_ci.py"]
+        },
+        "verifier_command": {
+          "const": [
+            "python3", "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+            "evidence/receipt.json", "--repository", "."
+          ]
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exit_code", "error_count", "stdout_sha256", "stderr_sha256"
+      ],
+      "properties": {
+        "exit_code": {"const": 0},
+        "error_count": {"const": 0},
+        "stdout_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "stderr_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

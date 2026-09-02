@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import types
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -21,6 +22,10 @@ RECEIPT_PATH = Path("evidence/receipt.json")
 VERIFIER_PATH = Path("tools/scripts/verify_gpu_trace_overhead_acceptance.py")
 ISSUER_PATH = Path("tools/scripts/a2t_structural_verification_ci.py")
 WORKFLOW_PATH = Path(".github/workflows/build.yml")
+SCHEMA_PATH = Path(
+    "docs/validation/gpu-trace-overhead/"
+    "a2t-structural-verifier-attestation-v1.schema.json"
+)
 OUTPUT_NAME = "attestation.json"
 STEP_NAME = "Verify A2T structural receipt"
 CHECK_NAME = "macos"
@@ -38,6 +43,23 @@ MAX_CAPTURE_BYTES = 64 * 1024
 MAX_JSON_BYTES = 8 * 1024 * 1024
 SHA1 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _load_local_source(module_name: str, path: Path) -> types.ModuleType:
+    data = path.read_bytes()
+    if len(data) > 256 * 1024:
+        raise RuntimeError(f"local source module is unbounded: {path.name}")
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    exec(compile(data, str(path), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+json_schema_lite = _load_local_source(
+    "a2t_json_schema_lite", Path(__file__).with_name("json_schema_lite.py")
+)
 
 
 class IssuerError(RuntimeError):
@@ -180,8 +202,15 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
     _require(verifier_e_blob == verifier_blob and verifier_e_bytes == verifier_bytes, "verifier changed between S and E")
     _require(_working_regular_file(repository, VERIFIER_PATH, 2 * 1024 * 1024) == verifier_bytes, "executed verifier differs from S/E blob")
 
-    issuer_blob, issuer_bytes = _tracked_file(repository, evidence_head, ISSUER_PATH)
-    _require(_working_regular_file(repository, ISSUER_PATH, 512 * 1024) == issuer_bytes, "executed issuer differs from E blob")
+    issuer_blob, issuer_bytes = _tracked_file(repository, source_revision, ISSUER_PATH)
+    issuer_e_blob, issuer_e_bytes = _tracked_file(repository, evidence_head, ISSUER_PATH)
+    _require(issuer_e_blob == issuer_blob and issuer_e_bytes == issuer_bytes, "issuer changed between S and E")
+    _require(_working_regular_file(repository, ISSUER_PATH, 512 * 1024) == issuer_bytes, "executed issuer differs from S/E blob")
+    schema_blob, schema_bytes = _tracked_file(repository, source_revision, SCHEMA_PATH)
+    schema_e_blob, schema_e_bytes = _tracked_file(repository, evidence_head, SCHEMA_PATH)
+    _require(schema_e_blob == schema_blob and schema_e_bytes == schema_bytes, "attestation schema changed between S and E")
+    _require(_working_regular_file(repository, SCHEMA_PATH, 512 * 1024) == schema_bytes, "attestation schema differs from S/E blob")
+    schema = _json_object(schema_bytes, "A2T attestation schema")
     workflow_blob, workflow_bytes = _tracked_file(repository, workflow_revision, WORKFLOW_PATH)
     _require(_working_regular_file(repository, WORKFLOW_PATH, 2 * 1024 * 1024) == workflow_bytes, "checked-out workflow differs from executed workflow revision")
 
@@ -212,8 +241,9 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
         "schema": "pulp.gpu-trace-structural-verifier-attestation.v1",
         "source_revision": source_revision,
         "evidence_head": evidence_head,
+        "contract": {**_binding(source_revision, SCHEMA_PATH, schema_blob), "sha256": _sha256(schema_bytes)},
         "workflow": {**_binding(workflow_revision, WORKFLOW_PATH, workflow_blob), "sha256": _sha256(workflow_bytes), "semantics_sha256": _sha256(semantic_bytes)},
-        "issuer": {**_binding(evidence_head, ISSUER_PATH, issuer_blob), "sha256": _sha256(issuer_bytes)},
+        "issuer": {**_binding(source_revision, ISSUER_PATH, issuer_blob), "sha256": _sha256(issuer_bytes)},
         "verifier": {**_binding(source_revision, VERIFIER_PATH, verifier_blob), "sha256": _sha256(verifier_bytes)},
         "receipt": {**_binding(evidence_head, RECEIPT_PATH, receipt_blob), "sha256": _sha256(receipt_bytes)},
         "trace_sha256": trace_sha256,
@@ -222,6 +252,8 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
         "step": {"name": STEP_NAME, "issuer_command": ISSUER_COMMAND, "verifier_command": VERIFIER_COMMAND},
         "result": {"exit_code": 0, "error_count": 0, "stdout_sha256": _sha256(stdout), "stderr_sha256": _sha256(stderr)},
     }
+    violations = json_schema_lite.validate(attestation, schema)
+    _require(not violations, "A2T attestation violates its closed schema: " + "; ".join(violations))
     output_directory.mkdir(parents=True, exist_ok=False)
     output = output_directory / OUTPUT_NAME
     output.write_text(json.dumps(attestation, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
