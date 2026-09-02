@@ -156,14 +156,21 @@ public:
     /// — it is what a "LFO Rate" knob writes to — so it cannot be reachable
     /// only through `prepare()`. `prepare()` allocates, is control-thread only,
     /// and restarts phase; sweeping a rate knob through it would stall the LFO
-    /// at phase 0 for the whole sweep. The rate is clamped into the shipped
-    /// LFO's legal range exactly as `prepare()` clamps it.
-    void set_lfo_rate_hz(double rate_hz) noexcept {
-        if (!prepared() || !std::isfinite(rate_hz))
-            return;
+    /// at phase 0 for the whole sweep.
+    ///
+    /// Rejects a non-finite or non-positive rate — the rates `prepare()`
+    /// refuses — and reports whether the rate was taken. The shipped LFO
+    /// clamps a non-positive rate up into its own legal range rather than
+    /// refusing it, so accepting one here would leave `config()` holding a
+    /// rate that `prepare(config())` then rejects: the bank and the config it
+    /// reports would disagree.
+    bool set_lfo_rate_hz(double rate_hz) noexcept {
+        if (!prepared() || !std::isfinite(rate_hz) || !(rate_hz > 0.0))
+            return false;
         config_.lfo.rate_hz = rate_hz;
         for (auto& lfo : lfos_)
             lfo.set_rate_hz(rate_hz);
+        return true;
     }
 
     /// RT-safe after prepare. Rescales every voice's bipolar LFO output.
@@ -172,10 +179,14 @@ public:
     /// a source whose convention is the inverse of this one's. Depth is the
     /// other half of a live LFO's automation surface, and has the same reason
     /// as the rate for not living behind `prepare()`.
-    void set_lfo_depth(float depth) noexcept {
+    ///
+    /// Rejects a non-finite depth, leaving the current depth in place, and
+    /// reports whether the depth was taken.
+    bool set_lfo_depth(float depth) noexcept {
         if (!prepared() || !std::isfinite(depth))
-            return;
+            return false;
         config_.lfo.depth = depth;
+        return true;
     }
 
     /// RT-safe after prepare. Reshapes every voice's LFO, preserving phase and

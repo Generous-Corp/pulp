@@ -30,6 +30,13 @@ job-to-runner binding, derived lease priority, completion, and VM/JIT cleanup.
 Re-check M1, M3, and M5 live; do not preserve a dated incident snapshot as
 topology. `tools/scripts/runner_topology.json` plus
 `runner_topology_check.py --mode=report` is the declarative routing truth.
+When reviewed cross-repo evidence is available, pass TartCI source profiles,
+installed-profile receipts, and the private desired-fleet manifest through the
+checker's read-only `--fleet-profile`, `--fleet-receipt`, and
+`--fleet-source-manifest` inputs. A source profile must use the current TartCI
+fields (`assignment_mode = "event-class-v2"`, exact `[[lane.tier]]`
+label/workflow/runner_group_id rows, and no fixed priority). This keeps private
+Pulp labels and host declarations out of generic TartCI/Shipyard code.
 
 ## Why (the failure modes this fixes)
 - **Build-dir churn → ODR heap corruption.** One `build/` reconfigured across branches/build-types mixes object layouts → `malloc: error for object 0x3f800000` (that's `1.0f` freed as a pointer) aborting in e.g. `Theme::~Theme`. Every job in a *pristine* clone makes this impossible.
@@ -327,6 +334,12 @@ main, reddening every PR's macOS gate.)
 - **Gatekeeper disabled in the CI base:** the cirruslabs base ships `spctl --master-disable`, so `spctl --assess` returns 0 for *any* path (even nonexistent). `check_notarization` was hardened with an `fs::exists` short-circuit so it's correct in both environments (see the `ship` skill).
 - **Clean the build dir on build-type flips.** Shipyard `backend=local` reconfiguring Debug over a Release `build/` reproduces the ODR churn → false test failures. `rm -rf build` first, or (better) validate in the VM, not the editing checkout.
 - **An unset `TART_HOME` is a hard error, by design — do not "fix" it with a default.** Every VM tool resolves the store through `tools/ci/lib/tart-home.sh`: `TART_HOME` from the env, else `vm_home` from `tartci host-profile --json`, else it dies naming the fix. It refuses to guess because a wrong store is **silent**: `tart list` against a path with no VMs is an empty list, not an error. That is how the stray-VM reaper spent its life defaulting to `$HOME/VMs` on a host whose store was elsewhere — inspecting an empty universe, reaping nothing, and exiting 0 reporting success. If a launchd agent dies with the TART_HOME error, the plist is missing its `<key>TART_HOME</key>` (launchd does not read your shell profile), or its `$TART_HOME` placeholder was never substituted. Tests: `tools/scripts/test_tart_home_resolution.py`.
+- **A default-store inventory is not an idle-boundary receipt.** If `tart list`
+  reports zero running guests while `tart run` processes or guest setup are
+  present, treat the state as unknown/fail-closed. Resolve the exact
+  receipt-bound profile and its `tart_home`, query that store, and corroborate
+  with process state. Pulp can detect profile/receipt/source-manifest drift from
+  fixtures; TartCI must own the live bound-store plus active-process check.
 - **Disk: sparse + CoW.** Each `disk.img` is a sparse 150 GB file (~45 GB real); `du`/Finder show apparent size (N×150 GB) but `df` shows the truth (CoW clones share blocks — e.g. 13 VMs ≈ 313 GB real). Don't panic at apparent size; prune redundant bare working VMs (tags retain shared blocks).
 - **First key injection needs `sshpass`** (password auth once); afterward everything uses the injected `id_ed25519`. `tart ip` can take ~10–120 s after boot — poll, don't fixed-sleep.
 - **A missing `--dir` mount target reads as a fake "no IP".** `tart-runner.sh` boots each VM with `--dir="ccache:$PULP_CI_CACHE/ccache"` (default `$HOME/.cache/pulp-ci/ccache`). If that host dir doesn't exist — the common case on a **fresh CI host** — `tart run` exits *immediately* with `VZErrorDomain Code=2 "directory sharing device configuration is invalid"`, so the VM never boots and the runner times out 120 s later reporting **"no IP"** — pointing you at networking when the real cause is a missing directory. `setup-ci-host.sh` now pre-creates it and `tart-runner.sh` both `mkdir -p`s it and prints the `tart run` boot log on failure. If you ever see "no IP", read the boot log it now emits before suspecting vmnet/DHCP. (Diagnosed on the secondary M-series host bring-up, 2026-06-01: a no-`--dir` boot got an IP in 0 s while a `--dir`-to-missing-path boot died instantly — the mount, not the network.)

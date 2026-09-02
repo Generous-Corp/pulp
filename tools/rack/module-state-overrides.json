@@ -15,6 +15,13 @@
       }
     ]
   },
+  "Geodesics-Vultiverse/Hexaquark": {
+    "plugin_version": "2.0.4",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "stores its scenes, channels, pages, steps, and microsteps in opaque module-owned state that a fresh patch cannot author from parameter metadata. Its numbered scene and Run controls are momentary editor buttons, not the sequence: the retained failure wrote both but carried no module data and no external clock, so every sequencing output stayed silent. The module manual confirms that an external clock is required and that steps must be edited into an active state. Choose a sequencer whose steps are ordinary parameters or provide a validated existing Hexaquark patch to refine"
+    }
+  },
   "LomasModules/AdvancedSampler": {
     "plugin_version": "2.0.0",
     "fresh_generation": {

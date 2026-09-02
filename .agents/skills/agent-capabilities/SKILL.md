@@ -463,6 +463,27 @@ Use an already-published key as the control for that grep — a brand-new key fr
 the previous transaction returns 1, so a 0 on yours is a real absence rather
 than a broken pattern.
 
+Whether `rederive.py` appends depends on the state it starts from, so **measure
+the append rather than following either rule blindly**. Starting from a tree
+whose four generated artifacts already sit at the protected base — which is
+where the reset-and-regenerate-once recovery leaves you — `rederive.py` alone
+bumps `SURFACE_INVENTORY_VERSION`, appends exactly one entry, and `--check`
+reports `fresh`; adding `--write` after it appends a *second* entry for one
+logical change and the append-only check rejects it. Starting from a tree that
+already carries a `--write` from earlier in the branch, the reset described
+above wins and the trailing `--write` is what moves the history.
+
+So the invariant to hold is the count, not the command sequence: after
+regenerating, compare entry counts against the protected base and require a
+delta of exactly 1, then stop. Run `--write` only if that delta is 0.
+
+`rederive.py` also refuses outright while a merge is in progress when the
+incoming commit is not the protected base, because the base resolver would step
+back to the merge base and derive a stale counter. That is why the conflict
+sequence commits the merge before re-deriving — a version bump staged into the
+merge commit itself is rejected as `inventory_version changed without a surface
+change`, since the surface document has not been regenerated yet.
+
 ### A catalog-bound header must NOT also get a `REVIEWED_HEADERS` row
 
 A header named by a `binding(...)` in a catalog is already a capability
@@ -477,11 +498,45 @@ vocabulary headers (whose `capability_keys` list names the kernels expressed
 over them) and `infrastructure` headers such as a private `detail/` helper,
 which bind no key of their own.
 
-### `header_fingerprint` is not the SHA-256 of the header file
+### `header_fingerprint` IS the SHA-256 of the header file's bytes
 
-The declared value and `sha256sum <header>` legitimately differ. Do not
-"reconcile" them by hashing the file — take the `got sha256:` the generator
-reports.
+The surface document says so itself — `"fingerprint_algorithm":
+"sha256-file-bytes"` — and every one of the 453 declared fingerprints agrees
+with the file on disk:
+
+```python
+import json, hashlib, pathlib
+d = json.load(open('docs/status/agent-capability-surface.json'))
+differ = [r['source'] for r in d['headers']
+          if 'sha256:' + hashlib.sha256(pathlib.Path(r['source']).read_bytes()).hexdigest()
+          != r['fingerprint']]
+print(len(d['headers']), 'headers,', len(differ), 'differ')   # 453 headers, 0 differ
+```
+
+The only real difference is the `sha256:` prefix the declared value carries and
+bare `shasum` output does not — which is what makes the two look unequal at a
+glance. Corrupt one declared value and the same loop reports it, so a clean run
+is a measurement rather than a tautology.
+
+An earlier revision of this section claimed the two "legitimately differ" and
+told you not to reconcile them by hashing the file. That was wrong, and it is
+the expensive kind of wrong: it reads as permission to paper over a genuine
+mismatch, when a mismatch means the header moved and the surface did not.
+
+### `--write` cannot fix a fingerprint — it is authored, not generated
+
+The fingerprint is declared in two places that must be edited by hand and kept
+equal: the `header_fingerprint=` literal in the capability's `EXPORTS` row in
+`tools/scripts/agent_capability_catalog_performance.py`, and the `fingerprint`
+field for that `source` in `docs/status/agent-capability-surface.json`.
+Regeneration checks them; it does not author them. So after changing a public
+capability header:
+
+1. `shasum -a 256 <header>` and prefix the digest with `sha256:`,
+2. write that value into both places above,
+3. bump `SURFACE_INVENTORY_VERSION` in `tools/scripts/agent_capability_manifest.py`
+   (surface axis — see the next section: this costs no contract bump),
+4. re-run `--check` and confirm it reports `fresh`.
 
 ### Adding a function to an existing capability header costs NO contract bump
 
