@@ -26,6 +26,10 @@ SCHEMA_PATH = Path(
     "docs/validation/gpu-trace-overhead/"
     "a2t-structural-verifier-attestation-v1.schema.json"
 )
+GOLDEN_PATH = Path(
+    "docs/validation/gpu-trace-overhead/fixtures/"
+    "a2t-structural-verifier-attestation-v1.golden.json"
+)
 JSON_SCHEMA_PATH = Path("tools/scripts/json_schema_lite.py")
 GPU_CONTRACT_PATH = Path("tools/scripts/gpu_trace_overhead_acceptance.py")
 SDK_HANDOFF_PATH = Path("tools/scripts/sdk_capability_handoff.py")
@@ -54,6 +58,15 @@ MAX_CAPTURE_BYTES = 64 * 1024
 MAX_JSON_BYTES = 8 * 1024 * 1024
 SHA1 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _workflow_semantics(evidence_head: str) -> dict[str, Any]:
+    return {
+        "issuer_command": ISSUER_COMMAND,
+        "verifier_command": VERIFIER_COMMAND,
+        "step_name": STEP_NAME,
+        "artifact_name": f"a2t-structural-verification-{evidence_head}",
+    }
 
 
 def _load_source_bytes(module_name: str, path: Path, data: bytes) -> types.ModuleType:
@@ -220,6 +233,88 @@ def _binding(commit: str, path: Path, blob: str) -> dict[str, str]:
     return {"commit": commit, "path": path.as_posix(), "blob": blob}
 
 
+def canonical_golden_attestation() -> dict[str, Any]:
+    source = "1" * 40
+    evidence = "2" * 40
+    workflow_revision = "3" * 40
+    semantics = _workflow_semantics(evidence)
+    return {
+        "schema": "pulp.gpu-trace-structural-verifier-attestation.v1",
+        "source_revision": source,
+        "evidence_head": evidence,
+        "contract": {
+            **_binding(source, SCHEMA_PATH, "4" * 40), "sha256": "4" * 64,
+        },
+        "workflow": {
+            **_binding(workflow_revision, WORKFLOW_PATH, "3" * 40),
+            "sha256": "3" * 64,
+            "semantics_sha256": _sha256(
+                json.dumps(
+                    semantics, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ),
+        },
+        "issuer": {
+            **_binding(source, ISSUER_PATH, "5" * 40), "sha256": "5" * 64,
+        },
+        "verifier": {
+            **_binding(source, VERIFIER_PATH, "6" * 40), "sha256": "6" * 64,
+        },
+        "dependencies": {
+            "issuer_json_schema_lite": {
+                **_binding(source, JSON_SCHEMA_PATH, "9" * 40),
+                "sha256": "9" * 64,
+            },
+            "verifier_gpu_trace_overhead_acceptance": {
+                **_binding(source, GPU_CONTRACT_PATH, "a" * 40),
+                "sha256": "a" * 64,
+            },
+            "verifier_json_schema_lite": {
+                **_binding(source, JSON_SCHEMA_PATH, "9" * 40),
+                "sha256": "9" * 64,
+            },
+            "verifier_sdk_capability_handoff": {
+                **_binding(source, SDK_HANDOFF_PATH, "b" * 40),
+                "sha256": "b" * 64,
+            },
+            "verifier_sdk_provenance": {
+                **_binding(source, SDK_PROVENANCE_PATH, "c" * 40),
+                "sha256": "c" * 64,
+            },
+        },
+        "receipt": {
+            **_binding(evidence, RECEIPT_PATH, "7" * 40), "sha256": "7" * 64,
+        },
+        "trace_sha256": "8" * 64,
+        "run": {
+            "id": 1234,
+            "attempt": 2,
+            "event": "pull_request",
+            "head_sha": evidence,
+            "workflow_sha": workflow_revision,
+        },
+        "job": {"key": JOB_KEY, "check_name": CHECK_NAME},
+        "step": {
+            "name": STEP_NAME,
+            "issuer_command": ISSUER_COMMAND,
+            "verifier_command": VERIFIER_COMMAND,
+        },
+        "result": {
+            "exit_code": 0,
+            "error_count": 0,
+            "stdout_sha256": _sha256(EXPECTED_STDOUT),
+            "stderr_sha256": _sha256(b""),
+        },
+    }
+
+
+def canonical_golden_bytes() -> bytes:
+    return (
+        json.dumps(canonical_golden_attestation(), indent=2, sort_keys=True)
+        + "\n"
+    ).encode()
+
+
 def issue(repository: Path, output_directory: Path, environment: Mapping[str, str]) -> Path:
     repository = repository.resolve()
     _require(environment.get("GITHUB_ACTIONS") == "true", "issuer may run only in GitHub Actions")
@@ -301,12 +396,7 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
     _require(stdout == EXPECTED_STDOUT, "A2T structural verifier stdout is not canonical")
     _require(stderr == b"", "A2T structural verifier wrote stderr")
 
-    workflow_semantics = {
-        "issuer_command": ISSUER_COMMAND,
-        "verifier_command": VERIFIER_COMMAND,
-        "step_name": STEP_NAME,
-        "artifact_name": f"a2t-structural-verification-{evidence_head}",
-    }
+    workflow_semantics = _workflow_semantics(evidence_head)
     semantic_bytes = json.dumps(workflow_semantics, sort_keys=True, separators=(",", ":")).encode()
     attestation = {
         "schema": "pulp.gpu-trace-structural-verifier-attestation.v1",
@@ -334,6 +424,21 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
 
 
 def main() -> int:
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--write-golden" and len(sys.argv) in {2, 3}:
+            output = (
+                Path(sys.argv[2])
+                if len(sys.argv) == 3
+                else Path(__file__).resolve().parents[2] / GOLDEN_PATH
+            )
+            output.write_bytes(canonical_golden_bytes())
+            print(f"a2t-structural-verification-ci: wrote canonical golden ({output})")
+            return 0
+        print(
+            "a2t-structural-verification-ci: FAIL: expected --write-golden [path]",
+            file=sys.stderr,
+        )
+        return 1
     output_root = os.environ.get("A2T_ATTESTATION_DIR")
     if not output_root:
         print("a2t-structural-verification-ci: FAIL: A2T_ATTESTATION_DIR is missing", file=sys.stderr)

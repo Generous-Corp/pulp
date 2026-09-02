@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -140,7 +141,9 @@ class ProducerTest(unittest.TestCase):
 
     def test_golden_fixture_is_closed_v1_and_forbids_future_authority(self) -> None:
         schema = json.loads((ROOT / MODULE.SCHEMA_PATH).read_text())
-        golden = json.loads(GOLDEN.read_text())
+        golden_bytes = GOLDEN.read_bytes()
+        self.assertEqual(golden_bytes, MODULE.canonical_golden_bytes())
+        golden = json.loads(golden_bytes)
         self.assertEqual(SCHEMA_VALIDATOR.validate(golden, schema), [])
         self.assertEqual(
             golden["schema"],
@@ -159,6 +162,15 @@ class ProducerTest(unittest.TestCase):
             mutated = json.loads(json.dumps(golden))
             del mutated["dependencies"][dependency]
             self.assertTrue(SCHEMA_VALIDATOR.validate(mutated, schema))
+
+    def test_canonical_producer_regenerates_golden_byte_exactly(self) -> None:
+        output = self.root / "generated-golden.json"
+        completed = subprocess.run(
+            [sys.executable, SCRIPT, "--write-golden", output],
+            cwd=ROOT, check=False, capture_output=True, text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(output.read_bytes(), GOLDEN.read_bytes())
 
     def test_rejects_receipt_not_identical_to_pr_head_blob(self) -> None:
         (self.root / MODULE.RECEIPT_PATH).write_text("{}", encoding="utf-8")

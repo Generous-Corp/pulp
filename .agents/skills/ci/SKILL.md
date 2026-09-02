@@ -30,6 +30,10 @@ mounted as a separate sibling input. The schema, issuer, issuer schema
 validator, verifier, and every verifier-loaded support module are bound to the
 reviewed `S` snapshot and must be byte-identical at `E` before any such
 dependency is loaded or executed.
+Regenerate the golden only with
+`python3 tools/scripts/a2t_structural_verification_ci.py --write-golden`; the
+producer test requires byte-exact equality with that canonical output. Do not
+hand-edit derived fields such as `workflow.semantics_sha256`.
 It intentionally cannot claim the future protected merge, its own Actions
 artifact ID/digest/size, the final job conclusion, or terminal acceptance.
 The planning validator must recover and authenticate those later from GitHub.
