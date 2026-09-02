@@ -131,11 +131,11 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
 
     def test_merge_group_uses_the_higher_priority_event_class(self):
         got = _macos_runs_on(None, event="merge_group")
-        self.assertEqual(got["group"], "pulp-trusted-build")
-        self.assertIn("self-hosted", got["labels"])
-        self.assertIn(MERGE_GROUP_LABEL, got["labels"])
-        self.assertNotIn(PR_HEAD_LABEL, got["labels"])
-        self.assertNotIn(LEGACY_SHARED_LABEL, got["labels"])
+        self.assertIsInstance(got, list)
+        self.assertIn("self-hosted", got)
+        self.assertIn(MERGE_GROUP_LABEL, got)
+        self.assertNotIn(PR_HEAD_LABEL, got)
+        self.assertNotIn(LEGACY_SHARED_LABEL, got)
 
     def test_default_workflow_dispatch_uses_pr_head_event_class(self):
         got = _macos_runs_on(None, event="workflow_dispatch")
