@@ -1473,15 +1473,21 @@ artifact contract and keep the existing hosted-runner trust boundary.
 When a pull-request head carries the exact tracked `evidence/receipt.json`, the
 native macOS matrix child runs the A2T structural verifier after the ordinary
 build and test gate. It fetches the event-pinned head and the receipt's exact
-source revision, rejects any working-file or Git-blob mismatch, bounds verifier
-stdout and stderr, and uploads one
+source revision, then runs the verifier from a detached checkout whose live
+`HEAD` is exactly that source revision. The PR-head receipt is supplied as a
+separate sibling input rather than overlaid into the source checkout. Before
+loading or executing Python, the issuer authenticates the issuer's schema
+validator and all four verifier dependencies as byte-identical `S`/`E` Git
+blobs, rejects any working-file mismatch, bounds verifier stdout and stderr,
+and uploads one
 `a2t-structural-verification-<head>` attestation. A present receipt cannot be
 silently skipped: verifier failure or noncanonical output fails `macos`.
 The producer validates the artifact against the closed
 `a2t-structural-verifier-attestation-v1.schema.json` contract before writing
-it. The schema, issuer, and verifier are exact `S` bindings and must remain
-byte-identical through `E`; the adjacent golden fixture is the stable example
-for planning-side and other read-only consumers.
+it. The schema, issuer, verifier, and every dynamically loaded dependency are
+exact `S` bindings and must remain byte-identical through `E`; the adjacent
+golden fixture is the stable example for planning-side and other read-only
+consumers.
 
 This artifact is deliberately not authority by itself. It records only facts
 available during that PR job: clean source and evidence revisions, exact file

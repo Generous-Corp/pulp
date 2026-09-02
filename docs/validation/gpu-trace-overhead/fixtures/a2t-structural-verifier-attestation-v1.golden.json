@@ -6,6 +6,38 @@
     "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
   },
   "evidence_head": "2222222222222222222222222222222222222222",
+  "dependencies": {
+    "issuer_json_schema_lite": {
+      "blob": "9999999999999999999999999999999999999999",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/json_schema_lite.py",
+      "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    "verifier_gpu_trace_overhead_acceptance": {
+      "blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/gpu_trace_overhead_acceptance.py",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "verifier_json_schema_lite": {
+      "blob": "9999999999999999999999999999999999999999",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/json_schema_lite.py",
+      "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    "verifier_sdk_capability_handoff": {
+      "blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/sdk_capability_handoff.py",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "verifier_sdk_provenance": {
+      "blob": "cccccccccccccccccccccccccccccccccccccccc",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/sdk_provenance.py",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  },
   "issuer": {
     "blob": "5555555555555555555555555555555555555555",
     "commit": "1111111111111111111111111111111111111111",
@@ -46,7 +78,7 @@
     "verifier_command": [
       "python3",
       "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
-      "evidence/receipt.json",
+      "../evidence/receipt.json",
       "--repository",
       "."
     ]

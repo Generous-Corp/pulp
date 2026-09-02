@@ -26,13 +26,24 @@ SCHEMA_PATH = Path(
     "docs/validation/gpu-trace-overhead/"
     "a2t-structural-verifier-attestation-v1.schema.json"
 )
+JSON_SCHEMA_PATH = Path("tools/scripts/json_schema_lite.py")
+GPU_CONTRACT_PATH = Path("tools/scripts/gpu_trace_overhead_acceptance.py")
+SDK_HANDOFF_PATH = Path("tools/scripts/sdk_capability_handoff.py")
+SDK_PROVENANCE_PATH = Path("tools/scripts/sdk_provenance.py")
+EXECUTED_DEPENDENCIES = {
+    "issuer_json_schema_lite": JSON_SCHEMA_PATH,
+    "verifier_gpu_trace_overhead_acceptance": GPU_CONTRACT_PATH,
+    "verifier_json_schema_lite": JSON_SCHEMA_PATH,
+    "verifier_sdk_capability_handoff": SDK_HANDOFF_PATH,
+    "verifier_sdk_provenance": SDK_PROVENANCE_PATH,
+}
 OUTPUT_NAME = "attestation.json"
 STEP_NAME = "Verify A2T structural receipt"
 CHECK_NAME = "macos"
 JOB_KEY = "build"
 ISSUER_COMMAND = ["python3", ISSUER_PATH.as_posix()]
 VERIFIER_COMMAND = [
-    "python3", VERIFIER_PATH.as_posix(), RECEIPT_PATH.as_posix(),
+    "python3", VERIFIER_PATH.as_posix(), "../evidence/receipt.json",
     "--repository", ".",
 ]
 EXPECTED_STDOUT = (
@@ -45,8 +56,7 @@ SHA1 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-def _load_local_source(module_name: str, path: Path) -> types.ModuleType:
-    data = path.read_bytes()
+def _load_source_bytes(module_name: str, path: Path, data: bytes) -> types.ModuleType:
     if len(data) > 256 * 1024:
         raise RuntimeError(f"local source module is unbounded: {path.name}")
     module = types.ModuleType(module_name)
@@ -55,11 +65,6 @@ def _load_local_source(module_name: str, path: Path) -> types.ModuleType:
     sys.modules[module_name] = module
     exec(compile(data, str(path), "exec", dont_inherit=True), module.__dict__)
     return module
-
-
-json_schema_lite = _load_local_source(
-    "a2t_json_schema_lite", Path(__file__).with_name("json_schema_lite.py")
-)
 
 
 class IssuerError(RuntimeError):
@@ -150,14 +155,33 @@ def _limit_output_files() -> None:
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_CAPTURE_BYTES, MAX_CAPTURE_BYTES))
 
 
-def _run_verifier(repository: Path) -> tuple[int, bytes, bytes]:
+def _run_verifier(
+    repository: Path, source_revision: str, receipt_bytes: bytes,
+) -> tuple[int, bytes, bytes]:
     with tempfile.TemporaryDirectory(prefix="pulp-a2t-verifier-") as temporary:
-        stdout_path = Path(temporary) / "stdout"
-        stderr_path = Path(temporary) / "stderr"
+        root = Path(temporary)
+        source_checkout = root / "source"
+        evidence_directory = root / "evidence"
+        evidence_directory.mkdir()
+        (evidence_directory / "receipt.json").write_bytes(receipt_bytes)
+        clone = subprocess.run(
+            ["git", "clone", "--quiet", "--no-checkout", "--shared", str(repository), str(source_checkout)],
+            check=False, capture_output=True, text=True,
+        )
+        _require(clone.returncode == 0, f"cannot create exact source checkout: {clone.stderr.strip()}")
+        checkout = subprocess.run(
+            ["git", "checkout", "--quiet", "--detach", source_revision],
+            cwd=source_checkout, check=False, capture_output=True, text=True,
+        )
+        _require(checkout.returncode == 0, f"cannot check out exact source revision: {checkout.stderr.strip()}")
+        head = str(_git(source_checkout, "rev-parse", "HEAD")).strip()
+        _require(head == source_revision, "verifier checkout HEAD differs from source_revision")
+        stdout_path = root / "stdout"
+        stderr_path = root / "stderr"
         with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
             try:
                 completed = subprocess.run(
-                    VERIFIER_COMMAND, cwd=repository, stdin=subprocess.DEVNULL,
+                    VERIFIER_COMMAND, cwd=source_checkout, stdin=subprocess.DEVNULL,
                     stdout=stdout_file, stderr=stderr_file, check=False,
                     timeout=120, preexec_fn=_limit_output_files,
                 )
@@ -202,6 +226,25 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
     _require(verifier_e_blob == verifier_blob and verifier_e_bytes == verifier_bytes, "verifier changed between S and E")
     _require(_working_regular_file(repository, VERIFIER_PATH, 2 * 1024 * 1024) == verifier_bytes, "executed verifier differs from S/E blob")
 
+    dependency_bindings: dict[str, dict[str, str]] = {}
+    dependency_bytes: dict[Path, bytes] = {}
+    for name, path in EXECUTED_DEPENDENCIES.items():
+        source_blob, source_bytes = _tracked_file(repository, source_revision, path)
+        evidence_blob, evidence_bytes = _tracked_file(repository, evidence_head, path)
+        _require(
+            evidence_blob == source_blob and evidence_bytes == source_bytes,
+            f"executed dependency {path} changed between S and E",
+        )
+        _require(
+            _working_regular_file(repository, path, 2 * 1024 * 1024) == source_bytes,
+            f"executed dependency {path} differs from S/E blob",
+        )
+        dependency_bindings[name] = {
+            **_binding(source_revision, path, source_blob),
+            "sha256": _sha256(source_bytes),
+        }
+        dependency_bytes[path] = source_bytes
+
     issuer_blob, issuer_bytes = _tracked_file(repository, source_revision, ISSUER_PATH)
     issuer_e_blob, issuer_e_bytes = _tracked_file(repository, evidence_head, ISSUER_PATH)
     _require(issuer_e_blob == issuer_blob and issuer_e_bytes == issuer_bytes, "issuer changed between S and E")
@@ -211,6 +254,9 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
     _require(schema_e_blob == schema_blob and schema_e_bytes == schema_bytes, "attestation schema changed between S and E")
     _require(_working_regular_file(repository, SCHEMA_PATH, 512 * 1024) == schema_bytes, "attestation schema differs from S/E blob")
     schema = _json_object(schema_bytes, "A2T attestation schema")
+    json_schema_lite = _load_source_bytes(
+        "a2t_json_schema_lite", JSON_SCHEMA_PATH, dependency_bytes[JSON_SCHEMA_PATH]
+    )
     workflow_blob, workflow_bytes = _tracked_file(repository, workflow_revision, WORKFLOW_PATH)
     _require(_working_regular_file(repository, WORKFLOW_PATH, 2 * 1024 * 1024) == workflow_bytes, "checked-out workflow differs from executed workflow revision")
 
@@ -225,7 +271,9 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
     _, trace_bytes = _tracked_file(repository, source_revision, trace_path)
     _require(_sha256(trace_bytes) == trace_sha256, "receipt trace digest differs from S blob")
 
-    exit_code, stdout, stderr = _run_verifier(repository)
+    exit_code, stdout, stderr = _run_verifier(
+        repository, source_revision, receipt_bytes
+    )
     _require(exit_code == 0, f"A2T structural verifier failed with exit {exit_code}")
     _require(stdout == EXPECTED_STDOUT, "A2T structural verifier stdout is not canonical")
     _require(stderr == b"", "A2T structural verifier wrote stderr")
@@ -245,6 +293,7 @@ def issue(repository: Path, output_directory: Path, environment: Mapping[str, st
         "workflow": {**_binding(workflow_revision, WORKFLOW_PATH, workflow_blob), "sha256": _sha256(workflow_bytes), "semantics_sha256": _sha256(semantic_bytes)},
         "issuer": {**_binding(source_revision, ISSUER_PATH, issuer_blob), "sha256": _sha256(issuer_bytes)},
         "verifier": {**_binding(source_revision, VERIFIER_PATH, verifier_blob), "sha256": _sha256(verifier_bytes)},
+        "dependencies": dependency_bindings,
         "receipt": {**_binding(evidence_head, RECEIPT_PATH, receipt_blob), "sha256": _sha256(receipt_bytes)},
         "trace_sha256": trace_sha256,
         "run": {"id": run_id, "attempt": run_attempt, "event": "pull_request", "head_sha": evidence_head, "workflow_sha": workflow_revision},

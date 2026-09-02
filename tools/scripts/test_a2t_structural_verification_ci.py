@@ -19,6 +19,12 @@ assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 ROOT = Path(__file__).parents[2]
+SCHEMA_SPEC = importlib.util.spec_from_file_location(
+    "a2t_test_json_schema_lite", ROOT / MODULE.JSON_SCHEMA_PATH
+)
+assert SCHEMA_SPEC and SCHEMA_SPEC.loader
+SCHEMA_VALIDATOR = importlib.util.module_from_spec(SCHEMA_SPEC)
+SCHEMA_SPEC.loader.exec_module(SCHEMA_VALIDATOR)
 GOLDEN = (
     ROOT / "docs/validation/gpu-trace-overhead/fixtures/"
     "a2t-structural-verifier-attestation-v1.golden.json"
@@ -39,14 +45,33 @@ class ProducerTest(unittest.TestCase):
         run(self.root, "git", "config", "user.email", "a2t@example.invalid")
         for relative in (
             MODULE.VERIFIER_PATH, MODULE.ISSUER_PATH, MODULE.WORKFLOW_PATH,
-            MODULE.SCHEMA_PATH,
+            MODULE.SCHEMA_PATH, *set(MODULE.EXECUTED_DEPENDENCIES.values()),
             Path("test/fixtures/perfetto-gpu/fixture.pftrace"),
         ):
             (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
         (self.root / MODULE.VERIFIER_PATH).write_text(
-            "#!/usr/bin/env python3\nprint('gpu-trace-overhead-acceptance: ok (v3 structural integrity only; nonterminal)')\n",
+            "#!/usr/bin/env python3\n"
+            "import json, subprocess, sys\n"
+            "from pathlib import Path\n"
+            "receipt_path = Path(sys.argv[1])\n"
+            "receipt = json.loads(receipt_path.read_text())\n"
+            "head = subprocess.run(['git', 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True).stdout.strip()\n"
+            "if head != receipt['source_revision'] or receipt_path.resolve().is_relative_to(Path.cwd().resolve()):\n"
+            "    print('wrong verifier checkout or receipt mount', file=sys.stderr)\n"
+            "    raise SystemExit(1)\n"
+            "print('gpu-trace-overhead-acceptance: ok (v3 structural integrity only; nonterminal)')\n",
             encoding="utf-8",
         )
+        (self.root / MODULE.JSON_SCHEMA_PATH).write_bytes(
+            (ROOT / MODULE.JSON_SCHEMA_PATH).read_bytes()
+        )
+        for relative in (
+            MODULE.GPU_CONTRACT_PATH, MODULE.SDK_HANDOFF_PATH,
+            MODULE.SDK_PROVENANCE_PATH,
+        ):
+            (self.root / relative).write_text(
+                f"# bounded dependency fixture: {relative.name}\n", encoding="utf-8"
+            )
         (self.root / MODULE.ISSUER_PATH).write_bytes(SCRIPT.read_bytes())
         (self.root / MODULE.WORKFLOW_PATH).write_text("name: Build and Test\n", encoding="utf-8")
         (self.root / MODULE.SCHEMA_PATH).write_bytes(
@@ -102,6 +127,10 @@ class ProducerTest(unittest.TestCase):
         self.assertEqual(payload["evidence_head"], self.evidence)
         self.assertEqual(payload["contract"]["commit"], self.source)
         self.assertEqual(payload["issuer"]["commit"], self.source)
+        self.assertEqual(set(payload["dependencies"]), set(MODULE.EXECUTED_DEPENDENCIES))
+        for name, path in MODULE.EXECUTED_DEPENDENCIES.items():
+            self.assertEqual(payload["dependencies"][name]["commit"], self.source)
+            self.assertEqual(payload["dependencies"][name]["path"], path.as_posix())
         self.assertEqual(payload["run"]["attempt"], 2)
         self.assertEqual(payload["step"]["verifier_command"], MODULE.VERIFIER_COMMAND)
         encoded = json.dumps(payload)
@@ -111,7 +140,7 @@ class ProducerTest(unittest.TestCase):
     def test_golden_fixture_is_closed_v1_and_forbids_future_authority(self) -> None:
         schema = json.loads((ROOT / MODULE.SCHEMA_PATH).read_text())
         golden = json.loads(GOLDEN.read_text())
-        self.assertEqual(MODULE.json_schema_lite.validate(golden, schema), [])
+        self.assertEqual(SCHEMA_VALIDATOR.validate(golden, schema), [])
         self.assertEqual(
             golden["schema"],
             "pulp.gpu-trace-structural-verifier-attestation.v1",
@@ -123,7 +152,12 @@ class ProducerTest(unittest.TestCase):
             self.assertNotIn(forbidden, json.dumps(golden))
             mutated = dict(golden)
             mutated[forbidden] = "future-or-self-claimed"
-            self.assertTrue(MODULE.json_schema_lite.validate(mutated, schema))
+            self.assertTrue(SCHEMA_VALIDATOR.validate(mutated, schema))
+
+        for dependency in MODULE.EXECUTED_DEPENDENCIES:
+            mutated = json.loads(json.dumps(golden))
+            del mutated["dependencies"][dependency]
+            self.assertTrue(SCHEMA_VALIDATOR.validate(mutated, schema))
 
     def test_rejects_receipt_not_identical_to_pr_head_blob(self) -> None:
         (self.root / MODULE.RECEIPT_PATH).write_text("{}", encoding="utf-8")
@@ -158,6 +192,34 @@ class ProducerTest(unittest.TestCase):
         self.environment["GITHUB_WORKFLOW_SHA"] = changed_head
         with self.assertRaisesRegex(MODULE.IssuerError, "issuer changed between S and E"):
             self.issue()
+
+    def test_rejects_every_executed_dependency_changed_after_source(self) -> None:
+        unique_paths = tuple(dict.fromkeys(MODULE.EXECUTED_DEPENDENCIES.values()))
+        originals = {path: (self.root / path).read_bytes() for path in unique_paths}
+        for path in unique_paths:
+            with self.subTest(path=path.as_posix()):
+                (self.root / path).write_bytes(originals[path] + b"# E-only mutation\n")
+                run(self.root, "git", "add", path.as_posix())
+                run(self.root, "git", "commit", "-qm", f"mutate {path.name} after source")
+                changed_head = run(self.root, "git", "rev-parse", "HEAD")
+                self.event.write_text(
+                    json.dumps({"pull_request": {"head": {"sha": changed_head}}}),
+                    encoding="utf-8",
+                )
+                self.environment["GITHUB_WORKFLOW_SHA"] = changed_head
+                with self.assertRaisesRegex(
+                    MODULE.IssuerError, f"executed dependency {path} changed"
+                ):
+                    self.issue()
+                (self.root / path).write_bytes(originals[path])
+                run(self.root, "git", "add", path.as_posix())
+                run(self.root, "git", "commit", "-qm", f"restore {path.name}")
+                restored_head = run(self.root, "git", "rev-parse", "HEAD")
+                self.event.write_text(
+                    json.dumps({"pull_request": {"head": {"sha": restored_head}}}),
+                    encoding="utf-8",
+                )
+                self.environment["GITHUB_WORKFLOW_SHA"] = restored_head
 
     def test_workflow_wires_exact_required_macos_producer(self) -> None:
         workflow = (ROOT / MODULE.WORKFLOW_PATH).read_text(encoding="utf-8")

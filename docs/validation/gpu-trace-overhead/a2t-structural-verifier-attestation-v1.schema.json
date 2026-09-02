@@ -6,8 +6,8 @@
   "additionalProperties": false,
   "required": [
     "schema", "source_revision", "evidence_head", "contract", "workflow",
-    "issuer", "verifier", "receipt", "trace_sha256", "run", "job", "step",
-    "result"
+    "issuer", "verifier", "dependencies", "receipt", "trace_sha256", "run",
+    "job", "step", "result"
   ],
   "properties": {
     "schema": {
@@ -68,6 +68,69 @@
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issuer_json_schema_lite",
+        "verifier_gpu_trace_overhead_acceptance",
+        "verifier_json_schema_lite",
+        "verifier_sdk_capability_handoff",
+        "verifier_sdk_provenance"
+      ],
+      "properties": {
+        "issuer_json_schema_lite": {
+          "type": "object", "additionalProperties": false,
+          "required": ["commit", "path", "blob", "sha256"],
+          "properties": {
+            "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "path": {"const": "tools/scripts/json_schema_lite.py"},
+            "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
+        "verifier_gpu_trace_overhead_acceptance": {
+          "type": "object", "additionalProperties": false,
+          "required": ["commit", "path", "blob", "sha256"],
+          "properties": {
+            "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "path": {"const": "tools/scripts/gpu_trace_overhead_acceptance.py"},
+            "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
+        "verifier_json_schema_lite": {
+          "type": "object", "additionalProperties": false,
+          "required": ["commit", "path", "blob", "sha256"],
+          "properties": {
+            "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "path": {"const": "tools/scripts/json_schema_lite.py"},
+            "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
+        "verifier_sdk_capability_handoff": {
+          "type": "object", "additionalProperties": false,
+          "required": ["commit", "path", "blob", "sha256"],
+          "properties": {
+            "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "path": {"const": "tools/scripts/sdk_capability_handoff.py"},
+            "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
+        "verifier_sdk_provenance": {
+          "type": "object", "additionalProperties": false,
+          "required": ["commit", "path", "blob", "sha256"],
+          "properties": {
+            "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "path": {"const": "tools/scripts/sdk_provenance.py"},
+            "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      }
+    },
     "receipt": {
       "type": "object",
       "additionalProperties": false,
@@ -116,7 +179,7 @@
         "verifier_command": {
           "const": [
             "python3", "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
-            "evidence/receipt.json", "--repository", "."
+            "../evidence/receipt.json", "--repository", "."
           ]
         }
       }
