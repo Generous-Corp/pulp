@@ -11,6 +11,7 @@ happened to fail; this asks thousands of real cables the same question at once.
     corpus_audit.py coverage       # how much of the corpus we can even judge
     corpus_audit.py cables         # what real patches actually connect
     corpus_audit.py usage-priors   # corroborated hints for unmapped ports
+    corpus_audit.py prior-accuracy # score those hints where truth is known
 
 WHY CABLES AND NOT PATCHES. A patch is one datapoint and carries the whole
 idiom-resolution machinery on top; a cable is a datapoint about exactly one
@@ -410,10 +411,87 @@ def cmd_usage_priors(rows: list, min_support: int, json_path: str = "") -> None:
         print(f"  wrote proposal-only report: {json_path}")
 
 
+def prior_accuracy(rows: list, floors=(1, 2, 3, 5)) -> list:
+    """Score the usage prior where the answer is already known.
+
+    The lane infers an unmapped port's class from the mapped end of a cable,
+    and by construction nothing can check it: the port is unmapped because we
+    have no scan of it. A cable with BOTH ends mapped is the held-out case --
+    run the same inference and compare against the port's own class.
+
+    This measures the assumption the whole lane rests on, that a cable's two
+    ends carry the same class of signal, and it measures what the admission
+    floor is buying. Accuracy that climbs with support is the control: a
+    contributor identity that could not tell sources apart would give a flat
+    line, because the support count would then be noise.
+
+    Read it as an upper bound. A port has a known class here only because it
+    is mapped, and mapped ports are plausibly better named than the unmapped
+    ports the lane actually serves.
+    """
+    evidence: dict[tuple, set] = collections.defaultdict(set)
+    truth: dict[tuple, str] = {}
+    for row in rows:
+        source = _contributor_key(row)
+        s, d = row["s"], row["d"]
+        if s is None or d is None:
+            continue
+        s_signal = _signal(s[0], s[1], "out")
+        d_signal = _signal(d[0], d[1], "in")
+        if d_signal:
+            key = (*row["src"], "output", row["s_index"])
+            evidence[(key, d_signal)].add(source)
+            if s_signal:
+                truth[key] = s_signal
+        if s_signal:
+            key = (*row["dst"], "input", row["d_index"])
+            evidence[(key, s_signal)].add(source)
+            if d_signal:
+                truth[key] = d_signal
+
+    by_port: dict[tuple, set[str]] = collections.defaultdict(set)
+    for key, signal in evidence:
+        by_port[key].add(signal)
+
+    out = []
+    for floor in floors:
+        hit = miss = unscored = 0
+        for (key, signal), sources in evidence.items():
+            if len(by_port[key]) > 1 or len(sources) < floor:
+                continue
+            if key not in truth:
+                unscored += 1
+            elif truth[key] == signal:
+                hit += 1
+            else:
+                miss += 1
+        scored = hit + miss
+        out.append({"min_support": floor, "scored": scored, "correct": hit,
+                    "wrong": miss, "unscored": unscored,
+                    "accuracy": (hit / scored) if scored else None})
+    return out
+
+
+def cmd_prior_accuracy(rows: list) -> None:
+    report = prior_accuracy(rows)
+    print("  held-out accuracy (both cable ends mapped, so truth is known)")
+    for entry in report:
+        accuracy = ("    n/a" if entry["accuracy"] is None
+                    else f"{100 * entry['accuracy']:6.1f}%")
+        print(f"    min-support {entry['min_support']}: scored "
+              f"{entry['scored']:5d}  correct {entry['correct']:5d} "
+              f"({accuracy})  wrong {entry['wrong']:4d}")
+    scored = [e for e in report if e["accuracy"] is not None]
+    if len(scored) > 1 and scored[-1]["accuracy"] <= scored[0]["accuracy"]:
+        print("    WARNING: accuracy does not improve with corroboration.")
+        print("    Support is not behaving like evidence; check that "
+              "contributors are actually being told apart.")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("cmd", choices=["jacks", "coverage", "cables",
-                                    "usage-priors"])
+                                    "usage-priors", "prior-accuracy"])
     ap.add_argument("--min-support", type=int, default=3,
                     help="distinct patch bodies required for a usage prior")
     ap.add_argument("--json", default="",
@@ -432,7 +510,8 @@ def main() -> int:
         cmd_usage_priors(rows, a.min_support, a.json)
     else:
         ({"jacks": cmd_jacks, "coverage": cmd_coverage,
-          "cables": cmd_cables}[a.cmd])(rows)
+          "cables": cmd_cables,
+          "prior-accuracy": cmd_prior_accuracy}[a.cmd])(rows)
     return 0
 
 

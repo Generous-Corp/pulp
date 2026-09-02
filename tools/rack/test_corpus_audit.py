@@ -104,6 +104,33 @@ def main() -> int:
     assert not any("alfa" in key for key in keys), keys
     print("  ok  a contributor key compares equal without carrying a name")
 
+    # Both ends mapped, so the far end's class is known and the inference can
+    # be scored. Three contributors agree the sequencer output is pitch, and
+    # the port map says so too.
+    def scored(name: str, out_name: str = "V/OCT") -> dict:
+        return dict(observation(name), s=(out_name, "Pitch"),
+                    d=("V/OCT", "Pitch"), source_author_id=None)
+
+    truthful = [scored(n) for n in ("alfa", "bravo", "charlie")]
+    report = audit.prior_accuracy(truthful, floors=(1, 3))
+    assert report[0]["correct"] and not report[0]["wrong"], report
+    assert report[1]["correct"], report
+    print("  ok  a prior that matches the mapped port scores as correct")
+
+    wrong = [dict(scored(n), s=("Clock", "Clock")) for n in ("a", "b", "c")]
+    report = audit.prior_accuracy(wrong, floors=(1,))
+    # Both directions are scored, so one disagreeing cable is two wrong
+    # answers: the output read as pitch and the input read as clock.
+    assert report[0]["wrong"] == 2 and report[0]["correct"] == 0, report
+    print("  ok  a prior that contradicts the mapped port scores as wrong")
+
+    unmapped = [dict(observation(n), source_author_id=None)
+                for n in ("alfa", "bravo")]
+    assert all(row["s"] is None for row in unmapped)
+    report = audit.prior_accuracy(unmapped, floors=(1,))
+    assert report[0]["scored"] == 0, report
+    print("  ok  a port with no known class is not scored at all")
+
     saved = (patch_corpus.ROOT, patch_corpus.PATCH_DIR, patch_corpus.load_index,
              patch_corpus.save_index, patch_corpus.listing,
              patch_corpus.detail, patch_corpus._get)

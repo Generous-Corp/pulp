@@ -1034,6 +1034,35 @@ accident. Tests for this must be shaped like the **stored** records rather than
 like the writer's output, since a fixture that supplies whichever field the code
 happens to read agrees with it by construction and proves nothing.
 
+### What the prior is actually worth, measured
+
+`corpus_audit.py prior-accuracy` scores the inference where the answer is
+already known. The lane infers an unmapped port's class from the mapped end of
+a cable, and by construction nothing can check that: the port is unmapped
+because there is no scan of it. A cable with **both** ends mapped is the
+held-out case, so run the same inference there and compare against the port's
+own class.
+
+Measured over the current corpus:
+
+| min-support | scored | correct | wrong |
+|---|---|---|---|
+| 1 | 400 | 324 (81.0%) | 76 |
+| 2 | 128 | 117 (91.4%) | 11 |
+| 3 | 60 | 59 (98.3%) | 1 |
+| 5 | 16 | 16 (100%) | 0 |
+
+Two things follow. The admission floor of 3 is not arbitrary: it is where a
+four-in-five guess becomes a fifty-to-one one. And accuracy climbing with
+support is the **control on the support count itself** - if contributors were
+not really being told apart, support would be noise and the line would be flat.
+`prior-accuracy` warns when it stops climbing, for exactly that reason.
+
+Read the number as an upper bound and say so when quoting it. A port has a
+known class here only because it is mapped, and mapped ports are plausibly
+better named than the unmapped ports the lane actually serves. This scores the
+inference, never the module: a prior remains a hint that a real scan overrides.
+
 ## The reading corpus has an index, and retrieval is not admission
 
 The source shelf is large enough that opening books one by one is no longer a
