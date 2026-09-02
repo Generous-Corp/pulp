@@ -474,6 +474,64 @@ TEST_CASE("WidgetBridge requestAnimationFrame callbacks continue during poll loo
     REQUIRE(engine.evaluate("frame_count").getWithDefault<int>(-1) == 3);
 }
 
+TEST_CASE("WidgetBridge native message dispatch is typed and defers requestAnimationFrame",
+          "[view][bridge][async]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    int repaint_requests = 0;
+    bridge.set_repaint_callback([&] { ++repaint_requests; });
+
+    engine.evaluate(R"(
+        globalThis.dispatch_raf_count = 0;
+        globalThis.dispatch_microtask_count = 0;
+        globalThis.acceptNativeMessage = function(type, payload, id) {
+            globalThis.dispatch_type = type;
+            globalThis.dispatch_payload = payload;
+            globalThis.dispatch_id = id;
+            Promise.resolve().then(function() { dispatch_microtask_count++; });
+            window.requestAnimationFrame(function() { dispatch_raf_count++; });
+        };
+    )");
+
+    auto payload = choc::value::createObject("NativeMessagePayload");
+    payload.addMember("revision", choc::value::createInt32(17));
+    payload.addMember("label", choc::value::createString("typed payload"));
+    bridge.dispatch_native_message(
+        "acceptNativeMessage", "processing_state_live", payload,
+        "test-source", "test native message dispatch");
+
+    REQUIRE(engine.evaluate("dispatch_type").toString()
+            == "processing_state_live");
+    REQUIRE(engine.evaluate("dispatch_payload.revision")
+                .getWithDefault<int>(-1) == 17);
+    REQUIRE(engine.evaluate("dispatch_payload.label").toString()
+            == "typed payload");
+    REQUIRE(engine.evaluate("dispatch_id").toString() == "test-source");
+    REQUIRE(engine.evaluate("dispatch_microtask_count")
+                .getWithDefault<int>(-1) == 1);
+    REQUIRE(engine.evaluate("dispatch_raf_count").getWithDefault<int>(-1) == 0);
+    REQUIRE(repaint_requests == 1);
+
+    bridge.poll_async_results();
+    REQUIRE(engine.evaluate("dispatch_raf_count").getWithDefault<int>(-1) == 1);
+
+    engine.evaluate(R"(
+        globalThis.acceptNativeMessageWithoutFrame = function(type, payload, id) {
+            globalThis.dispatch_without_frame = payload.revision;
+        };
+    )");
+    const auto repaint_requests_before_fallback = repaint_requests;
+    bridge.dispatch_native_message(
+        "acceptNativeMessageWithoutFrame", "processing_state_live", payload,
+        "test-source", "test native message dispatch fallback");
+    REQUIRE(engine.evaluate("dispatch_without_frame").getWithDefault<int>(-1)
+            == 17);
+    REQUIRE(repaint_requests == repaint_requests_before_fallback + 1);
+}
+
 // pulp #1412 — host idle pump must drain timers, not just rAF + async results.
 //
 // The platform host idle entry point (Mac CVDisplayLink, iOS CADisplayLink,
