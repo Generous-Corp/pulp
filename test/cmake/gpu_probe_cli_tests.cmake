@@ -8,13 +8,30 @@ function(is_gpu_compute_adapter_unavailable result_json output_variable)
         GET "${result_json}" schema)
     string(JSON result_verdict ERROR_VARIABLE result_verdict_error
         GET "${result_json}" verdict)
-    string(JSON result_code ERROR_VARIABLE result_code_error
-        GET "${result_json}" passes 0 code)
-    if(NOT result_schema_error AND NOT result_verdict_error AND NOT result_code_error AND
+    string(JSON result_version ERROR_VARIABLE result_version_error
+        GET "${result_json}" version)
+    string(JSON result_pass_count ERROR_VARIABLE result_pass_count_error
+        LENGTH "${result_json}" passes)
+    if(NOT result_schema_error AND NOT result_verdict_error AND
+       NOT result_version_error AND NOT result_pass_count_error AND
        result_schema STREQUAL "pulp.gpu-probe-result.v1" AND
-       result_verdict STREQUAL "unavailable" AND
-       result_code STREQUAL "gpu_compute_adapter_unavailable")
+       result_version EQUAL 1 AND result_pass_count GREATER 0 AND
+       result_verdict STREQUAL "unavailable")
         set(is_expected_unavailable TRUE)
+        math(EXPR result_last_pass "${result_pass_count} - 1")
+        foreach(pass_index RANGE 0 ${result_last_pass})
+            string(JSON pass_verdict ERROR_VARIABLE pass_verdict_error
+                GET "${result_json}" passes ${pass_index} verdict)
+            string(JSON pass_work_completed ERROR_VARIABLE pass_work_completed_error
+                GET "${result_json}" passes ${pass_index} work_completed)
+            string(JSON pass_code ERROR_VARIABLE pass_code_error
+                GET "${result_json}" passes ${pass_index} code)
+            if(pass_verdict_error OR pass_work_completed_error OR pass_code_error OR
+               NOT pass_verdict STREQUAL "unavailable" OR pass_work_completed OR
+               NOT pass_code STREQUAL "gpu_compute_adapter_unavailable")
+                set(is_expected_unavailable FALSE)
+            endif()
+        endforeach()
     endif()
     set(${output_variable} ${is_expected_unavailable} PARENT_SCOPE)
 endfunction()
@@ -22,14 +39,19 @@ endfunction()
 # Keep the narrow headless-Linux allowance fail-closed: another typed exit-2
 # result (for example, a runtime failure) must not impersonate adapter absence.
 set(adapter_unavailable_fixture
-    [[{"schema":"pulp.gpu-probe-result.v1","verdict":"unavailable","passes":[{"code":"gpu_compute_adapter_unavailable"}]}]])
+    [[{"schema":"pulp.gpu-probe-result.v1","version":1,"verdict":"unavailable","passes":[{"verdict":"unavailable","work_completed":false,"code":"gpu_compute_adapter_unavailable"},{"verdict":"unavailable","work_completed":false,"code":"gpu_compute_adapter_unavailable"}]}]])
 is_gpu_compute_adapter_unavailable("${adapter_unavailable_fixture}"
     exact_adapter_unavailable_fixture)
 string(REPLACE "gpu_compute_adapter_unavailable" "probe_runtime_failed"
     unrelated_exit_two_fixture "${adapter_unavailable_fixture}")
 is_gpu_compute_adapter_unavailable("${unrelated_exit_two_fixture}"
     unrelated_exit_two_accepted)
-if(NOT exact_adapter_unavailable_fixture OR unrelated_exit_two_accepted)
+set(mixed_exit_two_fixture
+    [[{"schema":"pulp.gpu-probe-result.v1","version":1,"verdict":"unavailable","passes":[{"verdict":"unavailable","work_completed":false,"code":"gpu_compute_adapter_unavailable"},{"verdict":"unavailable","work_completed":false,"code":"probe_runtime_failed"}]}]])
+is_gpu_compute_adapter_unavailable("${mixed_exit_two_fixture}"
+    mixed_exit_two_accepted)
+if(NOT exact_adapter_unavailable_fixture OR unrelated_exit_two_accepted OR
+   mixed_exit_two_accepted)
     message(FATAL_ERROR "adapter-unavailable result classifier is not fail-closed")
 endif()
 
