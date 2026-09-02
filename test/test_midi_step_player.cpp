@@ -954,18 +954,22 @@ TEST_CASE("StepPlayer holds an over-wide nudge inside the step that owns it",
 
 TEST_CASE("StepPlayer places a nudged onset independently of where a block begins",
           "[midi][step-player][partition][grid]") {
-    // A block reports its own start in both samples and ticks, and the tick is
-    // rounded: 29.4 ticks span a sample here, so a block start carries up to
-    // 0.4 of a tick of rounding error. Projecting a nudged onset relative to
-    // that rounded start folds the error into the answer, which is enough to
-    // tip an onset sitting near a half sample onto either of two samples
-    // depending on where the host began the block. Sweeping the leading block
-    // size walks the boundary through every residue and so through the
-    // rounding error's full range.
+    // A block reports its own start in both samples and ticks, and the two do
+    // not name the same instant. A tick is finer than a sample here -- 29.4 of
+    // them span one -- so many ticks map to the same sample, and the tick a
+    // host reports is the first of them. That start therefore sits up to half a
+    // sample below where the block actually begins, by an amount that depends
+    // on the sample it began on. Projecting an onset relative to it folds that
+    // offset into the answer, which is enough to move the onset by a whole
+    // sample depending only on where the host chose to break its callbacks.
+    // Sweeping the leading block size walks the boundary through every residue
+    // and so through the offset's full range.
     //
     // The grid alone cannot show this: a sixteenth is exactly 6'000 samples, so
-    // an un-nudged onset never sits near a half sample. It takes a nudge to put
-    // one there, which is why this arrived with the offset.
+    // an un-nudged onset always lands dead on one and has half a sample of room
+    // on either side. It takes a nudge to move an onset close enough to a
+    // sample boundary for the offset to carry it across, which is why this
+    // arrived with the offset.
     const auto map = constant_tempo_map();
     const auto build = [](std::int32_t nudge) {
         PlayerFixture<> fixture(1);
@@ -982,9 +986,10 @@ TEST_CASE("StepPlayer places a nudged onset independently of where a block begin
     constexpr std::int64_t kTotal = 24'000;
     const std::array single{std::int32_t{24'000}};
 
-    // Half a sample is 14.7 ticks, so these land an onset within the rounding
-    // error's reach of the boundary between two samples.
-    for (const std::int32_t nudge : {15, 44, 103, 162, 176'443}) {
+    // Each of these lands the second step's onset within the offset's reach of
+    // the boundary between two samples, so a projection that carries the offset
+    // reports a different sample from one that does not.
+    for (const std::int32_t nudge : {30, 59, 89, 118, 177, 176'443}) {
         INFO("nudge ticks = " << nudge);
         auto whole = build(nudge);
         const auto reference = render(whole, map, kTotal, single);
