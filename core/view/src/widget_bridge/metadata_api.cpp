@@ -50,15 +50,13 @@ bool bind_canvas_program(View& root, std::string anchor, CanvasWidget* source,
     // final-space DesignIR sibling applies the ancestor transform incorrectly
     // and splits paint ownership from event ownership.
     target->share_recorded_commands_from(*source);
-    source->set_opacity(1.0f);
-    target->set_opacity(0.0f);
-    target->set_pointer_events(View::PointerEvents::none);
-    // The authored behavior canvas may inherit `pointer-events:none` from
-    // its materialized wrapper (the capture plane is intentionally inert).
-    // Binding the live canvas is the ownership handoff: make both the canvas
-    // and its supplied behavior owner hit-testable so pointer dispatch reaches
-    // the existing DOM callbacks instead of stopping at an inert surface.
-    source->set_pointer_events(View::PointerEvents::auto_);
+    // The anchored CanvasWidget is the live behavior surface. Keep it visible
+    // and hit-testable so pointer samples reach the authored wrapper through
+    // the normal target-to-root DOM walk. The retained source canvas supplies
+    // commands only; hiding it would strand React pointer callbacks.
+    source->set_opacity(0.0f);
+    target->set_opacity(1.0f);
+    target->set_pointer_events(View::PointerEvents::auto_);
     if (behavior_owner)
         behavior_owner->set_pointer_events(View::PointerEvents::auto_);
     // Input ownership follows paint ownership. The authored behavior canvas

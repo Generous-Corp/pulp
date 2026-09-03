@@ -354,7 +354,7 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
         bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0,
           'behavior-wrapper')
     )js").getWithDefault<bool>(false));
-    REQUIRE_FALSE(captured->on_dom_pointer_event);
+    REQUIRE(captured->pointer_events() == View::PointerEvents::auto_);
 
     // React commits behavior after the DesignIR sibling can already be
     // attached. A later idempotent rebind must leave input on the live source,
@@ -373,16 +373,16 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
     REQUIRE(behavior->command_count() == 2);
     REQUIRE(captured->command_count() == 2);
     CHECK(&captured->commands() == &behavior->commands());
-    CHECK(behavior->opacity() == 1.0f);
-    CHECK(captured->opacity() == 0.0f);
-    CHECK(captured->pointer_events() == View::PointerEvents::none);
+    CHECK(behavior->opacity() == 0.0f);
+    CHECK(captured->opacity() == 1.0f);
+    CHECK(captured->pointer_events() == View::PointerEvents::auto_);
     const int before_redraw = host.count;
     bridge.load_script("canvasClear('behavior'); canvasFillRect('behavior', 8, 9, 10, 11, '#f0f');");
     REQUIRE(host.count > before_redraw);
     REQUIRE(behavior->command_count() == 1);
     REQUIRE(captured->command_count() == 1);
 
-    REQUIRE_FALSE(captured->on_dom_pointer_event);
+    REQUIRE(captured->pointer_events() == View::PointerEvents::auto_);
     REQUIRE(behavior_wrapper->on_dom_pointer_event);
     MouseEvent down;
     down.phase = MousePhase::press;
