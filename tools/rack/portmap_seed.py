@@ -67,6 +67,31 @@ def has_ranges(entry: dict) -> bool:
                if isinstance(p, dict))
 
 
+LOCAL_PATH_ENV = "FORGE_PORTMAP"
+
+
+def resolved_local_path() -> str:
+    """The local port map this process folds in.
+
+    Normally the live map CARTOG writes. An evaluation campaign that must pin
+    which scan a run was generated against sets FORGE_PORTMAP, and because the
+    campaign driver shells out inheriting the environment, one variable pins
+    both the inventory receipt and the generation subprocess.
+
+    A set-but-unusable value raises rather than falling back, because silently
+    becoming "no local scan" would make the arm under test indistinguishable
+    from the arm without it, and the comparison would report no difference for
+    the wrong reason.
+    """
+    override = os.environ.get(LOCAL_PATH_ENV)
+    if override is None:
+        return LOCAL_PATH
+    if not override or not os.path.isfile(override):
+        raise SystemExit(
+            f"{LOCAL_PATH_ENV} is set but is not a file: {override!r}")
+    return override
+
+
 def _version_admits(entry: dict, plug: dict | None) -> bool:
     """Whether an installed plugin admits a scanned entry, by version.
 
@@ -109,7 +134,7 @@ def entries(inv: dict | None = None,
             continue
         merged[_key(entry)] = entry
 
-    for entry in _read(local_path or LOCAL_PATH):
+    for entry in _read(local_path or resolved_local_path()):
         if inv is not None and not _version_admits(entry, inv.get(entry.get("plugin"))):
             continue
         shipped = merged.get(_key(entry))
@@ -127,7 +152,7 @@ def export(dest: str, local_path: str | None = None) -> dict:
     occupy space, match on version, and deliver nothing, while shadowing
     nothing they could usefully replace.
     """
-    kept = [e for e in _read(local_path or LOCAL_PATH) if has_ranges(e)]
+    kept = [e for e in _read(local_path or resolved_local_path()) if has_ranges(e)]
     kept.sort(key=lambda e: (e.get("plugin") or "", e.get("model") or ""))
     params = sum(len([p for p in e.get("params") or [] if "minValue" in p])
                  for e in kept)

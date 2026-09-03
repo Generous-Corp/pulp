@@ -146,6 +146,39 @@ def main() -> int:
     check(portmap_seed.entries(inv_of("Befaco", "2.4"), absent, local) == [],
           "an uninstalled plugin is refused, not admitted")
 
+    # A campaign pins which scan a run was generated against by pointing
+    # FORGE_PORTMAP at a frozen map. It must reach the fold, and a typo must
+    # stop the run rather than quietly becoming "no local scan" -- which would
+    # make the arm under test indistinguishable from the arm without it.
+    pinned = os.path.join(tmp, "pinned.json")
+    write(local, [entry("Befaco", "EvenVCO", "2.4", 3)])
+    write(pinned, [entry("Befaco", "Rampage", "2.4", 3)])
+    inv = inv_of("Befaco", "2.4")
+    saved = os.environ.pop(portmap_seed.LOCAL_PATH_ENV, None)
+    original = portmap_seed.LOCAL_PATH
+    portmap_seed.LOCAL_PATH = local
+    try:
+        check([e["model"] for e in portmap_seed.entries(inv, absent)] == ["EvenVCO"],
+              "with FORGE_PORTMAP unset the live map is folded")
+        os.environ[portmap_seed.LOCAL_PATH_ENV] = pinned
+        check([e["model"] for e in portmap_seed.entries(inv, absent)] == ["Rampage"],
+              "FORGE_PORTMAP pins which map is folded")
+        os.environ[portmap_seed.LOCAL_PATH_ENV] = os.path.join(tmp, "typo.json")
+        raised = False
+        try:
+            portmap_seed.entries(inv, absent)
+        except SystemExit as exc:
+            raised = portmap_seed.LOCAL_PATH_ENV in str(exc)
+        check(raised, "a FORGE_PORTMAP that names no file stops the run")
+        os.environ[portmap_seed.LOCAL_PATH_ENV] = pinned
+        check([e["model"] for e in portmap_seed.entries(inv, absent, local)] == ["EvenVCO"],
+              "an explicit local_path still outranks the environment")
+    finally:
+        portmap_seed.LOCAL_PATH = original
+        os.environ.pop(portmap_seed.LOCAL_PATH_ENV, None)
+        if saved is not None:
+            os.environ[portmap_seed.LOCAL_PATH_ENV] = saved
+
     print()
     print("all good" if not FAILED else f"{FAILED} wrong")
     return 1 if FAILED else 0

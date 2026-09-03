@@ -732,6 +732,19 @@ narrow. When a count of known ports moves by a handful for no obvious reason,
 check whether a plugin's version string changed shape before suspecting the
 scanner.
 
+## FORGE_PORTMAP pins which scan a run was generated against
+
+`portmap_seed.resolved_local_path()` reads `FORGE_PORTMAP` before falling back
+to the live map CARTOG writes. A campaign that compares two port maps sets it
+once; because the campaign driver shells out inheriting the environment, that
+single variable pins both the inventory receipt and the generation subprocess,
+so no driver argument has to be threaded through.
+
+A set-but-unusable value raises instead of falling back. Falling back would
+silently mean "no local scan", which is indistinguishable from the arm the
+comparison is measuring against, and the run would report no difference for
+entirely the wrong reason.
+
 ## Ranges are measured by a headless Rack, and both halves are traps
 
 Parameter ranges (`minValue` / `maxValue` / `defaultValue`) come off a
