@@ -708,6 +708,21 @@ like Merge or Split); none, from one that did not (unknown). Only the scan
 version separates the last two. `PortMap::controls_known()` is the rule; the
 UNMAPPED badge reads it.
 
+## The random prompt pool exists twice, and it promises modules
+
+Random offers a prompt the user reads and edits before building, so a prompt
+that names something the shipped modules cannot satisfy is a promise the
+product breaks on its first click. Keep every entry inside what actually
+ships, and say what the module really does -- a sample and hold with
+"switchable glide" is a contract; the same entry claiming a "track mode" it
+does not have is not.
+
+The pool is declared in TWO places that must agree: `RANDOM_MODULE` in
+`examples/forge-modular/app/ui/main.js` and `kRandomModule[]` in
+`forge-seam/modular/modular_shell.cpp`. Editing one and not the other is the
+easy mistake, and the two paths are far enough apart that nothing obvious
+fails. `tools/rack/test_generation_eligibility.py` is what catches it.
+
 ## Ranges are measured by a headless Rack, and both halves are traps
 
 Parameter ranges (`minValue` / `maxValue` / `defaultValue`) come off a
