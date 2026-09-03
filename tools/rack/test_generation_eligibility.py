@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import re
 import sys
 import unittest
 from unittest import mock
@@ -129,6 +131,30 @@ def dub_inventory() -> dict:
 
 
 class FreshGenerationEligibilityTest(unittest.TestCase):
+    def test_random_example_pools_are_identical_and_supported(self) -> None:
+        """The native shell and browser demo must not advertise phantom modules."""
+        root = Path(__file__).resolve().parents[2]
+        native = (root / "forge-seam/modular/modular_shell.cpp").read_text()
+        browser = (root / "examples/forge-modular/app/ui/main.js").read_text()
+
+        def pool(source: str, name: str) -> list[str]:
+            tail = source.split(name, 1)[1]
+            end = min((i for i in (tail.find("];"), tail.find("};")) if i >= 0),
+                      default=len(tail))
+            body = tail[:end]
+            return re.findall(r'"([^"]+)"', body)
+
+        native_modules = pool(native, "kRandomModule[]")
+        browser_modules = pool(browser, "RANDOM_MODULE = [")
+        self.assertEqual(native_modules, browser_modules)
+        self.assertEqual(len(native_modules), 6)
+
+        # These are the concrete contracts represented by the shipped module
+        # fixtures; a stale HP or invented feature makes generation fail later.
+        self.assertIn("6 HP wavefolder", native_modules[0])
+        self.assertIn("4 HP sample and hold", native_modules[3])
+        self.assertNotIn("track mode", " ".join(native_modules).lower())
+
     def test_complete_authoring_surface_requires_known_ports_and_params(self) -> None:
         self.assertTrue(P.complete_authoring_surface({
             "inputs": ["Audio"], "outputs": ["Audio"], "params": []}))

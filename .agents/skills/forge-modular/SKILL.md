@@ -773,6 +773,20 @@ Raising instead cost a full run at plugin 116 of 258.
 
 Freeze the live map before any library-wide run. It is the only copy, and
 recovering the pre-scan state afterwards is otherwise impossible.
+## The random prompt pool exists twice, and it promises modules
+
+Random offers a prompt the user reads and edits before building, so a prompt
+that names something the shipped modules cannot satisfy is a promise the
+product breaks on its first click. Keep every entry inside what actually
+ships, and say what the module really does -- a sample and hold with
+"switchable glide" is a contract; the same entry claiming a "track mode" it
+does not have is not.
+
+The pool is declared in TWO places that must agree: `RANDOM_MODULE` in
+`examples/forge-modular/app/ui/main.js` and `kRandomModule[]` in
+`forge-seam/modular/modular_shell.cpp`. Editing one and not the other is the
+easy mistake, and the two paths are far enough apart that nothing obvious
+fails. `tools/rack/test_generation_eligibility.py` is what catches it.
 
 ## Ranges are measured by a headless Rack, and both halves are traps
 
