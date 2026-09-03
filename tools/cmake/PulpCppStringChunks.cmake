@@ -1,0 +1,67 @@
+# Emit C++ raw-string fragments below the portable MSVC literal ceiling.
+set(PULP_CPP_RAW_STRING_CHUNK_BYTES 4096)
+set(PULP_MSVC_STRING_LITERAL_LIMIT_BYTES 16380)
+
+function(pulp_require_portable_cpp_literal value context)
+    string(LENGTH "${value}" _pulp_literal_length)
+    if(_pulp_literal_length GREATER PULP_MSVC_STRING_LITERAL_LIMIT_BYTES)
+        message(FATAL_ERROR
+            "MSVC_PORTABLE_LITERAL_LIMIT_EXCEEDED: ${context} is "
+            "${_pulp_literal_length} bytes (limit "
+            "${PULP_MSVC_STRING_LITERAL_LIMIT_BYTES})")
+    endif()
+endfunction()
+
+function(pulp_cpp_raw_string_chunks value output_source output_count output_max_bytes)
+    string(LENGTH "${value}" _pulp_input_length)
+    set(_pulp_offset 0)
+    set(_pulp_count 0)
+    set(_pulp_max_bytes 0)
+    set(_pulp_source "")
+
+    if(_pulp_input_length EQUAL 0)
+        set(_pulp_input_length_for_loop 1)
+    else()
+        set(_pulp_input_length_for_loop ${_pulp_input_length})
+    endif()
+
+    while(_pulp_offset LESS _pulp_input_length_for_loop)
+        math(EXPR _pulp_remaining "${_pulp_input_length} - ${_pulp_offset}")
+        if(_pulp_remaining GREATER PULP_CPP_RAW_STRING_CHUNK_BYTES)
+            set(_pulp_chunk_bytes ${PULP_CPP_RAW_STRING_CHUNK_BYTES})
+        elseif(_pulp_remaining GREATER 0)
+            set(_pulp_chunk_bytes ${_pulp_remaining})
+        else()
+            set(_pulp_chunk_bytes 0)
+        endif()
+
+        string(SUBSTRING "${value}" ${_pulp_offset} ${_pulp_chunk_bytes} _pulp_chunk)
+        set(_pulp_delimiter "PULP${_pulp_count}")
+        set(_pulp_salt 0)
+        string(FIND "${_pulp_chunk}" ")${_pulp_delimiter}\"" _pulp_collision)
+        while(NOT _pulp_collision EQUAL -1)
+            math(EXPR _pulp_salt "${_pulp_salt} + 1")
+            set(_pulp_delimiter "P${_pulp_count}_${_pulp_salt}")
+            string(LENGTH "${_pulp_delimiter}" _pulp_delimiter_length)
+            if(_pulp_delimiter_length GREATER 16)
+                message(FATAL_ERROR "Unable to choose a portable C++ raw-string delimiter")
+            endif()
+            string(FIND "${_pulp_chunk}" ")${_pulp_delimiter}\"" _pulp_collision)
+        endwhile()
+
+        string(APPEND _pulp_source
+            "    R\"${_pulp_delimiter}(${_pulp_chunk})${_pulp_delimiter}\",\n")
+        if(_pulp_chunk_bytes GREATER _pulp_max_bytes)
+            set(_pulp_max_bytes ${_pulp_chunk_bytes})
+        endif()
+        math(EXPR _pulp_offset "${_pulp_offset} + ${_pulp_chunk_bytes}")
+        math(EXPR _pulp_count "${_pulp_count} + 1")
+        if(_pulp_chunk_bytes EQUAL 0)
+            break()
+        endif()
+    endwhile()
+
+    set(${output_source} "${_pulp_source}" PARENT_SCOPE)
+    set(${output_count} ${_pulp_count} PARENT_SCOPE)
+    set(${output_max_bytes} ${_pulp_max_bytes} PARENT_SCOPE)
+endfunction()

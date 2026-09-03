@@ -708,6 +708,71 @@ like Merge or Split); none, from one that did not (unknown). Only the scan
 version separates the last two. `PortMap::controls_known()` is the rule; the
 UNMAPPED badge reads it.
 
+## A scanned block is admitted by exact version, and Core reports none
+
+`portmap_seed.entries(inv)` keeps a scanned block only when its `pluginVersion`
+equals the installed plugin's version. That strictness is deliberate: a vendor
+update can add, remove or renumber ports, and a block attached to the wrong
+index is worse than no block, because absent ports read as UNKNOWN while wrong
+ones are trusted.
+
+Core is the single plugin that reports no version, because it is compiled into
+Rack instead of being installed as a plugin directory. An exact match can
+therefore never succeed for it, and every scanned Core block was silently
+dropped -- including `AudioInterface2`, the stereo output nearly every audible
+patch terminates in, and the MIDI interfaces. The generator was wiring the one
+module every patch needs while being told its ports were unknown. No rescan can
+fix it either, since there is no plugin directory for `measure_ranges.py --all`
+to visit.
+
+So `_version_admits()` treats an absent installed version as a wildcard and
+keeps the exact match for every plugin that reports one. Core is the only
+plugin on a normal install with an empty version, so the widening is that
+narrow. When a count of known ports moves by a handful for no obvious reason,
+check whether a plugin's version string changed shape before suspecting the
+scanner.
+
+## FORGE_PORTMAP pins which scan a run was generated against
+
+`portmap_seed.resolved_local_path()` reads `FORGE_PORTMAP` before falling back
+to the live map CARTOG writes. A campaign that compares two port maps sets it
+once; because the campaign driver shells out inheriting the environment, that
+single variable pins both the inventory receipt and the generation subprocess,
+so no driver argument has to be threaded through.
+
+A set-but-unusable value raises instead of falling back. Falling back would
+silently mean "no local scan", which is indistinguishable from the arm the
+comparison is measuring against, and the run would report no difference for
+entirely the wrong reason.
+
+## A library-wide scan tore the port map, and nothing said so
+
+`measure_ranges.py --all` copied each launch's measured map onto the live path
+in place. Across the hundreds of launches a full library takes, that produced a
+map truncated mid-token with a later record's bytes spliced in behind it and
+doubled commas through the remainder.
+
+The damage was invisible. `portmap_seed._read` returned `[]` for anything it
+could not parse, which is correct for a machine that never scanned and very
+wrong for a machine whose map is torn: known-port modules fell from about 1010
+to 274 and the generator went on wiring blind with nothing anywhere reporting
+it. A file that EXISTS and will not parse is a fault, not an absence.
+
+So the copy-back goes through `_install_map`, which writes beside the
+destination, parses what it wrote, and renames -- a rename inside one
+filesystem is atomic, so a reader sees the old map or the new one and never
+half of each. And `_read` now says on stderr when a map exists and will not
+parse.
+
+The tear originates in the scratch directory, not in the copy: Rack writes
+that map itself, and a launch killed part-way through the write leaves it
+truncated -- which is common precisely because so many of these launches
+SIGSEGV. An unparseable measured map is therefore a FAILED LAUNCH, retried by
+halving like any other, and never a reason to abandon the remaining plugins.
+Raising instead cost a full run at plugin 116 of 258.
+
+Freeze the live map before any library-wide run. It is the only copy, and
+recovering the pre-scan state afterwards is otherwise impossible.
 ## The random prompt pool exists twice, and it promises modules
 
 Random offers a prompt the user reads and edits before building, so a prompt

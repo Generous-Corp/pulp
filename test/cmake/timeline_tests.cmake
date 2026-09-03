@@ -530,6 +530,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME timeline-mcp-selftest
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_mcp_emit.py)
+    add_test(NAME mcp-cpp-string-chunks-selftest
+        COMMAND ${CMAKE_COMMAND} -P
+            ${CMAKE_SOURCE_DIR}/test/cmake/test_pulp_cpp_string_chunks.cmake)
 
     # Corpus-coverage gate: every persisted pulp.timeline.sequence schema
     # version must carry at least one indexed document fixture. A schema bump

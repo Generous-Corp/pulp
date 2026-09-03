@@ -124,6 +124,82 @@ def main() -> int:
     check(portmap_seed.entries(inv_of("Befaco", "2.4"), seed, absent) == [],
           "an unreadable seed is ignored rather than raising")
 
+    # Core records no version, because it is compiled into Rack rather than
+    # installed as a plugin directory. An exact-version match can therefore
+    # never succeed for it, and every scanned Core block -- the audio and MIDI
+    # interfaces every patch needs to be heard -- was silently discarded.
+    write(local, [entry("Core", "AudioInterface", "2.6.6", 3)])
+    got = portmap_seed.entries(inv_of("Core", ""), absent, local)
+    check([e["model"] for e in got] == ["AudioInterface"],
+          "a plugin that reports no version admits its scanned block")
+
+    # The exact match still governs everything that DOES report a version: a
+    # vendor update can renumber ports, and a wrong index is worse than none.
+    write(local, [entry("JW-Modules", "Quantizer", "2.0.43", 3)])
+    check(portmap_seed.entries(inv_of("JW-Modules", "2.0.45"), absent, local) == [],
+          "a stale block is still dropped when the installed version differs")
+    check(len(portmap_seed.entries(inv_of("JW-Modules", "2.0.43"), absent, local)) == 1,
+          "a matching block is still kept")
+
+    # A plugin the entry names but this machine does not have stays refused,
+    # rather than falling through the no-version path.
+    check(portmap_seed.entries(inv_of("Befaco", "2.4"), absent, local) == [],
+          "an uninstalled plugin is refused, not admitted")
+
+    # A campaign pins which scan a run was generated against by pointing
+    # FORGE_PORTMAP at a frozen map. It must reach the fold, and a typo must
+    # stop the run rather than quietly becoming "no local scan" -- which would
+    # make the arm under test indistinguishable from the arm without it.
+    pinned = os.path.join(tmp, "pinned.json")
+    write(local, [entry("Befaco", "EvenVCO", "2.4", 3)])
+    write(pinned, [entry("Befaco", "Rampage", "2.4", 3)])
+    inv = inv_of("Befaco", "2.4")
+    saved = os.environ.pop(portmap_seed.LOCAL_PATH_ENV, None)
+    original = portmap_seed.LOCAL_PATH
+    portmap_seed.LOCAL_PATH = local
+    try:
+        check([e["model"] for e in portmap_seed.entries(inv, absent)] == ["EvenVCO"],
+              "with FORGE_PORTMAP unset the live map is folded")
+        os.environ[portmap_seed.LOCAL_PATH_ENV] = pinned
+        check([e["model"] for e in portmap_seed.entries(inv, absent)] == ["Rampage"],
+              "FORGE_PORTMAP pins which map is folded")
+        os.environ[portmap_seed.LOCAL_PATH_ENV] = os.path.join(tmp, "typo.json")
+        raised = False
+        try:
+            portmap_seed.entries(inv, absent)
+        except SystemExit as exc:
+            raised = portmap_seed.LOCAL_PATH_ENV in str(exc)
+        check(raised, "a FORGE_PORTMAP that names no file stops the run")
+        os.environ[portmap_seed.LOCAL_PATH_ENV] = pinned
+        check([e["model"] for e in portmap_seed.entries(inv, absent, local)] == ["EvenVCO"],
+              "an explicit local_path still outranks the environment")
+    finally:
+        portmap_seed.LOCAL_PATH = original
+        os.environ.pop(portmap_seed.LOCAL_PATH_ENV, None)
+        if saved is not None:
+            os.environ[portmap_seed.LOCAL_PATH_ENV] = saved
+
+    # A map that exists and will not parse is a fault, not a fresh machine.
+    # It costs three quarters of the known ports and reads exactly like a
+    # machine that never scanned, so it must say so on stderr.
+    import contextlib
+    import io
+    torn = os.path.join(tmp, "torn.json")
+    with open(torn, "w") as f:
+        f.write('{"modules": [{"plugin": "Befaco", "name": "x", "')
+    noise = io.StringIO()
+    with contextlib.redirect_stderr(noise):
+        got = portmap_seed.entries(inv_of("Befaco", "2.4"), absent, torn)
+    check(got == [], "a torn map yields no entries")
+    check("cannot be read" in noise.getvalue() and torn in noise.getvalue(),
+          "a torn map says so on stderr instead of looking like a fresh machine")
+
+    quiet = io.StringIO()
+    with contextlib.redirect_stderr(quiet):
+        portmap_seed.entries(inv_of("Befaco", "2.4"), absent, absent)
+    check(quiet.getvalue() == "",
+          "a machine that never scanned stays silent")
+
     print()
     print("all good" if not FAILED else f"{FAILED} wrong")
     return 1 if FAILED else 0
