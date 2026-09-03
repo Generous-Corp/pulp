@@ -1636,6 +1636,88 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 
 @end
 
+// ── PulpAppDelegate ──────────────────────────────────────────────────────────
+//
+// The runtime half of opening a document. Declaring the type in Info.plist
+// (pulp_declare_standalone_document_type() in CMake) is what makes Finder route
+// a double-click to this app; this delegate is what makes the app hear about it.
+// Without both halves the app launches and the file is silently dropped.
+
+// The installed handler, and the paths that arrived before there was one.
+//
+// A launch-time open is delivered around applicationDidFinishLaunching, which
+// is inside [NSApp run] — so it can land before the app has installed anything.
+// Dropping it would lose exactly the file that caused the launch, which is the
+// common case. Held paths are flushed the moment a handler appears.
+static std::function<void(const std::vector<std::string>&)>& mac_open_files_handler() {
+    static std::function<void(const std::vector<std::string>&)> handler;
+    return handler;
+}
+
+static std::vector<std::string>& mac_pending_open_files() {
+    static std::vector<std::string> pending;
+    return pending;
+}
+
+static void mac_deliver_open_files(std::vector<std::string> paths) {
+    if (paths.empty()) return;
+    auto& handler = mac_open_files_handler();
+    if (!handler) {
+        auto& pending = mac_pending_open_files();
+        pending.insert(pending.end(), paths.begin(), paths.end());
+        return;
+    }
+    handler(paths);
+}
+
+@interface PulpAppDelegate : NSObject <NSApplicationDelegate>
+@end
+
+@implementation PulpAppDelegate
+
+- (void)application:(NSApplication*)application openURLs:(NSArray<NSURL*>*)urls {
+    (void)application;
+    std::vector<std::string> paths;
+    paths.reserve(static_cast<size_t>(urls.count));
+    for (NSURL* url in urls) {
+        // Only file URLs. Pulp declares no CFBundleURLTypes, so a non-file URL
+        // cannot be routed here today; passing one through as a path would hand
+        // the app something that is not a path.
+        if (!url.isFileURL || url.path == nil) continue;
+        paths.emplace_back([url.path UTF8String]);
+    }
+    mac_deliver_open_files(std::move(paths));
+}
+
+@end
+
+// Install the app delegate, once, without ever displacing one that is already
+// there. A Pulp binary loaded into somebody else's app (a plug-in in a DAW) must
+// not take over that app's NSApplication delegate — doing so would break every
+// document, termination and reopen message the host relies on. Standalone Pulp
+// apps have no delegate, so this claims it; hosted ones keep theirs and simply
+// never receive open events, which is correct: the host owns its documents.
+static void mac_install_app_delegate() {
+    NSApplication* app = [NSApplication sharedApplication];
+    if (app.delegate != nil) return;
+    static PulpAppDelegate* delegate = nil;
+    if (delegate == nil) delegate = [[PulpAppDelegate alloc] init];
+    app.delegate = delegate;
+}
+
+static void mac_set_open_files_handler(
+    std::function<void(const std::vector<std::string>&)> handler) {
+    mac_open_files_handler() = std::move(handler);
+    mac_install_app_delegate();
+    auto& pending = mac_pending_open_files();
+    if (pending.empty() || !mac_open_files_handler()) return;
+    // Move before calling: a handler that opens a window can re-enter, and the
+    // queue must already be empty by then or the same file opens twice.
+    std::vector<std::string> flushed;
+    flushed.swap(pending);
+    mac_open_files_handler()(flushed);
+}
+
 // configure_window_type and the child-view geometry helpers
 // (child_view_frame_in_host, attach_child_view_to_host,
 // set_child_view_bounds_in_host, detach_child_view_from_host) were
@@ -1909,9 +1991,18 @@ public:
         return true;
     }
 
+    void set_open_files_handler(
+        std::function<void(const std::vector<std::string>&)> handler) override {
+        mac_set_open_files_handler(std::move(handler));
+    }
+
     void run_event_loop_until(std::function<bool()> ready_to_return) override {
         @autoreleasepool {
             [NSApplication sharedApplication];
+            // Before [NSApp run]: a launch-time open arrives inside it, and a
+            // delegate installed afterwards would never hear about the file
+            // that launched the app.
+            mac_install_app_delegate();
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
             register_cocoa_dispatcher_liveness(dispatcher_alive);
             auto dispatcher_token =
@@ -2352,9 +2443,18 @@ public:
         return true;
     }
 
+    void set_open_files_handler(
+        std::function<void(const std::vector<std::string>&)> handler) override {
+        mac_set_open_files_handler(std::move(handler));
+    }
+
     void run_event_loop_until(std::function<bool()> ready_to_return) override {
         @autoreleasepool {
             [NSApplication sharedApplication];
+            // Before [NSApp run]: a launch-time open arrives inside it, and a
+            // delegate installed afterwards would never hear about the file
+            // that launched the app.
+            mac_install_app_delegate();
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
             register_cocoa_dispatcher_liveness(dispatcher_alive);
             auto dispatcher_token =

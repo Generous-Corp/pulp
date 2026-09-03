@@ -362,6 +362,30 @@ extension of a single type in one call (`EXTENSION proj projx`).
 - If the target already has a hand-authored `MACOSX_BUNDLE_INFO_PLIST`, the
   call fails rather than overwriting it.
 
+### Declaring the type is only half of opening a document
+
+This function makes the OS *route* the file: Finder gives the app a document
+icon, the double-click launches it, and the Open panel offers the type. It does
+not make the app *receive* anything. macOS reports the file through the
+`NSApplicationDelegate` message `application:openURLs:`, so an app that declares
+the type and installs no handler launches and drops the file — which looks
+exactly like the declaration not working.
+
+The runtime half is `WindowHost::set_open_files_handler()`, or
+`StandaloneApp::set_open_files_handler()` for a standalone plug-in target:
+
+```cpp
+app.set_open_files_handler([&](const std::vector<std::string>& paths) {
+    for (const auto& path : paths) open_project(path);
+});
+app.run_with_editor();
+```
+
+Install it **before** the event loop starts. The file that launched the app is
+reported from inside the loop's own startup, so a handler wired up afterwards
+misses the common case; paths that arrive before a handler exists are held and
+delivered as soon as one is installed.
+
 ## pulp_app_icon
 
 **Status**: usable
