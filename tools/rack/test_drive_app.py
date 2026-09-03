@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DRIVE = os.path.join(HERE, "drive_app.py")
@@ -127,6 +128,28 @@ CASES = [
 
 sys.path.insert(0, HERE)
 import drive_app as D                                    # noqa: E402
+
+
+def check_generator_process_identity() -> int:
+    """The detector must match the command the installed app really spawns."""
+    seen = []
+
+    def fake_run(argv, **_kwargs):
+        seen.append(argv)
+        # pgrep itself evaluates the expression. Returning success here models
+        # the absolute Framework-Python command observed in the real app run.
+        return subprocess.CompletedProcess(argv, 0)
+
+    with mock.patch.object(D.subprocess, "run", side_effect=fake_run):
+        if not D.generating():
+            print("  WRONG  an absolute-path generator process reads idle")
+            return 1
+    expected = r"/(generate|patch)\.py([[:space:]]|$)"
+    if seen != [["pgrep", "-f", expected]]:
+        print(f"  WRONG  generator detector used an unsafe pattern: {seen!r}")
+        return 1
+    print("  ok     absolute-path generate.py/patch.py processes read running")
+    return 0
 
 
 def check_rack_open_evidence() -> int:
@@ -341,6 +364,7 @@ def main() -> int:
     bad += check_uidriver()
     bad += check_success_line_agrees()
     bad += check_rack_open_evidence()
+    bad += check_generator_process_identity()
     print(f"\n{len(CASES) - bad}/{len(CASES)} verdicts correct")
     return 1 if bad else 0
 

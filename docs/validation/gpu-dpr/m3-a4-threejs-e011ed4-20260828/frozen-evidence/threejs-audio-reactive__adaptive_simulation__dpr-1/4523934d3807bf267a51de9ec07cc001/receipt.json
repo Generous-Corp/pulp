@@ -1,0 +1,85 @@
+{
+  "adapter": {
+    "authentic_identity": true,
+    "backend": "Dawn/WebGPU",
+    "class": "hardware",
+    "driver": "Native Dawn Adapter (Metal)",
+    "name": "Native Dawn Adapter (Metal)"
+  },
+  "artifacts": [
+    {
+      "kind": "capture",
+      "path": "capture.png",
+      "sha256": "89029ea9a6ae0326c0df26a84e5f4a53e5726b758e8e7a95dd2146f7edd4c884"
+    },
+    {
+      "kind": "trace",
+      "path": "trace.pftrace",
+      "sha256": "9bc7310d3ac6ce2a6f42d51970a9d2217ee31429eda72dad7ec0947e74ef456a"
+    },
+    {
+      "kind": "raw_samples",
+      "path": "raw_samples.json",
+      "sha256": "144ee600f6f355204b9dfe78239543f362d60e1c6bc779da9591a128f9b92f21"
+    },
+    {
+      "kind": "input_receipt",
+      "path": "input_receipt.json",
+      "sha256": "279d5de406111f1b8fb73df73bfd6d4cef731ad113fa3709db57de19fa3fe8a8"
+    }
+  ],
+  "attempt_nonce": "4523934d3807bf267a51de9ec07cc001",
+  "attempt_number": 1,
+  "audio_thread_excluded": true,
+  "build_identity": {
+    "measurement_producer": {
+      "path": "/private/tmp/pulp-a4-threejs-e011ed4.YkcyDp/run/frozen-evidence/threejs-audio-reactive__adaptive_simulation__dpr-1/4523934d3807bf267a51de9ec07cc001/measurement-producer",
+      "sha256": "4bbaa64a24fc2a5c1e686270a6e39958581e7758c17d3d7298e4450af953e689"
+    },
+    "pulp_sha": "e011ed4d9f56eb02c9f67404a9b67da94d6d5438"
+  },
+  "content_digest": "8d323e902dc68bc9d9382ce0e7aeae477d7eaf361a433608fafb79f3b56c41ad",
+  "machine": {
+    "architecture": "arm64",
+    "hostname": "Daniels-Mac-Studio.local",
+    "id": "Daniels-Mac-Studio.local:arm64",
+    "os": "Darwin 25.6.0"
+  },
+  "measurement_attestation": {
+    "audio_device_opened": false,
+    "producer_sha256": "4bbaa64a24fc2a5c1e686270a6e39958581e7758c17d3d7298e4450af953e689",
+    "same_process": {
+      "adapter_identity": true,
+      "capture": true,
+      "frame_metrics": true,
+      "logical_input": true,
+      "memory_metrics": true,
+      "trace_correlation": true
+    },
+    "schema": "pulp.gpu-dpr-native-measurement-attestation.v1"
+  },
+  "measurement_scope": {
+    "audio_device_opened": false,
+    "same_process": {
+      "adapter_identity": true,
+      "capture": true,
+      "frame_metrics": true,
+      "logical_input": true,
+      "memory_metrics": true,
+      "trace_correlation": true
+    },
+    "schema": "pulp.gpu-dpr-native-measurement-scope.v1"
+  },
+  "mode": "adaptive_simulation",
+  "observed_dpr": 1,
+  "outcome": "fail",
+  "physical_size": {
+    "height": 600,
+    "width": 900
+  },
+  "requested_dpr": 1,
+  "scenario_id": "threejs-audio-reactive",
+  "scenario_kind": "maintained_native_canary",
+  "schema": "pulp.gpu-dpr-cell-receipt.v1",
+  "version": 1
+}

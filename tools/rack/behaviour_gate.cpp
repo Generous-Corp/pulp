@@ -131,8 +131,12 @@ float stimulus(const char* role, int i, int input_index) {
         return ((i / 16384) % 2) ? 10.f : 0.f;
     if (r == "Trigger")
         // A ~1 ms pulse, rare relative to the clock -- a reset that fires as
-        // often as the clock would pin a sequencer to its first step.
-        return (i % 16384) < 48 ? 10.f : 0.f;
+        // often as the clock would pin a sequencer to its first step. Its
+        // period is deliberately not a multiple of the 128-sample clock
+        // cycle: an aligned reset can always land when a divider is already
+        // at zero, making a correctly wired reset indistinguishable from an
+        // inert jack.
+        return ((i + input_index * 137) % 16001) < 48 ? 10.f : 0.f;
     if (r == "Audio")
         return 5.f * std::sin(2.0 * M_PI * 110.0 * i / kSr);
     if (r == "Pitch")

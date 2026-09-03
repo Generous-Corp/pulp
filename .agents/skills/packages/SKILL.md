@@ -224,6 +224,15 @@ Pulp fetches, vendors, or redistributes it independently. Otherwise the audit
 will require standalone NOTICE/licensing rows for something whose license and
 distribution boundary are already covered by the parent prebuilt.
 
+An independently redistributed runtime is different from a nested toolchain
+component. The pinned three.js payload is fetched or supplied through
+`PULP_THREEJS_RUNTIME_DIR` when `PULP_ENABLE_THREEJS_RUNTIME=ON` (the default
+with GPU support) and is staged under `share/pulp/threejs` for installed-SDK
+consumers. Treat a change to that install boundary as a dependency-inventory
+change: keep `tools/deps/manifest.json`, `DEPENDENCIES.md`, `NOTICE.md`, and
+`docs/reference/licensing.md` truthful together, even when the revision and
+license themselves do not change.
+
 Same rule for Skia *modules* (e.g. `skottie`/`sksg`, linked only when the opt-in
 `PULP_LOTTIE` CMake option is enabled): they ship inside the existing Skia
 prebuilt under the same Skia BSD-3-Clause entry — clarify their use in the Skia

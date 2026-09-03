@@ -104,6 +104,9 @@ endif()
 if(TARGET pulp-gpu-audio)
     list(APPEND PULP_SDK_TARGETS pulp-gpu-audio)
 endif()
+if(TARGET pulp-tool-gpu-health-model)
+    list(APPEND PULP_SDK_TARGETS pulp-tool-gpu-health-model)
+endif()
 
 if(TARGET pulp-inspect)
     list(APPEND PULP_SDK_TARGETS pulp-inspect)
@@ -322,6 +325,13 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp")
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 endif()
 
+# The exported CPU-only health model is the typed provider boundary for the
+# installed exact-instance GPU health-read executor.
+install(DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cli/gpu_health/include/pulp_tooling/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp_tooling"
+    FILES_MATCHING PATTERN "*.hpp")
+
 # The inspector protocol/session foundation is deliberately separate from the
 # desktop GPU overlay and remains available to installed CPU-only clients.
 if(TARGET pulp-inspect)
@@ -390,6 +400,9 @@ elseif(TARGET pulp-inspect-protocol)
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_host_ui_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_standalone_ui_adapter.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_main_thread_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_gpu_health_provider.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_gpu_health_read_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_read_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_write_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trace_session_executor.hpp"
@@ -447,19 +460,114 @@ install(PROGRAMS
     "${CMAKE_CURRENT_SOURCE_DIR}/examples/capability-control/generated/cli-walkthrough.sh"
     DESTINATION "share/pulp/capability-control")
 
-# Stable machine-readable GPU health result contract. The CLI and MCP helper
-# emit this schema outside a source checkout, so consumers need the matching
-# versioned contract from the selected installed SDK rather than a floating
-# documentation URL or an inferred response shape.
-set(_pulp_gpu_health_result_schema
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json")
-if(NOT EXISTS "${_pulp_gpu_health_result_schema}")
-    message(FATAL_ERROR
-        "Required GPU health result schema is missing: ${_pulp_gpu_health_result_schema}")
-endif()
-install(FILES "${_pulp_gpu_health_result_schema}"
+# Stable machine-readable GPU health contracts. Installed CLI and MCP
+# consumers need the exact versioned shapes selected by their SDK, not a
+# floating documentation URL or an inferred response.
+set(_pulp_gpu_health_contracts
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-health-read-result-v1.schema.json")
+foreach(_pulp_gpu_health_contract IN LISTS _pulp_gpu_health_contracts)
+    if(NOT EXISTS "${_pulp_gpu_health_contract}")
+        message(FATAL_ERROR
+            "Required GPU health contract is missing: ${_pulp_gpu_health_contract}")
+    endif()
+endforeach()
+install(FILES ${_pulp_gpu_health_contracts}
     DESTINATION "share/pulp/contracts")
-unset(_pulp_gpu_health_result_schema)
+unset(_pulp_gpu_health_contract)
+unset(_pulp_gpu_health_contracts)
+
+# Closed schema for independently authored same-trace Perfetto UI review.
+# This is a structural evidence contract, not terminal acceptance authority.
+set(_pulp_gpu_trace_human_review_schema
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-trace-human-review-v1.schema.json")
+if(NOT EXISTS "${_pulp_gpu_trace_human_review_schema}")
+    message(FATAL_ERROR
+        "Required GPU trace human-review schema is missing: ${_pulp_gpu_trace_human_review_schema}")
+endif()
+install(FILES "${_pulp_gpu_trace_human_review_schema}"
+    DESTINATION "share/pulp/contracts")
+unset(_pulp_gpu_trace_human_review_schema)
+
+# Stable machine-readable numeric GPU probe result contract. Keep this next to
+# the health contract so installed CLI/MCP consumers can validate evidence
+# without a Pulp source checkout.
+set(_pulp_gpu_probe_result_schema
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-probe-result-v1.schema.json")
+if(NOT EXISTS "${_pulp_gpu_probe_result_schema}")
+    message(FATAL_ERROR
+        "Required GPU probe result schema is missing: ${_pulp_gpu_probe_result_schema}")
+endif()
+install(FILES "${_pulp_gpu_probe_result_schema}"
+    DESTINATION "share/pulp/contracts")
+unset(_pulp_gpu_probe_result_schema)
+
+# The canonical GPU recipe catalog and its closed schema remain inspectable in
+# an installed SDK. pulp-cpp embeds these exact catalog bytes for standalone
+# CLI releases; this installed copy is the data interchange surface.
+set(_pulp_gpu_recipe_catalog_files
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/gpu-recipes.yaml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/gpu-recipes.schema.json")
+foreach(_pulp_gpu_recipe_catalog_file IN LISTS _pulp_gpu_recipe_catalog_files)
+    if(NOT EXISTS "${_pulp_gpu_recipe_catalog_file}")
+        message(FATAL_ERROR
+            "Required GPU recipe catalog file is missing: ${_pulp_gpu_recipe_catalog_file}")
+    endif()
+endforeach()
+install(FILES ${_pulp_gpu_recipe_catalog_files}
+    DESTINATION "share/pulp"
+    COMPONENT gpu-recipe-catalog)
+unset(_pulp_gpu_recipe_catalog_file)
+unset(_pulp_gpu_recipe_catalog_files)
+
+# Pinned native Three.js ESM runtime. Keep the upstream directory layout intact:
+# Pulp's V8 module resolver maps these exact specifiers and installed consumers
+# must not fall back to a test-only FetchContent checkout.
+if(PULP_HAS_THREEJS)
+    set(_pulp_threejs_install_root "share/pulp/threejs")
+    foreach(_pulp_threejs_runtime_file IN LISTS PULP_THREEJS_RUNTIME_FILES)
+        get_filename_component(_pulp_threejs_runtime_subdir
+            "${_pulp_threejs_runtime_file}" DIRECTORY)
+        if(_pulp_threejs_runtime_subdir STREQUAL "")
+            set(_pulp_threejs_runtime_destination
+                "${_pulp_threejs_install_root}")
+        else()
+            set(_pulp_threejs_runtime_destination
+                "${_pulp_threejs_install_root}/${_pulp_threejs_runtime_subdir}")
+        endif()
+        install(FILES
+            "${PULP_THREEJS_RUNTIME_DIR}/${_pulp_threejs_runtime_file}"
+            DESTINATION "${_pulp_threejs_runtime_destination}"
+            COMPONENT threejs-runtime)
+    endforeach()
+    install(FILES "${PULP_THREEJS_RUNTIME_MANIFEST}"
+        DESTINATION "${_pulp_threejs_install_root}"
+        COMPONENT threejs-runtime)
+    unset(_pulp_threejs_runtime_destination)
+    unset(_pulp_threejs_runtime_file)
+    unset(_pulp_threejs_runtime_subdir)
+    unset(_pulp_threejs_install_root)
+endif()
+
+# Versioned DPR experiment evidence contract. This is an evidence envelope,
+# not a rendering policy: installed automation needs the exact contract to
+# validate trial records without a source checkout.
+set(_pulp_gpu_dpr_experiment_schemas
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-corpus-v2-template.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-experiment-v1.schema.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-experiment-v2.schema.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-dpr-live-verification-v1.schema.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/contracts/gpu-vellum-package-terminal-v1.schema.json")
+foreach(_pulp_gpu_dpr_experiment_schema IN LISTS _pulp_gpu_dpr_experiment_schemas)
+    if(NOT EXISTS "${_pulp_gpu_dpr_experiment_schema}")
+        message(FATAL_ERROR
+            "Required GPU DPR experiment schema is missing: ${_pulp_gpu_dpr_experiment_schema}")
+    endif()
+endforeach()
+install(FILES ${_pulp_gpu_dpr_experiment_schemas}
+    DESTINATION "share/pulp/contracts")
+unset(_pulp_gpu_dpr_experiment_schema)
+unset(_pulp_gpu_dpr_experiment_schemas)
 
 # DSP capability registry.
 #
@@ -664,6 +772,10 @@ install(FILES
     # lib/cmake/Pulp/scripts too — the authoritative copy lives at
     # tools/scripts/check_bundle_architectures.py.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/check_bundle_architectures.py"
+    # pulp_add_ios_auv3() consumes these at downstream build time when the
+    # installed SDK advertises its verified Three.js runtime.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/bundle_threejs_for_jsc.mjs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/view/js/web-compat-three-shim.js"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp/scripts
 )
 

@@ -22,6 +22,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
@@ -64,7 +65,7 @@ def _resolver_source() -> str:
 
 def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
                    event: str = "pull_request",
-                   dispatch_selector: str = "") -> str | None:
+                   dispatch_selector: str = "") -> Any | None:
     """Run the real resolver and return the macOS leg's runs-on, if any."""
     env = dict(os.environ)
     env.update(
@@ -95,7 +96,7 @@ def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
             raise AssertionError("resolver emitted no matrix_json")
         for entry in json.loads(match.group(1)).get("include", []):
             if entry.get("key") == "macos":
-                return json.dumps(entry["runs_on_json"])
+                return json.loads(entry["runs_on_json"])
     return None
 
 
@@ -115,7 +116,9 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
         # Blanking the selector rather than skipping the job is deliberate: the
         # contributor gets a real signal on a clean throwaway runner instead of
         # a required check that never posts.
-        self.assertIn("macos", _macos_runs_on("someone-else/pulp").lower())
+        got = _macos_runs_on("someone-else/pulp")
+        self.assertIsInstance(got, str)
+        self.assertIn("macos", got.lower())
 
     def test_same_repo_pr_still_uses_the_self_hosted_macs(self):
         # The control. Without it, a resolver that routed *everything* to
@@ -128,6 +131,7 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
 
     def test_merge_group_uses_the_higher_priority_event_class(self):
         got = _macos_runs_on(None, event="merge_group")
+        self.assertIsInstance(got, list)
         self.assertIn("self-hosted", got)
         self.assertIn(MERGE_GROUP_LABEL, got)
         self.assertNotIn(PR_HEAD_LABEL, got)
@@ -150,7 +154,7 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
             event="workflow_dispatch",
             dispatch_selector=selector,
         )
-        self.assertEqual(json.loads(json.loads(got)), json.loads(selector))
+        self.assertEqual(got, json.loads(selector))
 
 
 if __name__ == "__main__":

@@ -31,6 +31,13 @@ DEVICE_MARKERS = (
     "GraphiteContext",
     "graphite_context",
     "GpuSurface",
+    "run_renderer3d_recipe",
+    "run_gpu_compute_magnitude_recipe",
+    "run_gpu_audio_stft_recipe",
+    "run_threejs_multi_pass_recipe",
+    # Indirect launcher: this suite starts the signed Standalone fixture, which
+    # creates the real Dawn/Metal device outside the test process.
+    "PULP_CONTROL_GPU_HEALTH_STANDALONE_PRODUCT_FIXTURE",
 )
 
 # Deliberately NOT a marker: the bare word "Dawn". It appears in prose — one
@@ -44,6 +51,11 @@ INTENTIONALLY_PARALLEL = {
     "pulp-test-gpu-audio-transport",
     "pulp-test-flow-pans",
 }
+
+# Explicitly invoked acceptance executables are not registered with CTest, so
+# they cannot contend under parallel CTest scheduling and have no test property
+# on which RESOURCE_LOCK could be set.
+MANUAL_ONLY_TARGETS = {"pulp-gpu-probe-native-acceptance"}
 
 # Sources that name a GPU type without standing up a device: they SUBCLASS the
 # interface to supply a mock. Referencing `GpuSurface` is not the same as
@@ -59,7 +71,9 @@ LOCK_VIA_VARIABLE = "PULP_GPU_TEST_DISCOVERY_ARGS"
 
 
 def manifests() -> list[Path]:
-    return sorted(MANIFEST_DIR.glob("*.cmake"))
+    paths = list(MANIFEST_DIR.glob("*.cmake"))
+    paths.extend((REPO_ROOT / "tools" / "cli").glob("**/CMakeLists.txt"))
+    return sorted(paths)
 
 
 def gpu_device_sources() -> set[str]:
@@ -134,6 +148,24 @@ def lock_text_for(target: str, manifest: Path) -> str:
 
 
 class GpuResourceLockTests(unittest.TestCase):
+    def test_standalone_product_stages_the_exact_trusted_client(self) -> None:
+        manifest = (MANIFEST_DIR / "gpu_health_tests.cmake").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "find_program(_pulp_gpu_health_test_codesign codesign REQUIRED)",
+            manifest,
+        )
+        self.assertIn(
+            'COMMAND "${_pulp_gpu_health_test_codesign}" --force --sign -',
+            manifest,
+        )
+        self.assertIn(
+            '"$<TARGET_FILE_DIR:pulp-test-control-gpu-health-standalone-product>/pulp"',
+            manifest,
+        )
+        self.assertNotIn("if(_pulp_control_host_codesign)", manifest)
+
     def test_device_creating_suites_take_the_gpu_lock(self) -> None:
         sources = gpu_device_sources()
         self.assertTrue(sources, "no GPU-device test sources found — detector broke")
@@ -141,7 +173,7 @@ class GpuResourceLockTests(unittest.TestCase):
         regs = registrations()
         checked = 0
         for target, (body, manifest) in regs.items():
-            if target in INTENTIONALLY_PARALLEL:
+            if target in INTENTIONALLY_PARALLEL or target in MANUAL_ONLY_TARGETS:
                 continue
             used = {s for s in sources if s in body}
             if not used:
@@ -157,6 +189,25 @@ class GpuResourceLockTests(unittest.TestCase):
                 )
         self.assertGreater(checked, 0, "matched no GPU suites — mapping broke")
 
+    def test_literal_catch_locks_precede_labels(self) -> None:
+        """Keep Catch's list-valued LABELS from swallowing later properties."""
+        checked = 0
+        for manifest in manifests():
+            text = manifest.read_text(encoding="utf-8")
+            for target, body in _calls(text, ("catch_discover_tests",)):
+                lock_at = body.find(LOCK)
+                if lock_at < 0:
+                    continue
+                checked += 1
+                labels_at = body.find("LABELS")
+                with self.subTest(target=target, manifest=manifest.name):
+                    self.assertTrue(
+                        labels_at < 0 or lock_at < labels_at,
+                        f"{target} ({manifest.name}) places {LOCK!r} after LABELS; "
+                        "Catch may serialize it as another label instead of a test property.",
+                    )
+        self.assertGreater(checked, 0, "matched no literal Catch GPU locks")
+
     def test_known_offscreen_suites_are_covered(self) -> None:
         """Guard the detector itself, not just the policy.
 
@@ -170,6 +221,8 @@ class GpuResourceLockTests(unittest.TestCase):
             "test_partial_repaint_gpu.cpp",
             "test_plugin_editor_headless_gpu.cpp",
             "test_font_rendering_goldens_gpu.cpp",
+            "test_gpu_probe_native_recipes.cpp",
+            "test_control_gpu_health_standalone_product.cpp",
         ):
             with self.subTest(source=name):
                 self.assertIn(name, sources)

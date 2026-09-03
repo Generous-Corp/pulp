@@ -226,6 +226,10 @@ def standalone_host_payload() -> bytes:
 
 
 def member_payload(name: str, platform: str = "linux-x64") -> bytes:
+    if name == "pulp-sdk/share/pulp/gpu-recipes.yaml":
+        return (ROOT / "docs/status/gpu-recipes.yaml").read_bytes()
+    if name == "pulp-sdk/share/pulp/gpu-recipes.schema.json":
+        return (ROOT / "docs/status/gpu-recipes.schema.json").read_bytes()
     if name in {
         rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST,
         rac.CONTROL_STANDALONE_HOST_SDK_MANIFEST,
@@ -397,13 +401,14 @@ def make_platform(root: Path, platform: str) -> tuple[set[str], set[str]]:
 
 
 class ReleaseArtifactContentsTests(unittest.TestCase):
+
     def test_relocated_backfill_verifier_resolves_registry_from_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as td, mock.patch.dict(
             os.environ, {"GITHUB_WORKSPACE": str(ROOT)}
         ), mock.patch.object(rac, "__file__", str(Path(td) / "release_artifact_contents.py")):
             self.assertEqual(
                 rac._control_registry_digest(),
-                "b3bfbc17c377a58531c0689ce961d33d43d7504c61f8db979cd1a0df678409bc",
+                "9a32256a646ab2612cfe0c8f50a77afe9a4353b94c1504749ab855a8dc9c64a8",
             )
 
     def test_cli_contract_tracks_import_design_runtime_manifest(self) -> None:
@@ -758,6 +763,81 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         self.assertIn(
             member,
             rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
+        )
+
+    def test_threejs_runtime_is_required_from_its_release_floor(self) -> None:
+        member = "pulp-sdk/share/pulp/threejs/build/three.webgpu.js"
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.819.0"),
+        )
+        self.assertTrue(
+            rac.THREEJS_RUNTIME_SDK_MEMBERS.issubset(
+                rac.required_sdk_members(
+                    "linux-x64", rac.DEFAULT_MATRIX, "0.819.0"
+                )
+            )
+        )
+
+    def test_gpu_health_read_contract_is_required_from_its_release_floor(self) -> None:
+        member = (
+            "pulp-sdk/share/pulp/contracts/"
+            "gpu-health-read-result-v1.schema.json"
+        )
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.819.0"),
+        )
+
+    def test_gpu_dpr_contract_is_required_from_its_release_floor(self) -> None:
+        v1 = "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v1.schema.json"
+        v2 = {
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-corpus-v2-template.json",
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v2.schema.json",
+            "pulp-sdk/share/pulp/contracts/gpu-dpr-live-verification-v1.schema.json",
+            "pulp-sdk/share/pulp/contracts/gpu-vellum-package-terminal-v1.schema.json",
+        }
+        self.assertNotIn(
+            v1, rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0")
+        )
+        self.assertIn(
+            v1, rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.819.0")
+        )
+        self.assertTrue(
+            v2.isdisjoint(
+                rac.required_sdk_members(
+                    "linux-x64", rac.DEFAULT_MATRIX, "0.823.1"
+                )
+            )
+        )
+        self.assertTrue(
+            v2.issubset(
+                rac.required_sdk_members(
+                    "linux-x64", rac.DEFAULT_MATRIX, "0.824.0"
+                )
+            )
+        )
+
+    def test_gpu_trace_human_review_contract_is_required_from_its_release_floor(self) -> None:
+        member = (
+            "pulp-sdk/share/pulp/contracts/"
+            "gpu-trace-human-review-v1.schema.json"
+        )
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.818.0"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.819.0"),
         )
 
     def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
@@ -1185,6 +1265,192 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_missing_gpu_probe_contract_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove(
+                "pulp-sdk/share/pulp/contracts/gpu-probe-result-v1.schema.json"
+            )
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "gpu-probe-result-v1.schema.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_missing_gpu_recipe_catalog_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove("pulp-sdk/share/pulp/gpu-recipes.yaml")
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "gpu-recipes.yaml"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_corrupt_gpu_recipe_catalog_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            member = "pulp-sdk/share/pulp/gpu-recipes.yaml"
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(
+                root / rac.sdk_asset_name("linux-x64"),
+                sdk,
+                as_zip=False,
+                payload_overrides={member: b"corrupt\n"},
+            )
+            with self.assertRaisesRegex(rac.ContentError, "selected release catalog digest"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_gpu_recipe_catalog_matrix_digests_match_source(self) -> None:
+        sources = {
+            "pulp-sdk/share/pulp/gpu-recipes.yaml": ROOT
+            / "docs/status/gpu-recipes.yaml",
+            "pulp-sdk/share/pulp/gpu-recipes.schema.json": ROOT
+            / "docs/status/gpu-recipes.schema.json",
+        }
+        self.assertEqual(set(rac.DEFAULT_MATRIX.gpu_recipe_catalog_sha256), set(sources))
+        for member, source in sources.items():
+            self.assertEqual(
+                rac.DEFAULT_MATRIX.gpu_recipe_catalog_sha256[member],
+                hashlib.sha256(source.read_bytes()).hexdigest(),
+            )
+
+    def test_selected_release_matrix_owns_gpu_recipe_catalog_digests(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            selected_payloads = {
+                "pulp-sdk/share/pulp/gpu-recipes.yaml": b"selected-tag-catalog\n",
+                "pulp-sdk/share/pulp/gpu-recipes.schema.json": b"selected-tag-schema\n",
+            }
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(
+                root / rac.sdk_asset_name("linux-x64"),
+                sdk,
+                as_zip=False,
+                payload_overrides=selected_payloads,
+            )
+
+            matrix_document = json.loads(
+                rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8")
+            )
+            matrix_document["gpu_recipe_catalog_sha256"] = {
+                member: hashlib.sha256(payload).hexdigest()
+                for member, payload in selected_payloads.items()
+            }
+            selected_matrix_path = root / "selected-tag-product-matrix.json"
+            selected_matrix_path.write_text(
+                json.dumps(matrix_document), encoding="utf-8"
+            )
+
+            self.assertEqual(
+                rac.main(
+                    [
+                        str(root),
+                        "--platform",
+                        "linux-x64",
+                        "--version",
+                        VERSION,
+                        "--source-sha",
+                        SOURCE_SHA,
+                        "--matrix",
+                        str(selected_matrix_path),
+                    ]
+                ),
+                0,
+            )
+            with self.assertRaisesRegex(
+                rac.ContentError, "selected release catalog digest"
+            ):
+                rac.verify_platform(
+                    root,
+                    "linux-x64",
+                    VERSION,
+                    SOURCE_SHA,
+                    native_signatures=False,
+                )
+
+    def test_negative_control_missing_gpu_dpr_contract_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove(
+                "pulp-sdk/share/pulp/contracts/gpu-dpr-experiment-v1.schema.json"
+            )
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "gpu-dpr-experiment-v1.schema.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_missing_gpu_dpr_v2_contract_fires(self) -> None:
+        members = {
+            "gpu-dpr-corpus-v2-template.json",
+            "gpu-dpr-experiment-v2.schema.json",
+            "gpu-dpr-live-verification-v1.schema.json",
+            "gpu-vellum-package-terminal-v1.schema.json",
+        }
+        for filename in members:
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                cli, sdk = make_platform(root, "linux-x64")
+                sdk.remove(f"pulp-sdk/share/pulp/contracts/{filename}")
+                write_archive(
+                    root / rac.cli_asset_name("linux-x64"), cli, as_zip=False
+                )
+                write_archive(
+                    root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False
+                )
+                with self.assertRaisesRegex(rac.ContentError, filename):
+                    rac.verify_platform(
+                        root,
+                        "linux-x64",
+                        VERSION,
+                        SOURCE_SHA,
+                        native_signatures=False,
+                    )
+
+    def test_negative_control_missing_gpu_health_read_contract_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove(
+                "pulp-sdk/share/pulp/contracts/"
+                "gpu-health-read-result-v1.schema.json"
+            )
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "gpu-health-read-result-v1.schema.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_missing_threejs_runtime_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove("pulp-sdk/share/pulp/threejs/build/three.webgpu.js")
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "three.webgpu.js"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
     def test_negative_control_missing_sdk_importer_runtime_fires_at_new_floor(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1424,6 +1690,14 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["sdk_provenance_floor"]
             del document["capability_handoff_floor"]
             del document["gpu_health_contract_floor"]
+            del document["gpu_probe_contract_floor"]
+            del document["gpu_recipe_catalog_floor"]
+            del document["gpu_recipe_catalog_sha256"]
+            del document["threejs_runtime_floor"]
+            del document["gpu_health_read_contract_floor"]
+            del document["gpu_dpr_experiment_contract_floor"]
+            del document["gpu_dpr_experiment_v2_contract_floor"]
+            del document["gpu_trace_human_review_contract_floor"]
             del document["inspector_sdk_floor"]
             del document["control_broker_floor"]
             del document["control_standalone_host_floor"]
@@ -1432,6 +1706,22 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
             self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
             self.assertEqual(historical.gpu_health_contract_floor, "999999.0.0")
+            self.assertEqual(historical.gpu_probe_contract_floor, "999999.0.0")
+            self.assertEqual(historical.gpu_recipe_catalog_floor, "999999.0.0")
+            self.assertEqual(historical.gpu_recipe_catalog_sha256, {})
+            self.assertEqual(historical.threejs_runtime_floor, "999999.0.0")
+            self.assertEqual(
+                historical.gpu_health_read_contract_floor, "999999.0.0"
+            )
+            self.assertEqual(
+                historical.gpu_dpr_experiment_contract_floor, "999999.0.0"
+            )
+            self.assertEqual(
+                historical.gpu_dpr_experiment_v2_contract_floor, "999999.0.0"
+            )
+            self.assertEqual(
+                historical.gpu_trace_human_review_contract_floor, "999999.0.0"
+            )
             self.assertEqual(historical.inspector_sdk_floor, "999999.0.0")
             self.assertEqual(historical.control_broker_floor, "999999.0.0")
             self.assertEqual(

@@ -37,6 +37,8 @@ versions, executors, publishers, publications, and instances fail closed.
 
 - plugin state, parameters, presets, authoring state, and host automation;
 - audio/MIDI fixtures, render output, screenshots, logs, traces, and telemetry;
+- GPU adapter/build/source/shader identities, target signatures, startup
+  timings, cache state, and correlated optimization evidence;
 - user consent decisions, publisher policy, grants, receipts, and audit records;
 - per-session and bootstrap credentials;
 - exact instance, slot, process-generation, and publication identity;
@@ -79,6 +81,15 @@ peer-bound, and wiped. Registrations validate a canonical manifest plus the
 exact artifact digest and expose only that manifest's bounded capability set.
 Interactive trusted-consent decisions reject replay, while an existing user
 policy may be deliberately reusable.
+The GPU-health capability on an interactive grant from the trusted Pulp CLI,
+host UI, or broker-owned user prompt is not reusable for new work: the broker
+atomically reserves one fresh idempotency identity and, after its durable
+receipt exists, accepts only operation-store replay of that identity. Other
+capabilities on the same grant retain their reusable operation behavior.
+Concurrent admission cannot spend the GPU-health approval on two different
+operations, and releasing one provisional admission cannot reopen another
+reservation or a committed grant. Interactive decision IDs remain single-use,
+while a separately configured user policy may still issue reusable grants.
 
 Control envelopes are closed, versioned, size-bounded, valid UTF-8 JSON with a
 canonical request hash. Every `ControlService::Session` negotiates its own
@@ -177,6 +188,7 @@ environment-delivered bootstrap credentials remain rejected.
 | Artifact or private-data exfiltration | Opaque handles, exact producer lineage, original-grant reauthorization, per-blob/chunk and aggregate quotas, bounded retention/collection, explicit redaction state, and content-free deletion audit; no same-UID at-rest secrecy claim |
 | Runtime evaluation becomes a mutation shortcut | Separate high-risk component and capability, `research-unsafe` profile, exact acknowledgement, dedicated evaluator, realm and size/time limits; never an implementation path for typed operations |
 | Denial of service against broker, host, or audio thread | Bounded clients, frames, queues, rates, subscriptions, jobs, receipts, per-blob/chunk and aggregate artifact sizes/counts; timeouts, cancellation, expiry, and orphan/partial cleanup; no JSON/network work on the audio thread |
+| GPU startup evidence is laundered into an optimization claim | Sensitive exact-instance read; closed typed schema; ratified budget provenance; bounded trials and event-loss accounting; content/signature negative controls; nullable GPU/Perfetto correlation; complete-capture and causal-attribution gates; no newest-instance or newest-trace fallback; no render, trace start, prewarm, or shader compile in the read executor |
 | Grant revoked while work is queued or executing | Admission and pre-apply revalidation, cancellable staged operations, truthful `mayHaveApplied`/receipt state, no automatic retry of ambiguous mutation |
 | Schema downgrade or scope smuggling | Namespaced versioned IDs, canonical serialization and digest, unknown-field rejection, no permissive downgrade, explicit manifest changes for new fields/directions/rates |
 | Removed build authority survives reconfiguration | Per-target profile, capability, and unsafe-evaluation declarations force-refresh on every configure; a two-configure regression proves critical authority is withdrawn without deleting the build tree |

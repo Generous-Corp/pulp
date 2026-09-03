@@ -2156,6 +2156,83 @@ destroy LAST (after the bridge and the editor host), because the final detach
 flushes the trace and joins the auto-flush timer — it has to outlive every span
 those objects can still emit.
 
+## GPU first-visible-frame health
+
+A control-enabled Standalone that declares `gpu.health.read` now requires an
+attached ViewBridge/window. Its Pulp-owned health adapter polls only on the UI
+thread, captures the existing back buffer, and publishes an immutable snapshot;
+the control worker only reads that snapshot. Do not move capture or provider
+writes to the audio thread.
+
+Set the endpoint honestly. Standalone, DAW, and Forge roles use
+`native-compositor-presentation` and require an independently sourced native
+presentation timestamp. Only the constrained headless role may configure
+`headless-capture-complete`; it uses capture completion and must leave compositor
+present timing null. Missing compile/upload/hidden/present/source/shader
+instrumentation is coverage, not event loss. Preserve exact nullable fields and
+named categories so the closed A3 verifier can select only a passing
+`no-change` or failing `queue-B4-investigation`; never invent Vellum events or
+identities in the ViewBridge. Produce the blank-frame and audio-thread control
+receipts with the focused harness commands in
+`docs/validation/gpu-first-visible-a3-acceptance.md`; the raw seed environment
+variable by itself is not a receipt.
+
+The provider now keeps a distinct GPU evidence ID and trace evidence ID and can
+retain multiple lifecycle trials, but a product adapter must call
+`begin_editor_open` only for an editor lifecycle it actually observed. Do not
+rearm it on an arbitrary frame or label repeated captures as same-process
+editor reopens. `gpu_first_visible_a3_campaign.py` validates the external
+10-cold/10-warm ledger; it does not create those lifecycle boundaries. The
+standalone host's ordinary first observation is therefore a truthful preflight
+and remains nonterminal until a real role adapter supplies all opens and the
+role-appropriate endpoint.
+
+`gpu_first_visible_a3_external_adapter.py` gives product teams one pinned
+producer boundary for that missing work. A producer receives the fixed 10+10
+request and must preserve the actual `begin_editor_open` lifecycle, cache
+boundary, endpoint, and evidence IDs in its artifacts. The envelope validates
+and retains those artifacts but never calls `begin_editor_open`, captures a
+frame, or invents a presentation timestamp itself.
+The four checked-in role entry points turn this into an executable handoff:
+each invokes one exact external lifecycle driver, requires a predecessor for
+every warm same-process reopen, and retains the closed driver protocol in the
+host evidence tar. Each row answers the producer's nonce while the exact host
+executable is alive and retains its observed start identity; the trace binds to
+one challenged PID. A separate reviewed source-build driver reproduces the
+measured product/bundle without receiving its runtime path. The lifecycle
+driver must use the real product/host bridge; a loop of
+capture calls without editor lifecycle evidence is rejected.
+
+The separate four-state overhead collector similarly requires a
+candidate-relative `state_build_driver`. It exports the exact source row and
+default-deny rebuilds it without access to the measured executable, ambient
+build output, or network, then requires matching executable bytes and tracing
+sentinel state. Preserve its source archive, closed request/receipt, rebuilt
+product, logs, and toolchain snapshots; no ViewBridge observation can replace
+that product provenance.
+
+The health-transition trace macros compile to no work when `PULP_TRACING=OFF`,
+but compiled-in idle and active product cost still need evidence. Terminal A3
+requires the acceptance guide's exact pre-change, compile-out, compiled-in idle,
+and active 128 MiB control with 5 warmups, 30 measured, and 20 fresh-process
+observations per state. All must report zero xruns and audio-thread trace events.
+The active role campaigns include the spans but do not replace this differential
+control. Keep all producer work and Perfetto session management off the audio
+thread.
+
+The terminal overhead workflow enters through
+`gpu_first_visible_a3_trace_producer_overhead.py collect-state`. That collector,
+not ViewBridge or the product driver, owns the 55 per-state liveness challenges
+and binds process start plus executable identity. Active binary traces must
+contain the health-first-visible package and the complete b4ba exact
+20-signature `state`/`render`/`js` package on the challenged host process.
+Acquire/submit/present are mandatory; every other signature remains counted
+and an unobserved one is not-covered, not zero-cost. Require zero producer
+events on declared audio TIDs. Do not add evidence IDs, session control, or
+synthesized compositor timestamps to ViewBridge to satisfy the receipt.
+
+A3 v2 terminal acceptance preserves that boundary with an external audio-thread exclusion receipt and an independently digest-bound blank-frame negative. Per-sample zero counters do not replace either control.
+
 ## `ViewBridge` is a view-side symbol despite living in `namespace pulp::format`
 
 `ViewBridge` is declared in `pulp::format` but **defined in

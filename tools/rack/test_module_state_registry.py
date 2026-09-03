@@ -158,6 +158,34 @@ class RegistryShapeTest(unittest.TestCase):
                 self.assertTrue(all(key.split("/")))
 
 
+class PersistentAuthoringRefusalTest(unittest.TestCase):
+    """Opaque musical state is never mistaken for ordinary button params."""
+
+    def test_hexaquark_is_excluded_but_an_existing_patch_is_describable(
+            self) -> None:
+        inv = {
+            "Geodesics-Vultiverse": {
+                "name": "Geodesics Vultiverse", "version": "2.0.4",
+                "modules": {
+                    "Hexaquark": _module(
+                        "Hexaquark", tags=["Sequencer"],
+                        params=[{"id": 35, "name": "Scene 1"},
+                                {"id": 51, "name": "Run"}]),
+                    "Ions": _module("Ions", tags=["Utility"]),
+                },
+            },
+        }
+        fresh = P.render_inventory(inv)
+        refinement = P.render_inventory(inv, fresh_generation=False)
+        self.assertNotIn("Hexaquark", fresh)
+        self.assertIn("Ions", fresh)
+        self.assertIn("Hexaquark", refinement)
+        reason = P.fresh_generation_refusal(
+            "Geodesics-Vultiverse", "Hexaquark", inv)
+        self.assertIn("opaque module-owned state", reason)
+        self.assertIn("external clock", reason)
+
+
 class InstalledVersionPinTest(unittest.TestCase):
     """Every pin still names the exact version installed on this machine.
 
@@ -206,6 +234,85 @@ class InstalledVersionPinTest(unittest.TestCase):
         for pair in sorted(refused):
             with self.subTest(module="/".join(pair)):
                 self.assertNotIn(pair, allowed)
+
+
+class CensusRefusalTest(unittest.TestCase):
+    """The refusals added from the offline audibility census still bite.
+
+    These entries were written from a measurement rather than from reading a
+    panel, so the thing most likely to rot is the link between the two: a pin
+    that drifts off the installed version, or an expander refused while the
+    module it expands quietly becomes generatable again. Neither fails loudly
+    on its own -- the rule just stops applying -- so both are checked here
+    against the real inventory, with controls that must move the other way.
+    """
+
+    # (plugin, model, the module this one expands or None if it stands alone).
+    MEASURED = (
+        ("voxglitch", "GrainEngineMK2Expander", "GrainEngineMK2"),
+        ("voxglitch", "GrooveBoxExpander", "groovebox"),
+        ("SickoCV", "Parking", None),
+    )
+    # One module per pack that the census found emitting signal and that the
+    # registry deliberately leaves alone. If a pack-wide refusal ever lands by
+    # accident these are what notices.
+    CONTROLS = (("voxglitch", "vector_rotation"), ("SickoCV", "Adder8"))
+
+    def setUp(self) -> None:
+        self.inv = P.inventory()
+        if not (self.inv.get("Core") or {}).get("modules"):
+            self.skipTest("no installed Rack plugin inventory to measure these "
+                          "refusals against; this proves nothing")
+        self.rules = P.module_state_rules()
+
+    def test_each_measured_refusal_removes_its_module(self) -> None:
+        allowed = P.required_tag_candidate_allowlist(self.inv, narrowed=False)
+        for plugin, model, _ in self.MEASURED:
+            with self.subTest(module=f"{plugin}/{model}"):
+                # Fails if the pin drifts off the installed version, because
+                # the refusal then stops applying while still looking present.
+                self.assertIsNotNone(
+                    P.fresh_generation_refusal(plugin, model, self.inv))
+                self.assertNotIn((plugin, model), allowed)
+        for plugin, model in self.CONTROLS:
+            with self.subTest(control=f"{plugin}/{model}"):
+                # Control: fails if the allowlist collapsed, or if the refusal
+                # spread to the whole pack, either of which would make the
+                # assertions above pass for free.
+                self.assertIsNone(
+                    P.fresh_generation_refusal(plugin, model, self.inv))
+                self.assertIn((plugin, model), allowed)
+
+    def test_an_expander_is_not_refused_while_its_base_still_is_not(self) -> None:
+        """Refusing the expander but not the module it expands is incoherent.
+
+        The expander reasons rest on the base being unusable too. If the base
+        is ever made generatable, the expander's stated mechanic is no longer
+        true and its entry has to be rewritten rather than left standing.
+        """
+        bases = [(plugin, base) for plugin, _, base in self.MEASURED if base]
+        # Control: an empty pair list would satisfy the loop vacuously.
+        self.assertEqual(2, len(bases))
+        for plugin, base in bases:
+            with self.subTest(base=f"{plugin}/{base}"):
+                # The base is a real installed model, so the check is not
+                # passing merely because the name is wrong.
+                self.assertIn(base,
+                              (self.inv[plugin].get("modules") or {}))
+                self.assertIsNotNone(
+                    P.fresh_generation_refusal(plugin, base, self.inv))
+
+    def test_measured_refusals_state_the_measurement_not_just_a_mechanic(
+            self) -> None:
+        for plugin, model, _ in self.MEASURED:
+            with self.subTest(module=f"{plugin}/{model}"):
+                reason = self.rules[f"{plugin}/{model}"]["fresh_generation"][
+                    "reason"]
+                self.assertIn("Measured offline", reason)
+                # The census drove eleven parameter and input conditions; a
+                # reason that cites the measurement has to say what it covered
+                # or a reader cannot tell how weak the claim is.
+                self.assertIn("eleven", reason)
 
 
 class RegistryFileTest(unittest.TestCase):

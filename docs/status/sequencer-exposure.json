@@ -1899,21 +1899,27 @@
             "class StepPlayer {",
             "MidiUtilityProcessReport process(const MidiBuffer& input, MidiBuffer& output,",
             "MidiUtilityProcessReport flush_transport(MidiBuffer& output) noexcept",
-            "std::int32_t timing_offset_ticks = 0;"
+            "std::int32_t timing_offset_ticks = 0;",
+            "struct StepPlayerCoordinate {",
+            "std::optional<StepPlayerCoordinate> coordinate_at(std::size_t lane,",
+            "std::optional<StepPlayerCoordinate> upcoming_coordinate(std::size_t lane) const noexcept {"
           ]
         }
       ],
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid \u2014 swing, a groove table or a per-step nudge \u2014 without running its own scheduler beside the kernel.",
+          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid — swing, a groove table or a per-step nudge — without running its own scheduler beside the kernel. The header also exposes the scheduling coordinate itself: coordinate_at(lane, tick) answers which step a lane's walk selects at a grid coordinate and upcoming_coordinate(lane) answers the step it will fire next, so a UI or a test can read the pipeline stage without pushing audio through the player.",
           "evidence": [
             {
               "kind": "sdk_header",
               "path": "core/midi/include/pulp/midi/step_player.hpp",
               "needles": [
                 "class StepPlayer {",
-                "std::int32_t timing_offset_ticks = 0;"
+                "std::int32_t timing_offset_ticks = 0;",
+                "struct StepPlayerCoordinate {",
+                "std::optional<StepPlayerCoordinate> coordinate_at(std::size_t lane,",
+                "std::optional<StepPlayerCoordinate> upcoming_coordinate(std::size_t lane) const noexcept {"
               ]
             }
           ]
@@ -1963,8 +1969,8 @@
           "needles": [
             "class VoiceModulationSources",
             "VoiceModulationResult append_lfo_lane(",
-            "void set_lfo_rate_hz(double rate_hz) noexcept {",
-            "void set_lfo_depth(float depth) noexcept {",
+            "bool set_lfo_rate_hz(double rate_hz) noexcept {",
+            "bool set_lfo_depth(float depth) noexcept {",
             "void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {"
           ]
         }
@@ -1972,15 +1978,15 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations \u2014 which is every LFO a musician can reach \u2014 no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from.",
+          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations — which is every LFO a musician can reach — no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from. set_lfo_rate_hz() and set_lfo_depth() report whether the value was taken and refuse the rates and depths prepare() refuses, so the config the bank reports stays one prepare() accepts.",
           "evidence": [
             {
               "kind": "sdk_header",
               "path": "core/audio/include/pulp/audio/voice_modulation_sources.hpp",
               "needles": [
                 "class VoiceModulationSources",
-                "void set_lfo_rate_hz(double rate_hz) noexcept {",
-                "void set_lfo_depth(float depth) noexcept {",
+                "bool set_lfo_rate_hz(double rate_hz) noexcept {",
+                "bool set_lfo_depth(float depth) noexcept {",
                 "void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {"
               ]
             }
@@ -2168,6 +2174,59 @@
               ]
             }
           ]
+        }
+      }
+    },
+    {
+      "id": "gpu-health-installed-sdk-projection",
+      "title": "GPU health contracts and provider model install with the selected SDK",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "gpu-ux-installed-sdk-20260828",
+      "owned_paths": [
+        "tools/cmake/PulpInstallRules.cmake"
+      ],
+      "evidence": [
+        {
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "pulp-tool-gpu-health-model",
+            "gpu-health-read-result-v1.schema.json",
+            "control_gpu_health_read_executor.hpp"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The selected SDK installs the CPU-only GPU health model target, typed health and control contracts, and exact GPU-health provider and executor headers needed by installed diagnostics without a source checkout.",
+          "evidence": [
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "pulp-tool-gpu-health-model",
+                "gpu-health-read-result-v1.schema.json",
+                "control_gpu_health_read_executor.hpp"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "GPU diagnostic packaging adds no Timeline command, argument, or handler."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "GPU diagnostic packaging adds no Timeline MCP operation, schema, or handler."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Installed GPU diagnostic assets do not add or widen a sequencer live-control grant."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This packaging row records installed artifacts and does not alter the sequencer design-time capability manifest."
         }
       }
     },

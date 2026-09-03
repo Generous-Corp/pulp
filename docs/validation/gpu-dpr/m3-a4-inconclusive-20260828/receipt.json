@@ -1,0 +1,33 @@
+{
+  "schema": "pulp.gpu-dpr-a4-publication-receipt.v1",
+  "version": 1,
+  "recorded_date": "2026-08-28",
+  "experiment_id": "a4-m3-preflight-20260828-319a64a1",
+  "status": "inconclusive",
+  "disposition": null,
+  "b5_status": "waiting-trigger",
+  "artifacts": [
+    {
+      "path": "capture-index.json",
+      "role": "preflight-only-cell-to-capture-digest-index",
+      "sha256": "738968bcb9824a06b8aad01935f21fbc648ad575d9b35f28ffcb94cf29926d19"
+    },
+    {
+      "path": "gap-report.json",
+      "role": "exact-machine-readable-gap-and-minimal-adapter-handoff",
+      "sha256": "9fa378aa791b993b9bf037d372dbd8a85d624df44d7a05f7b764b558db8ab5a4"
+    },
+    {
+      "path": "result.json",
+      "role": "exact-runner-projected-incomplete-result",
+      "sha256": "d29a13442025655bca2e97c2dcb830834372f4da89256fe3fbac7efd2543fad6"
+    }
+  ],
+  "external_corpus": {
+    "checked_in": false,
+    "release_evidence": false,
+    "capture_count": 36,
+    "location_role": "producer-worktree-only and intentionally not a durable or release location",
+    "reason": "raw PNG and per-cell preflight artifacts are non-release working evidence and are not required to verify this incomplete publication"
+  }
+}

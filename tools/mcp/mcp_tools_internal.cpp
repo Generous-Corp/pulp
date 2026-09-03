@@ -143,6 +143,31 @@ fs::path sibling_pulp_cpp_path(const fs::path& executable_path) {
     return installed;
 }
 
+fs::path sibling_pulp_path(const fs::path& executable_path) {
+#if defined(_WIN32)
+    constexpr auto executable_name = "pulp.exe";
+#else
+    constexpr auto executable_name = "pulp";
+#endif
+    const auto directory = executable_path.parent_path();
+    const auto installed = directory / executable_name;
+    if (fs::is_regular_file(installed)) return installed;
+
+    // The Rust CLI is staged at the build root while MCP lives below
+    // build/tools/mcp[/<config>]. Keep resolution bound to the running image;
+    // cwd and PATH must not select a different SDK release.
+    if (directory.parent_path().filename() == "tools") {
+        const auto single_config = directory.parent_path().parent_path() / executable_name;
+        if (fs::is_regular_file(single_config)) return single_config;
+    }
+    if (directory.parent_path().filename() == "mcp") {
+        const auto multi_config = directory.parent_path().parent_path().parent_path() /
+                                  directory.filename() / executable_name;
+        if (fs::is_regular_file(multi_config)) return multi_config;
+    }
+    return installed;
+}
+
 std::string random_temp_suffix() {
     static constexpr char hex[] = "0123456789abcdef";
     std::random_device rd;

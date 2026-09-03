@@ -15,11 +15,18 @@
       }
     ]
   },
+  "Geodesics-Vultiverse/Hexaquark": {
+    "plugin_version": "2.0.4",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "stores its scenes, channels, pages, steps, and microsteps in opaque module-owned state that a fresh patch cannot author from parameter metadata. Its numbered scene and Run controls are momentary editor buttons, not the sequence: the retained failure wrote both but carried no module data and no external clock, so every sequencing output stayed silent. The module manual confirms that an external clock is required and that steps must be edited into an active state. Choose a sequencer whose steps are ordinary parameters or provide a validated existing Hexaquark patch to refine"
+    }
+  },
   "LomasModules/AdvancedSampler": {
     "plugin_version": "2.0.0",
     "fresh_generation": {
       "status": "unsupported",
-      "reason": "plays back a .wav file the person loads into the module through its own on-panel browser, and the installed pack carries no audio of its own, so a freshly generated instance has no sample to trigger and its output stays at zero. Choose a module that synthesises its own signal"
+      "reason": "plays back a .wav file the person loads into the module through its own on-panel browser, and the installed pack carries no audio of its own, so a freshly generated instance has no sample to trigger. Measured offline across eleven parameter and input conditions it never plays anything back: one output rests at exactly zero until a parameter sweep fires a single one-millisecond trigger, and the other stays below one volt with one nonzero sample in two seconds. Choose a module that synthesises its own signal"
     }
   },
   "PathSet-Infinity/WarpDrive": {
@@ -69,6 +76,13 @@
     "fresh_generation": {
       "status": "unsupported",
       "reason": "maps keyboard pitches onto .wav files the person loads through the module's own on-panel browser, and the installed pack ships only metronome click audio, so a freshly generated instance has nothing mapped and produces silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "SickoCV/Parking": {
+    "plugin_version": "2.7.10",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "a cable tidy rather than a processor: the pack's own manifest calls it a set of unconnected inputs and outputs just to park unused cables, so there is no path from any input to any output to carry a signal. Measured offline across eleven parameter and input conditions all sixteen outputs stayed below a millivolt. Choose a module that synthesises its own signal"
     }
   },
   "SickoCV/SickoPlayer": {
@@ -188,6 +202,20 @@
     "fresh_generation": {
       "status": "unsupported",
       "reason": "granulates a .wav file the person loads through the module's own browser, and the pack ships no audio for this module, so a freshly generated instance has nothing to granulate and produces silence. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/GrainEngineMK2Expander": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "an expander that records external audio into the adjacent Grain Engine MK2; with no neighbour there is nothing to record into, and Grain Engine MK2 itself cannot be freshly generated for the same lack of audio. Measured offline across eleven parameter and input conditions both of its outputs stayed below a millivolt. Choose a module that synthesises its own signal"
+    }
+  },
+  "voxglitch/GrooveBoxExpander": {
+    "plugin_version": "2.44.0",
+    "fresh_generation": {
+      "status": "unsupported",
+      "reason": "an expander that adds mutes, solos and per-track gates to the adjacent Groove Box; with no neighbour there are no tracks to mute or gate, and Groove Box itself cannot be freshly generated because the pack ships no audio for its slots. Measured offline across eleven parameter and input conditions all eight of its outputs stayed below a millivolt. Choose a synthesised drum module instead"
     }
   },
   "voxglitch/autobreak": {

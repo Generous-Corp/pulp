@@ -1,0 +1,1307 @@
+#!/usr/bin/env python3
+"""Verify a durable A2 GPU-probe acceptance receipt."""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import hashlib
+import json
+from pathlib import Path, PurePosixPath
+import re
+import subprocess
+import sys
+import types
+from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
+    path = SCRIPT_DIR / filename
+    data = path.read_bytes()
+    if len(data) > 2 * 1024 * 1024:
+        raise RuntimeError(f"local source module is unbounded: {filename}")
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    sys.modules[module_name] = module
+    exec(compile(data, str(path), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+json_schema_lite = _load_local_source("json_schema_lite", "json_schema_lite.py")
+
+
+ROOT = Path(__file__).resolve().parents[2]
+PROVIDER_MANIFEST_PATH = "tools/deps/manifest.json"
+SKIA_PROVIDER_TOP_LEVEL = frozenset({
+    ".skia-asset-sha256", "VERSION.md", "build", "include", "lib",
+    "modules", "share",
+})
+V8_PROVIDER_TOP_LEVEL = frozenset({
+    ".v8-asset-sha256", "LICENSE", "LICENSE.txt", "README", "README.md",
+    "VERSION", "VERSION.md", "bin", "data", "icudtl.dat", "include",
+    "jniLibs", "lib", "share", "snapshot_blob.bin",
+})
+
+
+def _skia_consumed_top_level_entries(authority: dict[str, Any]) -> frozenset[str]:
+    """Derive exact provider-root additions from consumed Skia archive paths."""
+    patterns = {
+        "build/<platform>-gpu/lib/Release": re.compile(
+            r"build/(?:mac|win|linux|android(?:-x86_64)?|ios|wasm)-gpu/"
+            r"lib/Release/(?:libskia\.a|skia\.lib)"
+        ),
+        "<platform>-gpu/lib/Release": re.compile(
+            r"(?:mac|win|linux|android(?:-x86_64)?|ios|wasm)-gpu/"
+            r"lib/Release/(?:libskia\.a|skia\.lib)"
+        ),
+        "<platform>/lib": re.compile(
+            r"(?:mac|win|linux|android|ios|wasm)(?:[-_][A-Za-z0-9_+-]+)?/"
+            r"lib/(?:libskia\.a|skia\.lib)"
+        ),
+        "lib": re.compile(r"lib/(?:libskia\.a|skia\.lib)"),
+    }
+    pattern = patterns.get(authority.get("provider_layout"))
+    archives = authority.get("consumed_skia_archives")
+    if pattern is None or not isinstance(archives, list) or not archives:
+        raise ValueError("Skia provider lacks an exact consumed archive layout")
+    if any(not isinstance(value, str) for value in archives):
+        raise ValueError("Skia provider has an invalid consumed archive path")
+    if len(archives) != len(set(archives)):
+        raise ValueError("Skia provider repeats a consumed archive path")
+    top_level: set[str] = set()
+    for value in archives:
+        if len(value) > 512:
+            raise ValueError("Skia provider has an invalid consumed archive path")
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or not path.parts
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or pattern.fullmatch(value) is None
+        ):
+            raise ValueError("Skia provider consumed archive disagrees with its layout")
+        top_level.add(path.parts[0])
+    return frozenset(top_level)
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+GPU_EVIDENCE_ID = re.compile(r"^[0-9a-f]{32}$")
+SOURCE_STAMP = re.compile(r"^[0-9a-f]{7,40}$")
+GROUPS = {
+    "compute": "gpu-compute.magnitude.v1",
+    "stft": "gpu-audio.stft.v1",
+    "renderer": "renderer3d.hardcoded-cube.v1",
+    "threejs": "threejs.multi-pass.v1",
+}
+HARDWARE_REQUIRED = {"compute", "stft", "threejs"}
+EXPECTED_SAMPLE_COUNTS = {
+    "compute": 256,
+    "stft": 1024,
+    "renderer": 0,
+    "threejs": 5,
+}
+EXPECTED_DIMENSIONS = {
+    "compute": {"width": 256, "height": 1, "work_items": 256},
+    "stft": {"width": 1024, "height": 1, "work_items": 1024},
+    "renderer": {"width": 128, "height": 128, "work_items": 16_384},
+    "threejs": {"width": 96, "height": 96, "work_items": 9_216},
+}
+RENDERER_NEGATIVE_DIMENSIONS = {"width": 32, "height": 32, "work_items": 1_024}
+RENDERER_NEGATIVE_MUTATION = "pre-submit-framebuffer-downscale"
+EXPECTED_BINARY_ROLES = {
+    "compute": "installed_rust_cli",
+    "stft": "installed_rust_cli",
+    "renderer": "scene3d_cpp_cli",
+    "threejs": "v8_threejs_cpp_cli",
+}
+EXPECTED_BINARY_ROLES_V2 = {group: "installed_rust_cli" for group in GROUPS}
+EXPECTED_SOURCE_BLOBS = {
+    "core/render/include/pulp/render/gpu_compute.hpp",
+    "core/render/include/pulp/render/renderer3d.hpp",
+    "core/render/src/gpu_compute.cpp",
+    "core/render/src/renderer3d.cpp",
+    "tools/cli/gpu_probe/src/native_acceptance.cpp",
+    "tools/cli/gpu_probe/src/native_recipes.cpp",
+    "tools/cli/gpu_probe/src/probe_result.cpp",
+    "tools/cli/gpu_probe/src/probe_result_json.cpp",
+    "tools/cli/gpu_probe/src/stft_native_acceptance.cpp",
+}
+EXPECTED_BINARIES = {
+    "installed_rust_cli",
+    "installed_cpp_delegate",
+    "installed_mcp",
+    "scene3d_cpp_cli",
+    "v8_threejs_cpp_cli",
+}
+EXPECTED_BINARIES_V2 = {
+    "installed_rust_cli",
+    "installed_cpp_delegate",
+    "installed_mcp",
+}
+EXPECTED_SOURCE_BLOBS_V2 = EXPECTED_SOURCE_BLOBS | {
+    "CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "docs/contracts/gpu-probe-result-v1.schema.json",
+    "docs/contracts/gpu-health-result-v1.schema.json",
+    "docs/status/gpu-recipes.schema.json",
+    "docs/status/gpu-recipes.yaml",
+    "docs/validation/gpu-probes/README.md",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/src/fallthrough.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/cmd_gpu.cpp",
+    "tools/cli/gpu_artifact_publication.cpp",
+    "tools/cli/gpu_artifact_publication.hpp",
+    "tools/cli/gpu_probe/CMakeLists.txt",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp",
+    "tools/cli/gpu_recipe_catalog_data.h.in",
+    "tools/cmake/FindSkia.cmake",
+    "tools/cmake/FindV8.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/gpu_probe_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/verify_gpu_probe_acceptance.py",
+}
+EXPECTED_PLAN_REVISION = "641649b7e7fece6baae34380b6e719904506af22"
+EXPECTED_PLAN_SHA256 = "00bdb8bd55fb90fb42d98a09442d2b168505a23a4208cb5b9edb67b01de69f07"
+EXPECTED_PLAN_BLOB = "2d1c461d3ea640f75786a72c312d074f68f59028"
+EXPECTED_FORGE_REVISION = "0750a88dea3af7fca927a8c02887e071109407ae"
+EXPECTED_FORGE_ROOT_TREE = "b31fb3effd109b30381007f43de208f81d6926a7"
+EXPECTED_FORGE_PULP_REF_BLOB = "3e54500140a1dc5de0dbefaab29612916f257ecd"
+EXPECTED_HISTORICAL_V1_HEAD = "146716041f20e9cd5e599f11f4697369d3218519"
+EXPECTED_HISTORICAL_V1_EQUIVALENT_HEAD = "a63e3741d6b8db8c98f749d27a618dc832acb115"
+OFFLINE_STRUCTURAL_STATUS = "nonterminal-offline-structural-evidence"
+OFFLINE_TERMINAL_ERROR = (
+    "standalone GPU-probe verification and recording are structural-only; "
+    "terminal acceptance requires a separate protected cross-system authority"
+)
+RESULT_SCHEMA = (
+    Path(__file__).resolve().parents[2]
+    / "docs/contracts/gpu-probe-result-v1.schema.json"
+)
+HEALTH_SCHEMA = RESULT_SCHEMA.with_name("gpu-health-result-v1.schema.json")
+
+
+def _load(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _mapping(value: Any, name: str, errors: list[str]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        errors.append(f"{name} must be an object")
+        return {}
+    return value
+
+
+def _git_blobs(commit: str, paths: set[str]) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "ls-tree", commit, "--", *sorted(paths)],
+        cwd=Path(__file__).resolve().parents[2],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        return {}
+    blobs: dict[str, str] = {}
+    for line in completed.stdout.splitlines():
+        try:
+            metadata, path = line.split("\t", 1)
+            _mode, kind, value = metadata.split()
+        except ValueError:
+            continue
+        if kind == "blob" and GIT_SHA.fullmatch(value):
+            blobs[path] = value
+    return blobs
+
+
+def _checkout_blobs(paths: set[str]) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "hash-object", "--stdin-paths"],
+        cwd=Path(__file__).resolve().parents[2],
+        input="".join(f"{path}\n" for path in sorted(paths)),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        return {}
+    values = completed.stdout.splitlines()
+    if len(values) != len(paths):
+        return {}
+    return {
+        path: value
+        for path, value in zip(sorted(paths), values)
+        if GIT_SHA.fullmatch(value)
+    }
+
+
+def _canonical_repeat(result: dict[str, Any]) -> dict[str, Any]:
+    value = copy.deepcopy(result)
+    value.pop("gpu_evidence_id", None)
+    return value
+
+
+def _expected_root_tree(repository: Path, revision: str) -> str | None:
+    completed = subprocess.run(
+        ["git", "rev-parse", f"{revision}^{{tree}}"],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    value = completed.stdout.strip()
+    return value if completed.returncode == 0 and GIT_SHA.fullmatch(value) else None
+
+
+def _expected_gitlinks(repository: Path, revision: str) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "ls-tree", "-rz", "-r", revision],
+        cwd=repository, check=False, capture_output=True,
+    )
+    if completed.returncode != 0:
+        return {}
+    values: dict[str, str] = {}
+    for raw in completed.stdout.split(b"\0"):
+        if not raw:
+            continue
+        try:
+            metadata, path = raw.split(b"\t", 1)
+            mode, kind, value = metadata.decode("ascii").split()
+        except (ValueError, UnicodeDecodeError):
+            return {}
+        if mode == "160000" and kind == "commit" and GIT_SHA.fullmatch(value):
+            values[path.decode("utf-8")] = value
+    return values
+
+
+def _verify_tree_claim(
+    claim: Any, *, revision: str, root_tree: str | None,
+    overlay_paths: list[str], label: str, errors: list[str],
+) -> None:
+    value = _mapping(claim, f"{label} source_tree_claim", errors)
+    gitlinks = value.get("excluded_gitlinks")
+    if (
+        value.get("method") != "retained-git-tree-vnode-and-descriptor-v1"
+        or value.get("revision") != revision
+        or root_tree is None
+        or value.get("root_tree") != root_tree
+        or value.get("overlay_paths") != overlay_paths
+        or not isinstance(value.get("regular_or_symlink_files"), int)
+        or isinstance(value.get("regular_or_symlink_files"), bool)
+        or value["regular_or_symlink_files"] <= 0
+        or not isinstance(value.get("retained_directories"), int)
+        or isinstance(value.get("retained_directories"), bool)
+        or value["retained_directories"] <= 0
+        or not isinstance(gitlinks, dict)
+        or any(
+            not isinstance(path, str)
+            or not isinstance(blob, str)
+            or GIT_SHA.fullmatch(blob) is None
+            for path, blob in gitlinks.items()
+        )
+    ):
+        errors.append(f"{label} source was not retained as its exact Git tree")
+
+
+def _verify_build_input_claim(
+    value: Any, errors: list[str], *, targets: list[str], label: str,
+    forced_clean_before_build: bool,
+) -> None:
+    claim = _mapping(value, f"{label} build_input_claim", errors)
+    if (
+        claim.get("method") != "regenerated-cmake-ninja-input-descriptor-v1"
+        or not isinstance(claim.get("file_count"), int)
+        or isinstance(claim.get("file_count"), bool)
+        or claim["file_count"] < 3
+        or not isinstance(claim.get("manifest_sha256"), str)
+        or SHA256.fullmatch(claim["manifest_sha256"]) is None
+        or claim.get("build_targets") != targets
+        or claim.get("forced_clean_before_build") is not forced_clean_before_build
+    ):
+        errors.append(
+            f"{label} build inputs were not regenerated, retained, and forced clean"
+        )
+
+
+def _verify_complete_tree_claim(value: Any, label: str, errors: list[str]) -> None:
+    claim = _mapping(value, f"{label} tree claim", errors)
+    if (
+        claim.get("method") != "retained-complete-tree-vnode-and-descriptor-v1"
+        or not isinstance(claim.get("file_count"), int)
+        or isinstance(claim.get("file_count"), bool)
+        or claim["file_count"] <= 0
+        or not isinstance(claim.get("bytes"), int)
+        or isinstance(claim.get("bytes"), bool)
+        or claim["bytes"] <= 0
+        or SHA256.fullmatch(str(claim.get("manifest_sha256", ""))) is None
+    ):
+        errors.append(f"{label} was not retained as one complete exact tree")
+
+
+def _pinned_provider_asset_digests(dependency_name: str) -> tuple[str, set[str]]:
+    data = (ROOT / PROVIDER_MANIFEST_PATH).read_bytes()
+    manifest = json.loads(data)
+    dependency = next(
+        (
+            row for row in manifest.get("dependencies", [])
+            if isinstance(row, dict) and row.get("name") == dependency_name
+        ),
+        None,
+    )
+    assets = (
+        dependency.get("determinism", {}).get("release_assets", {})
+        if isinstance(dependency, dict) else {}
+    )
+    digests = {
+        row.get("sha256") for row in assets.values()
+        if isinstance(row, dict)
+        and isinstance(row.get("sha256"), str)
+        and SHA256.fullmatch(row["sha256"])
+        and row.get("library", True) is not False
+    }
+    return hashlib.sha256(data).hexdigest(), digests
+
+
+def _verify_render_provider_claim(value: Any, errors: list[str]) -> None:
+    claim = _mapping(value, "render_provider_input_claim", errors)
+    providers = _mapping(claim.get("providers"), "render providers", errors)
+    disposition = claim.get("skia_source_disposition")
+    expected_roles = {"skia_dawn", "v8"}
+    if disposition == "retained-complete-adjacent-source-tree":
+        expected_roles.add("skia_source")
+    elif disposition != "not-present-at-configured-or-resolved-sibling":
+        errors.append("Pulp render providers lack an exact Skia source disposition")
+    if (
+        claim.get("method") != "retained-resolved-render-provider-trees-v3"
+        or set(providers) != expected_roles
+        or SHA256.fullmatch(str(claim.get("manifest_sha256", ""))) is None
+        or claim.get("manifest_sha256") != hashlib.sha256(
+            json.dumps(
+                {
+                    "providers": providers,
+                    "skia_source_disposition": disposition,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+    ):
+        errors.append("Pulp render providers lack one exact sealed provider manifest")
+        return
+    expected_metadata = {
+        "skia_dawn": (
+            "resolved-skia-dawn-provider-root",
+            "exact CMake/Ninja Skia layout plus pinned asset generation",
+        ),
+        "v8": (
+            "resolved-v8-provider-root",
+            "exact CMake V8 runtime layout plus pinned asset generation",
+        ),
+        "skia_source": (
+            "resolved-skia-source-provider-root",
+            "FindSkia adjacent SKIA_DIR/../skia-src include root",
+        ),
+    }
+    for role, row_value in providers.items():
+        row = _mapping(row_value, f"render provider {role}", errors)
+        expected_role, expected_resolution = expected_metadata[role]
+        if (
+            row.get("root_role") != expected_role
+            or row.get("resolution") != expected_resolution
+        ):
+            errors.append(f"render provider {role} lacks exact root provenance")
+        authority = _mapping(
+            row.get("root_authority"),
+            f"render provider {role} root authority", errors,
+        )
+        if role in {"skia_dawn", "v8"}:
+            dependency = "Skia" if role == "skia_dawn" else "V8"
+            stamp = (
+                ".skia-asset-sha256"
+                if role == "skia_dawn" else ".v8-asset-sha256"
+            )
+            allowed = (
+                SKIA_PROVIDER_TOP_LEVEL
+                if role == "skia_dawn" else V8_PROVIDER_TOP_LEVEL
+            )
+            skia_layout_valid = True
+            consumed_top_level: frozenset[str] = frozenset()
+            if role == "skia_dawn":
+                try:
+                    consumed_top_level = _skia_consumed_top_level_entries(authority)
+                except ValueError:
+                    skia_layout_valid = False
+                allowed = allowed | consumed_top_level
+            manifest_sha256, asset_digests = _pinned_provider_asset_digests(
+                dependency
+            )
+            entries = authority.get("top_level_entries")
+            if (
+                authority.get("method")
+                != "pinned-release-asset-stamp-and-exact-layout-v1"
+                or authority.get("dependency") != dependency
+                or authority.get("dependency_manifest_path")
+                != PROVIDER_MANIFEST_PATH
+                or authority.get("dependency_manifest_sha256") != manifest_sha256
+                or authority.get("generation_stamp_path") != stamp
+                or authority.get("generation_asset_sha256") not in asset_digests
+                or SHA256.fullmatch(
+                    str(authority.get("generation_stamp_sha256", ""))
+                ) is None
+                or not isinstance(entries, list)
+                or any(
+                    not isinstance(entry, str)
+                    or entry not in allowed
+                    for entry in entries
+                )
+                or len(entries) != len(set(entries))
+                or stamp not in entries
+                or (
+                    role == "skia_dawn"
+                    and (
+                        not skia_layout_valid
+                        or authority.get("consumed_top_level_entries")
+                        != sorted(consumed_top_level)
+                    )
+                )
+            ):
+                errors.append(
+                    f"render provider {role} lacks pinned generation authority"
+                )
+            if role == "skia_dawn" and (
+                not skia_layout_valid
+                or authority.get("consumed_top_level_entries")
+                != sorted(consumed_top_level)
+                or authority.get("cache_authority")
+                not in {"SKIA_DIR", "generated-ninja"}
+                or authority.get("provider_layout") not in {
+                    "build/<platform>-gpu/lib/Release",
+                    "<platform>-gpu/lib/Release", "<platform>/lib", "lib",
+                }
+                or not isinstance(authority.get("consumed_skia_archives"), list)
+                or not authority["consumed_skia_archives"]
+            ):
+                errors.append("render provider skia_dawn lacks exact consumed layout")
+            if role == "v8" and (
+                authority.get("cache_authority") != "V8_RUNTIME_LIBRARY"
+                or authority.get("provider_layout") not in {
+                    "lib/<runtime>", "jniLibs/arm64-v8a/<runtime>",
+                }
+                or not isinstance(authority.get("consumed_runtime"), str)
+            ):
+                errors.append("render provider v8 lacks exact consumed layout")
+        elif (
+            authority.get("method") != "exact-adjacent-skia-source-layout-v1"
+            or authority.get("cache_authority") != "SKIA_DIR/../skia-src"
+            or authority.get("provider_layout") != "src/core"
+        ):
+            errors.append("render provider skia_source lacks exact adjacent layout")
+        _verify_complete_tree_claim(row.get("tree_claim"), f"render provider {role}", errors)
+        members = row.get("required_members")
+        if not isinstance(members, list) or not members or any(
+            not isinstance(member, dict)
+            or not isinstance(member.get("path"), str)
+            or GIT_SHA.fullmatch(str(member.get("git_blob_sha1", ""))) is None
+            or SHA256.fullmatch(str(member.get("sha256", ""))) is None
+            or not isinstance(member.get("bytes"), int)
+            or isinstance(member.get("bytes"), bool)
+            or member["bytes"] <= 0
+            for member in members
+        ):
+            errors.append(f"render provider {role} lacks exact required members")
+            continue
+        names = {Path(member["path"]).name for member in members}
+        if role == "skia_dawn" and not (
+            names & {"libskia.a", "skia.lib"}
+            and names & {"libdawn_combined.a", "dawn_combined.lib"}
+        ):
+            errors.append("render provider skia_dawn lacks both consumed archives")
+        if role == "v8" and not (
+            any(member["path"] == "include/v8.h" for member in members)
+            and names & {"libv8.dylib", "libv8.so", "v8.dll"}
+        ):
+            errors.append("render provider v8 lacks its consumed headers/runtime")
+        if role in {"skia_dawn", "v8"}:
+            stamp = (
+                ".skia-asset-sha256"
+                if role == "skia_dawn" else ".v8-asset-sha256"
+            )
+            stamp_members = [member for member in members if member["path"] == stamp]
+            if (
+                len(stamp_members) != 1
+                or stamp_members[0].get("sha256")
+                != authority.get("generation_stamp_sha256")
+            ):
+                errors.append(
+                    f"render provider {role} generation stamp is not retained"
+                )
+        if role == "skia_source" and not any(
+            member["path"].startswith("src/core/") for member in members
+        ):
+            errors.append("render provider skia_source lacks a consumed src/core input")
+
+
+def _png_metrics(path: Path) -> dict[str, int]:
+    """Decode a bounded 8-bit RGB/RGBA PNG and prove nonblank content."""
+    import binascii
+    import struct
+    import zlib
+
+    if path.is_symlink():
+        raise ValueError("Forge screenshot must be an in-receipt regular file")
+    data = path.read_bytes()
+    if len(data) > 8 * 1024 * 1024 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("Forge screenshot is not a bounded PNG")
+    offset = 8
+    width = height = bit_depth = color_type = interlace = None
+    compressed = bytearray()
+    while offset + 12 <= len(data):
+        length = struct.unpack(">I", data[offset:offset + 4])[0]
+        kind = data[offset + 4:offset + 8]
+        end = offset + 12 + length
+        if end > len(data):
+            raise ValueError("Forge screenshot PNG is truncated")
+        payload = data[offset + 8:offset + 8 + length]
+        declared_crc = struct.unpack(">I", data[end - 4:end])[0]
+        if (binascii.crc32(kind + payload) & 0xffffffff) != declared_crc:
+            raise ValueError("Forge screenshot PNG has an invalid chunk CRC")
+        if kind == b"IHDR":
+            if len(payload) != 13:
+                raise ValueError("Forge screenshot PNG has a malformed IHDR")
+            width, height, bit_depth, color_type, _compression, _filter, interlace = struct.unpack(
+                ">IIBBBBB", payload
+            )
+        elif kind == b"IDAT":
+            compressed.extend(payload)
+        elif kind == b"IEND":
+            break
+        offset = end
+    if (
+        not isinstance(width, int) or not isinstance(height, int)
+        or width < 320 or height < 240 or width * height > 4_000_000
+        or bit_depth != 8 or color_type not in {2, 6} or interlace != 0
+    ):
+        raise ValueError("Forge screenshot has unsupported or implausible PNG geometry")
+    channels = 3 if color_type == 2 else 4
+    stride = width * channels
+    expected_filtered_bytes = (stride + 1) * height
+    try:
+        inflater = zlib.decompressobj()
+        filtered = inflater.decompress(bytes(compressed), expected_filtered_bytes + 1)
+        if inflater.unconsumed_tail:
+            raise ValueError("Forge screenshot PNG expands beyond its declared geometry")
+    except zlib.error as error:
+        raise ValueError(f"Forge screenshot PNG data is invalid: {error}") from error
+    if len(filtered) != expected_filtered_bytes or not inflater.eof or inflater.unused_data:
+        raise ValueError("Forge screenshot PNG scanline size is incoherent")
+    previous = bytearray(stride)
+    colors: set[bytes] = set()
+    luminance_min = 255
+    luminance_max = 0
+    cursor = 0
+    for _row_index in range(height):
+        filter_type = filtered[cursor]
+        cursor += 1
+        encoded = filtered[cursor:cursor + stride]
+        cursor += stride
+        row = bytearray(stride)
+        for index, value in enumerate(encoded):
+            left = row[index - channels] if index >= channels else 0
+            up = previous[index]
+            upper_left = previous[index - channels] if index >= channels else 0
+            if filter_type == 0:
+                predictor = 0
+            elif filter_type == 1:
+                predictor = left
+            elif filter_type == 2:
+                predictor = up
+            elif filter_type == 3:
+                predictor = (left + up) // 2
+            elif filter_type == 4:
+                p = left + up - upper_left
+                distances = (abs(p - left), abs(p - up), abs(p - upper_left))
+                predictor = (left, up, upper_left)[distances.index(min(distances))]
+            else:
+                raise ValueError("Forge screenshot uses an invalid PNG filter")
+            row[index] = (value + predictor) & 0xff
+        for index in range(0, stride, channels):
+            rgb = bytes(row[index:index + 3])
+            if len(colors) < 4096:
+                colors.add(rgb)
+            luminance = (int(rgb[0]) + int(rgb[1]) + int(rgb[2])) // 3
+            luminance_min = min(luminance_min, luminance)
+            luminance_max = max(luminance_max, luminance)
+        previous = row
+    if len(colors) < 16 or luminance_max - luminance_min < 20:
+        raise ValueError("Forge screenshot is blank or lacks a credible UI content range")
+    return {
+        "width": width,
+        "height": height,
+        "decoded_pixel_count": width * height,
+        "distinct_rgb_lower_bound": len(colors),
+        "luminance_range": luminance_max - luminance_min,
+    }
+
+
+def _verify_v2_metadata(root: Path, receipt: dict[str, Any], errors: list[str]) -> None:
+    source = _mapping(receipt.get("source_identity"), "source_identity", errors)
+    if source.get("repository") != "Generous-Corp/pulp" or source.get("clean") is not True:
+        errors.append("v2 source identity is not a clean canonical Pulp checkout")
+    if source.get("revision") != receipt.get("integration_head"):
+        errors.append("v2 source identity differs from integration_head")
+    if not SHA256.fullmatch(str(source.get("status_sha256", ""))):
+        errors.append("v2 source identity lacks the clean-status digest")
+    plan = _mapping(receipt.get("accepted_plan"), "accepted_plan", errors)
+    expected_plan = {
+        "repository": "danielraffel/pulp-planning",
+        "revision": EXPECTED_PLAN_REVISION,
+        "path": "research/2026-08-27-vgpu-gpu-ux-inspiration-audit-and-plan.md",
+        "blob": EXPECTED_PLAN_BLOB,
+        "sha256": EXPECTED_PLAN_SHA256,
+    }
+    for key, value in expected_plan.items():
+        if plan.get(key) != value:
+            errors.append(f"v2 accepted plan {key} differs from the canonical plan")
+    install = _mapping(receipt.get("install_provenance"), "install_provenance", errors)
+    build_info = _mapping(install.get("build_info"), "install build_info", errors)
+    revision = str(receipt.get("integration_head", ""))
+    stamped = build_info.get("kGitSha")
+    if (
+        install.get("cmake_home_revision") != revision
+        or install.get("cmake_build_type") != "Release"
+        or install.get("rust_profile") != "release"
+        or build_info.get("kBuildType") != "Release"
+        or build_info.get("kGitDirty") is not False
+        or not isinstance(stamped, str)
+        or SOURCE_STAMP.fullmatch(stamped) is None
+        or not revision.startswith(stamped)
+    ):
+        errors.append("v2 installed CLI provenance is not the exact clean Release source")
+    if install.get("build_install_binary_identity") != "pass":
+        errors.append("v2 installed binaries were not byte-identical to refreshed build outputs")
+    if install.get("install_prefix_initial_state") != "absent-and-atomically-claimed":
+        errors.append("v2 install prefix was not fresh and atomically claimed")
+    if install.get("install_prefix_claim_method") != (
+        "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+    ):
+        errors.append("v2 install prefix lacks atomic created-inode publication")
+    prefix_claim = install.get("install_prefix_claim")
+    if (
+        not isinstance(prefix_claim, dict)
+        or set(prefix_claim) != {"device", "inode"}
+        or any(
+            not isinstance(prefix_claim.get(field), int)
+            or isinstance(prefix_claim.get(field), bool)
+            or prefix_claim[field] < 0
+            for field in ("device", "inode")
+        )
+    ):
+        errors.append("v2 install prefix lacks its claimed directory identity")
+    for field in ("cmake_cache_sha256", "build_info_sha256"):
+        if not SHA256.fullmatch(str(install.get(field, ""))):
+            errors.append(f"v2 installed provenance lacks exact {field}")
+    _verify_tree_claim(
+        install.get("source_tree_claim"),
+        revision=revision,
+        root_tree=_expected_root_tree(ROOT, revision),
+        overlay_paths=[],
+        label="Pulp",
+        errors=errors,
+    )
+    pulp_tree_claim = install.get("source_tree_claim")
+    if isinstance(pulp_tree_claim, dict) and (
+        pulp_tree_claim.get("excluded_gitlinks")
+        != _expected_gitlinks(ROOT, revision)
+    ):
+        errors.append("Pulp retained source claim omits or invents Git links")
+    _verify_build_input_claim(
+        install.get("build_input_claim"), errors,
+        targets=["pulp-rust-cli", "pulp-cli", "pulp-mcp"], label="Pulp",
+        forced_clean_before_build=True,
+    )
+    _verify_render_provider_claim(install.get("render_provider_input_claim"), errors)
+    features = _mapping(install.get("feature_contract"), "install feature_contract", errors)
+    expected_features = {
+        "PULP_ENABLE_GPU": "ON", "PULP_ENABLE_SCENE3D": "ON",
+        "PULP_ENABLE_THREEJS_RUNTIME": "ON", "PULP_ENABLE_JS": "ON",
+        "PULP_JS_ENGINE": "v8", "PULP_BUILD_RUST_CLI": "ON",
+        "PULP_HAS_THREEJS": "TRUE",
+    }
+    if features != expected_features:
+        errors.append("v2 installed build lacks the exact all-four feature contract")
+    binaries = receipt.get("binaries")
+    if isinstance(binaries, dict):
+        for role, binary in binaries.items():
+            if isinstance(binary, dict) and (
+                binary.get("build_output_sha256") != binary.get("sha256")
+                or not isinstance(binary.get("bytes"), int)
+                or isinstance(binary.get("bytes"), bool)
+                or binary["bytes"] <= 0
+                or not isinstance(binary.get("build_output_bytes"), int)
+                or isinstance(binary.get("build_output_bytes"), bool)
+                or binary["build_output_bytes"] != binary["bytes"]
+            ):
+                errors.append(f"v2 binary {role} differs from its refreshed build output")
+        rust = binaries.get("installed_rust_cli")
+        cpp = binaries.get("installed_cpp_delegate")
+        if (
+            isinstance(rust, dict) and isinstance(cpp, dict)
+            and rust.get("sha256") == cpp.get("sha256")
+        ):
+            errors.append("v2 installed pulp is a C++ copy rather than the Rust front")
+    forge = _mapping(receipt.get("forge_downstream"), "forge_downstream", errors)
+    if forge.get("repository") != "Generous-Corp/forge" or forge.get("revision") != EXPECTED_FORGE_REVISION:
+        errors.append("v2 Forge proof does not name the exact accepted Forge revision")
+    overlay = _mapping(forge.get("pulp_sdk_ref_overlay"), "Forge PULP_SDK_REF overlay", errors)
+    if overlay.get("path") != "PULP_SDK_REF" or overlay.get("content") != revision:
+        errors.append("v2 Forge proof lacks the exact one-file Pulp SDK overlay")
+    if overlay.get("original_blob") != EXPECTED_FORGE_PULP_REF_BLOB:
+        errors.append("v2 Forge proof lacks the accepted original PULP_SDK_REF blob")
+    if forge.get("all_other_tracked_files_clean") is not True:
+        errors.append("v2 Forge proof has source drift beyond PULP_SDK_REF")
+    _verify_tree_claim(
+        forge.get("source_tree_claim"),
+        revision=EXPECTED_FORGE_REVISION,
+        root_tree=EXPECTED_FORGE_ROOT_TREE,
+        overlay_paths=["PULP_SDK_REF"],
+        label="Forge",
+        errors=errors,
+    )
+    forge_tree_claim = forge.get("source_tree_claim")
+    if isinstance(forge_tree_claim, dict) and forge_tree_claim.get(
+        "excluded_gitlinks"
+    ) != {}:
+        errors.append("Forge retained source claim excludes Git links")
+    _verify_complete_tree_claim(
+        forge.get("pulp_sdk_tree_claim"), "Forge consumed Pulp SDK", errors
+    )
+    _verify_build_input_claim(
+        forge.get("build_input_claim"), errors,
+        targets=["ForgeModular_Standalone"], label="Forge",
+        forced_clean_before_build=False,
+    )
+    if forge.get("build_directory_claim_method") != (
+        "unpredictable-staging-directory-renameatx-noreplace-retained-fd-v1"
+    ):
+        errors.append("Forge build directory lacks atomic created-inode publication")
+    forge_build_claim = forge.get("build_directory_claim")
+    if (
+        not isinstance(forge_build_claim, dict)
+        or set(forge_build_claim) != {"device", "inode"}
+        or any(
+            not isinstance(forge_build_claim.get(field), int)
+            or isinstance(forge_build_claim.get(field), bool)
+            or forge_build_claim[field] < 0
+            for field in ("device", "inode")
+        )
+    ):
+        errors.append("Forge build directory lacks its retained inode claim")
+    _verify_complete_tree_claim(
+        forge.get("bundle_tree_claim"), "Forge bundle", errors
+    )
+    stamp = _mapping(forge.get("bundle_build_info"), "Forge bundle build info", errors)
+    if (
+        stamp.get("product") != "Forge Modular"
+        or stamp.get("schema") != "1"
+        or not str(stamp.get("version", "")).strip()
+        or not str(stamp.get("product_id", "")).strip()
+        or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(stamp.get("packaged", "")))
+        or stamp.get("role") != "Rack module and patch generator"
+        or stamp.get("format") != "Standalone application"
+        or "Release" not in str(stamp.get("build", ""))
+        or revision[:12] not in str(stamp.get("pulp_sdk", ""))
+        or stamp.get("expected_pulp_sdk_ref") not in {None, ""}
+    ):
+        errors.append("v2 Forge bundle stamp does not bind the Modular shell to this Pulp SDK")
+    if forge.get("codesign_verify") != "pass" or forge.get("build_target") != "ForgeModular_Standalone":
+        errors.append("v2 Forge standalone was not rebuilt and signature-verified")
+    for field in ("cmake_cache_sha256", "bundle_build_info_sha256", "bundle_binary_sha256"):
+        if not SHA256.fullmatch(str(forge.get(field, ""))):
+            errors.append(f"v2 Forge proof lacks exact {field}")
+    screenshot_path = root / "forge-modular-screenshot.png"
+    try:
+        metrics = _png_metrics(screenshot_path)
+    except (OSError, ValueError) as error:
+        errors.append(f"Forge screenshot content proof failed: {error}")
+    else:
+        if metrics != forge.get("screenshot_metrics"):
+            errors.append("Forge screenshot metrics differ from decoded PNG content")
+    try:
+        doctor_path = root / "forge-gpu-doctor.json"
+        if doctor_path.is_symlink():
+            raise ValueError("Forge GPU doctor must be an in-receipt regular file")
+        doctor_payload = _load(doctor_path)
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"cannot parse Forge GPU doctor evidence: {error}")
+    except ValueError as error:
+        errors.append(str(error))
+    else:
+        doctor = _mapping(doctor_payload, "Forge GPU doctor evidence", errors)
+        try:
+            health_schema = _load(HEALTH_SCHEMA)
+        except (OSError, json.JSONDecodeError) as error:
+            errors.append(f"cannot read GPU health schema: {error}")
+        else:
+            for problem in json_schema_lite.validate(doctor_payload, health_schema):
+                errors.append(f"Forge GPU doctor schema: {problem}")
+        if (
+            doctor.get("schema") != "pulp.gpu-health-result.v1"
+            or doctor.get("verdict") != "pass"
+            or doctor.get("health_state") != "healthy"
+            or doctor.get("recommendations") != []
+        ):
+            errors.append("Forge-cwd GPU doctor did not return a healthy typed pass")
+        probes = doctor.get("probes")
+        if not isinstance(probes, list) or not probes or any(
+            not isinstance(probe, dict) or probe.get("verdict") != "pass"
+            for probe in probes
+        ):
+            errors.append("Forge-cwd GPU doctor lacks all-passing real probes")
+        else:
+            required_probes = [probe for probe in probes if probe.get("required") is True]
+            if not required_probes:
+                errors.append("Forge-cwd GPU doctor lacks a required real probe")
+            elif any(
+                not isinstance(probe.get("adapter"), dict)
+                or probe["adapter"].get("status") != "authentic"
+                or probe["adapter"].get("class") != "hardware"
+                or "Metal" not in (
+                    str(probe["adapter"].get("backend", ""))
+                    + str(probe["adapter"].get("architecture", ""))
+                )
+                for probe in required_probes
+            ):
+                errors.append("Forge-cwd GPU doctor did not use authentic Metal hardware")
+            else:
+                measurements = [
+                    value if isinstance(value, dict) else {}
+                    for value in (probe.get("measurements") for probe in required_probes)
+                ]
+                for field in (
+                    "command_submitted", "readback_completed", "pixel_output_produced",
+                    "content_floor_passed", "compute_initialized", "compute_oracle_passed",
+                ):
+                    if not any(value.get(field) is True for value in measurements):
+                        errors.append(f"Forge-cwd GPU doctor did not prove {field}")
+    expected_canaries = {
+        "gpu_audio": {
+            "status": "pass", "recipe": GROUPS["stft"],
+            "cli_positive_files": ["stft-run1.json", "stft-run2.json"],
+            "cli_negative_file": "stft-negative.json",
+            "mcp_positive_response_id": 4, "mcp_negative_response_id": 5,
+        },
+        "threejs": {
+            "status": "pass", "recipe": GROUPS["threejs"],
+            "cli_positive_files": ["threejs-run1.json", "threejs-run2.json"],
+            "cli_negative_file": "threejs-negative.json",
+            "mcp_positive_response_id": 8, "mcp_negative_response_id": 9,
+        },
+    }
+    if "missing_path_canaries" in forge:
+        errors.append("Pulp path canaries must not be claimed as Forge downstream evidence")
+    if receipt.get("additional_pulp_path_canaries") != expected_canaries:
+        errors.append(
+            "A2 proof does not bind the additional Pulp Three.js/GPU-audio paths "
+            "to their executed CLI/MCP evidence"
+        )
+    acceptance = _mapping(receipt.get("acceptance"), "acceptance", errors)
+    expected_acceptance = {
+        "terminal_status": OFFLINE_STRUCTURAL_STATUS,
+        "all_four_installed_cli": "pass",
+        "all_four_installed_mcp": "pass", "seeded_negative_controls": "pass",
+        "forge_modular_and_additional_pulp_path_canaries": "pass",
+    }
+    if acceptance != expected_acceptance:
+        errors.append(
+            "v2 structural acceptance fields are incomplete or claim terminal authority"
+        )
+
+
+def verify(root: Path, *, require_terminal: bool = False) -> list[str]:
+    errors: list[str] = []
+    try:
+        result_schema = _load(RESULT_SCHEMA)
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"cannot read GPU probe result schema: {error}"]
+    receipt_path = root / "receipt.json"
+    try:
+        receipt = _load(receipt_path)
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"cannot read receipt.json: {error}"]
+    if not isinstance(receipt, dict):
+        return ["receipt.json must contain an object"]
+
+    schema = receipt.get("schema")
+    v2 = schema == "pulp.gpu-probe-acceptance-receipt.v2"
+    if schema not in {
+        "pulp.gpu-probe-acceptance-receipt.v1",
+        "pulp.gpu-probe-acceptance-receipt.v2",
+    }:
+        errors.append("receipt schema mismatch")
+    integration_head = str(receipt.get("integration_head", ""))
+    if not GIT_SHA.fullmatch(integration_head):
+        errors.append("integration_head must be an exact Git SHA")
+    historical_revision = integration_head
+    if not v2:
+        equivalent = receipt.get("verification_equivalent_head")
+        if integration_head != EXPECTED_HISTORICAL_V1_HEAD:
+            errors.append("historical receipt changed its recorded integration_head")
+        if equivalent != EXPECTED_HISTORICAL_V1_EQUIVALENT_HEAD:
+            errors.append("historical receipt changed its verification-equivalent head")
+        historical_revision = str(equivalent or "")
+    source_blobs = _mapping(receipt.get("source_blobs"), "source_blobs", errors)
+    expected_source_blobs = EXPECTED_SOURCE_BLOBS_V2 if v2 else EXPECTED_SOURCE_BLOBS
+    if set(source_blobs) != expected_source_blobs:
+        errors.append("source_blobs does not bind the exact recipe source set")
+    historical_blobs = (
+        _git_blobs(historical_revision, expected_source_blobs)
+        if GIT_SHA.fullmatch(historical_revision)
+        else {}
+    )
+    # V1 is an immutable historical receipt: its source authority is the
+    # declared integration commit. V2 is the current-source structural
+    # contract and additionally fails closed against the live HEAD/checkout.
+    head_blobs = _git_blobs("HEAD", expected_source_blobs) if v2 else {}
+    checkout_blobs = _checkout_blobs(expected_source_blobs) if v2 else {}
+    for path, declared_blob in source_blobs.items():
+        if path not in expected_source_blobs:
+            continue
+        if not GIT_SHA.fullmatch(str(declared_blob)):
+            errors.append(f"source blob {path} must be an exact Git blob SHA")
+            continue
+        observed_blob = historical_blobs.get(path)
+        if observed_blob is None:
+            errors.append(f"cannot resolve {path} at integration_head")
+        elif observed_blob != declared_blob:
+            errors.append(f"source blob mismatch for {path}")
+        if v2:
+            head_blob = head_blobs.get(path)
+            if head_blob is None:
+                errors.append(f"cannot resolve {path} at current HEAD")
+            elif head_blob != declared_blob:
+                errors.append(f"current HEAD source blob drift for {path}")
+            checkout_blob = checkout_blobs.get(path)
+            if checkout_blob is None:
+                errors.append(f"cannot hash {path} in current checkout")
+            elif checkout_blob != declared_blob:
+                errors.append(f"current checkout source blob drift for {path}")
+    context = _mapping(receipt.get("execution_context"), "execution_context", errors)
+    if context.get("cwd_role") != "fresh-temporary-directory-outside-any-checkout":
+        errors.append("installed fronts were not recorded outside every checkout")
+    if context.get("path") != "/usr/bin:/bin:/usr/sbin:/sbin":
+        errors.append("installed fronts did not use the bounded system-only PATH")
+    binaries = _mapping(receipt.get("binaries"), "binaries", errors)
+    expected_binaries = EXPECTED_BINARIES_V2 if v2 else EXPECTED_BINARIES
+    if set(binaries) != expected_binaries:
+        errors.append("binaries does not bind the exact installed executable set")
+    for role, value in binaries.items():
+        digest = value.get("sha256") if v2 and isinstance(value, dict) else value
+        if not SHA256.fullmatch(str(digest)):
+            errors.append(f"binary {role} lacks a SHA-256 digest")
+        if v2 and (not isinstance(value, dict) or not isinstance(value.get("bytes"), int)
+                   or value.get("bytes", 0) <= 0):
+            errors.append(f"binary {role} lacks a positive byte count")
+
+    declared = _mapping(receipt.get("raw_sha256"), "raw_sha256", errors)
+    expected_files = {
+        *(f"{group}-{suffix}.json" for group in GROUPS for suffix in ("run1", "run2", "negative")),
+        "mcp-transcript.jsonl",
+    }
+    if v2:
+        expected_files |= {"forge-modular-screenshot.png", "forge-gpu-doctor.json"}
+    if set(declared) != expected_files:
+        errors.append(
+            f"raw_sha256 does not name the exact {len(expected_files)}-file evidence set"
+        )
+    for name in sorted(expected_files):
+        digest = declared.get(name)
+        path = root / name
+        try:
+            limit = 8 * 1024 * 1024 if name in {
+                "mcp-transcript.jsonl", "forge-modular-screenshot.png"
+            } else 1024 * 1024
+            if path.is_symlink() or not path.is_file():
+                errors.append(f"{name} must be a regular in-receipt evidence file")
+                continue
+            if path.stat().st_size > limit:
+                errors.append(f"{name} exceeds its {limit}-byte evidence cap")
+                continue
+            observed = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as error:
+            errors.append(f"cannot read {name}: {error}")
+            continue
+        if observed != digest:
+            errors.append(f"raw digest mismatch for {name}")
+
+    run_groups = _mapping(receipt.get("run_groups"), "run_groups", errors)
+    if set(run_groups) != set(GROUPS):
+        errors.append("receipt does not bind the exact four run groups")
+    seen_evidence_ids: set[str] = set()
+    for group, recipe in GROUPS.items():
+        run_group = run_groups.get(group, {})
+        if not isinstance(run_group, dict):
+            errors.append(f"receipt run group {group} must be an object")
+            run_group = {}
+        if run_group.get("recipe") != recipe:
+            errors.append(f"receipt run group {group} does not bind recipe {recipe}")
+        role = run_group.get("binary_role")
+        expected_roles = EXPECTED_BINARY_ROLES_V2 if v2 else EXPECTED_BINARY_ROLES
+        if role != expected_roles[group] or role not in binaries:
+            errors.append(f"receipt run group {group} has the wrong executable role")
+        runs: dict[str, dict[str, Any]] = {}
+        for suffix in ("run1", "run2", "negative"):
+            path = root / f"{group}-{suffix}.json"
+            try:
+                result_payload = _load(path)
+            except (OSError, json.JSONDecodeError) as error:
+                errors.append(f"cannot parse {path.name}: {error}")
+                continue
+            for problem in json_schema_lite.validate(result_payload, result_schema):
+                errors.append(f"{path.name}: schema: {problem}")
+            if not isinstance(result_payload, dict):
+                errors.append(f"{path.name}: probe result must be an object")
+                continue
+            result = result_payload
+            runs[suffix] = result
+            evidence_id = result.get("gpu_evidence_id")
+            if not GPU_EVIDENCE_ID.fullmatch(str(evidence_id)):
+                errors.append(f"{path.name}: gpu_evidence_id must be exact 32-hex")
+            elif evidence_id in seen_evidence_ids:
+                errors.append(f"{path.name}: gpu_evidence_id was reused by another A2 run")
+            else:
+                seen_evidence_ids.add(evidence_id)
+            if result.get("recipe_id") != recipe:
+                errors.append(f"{path.name}: recipe mismatch")
+            expected_dimensions = (
+                RENDERER_NEGATIVE_DIMENSIONS
+                if group == "renderer" and suffix == "negative"
+                else EXPECTED_DIMENSIONS[group]
+            )
+            if result.get("dimensions") != expected_dimensions:
+                errors.append(f"{path.name}: execution dimensions are not recipe-bound")
+            passes = result.get("passes")
+            if (
+                not isinstance(passes, list) or not passes
+                or not all(isinstance(item, dict) and item.get("work_completed") for item in passes)
+            ):
+                errors.append(f"{path.name}: work was not proven complete")
+            artifacts_value = result.get("artifacts")
+            artifacts = (
+                artifacts_value
+                if isinstance(artifacts_value, list)
+                and all(isinstance(item, dict) for item in artifacts_value)
+                else []
+            )
+            artifact_bytes = [item.get("bytes") for item in artifacts]
+            if (
+                not artifacts
+                or any(type(value) is not int or value < 0 for value in artifact_bytes)
+                or sum(artifact_bytes) > 512 * 1024
+            ):
+                errors.append(f"{path.name}: artifacts are absent or exceed 512 KiB")
+            for artifact in artifacts:
+                if not SHA256.fullmatch(str(artifact.get("sha256", ""))):
+                    errors.append(f"{path.name}: artifact lacks SHA-256")
+            if group == "renderer":
+                rgba = [artifact for artifact in artifacts
+                        if artifact.get("name") == "observed.rgba8"]
+                expected_rgba_bytes = expected_dimensions["work_items"] * 4
+                if len(rgba) != 1 or rgba[0].get("kind") != "image" or \
+                        rgba[0].get("mime") != "application/octet-stream" or \
+                        rgba[0].get("bytes") != expected_rgba_bytes:
+                    errors.append(
+                        f"{path.name}: observed RGBA artifact does not match declared dimensions"
+                    )
+            if result.get("numeric_sample_count") != EXPECTED_SAMPLE_COUNTS[group]:
+                errors.append(f"{path.name}: numeric sample count changed")
+            adapter_value = result.get("adapter")
+            adapter = adapter_value if isinstance(adapter_value, dict) else {}
+            if group in HARDWARE_REQUIRED and (
+                adapter.get("status") != "authentic"
+                or adapter.get("class") != "hardware"
+                or adapter.get("backend") != "Metal"
+            ):
+                errors.append(f"{path.name}: hardware-required adapter claim is not authentic Metal")
+            if group == "renderer" and (
+                adapter.get("status") != "unverified"
+                or adapter.get("class") != "unknown"
+                or "Metal" not in str(adapter.get("name", ""))
+            ):
+                errors.append(f"{path.name}: renderer adapter truthfulness changed")
+
+        if set(runs) != {"run1", "run2", "negative"}:
+            continue
+        if runs["run1"].get("verdict") != "pass" or runs["run2"].get("verdict") != "pass":
+            errors.append(f"{group}: both positive runs must pass")
+        for label in ("run1", "run2"):
+            passes = runs[label].get("passes")
+            if not isinstance(passes, list) or not all(
+                isinstance(item, dict) and item.get("verdict") == "pass"
+                for item in passes
+            ):
+                errors.append(f"{group}: {label} contains a non-passing semantic pass")
+        if _canonical_repeat(runs["run1"]) != _canonical_repeat(runs["run2"]):
+            errors.append(f"{group}: positive rerun is not deterministic")
+        negative = runs["negative"]
+        if negative.get("verdict") != "fail" or not negative.get("mutation"):
+            errors.append(f"{group}: seeded negative control did not fail")
+        if group == "renderer" and negative.get("mutation") != RENDERER_NEGATIVE_MUTATION:
+            errors.append("renderer: negative mutation is not the exact pre-submit mutation")
+        negative_passes = negative.get("passes")
+        if not isinstance(negative_passes, list) or not any(
+            isinstance(item, dict)
+            and item.get("verdict") == "fail"
+            and item.get("work_completed")
+            for item in negative_passes
+        ):
+            errors.append(f"{group}: negative control lacks a completed causal failure")
+
+    try:
+        transcript_path = root / "mcp-transcript.jsonl"
+        if transcript_path.is_symlink() or transcript_path.stat().st_size > 8 * 1024 * 1024:
+            raise ValueError("MCP transcript is not a bounded regular evidence file")
+        transcript = [json.loads(line) for line in transcript_path.read_text().splitlines()]
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"cannot parse MCP transcript: {error}")
+        transcript = []
+    except ValueError as error:
+        errors.append(str(error))
+        transcript = []
+    expected_transcript_length = 1 + (2 * len(GROUPS) if v2 else 2)
+    if (
+        len(transcript) != expected_transcript_length
+        or not all(isinstance(row, dict) for row in transcript)
+        or [row.get("id") for row in transcript] != list(
+            range(1, expected_transcript_length + 1)
+        )
+    ):
+        errors.append(
+            "MCP transcript must contain initialize plus all-four positive/negative responses"
+            if v2 else
+            "MCP transcript must contain initialize, positive, and negative responses"
+        )
+    else:
+        if any(row.get("jsonrpc") != "2.0" for row in transcript):
+            errors.append("MCP transcript contains a non-JSON-RPC response")
+        initialize_result = transcript[0].get("result")
+        if (
+            not isinstance(initialize_result, dict)
+            or initialize_result.get("protocolVersion") != "2024-11-05"
+        ):
+            errors.append("MCP transcript lacks the accepted initialize response")
+        mcp_evidence: dict[str, Any] = {}
+        pairs = []
+        if v2:
+            for index, group in enumerate(GROUPS):
+                pairs.extend(((f"{group}-positive", transcript[1 + 2 * index]),
+                              (f"{group}-negative", transcript[2 + 2 * index])))
+        else:
+            pairs = [("positive", transcript[1]), ("negative", transcript[2])]
+        for label, row in pairs:
+            result_value = row.get("result")
+            result = result_value if isinstance(result_value, dict) else {}
+            positive = label.endswith("positive") or label == "positive"
+            expected_exit = 0 if positive else 1
+            if bool(result.get("isError", False)) != (not positive):
+                if not v2 and positive:
+                    errors.append("MCP positive result must omit isError or preserve isError=false")
+                elif not v2:
+                    errors.append("MCP completed failure did not preserve isError=true")
+                else:
+                    errors.append(f"MCP {label} did not preserve typed isError status")
+            structured_value = result.get("structuredContent")
+            structured = structured_value if isinstance(structured_value, dict) else {}
+            if structured.get("exit_code") != expected_exit:
+                errors.append(f"MCP {label} did not preserve exit {expected_exit}")
+            evidence = structured.get("evidence")
+            for problem in json_schema_lite.validate(evidence, result_schema):
+                errors.append(f"MCP {label} evidence schema: {problem}")
+            if isinstance(evidence, dict):
+                mcp_evidence[label] = evidence
+            content = result.get("content")
+            try:
+                if not isinstance(content, list):
+                    raise TypeError("MCP content is not an array")
+                text_evidence = json.loads(content[0]["text"])
+            except (IndexError, KeyError, TypeError, json.JSONDecodeError):
+                errors.append(f"MCP {label} text evidence is missing or malformed")
+            else:
+                if text_evidence != evidence:
+                    errors.append(f"MCP {label} text and structured evidence disagree")
+        comparisons = (
+            [(f"{group}-positive", f"{group}-run1.json") for group in GROUPS]
+            + [(f"{group}-negative", f"{group}-negative.json") for group in GROUPS]
+            if v2 else
+            [("positive", "compute-run1.json"), ("negative", "compute-negative.json")]
+        )
+        for label, raw_name in comparisons:
+            if label not in mcp_evidence:
+                continue
+            try:
+                raw = _load(root / raw_name)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(raw, dict):
+                errors.append(f"{raw_name}: probe result must be an object")
+                continue
+            if _canonical_repeat(mcp_evidence[label]) != _canonical_repeat(raw):
+                errors.append(f"MCP {label} evidence is not the installed CLI recipe result")
+    if v2:
+        _verify_v2_metadata(root, receipt, errors)
+    if require_terminal:
+        errors.append(OFFLINE_TERMINAL_ERROR)
+        if GIT_SHA.fullmatch(integration_head):
+            try:
+                live_head = subprocess.run(
+                    ["git", "rev-parse", "HEAD"], cwd=ROOT, check=False,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+            except OSError:
+                live_head = ""
+            if live_head != integration_head:
+                errors.append(
+                    "terminal certification requires integration_head to equal live checkout HEAD"
+                )
+
+    return errors
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("receipt_dir", type=Path)
+    parser.add_argument(
+        "--terminal", action="store_true",
+        help=(
+            "Fail with guidance: no local recorder or offline verifier can issue "
+            "terminal acceptance"
+        ),
+    )
+    args = parser.parse_args(argv)
+    errors = verify(args.receipt_dir, require_terminal=args.terminal)
+    if errors:
+        for error in errors:
+            print(f"gpu-probe-acceptance: FAIL: {error}", file=sys.stderr)
+        return 1
+    schema = _load(args.receipt_dir / "receipt.json").get("schema")
+    if schema == "pulp.gpu-probe-acceptance-receipt.v2":
+        print(
+            "gpu-probe-acceptance: ok (v2 structural integrity only; nonterminal)"
+        )
+    else:
+        print("gpu-probe-acceptance: ok (historical v1 integrity; nonterminal)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

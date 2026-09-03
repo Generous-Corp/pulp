@@ -19,6 +19,12 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME gpu-recipe-catalog-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_recipe_catalog.py")
+    add_test(NAME gpu-clean-agent-journey-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_clean_agent_journey.py")
     add_test(NAME doxygen-installed-header-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/doxygen_installed_header_check.py")
@@ -28,6 +34,17 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME transient-interaction-trace-budget-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_transient_interaction_trace.py")
+    # The web-compat harness classifies a CSS property as out-of-scope when it
+    # is absent from a hand-transcribed table of one Yoga release. A stale table
+    # therefore hides real gaps as "out of scope" and the compat numbers improve
+    # while the measurement goes blind, so the table's stamped version has to
+    # track the Yoga pin.
+    add_test(NAME yoga-oracle-pin-lockstep
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/check_yoga_oracle_pin.py")
+    add_test(NAME yoga-oracle-pin-lockstep-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_yoga_oracle_pin.py")
     add_test(NAME agent-capability-manifest-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/agent_capability_manifest.py" --check)
@@ -412,12 +429,64 @@ if(Python3_Interpreter_FOUND)
     # else's unrelated PR, which is exactly the signal nobody attributes here.
     add_test(NAME gpu-test-resource-locks COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_test_resource_locks.py")
+    add_test(NAME gpu-provenance-hydration-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_gpu_provenance_commits.py")
 
     # Closed-schema and semantic negative controls for the shared GPU health
     # envelope. This is intentionally GPU-free so every platform proves the
     # contract even when no real adapter is available.
     add_test(NAME gpu-health-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_contract.py")
+    add_test(NAME gpu-health-read-contract-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_read_contract.py")
+    add_test(NAME gpu-probe-acceptance-verifier-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_probe_acceptance.py")
+    add_test(NAME gpu-probe-terminal-recorder-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_probe_acceptance.py")
+    add_test(NAME gpu-probe-historical-v1-acceptance COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/verify_gpu_probe_acceptance.py"
+        "${CMAKE_SOURCE_DIR}/docs/validation/gpu-probes/m3-a2-real-probes-20260828")
+    add_test(NAME gpu-first-visible-acceptance-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_acceptance.py")
+    add_test(NAME gpu-first-visible-acceptance-v2-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py")
+    add_test(NAME gpu-first-visible-campaign-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_campaign.py")
+    add_test(NAME gpu-first-visible-external-adapter-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_external_adapter.py")
+    set_tests_properties(gpu-first-visible-external-adapter-selftest PROPERTIES
+        PROCESSORS 8)
+    add_test(NAME gpu-first-visible-role-producers-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_role_producers.py")
+    add_test(NAME gpu-first-visible-trace-producer-overhead-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py")
+    add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_trace_overhead_acceptance.py")
+    add_test(NAME gpu-trace-overhead-verifier-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_trace_overhead_acceptance.py")
+    # Typed, GPU-free negative controls for the DPR experiment evidence
+    # envelope. Real trials remain separately gated on A2T trace coverage and
+    # A3 budget receipts; this test proves only the portable contract.
+    add_test(NAME gpu-dpr-experiment-contract-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_experiment.py")
+    add_test(NAME gpu-dpr-runner-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_runner.py")
+    set_tests_properties(gpu-dpr-runner-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
+    add_test(NAME gpu-dpr-v2-evidence-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_v2_evidence.py")
+    set_tests_properties(gpu-dpr-v2-evidence-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
+    add_test(NAME gpu-dpr-pulp-native-adapter-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_pulp_native_adapter.py")
+    if(UNIX)
+        add_test(NAME gpu-dpr-web-adapter-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_web_adapter.py")
+    endif()
+    add_test(NAME gpu-dpr-inconclusive-receipt-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py")
     if(UNIX AND PROJECT_IS_TOP_LEVEL)
         add_test(NAME gpu-health-cpu-only-configure
             COMMAND bash

@@ -178,4 +178,27 @@ fn parse_offline_utility_verbs() {
     };
     assert_eq!(args.file, Path::new("/tmp/x.pftrace"));
     assert!(args.no_browser);
+
+    let (sub, _) = parse(&s(&["open", "--", "--shell-looking.pftrace"])).unwrap();
+    let Sub::Open(args) = sub else {
+        panic!("expected open")
+    };
+    assert_eq!(args.file, Path::new("--shell-looking.pftrace"));
+}
+
+#[test]
+fn named_gpu_questions_require_only_a_flushed_trace() {
+    for verb in ["gpu-startup", "gpu-health", "gpu-probe"] {
+        let (sub, flags) = parse(&s(&[verb, "--trace", "/tmp/x.pftrace", "--json"])).unwrap();
+        assert!(matches!(sub, Sub::GpuAnalysis(_)));
+        assert!(flags.json);
+        assert!(parse(&s(&[verb])).is_err());
+        assert!(parse(&s(&[verb, "--trace", "/tmp/x.pftrace", "--instance", "x"])).is_err());
+    }
+}
+
+#[test]
+fn named_gpu_questions_never_become_control_calls() {
+    let (sub, _) = parse(&s(&["gpu-health", "--trace", "/tmp/x.pftrace"])).unwrap();
+    assert!(to_control_call(&sub).is_none());
 }

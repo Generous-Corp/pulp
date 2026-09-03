@@ -110,6 +110,31 @@ pass `'[doctor]'` to the binary itself).
 The `/audio-harness` slash command wraps this. JSON metric/curve artifacts (on failure or
 on demand) land under a temp `pulp-audio-metrics/` dir and are INFO-logged.
 
+### Localize a GPU STFT failure with the bounded recipe
+
+Use `gpu-audio.stft.v1` when the question is whether Pulp's offline Dawn STFT
+dispatch, readback, or magnitude output disagrees with an independent CPU FFT
+oracle:
+
+```bash
+mkdir -p "$PWD/artifacts/gpu/stft"
+pulp gpu probe --recipe gpu-audio.stft.v1 \
+  --artifacts "$PWD/artifacts/gpu/stft" --json
+```
+
+This is a deterministic, bounded CLI/MCP child-process probe. It never runs in
+the audio callback and does not open an audio device. A pass proves this fixed
+GPU STFT recipe completed and matched its CPU oracle on the reported adapter;
+it does not prove a plugin's realtime scheduling, arbitrary audio content, or
+the wider DSP contract. Keep using `RenderScenario`, Audio Doctor, and the
+offline audio-harness checks above for those claims.
+
+Interpret the exit/result contract literally: exit 0 is a completed pass, exit
+1 is a completed oracle failure, and exit 2 is unavailable or unverified
+evidence, never a skip-pass. Add `--negative-control` when validating the probe
+itself; the planted FFT mutation must complete GPU work and return the typed
+failure that proves the CPU oracle can catch it.
+
 ## Measuring a reverb — two traps that make a working engine look broken
 
 Both of these cost real debugging time on the multirate FDN reverb, and both

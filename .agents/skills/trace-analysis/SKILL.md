@@ -1,6 +1,6 @@
 ---
 name: trace-analysis
-description: The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). Runs the hypothesis→query→drill-down chain-of-evidence loop autonomously and returns a plain-English root cause + evidence + a concrete fix. TRIGGER on "why is my plugin slow to open", "find the slowest frames", "why is the UI stuttering", "why is my plugin using so much CPU", "which DSP node is expensive", "the load meter looks calm but CPU is pinned", or any `pulp trace explain "<question>"` / `/trace "<question>"` / `pulp_trace_explain` invocation. Ships Pulp-specific hints for dsp, frame, js, gpu, and cross-platform symptoms.
+description: The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). Runs the hypothesis→query→drill-down chain-of-evidence loop autonomously and returns a plain-English root cause + evidence + a concrete fix. TRIGGER on "why is my plugin slow to open", "find the slowest frames", "why is the UI stuttering", "why is my plugin using so much CPU", "which DSP node is expensive", "the load meter looks calm but CPU is pinned", or a named `pulp trace gpu-startup|gpu-health|gpu-probe` analysis. Ships Pulp-specific hints for dsp, frame, js, gpu, and cross-platform symptoms.
 requires:
   - .agents/skills/trace-analysis/references/hints_dsp.md
   - .agents/skills/trace-analysis/references/hints_frame.md
@@ -43,13 +43,14 @@ named query primitives. This harness decides *what to ask*; `trace-sql` is
 
 | Tier | Who | Entry | This skill's role |
 |---|---|---|---|
-| **L0** | novice, no agent | Planned named presets | not available yet |
+| **L0** | novice, no agent | `pulp trace gpu-startup\|gpu-health\|gpu-probe --trace FILE` | return the same bounded typed analysis used by MCP |
 | **L1** | novice, one-shot | A `.pftrace` plus a question | **run this protocol autonomously**, return narrated root cause + evidence + fix |
 | **L2** | expert, iterative | `pulp trace query "<sql>" --trace FILE` + this skill + `trace-sql` loaded | drive the full loop by hand on hard/multi-bottleneck cases |
 
-The live `Trace.query` / `Trace.explain` methods and named preset verbs are
-reserved and currently return `capability_unavailable`; do not treat them as
-successful analysis. L1 runs this workflow over real offline queries.
+The three GPU questions are closed, checked-in PerfettoSQL analyses; they never
+accept raw SQL or select a live target. Other planned named presets and live
+`Trace.query` / `Trace.explain` remain unavailable. L1 runs the broader workflow
+over real offline queries.
 
 ---
 
@@ -70,6 +71,14 @@ captured trace yet. For zero-install, run
 (Perfetto v57.2), SHA-256-verified, into `$PULP_HOME`. (`pulp tool install
 trace-processor` fetches the same pinned artifact via the tool registry.)
 
+The `pulp-rust-gpu-trace-analysis-integration` CTest is always registered. At
+test time its wrapper accepts an explicit executable
+`$PULP_TRACE_PROCESSOR` or the pinned v57.2 Pulp cache. A missing processor is
+a visible CTest SKIP (exit 77); an invalid explicit override is a failure; a
+resolved processor runs the full fail-closed Cargo integration suite. Do not
+condition test registration on the configure-time environment or accept an
+arbitrary PATH version for this SDK-matched integration gate.
+
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
 # ... reproduce (open the editor, sweep the knob, run the offline render) ...
@@ -87,10 +96,14 @@ fails closed. When selecting an exact broker-owned live instance, pass the same
 `--instance ID` to both `start` and `stop`; omission retains fail-closed
 unambiguous selection.
 
-**Before trusting the capture**, confirm it is not silently empty/truncated
-(ring overflow → empty trace): `SELECT DISTINCT category FROM slice`. No rows,
-or missing the category you asked for, means re-capture with a larger
-`--ring-mb` or a shorter window — not "nothing was slow."
+**Before trusting the capture**, confirm it is not silently empty/truncated.
+The three named GPU questions inspect processor-reported truncation,
+whole-trace slice count, unfinished slices, and positive Perfetto
+data-loss/no-flush stats automatically. For
+free-form analysis, query both `SELECT DISTINCT category FROM slice` and
+`SELECT name,value FROM stats WHERE severity='data_loss' AND value>0`. No rows,
+or a missing requested category, means re-capture with a larger `--ring-mb` or
+a shorter window—not "nothing was slow."
 
 When you already have a flushed `.pftrace` and no live session (the common case
 for a trace a user handed you), run SQL against the file directly — no inspector
@@ -110,6 +123,41 @@ To eyeball a trace in the Perfetto timeline instead of querying it, hand it to
 the UI (browsers block `file://`, so this serves it over loopback and opens the
 UI at it): `pulp trace open /tmp/pulp-<ts>.pftrace` (`--no-browser` prints the
 URL to paste; `--json` for agents).
+
+For the bounded GPU path, start with one named question. `gpu-startup` is
+deliberately `unverified` until A3 defines a measured budget; `gpu-health` and
+`gpu-probe` return pass/fail. Missing categories, unfinished slices, or invalid
+probe evidence return `unavailable` rather than a misleading pass. Read
+`cold_start_contributors` separately from `steady_state_contributors`. Treat
+`execution_state` as CPU/wait evidence only when
+`scheduler_evidence_available:true`, which requires complete interval coverage
+for at least one contributor; partial/absent coverage stays `unavailable`.
+That state means the wall-clock span does not prove blocking, so use the emitted
+platform-harness action. Treat an `unknown` timing phase as neither cold nor
+steady.
+
+```bash
+pulp trace gpu-startup --trace /tmp/pulp.pftrace --json
+pulp trace gpu-health  --trace /tmp/pulp.pftrace --json
+pulp trace gpu-probe   --trace /tmp/pulp.pftrace --json
+```
+
+Named GPU analysis is deliberately bounded at the external-tool boundary: the
+trace must be at most 512 MiB, `trace_processor` gets one 120-second wall-clock
+deadline, and stdout plus stderr may retain at most 4 MiB. A deadline, output
+overflow, or pipe-read failure terminates the entire Unix process group or
+Windows Job Object, including descendants. Do not replace this runner with
+`Command::output`, child-only termination, or an unbounded wait. If a valid
+trace hits a limit, narrow or shorten the capture first; use L2 offline queries
+to split a genuinely large investigation. Treat repeated limit failures as an
+actionable processor/query problem, not as evidence that rendering is slow.
+Before launch, the named analyzer opens without following the final
+symlink/reparse point and without blocking on a Unix FIFO/device replacement,
+then verifies a regular-file handle. It copies those bytes into an exclusive
+private snapshot (mode 0600 on Unix) and rejects replacement or resize using
+handle-derived filesystem identity (device/inode on Unix, volume/file ID on
+Windows). The processor receives only that snapshot pathname; do not restore a
+stat-then-reopen flow over the caller-controlled path.
 
 ---
 
@@ -461,3 +509,141 @@ validation on every machine whose adapter happened to offer timestamps.
 If you need per-recording GPU time in a capture, enable it explicitly on the
 host's Options. If a trace shows no `gpu_render_time`, check that flag before
 suspecting the adapter.
+
+## DPR experiment traces reuse A2T
+
+A4 DPR trials do not introduce a second profiler or a new ad-hoc SQL report.
+They must answer the named A2T Perfetto questions and carry the protected A3
+policy/campaign identity required by
+`docs/contracts/gpu-dpr-experiment-v2.schema.json`. V1 receipts are historical
+nonterminal input and count as zero v2 cells.
+Validate required categories from the DPR manifest before interpreting a run.
+Missing categories, unavailable real GPU timing where the question requires it,
+or a trace that cannot be bound to the trial artifact leaves the cell
+incomplete; it is not evidence that the cost was zero.
+
+`tools/scripts/gpu_dpr_runner.py` validates each cell's raw trace artifact,
+required categories, and named `gpu-startup`, `gpu-health`, and `gpu-probe`
+receipts before ingestion. It does not run substitute SQL or turn missing GPU
+timing into zero; missing or rejected trace evidence remains resumable.
+The v2 runner first snapshots the exact A2T-authorized analyzer and each
+producer trace into its owned run root. It hashes held regular files, rejects
+symlink/outside/substituted paths, and reruns that analyzer during ingestion,
+finalization, and complete-result validation. JSON text that merely names trace
+categories is not a Perfetto trace; browser cells must retain their real
+DevTools trace form. The state HMAC is integrity-only and cannot replace the
+nonce-bound trace receipt or protected-main dependency blobs.
+Each named answer must expose one `category_scope` matching the trial evidence
+ID and stable Perfetto process instance across all three questions. Categories
+from another PID/UPID or nonce do not satisfy the manifest. Treat the closed
+probe failure diagnostics `cpu_oracle_mismatch` and
+`magnitude_dispatch_failed` as causal failures even if adapter health was
+reported healthy.
+
+Each v2 mode emits 30 aligned trials of at least 240 frames in the same process
+as the correlated trace, plus five independently reset warm-ups. Its 20
+first-frame values are different: each comes from a
+fresh child process and has a typed ledger row binding attempt nonce/number,
+unique PID, producer/content/build digests, exact adapter identity, and the
+sample. The adapter and runner revalidate that ledger; a reused PID or mixed
+identity is incomplete evidence, even when the aggregate sample count is 20.
+Repeat the complete 84-cell matrix on the same frozen machine/provider/build;
+an isolated attractive trace cannot replace the same-unit repeat formulas.
+
+Trace timing does not bypass instrument validity. The raw metric must say
+whether it is measured, derived, or unavailable, and GPU timer evidence must
+include an empirical resolution plus five baseline and five eight-times-work
+calibration trials whose medians are distinguishable. Adaptive traces must bind
+the actual measured samples and scale-before/scale-after transitions; a mode
+label or requested scale alone is not observed adaptive behavior.
+
+## Correlating GPU-health startup snapshots
+
+The Pulp-owned product host creates distinct bounded GPU and trace evidence IDs
+and emits both on its first-visible lifecycle and health-transition spans. A
+role adapter must preserve those exact values in the health response and trace;
+it must not synthesize a replacement when either is absent. Keep
+`causal_attribution=unverified` and the startup verdict unverified until an A2T
+artifact supplies the required categories and is bound to the same product
+instance, build, frame identity, and trial. Dropped events, truncation, missing
+categories, timeout, or instance loss are fail-closed evidence, not zero-cost
+measurements. Perfetto production and provider mutation remain off the audio
+thread.
+
+For the agent slash surface, use one named question: `/trace gpu-startup
+--trace FILE`, `/trace gpu-health --trace FILE`, or `/trace gpu-probe --trace
+FILE`. Preserve the corresponding `pulp trace ... --json` output for the A2T
+receipt. A human Perfetto UI inspection is useful additional evidence but does
+not replace the digest-bound machine result or its invalid-trace negative.
+
+For an A3 external role, the executable selected by
+`PULP_A3_CAMPAIGN_PRODUCER` must emit the campaign trace with the exact health
+IDs. The checked-in external adapter snapshots that producer but does not run
+substitute SQL or create an evidence ID. Its role producer pins the exact
+checked-in source-bound analyzer wrapper, prepares it with fresh config-free
+Cargo state and retained toolchain/source/output digests, proves its invalid-trace negative,
+and derives the typed campaign analysis only when the named replay selects the
+health result's exact evidence ID and the producer-challenged trace-host PID. The
+structural replay is normally `unverified`/exit 2 because it has no A3 budget;
+keep it separate from the health document's budget verdict. A failing analyzer
+result is terminal, and the producer may not overwrite either verdict. Final
+same-instance A2T replay and human Perfetto UI correlation
+are added only from the selected causal campaign after all role runs complete.
+The canonical v2 matrix has exactly seven entry roles: `pulp-standalone`,
+`forge-modular-standalone`, `forge-modular-auv2-logic`,
+`forge-modular-vst3-reaper`, `forge-modular-clap-reaper`,
+`headless-reference`, and `constrained-adapter`. Each entry point pins its
+lifecycle driver and rejects analyzer evidence IDs that differ from the exact
+health instance. The driver still owns capture; the entry point cannot
+manufacture a Perfetto file or native-present event. Do not collect until the
+protected product policy binds all role thresholds and the constrained adapter,
+configuration, support matrix, and authentic A1 evidence; the current canonical
+receipt is truthfully blocked on those two inputs.
+
+The product health-transition spans are real runtime producers even though the
+macros compile out with `PULP_TRACING=OFF`. Terminal A3 separately requires the
+four-state pre-change/compile-out/compiled-in-idle/active control documented in
+`docs/validation/gpu-first-visible-a3-acceptance.md`: 5 warmups, 30 measured,
+20 fresh-process observations per state, zero xruns/audio-thread trace events,
+and derived median/p95 ceilings. The offline A2T no-producer disposition does
+not waive this product control.
+
+Collect every state with `gpu_first_visible_a3_trace_producer_overhead.py
+collect-state`, never by invoking the product driver directly. The collector
+owns 55 live challenge/ack handshakes per state and binds exact executable/start
+identity. Active replay must prove both immutable packages: health-first-visible
+at `8175bd…` and the complete b4ba exact 20-signature `state`/`render`/`js`
+inventory. Acquire/submit/present are mandatory per sample; the other 17
+signatures are counted and an unobserved signature stays explicitly
+not-covered, never zero-cost. Use the exact v57.2 `trace_processor_shell`;
+production Chrome JSON is forbidden.
+The request also pins a candidate-relative `state_build_driver`. Before timing,
+the collector exports the exact row source and default-deny rebuilds it without
+the measured binary, ambient build output, or network; rebuilt bytes and the
+compile-in sentinel must match the requested state. Preserve the source
+archive, closed build request/receipt, product, logs, and digest/version-bound
+toolchain snapshots. A direct binary or build-driver assertion cannot pass.
+
+## Correlate a catalog recipe with Perfetto
+
+Begin with `pulp gpu recipes list --symptom <exact-token> --json`, run the
+selected baseline twice, then its seeded negative control. Carry the emitted
+`gpu_evidence_id` into the closed `gpu-probe` trace question so a scheduling or
+frame contributor can be tied to the exact oracle evidence rather than to a
+filename guess. Exit 2 remains unavailable/unverified and cannot be interpreted
+as zero cost. The separate exact-instance `dev.pulp.gpu/health.read@1` control
+operation is a cheap live snapshot; it neither starts a trace nor proves an
+offline catalog recipe callable.
+
+Perfetto localizes a stage; it does not automatically prove a platform event
+race. A useful trace may show inexpensive paint work (about 1 ms) alongside
+resize spans clustered near a 60 Hz frame (about 15.7 ms p50 and 18.7 ms p99),
+which focuses the next test on acquire, present, compositor, or callback order.
+Then use a deterministic AppKit/GPU event-order harness and a planted old-
+behavior negative control to prove whether a redundant same-size resize or
+retained-cover lifetime caused the symptom. Finish with real product proof,
+such as a 60 fps recording plus interaction/feel validation. Report those as
+three distinct links: trace localization, platform-race proof, and product
+acceptance. Never describe Perfetto alone as having found the root cause.
+
+For A3 v2, do not validate a submitted analysis sidecar in isolation. Rehash the exact `.pftrace`, verify prepared-analyzer provenance, run that analyzer, and require its evidence/process scope and capture completeness to agree with the digest-bound campaign, category set, and sidecar bindings.

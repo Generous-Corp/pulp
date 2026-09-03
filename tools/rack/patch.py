@@ -29,6 +29,7 @@ much smaller thing layered on top by the generator.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import os
@@ -43,6 +44,7 @@ import attempt_artifacts
 import cv_depth
 import maker_intent
 import run_state
+import signal_path
 from module_kinds import is_audio_interface
 
 
@@ -1891,6 +1893,13 @@ def explain(patch: dict, inv: dict, why: dict | None = None) -> str:
         out.append("MODULATION THAT MAY NOT BE HEARD")
         out.extend(f"  {note}" for note in quiet)
         out.append("")
+    # A gain stage or a jack role that rests on a name heuristic, or a
+    # repair too ambiguous to make, is told to the reader the same way.
+    blocked = signal_path.advisory_notes(patch, inv)
+    if blocked:
+        out.append("SIGNAL THAT MAY NOT GET THROUGH")
+        out.extend(f"  {note}" for note in blocked)
+        out.append("")
     return "\n".join(out).rstrip()
 
 
@@ -2212,6 +2221,12 @@ def prepare_and_lint(patch: dict, inv: dict,
     # Runs after materialize_module_state, whose data_defaults are applied
     # with setdefault and therefore do NOT displace an authored false.
     run_state.start_stopped_modules(patch, inv, module_state_rules())
+    # A carrier can reach a real jack at a valid index and still be
+    # inaudible: a level of 0 multiplies it away, and a modulation jack
+    # never carried it in the first place. Both are legal files that make
+    # no sound, so they are repaired here rather than judged later.
+    signal_path.open_gain_stages(patch, inv)
+    signal_path.route_carriers_to_signal_inputs(patch, inv)
     patch = reflow(patch, inv)
     return patch, list(dict.fromkeys(physical_errs + lint(patch, inv)))
 
@@ -2441,6 +2456,10 @@ def lint(patch: dict, inv: dict) -> list[str]:
     errs.extend(cv_depth.dead_edge_errors(patch, inv))
     errs.extend(run_state.stopped_run_flag_errors(patch, inv,
                                                   module_state_rules()))
+    # Blocking only where the Audio port role was read rather than guessed;
+    # an inferred role is reported by explain(). Both writers above run
+    # first, so this catches a regression in that ordering.
+    errs.extend(signal_path.dead_signal_path_errors(patch, inv))
 
     # A patch that reaches no audio interface makes no sound, which is a far
     # more common generated failure than a malformed file.
@@ -3358,6 +3377,49 @@ def rack_plugin_dirs() -> list[str]:
             os.path.isdir(os.path.join(rack_user, name))]
 
 
+def licence_user_dir() -> tuple[str | None, int]:
+    """A Rack user directory an offline harness may point `asset::init()` at.
+
+    Modules bought through the VCV Library resolve a cached key at
+    `<asset::userDir>/licenses/<plugin>.vcvkey`. `asset::userDir` is empty
+    until `asset::init()` runs, so in a harness that never calls it the lookup
+    goes to `/licenses/...`, finds nothing, and the module decides it is
+    unlicensed -- whereupon it runs and writes zero to every output. It logs
+    nothing and constructs normally, so the patch simply reads as silent and
+    the blame lands on the patch or on the module. An offline check that skips
+    this measures the licence check rather than the DSP.
+
+    The directory returned is ours, with `licenses` symlinked to Rack's, so
+    keys resolve where Rack resolves them and nothing is written into Rack's
+    own directory. The key count is returned because zero is a real state: it
+    means commercial modules are being measured unlicensed, which is a
+    property of the machine rather than of any module.
+    """
+    real = None
+    for base in (os.path.expanduser("~/Library/Application Support/Rack2"),
+                 os.path.expanduser("~/.local/share/Rack2"),
+                 os.path.expanduser("~/.Rack2")):
+        candidate = os.path.join(base, "licenses")
+        if os.path.isdir(candidate):
+            real = candidate
+            break
+    if real is None:
+        return None, 0
+    staged = os.path.join(CACHE_DIR, "rack-user-dir")
+    try:
+        os.makedirs(staged, exist_ok=True)
+        link = os.path.join(staged, "licenses")
+        if os.path.islink(link) and \
+                os.path.realpath(link) != os.path.realpath(real):
+            os.unlink(link)
+        if not os.path.islink(link) and not os.path.exists(link):
+            os.symlink(real, link)
+        keys = len([f for f in os.listdir(real) if f.endswith(".vcvkey")])
+    except OSError:
+        return None, 0
+    return staged, keys
+
+
 def install_module(plugin: str, version: str, premium: bool,
                    entitled: bool = False) -> tuple:
     """Fetch a library plugin into Rack's plugin directory.
@@ -3876,6 +3938,8 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict,
 
 
 GATE_SRC = os.path.join(HERE, "patch_gate.cpp")
+# Kept only as the pre-content-addressed cache location, so old installations
+# can coexist with the new cache without being mistaken for current output.
 GATE_BIN = os.path.join(CACHE_DIR, "patch-gate")
 #: The headers that come with the gate, so a change to the measurement rebuilds
 #: it. Comparing the binary against patch_gate.cpp alone left an edited
@@ -3890,6 +3954,32 @@ GATE_HEADERS = [os.path.join(HERE, n) for n in
 import fetch_sdk as _fetch_sdk
 
 SDK = _fetch_sdk.installed_at() or _fetch_sdk.DEST
+
+
+def gate_source_identity() -> str:
+    """Identity of the gate executable's actual build inputs.
+
+    An mtime comparison cannot identify copied release sources: packaging and
+    installation routinely preserve timestamps older than a gate compiled by
+    the previous release. That made a fixed ``patch_gate.cpp`` silently reuse
+    its predecessor forever. Source bytes are cheap to hash and unambiguous.
+    The Rack library stat also prevents carrying one SDK's executable across a
+    replaced SDK without hashing the whole dylib on every patch build.
+    """
+    h = hashlib.sha256(b"forge-patch-gate-v2\0")
+    for path in [GATE_SRC] + GATE_HEADERS:
+        h.update(os.path.basename(path).encode("utf-8") + b"\0")
+        with open(path, "rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                h.update(chunk)
+    rack_lib = os.path.join(SDK, "libRack.dylib")
+    try:
+        stat = os.stat(rack_lib)
+        h.update(os.path.realpath(SDK).encode("utf-8") + b"\0")
+        h.update(f"{stat.st_size}:{stat.st_mtime_ns}".encode("ascii"))
+    except OSError:
+        h.update(b"no-rack-library")
+    return h.hexdigest()
 
 
 def ensure_audibility_sdk(announce=print) -> str:
@@ -3942,24 +4032,36 @@ def build_gate() -> tuple[str | None, str]:
     cause sends the next hour to the wrong place.
     """
     import subprocess
-    newest_src = max(os.path.getmtime(p) for p in [GATE_SRC] + GATE_HEADERS
-                     if os.path.exists(p))
-    if os.path.exists(GATE_BIN) and os.path.getmtime(GATE_BIN) > newest_src:
-        return GATE_BIN, ""
     if not os.path.exists(os.path.join(SDK, "include", "rack.hpp")):
         return None, f"no Rack SDK at {SDK}"
+    try:
+        identity = gate_source_identity()
+    except OSError as error:
+        return None, f"cannot identify the gate sources: {error}"
     os.makedirs(CACHE_DIR, exist_ok=True)
+    gate_bin = os.path.join(CACHE_DIR, f"patch-gate-{identity[:24]}")
+    if os.path.exists(gate_bin):
+        return gate_bin, ""
     # Still one file against the SDK and nothing else. The behaviour headers sit
     # beside this one, which is what -I{HERE} finds; they pull in no library, so
     # the gate keeps the property that the ONLY thing standing between it and a
     # machine that can build it is the Rack SDK.
+    temporary = f"{gate_bin}.pending-{os.getpid()}"
     r = subprocess.run(
-        ["clang++", "-std=c++20", "-O1", "-o", GATE_BIN, GATE_SRC,
+        ["clang++", "-std=c++20", "-O1", "-o", temporary, GATE_SRC,
          f"-I{HERE}", f"-I{SDK}/include", f"-I{SDK}/dep/include", "-DARCH_MAC",
          os.path.join(SDK, "libRack.dylib")],
         capture_output=True, text=True)
     if r.returncode == 0:
-        return GATE_BIN, ""
+        # A process killed before this rename leaves only an untrusted pending
+        # file. Concurrent identical builders may both publish the same bytes;
+        # neither can publish a binary for a different source identity here.
+        os.replace(temporary, gate_bin)
+        return gate_bin, ""
+    try:
+        os.unlink(temporary)
+    except OSError:
+        pass
     return None, "the gate did not compile:\n" + (r.stderr or r.stdout).strip()
 
 
@@ -4179,7 +4281,8 @@ GATE_CRASHED = "the audibility gate CRASHED"
 LONG_HORIZON_MARKER = "FORGE_LONG_HORIZON_JSON: "
 
 
-def gate_crash_report(signal: int, patch: dict) -> str:
+def gate_crash_report(signal: int, patch: dict,
+                      gate_binary: str | None = None) -> str:
     """What to say when the gate dies instead of judging.
 
     Names the plugins it was asked to load, because the crash is in one of them
@@ -4193,7 +4296,7 @@ def gate_crash_report(signal: int, patch: dict) -> str:
             f"could not be run.\n"
             f"  It was loading: {', '.join(plugins)}\n"
             f"  Reproduce it with:\n"
-            f"    {os.path.join(CACHE_DIR, 'patch-gate')} <patch.vcv> "
+            f"    {gate_binary or GATE_BIN} <patch.vcv> "
             f"{plugin_dirs[0] if plugin_dirs else '<plugin dir>'}")
 
 
@@ -4788,7 +4891,12 @@ def audibility(patch: dict,
             env["PATCH_GATE_CHECKPOINTS"] = ",".join(
                 f"{checkpoint:g}" for checkpoint in checkpoints)
             timeout = max(timeout, checkpoints[-1] + 126.0)
-        r = subprocess.run([gate, tmp, pdir], capture_output=True, text=True,
+        # Without the user directory a commercially licensed module cannot
+        # find its key, silences itself, and the patch reads as silent for a
+        # reason that has nothing to do with the patch.
+        user_dir, _keys = licence_user_dir()
+        argv = [gate, tmp, pdir] + ([user_dir] if user_dir else [])
+        r = subprocess.run(argv, capture_output=True, text=True,
                            timeout=timeout, env=env)
         # A CRASH IS NOT SILENCE. The gate dies on SIGSEGV loading some
         # third-party plugins, and a negative return code with no output was
@@ -4797,7 +4905,8 @@ def audibility(patch: dict,
         # ended in "gave up after 3 attempts" with nothing anywhere saying a
         # process had died. Six generations were spent on that reading.
         if r.returncode < 0:
-            return UNMEASURED, gate_crash_report(-r.returncode, patch)
+            return UNMEASURED, gate_crash_report(
+                -r.returncode, patch, gate_binary=gate)
         # 2 is the gate refusing its own configuration -- a bad
         # PATCH_GATE_SET name, say. It never looked at the patch, so it has no
         # opinion about it, and reading that as silence would reject a good

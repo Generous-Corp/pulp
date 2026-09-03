@@ -1,0 +1,103 @@
+{
+  "schema": "pulp.gpu-probe-result.v1",
+  "version": 1,
+  "gpu_evidence_id": "6825a3291dcd2f0a786c33de2fb91bc3",
+  "recipe_id": "renderer3d.hardcoded-cube.v1",
+  "source_digest": "d66c9d9583d3e6db88c9cf7c98b7aba0949975ad637e9158d74d6554a4d4f06e",
+  "signature_digest": "d7b831a9e4ca7a4aad64d13e6a8d4556ec030881145ca714aea1b37c5cd5d4d0",
+  "dimensions": {
+    "width": 32,
+    "height": 32,
+    "work_items": 1024
+  },
+  "seed": 5928230539327963137,
+  "clock": "fixed-step-0",
+  "input_format": "rgba32float",
+  "output_format": "rgba8-srgb",
+  "encoding": "png",
+  "tolerance": {
+    "absolute": 0.00392156862745098,
+    "relative": 0.0
+  },
+  "adapter_policy": "hardware-preferred",
+  "adapter": {
+    "status": "unverified",
+    "class": "unknown",
+    "backend": "Dawn/WebGPU",
+    "name": "Native Dawn Adapter (Metal)",
+    "vendor": "Dawn",
+    "architecture": "Metal",
+    "device": null
+  },
+  "numeric_sample_count": 0,
+  "mutation": "pre-submit-framebuffer-downscale",
+  "verdict": "fail",
+  "passes": [
+    {
+      "sequence": 0,
+      "name": "adapter",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "adapter_acquired"
+    },
+    {
+      "sequence": 1,
+      "name": "render",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "render_submitted"
+    },
+    {
+      "sequence": 2,
+      "name": "readback",
+      "verdict": "pass",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "readback_completed"
+    },
+    {
+      "sequence": 3,
+      "name": "content",
+      "verdict": "fail",
+      "work_completed": true,
+      "expected": null,
+      "observed": null,
+      "absolute_error": null,
+      "code": "portable_structure_mismatch"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "content-oracle.json",
+      "kind": "json",
+      "mime": "application/json",
+      "bytes": 176,
+      "sha256": "675c03d4786b6d1cdd45cc4e6134c44e8d13c5bf4d30e71b3f687bce57c0bd03"
+    },
+    {
+      "name": "final.png",
+      "kind": "image",
+      "mime": "image/png",
+      "bytes": 1298,
+      "sha256": "bd8025de40e8f6fdef16a95c1d47a19e0e0431aad9e8e4f4b8cf73d795360599"
+    },
+    {
+      "name": "observed.rgba8",
+      "kind": "image",
+      "mime": "application/octet-stream",
+      "bytes": 4096,
+      "sha256": "65364990ba777315a25f6ab4d21de27bf4b742ff9ce5f720ad47084c18e15f66"
+    }
+  ],
+  "recommendations": [
+    "Inspect the named render/readback/content pass before comparing screenshots."
+  ]
+}

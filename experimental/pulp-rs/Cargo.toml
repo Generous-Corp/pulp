@@ -31,6 +31,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow     = "1"
 clap       = { version = "4", features = ["derive"] }
+command-group = "5.0.1"
 is-terminal = "0.4"
 regex      = "1"
 semver     = "1"
@@ -55,6 +56,9 @@ toml_edit  = "0.22"
 # painless. See `src/update.rs` for the trait that keeps tests off the
 # network.
 ureq       = { version = "2", default-features = false, features = ["tls", "json"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2"

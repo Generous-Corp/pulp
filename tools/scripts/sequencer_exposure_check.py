@@ -71,6 +71,9 @@ E0_INFRASTRUCTURE_PATHS = {
     "tools/scripts/sequencer_exposure_check.py",
     "tools/scripts/test_sequencer_exposure_check.py",
 }
+SHARED_CROSS_DOMAIN_PATHS = {
+    "docs/reference/capability-control.md",
+}
 
 
 def _is_nonempty_string(value: Any) -> bool:
@@ -893,7 +896,8 @@ def validate_transition(
         path for path in changed
         if path not in E0_INFRASTRUCTURE_PATHS and
         (
-            is_sequencer_owned_path(path) or path in documented or
+            is_sequencer_owned_path(path) or
+            (path in documented and path not in SHARED_CROSS_DOMAIN_PATHS) or
             path in (semantic_added_paths or set())
         )
     )

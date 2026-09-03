@@ -8,11 +8,12 @@ is usable today. Live lifecycle control is broker-authorized and fail-closed.
 
 Tracing is a dev-only tool. Never ship a plugin with `PULP_TRACING` enabled.
 
-## Four paths (pick by what you have)
+## Five paths (pick by what you have)
 
 | You have | Path | Tool |
 |---|---|---|
 | Authorized control session + want a DSP flamegraph | **Experimental live trace** | Start/stop through canonical control |
+| An A3 GPU startup trace + bounded question | **Named A2T analysis** | `/trace gpu-startup\|gpu-health\|gpu-probe --trace FILE.pftrace` |
 | A `.pftrace` + a question | **Query** | `pulp trace query "<sql>" --trace FILE.pftrace` |
 | Want to hand an agent / human the raw file | **Return the path** | `pulp trace stop` prints it; open in ui.perfetto.dev |
 | A UI hitch to correlate | **Frame trace + motion join** | trace `render,layout` while a motion trace runs; query on shared `trace_id` |
@@ -35,6 +36,42 @@ pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" \
   --trace /tmp/pulp-trace.pftrace
 
 ```
+
+## Named A2T GPU analysis
+
+Use the slash command with one exact bounded question; it delegates to the same
+typed installed analysis surface used by the CLI/MCP parity receipt:
+
+```text
+/trace gpu-startup --trace /tmp/pulp.pftrace
+/trace gpu-health --trace /tmp/pulp.pftrace
+/trace gpu-probe --trace /tmp/pulp.pftrace
+```
+
+The underlying reproducible commands are:
+
+```bash
+pulp trace gpu-startup --trace /tmp/pulp.pftrace --json
+pulp trace gpu-health  --trace /tmp/pulp.pftrace --json
+pulp trace gpu-probe   --trace /tmp/pulp.pftrace --json
+pulp trace open /tmp/pulp.pftrace
+```
+
+The three named verbs run the checked-in PerfettoSQL views and share their
+typed result with MCP `pulp_trace_analyze`. `gpu-startup` remains `unverified`
+until the matching A3 product budget is ratified. Empty, truncated,
+never-flushed, CPU-raster-host, and wrong-category captures fail closed; they
+are not zero GPU cost.
+
+For A3, preserve the exact trace, analyzer, JSON result, and same-instance GPU
+and trace evidence IDs. An `unavailable` or `unverified` result, a different
+process instance, missing categories, dropped events, or a digest mismatch is
+nonterminal; do not replace it with ad-hoc SQL or a visual impression from the
+Perfetto UI. Human UI review is additional digest-bound evidence, not the
+machine result. Keep the returned evidence IDs when moving from the ranked
+Perfetto cause to a focused host/GPU harness and planted regression: Perfetto
+localizes the expensive stage, but it does not by itself prove an application
+state-machine fix.
 
 ## Control methods
 

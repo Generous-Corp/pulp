@@ -1,0 +1,300 @@
+# GPU trace-analysis overhead acceptance
+
+`tools/scripts/gpu_trace_overhead_acceptance.py` measures the closed offline
+GPU questions through an installed `pulp`/`pulp-mcp` sibling pair. It runs five
+warm-ups, 30 alternating paired trials, and 20 alternating fresh-process
+trials by default. The receipt retains every raw duration, executable and trace
+digest, host/GPU identity, median, p95, median absolute deviation, and a paired
+bootstrap confidence interval.
+
+This harness answers a deliberately narrow question: how much wall time does
+the installed offline analysis path take, and do CLI and MCP return identical
+typed evidence from the same SDK-matched trace processor and saved artifact?
+It does not claim that the saved fixture used this machine's GPU.
+
+```bash
+python3 tools/scripts/gpu_trace_overhead_acceptance.py \
+  --build-dir /external/exact-head-release-build \
+  --install-prefix /external/new-a2t-install-prefix \
+  --trace test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace \
+  --trace-processor "$HOME/.pulp/tools/trace-processor/v57.2/mac-arm64/trace_processor_shell" \
+  --question gpu-startup \
+  --source-revision "$(git rev-parse HEAD)" \
+  --mcp-source-revision "$(git rev-parse HEAD)" \
+  --repository "$PWD" \
+  --plan-revision "$PLAN_REVISION" \
+  --plan-sha256 "$PLAN_SHA256" \
+  --planning-repository "$PWD/planning" \
+  --human-review-document "$HUMAN_REVIEW_DOCUMENT" \
+  --output /tmp/gpu-trace-overhead.json
+```
+
+`$HUMAN_REVIEW_DOCUMENT` must name a dedicated, independently committed
+same-artifact review document satisfying the contract below. The historical M3
+agent receipt is not a valid value. Binding such a document remains structural;
+it is not local terminal authority.
+
+The recorder requires `--repository` to be the exact clean canonical Pulp
+worktree containing the executing recorder, verifier, and source-loaded support
+modules at `--source-revision`; an adjacent or older checkout is rejected even
+when it is clean. The receipt binds those executing files as exact Git blobs.
+It also requires an external single-config Release build configured from
+that exact checkout with the same GPU/Scene3D/Three.js/V8/Rust feature contract
+as A2. `--install-prefix` must not exist. The recorder refreshes the Rust CLI,
+C++ delegate, and MCP targets after publishing an unpredictable staging
+directory to that final path with macOS no-replace rename semantics and
+retaining the exact created inode. Before reconfiguration it retains every
+tracked regular-file/symlink inode and Git blob in the exact Pulp source tree.
+It then reconfigures the external build directory, retains the regenerated
+CMake cache, Ninja graph, CMake modules, and configure-time headers, runs a
+forced CMake clean, removes the Rust Cargo target cache, and requires all three
+measured outputs to be absent before rebuilding them. The source and generated
+input descriptors remain live across clean, build, install, replay, timing,
+and publication. It also resolves and retains the complete selected Skia/Dawn
+and V8 provider trees (including the exact Skia/Dawn archives, V8 headers, and
+V8 runtime) before the clean build. Each binary provider must resolve from the
+exact CMake/Ninja-consumed package root, match a fixed supported platform
+layout, carry
+the release-asset generation stamp pinned by `tools/deps/manifest.json`, and
+contain no top-level directory beyond the fixed package entries and the exact
+directory derived from the consumed archive paths; an arbitrary `*-gpu` name
+is not an allowlist. If FindSkia consumes the adjacent
+`SKIA_DIR/../skia-src` layout, the recorder retains that complete source tree as
+a third provider; broad provider roots and escaping symlinks fail closed. Those
+provider descriptors stay live through every measured launch. Immediately
+after the build it retains all three exact
+build-output inodes before installation, then retains the installed build
+stamp, CLI, delegate, MCP, trace, and trace-processor inodes through final
+publication. Every claim is rehashed and sealed with macOS vnode mutation
+monitoring, so replace-and-restore races remain observable across complete
+path-ancestor chains. Each installed executable must be byte-identical to its
+retained exact build-tree output. Its
+receipt binds the CMake cache digest, build settings, targets, installed/build
+digests, and positive byte counts in addition to the installed
+`build_info.hpp` source stamp; a current header beside stale or mixed binaries
+therefore fails closed. `--output` must likewise be a new nonsymlink path under
+an existing directory outside the Pulp, planning, build, and install trees; the
+recorder retains that no-follow parent descriptor before any build or replay,
+keeps it live for the complete campaign, and publishes a fsynced staged inode
+by a relative no-replace link. It then rehashes the published bytes against the
+generated payload, rejecting parent, staged-file, or in-place content swaps
+without dirtying or overwriting measured source. During
+measurement `PATH` excludes their prefix and all checkout build directories;
+MCP therefore succeeds only through its installed absolute-sibling binding.
+Semantic parity is checked on every warm-up and measured trial. Both binaries
+must be built from the same source revision; a distinct
+`--mcp-source-revision` is required and accepted only when it exactly matches
+the lowercase 40-hex `--source-revision`. The installed build stamp is parsed
+and checked rather than trusting those declarations alone. The accepted plan
+is likewise read from its immutable Git object and checked against its Git blob
+and SHA-256 identities.
+
+The A2T-scoped no-added-producer disposition is not caller-selected and does not label
+whole mixed-purpose commits as A2T work. The recorder loads the checked-in
+`gpu_trace_overhead_scope.json` contract, verifies its canonical-plan 29-path
+implementation identity, and recomputes an immutable-pre-A2T-base to exact
+source-head tree delta over the complete current A2T path contract. It records
+exact base/source blobs plus path-limited touching history. A commit that also
+changes unrelated A3/A4/tooling code contributes only its A2T path delta; its
+other paths neither contaminate nor justify this disposition. Recorder and
+verifier changes at the final source head are included through their exact
+source blobs without requiring a self-referential commit list.
+
+Manifest completeness is independently derived from immutable Git objects:
+the accepted patch's exact 29 paths, every tracked Perfetto-GPU fixture, the
+bounded Rust trace-command and A2T acceptance-script families, and exact stable
+A2T schema/view/tool identifiers within fixed behavior roots. The discovery
+roots include the plan's product-producer prefixes, where the required
+source annotation `"gpu_evidence_id"` (serialized by Perfetto as
+`debug.gpu_evidence_id`) plus a `PULP_TRACE_*` macro identifies a real producer.
+Generic symptom prose such as “slow GPU startup” is not an identifier and
+cannot expand the scope by substring accident.
+
+The rebased immutable A2T base already contains the input-to-present latency
+package's render-category `gpu_acquire`, `gpu_submit`, and `gpu_present`
+stages. That pre-base package remains bound through A3's immutable authority,
+but it is not a post-base producer delta. A3's health producer in
+`inspect/src/control_gpu_health_provider.cpp` is the sole post-base producer
+exposed under `non_a2t_product_producers`, with its exact blob, introducing
+revision, and immutable-source path authority. The recorder neither hides that
+path nor uses it to justify A2T's disposition. Any post-base product producer
+without independently checked package authority fails closed. Both owner
+packages must provide their own
+tracing-off, tracing-on/idle, and active-capture overhead/control evidence;
+A2T records that obligation as external rather than pretending to evaluate it.
+
+New v2 receipts also bind `integration_head` plus the exact Git blobs for the
+Rust analyzer, all three closed PerfettoSQL views, CLI/MCP dispatch surfaces,
+processor pin sources, recorder/verifier, the A3 package-scope authority used
+only to classify the later producer, and every checked-in trace in the required
+replay matrix. Validation resolves those blobs at
+the historical integration head, current `HEAD`, and the current checkout, so
+an analyzer, SQL, MCP projection, or fixture edit makes the receipt stale even
+when its saved timing JSON is unchanged. The committed
+`m3-a2t-offline-analysis-20260828.json` predates this field and is intentionally
+stale after the current analyzer hardening; regenerate it only with the final
+installed CLI/MCP and pinned trace-processor replay.
+
+The Rust unit contract and real fixture integration wrapper are always
+registered when the experimental Rust CLI is enabled. The wrapper resolves an
+explicit `PULP_TRACE_PROCESSOR` first, then Pulp's canonical pinned cache, and
+returns visible CTest skip code 77 when neither exists. A configured test is
+therefore never silently absent. The acceptance recorder additionally rejects
+a processor outside the canonical cache, with the wrong platform/version/hash,
+or whose `--version` output does not match Pulp's v57.2 SDK dependency.
+
+Before timing, the recorder replays the healthy, shader-compile failure,
+blank-readback failure, device-loss, acquire/present wall-time-only,
+first-frame pipeline/upload stall, incomplete-capture, and wrong-category
+fixtures twice through the installed CLI and once through the installed MCP.
+It requires deterministic checked-view replay, typed exit/`isError` behavior,
+text/structured MCP identity, all semantic fields, and the intended
+verdict/stage/action. The structural verifier correlates the timed result to
+that same replay row and checked-in artifact digest; it does not certify that a
+saved JSON object came from a live recorder process.
+
+The recorder derives the complete path-scoped A2T tree delta from the immutable
+pre-A2T boundary to the exact measured source head. A caller cannot shorten or
+select its history. The manifest's stable patch ID binds the canonical plan's
+original/replayed implementation to its integrated equivalent; later changes
+are bound by their exact final blobs and path-limited touching history. This
+scope contains offline CLI/MCP/SQL/docs/tests and no A2T-scoped
+runtime/render/view/format or Inspector producer delta. Therefore A2T-scoped
+new-producer runtime overhead is
+`not-applicable-no-a2t-scoped-producer-cost`, not a
+timing pass and not a statement that the final tree contains no producers. The
+receipt binds
+the exact canonical plan revision and digest that accepts this Horizon-A
+disposition while preserving the full producer/xrun protocol for B6.
+
+When B6 adds Vellum-owned render producer instrumentation, compare the same
+optimized product workload and adapter against the pre-change baseline in
+three configurations:
+
+1. tracing compiled out;
+2. tracing compiled in with no active session; and
+3. an active bounded 128 MiB capture.
+
+Use five warm-ups and 30 measured trials for steady-state work plus 20
+fresh-process trials for startup. Preserve raw samples and the same identity
+fields as this receipt. Grade the median/p95 deltas against the canonical plan's
+1%/2%, 2%/5%, and 5%/10% ceilings respectively, and prove the active capture
+adds no xrun. Offline analysis cannot waive or stand in for that B6 gate.
+
+## Human Perfetto correlation
+
+Automation proves that the typed result cites the saved artifact and emits a
+`ui_correlation.open_command` plus bounded search terms. The committed M3
+receipt records an agent observation against the exact `9fd7cf0d...` artifact:
+the recorded Perfetto selection was `gpu_pipeline_prepare` (1.8 ms) and
+`gpu_resource_upload` (0.9 ms) on the expected GPU track, with the shared
+`4444...4444` evidence ID and expected frame/sequence fields. Its reviewer is
+`Codex visual acceptance agent`, so it is not human acceptance and cannot close
+the plan's human same-artifact gate. The fixture was delivered through
+Perfetto's official localhost embedding protocol with `localOnly`
+browser-memory handling; it was not uploaded or shared. Current evidence
+therefore remains nonterminal until a named person reviews that same artifact.
+
+Regenerating analyzer timings does not repeat or silently manufacture visual
+acceptance. For a `gpu-startup` rerun, pass a dedicated document at
+`docs/validation/gpu-trace-overhead/human-reviews/<trace-sha256>.json` with
+`--human-review-document`. Its schema is
+`pulp.gpu-trace-human-review.v1`, closed and installed from
+`docs/contracts/gpu-trace-human-review-v1.schema.json`; it binds the question, artifact SHA-256,
+review date, Perfetto UI revision/delivery, exact observed spans, and a bounded
+review authority object naming the person and Git author. The document's
+last-touch commit must be a prior single-parent commit that changes exactly that
+one review file, and the blob must remain identical at the measured source
+revision, one of its direct parents, current `HEAD`, and the checkout. The
+filename must equal the trace digest. Reviewer identities are Unicode-
+normalized, split into alphanumeric tokens, and stripped of numeric model
+suffixes before checking; names such as `GPT5`, `ChatGPT5`, `Claude3`,
+`Codex5`, and `Gemini2`, as well as other model, assistant, agent, automation,
+or bot identities, fail closed,
+but the name filter is only defense in depth: the dedicated path, immutable
+single-file publication commit, exact blob, and same-artifact observations are
+the actual local evidence boundary. The structural verifier re-reads that Git
+blob; it never treats the new receipt's own fields as authority. It records
+`acceptance.human_perfetto_ui_correlation: bound-independent-review-evidence`
+when that structural binding succeeds. A missing object, different question,
+mixed publication commit, changed artifact, or mismatched Git author fails
+closed.
+The current top two typed contributors must also match the human-observed span
+name, duration, evidence ID, frame index, sequence, and health state exactly.
+Do not pass this option for `gpu-health` or `gpu-probe`; those runs cannot
+inherit a startup UI review.
+
+The dedicated document shape is:
+
+```json
+{
+  "schema": "pulp.gpu-trace-human-review.v1",
+  "question": "gpu-startup",
+  "artifact_sha256": "<64 lowercase hex>",
+  "review_authority": {
+    "kind": "independent-human-same-artifact-review",
+    "reviewer_kind": "human",
+    "reviewer": "<person who directly inspected the trace>",
+    "git_commit_author": "Git Name <email@example.com>",
+    "attestation": "<bounded first-person statement describing the direct inspection>"
+  },
+  "reviewed_utc": "<UTC timestamp>",
+  "ui_revision": "<Perfetto UI revision>",
+  "delivery": "<how the local artifact reached Perfetto UI>",
+  "observed_spans": [
+    {
+      "name": "gpu_pipeline_prepare",
+      "duration_ns": 1800000,
+      "gpu_evidence_id": "<32 lowercase hex>",
+      "frame_index": 0,
+      "sequence": 1,
+      "health_state": "healthy"
+    },
+    {
+      "name": "gpu_resource_upload",
+      "duration_ns": 900000,
+      "gpu_evidence_id": "<same 32 lowercase hex>",
+      "frame_index": 0,
+      "sequence": 2,
+      "health_state": "healthy"
+    }
+  ]
+}
+```
+
+The Git identity and attestation are immutable structural claims, not proof of
+personhood. Protected final acceptance must verify the human and integration
+authority independently.
+
+After recording, replay structural integrity from the exact integration
+checkout:
+
+```bash
+python3 tools/scripts/verify_gpu_trace_overhead_acceptance.py \
+  /tmp/gpu-trace-overhead.json --repository "$PWD"
+```
+
+The standalone verifier and recorder are always nonterminal. `--terminal`
+intentionally fails; no caller-selected JSON field, copied directory, recomputed
+hash, importable Python function, or recorder stdout can attest terminal
+execution. The recorder prints only `result: structural-evidence-written` after
+closing its retained claims. Final A2T acceptance requires a separate protected
+cross-system package that independently binds the exact protected integration
+authority, the recorder run and retained bytes, and an independently committed
+genuine-human review of that same trace. This repository does not mint that
+package. The existing `m3-a2t-offline-analysis-20260828.json` is historical: it
+predates v3 installed
+provider provenance, complete fixture replay, expanded semantic parity, and
+exact same-artifact contributor correlation, so it is not terminal evidence.
+Its agent-review object cannot be inherited as human acceptance. A genuine
+human same-artifact review must be published independently before the final
+fresh recorder run.
+
+Perfetto is a localization tool, not an oracle for every platform state
+machine. A real resize investigation demonstrated the correct evidence chain:
+the trace showed paint was cheap and localized the delay to acquire/present and
+compositor timing; a platform event-order harness then reproduced a redundant
+same-size callback releasing retained content too early; a planted regression,
+60 fps recording, and direct feel check validated the fix. Do not claim the
+trace alone discovered the callback race, and do not turn that AppKit-specific
+mechanism into a generic Pulp or Vellum contract.

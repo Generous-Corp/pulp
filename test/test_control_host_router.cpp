@@ -105,11 +105,14 @@ TEST_CASE("host router correlates completion to exact registration generation") 
     const ControlEnvelope completed{.payload = ControlHostCompleteEnvelope{
                                         .route_id = route,
                                         .terminal_state = ControlReceiptState::Completed,
+                                        .evidence_ids = {"gpu-evidence-1"},
                                     }};
     CHECK_FALSE(router.receive(ControlRegistrationId{"registration-1"}, 8, completed));
     CHECK(router.receive(ControlRegistrationId{"registration-1"}, 7, completed));
     REQUIRE(outcome.wait_for(1s) == std::future_status::ready);
-    CHECK(outcome.get().terminal_state == ControlReceiptState::Completed);
+    const auto result = outcome.get();
+    CHECK(result.terminal_state == ControlReceiptState::Completed);
+    CHECK(result.result.evidence_ids == std::vector<std::string>{"gpu-evidence-1"});
 }
 
 TEST_CASE("host router rejects forged or revoked artifact publication before broker storage") {

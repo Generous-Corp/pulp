@@ -1,5 +1,6 @@
 #include <pulp/inspect/control_broker.hpp>
 
+#include "control_operation_internal.hpp"
 #include "control_protocol_internal.hpp"
 
 #include <algorithm>
@@ -430,7 +431,6 @@ ControlBroker::admit_verified_operation(const VerifiedControlPeerIdentity& clien
                      request.registration_id);
         return result;
     }
-
     ControlAuthorityBinding authority{
         .broker_id = identities_.broker_id(),
         .client_principal = client->peer_fingerprint,
@@ -458,36 +458,97 @@ ControlBroker::admit_verified_operation(const VerifiedControlPeerIdentity& clien
     binding.request_id = request.request_id;
     binding.idempotency_key = request.idempotency_key;
     binding.canonical_request_hash = request.canonical_request_hash;
+    const auto operation_identity = detail::idempotency_content_hash(binding);
+    const auto authorization = grants_.authorize_operation(
+        request.grant_id, request.client_id, request.registration_id,
+        operation->capability, operation_identity);
+    if (!authorization) {
+        result.status = ControlAdmissionStatus::PermissionDenied;
+        result.permission = evaluate_control_permission({
+            .implemented = true,
+            .built = built,
+            .host_available = host_available,
+            .activated = activated,
+            .policy_eligible = policy_eligible,
+            .client_granted = false,
+            .session_live = true,
+        });
+        result.plan.reset();
+        audit_denial("operation.admit", client_peer, "one-shot-grant-consumed",
+                     request.client_id, request.registration_id);
+        return result;
+    }
     coordination_lock.unlock();
 
-    const auto stored = allow_new ? operation_store_->admit(std::move(binding))
-                                  : operation_store_->replay(std::move(binding));
+    const bool authorization_requires_replay =
+        authorization->kind == ControlOperationAuthorizationKind::CommittedOneShot;
+    const auto stored = allow_new && !authorization_requires_replay
+        ? operation_store_->admit(std::move(binding))
+        : operation_store_->replay(std::move(binding));
     result.receipt = stored.receipt;
+    const auto release_one_shot_reservation = [&] {
+        if (authorization->kind ==
+            ControlOperationAuthorizationKind::ProvisionalOneShot)
+            (void)grants_.release_operation_authorization(
+                request.grant_id, operation_identity,
+                authorization->reservation_token);
+    };
     if (stored.status == ControlOperationStoreStatus::IdempotencyConflict) {
+        release_one_shot_reservation();
         result.status = ControlAdmissionStatus::IdempotencyConflict;
         result.plan.reset();
         return result;
     }
     if (stored.status == ControlOperationStoreStatus::RequestIdConflict) {
+        release_one_shot_reservation();
         result.status = ControlAdmissionStatus::RequestIdConflict;
         result.plan.reset();
         return result;
     }
     if (stored.status == ControlOperationStoreStatus::ReplayWindowExpired) {
+        release_one_shot_reservation();
         result.status = ControlAdmissionStatus::ReplayWindowExpired;
         result.plan.reset();
         return result;
     }
     if (stored.status == ControlOperationStoreStatus::ResourceExhausted) {
+        release_one_shot_reservation();
         result.status = ControlAdmissionStatus::ResourceExhausted;
+        result.plan.reset();
+        return result;
+    }
+    if (authorization_requires_replay &&
+        stored.status == ControlOperationStoreStatus::NotFound) {
+        result.status = ControlAdmissionStatus::PermissionDenied;
         result.plan.reset();
         return result;
     }
     if ((stored.status != ControlOperationStoreStatus::Admitted &&
          stored.status != ControlOperationStoreStatus::Replay) ||
         !stored.receipt) {
+        release_one_shot_reservation();
         result.status = ControlAdmissionStatus::DurableStoreUnavailable;
         result.plan.reset();
+        return result;
+    }
+    if (authorization->kind ==
+            ControlOperationAuthorizationKind::ProvisionalOneShot &&
+        !grants_.commit_operation_authorization(
+            request.grant_id, operation_identity,
+            authorization->reservation_token)) {
+        ControlOperationResult cancelled;
+        cancelled.result_code = ControlResultCode::Cancelled;
+        cancelled.explanation = "one-shot authorization changed after admission";
+        cancelled.cancellation_reason = "admission-authorization";
+        if (stored.status == ControlOperationStoreStatus::Admitted && stored.receipt) {
+            const auto transitioned = operation_store_->transition(
+                stored.receipt->receipt_id, ControlReceiptState::Admitted,
+                ControlReceiptState::Cancelled, std::move(cancelled));
+            result.receipt = transitioned.receipt;
+        }
+        result.status = ControlAdmissionStatus::CancelledBeforeDispatch;
+        result.plan.reset();
+        result.should_dispatch = false;
         return result;
     }
     result.plan->receipt_id = stored.receipt->receipt_id;
@@ -496,7 +557,9 @@ ControlBroker::admit_verified_operation(const VerifiedControlPeerIdentity& clien
     result.status = ControlAdmissionStatus::Admitted;
     result.should_dispatch = stored.status == ControlOperationStoreStatus::Admitted;
 
-    if (result.should_dispatch && !revalidate_operation(client_peer, *result.plan)) {
+    const bool dispatch_authorized = !result.should_dispatch ||
+                                     revalidate_operation(client_peer, *result.plan);
+    if (result.should_dispatch && !dispatch_authorized) {
         ControlOperationResult cancelled;
         cancelled.result_code = ControlResultCode::Cancelled;
         cancelled.explanation = "authority changed before dispatch";

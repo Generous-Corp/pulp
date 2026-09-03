@@ -56,6 +56,19 @@ not make them agent-capability rows: keep runtime-control operations and policy
 out of `agent-capabilities.json`, and keep the capability surface ledger focused
 on the design-time public-header contract.
 
+The A3 GPU startup-health surface is a concrete example. The installed
+`ControlGpuHealthProvider`, `ControlGpuHealthViewAdapter`,
+`ControlGpuHealthReadExecutor`, and `pulp.gpu-health-read-result.v1` types are
+runtime control plumbing. Do not add `dev.pulp.gpu/health.read@1`, its grants,
+instances, receipts, measurement campaigns, or B4 disposition to
+`agent-capabilities.json`. A public-header ledger classification, where one is
+required by the covered roots, records only that the header was reviewed; it
+must not turn this runtime operation into a generator-facing design capability.
+The checkout-only `gpu_first_visible_a3_campaign.py` runner is also runtime
+acceptance tooling, not an installed SDK capability: do not add its adapter
+request/receipt schemas, 10+10 lifecycle ledger, or source-binding receipt to
+the design-time capability catalog.
+
 ## Classify the change
 
 For a new public header or symbol:
@@ -301,6 +314,12 @@ and adjacent policy self-tests. When adding a new Python policy test there,
 register the test explicitly in the same change; merely creating a
 `tools/ci/test_*.py` file does not make CTest execute it.
 
+That registry also runs the browser DPR adapter self-test. Keep its exact
+Playwright-version, artifact-confinement, product-digest, typed-metric, timer
+calibration, logical-input, and same-content fidelity negatives registered;
+an executable measurement script without the CTest entry is not maintained
+evidence tooling.
+
 That registry also carries the trusted Vellum merge self-test. Keep its clean
 base+head positive control and real content-conflict negative control together:
 the required gate must prove it can construct the exact two-parent candidate,
@@ -444,6 +463,27 @@ Use an already-published key as the control for that grep — a brand-new key fr
 the previous transaction returns 1, so a 0 on yours is a real absence rather
 than a broken pattern.
 
+Whether `rederive.py` appends depends on the state it starts from, so **measure
+the append rather than following either rule blindly**. Starting from a tree
+whose four generated artifacts already sit at the protected base — which is
+where the reset-and-regenerate-once recovery leaves you — `rederive.py` alone
+bumps `SURFACE_INVENTORY_VERSION`, appends exactly one entry, and `--check`
+reports `fresh`; adding `--write` after it appends a *second* entry for one
+logical change and the append-only check rejects it. Starting from a tree that
+already carries a `--write` from earlier in the branch, the reset described
+above wins and the trailing `--write` is what moves the history.
+
+So the invariant to hold is the count, not the command sequence: after
+regenerating, compare entry counts against the protected base and require a
+delta of exactly 1, then stop. Run `--write` only if that delta is 0.
+
+`rederive.py` also refuses outright while a merge is in progress when the
+incoming commit is not the protected base, because the base resolver would step
+back to the merge base and derive a stale counter. That is why the conflict
+sequence commits the merge before re-deriving — a version bump staged into the
+merge commit itself is rejected as `inventory_version changed without a surface
+change`, since the surface document has not been regenerated yet.
+
 ### A catalog-bound header must NOT also get a `REVIEWED_HEADERS` row
 
 A header named by a `binding(...)` in a catalog is already a capability
@@ -458,11 +498,45 @@ vocabulary headers (whose `capability_keys` list names the kernels expressed
 over them) and `infrastructure` headers such as a private `detail/` helper,
 which bind no key of their own.
 
-### `header_fingerprint` is not the SHA-256 of the header file
+### `header_fingerprint` IS the SHA-256 of the header file's bytes
 
-The declared value and `sha256sum <header>` legitimately differ. Do not
-"reconcile" them by hashing the file — take the `got sha256:` the generator
-reports.
+The surface document says so itself — `"fingerprint_algorithm":
+"sha256-file-bytes"` — and every one of the 453 declared fingerprints agrees
+with the file on disk:
+
+```python
+import json, hashlib, pathlib
+d = json.load(open('docs/status/agent-capability-surface.json'))
+differ = [r['source'] for r in d['headers']
+          if 'sha256:' + hashlib.sha256(pathlib.Path(r['source']).read_bytes()).hexdigest()
+          != r['fingerprint']]
+print(len(d['headers']), 'headers,', len(differ), 'differ')   # 453 headers, 0 differ
+```
+
+The only real difference is the `sha256:` prefix the declared value carries and
+bare `shasum` output does not — which is what makes the two look unequal at a
+glance. Corrupt one declared value and the same loop reports it, so a clean run
+is a measurement rather than a tautology.
+
+An earlier revision of this section claimed the two "legitimately differ" and
+told you not to reconcile them by hashing the file. That was wrong, and it is
+the expensive kind of wrong: it reads as permission to paper over a genuine
+mismatch, when a mismatch means the header moved and the surface did not.
+
+### `--write` cannot fix a fingerprint — it is authored, not generated
+
+The fingerprint is declared in two places that must be edited by hand and kept
+equal: the `header_fingerprint=` literal in the capability's `EXPORTS` row in
+`tools/scripts/agent_capability_catalog_performance.py`, and the `fingerprint`
+field for that `source` in `docs/status/agent-capability-surface.json`.
+Regeneration checks them; it does not author them. So after changing a public
+capability header:
+
+1. `shasum -a 256 <header>` and prefix the digest with `sha256:`,
+2. write that value into both places above,
+3. bump `SURFACE_INVENTORY_VERSION` in `tools/scripts/agent_capability_manifest.py`
+   (surface axis — see the next section: this costs no contract bump),
+4. re-run `--check` and confirm it reports `fresh`.
 
 ### Adding a function to an existing capability header costs NO contract bump
 
@@ -719,6 +793,8 @@ no line carries two statements.
 
 Extract codes from every return form, including ternaries (`return c ? 0 : N;`) — a naive
 `grep -oE "return [0-9]+;"` misses those and manufactures phantom collisions.
+
+For A3 v2 terminal acceptance, never treat receipt fields as publication or trace proof. The verifier must derive protected `main`, the canonical receipt blob, required check identities/results, and artifact digests live, then replay the pinned analyzer over the exact trace bytes.
 
 ## `PulpInstallRules.cmake` fires this gate for reasons that have nothing to do with capabilities
 

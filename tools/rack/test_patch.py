@@ -64,12 +64,16 @@ def voice(**over):
 CASES = [
     # ── must pass ────────────────────────────────────────────────────────────
     ("a plain working voice", voice(), True, None),
+    # The VCA's inputs are CV_INPUT then IN_INPUT, so the carrier belongs on
+    # in:1. Cabled to in:0 this renders 0.000 V through the real DSP -- the
+    # module multiplies by an unconnected IN_INPUT -- while every structural
+    # check passes, which is the case `signal_path` exists to catch.
     ("our own modules end to end", {
         "version": "2.6.6",
         "modules": [mod(1, "ForgeModular", "VCO"),
                     mod(2, "ForgeModular", "VCA", (10, 0)),
                     mod(3, "Core", "AudioInterface2", (20, 0))],
-        "cables": [cable(1, 1, 0, 2, 0), cable(2, 2, 0, 3, 0)]}, True, None),
+        "cables": [cable(1, 1, 0, 2, 1), cable(2, 2, 0, 3, 0)]}, True, None),
     ("modules from several vendors mixed", {
         "version": "2.6.6",
         "modules": [mod(1, "ForgeModular", "LFO"),
@@ -1011,8 +1015,17 @@ def check_gate_survives_third_party() -> tuple:
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "patch_gate.cpp")).read()
     body = src[src.find("int main("):]
-    at_ctx = body.find("install_rack_context(argv[1])")
+    at_ctx = body.find("install_rack_context(argv[1]")
     at_load = body.find("load_plugin(")
+    # Scoped to the installer's own definition rather than to the whole file:
+    # the ordering that matters is that the licence directory is resolved by
+    # the same function that stands the context up, which `at_ctx` above has
+    # already pinned ahead of the first dlopen. Searching the whole file and
+    # comparing against an offset into `main` would be comparing positions in
+    # two different strings.
+    installer = src[src.find("void install_rack_context("):src.find("int main(")]
+    at_asset = installer.find("rack::asset::init()")
+    at_userdir = installer.find("rack::asset::userDir")
     if "contextSet" not in src:
         bad += 1
         print("  WRONG  the gate never installs a Rack context, so every "
@@ -1022,9 +1035,15 @@ def check_gate_survives_third_party() -> tuple:
         bad += 1
         print("  WRONG  the gate loads a plugin before the Rack context "
               "exists; the context has to come first, as it does in Rack")
+    elif at_asset < 0 or at_userdir < 0 or at_userdir > at_asset:
+        bad += 1
+        print("  WRONG  the gate never points asset::userDir at a directory "
+              "holding the cached VCV licence keys, so every commercially "
+              "licensed module decides it is unlicensed and writes zero to "
+              "every output while constructing and running normally")
     else:
-        print("  ok     the gate stands up a Rack context before it loads "
-              "anything")
+        print("  ok     the gate stands up a Rack context, and resolves the "
+              "licence key directory, before it loads anything")
 
     ran += 1
     at_up = body.find("bring_up(")
@@ -1098,6 +1117,122 @@ def check_gate_survives_third_party() -> tuple:
         else:
             print(f"  ok     the gate ran {plug}/{model} without dying "
                   f"(exit {r.returncode})")
+    return bad, ran
+
+
+#: A comment or a string can say "dlopen" without calling it; only a call has
+#: an open paren after the name. `dlopen failed: %s` in a format string does
+#: not match, and neither does prose about the dlopen cost.
+_DLOPEN_CALL = re.compile(r"\bdlopen\s*\(")
+
+#: Both of these harnesses carry a doc comment naming the exact calls this
+#: check looks for, because the defect needed explaining where it happened. A
+#: search over the raw text would find the prose and call the file correct
+#: while the code below it did the wrong thing, so comments come out first.
+_CXX_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def _code_only(src: str) -> str:
+    return _CXX_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), src)
+
+
+def licence_resolved_before_dlopen(src: str):
+    """-> (verdict, detail) for one harness's source text.
+
+    A harness that loads somebody else's plugin has to point
+    `rack::asset::userDir` at the cached licence keys and call
+    `rack::asset::init()` BEFORE its first `dlopen`, because a commercially
+    licensed module resolves its key while it is being constructed. Miss it
+    and the module builds, runs, logs nothing, and writes zero to every
+    output -- which reads exactly like a dead module.
+
+    Verdicts: "n/a" (this file loads no plugin), "ok", or "bad".
+    """
+    src = _code_only(src)
+    call = _DLOPEN_CALL.search(src)
+    if not call:
+        return "n/a", "loads no plugin of its own"
+    at_load = call.start()
+    at_userdir = src.find("rack::asset::userDir")
+    at_init = src.find("rack::asset::init()")
+    if at_userdir < 0 or at_init < 0:
+        return "bad", ("never resolves the cached VCV licence keys at all, so "
+                       "every licensed module it measures reads as dead")
+    if at_userdir > at_init:
+        return "bad", ("calls asset::init() before pointing asset::userDir at "
+                       "the licence directory, so init() bakes in the empty "
+                       "default and the lookup goes to /licenses/")
+    if at_init > at_load:
+        return "bad", ("resolves the licence directory only after its first "
+                       "dlopen, and a module resolves its key while it is "
+                       "being constructed")
+    return "ok", "resolves the licence directory before its first dlopen"
+
+
+def check_every_dlopen_harness_resolves_licences() -> tuple:
+    """Every harness that loads a third-party plugin, not just the one we fixed.
+
+    The audibility gate shipped for months without this and reported licensed
+    modules as dead. The gate is fixed; the next harness somebody writes is
+    not, and nothing here would have noticed. So the question is asked of the
+    whole directory: any source that calls `dlopen` has to have resolved the
+    licence key directory first. A file that loads no plugin is not in scope
+    and says so.
+    """
+    bad, ran = 0, 0
+    here = os.path.dirname(os.path.abspath(__file__))
+    sources = sorted(f for f in os.listdir(here) if f.endswith(".cpp"))
+
+    # Both directions on the checker itself, before it is pointed at anything
+    # real. A checker that cannot fail would pass the whole sweep while the
+    # defect it exists to catch walked straight past it.
+    good_src = ('void up(const std::string& d) { rack::asset::userDir = d;\n'
+                '  rack::asset::init(); }\n'
+                'void load() { void* h = dlopen(p.c_str(), RTLD_NOW); }\n')
+    bad_src = ('void load() { void* h = dlopen(p.c_str(), RTLD_NOW); }\n'
+               'void up(const std::string& d) { rack::asset::userDir = d;\n'
+               '  rack::asset::init(); }\n')
+    none_src = 'int main() { std::printf("the dlopen cost is paid once\\n"); }\n'
+    # The prose that explains the defect names the calls that fix it. A file
+    # that only TALKS about them is still broken.
+    talk_src = ('/// rack::asset::userDir then rack::asset::init() must run\n'
+                '/// before the first dlopen.\n' + bad_src)
+    ran += 1
+    controls = [licence_resolved_before_dlopen(good_src)[0],
+                licence_resolved_before_dlopen(bad_src)[0],
+                licence_resolved_before_dlopen(none_src)[0],
+                licence_resolved_before_dlopen(talk_src)[0]]
+    if controls != ["ok", "bad", "n/a", "bad"]:
+        bad += 1
+        print(f"  WRONG  the licence-order check does not discriminate: a "
+              f"correct harness, one that dlopens first, one that loads "
+              f"nothing, and one that only mentions the calls in a comment "
+              f"read as {controls}")
+    else:
+        print("  ok     the licence-order check passes a correct harness, "
+              "fails one that dlopens first, excuses one that loads nothing, "
+              "and is not fooled by a comment naming the calls")
+
+    scoped = []
+    for name in sources:
+        verdict, detail = licence_resolved_before_dlopen(
+            open(os.path.join(here, name)).read())
+        if verdict == "n/a":
+            continue
+        scoped.append(name)
+        ran += 1
+        if verdict == "bad":
+            bad += 1
+            print(f"  WRONG  {name} {detail}")
+        else:
+            print(f"  ok     {name} {detail}")
+
+    if not scoped:
+        # Not a pass. Either no harness loads a plugin any more, or the sweep
+        # stopped finding the ones that do -- and the second is the reason
+        # this check exists.
+        print(f"  SKIP   none of the {len(sources)} C++ sources here calls "
+              f"dlopen, so this proves nothing about licence resolution")
     return bad, ran
 
 
@@ -4160,36 +4295,50 @@ def check_behaviour_is_measured() -> tuple:
                   "filter sweep each measure as themselves and as nothing "
                   "else, with no SDK anywhere")
 
-    # A HEADER EDIT MUST REBUILD THE GATE. The staleness check compared the
-    # binary's mtime against patch_gate.cpp alone, so once the measurement moved
-    # into headers beside it, editing one changed nothing a rebuild could see:
-    # the next run would silently test the previous binary while the change
-    # appeared to do nothing at all. Asserted against the real decision rather
-    # than by reading the source, so a later rewrite of it cannot pass by
-    # keeping the shape.
+    # ANY SOURCE-BYTE EDIT MUST SELECT A NEW GATE, EVEN WHEN ITS MTIME IS OLD.
+    # Installed releases preserve/copy source timestamps, so an updated source
+    # can legitimately be older than the binary cached by its predecessor.
+    # The former mtime gate then ran old measurement code forever. Exercise the
+    # real build decision in an isolated cache, and make the edited copy OLDER
+    # than the first binary so this fails under that implementation.
     ran += 1
     stale = []
-    for header in P.GATE_HEADERS:
-        if not os.path.exists(header):
-            stale.append(f"{os.path.basename(header)} does not exist")
-            continue
-        # A binary newer than every source, then a header touched past it.
-        newest = max(os.path.getmtime(p) for p in [P.GATE_SRC] + P.GATE_HEADERS)
-        os.makedirs(os.path.dirname(P.GATE_BIN), exist_ok=True)
-        with open(P.GATE_BIN, "a"):
-            os.utime(P.GATE_BIN, (newest + 10, newest + 10))
-        os.utime(header, (newest + 20, newest + 20))
-        if P.build_gate()[0] == P.GATE_BIN and \
-                os.path.getmtime(P.GATE_BIN) < os.path.getmtime(header):
-            stale.append(f"touching {os.path.basename(header)} reused the "
-                         f"binary built before it")
+    with tempfile.TemporaryDirectory(prefix="patch-gate-cache-") as root:
+        inputs = [P.GATE_SRC] + P.GATE_HEADERS
+        copies = []
+        for source in inputs:
+            target = os.path.join(root, os.path.basename(source))
+            shutil.copy2(source, target)
+            copies.append(target)
+        original = P.GATE_SRC, P.GATE_HEADERS, P.CACHE_DIR
+        try:
+            P.GATE_SRC, P.GATE_HEADERS, P.CACHE_DIR = \
+                copies[0], copies[1:], os.path.join(root, "cache")
+            first, why = P.build_gate()
+            if not first:
+                stale.append(f"baseline gate did not build: {why}")
+            else:
+                for changed in copies:
+                    with open(changed, "a", encoding="utf-8") as output:
+                        output.write("\n// source-identity negative control\n")
+                    os.utime(changed, (1, 1))
+                    rebuilt, why = P.build_gate()
+                    if not rebuilt:
+                        stale.append(f"{os.path.basename(changed)} did not "
+                                     f"rebuild: {why}")
+                    elif rebuilt == first:
+                        stale.append(f"editing {os.path.basename(changed)} "
+                                     "reused the old binary")
+                    first = rebuilt or first
+        finally:
+            P.GATE_SRC, P.GATE_HEADERS, P.CACHE_DIR = original
     if stale:
         bad += 1
-        print(f"  WRONG  the gate does not rebuild when its own sources change, "
+        print(f"  WRONG  the gate does not rebuild when its source bytes change, "
               f"so an edited measurement is silently never run: {stale}")
     else:
-        print(f"  ok     touching any of the gate's {len(P.GATE_HEADERS)} "
-              f"headers rebuilds it")
+        print(f"  ok     changing any of the gate's {1 + len(P.GATE_HEADERS)} "
+              f"source inputs selects a new binary despite older mtimes")
 
     # Every field a threshold names must be one the gate writes. A typo here
     # costs nothing at import and everything at run time: the field reads back
@@ -4354,6 +4503,7 @@ def main():
     nf_bad, nf_ran = check_named_is_fetched()
     gc_bad, gc_ran = check_gate_crash_is_not_silence()
     gs_bad, gs_ran = check_gate_survives_third_party()
+    lic_bad, lic_ran = check_every_dlopen_harness_resolves_licences()
     uk_bad, uk_ran = check_unjudged_patch_is_kept()
     sdk_bad, sdk_ran = check_sdk_resolution()
     set_bad, set_ran = check_setting_writer()
@@ -4397,8 +4547,8 @@ def main():
                 output_bad + ship_bad + ver_bad)
     acq_ran += (lb_ran + br_ran + gc_ran + sdk_ran + set_ran + fresh_ran +
                 output_ran + ship_ran + ver_ran)
-    acq_bad += nf_bad + gs_bad + uk_bad + stream_bad + panel_bad
-    acq_ran += nf_ran + gs_ran + uk_ran + stream_ran + panel_ran
+    acq_bad += nf_bad + gs_bad + lic_bad + uk_bad + stream_bad + panel_bad
+    acq_ran += nf_ran + gs_ran + lic_ran + uk_ran + stream_ran + panel_ran
     # UNION of every lane's counters. Taking one side drops
     # another lane's checks while the total still reads healthy.
     acq_bad += (vp_bad + mel_bad + domain_bad + beh_bad + aff_bad +

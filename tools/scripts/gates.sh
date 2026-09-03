@@ -11,6 +11,7 @@
 #   - skill-path-map lint (the map's own rules match real files, validate
 #     against its schema, and don't quietly widen a subsystem claim)
 #   - version-bump (catches feat:/fix: PRs without a chore: bump versions commit)
+#   - yoga-oracle lockstep (the web-compat Yoga oracle matches the Yoga pin)
 #   - compat-sync (mapped compat paths require matrix/docs/tests or a skip trailer)
 #   - config-doc (mapped config surfaces require their guide doc or a skip trailer)
 #   - compat-aggregate (compat.json stays byte-identical to compat/ parts)
@@ -210,6 +211,23 @@ if [ -f "$PIN_CHECK" ]; then
     echo "" >&2
     echo "▸ shipyard-pin lockstep check" >&2
     if ! "$PYTHON" "$PIN_CHECK"; then
+        fail=1
+    fi
+fi
+
+# ── 2c. yoga-oracle lockstep ──────────────────────────────────────
+# The web-compat harness decides whether a CSS property is in scope by looking
+# it up BY NAME in a hand-transcribed table of one Yoga release
+# (tools/harness/oracles/yoga/yoga-supported.json); the adapter reports anything
+# absent as out-of-scope rather than as a gap. Bumping the Yoga pin without
+# re-transcribing that table therefore reclassifies every newly gained property
+# as out-of-scope, and the compat numbers improve because the measurement went
+# blind. Sub-second, offline, no build.
+YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
+if [ -f "$YOGA_ORACLE_PIN" ]; then
+    echo "" >&2
+    echo "▸ yoga-oracle lockstep check (compat oracle matches the Yoga pin)" >&2
+    if ! "$PYTHON" "$YOGA_ORACLE_PIN"; then
         fail=1
     fi
 fi

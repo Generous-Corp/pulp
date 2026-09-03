@@ -62,6 +62,70 @@ a Pulp GPU-doctor change. If the diagnostic cannot be implemented through the
 existing interface, stop and route the required framework change to
 `Generous-Corp/vellum`; do not add a Pulp-side duplicate or compatibility API.
 
+The same ownership split applies to first-visible-frame GPU health. Pulp owns
+the product measurement budget, closed result schema, capability-control
+operation and executor adapter, CLI/MCP projection, Forge/DAW acceptance, and
+Perfetto evidence interpretation. Generic frame-lifecycle spans, render-stage
+identity, shader/pipeline cache instrumentation, or prewarm implementation are
+Vellum work when their projected slice is framework-authoritative-transferred.
+Keep nullable Vellum/source/shader and GPU/trace correlation seams in Pulp until
+those producers exist; do not manufacture identities, promote incomplete event
+captures, or advertise a live host capability before the exact product adapter
+can return a validated snapshot.
+
+For A3 receipts, distinguish capture integrity from instrumentation coverage.
+Dropped or truncated available events invalidate every terminal disposition.
+Named missing compile/upload/hidden/present/source/shader events may remain only
+for a passing `no-change` or an over-budget `queue-B4-investigation`; the latter
+must bind each missing event and argument to an exact path in the active
+`framework-authoritative-transferred` `render-skia-dawn` slice. That route is a
+request for post-adoption instrumentation and rerun, not authority to implement
+the event or prewarm policy in Pulp.
+
+A4 DPR orchestration, retained cell artifacts, deterministic analysis, and
+protected-main publication receipts are Pulp-owned. `init-v2` must derive its
+manifest from the fixed terminal A2T/A3 receipts; `finalize-v2` may consume only
+nonce-bound runner snapshots, never a caller manifest/result/disposition. This
+does not move generic DPR policy into Pulp: a freshly live-verified 84-plus-84
+candidate only queues B5, which remains the separately reviewed Vellum adoption
+boundary. The current zero-cell inconclusive result authorizes no route change.
+
+The Pulp-owned live seam is `ControlGpuHealthProvider` plus
+`ControlGpuHealthViewAdapter`: product hosts supply existing back-buffer and
+`GpuSurface` callbacks, while exact generic present/source/shader/cache events
+remain Vellum work. A capture-confirmed upper bound may populate a validated
+snapshot but must keep the unratified startup verdict unverified. Route any
+request for a true present hook or generic pipeline instrumentation to Vellum
+instead of modifying generic window or render-lifecycle paths in Pulp.
+
+The Pulp-owned A3 campaign runner may snapshot product-specific adapters,
+validate 10+10 lifecycle/cache provenance, and name transferred instrumentation
+gaps. That runner is not authority to add a missing generic producer in Pulp.
+If the real adapter cannot source present, pipeline, upload, shader, or source
+identity through an existing seam, leave the fields null, record the exact
+`render-skia-dawn` gap, and route the post-adoption producer to Vellum. Never
+make a warm label or a zero duration stand in for the missing boundary.
+
+The checkout-owned `gpu_first_visible_a3_external_adapter.py` is within the
+same Pulp evidence boundary: it may pin a role-specific executable, validate
+its closed producer receipt, and run the independent blank/audio controls. It
+does not move ownership of the producer's generic present, shader, pipeline,
+upload, or cache events. When those facts are unavailable through existing
+product seams, the producer must report the exact transferred gap rather than
+adding a Pulp-side render hook.
+The checked-in standalone, constrained-headless, REAPER, and Forge producers
+are orchestration adapters inside that boundary. They may pin exact source,
+product, host, and lifecycle-driver identities and reject missing endpoint
+truth; their existence does not authorize a Pulp implementation of a missing
+generic native-present or cache event.
+
+Pulp also owns the A4 DPR runner, product-scenario adapters, evidence ingestion,
+and the B5 dependency receipt. The runner may classify a measured candidate,
+but B5 remains `waiting-trigger` until the adopted Vellum API refresh. Any
+generic DPR policy, render-lifecycle instrumentation, or framework adapter
+needed to act on that result originates in Vellum; do not implement it in this
+Pulp evidence lane.
+
 ## Validate the contract
 
 Run the closed eight-case suite and projection validator:
@@ -77,6 +141,8 @@ emits the digest-bound `pulp-vellum-routing-contract-execution` artifact. Pull
 requests and manual dispatches validate the contract without publishing release
 evidence. That receipt is evidence for Vellum's release verifier; do not
 hand-author or replay it.
+
+A3 v2 terminal acceptance is Pulp integration evidence. Its attribution may queue Vellum follow-up, but terminal proof must bind exact transferred routes and may not manufacture missing generic instrumentation in Pulp.
 
 The trusted PR gate validates a deterministic synthetic merge tree, but event
 time and emergency-expiry checks are bound to the real PR source head supplied

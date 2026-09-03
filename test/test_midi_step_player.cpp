@@ -1009,3 +1009,162 @@ TEST_CASE("StepPlayer places a nudged onset independently of where a block begin
         }
     }
 }
+
+TEST_CASE("StepPlayer publishes the coordinate a lane's walk selects",
+          "[midi][step-player][coordinate]") {
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(2);
+    fixture.spec.lanes[1].direction = midi::StepPlayerDirection::Reverse;
+    auto player = fixture.make();
+    for (std::size_t lane = 0; lane < 2; ++lane)
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            step.pitch_offset = static_cast<std::int8_t>(index);
+            REQUIRE(player.set_step(lane, index, step) == midi::StepPlayerError::None);
+        }
+
+    // The query is pure in the tick: it answers before any block is processed.
+    CHECK_FALSE(player.upcoming_coordinate(0).has_value());
+    CHECK_FALSE(player.coordinate_at(2, {0}).has_value());
+
+    for (std::int64_t ordinal = 0; ordinal < 9; ++ordinal) {
+        const timebase::TickPosition tick{ordinal * kStepTicks};
+        const auto forward = player.coordinate_at(0, tick);
+        REQUIRE(forward.has_value());
+        CHECK(forward->ordinal == ordinal);
+        CHECK(forward->cycle == static_cast<std::uint64_t>(ordinal / 4));
+        CHECK(forward->index == static_cast<std::size_t>(ordinal % 4));
+        CHECK(forward->following_tick.value == tick.value + kStepTicks);
+
+        const auto reverse = player.coordinate_at(1, tick);
+        REQUIRE(reverse.has_value());
+        CHECK(reverse->index == static_cast<std::size_t>(3 - (ordinal % 4)));
+    }
+
+    // The coordinate a lane reports as upcoming is the one it goes on to play.
+    auto input = prepared_buffer();
+    auto output = prepared_buffer(player.contract().required_output_events(0));
+    const midi::StepPlayerBlock block{
+        .sample_start = {0},
+        .tick_start = map.samples_to_ticks({0}),
+        .sample_count = 1,
+        .sample_rate = {kSampleRate, 1},
+        .tempo_bpm = 120.0,
+        .tempo_map = &map,
+        .playing = true,
+        .transport_event = midi::StepPlayerTransportEvent::Continuous,
+    };
+    REQUIRE(player.process(input, output, block).complete);
+    const auto upcoming = player.upcoming_coordinate(0);
+    REQUIRE(upcoming.has_value());
+    CHECK(upcoming->index == 1);
+    CHECK(upcoming->step_tick.value == kStepTicks);
+}
+
+TEST_CASE("StepPlayer coordinate query names the step the lane actually fires",
+          "[midi][step-player][coordinate]") {
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(2);
+    fixture.spec.lanes[1].direction = midi::StepPlayerDirection::PingPong;
+    auto player = fixture.make();
+    for (std::size_t lane = 0; lane < 2; ++lane)
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            // The pitch names the step, so a fired note identifies the index.
+            step.pitch_offset = static_cast<std::int8_t>(index);
+            REQUIRE(player.set_step(lane, index, step) == midi::StepPlayerError::None);
+        }
+
+    // Coordinates are read up front, before the walk has advanced at all: a
+    // query that merely echoed playback state could not answer here.
+    std::vector<std::size_t> predicted[2];
+    for (std::size_t lane = 0; lane < 2; ++lane)
+        for (std::int64_t ordinal = 0; ordinal < 10; ++ordinal) {
+            const auto coordinate = player.coordinate_at(lane, {ordinal * kStepTicks});
+            REQUIRE(coordinate.has_value());
+            predicted[lane].push_back(coordinate->index);
+        }
+
+    const std::int32_t partitions[] = {256, 64, 512};
+    const auto samples = map.ticks_to_samples({10 * kStepTicks}).value;
+    const auto attacks = attacks_of(render(player, map, samples, partitions));
+
+    for (std::size_t lane = 0; lane < 2; ++lane) {
+        std::size_t ordinal = 0;
+        for (const auto& attack : attacks) {
+            if (attack.event.channel() != static_cast<std::uint8_t>(lane))
+                continue;
+            REQUIRE(ordinal < predicted[lane].size());
+            const auto expected =
+                static_cast<int>(fixture.spec.lanes[lane].base_note) +
+                static_cast<int>(predicted[lane][ordinal]);
+            INFO("lane " << lane << " ordinal " << ordinal);
+            CHECK(static_cast<int>(attack.event.note()) == expected);
+            ++ordinal;
+        }
+        // A lane that never spoke would pass the loop above vacuously.
+        CHECK(ordinal == 10);
+    }
+
+    // A ping-pong lane's walk is not a modulo, so the two lanes must disagree —
+    // otherwise the check above would hold for any index the query invented.
+    CHECK(predicted[0] != predicted[1]);
+}
+
+TEST_CASE("StepPlayer coordinate query names the step a random walk fires",
+          "[midi][step-player][coordinate]") {
+    const auto map = constant_tempo_map();
+    PlayerFixture<> fixture(2);
+    fixture.spec.random_seed = 0x5eed;
+    fixture.spec.lanes[1].direction = midi::StepPlayerDirection::Random;
+    auto player = fixture.make();
+    for (std::size_t lane = 0; lane < 2; ++lane)
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            // The pitch names the step, so a fired note identifies the index.
+            step.pitch_offset = static_cast<std::int8_t>(index);
+            REQUIRE(player.set_step(lane, index, step) == midi::StepPlayerError::None);
+        }
+
+    constexpr std::int64_t kOrdinals = 16;
+    std::vector<std::size_t> predicted;
+    for (std::int64_t ordinal = 0; ordinal < kOrdinals; ++ordinal) {
+        const auto coordinate = player.coordinate_at(1, {ordinal * kStepTicks});
+        REQUIRE(coordinate.has_value());
+        predicted.push_back(coordinate->index);
+    }
+
+    // The random walk reads the grid coordinate rather than consuming RNG
+    // state, so asking again — and out of order — must answer the same.
+    for (std::int64_t ordinal = kOrdinals - 1; ordinal >= 0; --ordinal) {
+        const auto repeat = player.coordinate_at(1, {ordinal * kStepTicks});
+        REQUIRE(repeat.has_value());
+        CHECK(repeat->index == predicted[static_cast<std::size_t>(ordinal)]);
+    }
+
+    const std::int32_t partitions[] = {256, 64, 512};
+    const auto samples = map.ticks_to_samples({kOrdinals * kStepTicks}).value;
+    const auto attacks = attacks_of(render(player, map, samples, partitions));
+
+    std::size_t ordinal = 0;
+    for (const auto& attack : attacks) {
+        if (attack.event.channel() != 1)
+            continue;
+        REQUIRE(ordinal < predicted.size());
+        const auto expected = static_cast<int>(fixture.spec.lanes[1].base_note) +
+                              static_cast<int>(predicted[ordinal]);
+        INFO("random ordinal " << ordinal);
+        CHECK(static_cast<int>(attack.event.note()) == expected);
+        ++ordinal;
+    }
+    // A lane that never spoke would pass the loop above vacuously.
+    CHECK(ordinal == static_cast<std::size_t>(kOrdinals));
+
+    // If the walk had degenerated to the forward modulo, agreeing with it
+    // would say nothing about the random branch the query has to reproduce.
+    bool differs = false;
+    for (std::int64_t index = 0; index < kOrdinals; ++index)
+        differs = differs || predicted[static_cast<std::size_t>(index)] !=
+                                 static_cast<std::size_t>(index % 4);
+    CHECK(differs);
+}

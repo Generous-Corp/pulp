@@ -1166,6 +1166,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           lfs: false
+          # GPU provenance self-tests use HEAD^ and exact historical receipts.
+          # Keep normal checkout shallow; the bounded hydration step below
+          # fetches only the authority commits named by checked-in evidence.
+          fetch-depth: 2
           # Self-hosted runner reuses its workspace across runs so ccache,
           # FetchContent caches, and CMake configure persist between PRs.
           # GitHub-hosted runners get a fresh VM each run anyway, so the
@@ -1191,6 +1195,10 @@ jobs:
           else
             git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
           fi
+
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
 
       - name: Set up Namespace macOS cache
         if: runner.os == 'macOS' && contains(matrix.runs_on_json, 'namespace-profile')

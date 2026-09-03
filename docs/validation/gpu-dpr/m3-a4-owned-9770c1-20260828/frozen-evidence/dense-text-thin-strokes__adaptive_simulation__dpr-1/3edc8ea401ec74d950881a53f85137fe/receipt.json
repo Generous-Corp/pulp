@@ -1,0 +1,84 @@
+{
+  "adapter": {
+    "authentic_identity": true,
+    "backend": "Dawn/WebGPU",
+    "class": "hardware",
+    "driver": "Native Dawn Adapter (Metal)",
+    "name": "Native Dawn Adapter (Metal)"
+  },
+  "artifacts": [
+    {
+      "kind": "capture",
+      "path": "capture.png",
+      "sha256": "5fc2c4b92e1a5aff1a81681666f17d6a2f64fe94734391cf2d39cff75b66b063"
+    },
+    {
+      "kind": "trace",
+      "path": "trace.pftrace",
+      "sha256": "837e4caccd74bc0c0c5b3263b2a01c871ac6f9788b24348c6529ea788280e6db"
+    },
+    {
+      "kind": "raw_samples",
+      "path": "raw_samples.json",
+      "sha256": "b919dd462429ca050a3cfe49d739316295192a12f3b5c8fd98b9fbc67618d9fa"
+    },
+    {
+      "kind": "input_receipt",
+      "path": "input_receipt.json",
+      "sha256": "d1622f62013909dbd262eb9dff933d9f6ff56f40bf206db36045da3c32cbbcbc"
+    }
+  ],
+  "attempt_nonce": "3edc8ea401ec74d950881a53f85137fe",
+  "attempt_number": 1,
+  "build_identity": {
+    "measurement_producer": {
+      "path": "/private/tmp/pulp-a4-owned-9770c1-correct.wLyrJp/run/frozen-evidence/dense-text-thin-strokes__adaptive_simulation__dpr-1/3edc8ea401ec74d950881a53f85137fe/measurement-producer",
+      "sha256": "4bbaa64a24fc2a5c1e686270a6e39958581e7758c17d3d7298e4450af953e689"
+    },
+    "pulp_sha": "9770c166338fc03a14c7724a9ffd220ec89735df"
+  },
+  "content_digest": "d852e4f1c705707885c1ed3e37112b9ee682b588efd32d9db639ea9f490ff24e",
+  "machine": {
+    "architecture": "arm64",
+    "hostname": "Daniels-Mac-Studio.local",
+    "id": "Daniels-Mac-Studio.local:arm64",
+    "os": "Darwin 25.6.0"
+  },
+  "measurement_attestation": {
+    "audio_device_opened": false,
+    "producer_sha256": "4bbaa64a24fc2a5c1e686270a6e39958581e7758c17d3d7298e4450af953e689",
+    "same_process": {
+      "adapter_identity": true,
+      "capture": true,
+      "frame_metrics": true,
+      "logical_input": true,
+      "memory_metrics": true,
+      "trace_correlation": true
+    },
+    "schema": "pulp.gpu-dpr-native-measurement-attestation.v1"
+  },
+  "measurement_scope": {
+    "audio_device_opened": false,
+    "same_process": {
+      "adapter_identity": true,
+      "capture": true,
+      "frame_metrics": true,
+      "logical_input": true,
+      "memory_metrics": true,
+      "trace_correlation": true
+    },
+    "schema": "pulp.gpu-dpr-native-measurement-scope.v1"
+  },
+  "mode": "adaptive_simulation",
+  "observed_dpr": 1,
+  "outcome": "pass",
+  "physical_size": {
+    "height": 360,
+    "width": 640
+  },
+  "requested_dpr": 1,
+  "scenario_id": "dense-text-thin-strokes",
+  "scenario_kind": "pulp_screenshot",
+  "schema": "pulp.gpu-dpr-cell-receipt.v1",
+  "version": 1
+}

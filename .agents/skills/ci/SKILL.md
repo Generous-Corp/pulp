@@ -39,6 +39,11 @@ incidents unless a section explicitly says otherwise. They are not the current
 required-gate topology. The authoritative declarative surface is
 `tools/scripts/runner_topology.json`; reconcile it with live variables using
 `python3 tools/scripts/runner_topology_check.py --mode=report`.
+The same checker accepts read-only `--fleet-profile`, `--fleet-receipt`, and
+`--fleet-source-manifest` fixtures. Use them to prove that a TartCI source
+profile serves both classes, the loaded receipt binds its exact digest, and the
+private desired-fleet manifest agrees. Keep Pulp labels and host declarations in
+those repo/private inputs, not generic Shipyard or TartCI code.
 
 The canonical `.github/workflows/build.yml` `Build and Test` pull-request run
 is excluded from broad stale-run and superseded-run janitors. Its narrow
@@ -1677,6 +1682,28 @@ bisectable.
   unimplemented keyword *raises* rather than being skipped — so no schema
   constraint can be silently unchecked. **Adding a gate-script test file is not
   enough: `test_gates.py` must import its `TestCase`, or it runs nowhere.**
+- **Yoga oracle/pin lockstep (`check_yoga_oracle_pin.py`).** Whole-tree
+  invariant (not diff-scoped). The web-compat harness decides scope by looking a
+  CSS property up **by name** in `tools/harness/oracles/yoga/yoga-supported.json`
+  — a table hand-transcribed from one Yoga release — and
+  `tools/harness/adapters/yoga.py` reports anything absent from it as
+  `Status.OOS`, "out-of-scope", not as an uncovered gap. Yoga itself is pinned
+  independently in `tools/cmake/PulpDependencies.cmake`. Bumping the pin without
+  re-transcribing the table therefore reclassifies every property and enum value
+  the new Yoga gained as out of scope, and compat coverage *improves* because the
+  measurement went blind — the worst gate failure shape there is. The check reads
+  both ends and fails when they disagree. It also rejects the two cmake pin sites
+  (`pulp_register_fetchcontent_source ... REF` and the `FetchContent_Declare`
+  `GIT_TAG`) disagreeing with each other, and a missing or uncited version stamp,
+  so it cannot pass vacuously: exit `1` is drift, exit `2` is an unparseable or
+  absent stamp. Runs in `gates.sh`, in the pre-push hook, and as the
+  `yoga-oracle-pin-lockstep` ctest (with `yoga-oracle-pin-lockstep-selftest`
+  covering the checker itself). The ctest is the authoritative lane: the
+  pre-push hook shares `run_gate_captured`'s exit `2` with its own
+  capture-directory error, so — like every other gate there — it treats `2` as
+  an advisory internal error rather than a hard fail. Fixing it means restamping the oracle's `version`
+  and its `source` citation against the new `facebook/yoga@<ref>` YGEnums.h
+  *and* re-reading the property table — restamping alone re-hides the gap.
 - **Conflict-marker guard (`conflict_marker_check.py`).** Whole-tree guard (not
   diff-scoped): no tracked file may carry a git conflict marker. Born from the
   incident where a squash-merge's stale side collided with an already-advanced
@@ -5497,6 +5524,23 @@ fetch. `test_workflow_build_dirs.py` pins the workflow wiring and proves the
 missing-base negative control plus the event-pinned repair with local shallow
 repositories.
 
+**GPU provenance checks need connected event ancestry, not detached objects.**
+The GPU handoff and historical receipts intentionally validate old
+`revision:path` identities and ancestor/last-owner relationships. Fetching each
+SHA with `--depth=1` makes the objects readable but leaves them disconnected,
+so it cannot satisfy those checks. The native `build.yml` job runs
+`hydrate_gpu_provenance_commits.py`: it caps the checked-in Pulp revision set,
+unshallows only the exact `GITHUB_REF` event history when required, and then
+fails closed unless every named revision is a commit and an ancestor of HEAD.
+The cap is a cardinality guard, not permission to truncate evidence. Keep its
+accepted and rejected boundaries covered by
+`test_hydrate_gpu_provenance_commits.py`, and raise the explicit bound with
+headroom when legitimate closed handoff identities approach it; dropping or
+coalescing latest-owner revisions would falsify provenance. The current bound
+is 128 and the checked-in handoff plus independent probe receipt uses 65.
+Do not replace that step with a fixed deepen count, a full all-refs clone, or
+detached per-SHA fetches.
+
 **macOS builds with the Ninja generator.** `build.yml`'s Configure step
 passes `-G Ninja` on macOS only (Linux/Windows keep their default
 generator). Ninja schedules parallelism better and is faster on the
@@ -6834,19 +6878,16 @@ drift; humans run `shipyard update` to apply.
   lacks `/opt/homebrew/bin` and reports Homebrew tools as missing — this
   produces a FALSE "tart is not installed" census result. Use
   `ssh host 'zsh -lc "…"'` for any host census.
-- **`TART_HOME` is per-host BY DESIGN — never default it.** Real VM homes
-  differ intentionally: m3 = `/Volumes/Workshop/VMs` (external SSD), m1 and
-  m5 = `~/VMs` (internal SSD). A default is an undeclared name wearing a
-  trench coat: on a VM host an unset `TART_HOME` must be a **loud hard
-  error naming the fix**, never a guess. The repo holds RULES; the host
-  holds VALUES — per-host truth belongs in the tartci host profile, not a
-  repo constant. `tools/ci/*.sh` currently carry contradictory hardcoded
-  defaults (`/Volumes/Workshop/VMs` in the tart-runner / run-job /
-  provision / runner-linux scripts, `$HOME/VMs` in `reap-stray-vms.sh` and
-  `setup-ci-host.sh`). The worst failure mode: on m3, `reap-stray-vms.sh`
-  defaults to `$HOME/VMs`, which is **empty** on that host — so the reaper
-  inspects the wrong universe, reaps nothing, and exits 0 reporting
-  success. A silent permanent no-op. Always pass `TART_HOME` explicitly.
+- **`TART_HOME` is per-host BY DESIGN — never default it.** Every Pulp VM tool
+  now resolves it through `tools/ci/lib/tart-home.sh`: explicit environment,
+  then the host profile's `vm_home`, otherwise a loud error. Do not restore a
+  host/path table or a guessed `$HOME/VMs`/`/Volumes/.../VMs` fallback. A bare
+  `tart list` using an unbound default store is not proof that the host is idle:
+  if `tart run` processes or guest setup exist simultaneously, the result is
+  **unknown**. Resolve the receipt-bound profile, query its exact store, and
+  corroborate process state before any active-work decision. Pulp's topology
+  checker can compare supplied profile/receipt/source-manifest fixtures; live
+  store/process reconciliation belongs in TartCI.
 
 ### Anti-pattern (legacy)
 
@@ -7049,7 +7090,7 @@ Key facts:
 
 Companion plan: `planning/2026-05-19-ci-optimization-plan.md`.
 
-## macOS runner routing — fast JIT primary, local-only overflow
+## macOS runner routing — event-class JIT primary, reviewed hosted overflow
 
 **A routing var describes REALITY; `build.yml`'s `||` default is only the
 fallback.** Read the live variable before reasoning about where a leg runs —
@@ -7066,9 +7107,10 @@ python3 tools/scripts/runner_topology_check.py --mode=report
 
 The contracted required gate is the M1/M3/M5 JIT pool. The JSON records the
 legacy base selector; `build.yml` replaces `pulp-gate-fast` with the exact PR or
-merge-group event class before assignment. macOS overflow is disabled with the
-`local-only` sentinel, and paid Namespace variables remain unset. Read both
-surfaces together for the effective selector.
+merge-group event class before assignment. The reviewed overflow contract is
+GitHub-hosted `macos-15`; `local-only` remains its explicit disable sentinel,
+and paid Namespace variables remain unset. Read both surfaces together for the
+effective selector.
 
 **Required/advisory isolation.** The `pulp-build*` and `pulp-preamble*` labels
 are reserved for required merge-gate work. Example validation and format

@@ -13,13 +13,14 @@ before you touch it.
 
 ## Available analysis surface
 
-Capture and offline SQL are available today. Rust exposes no live query,
-snapshot, explain, raw-port, or publication-selection path. Named L0 presets
-remain planned rather than silently returning placeholder data.
+Capture, offline SQL, and three closed GPU analyses are available today. Rust
+exposes no live query, snapshot, explain, raw-port, or publication-selection
+path. Other named L0 presets remain planned rather than silently returning
+placeholder data.
 
 | Tier | Who | Entry point | What you get |
 |---|---|---|---|
-| **L0** | Novice, **no agent** | Planned named presets | Not available yet. |
+| **L0** | Novice, **no agent** | `pulp trace gpu-startup\|gpu-health\|gpu-probe --trace FILE` | A typed result from one checked-in PerfettoSQL view. |
 | **L1** | Novice, **one-shot** | Give an agent a `.pftrace` and load `trace-analysis` | A plain-English root cause, evidence chain, and fix built from real offline queries. |
 | **L2** | Expert, **iterative** | `pulp trace query "<sql>" --trace FILE.pftrace` with the `trace-analysis` + `trace-sql` skills loaded | The hypothesis→query→drill-down loop over the flushed trace. |
 
@@ -27,6 +28,52 @@ The planned L0 preset names map **1:1** onto the trace-stdlib SQL views shipped 
 `trace-sql` skill (`slowest-frames → pulp_slowest_frames`, `xruns →
 pulp_xruns`, `dsp-hotspots → pulp_dsp_node_cost`, `layout-vs-paint →
 pulp_layout_vs_paint`). They are not exposed as successful commands yet.
+
+GPU analysis is the first shipped L0 slice. Its three names map one-to-one to
+`pulp_gpu_startup_breakdown`, `pulp_gpu_health_transitions`, and
+`pulp_gpu_probe_correlation`. The CLI and `pulp_trace_analyze` MCP tool return
+the same `pulp.trace-gpu-analysis.v1` result and accept no raw SQL. Startup is
+`unverified` until A3 supplies a measured budget. Its cold/setup and indexed
+steady-state contributors are separate. When the capture contains scheduler
+`thread_state` intervals covering the complete slice, each contributor reports CPU-running and non-running
+time plus a `cpu-dominated|wait-dominated|mixed` classification; without that
+evidence it says `unavailable` and never infers blocking from wall duration.
+Unindexed work beginning before a correlated frame-zero completes is cold;
+later unindexed work is `unknown`, never silently folded into steady or cold.
+Zero-byte/never-flushed captures, processor-reported truncation, positive Perfetto data-loss/no-flush stats,
+unfinished slices, missing categories, and invalid evidence correlation are
+typed `unavailable` outcomes with `capture_complete:false`.
+Observed categories are accepted only from the same evidence ID and stable
+Perfetto process instance as the question rows; an unrelated process cannot
+complete that category set. The closed probe view also treats the producer's
+`cpu_oracle_mismatch` and `magnitude_dispatch_failed` diagnostics as failures,
+even alongside an inconsistent `healthy` state. Every tooling-owned
+`gpu_probe*`/`gpu_readback*` candidate must carry the cohort evidence ID; one
+untagged tooling span makes correlation unavailable even when another tagged
+row is healthy. Generic untagged backend spans remain allowed.
+
+The named GPU analyzer has explicit resource limits: traces larger than
+512 MiB are rejected before `trace_processor` launches. An opened non-symlink
+regular trace is copied into an exclusive private snapshot (mode 0600 on Unix);
+replacement or growth during that copy is rejected, and the processor receives
+only the snapshot path. Processing has one 120-second wall-clock deadline, and
+retained stdout plus stderr is capped at
+4 MiB. Deadline, output-overflow, and pipe-read failures terminate the complete
+processor tree on both Unix and Windows. If a legitimate capture hits a limit,
+shorten or narrow the capture, or divide the investigation into focused L2
+queries. Do not interpret a resource-limit error as a rendering bottleneck.
+Free-form `pulp trace query` is a separate, pre-existing runner and does not yet
+carry the named analyzer's bounds.
+
+For repeatable installed CLI/MCP timing and artifact-binding evidence, use
+`tools/scripts/gpu_trace_overhead_acceptance.py`; its receipt keeps five
+warm-ups, 30 paired samples, 20 fresh-process samples, host identity, raw
+durations, p95, noise, and confidence. This measures offline analysis only.
+Any new trace producer call sites still require compile-out,
+compiled-in/idle, and active 128 MiB capture trials on the real product
+workload. When an analyzer change touches no producer path, record that exact no-change
+inventory as `not-applicable`; do not relabel analyzer timing as product
+capture overhead.
 
 ### The L1 "explain" flow, spelled out
 

@@ -80,10 +80,19 @@ Rules it follows, each of which was a wrong answer first:
 ## A table is not a fact, and a retry cannot see the run
 
 Two lessons from the run kept in `tools/rack/test_fixtures/silent-oscillator/`.
-A correctly-wired patch was silent because one oscillator produced 0.000 V, and
-the model kept that oscillator for **four consecutive attempts**, adjusting its
-knobs. Its params were all in range and none at a silencing zero, so retuning
-was never going to work.
+A correctly-wired patch read silent because one oscillator reported 0.000 V,
+and the model kept that oscillator for **four consecutive attempts**, adjusting
+its knobs. Its params were all in range and none at a silencing zero, so
+retuning was never going to work.
+
+That oscillator was not broken. It was licensed, and the gate of the day never
+resolved licence keys, so it wrote zeros: this run is an instance of "A
+licensed module runs, writes zeros, and logs nothing" below, and the replay in
+`tools/rack/licence-fix-replay.json` carries both of its patches moving silent
+to audible under the fixed gate. **That changes the cause and not one of the
+lessons.** The retry could not see the harness, only the readings, so naming
+the first module in the chain reading zero was still the right move and the
+right answer was still Zephyr.
 
 **The information was already there and was not usable.** The retry context
 carried the entire per-module table and told the model to "find the FIRST
@@ -138,6 +147,14 @@ request. If none fully qualifies, retain the audible candidate with the fewest
 missed requirements as unfinished with its exact errors; preserve the original
 patch only when no sibling became measured audible. This is a general
 output-selection repair, never a module-identity exception.
+
+The acceptance result has to remain bound to the candidate that was actually
+measured. `patch.py` may not reuse an earlier long-horizon result after a
+deterministic repair changes the patch, and a timeout or unavailable listener
+is `UNMEASURED`, never a pass. When the gate prints a completed artifact or a
+specific terminal failure, `drive_app.py` must classify that exact producer
+wording as PASS or FAIL rather than degrading it to INCONCLUSIVE. Keep producer
+and every reader pinned together with positive and negative fixtures.
 
 `render_inventory` has the same honesty rule: a module with no recorded jacks
 prints `ports: UNKNOWN`, and inputs and outputs are independent. It used to
@@ -327,6 +344,15 @@ carry an exclusion to a different plugin version without fresh evidence. This
 is why `PathSet-Infinity/WarpDrive` 2.1.0 is excluded: a newly authored instance
 is silent without its opaque coil, LFO, and envelope sequences even though the
 module is installed and its ordinary Rack metadata looks sufficient.
+
+`Geodesics-Vultiverse/Hexaquark` 2.0.4 is excluded for the same class by
+different evidence. It requires an external clock, and its musical sequence is
+stored in an opaque roughly 32 KiB `data.state`; setting the visible Run or
+Scene parameters does not author that state. Keep it available when refining a
+validated saved patch, but do not offer or accept it for fresh generation until
+an exact-version state compiler has a three-arm proof: known preset state plus
+clock plays, the same state without clock does not, and blank state plus clock
+does not. A newer version needs fresh evidence rather than inheriting this row.
 
 Before a module-generation request can reach a model, it must select at least
 one direct primary DSP capability from
@@ -544,6 +570,67 @@ was never heard. 96% of the generated patches place at least one ForgeModular
 module, so essentially every measurement over that corpus is about a rack with
 missing modules, whatever else it also says. Check `otool -L` before trusting
 any generation-era audio result.
+
+## A licensed module runs, writes zeros, and logs nothing
+
+A VCV Library module resolves its entitlement from a cached key at
+`<asset::userDir>/licenses/<plugin>.vcvkey`. Nothing sets `userDir` for you. In
+a harness that only calls `dlopen` it is empty, so the lookup goes to
+`/licenses/...`, finds nothing, and the module **constructs normally, runs its
+DSP, and writes 0 to every output**. No exception, no failed load, no log line.
+
+That is externally indistinguishable from a module that is genuinely dead,
+which is the whole problem. A gate that measures outputs reports SILENT, the
+generation believes the module is broken, and it spends its retries replacing a
+part that works.
+
+**The ordering is load-bearing:**
+
+```
+asset::userDir = <the Rack user dir>  ->  rack::asset::init()  ->  first dlopen
+```
+
+`asset::init()` called after the first `dlopen` does nothing. The key is read
+while the plugin initialises, not when it is asked for its output.
+
+The control that separates "unlicensed" from "dead":
+
+```bash
+ls ~/Library/Application\ Support/Rack2/licenses/*.vcvkey | wc -l
+# non-zero, or the comparison below proves nothing
+```
+
+Then measure the same patch with and without `userDir` set. A verdict that
+**changes** is a licence; a verdict that **holds** is a real defect. Do not
+skip the first line: on a machine with no keys, both halves agree for a reason
+that has nothing to do with the patch.
+
+Every harness that loads plugins has to do this, not only the audibility gate.
+`test_patch.py` asserts it, so a new loader that forgets is caught there rather
+than by a run of patches that read as silent for a reason nobody can see.
+
+### `nm` cannot tell you whether a plugin links libRack
+
+The obvious check for the missing-`-lRack` defect above is to look at the
+symbols, and it does not work. `nm -m plugin.dylib | grep _ZN4rack` reports
+**118 undefined for a correct build and a broken one alike**; shipped
+third-party plugins report 165. Undefined `rack::` symbols are normal, because
+they are exactly what the flat namespace resolves at load. Only `otool -L`
+names the load command, and a missing load command is the defect.
+
+## The gate is seeded from the clock, so a single flip is noise
+
+`patch_gate` calls `rack::random::init()`, which seeds from the clock inside
+libRack, so two identical passes over the same patch can disagree. Measured
+over a corpus it is rare and real: one disagreement in 500 patch-measurements,
+and always one patch flipping rather than a set.
+
+So a replay or an A/B that reports **one** changed verdict has reported noise.
+Run the same binary twice before comparing two binaries, and state that floor
+beside the result. An effect has to clear it to mean anything, and the ceiling
+matters too: if only 13 patches in the corpus can possibly change, a result of
+8 is inside a band of 2 to 13, not a rate.
+
 
 ## Intent anchors are constraints, not decoration
 
@@ -1004,6 +1091,86 @@ module's `out0` into a `V/Oct` input, that is a pitch output, and that is
 knowledge about the ~40% of the library CARTOG cannot reach because nobody has
 it installed. It is a prior, never a measurement, and must never override a
 real scan.
+
+### The support count is only as good as the identity behind it
+
+`usage-priors` admits a port hint only when several **distinct contributors**
+independently wire a jack the same way, so one contributor cannot corroborate
+themselves by uploading twice. That makes the contributor identity, not the
+floor, the part that decides whether the lane can ever admit anything.
+
+An identity that reads a field the stored evidence does not carry does not
+error. Every observation falls into the same anonymous bucket, support pins at
+exactly 1, and any floor above 1 becomes unreachable. The lane then prints
+`corroborated priors: 0` with a four-figure quarantine, which reads as a
+finding about the corpus rather than a broken instrument, and the honest-looking
+number invites the wrong fix: lowering the floor. The floor was never the
+problem.
+
+So the lane now reports `degenerate_support` and prints a warning when *every*
+observation has support exactly 1, because a corpus that genuinely lacks
+corroboration still shows a spread of support counts. When you change anything
+about how contributors are told apart, re-run the sensitivity control rather
+than reading the headline: run it once each at `--min-support 1`, `2` and `3` and compare. A
+real corpus decays (many at 1, fewer at 2, fewer at 3); a broken identity falls
+off a cliff (everything at 1, nothing above it).
+
+The identity is a comparison token, never a label: contributor names are hashed
+before they are counted, so nothing downstream can print or persist one even by
+accident. Tests for this must be shaped like the **stored** records rather than
+like the writer's output, since a fixture that supplies whichever field the code
+happens to read agrees with it by construction and proves nothing.
+
+### What the prior is actually worth, measured
+
+`corpus_audit.py prior-accuracy` scores the inference where the answer is
+already known. The lane infers an unmapped port's class from the mapped end of
+a cable, and by construction nothing can check that: the port is unmapped
+because there is no scan of it. A cable with **both** ends mapped is the
+held-out case, so run the same inference there and compare against the port's
+own class.
+
+Measured over the current corpus:
+
+| min-support | scored | correct | wrong |
+|---|---|---|---|
+| 1 | 400 | 324 (81.0%) | 76 |
+| 2 | 128 | 117 (91.4%) | 11 |
+| 3 | 60 | 59 (98.3%) | 1 |
+| 5 | 16 | 16 (100%) | 0 |
+
+Two things follow. The admission floor of 3 is not arbitrary: it is where a
+four-in-five guess becomes a fifty-to-one one. And accuracy climbing with
+support is the **control on the support count itself** - if contributors were
+not really being told apart, support would be noise and the line would be flat.
+`prior-accuracy` warns when it stops climbing, for exactly that reason.
+
+Read the number as an upper bound and say so when quoting it. A port has a
+known class here only because it is mapped, and mapped ports are plausibly
+better named than the unmapped ports the lane actually serves. This scores the
+inference, never the module: a prior remains a hint that a real scan overrides.
+
+### Nothing consumes the priors yet, and the port map is the wrong home
+
+Say this plainly before quoting the accuracy table at anyone: the report is
+proposal-only and **no code reads it**. Count the readers rather than assuming
+one exists. The lane produces good hints that currently go nowhere, so the
+remaining work is a consumer, not more inference.
+
+When that consumer is built, it does not belong in the port map, and the port
+map's own docstring says why. `portmap_merge.hpp` folds a fresh scan in by
+replacing a re-measured module's whole block, so anything inferred that is
+stored there is erased the moment somebody scans the module. Ranges belong
+there because they ARE the scanner's fact; a classification is not, which is
+exactly why affordances are kept in their own cache instead. A prior is
+inferred, so it follows the affordance precedent, not the range one.
+
+The precedence a consumer has to preserve, strongest first: this machine's own
+scan, then the shipped seed, then a prior. A prior may only answer where the
+port map has no answer at all. It never fills a gap inside an entry the
+scanner already replaced, because "the scanner looked and found nothing" and
+"nobody has looked" are different answers and merging them is how an inference
+comes to outrank a measurement.
 
 ## The reading corpus has an index, and retrieval is not admission
 

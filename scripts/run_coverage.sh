@@ -218,12 +218,15 @@ if [[ "${CTEST_RC}" -ne 0 ]]; then
 fi
 
 echo "=== Merging profiles ==="
-# Avoid shell-glob on thousands of profraw files that may exhaust argv
-# on some OSes; feed via find -print0 | xargs.
 mkdir -p "${REPORT_DIR}"
 PROFDATA="${REPORT_DIR}/pulp.profdata"
 MERGE_LOG="${REPORT_DIR}/llvm-profdata-merge.log"
-PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -name '*.profraw' -type f | wc -l | tr -d ' ')
+PROFILE_INPUTS="${REPORT_DIR}/llvm-profdata-inputs.txt"
+# Keep argv bounded and use one llvm-profdata invocation. xargs may split a
+# large profile set into multiple merges, and each later -o invocation
+# overwrites the prior result instead of accumulating it.
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -print > "${PROFILE_INPUTS}"
+PROFILE_SHARDS=$(wc -l < "${PROFILE_INPUTS}" | tr -d ' ')
 if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
     echo "run_coverage.sh: no raw profile shards were produced" >&2
     exit 1
@@ -231,9 +234,8 @@ fi
 # A timed-out or aborted test can leave its pool shard truncated. Keep every
 # valid shard instead of letting llvm-profdata's default failure-mode=any
 # blackhole the whole report, but fail closed if corruption is systemic.
-if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -print0 \
-    | xargs -0 llvm-profdata merge -sparse --failure-mode=all \
-        -o "${PROFDATA}" 2>"${MERGE_LOG}"; then
+if ! llvm-profdata merge -sparse --failure-mode=all \
+    --input-files="${PROFILE_INPUTS}" -o "${PROFDATA}" 2>"${MERGE_LOG}"; then
     cat "${MERGE_LOG}" >&2
     exit 1
 fi

@@ -97,6 +97,31 @@ if(Python3_Interpreter_FOUND)
         LABELS "rack;contract"
         TIMEOUT 60)
 
+    # A patch whose signal never reaches an output: a gain stage left closed,
+    # a carrier landed on a modulation jack. Both render structurally perfect
+    # and inaudible, so nothing upstream of an actual measurement catches
+    # them. Registered here rather than left to a Rack-enabled build because
+    # the rules are pure inventory arithmetic and need no SDK -- and because
+    # a check that only runs where Rack is installed does not guard the
+    # generator that runs everywhere. Hermetic.
+    add_test(NAME rack-signal-path
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_signal_path.py)
+    set_tests_properties(rack-signal-path PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 60)
+
+    # The reasoning of the licence-fix replay: what it refuses to measure,
+    # what it counts as a transition, and whether its two controls can fail.
+    # Hermetic -- it builds no gate and loads no plugin, so it runs everywhere
+    # while the replay itself stays an on-demand tool needing an SDK and keys.
+    add_test(NAME rack-licence-fix-replay
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_replay_licence_fix.py)
+    set_tests_properties(rack-licence-fix-replay PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 120)
+
     # What the gate SAYS when an input reads as inert, which decides whether a
     # generation can act on the failure or only observe it. Compiles two
     # fixtures against the real Rack SDK and runs the real gate, so it skips

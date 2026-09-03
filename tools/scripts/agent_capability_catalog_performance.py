@@ -240,7 +240,7 @@ EXPORTS = [
             include="pulp/audio/voice_modulation_sources.hpp",
             qualified_name="pulp::audio::VoiceModulationSources<4>",
             target="Pulp::audio",
-            header_fingerprint="sha256:5d62d1ef328c7a47103efcc0910ef48928ca844213c6a4a8579cdf8e9f15a234",
+            header_fingerprint="sha256:fcebd2eee1729ee806c369dd9e2696cc0c1aa8e6442afe01b9e84b2d3dd70da0",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -431,7 +431,7 @@ EXPORTS = [
             include="pulp/midi/step_player.hpp",
             qualified_name="pulp::midi::StepPlayer<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:5e5912901dcfee1158610015a28b1fa3bd9fdbdd1674637eb3413b7e191b5239",
+            header_fingerprint="sha256:eb2d26f9aa1d2d1414daa30c302cc59093e741df2d3dbeedc78d9ae28a7a731b",
         )],
         _link_probes=[{
             "role": "entrypoint",

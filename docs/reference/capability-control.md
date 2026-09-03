@@ -154,7 +154,7 @@ Build profiles are artifact policy, not client grants:
 | `production-stripped` | Default. Endpoint and capability list must be empty. |
 | `developer-local` | Explicit developer capabilities; Standalone endpoint only. |
 | `test-deterministic` | Explicit deterministic test/T0 capabilities; never a production default. |
-| `support-diagnostics` | Explicit instance, state, diagnostics, or log reads only. |
+| `support-diagnostics` | Explicit instance, state, GPU-health, diagnostics, or log reads only. |
 | `research-unsafe` | Explicit research list; evaluation also needs the separate acknowledgement. |
 
 Runtime grant profiles are a different, smaller vocabulary:
@@ -162,6 +162,83 @@ Runtime grant profiles are a different, smaller vocabulary:
 is intersected with the exact live registration's declared capabilities. Empty
 intersection, missing consent, stale publication, or a dead session denies the
 request.
+
+Interactive grants from the trusted Pulp CLI, host UI, or broker-owned prompt
+keep their established reusable operation behavior except for GPU startup-health
+reads. An interactive `dev.pulp.gpu/health.read@1` approval admits at most one
+fresh idempotency identity; reconnecting or changing the request ID may only
+replay that operation's existing durable receipt. Different params, operation
+identity, target lineage, or idempotency identity require new consent. The
+interactive decision ID itself remains single-use for every capability, and
+runtime evaluation still requires interactive consent. An explicit existing-user
+policy may authorize reusable GPU-health reads.
+
+### GPU startup-health snapshots
+
+`dev.pulp.gpu/health.read@1` is the exact-instance read operation for the
+versioned `pulp.gpu-health-read-result.v1` response. It is a sensitive,
+read-only background operation: calling it reads a bounded, already-produced
+snapshot. It does not open an editor, render a frame, compile a shader, start a
+trace, prewarm a cache, or run on the audio thread.
+
+The response preserves the complete `pulp.gpu-health-result.v1` device and
+render-health object under `health`. Its `startup` object binds the measurement
+clock and explicit `native-compositor-presentation` or
+`headless-capture-complete` endpoint, cold/warm trials, content and target
+signatures, prepared/fallback state, adapter class, bounded event-loss fields,
+and nullable GPU/Perfetto evidence IDs. The budget freezes separate nonzero
+cold and warm trial counts whose sum and observed composition must match the
+total trial count. A performance verdict or final
+`queue-B4`, `queue-B4-investigation`, or `no-change` disposition is valid only
+after the budget is ratified and the required correlated capture is lossless.
+`dropped_event_count` and `truncated` describe capture integrity;
+`missing_trace_categories` describes instrumentation coverage and may remain
+nonempty for the plan-authorized investigation or passing no-change cases.
+An unratified budget fixes how future trials will be interpreted but cannot
+publish a performance pass or fail.
+
+Once the exact live product advertises the operation, read it through the
+existing generic control CLI:
+
+```sh
+pulp control call --instance "$INSTANCE_ID" dev.pulp.gpu/health.read@1 \
+  --profile inspect-readonly --params '{}' --json
+```
+
+Registry and MCP presence do not imply host availability. Control-enabled
+Standalone products now compose `ControlGpuHealthProvider` with a UI-thread
+view adapter and advertise the operation only when that editor surface exists.
+The adapter captures the host back buffer after ordinary event/render work,
+records authentic `GpuSurface::adapter_info()` when present, applies the shared
+PNG content floor, and publishes an immutable snapshot for the exact admitted
+registration, instance, and publication. Reads are atomic and never render,
+block, compile, trace, or touch the audio thread.
+
+The default Standalone composition is intentionally conservative: capture
+completion bounds back-buffer readiness but does not prove the native present
+boundary. Visible Standalone, DAW, and Forge campaigns require independent
+native compositor evidence. Only a provider explicitly configured for the
+constrained headless role uses capture completion as its endpoint, and it cannot
+claim compositor present timing. A trusted visible product composition may supply independent native
+present timestamps, unique editor-lifecycle and observed cache-state identity,
+direct submission evidence, bounded compile/upload/hidden-frame/present timings,
+signatures, and the same 32-hex GPU evidence ID observed by the same-instance
+trace. Capture completion never substitutes for presentation.
+Without a ratified budget, exact lifecycle/cache identity, submission, target,
+same-instance trace identity, and the role-appropriate endpoint, the versioned
+`pulp.editor-first-visible.v1` startup result remains unverified. Missing causal
+stage timings or source/shader identity are instead recorded as instrumentation
+coverage gaps; they never become dropped-event claims.
+
+Even a locally complete live snapshot is raw campaign evidence, not the A3
+acceptance decision. The closed A3 verifier independently binds the ratified
+budget and raw samples, product/host artifacts, exact trace and analyzer replay,
+blank negative, and audio-thread exclusion receipt before any B4 disposition is
+legal. `PULP_GPU_HEALTH_SEED_BLANK_FRAME=1` provides the deterministic blank
+first-frame negative control. Timeout, instance loss, event loss, invalid PNG,
+blank content, malformed producer data, reused lifecycle identity, and missing
+adapter identity all fail closed. This runtime operation remains absent from the
+design-time agent capability manifest.
 
 ## Diagnose and audit
 

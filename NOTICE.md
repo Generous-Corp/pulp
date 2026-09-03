@@ -141,6 +141,20 @@ SOFTWARE.
 
 ---
 
+## command-group
+
+Copyrights are retained by the command-group contributors.
+
+Licensed to Pulp under the Apache License, Version 2.0. The complete Apache
+License, Version 2.0 is reproduced in the appendix to this file.
+
+The Windows job-object implementation includes code adapted from watchexec,
+Copyright Matt Green, licensed under Apache License, Version 2.0. Other adapted
+code retains the Rust Contributors' copyright and is available under Apache
+License, Version 2.0.
+
+---
+
 ## cpp-httplib
 
 Copyright (c) 2017 yhirose
@@ -1391,8 +1405,10 @@ developer opts in with `PULP_ENABLE_SCALA_TUNING=ON` or
 
 Copyright (c) 2010-2026 three.js authors
 
-MIT License — used optionally for native WebGPU bridge demos and tests.
-Fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON.
+MIT License — used for the pinned native WebGPU runtime consumed by demos,
+tests, and installed SDKs. It is fetched or supplied through
+`PULP_THREEJS_RUNTIME_DIR` when `PULP_ENABLE_THREEJS_RUNTIME=ON`, which defaults
+to the GPU-support setting.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1680,7 +1696,8 @@ SOFTWARE.
 
 Reproduced once here, in full, to satisfy Apache-2.0 section 4(a) for every
 Apache-2.0 component listed above that Pulp redistributes — AudioUnitSDK,
-Highway, Mbed TLS, and SheenBidi all ship inside the installed SDK tree.
+command-group, Highway, Mbed TLS, and SheenBidi all ship inside Pulp's
+redistributed products.
 Section 4(a) requires giving recipients a copy of the License itself; the
 per-entry headers above carry each component's copyright and standard notice
 but only link to the License, and a link is not a copy. The License is one
