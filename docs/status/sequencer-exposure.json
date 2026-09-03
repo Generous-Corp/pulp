@@ -2326,6 +2326,13 @@
             "#include <windows.h>",
             "#include <sddl.h>"
           ]
+        },
+        {
+          "path": "test/test_authoring_capsule.cpp",
+          "needles": [
+            "a successful preview writes nothing while admission extracts the same member",
+            "tree_snapshot"
+          ]
         }
       ],
       "surfaces": {
