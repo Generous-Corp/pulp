@@ -285,8 +285,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-trace-overhead",
           "state": "pulp-owned-retained",
-          "revision": "ca185c42ead63f0f235c12119a071a59c3dabb87",
-          "object_id": "45d0b72554a40f5902acd250be82061abe75decd",
+          "revision": "5b57066f5491eba7089f5ced44763f5a765dbce2",
+          "object_id": "6b64ceab7069be1bcf2091de7a38064e6e1d005c",
           "object_type": "tree"
         },
         {
