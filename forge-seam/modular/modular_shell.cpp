@@ -442,9 +442,10 @@ constexpr auto kTransparent = pulp::canvas::Color::rgba8(0, 0, 0, 0);
 // a prompt anybody can judge, and the point of showing it before building is
 // that it can be read and edited.
 const char* const kRandomModule[] = {
-    "a 12 HP wavefolder with drive and symmetry, plus a CV input for the fold amount",
+    "a 6 HP wavefolder with drive and symmetry, plus a CV input for the fold amount",
     "an 8 HP slew limiter with separate rise and fall, and an end-of-rise gate",
-    "a 6 HP sample and hold with an internal noise source and a track mode",
+    "a 4 HP dual attenuverter with a shared offset",
+    "a 4 HP sample and hold with an internal noise source and switchable glide",
     "a 10 HP chaotic modulation source with rate, character and two decorrelated outputs",
     "an 8 HP resonant lowpass gate with a vactrol-style decay",
 };
