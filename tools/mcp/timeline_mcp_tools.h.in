@@ -5,8 +5,9 @@
 
 namespace pulp_mcp {
 
-inline constexpr std::string_view kTimelineMcpToolsDocument =
-    R"PULPTL(@PULP_TIMELINE_MCP_TOOLS_JSON@)PULPTL";
+inline constexpr std::array<std::string_view, @PULP_TIMELINE_MCP_DOCUMENT_CHUNK_COUNT@>
+    kTimelineMcpToolsDocumentChunks{
+@PULP_TIMELINE_MCP_DOCUMENT_CHUNKS@};
 
 inline constexpr std::array<std::string_view, 10> kTimelineMcpTools{
     R"PULPTL(@PULP_TIMELINE_MCP_TOOL_JSON_0@)PULPTL",
