@@ -201,16 +201,25 @@ def parse_time(value: str, label: str) -> dt.datetime:
 def verify_signature(statement: dict[str, Any], public_key: str,
                      identity: str, signature: bytes) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        allowed = Path(temp_dir) / "allowed_signers"
         signature_path = Path(temp_dir) / "statement.sig"
-        allowed.write_text(f"{identity} {public_key}\n", encoding="utf-8")
         signature_path.write_bytes(signature)
-        result = subprocess.run(
-            ["ssh-keygen", "-Y", "verify", "-f", str(allowed), "-I", identity,
-             "-n", NAMESPACE, "-s", str(signature_path)],
-            input=canonical(statement), stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, check=False,
-        )
+        # ssh-keygen requires an allowed-signers pathname, but the signer
+        # identity and public key are trust inputs and must not be persisted as
+        # clear-text storage.  Feed the file through an inherited pipe instead.
+        allowed_read, allowed_write = os.pipe()
+        try:
+            os.write(allowed_write, f"{identity} {public_key}\n".encode("utf-8"))
+        finally:
+            os.close(allowed_write)
+        try:
+            result = subprocess.run(
+                ["ssh-keygen", "-Y", "verify", "-f", f"/dev/fd/{allowed_read}",
+                 "-I", identity, "-n", NAMESPACE, "-s", str(signature_path)],
+                input=canonical(statement), stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, check=False, pass_fds=(allowed_read,),
+            )
+        finally:
+            os.close(allowed_read)
     require(result.returncode == 0, "run-attestation signature is not valid for the trusted host key")
 
 
