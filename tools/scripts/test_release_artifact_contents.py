@@ -1737,6 +1737,40 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             )
 
 
+class StandaloneHostCapabilityPin(unittest.TestCase):
+    """The capability set, pinned independently of the constant it checks.
+
+    Every other assertion here builds its fixture from
+    CONTROL_STANDALONE_HOST_CAPABILITIES, so it agrees with that tuple by
+    construction and cannot notice when the tuple falls behind the host. That
+    is how a release shipped a verifier expecting two capabilities while the
+    binary emitted three: nothing compared the tuple to anything but itself,
+    and the mismatch surfaced only at artifact verification, after a full
+    build, as an opaque tuple diff.
+
+    Pinning the literals here does not prove the host agrees. It does force a
+    deliberate edit in two places, so adding an operation cannot silently pass
+    review and fail the release.
+    """
+
+    def test_capabilities_match_the_pinned_set(self) -> None:
+        self.assertEqual(
+            tuple(rac.CONTROL_STANDALONE_HOST_CAPABILITIES),
+            (
+                "dev.pulp.gpu/health.read@1",
+                "dev.pulp.instance/read@1",
+                "dev.pulp.state/read@1",
+            ),
+        )
+
+    def test_capabilities_are_sorted_and_unique(self) -> None:
+        # The host emits them sorted, so a mismatch reads as a missing or extra
+        # entry rather than as a reordering.
+        caps = list(rac.CONTROL_STANDALONE_HOST_CAPABILITIES)
+        self.assertEqual(caps, sorted(caps))
+        self.assertEqual(len(caps), len(set(caps)))
+
+
 class ActivePlatformsContract(unittest.TestCase):
     """The active_platforms shipping knob and its asset-contract derivation."""
 

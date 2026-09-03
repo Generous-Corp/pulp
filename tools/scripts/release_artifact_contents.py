@@ -82,6 +82,11 @@ CONTROL_MANIFEST_PERMISSION_TERMS = (
     "session_live",
 )
 CONTROL_STANDALONE_HOST_CAPABILITIES = (
+    # Kept in the order the host emits, which is sorted, so a mismatch reads as
+    # a missing or extra entry rather than a reordering. The host declares these
+    # unconditionally; adding an operation there without adding it here fails
+    # every release artifact at verification, not at build.
+    "dev.pulp.gpu/health.read@1",
     "dev.pulp.instance/read@1",
     "dev.pulp.state/read@1",
 )
