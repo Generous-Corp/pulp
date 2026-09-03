@@ -200,22 +200,40 @@ case "${command_name}" in
         show_branch "${branch}"
         ;;
     list)
+        # Read the whole lineage table in a fixed number of git invocations. A
+        # per-branch `git config --get` loop costs one process per field per
+        # branch, so a checkout carrying a few thousand local branches spends
+        # tens of thousands of spawns and minutes of wall time to print a table
+        # that is already sitting in one config file. git lowercases the
+        # trailing key component, so the lookups below are lowercase even
+        # though `key()` writes them camel-cased.
         printf 'STATUS\tHEAD_MATCH\tUPDATED\tDURABLE_SHA\tBRANCH\tLAST_PATH\tSUCCESSOR\tPR_OR_ARCHIVE\n'
-        while IFS= read -r b; do
-            branch="${b}"
-            state="$(get_value Status)"
-            [[ -n "${state}" ]] || continue
-            destination="$(get_value Pr)"
-            [[ -n "${destination}" ]] || destination="$(get_value Archive)"
-            durable_sha="$(get_value DurableSha)"
-            current_sha="$(git rev-parse "refs/heads/${branch}" </dev/null)"
-            head_match=no
-            [[ "${durable_sha}" == "${current_sha}" ]] && head_match=yes
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-                "${state}" "${head_match}" "$(get_value UpdatedAt)" "${durable_sha}" \
-                "${branch}" "$(get_value LastPath)" "$(get_value Successor)" \
-                "${destination}"
-        done < <(git for-each-ref --format='%(refname:short)' refs/heads | sort)
+        awk -F'\t' '
+            NR == FNR {
+                space = index($0, " ")
+                if (space == 0) { name = $0; value = "" }
+                else { name = substr($0, 1, space - 1); value = substr($0, space + 1) }
+                # A value holding a newline arrives as continuation lines that
+                # are not config keys; skip them rather than guess at them.
+                if (name ~ /^branch\./) cfg[name] = value
+                next
+            }
+            {
+                branch = $1
+                prefix = "branch." branch ".pulpworktree"
+                state = cfg[prefix "status"]
+                if (state == "") next
+                durable = cfg[prefix "durablesha"]
+                head_match = (durable == $2) ? "yes" : "no"
+                destination = cfg[prefix "pr"]
+                if (destination == "") destination = cfg[prefix "archive"]
+                printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", \
+                    state, head_match, cfg[prefix "updatedat"], durable, \
+                    branch, cfg[prefix "lastpath"], cfg[prefix "successor"], \
+                    destination
+            }
+        ' <(git config --local --get-regexp '^branch\..*\.pulpworktree' 2>/dev/null || true) \
+          <(git for-each-ref --format='%(refname:short)%09%(objectname)' refs/heads | sort)
         ;;
     *)
         usage

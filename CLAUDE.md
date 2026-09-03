@@ -1225,36 +1225,29 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 **Shipping a PR** — when the user says any of "push a PR", "ship this", "ship it", "we're done", "merge this", or "push it", invoke `shipyard pr` (the existing `ci` skill routes through this). Never run `gh pr create` + `shipyard ship` separately; never run the version-bump or skill-sync scripts by hand. `shipyard pr` orchestrates:
 
 1. `skill_sync_check.py --mode=report` — hard-fails on missing SKILL.md updates.
-2. `version_bump_check.py --mode=apply` — rewrites version files and CHANGELOG stub.
+2. `version_bump_check.py --mode=apply` — under post-merge assignment this writes
+   **no** version files (see below); it reports the heuristic verdict only.
 3. Branch push, PR creation, Shipyard state recording, and cross-platform validation — one command, merges on green.
 4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
 
-**Exact fix/feat release marker:** `.github/workflows/version-skill-check.yml`
-adds `--require-bump-for-fix-feat` on PRs. If the PR title or any live
-commit-derived signal starts with `fix:` / `fix(scope):` / `feat:` /
-`feat(scope):`, the diff range must contain a bump-marker commit whose subject
-starts with exactly
-`chore: bump versions` (canonical) or `chore(versions): bump` (legacy),
-unless the range has a top-level `Version-Bump: skip reason="..."`
-trailer. Near-misses such as `chore: bump SDK to vX.Y.Z` do not count.
-Explicit reverts cancel their target signals; reverting a revert restores them.
-When manually repairing a release bump, use the exact canonical subject.
-For PRs targeting `main`, the required check also writes an **Expected release
-tags** run summary for the PR queue. This prediction uses the fetched tag state
-and the same auto-release skip/revert guard, modeling GitHub's sole-commit
-subject versus multi-commit PR-title squash policy separately from the synthetic
-merge tree; `auto-release.yml` creates the
-actual signed tags only after merge.
+**PRs carry no version files — the bot assigns the number on merge.**
+`tools/scripts/versioning.json` sets `"post_merge_assignment": true`, so
+`version_bump_check.py --mode=apply` is a verified no-op and a shipped PR
+touches no version file at all. `version-at-land.yml` re-derives the level from
+the same path heuristic and assigns it after the merge lands. Do **not** hand-write
+a version number, and do **not** add a `chore: bump versions` marker commit — that
+marker belongs to the retired per-PR model, and the gate no longer looks for one.
+One consequence worth stating: the bot assigns one version per surface per drain,
+so a queue batch of three SDK fixes yields one SDK release covering all three.
 
-**Bumps are diff-driven, not title-driven.** `--require-bump-for-fix-feat`
-is an *additional* gate layered on `fix:`/`feat:` titles — it is NOT what
-triggers the base requirement. `version_bump_check.py` derives a bump
-heuristic from the touched paths, so ANY change to versioned source (e.g.
-`core/**`) needs a `chore: bump versions` commit regardless of the PR/commit
-title — a `refactor:` or `chore:` subject does not exempt it. Don't predict
-from the title; run `tools/scripts/gates.sh origin/main` (the same check)
-before pushing. Genuinely exempt changes (docs-only, workflow-only,
-test-only) use the `Version-Bump: <surface>=skip reason="..."` trailer.
+**The one live guard is `fix/feat-touches-a-surface`.** A PR whose title or
+commit subjects read `fix:` / `feat:` but whose diff scores `none` on every
+versioned surface hard-fails, because the bot would assign nothing and the change
+would never ship. Resolve it by re-titling to `chore:` / `docs:` / `refactor:` /
+`build:`, by declaring intent with `Version-Bump: <surface>=<level>`, or with
+`Version-Bump: skip reason="..."`. A `Version-Bump:` trailer is an optional
+override for a heuristic-underweighted case, not a routine step. Run
+`tools/scripts/gates.sh origin/main` before pushing to see the same verdict CI will.
 
 Direct `gh pr create` is an emergency/manual bypass only. If it is used because the user explicitly asked for it or Shipyard is broken, call out that the PR may not be visible in Shipyard-managed state until it is reconciled or re-shipped through Shipyard.
 

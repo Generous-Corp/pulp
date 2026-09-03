@@ -1379,6 +1379,38 @@ TEST_CASE("MCP trace output overflow waits for CLI descendant cleanup",
 #endif
 
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
+template <typename Chunks>
+std::string join_timeline_mcp_chunks(const Chunks& chunks) {
+    std::string joined;
+    for (const auto chunk : chunks)
+        joined += chunk;
+    return joined;
+}
+
+TEST_CASE("generated timeline MCP chunks preserve the schema artifact",
+          "[mcp][tools][timeline][generated]") {
+    std::ifstream artifact(repo_root_path() /
+                           "core/timeline/schema/timeline_mcp_tools.json",
+                           std::ios::binary);
+    REQUIRE(artifact);
+    const std::string expected_document{std::istreambuf_iterator<char>(artifact),
+                                        std::istreambuf_iterator<char>()};
+    REQUIRE(join_timeline_mcp_chunks(kTimelineMcpToolsDocumentChunks) ==
+            expected_document);
+
+    const auto expected = choc::json::parse(expected_document);
+    std::string emitted_document = "{\"tools\":[";
+    for (std::size_t i = 0; i < kTimelineMcpTools.size(); ++i) {
+        if (i != 0)
+            emitted_document += ',';
+        emitted_document += kTimelineMcpTools[i];
+    }
+    emitted_document += "]}";
+    const auto emitted = choc::json::parse(emitted_document);
+    REQUIRE(choc::json::toString(emitted["tools"], false) ==
+            choc::json::toString(expected["tools"], false));
+}
+
 TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][tools][timeline]") {
     const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":41,"method":"tools/list"})JSON");
     for (const auto name : pulp_mcp::kTimelineMcpToolNames) {

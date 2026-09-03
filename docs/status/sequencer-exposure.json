@@ -1840,6 +1840,52 @@
       }
     },
     {
+      "id": "windows-mcp-string-chunks",
+      "title": "Portable generated Timeline MCP document string chunks",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "a4565ce5-05df-467e-b284-1edf94c63a11",
+      "owned_paths": [
+        "test/cmake/timeline_tests.cmake",
+        "test/test_mcp_server.cpp",
+        "tools/mcp/CMakeLists.txt",
+        "tools/mcp/timeline_mcp_tools.h.in",
+        "test/cmake/test_pulp_cpp_string_chunks.cmake",
+        "tools/cmake/PulpCppStringChunks.cmake",
+        "docs/status/sequencer-exposure.json"
+      ],
+      "evidence": [
+        {
+          "path": "tools/mcp/timeline_mcp_tools.h.in",
+          "needles": [
+            "kTimelineMcpToolsDocumentChunks"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "This is a generated internal MCP artifact and adds no installed SDK API."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The repair changes generated MCP string assembly only."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP verb or schema operation is added; existing ten operations remain unchanged."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Generated literal chunking creates no live Product-A control surface."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This is an internal portable C++ generation constraint, not a design-time capability."
+        }
+      }
+    },
+    {
       "id": "sequencer-api-docs-diagnostic-privacy",
       "title": "Private-path-safe Sequencer API documentation diagnostics",
       "classification": "ci_test_only",
