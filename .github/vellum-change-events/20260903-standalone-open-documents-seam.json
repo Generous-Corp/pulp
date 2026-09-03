@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260903-standalone-open-documents-seam",
+  "kind": "change",
+  "created_at": "2026-09-03T04:41:40Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Pulp standalone apps have no way to receive the files the OS asks them to open, so a Finder double-click or an 'open -a' on a project document launches the app and drops the path. This adds one virtual to WindowHost, set_open_files_handler, whose base implementation is a recorded unsupported-feature no-op; the macOS host implements it in its own translation unit and everything else inherits the no-op. The retained UI kernel is only the carrier: the routing decision lives in the app bundle's CFBundleDocumentTypes declaration and the delivery contract lives in StandaloneApp, neither of which is a Vellum slice. This is a Pulp-only platform-shell seam with no named immutable Vellum framework commit to backport; a Vellum-native retained UI should define its own document-open contract, including whether launch-time paths are held for a late handler, rather than copy this shape.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-mac-open-document",
+    "mac-objc-source-list-guard"
+  ],
+  "disposition": "pulp-only"
+}
