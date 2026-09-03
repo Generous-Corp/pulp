@@ -12,6 +12,48 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+## A2T structural evidence is produced only by the required macOS PR job
+
+An A2T evidence PR targeting `Generous-Corp/pulp` `main` that adds or modifies the exact tracked
+`evidence/receipt.json` gets
+one additional fail-closed step in the native `macos` matrix child. The step
+runs `tools/scripts/a2t_structural_verification_ci.py`, which executes the
+reviewed offline verifier with bounded stdout/stderr and uploads one immutable
+`a2t-structural-verification-<PR-head>` attestation. The attestation is
+structural and nonterminal: it binds the protected target repository/ref,
+execution-time `S`/`E`, Git blobs,
+digests, command, workflow revision, run attempt, job key, step, and result.
+Its closed producer contract is
+`docs/validation/gpu-trace-overhead/a2t-structural-verifier-attestation-v1.schema.json`;
+the issuer validates every output against it, and the adjacent `fixtures/`
+golden is the stable cross-repository consumer example. The verifier runs in a
+detached checkout whose live `HEAD` is exactly `S`; the tracked `E` receipt is
+mounted as a separate sibling input. The schema, issuer, issuer schema
+validator, verifier, and every verifier-loaded support module are bound to the
+reviewed `S` snapshot and must be byte-identical at `E` before any such
+dependency is loaded or executed.
+Regenerate the golden only with
+`python3 tools/scripts/a2t_structural_verification_ci.py --write-golden`; the
+producer test requires byte-exact equality with that canonical output. Do not
+hand-edit derived fields such as `workflow.semantics_sha256`.
+It intentionally cannot claim the future protected merge, its own Actions
+artifact ID/digest/size, the final job conclusion, or terminal acceptance.
+The planning validator must recover and authenticate those later from GitHub.
+
+The event-pinned base/head tree diff, not path existence, gates this work. An
+unrelated PR that merely inherits a historical receipt skips it, including a
+later tool-only change. A receipt add/modify on a PR runs and publishes; the
+same change targeting `develop/**` or another repository verifies without
+issuing or uploading protected-main attestation authority. The
+same change in a merge group or protected-main push reruns structural
+verification but cannot issue or upload PR attestation authority. An exact
+event revision that cannot be hydrated, an ambiguous receipt diff, or a
+receipt deletion fails closed. A receipt that is untracked, symlinked,
+different from the PR-head blob, bound to a different schema/issuer/verifier,
+dynamically loaded dependency, trace, or source,
+or produces noncanonical verifier output fails the required check. Linux and
+Windows remain advisory and do not produce this authority.
+
 ## Current required-macOS truth (read before older incident notes)
 
 Pulp's required PR and merge-queue macOS checks use the local M1/M3/M5 Tart
