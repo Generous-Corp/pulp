@@ -448,6 +448,55 @@ bool ed25519_verify(
     return rc == 0;
 }
 
+// ── X25519 (RFC 7748) ───────────────────────────────────────────────────
+
+std::optional<X25519KeyPair> x25519_keypair_generate() {
+    // A private scalar is 32 arbitrary bytes — crypto_scalarmult_base
+    // clamps its own copy, so there is nothing to fix up here.
+    auto secret = secure_random_bytes(x25519_private_key_size);
+    if (!secret) return std::nullopt;
+    return x25519_keypair_from_private_key(secret->data(), secret->size());
+}
+
+std::optional<X25519KeyPair> x25519_keypair_from_private_key(
+    const uint8_t* private_key, size_t private_key_size) {
+    if (private_key == nullptr || private_key_size != x25519_private_key_size)
+        return std::nullopt;
+
+    X25519KeyPair kp;
+    kp.private_key.assign(private_key, private_key + private_key_size);
+    kp.public_key.resize(x25519_public_key_size);
+    if (crypto_scalarmult_base(kp.public_key.data(), kp.private_key.data()) != 0)
+        return std::nullopt;
+    return kp;
+}
+
+std::optional<std::vector<uint8_t>> x25519_shared_secret(
+    const uint8_t* private_key, size_t private_key_size,
+    const uint8_t* peer_public_key, size_t peer_public_key_size) {
+    if (private_key == nullptr || private_key_size != x25519_private_key_size)
+        return std::nullopt;
+    if (peer_public_key == nullptr ||
+        peer_public_key_size != x25519_public_key_size)
+        return std::nullopt;
+
+    std::vector<uint8_t> shared(x25519_shared_secret_size);
+    if (crypto_scalarmult(shared.data(), private_key, peer_public_key) != 0) {
+        std::fill(shared.begin(), shared.end(), uint8_t{0});
+        return std::nullopt;
+    }
+
+    // A small-order peer point drives the result to zero regardless of our
+    // private key, so the peer would know the "shared" secret in advance.
+    // Compared in constant time: the branch is on attacker-supplied input.
+    const std::array<uint8_t, x25519_shared_secret_size> zero{};
+    if (constant_time_equal(shared.data(), zero.data(), zero.size())) {
+        std::fill(shared.begin(), shared.end(), uint8_t{0});
+        return std::nullopt;
+    }
+    return shared;
+}
+
 // ── Machine ID ──────────────────────────────────────────────────────────
 
 std::string machine_id() {
