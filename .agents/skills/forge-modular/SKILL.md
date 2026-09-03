@@ -764,6 +764,13 @@ filesystem is atomic, so a reader sees the old map or the new one and never
 half of each. And `_read` now says on stderr when a map exists and will not
 parse.
 
+The tear originates in the scratch directory, not in the copy: Rack writes
+that map itself, and a launch killed part-way through the write leaves it
+truncated -- which is common precisely because so many of these launches
+SIGSEGV. An unparseable measured map is therefore a FAILED LAUNCH, retried by
+halving like any other, and never a reason to abandon the remaining plugins.
+Raising instead cost a full run at plugin 116 of 258.
+
 Freeze the live map before any library-wide run. It is the only copy, and
 recovering the pre-scan state afterwards is otherwise impossible.
 

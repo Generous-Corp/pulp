@@ -645,7 +645,15 @@ def launch_once(rack: str, patch: str, scan_window: float) -> Launch:
                 proc.wait(timeout=10)
         measured_map = os.path.join(scratch, "forge-portmap.json")
         if not why and os.path.exists(measured_map):
-            _install_map(measured_map, PORTMAP)
+            try:
+                _install_map(measured_map, PORTMAP)
+            except Exception as exc:                        # noqa: BLE001
+                # Rack writes this map itself, and these launches die often.
+                # A launch killed part-way through that write leaves a
+                # truncated map, which is a failed launch like any other and
+                # is retried by halving -- not a reason to abandon the
+                # remaining plugins.
+                why = f"the measured map was incomplete ({exc})"
         drop_scratch(scratch)
     return Launch(log, why, crashes, died)
 
