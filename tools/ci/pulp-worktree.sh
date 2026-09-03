@@ -202,6 +202,11 @@ Inventory is a dry-run by default. Deletion requires an explicit --apply and
 an affirmative safety classification; a deleted upstream branch is not proof
 that a worktree merged. The safety classifier is not yet available, so this
 transition build reports zero deletion candidates even in apply mode.
+
+To actually remove worktrees today, use tools/scripts/clean_worktrees.sh. It
+carries the affirmative classifier this command is waiting for: exact ancestry
+into origin/main, a live-process check, git's own dirty check, and a lineage
+veto. It reports uncommitted work as AT RISK rather than removing it.
 EOF
       return 0;;
     *) die "unknown gc arg: $1";; esac; done

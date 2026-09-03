@@ -632,6 +632,15 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_builds
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
+
+        # clean_worktrees.sh removes whole worktrees, so its guard is the one
+        # that must never be merely present: the suite stages a live process and
+        # asserts the busy tree survives. That case fails when the guard
+        # regresses, which is what makes registering it worth the runtime.
+        add_test(NAME clean-worktrees-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktrees
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(clean-worktrees-selftest PROPERTIES TIMEOUT 600)
     endif()
     # Tool registry: docs/status/tools.yaml must stay valid (every path and
     # invocation resolves) AND complete (every committed entry point under the

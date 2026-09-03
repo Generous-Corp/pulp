@@ -545,6 +545,30 @@ def await_crash_reports(mark: float,
         time.sleep(0.25)
 
 
+def _install_map(source: str, destination: str) -> None:
+    """Put a freshly measured map in place, whole or not at all.
+
+    Copying onto the live path writes in place, so anything reading it
+    mid-copy -- or a second launch copying its own map back -- sees a torn
+    file. A library-wide run does hundreds of launches and produced exactly
+    that: a map truncated mid-token, with a later record's bytes spliced in
+    behind it. Nothing downstream reported it, because an unparseable map
+    reads the same as a machine that never scanned.
+
+    Write beside the destination and rename. A rename within one filesystem
+    is atomic, so a reader sees either the previous map or the new one.
+    """
+    holding = destination + ".incoming"
+    try:
+        shutil.copy2(source, holding)
+        with open(holding, encoding="utf-8") as check:
+            json.load(check)
+        os.replace(holding, destination)
+    except Exception:
+        if os.path.exists(holding):
+            os.unlink(holding)
+        raise
+
 def launch_once(rack: str, patch: str, scan_window: float) -> Launch:
     """One headless launch. Returns (log, "" | why it failed, crash reports).
 
@@ -621,7 +645,15 @@ def launch_once(rack: str, patch: str, scan_window: float) -> Launch:
                 proc.wait(timeout=10)
         measured_map = os.path.join(scratch, "forge-portmap.json")
         if not why and os.path.exists(measured_map):
-            shutil.copy2(measured_map, PORTMAP)
+            try:
+                _install_map(measured_map, PORTMAP)
+            except Exception as exc:                        # noqa: BLE001
+                # Rack writes this map itself, and these launches die often.
+                # A launch killed part-way through that write leaves a
+                # truncated map, which is a failed launch like any other and
+                # is retried by halving -- not a reason to abandon the
+                # remaining plugins.
+                why = f"the measured map was incomplete ({exc})"
         drop_scratch(scratch)
     return Launch(log, why, crashes, died)
 
