@@ -47,7 +47,13 @@ def _read(path: str) -> list:
     try:
         with open(path, encoding="utf-8") as source:
             doc = json.load(source)
-    except Exception:
+    except Exception as exc:                                # noqa: BLE001
+        # A map that EXISTS and will not parse is a fault, not a fresh
+        # machine. Silently returning nothing costs three quarters of the
+        # known ports and looks exactly like a machine that never scanned, so
+        # the generator wires blind and nothing anywhere says why.
+        print(f"port map cannot be read, so none of its ports are known: "
+              f"{path}: {exc}", file=sys.stderr)
         return []
     entries = doc.get("modules")
     return entries if isinstance(entries, list) else []

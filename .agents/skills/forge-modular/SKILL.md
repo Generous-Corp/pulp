@@ -745,6 +745,28 @@ silently mean "no local scan", which is indistinguishable from the arm the
 comparison is measuring against, and the run would report no difference for
 entirely the wrong reason.
 
+## A library-wide scan tore the port map, and nothing said so
+
+`measure_ranges.py --all` copied each launch's measured map onto the live path
+in place. Across the hundreds of launches a full library takes, that produced a
+map truncated mid-token with a later record's bytes spliced in behind it and
+doubled commas through the remainder.
+
+The damage was invisible. `portmap_seed._read` returned `[]` for anything it
+could not parse, which is correct for a machine that never scanned and very
+wrong for a machine whose map is torn: known-port modules fell from about 1010
+to 274 and the generator went on wiring blind with nothing anywhere reporting
+it. A file that EXISTS and will not parse is a fault, not an absence.
+
+So the copy-back goes through `_install_map`, which writes beside the
+destination, parses what it wrote, and renames -- a rename inside one
+filesystem is atomic, so a reader sees the old map or the new one and never
+half of each. And `_read` now says on stderr when a map exists and will not
+parse.
+
+Freeze the live map before any library-wide run. It is the only copy, and
+recovering the pre-scan state afterwards is otherwise impossible.
+
 ## Ranges are measured by a headless Rack, and both halves are traps
 
 Parameter ranges (`minValue` / `maxValue` / `defaultValue`) come off a

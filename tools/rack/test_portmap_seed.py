@@ -179,6 +179,27 @@ def main() -> int:
         if saved is not None:
             os.environ[portmap_seed.LOCAL_PATH_ENV] = saved
 
+    # A map that exists and will not parse is a fault, not a fresh machine.
+    # It costs three quarters of the known ports and reads exactly like a
+    # machine that never scanned, so it must say so on stderr.
+    import contextlib
+    import io
+    torn = os.path.join(tmp, "torn.json")
+    with open(torn, "w") as f:
+        f.write('{"modules": [{"plugin": "Befaco", "name": "x", "')
+    noise = io.StringIO()
+    with contextlib.redirect_stderr(noise):
+        got = portmap_seed.entries(inv_of("Befaco", "2.4"), absent, torn)
+    check(got == [], "a torn map yields no entries")
+    check("cannot be read" in noise.getvalue() and torn in noise.getvalue(),
+          "a torn map says so on stderr instead of looking like a fresh machine")
+
+    quiet = io.StringIO()
+    with contextlib.redirect_stderr(quiet):
+        portmap_seed.entries(inv_of("Befaco", "2.4"), absent, absent)
+    check(quiet.getvalue() == "",
+          "a machine that never scanned stays silent")
+
     print()
     print("all good" if not FAILED else f"{FAILED} wrong")
     return 1 if FAILED else 0
