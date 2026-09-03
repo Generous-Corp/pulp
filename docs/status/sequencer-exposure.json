@@ -2519,6 +2519,80 @@
           ]
         }
       }
+    },
+    {
+      "id": "standalone-open-documents-installed-sdk",
+      "title": "Standalone document-open seam ships with the selected SDK",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "standalone-open-documents-20260903",
+      "owned_paths": [
+        "tools/cmake/PulpInstallRules.cmake",
+        "tools/cmake/PulpUtils.cmake",
+        "core/format/include/pulp/format/standalone.hpp",
+        "core/view/include/pulp/view/window_host.hpp"
+      ],
+      "evidence": [
+        {
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "core/view/platform/mac/window_host_mac_open_documents.mm",
+            "core/view/platform/mac/window_host_mac_open_documents.h"
+          ]
+        },
+        {
+          "path": "core/format/include/pulp/format/standalone.hpp",
+          "needles": [
+            "void set_open_files_handler(",
+            "open_files_handler_"
+          ]
+        },
+        {
+          "path": "core/view/include/pulp/view/window_host.hpp",
+          "needles": [
+            "virtual void set_open_files_handler(",
+            "note_unsupported_feature(\"set_open_files_handler\")"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "An SDK consumer building a standalone app can now receive the files the OS asks that app to open. StandaloneApp::set_open_files_handler and the WindowHost virtual behind it are public installed headers, and the macOS translation unit that implements the delivery is added to the installed view source list, so the seam is reachable from a consumer build with no source checkout. The base WindowHost implementation is a recorded no-op, so a platform without a document-open route degrades to an unsupported-feature note rather than silence.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/format/include/pulp/format/standalone.hpp",
+              "needles": [
+                "void set_open_files_handler("
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "core/view/platform/mac/window_host_mac_open_documents.mm"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The document-open seam adds no Timeline command, argument, or handler; it is an OS-to-app launch route in a windowed process."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP operation, schema, or handler is added or widened; nothing here is reachable from an offline session."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Delivering a file path to an application handler adds no sequencer live-control grant and cannot move transport, tempo, or a parameter on its own."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This row records an installed platform seam. It declares no design-time capability and leaves the agent capability manifest unchanged."
+        }
+      }
     }
   ],
   "tombstones": []

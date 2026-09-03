@@ -371,6 +371,53 @@ What this means for editor work:
   the same run keeps audio on by itself.
 - `StandaloneApp::audio_skipped_for_capture()` reports which mode a run took.
 
+## Opening a document has two halves, and each is inert alone
+
+An app that opens its own file type on macOS needs BOTH:
+
+1. **Routing** — `pulp_declare_standalone_document_type()` in CMake, which writes
+   `CFBundleDocumentTypes` + `UTExportedTypeDeclarations` into the app's
+   Info.plist. This is what makes Finder give the file the app's icon and send a
+   double-click to it.
+2. **Delivery** — `StandaloneApp::set_open_files_handler()` (or, below it,
+   `WindowHost::set_open_files_handler()`). macOS reports the file through the
+   `NSApplicationDelegate` message `application:openURLs:`; with no handler the
+   app launches and the file is dropped.
+
+Declaring the type without installing a handler is the failure that reads as
+"the declaration didn't work": the icon is right, the double-click launches the
+app, and nothing opens.
+
+```cpp
+app.set_open_files_handler([&](const std::vector<std::string>& paths) {
+    for (const auto& path : paths) open_project(path);
+});
+app.run_with_editor();     // handler MUST be installed first — see below
+```
+
+**Install before the event loop starts.** The file that launched the app is
+delivered around `applicationDidFinishLaunching`, which is *inside* `[NSApp
+run]`. A handler wired up after the loop starts would miss exactly the file that
+caused the launch — the common case. Paths that arrive before a handler exists
+are held and flushed the moment one is installed, so an app that installs late
+still gets them, but the ordering above is the contract to write against.
+Passing `{}` removes the handler without discarding what is queued.
+
+**The delegate never displaces one that is already there.** A Pulp plug-in
+loaded into a DAW shares that host's `NSApplication`. Taking over its delegate
+would break the host's own document, reopen and termination messages, so the
+install is guarded on `NSApp.delegate == nil`. A hosted Pulp binary therefore
+never receives open events — correct, because the host owns its documents. This
+is pinned by a test, not left to the guard's comment
+(`test/test_mac_open_document.mm`, target `pulp-test-mac-open-document`), which
+drives the real installed delegate directly: nothing in a unit test can produce
+the Apple Event the OS sends.
+
+`PulpAppDelegate` is registered in `core/view/platform/mac/pulp_mac_objc_names.h`
+like every other Pulp ObjC class. ObjC class names are process-global, and an
+`NSApplication` delegate is the most dangerous kind to have shadowed across two
+co-loaded Pulp binaries.
+
 ## Secondary views
 
 ```cpp

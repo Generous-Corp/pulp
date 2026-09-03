@@ -212,6 +212,20 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+    # macOS ObjC source lists: three hand-maintained lists (the in-tree target,
+    # what the SDK installs, what a consumer recompiles per binary) must name the
+    # same translation units, or the per-binary ObjC class suffix is dropped and
+    # two Pulp plug-ins in one host register colliding class names. Omitting a
+    # file from the install list drops the suffix for EVERY class, not just the
+    # new one, and the binary still builds and runs — it collides only in
+    # somebody else's host. The selftest is the load-bearing half: it regresses a
+    # copy of the tree seven ways and requires the guard to reject each one for
+    # the reason under test.
+    add_test(NAME mac-objc-source-list-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/mac_objc_source_list_guard.py")
+    add_test(NAME mac-objc-source-list-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_mac_objc_source_list_guard.py")
+    set_tests_properties(mac-objc-source-list-guard-selftest PROPERTIES TIMEOUT 120)
     # setup.sh bootstraps a checkout; the build it performs along the way must
     # default to Release with examples off, matching the required gate's own
     # configure. Nothing else in the tree reads those defaults, so they can

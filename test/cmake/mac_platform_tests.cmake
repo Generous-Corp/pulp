@@ -73,6 +73,22 @@ if(APPLE AND NOT PULP_IOS)
     catch_discover_tests(pulp-test-mac-mousedown-stale-focus)
 endif()
 if(APPLE AND NOT PULP_IOS)
+    # The runtime half of opening a document: the NSApplication delegate that
+    # receives application:openURLs:. It drives the real installed delegate,
+    # because nothing in a unit test can produce the Apple Event the OS sends.
+    # The declaration half (CFBundleDocumentTypes) is covered by
+    # test_standalone_document_types.cmake; neither half works alone.
+    add_executable(pulp-test-mac-open-document
+        test_mac_open_document.mm
+    )
+    target_link_libraries(pulp-test-mac-open-document PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+    )
+    catch_discover_tests(pulp-test-mac-open-document)
+endif()
+if(APPLE AND NOT PULP_IOS)
     # Pin macOS performKeyEquivalent routing, text-input
     # protocol conformance, and TextEditor-specific command priority.
     add_executable(pulp-test-mac-perform-key-equivalent
