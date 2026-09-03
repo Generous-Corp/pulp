@@ -1860,6 +1860,18 @@
           "needles": [
             "kTimelineMcpToolsDocumentChunks"
           ]
+        },
+        {
+          "path": "test/test_mcp_server.cpp",
+          "needles": [
+            "TimelineMcpToolsDocumentChunks"
+          ]
+        },
+        {
+          "path": "tools/mcp/CMakeLists.txt",
+          "needles": [
+            "timeline_mcp_tools.h"
+          ]
         }
       ],
       "surfaces": {
