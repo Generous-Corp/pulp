@@ -67,6 +67,30 @@ def has_ranges(entry: dict) -> bool:
                if isinstance(p, dict))
 
 
+def _version_admits(entry: dict, plug: dict | None) -> bool:
+    """Whether an installed plugin admits a scanned entry, by version.
+
+    An exact match is the rule, because a vendor update can add, remove or
+    renumber ports and a block attached to the wrong index is worse than no
+    block at all.
+
+    Core is the one plugin that records no version. It is compiled into Rack
+    rather than installed as a plugin directory, so the inventory reads its
+    version as empty and an exact match can never succeed -- which silently
+    discarded every scanned Core block, including the audio and MIDI
+    interfaces every patch needs to be heard. No rescan can supply the missing
+    string either, since there is no plugin directory to scan. So an absent
+    installed version admits the entry, and every plugin that reports one
+    keeps the exact match.
+    """
+    if plug is None:
+        return False
+    installed = plug.get("version")
+    if not installed:
+        return True
+    return entry.get("pluginVersion") == installed
+
+
 def entries(inv: dict | None = None,
             seed_path: str | None = None,
             local_path: str | None = None) -> list:
@@ -81,17 +105,13 @@ def entries(inv: dict | None = None,
     merged: dict[tuple, dict] = {}
 
     for entry in _read(seed_path or SEED_PATH):
-        if inv is not None:
-            plug = inv.get(entry.get("plugin"))
-            if not plug or entry.get("pluginVersion") != plug.get("version"):
-                continue
+        if inv is not None and not _version_admits(entry, inv.get(entry.get("plugin"))):
+            continue
         merged[_key(entry)] = entry
 
     for entry in _read(local_path or LOCAL_PATH):
-        if inv is not None:
-            plug = inv.get(entry.get("plugin"))
-            if not plug or entry.get("pluginVersion") != plug.get("version"):
-                continue
+        if inv is not None and not _version_admits(entry, inv.get(entry.get("plugin"))):
+            continue
         shipped = merged.get(_key(entry))
         if shipped is not None and _scan(entry) < _scan(shipped):
             continue

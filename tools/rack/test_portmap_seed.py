@@ -124,6 +124,28 @@ def main() -> int:
     check(portmap_seed.entries(inv_of("Befaco", "2.4"), seed, absent) == [],
           "an unreadable seed is ignored rather than raising")
 
+    # Core records no version, because it is compiled into Rack rather than
+    # installed as a plugin directory. An exact-version match can therefore
+    # never succeed for it, and every scanned Core block -- the audio and MIDI
+    # interfaces every patch needs to be heard -- was silently discarded.
+    write(local, [entry("Core", "AudioInterface", "2.6.6", 3)])
+    got = portmap_seed.entries(inv_of("Core", ""), absent, local)
+    check([e["model"] for e in got] == ["AudioInterface"],
+          "a plugin that reports no version admits its scanned block")
+
+    # The exact match still governs everything that DOES report a version: a
+    # vendor update can renumber ports, and a wrong index is worse than none.
+    write(local, [entry("JW-Modules", "Quantizer", "2.0.43", 3)])
+    check(portmap_seed.entries(inv_of("JW-Modules", "2.0.45"), absent, local) == [],
+          "a stale block is still dropped when the installed version differs")
+    check(len(portmap_seed.entries(inv_of("JW-Modules", "2.0.43"), absent, local)) == 1,
+          "a matching block is still kept")
+
+    # A plugin the entry names but this machine does not have stays refused,
+    # rather than falling through the no-version path.
+    check(portmap_seed.entries(inv_of("Befaco", "2.4"), absent, local) == [],
+          "an uninstalled plugin is refused, not admitted")
+
     print()
     print("all good" if not FAILED else f"{FAILED} wrong")
     return 1 if FAILED else 0

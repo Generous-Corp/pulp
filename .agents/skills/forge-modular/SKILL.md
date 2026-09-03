@@ -708,6 +708,30 @@ like Merge or Split); none, from one that did not (unknown). Only the scan
 version separates the last two. `PortMap::controls_known()` is the rule; the
 UNMAPPED badge reads it.
 
+## A scanned block is admitted by exact version, and Core reports none
+
+`portmap_seed.entries(inv)` keeps a scanned block only when its `pluginVersion`
+equals the installed plugin's version. That strictness is deliberate: a vendor
+update can add, remove or renumber ports, and a block attached to the wrong
+index is worse than no block, because absent ports read as UNKNOWN while wrong
+ones are trusted.
+
+Core is the single plugin that reports no version, because it is compiled into
+Rack instead of being installed as a plugin directory. An exact match can
+therefore never succeed for it, and every scanned Core block was silently
+dropped -- including `AudioInterface2`, the stereo output nearly every audible
+patch terminates in, and the MIDI interfaces. The generator was wiring the one
+module every patch needs while being told its ports were unknown. No rescan can
+fix it either, since there is no plugin directory for `measure_ranges.py --all`
+to visit.
+
+So `_version_admits()` treats an absent installed version as a wildcard and
+keeps the exact match for every plugin that reports one. Core is the only
+plugin on a normal install with an empty version, so the widening is that
+narrow. When a count of known ports moves by a handful for no obvious reason,
+check whether a plugin's version string changed shape before suspecting the
+scanner.
+
 ## Ranges are measured by a headless Rack, and both halves are traps
 
 Parameter ranges (`minValue` / `maxValue` / `defaultValue`) come off a
