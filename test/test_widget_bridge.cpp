@@ -355,6 +355,8 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
           'behavior-wrapper')
     )js").getWithDefault<bool>(false));
     REQUIRE(captured->pointer_events() == View::PointerEvents::auto_);
+    REQUIRE(behavior->pointer_events() == View::PointerEvents::none);
+    REQUIRE(root.hit_test({50, 60}) == captured);
 
     // React commits behavior after the DesignIR sibling can already be
     // attached. A later idempotent rebind must leave input on the live source,

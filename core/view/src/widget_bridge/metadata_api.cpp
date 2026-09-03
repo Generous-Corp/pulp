@@ -53,8 +53,12 @@ bool bind_canvas_program(View& root, std::string anchor, CanvasWidget* source,
     // The anchored CanvasWidget is the live behavior surface. Keep it visible
     // and hit-testable so pointer samples reach the authored wrapper through
     // the normal target-to-root DOM walk. The retained source canvas supplies
-    // commands only; hiding it would strand React pointer callbacks.
+    // commands only; remove it from hit testing as well as paint. An opacity-0
+    // view is still a valid native hit target, so leaving the source's default
+    // PointerEvents::auto_ here would make the hidden behavior canvas win the
+    // z-order walk and strand the callbacks on an invisible surface.
     source->set_opacity(0.0f);
+    source->set_pointer_events(View::PointerEvents::none);
     target->set_opacity(1.0f);
     target->set_pointer_events(View::PointerEvents::auto_);
     if (behavior_owner)
