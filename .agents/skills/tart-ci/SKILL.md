@@ -369,6 +369,19 @@ main, reddening every PR's macOS gate.)
 ## Store & hygiene
 **`TART_HOME` is declared by the host, never by the repo** — hosts with an external build SSD keep the store on a `/Volumes` mount, hosts on internal storage keep it under `$HOME`, and both are correct. Exclude it from Spotlight (`.metadata_never_index`). Tag goldens `:<date>` + roll `:latest`. Ephemeral job VMs are deleted after use; confirm cleanup (`tart delete` fails silently on a *running* VM — stop → delete → verify). Reclaim with `tart-provision.sh list` + prune.
 
+**`pulp-worktree.sh gc` deletes nothing, by design — the classifier lives elsewhere.**
+Its help says so ("the safety classifier is not yet available"), so a `gc --apply` that
+reports zero candidates is the documented behaviour, not a broken run. To actually reclaim
+worktrees use `tools/scripts/clean_worktrees.sh`, which carries the affirmative
+classification: exact `git merge-base --is-ancestor` into `origin/main`, a live-process
+check, git's own dirty check, and a lineage veto. Two traps it exists to survive, both of
+which read as "idle" when wrong: `git worktree list --porcelain` reports the **physical**
+path (`/private/var/...`) while a process launched through the logical path carries
+`/var/...` on its argv, and `printf ... | grep -q` under `pipefail` reports a **match** as
+failure (grep exits first, printf takes SIGPIPE). Either one silently clears a worktree
+with a live build in it. Uncommitted content is reported AT RISK and never removed, and a
+deleted upstream branch is still not merge proof.
+
 Persistent native Actions runners have a separate storage rule: their
 `RUSTUP_HOME` and `CARGO_HOME` belong under each runner's own internal-APFS
 `_toolcache`, never behind `~/.rustup`/`~/.cargo` symlinks into the external VM
