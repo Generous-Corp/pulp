@@ -45,6 +45,27 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 existing->set_default_hover_feedback(true);
             }
             if (auto* p = existing->parent()) {
+                // A preserved DOM reparent can carry a stronger container
+                // hint than the widget's original materialization.  In
+                // particular, Settings upgrades a retained plain div to a
+                // real ScrollView after the portal is reopened.  Do not let
+                // the existing-widget fast path silently discard that hint.
+                if (hint == "scroll"
+                    && dynamic_cast<ScrollView*>(existing) == nullptr) {
+                    auto removed = p->remove_child(existing);
+                    auto scroll = std::make_unique<ScrollView>();
+                    scroll->set_id(childId);
+                    while (removed->child_count() > 0) {
+                        auto* child = removed->child_at(0);
+                        scroll->add_child(removed->remove_child(child));
+                    }
+                    self.widgets_.cache(childId, scroll.get());
+                    // The authored parent id is authoritative during portal
+                    // replay. The retained native parent can be the stale
+                    // root container even while the JS parent has recovered.
+                    self.resolve_parent(parentId)->add_child(std::move(scroll));
+                    return choc::value::Value();
+                }
                 // Move the existing subtree to the new parent - don't erase widgets.
                 auto removed = p->remove_child(existing);
                 // Reparenting preserves the original creator; this is a cache

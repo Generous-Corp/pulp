@@ -36,7 +36,7 @@ CanvasWidget* canvas_at(View& root, std::size_t wanted, std::size_t& seen) {
 }
 
 bool bind_canvas_program(View& root, std::string anchor, CanvasWidget* source,
-                         View*, View*) {
+                         View*, View* behavior_owner) {
     int matches = 0;
     auto* target_view = unique_anchor(root, anchor, matches);
     if (matches != 1 || !target_view || !source || target_view == source)
@@ -53,6 +53,14 @@ bool bind_canvas_program(View& root, std::string anchor, CanvasWidget* source,
     source->set_opacity(1.0f);
     target->set_opacity(0.0f);
     target->set_pointer_events(View::PointerEvents::none);
+    // The authored behavior canvas may inherit `pointer-events:none` from
+    // its materialized wrapper (the capture plane is intentionally inert).
+    // Binding the live canvas is the ownership handoff: make both the canvas
+    // and its supplied behavior owner hit-testable so pointer dispatch reaches
+    // the existing DOM callbacks instead of stopping at an inert surface.
+    source->set_pointer_events(View::PointerEvents::auto_);
+    if (behavior_owner)
+        behavior_owner->set_pointer_events(View::PointerEvents::auto_);
     // Input ownership follows paint ownership. The authored behavior canvas
     // remains in the native hit-test tree; the final-space DesignIR sibling is
     // only retained as a hidden diagnostic/reference surface. Copying gesture
