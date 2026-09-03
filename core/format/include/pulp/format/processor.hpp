@@ -788,6 +788,14 @@ public:
     /// no parameter events.
     const state::ParameterEventQueue* param_events() const { return param_events_; }
 
+    /// Timestamped host modulation events for the current block. CLAP
+    /// PARAM_MOD events retain their sample offsets here; the StateStore
+    /// modulation offset remains the compatibility snapshot for processors
+    /// that only consume block-rate modulation.
+    const state::ModulationEventQueue* modulation_events() const {
+        return modulation_events_;
+    }
+
     /// Emit a sample-accurate parameter change to the host from `process()`.
     ///
     /// Call this when the plugin itself changes a parameter mid-block (e.g. an
@@ -825,6 +833,10 @@ public:
     void set_ump_input(const midi::UmpBuffer* ump) { ump_input_ = ump; }
     /// @internal Called by format adapters before process().
     void set_param_events(const state::ParameterEventQueue* events) { param_events_ = events; }
+    /// @internal Called by format adapters before process().
+    void set_modulation_events(const state::ModulationEventQueue* events) {
+        modulation_events_ = events;
+    }
     /// @internal Called by format adapters before process() to receive
     /// sample-accurate output parameter events pushed via
     /// push_output_param_event(). The adapter owns the queue, clears it before
@@ -982,6 +994,7 @@ private:
     const midi::MpeBuffer* mpe_input_ = nullptr;
     const midi::UmpBuffer* ump_input_ = nullptr;
     const state::ParameterEventQueue* param_events_ = nullptr;
+    const state::ModulationEventQueue* modulation_events_ = nullptr;
     state::ParameterEventQueue* output_param_events_ = nullptr;
     audio::Buffer<float> f64_fallback_input_scratch_;
     audio::Buffer<float> f64_fallback_output_scratch_;
