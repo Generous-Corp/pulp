@@ -47,7 +47,13 @@ def _read(path: str) -> list:
     try:
         with open(path, encoding="utf-8") as source:
             doc = json.load(source)
-    except Exception:
+    except Exception as exc:                                # noqa: BLE001
+        # A map that EXISTS and will not parse is a fault, not a fresh
+        # machine. Silently returning nothing costs three quarters of the
+        # known ports and looks exactly like a machine that never scanned, so
+        # the generator wires blind and nothing anywhere says why.
+        print(f"port map cannot be read, so none of its ports are known: "
+              f"{path}: {exc}", file=sys.stderr)
         return []
     entries = doc.get("modules")
     return entries if isinstance(entries, list) else []
@@ -67,6 +73,55 @@ def has_ranges(entry: dict) -> bool:
                if isinstance(p, dict))
 
 
+LOCAL_PATH_ENV = "FORGE_PORTMAP"
+
+
+def resolved_local_path() -> str:
+    """The local port map this process folds in.
+
+    Normally the live map CARTOG writes. An evaluation campaign that must pin
+    which scan a run was generated against sets FORGE_PORTMAP, and because the
+    campaign driver shells out inheriting the environment, one variable pins
+    both the inventory receipt and the generation subprocess.
+
+    A set-but-unusable value raises rather than falling back, because silently
+    becoming "no local scan" would make the arm under test indistinguishable
+    from the arm without it, and the comparison would report no difference for
+    the wrong reason.
+    """
+    override = os.environ.get(LOCAL_PATH_ENV)
+    if override is None:
+        return LOCAL_PATH
+    if not override or not os.path.isfile(override):
+        raise SystemExit(
+            f"{LOCAL_PATH_ENV} is set but is not a file: {override!r}")
+    return override
+
+
+def _version_admits(entry: dict, plug: dict | None) -> bool:
+    """Whether an installed plugin admits a scanned entry, by version.
+
+    An exact match is the rule, because a vendor update can add, remove or
+    renumber ports and a block attached to the wrong index is worse than no
+    block at all.
+
+    Core is the one plugin that records no version. It is compiled into Rack
+    rather than installed as a plugin directory, so the inventory reads its
+    version as empty and an exact match can never succeed -- which silently
+    discarded every scanned Core block, including the audio and MIDI
+    interfaces every patch needs to be heard. No rescan can supply the missing
+    string either, since there is no plugin directory to scan. So an absent
+    installed version admits the entry, and every plugin that reports one
+    keeps the exact match.
+    """
+    if plug is None:
+        return False
+    installed = plug.get("version")
+    if not installed:
+        return True
+    return entry.get("pluginVersion") == installed
+
+
 def entries(inv: dict | None = None,
             seed_path: str | None = None,
             local_path: str | None = None) -> list:
@@ -81,17 +136,13 @@ def entries(inv: dict | None = None,
     merged: dict[tuple, dict] = {}
 
     for entry in _read(seed_path or SEED_PATH):
-        if inv is not None:
-            plug = inv.get(entry.get("plugin"))
-            if not plug or entry.get("pluginVersion") != plug.get("version"):
-                continue
+        if inv is not None and not _version_admits(entry, inv.get(entry.get("plugin"))):
+            continue
         merged[_key(entry)] = entry
 
-    for entry in _read(local_path or LOCAL_PATH):
-        if inv is not None:
-            plug = inv.get(entry.get("plugin"))
-            if not plug or entry.get("pluginVersion") != plug.get("version"):
-                continue
+    for entry in _read(local_path or resolved_local_path()):
+        if inv is not None and not _version_admits(entry, inv.get(entry.get("plugin"))):
+            continue
         shipped = merged.get(_key(entry))
         if shipped is not None and _scan(entry) < _scan(shipped):
             continue
@@ -107,7 +158,7 @@ def export(dest: str, local_path: str | None = None) -> dict:
     occupy space, match on version, and deliver nothing, while shadowing
     nothing they could usefully replace.
     """
-    kept = [e for e in _read(local_path or LOCAL_PATH) if has_ranges(e)]
+    kept = [e for e in _read(local_path or resolved_local_path()) if has_ranges(e)]
     kept.sort(key=lambda e: (e.get("plugin") or "", e.get("model") or ""))
     params = sum(len([p for p in e.get("params") or [] if "minValue" in p])
                  for e in kept)

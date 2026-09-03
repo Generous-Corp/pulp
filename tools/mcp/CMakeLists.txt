@@ -29,6 +29,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${PROJECT_SOURCE_DIR}/docs/contracts/gpu-probe-result-v1.schema.json")
 
 if(PULP_ENABLE_PROJECT_PACKAGE)
+    include("${PROJECT_SOURCE_DIR}/tools/cmake/PulpCppStringChunks.cmake")
     file(READ
         "${PROJECT_SOURCE_DIR}/core/timeline/schema/timeline_mcp_tools.json"
         PULP_TIMELINE_MCP_TOOLS_JSON)
@@ -72,8 +73,16 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
     unset(_tool_json)
     unset(_tool_json_length)
     unset(_tool_name)
+    pulp_cpp_raw_string_chunks(
+        "${PULP_TIMELINE_MCP_TOOLS_JSON}"
+        PULP_TIMELINE_MCP_DOCUMENT_CHUNKS
+        PULP_TIMELINE_MCP_DOCUMENT_CHUNK_COUNT
+        _PULP_TIMELINE_MCP_DOCUMENT_MAX_CHUNK_BYTES)
+    unset(_PULP_TIMELINE_MCP_DOCUMENT_MAX_CHUNK_BYTES)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/core/timeline/schema/timeline_mcp_tools.json")
+        "${PROJECT_SOURCE_DIR}/core/timeline/schema/timeline_mcp_tools.json"
+        "${PROJECT_SOURCE_DIR}/tools/cmake/PulpCppStringChunks.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/timeline_mcp_tools.h.in")
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/timeline_mcp_tools.h.in"
         "${CMAKE_CURRENT_BINARY_DIR}/timeline_mcp_tools.h"

@@ -1,0 +1,104 @@
+{
+  "contract": {
+    "blob": "4444444444444444444444444444444444444444",
+    "commit": "1111111111111111111111111111111111111111",
+    "path": "docs/validation/gpu-trace-overhead/a2t-structural-verifier-attestation-v1.schema.json",
+    "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "dependencies": {
+    "issuer_json_schema_lite": {
+      "blob": "9999999999999999999999999999999999999999",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/json_schema_lite.py",
+      "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    "verifier_gpu_trace_overhead_acceptance": {
+      "blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/gpu_trace_overhead_acceptance.py",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "verifier_json_schema_lite": {
+      "blob": "9999999999999999999999999999999999999999",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/json_schema_lite.py",
+      "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    "verifier_sdk_capability_handoff": {
+      "blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/sdk_capability_handoff.py",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "verifier_sdk_provenance": {
+      "blob": "cccccccccccccccccccccccccccccccccccccccc",
+      "commit": "1111111111111111111111111111111111111111",
+      "path": "tools/scripts/sdk_provenance.py",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  },
+  "evidence_head": "2222222222222222222222222222222222222222",
+  "issuer": {
+    "blob": "5555555555555555555555555555555555555555",
+    "commit": "1111111111111111111111111111111111111111",
+    "path": "tools/scripts/a2t_structural_verification_ci.py",
+    "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "job": {
+    "check_name": "macos",
+    "key": "build"
+  },
+  "receipt": {
+    "blob": "7777777777777777777777777777777777777777",
+    "commit": "2222222222222222222222222222222222222222",
+    "path": "evidence/receipt.json",
+    "sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "result": {
+    "error_count": 0,
+    "exit_code": 0,
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "e100bfc3c8f5b9ee6b5c36bb4f21188f4bb317c1309c90ab3062e722fb005498"
+  },
+  "run": {
+    "attempt": 2,
+    "event": "pull_request",
+    "head_sha": "2222222222222222222222222222222222222222",
+    "id": 1234,
+    "workflow_sha": "3333333333333333333333333333333333333333"
+  },
+  "schema": "pulp.gpu-trace-structural-verifier-attestation.v1",
+  "source_revision": "1111111111111111111111111111111111111111",
+  "step": {
+    "issuer_command": [
+      "python3",
+      "tools/scripts/a2t_structural_verification_ci.py"
+    ],
+    "name": "Verify A2T structural receipt",
+    "verifier_command": [
+      "python3",
+      "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+      "../evidence/receipt.json",
+      "--repository",
+      "."
+    ]
+  },
+  "target": {
+    "ref": "main",
+    "repository": "Generous-Corp/pulp"
+  },
+  "trace_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+  "verifier": {
+    "blob": "6666666666666666666666666666666666666666",
+    "commit": "1111111111111111111111111111111111111111",
+    "path": "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+    "sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+  },
+  "workflow": {
+    "blob": "3333333333333333333333333333333333333333",
+    "commit": "3333333333333333333333333333333333333333",
+    "path": ".github/workflows/build.yml",
+    "semantics_sha256": "24ed93f9e04f5fcd94dcc8b95803c12701dd9e4ba5185434e932a912cc81b493",
+    "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  }
+}

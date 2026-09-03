@@ -525,6 +525,12 @@ if(UNIX)
     add_test(NAME contributor-check
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_contributor_check.sh)
     set_tests_properties(contributor-check PROPERTIES TIMEOUT 120)
+    # worktree_lineage.sh is how every agent discovers whether a checkout is
+    # safe to remove, so a wrong row is a deletion hazard. Builds a throwaway
+    # repo and asserts each emitted column against the config it renders.
+    add_test(NAME worktree-lineage-selftest
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_worktree_lineage.sh)
+    set_tests_properties(worktree-lineage-selftest PROPERTIES TIMEOUT 120)
     # Builds four throwaway CMake fixtures, so it is slower than a text check
     # and worth every second: the vacuous-test case is the one that proves the
     # harness reports a test that cannot fail rather than blessing it.
