@@ -349,6 +349,25 @@ public:
         note_unsupported_feature("set_app_key_monitor");
     }
 
+    // Install a handler for files the OS asks this app to open: a double-click
+    // in Finder, a drag onto the app icon or Dock tile, or `open -a`. Paths are
+    // delivered on the main thread.
+    //
+    // Install it BEFORE run_event_loop(). A launch-time open arrives while the
+    // app is still finishing launch — before the loop starts — so a handler set
+    // afterwards would miss the very file that caused the launch. Any paths that
+    // arrive before a handler exists are held and delivered as soon as one is
+    // installed; passing `{}` removes the handler without discarding them.
+    //
+    // Declaring the document type is the other half of this: without a
+    // CFBundleDocumentTypes entry (pulp_declare_standalone_document_type() in
+    // CMake) the OS never routes the file here at all.
+    virtual void set_open_files_handler(
+        std::function<void(const std::vector<std::string>&)> handler) {
+        (void)handler;
+        note_unsupported_feature("set_open_files_handler");
+    }
+
     // Set a callback for when the window is closed
     virtual void set_close_callback(std::function<void()> cb) = 0;
 

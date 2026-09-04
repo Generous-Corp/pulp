@@ -593,6 +593,7 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();
     self->param_events.clear();
+    self->modulation_events.clear();
 
     // Handle parameter, modulation, and gesture events from host
     auto* in_events = process->in_events;
@@ -621,6 +622,14 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
                 const auto ev = load_event<clap_event_param_mod_t>(hdr);
                 state::ModulationLane lane;
                 if (clap_param_modulation_lane(*self, ev, lane)) {
+                    // Preserve CLAP's event timestamp for processors that
+                    // consume a sample-accurate modulation lane. Keep the
+                    // legacy StateStore snapshot in sync for block-rate
+                    // processors and existing API consumers.
+                    self->modulation_events.push(state::ModulationEvent{
+                        static_cast<state::ParamID>(ev.param_id),
+                        static_cast<int32_t>(hdr->time),
+                        static_cast<float>(ev.amount)});
                     self->store.set_mod_offset(
                         static_cast<state::ParamID>(ev.param_id),
                         static_cast<float>(ev.amount));
@@ -635,6 +644,7 @@ static void clap_phase_decode_param_events(PulpClapPlugin* self,
         }
     }
     self->param_events.sort();
+    self->modulation_events.sort();
 }
 
 static bool is_midi_ownership_event(const midi::MidiEvent& event) {
@@ -985,6 +995,7 @@ static bool clap_phase_prepare_sidecars(PulpClapPlugin* self,
         self->processor->set_ump_input(nullptr);
     }
     self->processor->set_param_events(&self->param_events);
+    self->processor->set_modulation_events(&self->modulation_events);
     self->output_param_events.clear();
     self->processor->set_output_param_events(&self->output_param_events);
     return state_event_dropped || !mpe_complete;

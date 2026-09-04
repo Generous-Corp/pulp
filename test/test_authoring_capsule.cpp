@@ -136,6 +136,36 @@ std::vector<std::uint8_t> bytes_of(std::string_view text) {
     return std::vector<std::uint8_t>(text.begin(), text.end());
 }
 
+// Every path under `root`, relative and sorted: a whole-tree fingerprint, so a
+// stray write anywhere is visible rather than only a write we thought to name.
+std::vector<std::string> tree_snapshot(const fs::path& root) {
+    std::vector<std::string> entries;
+    for (const auto& entry : fs::recursive_directory_iterator(root))
+        entries.push_back(fs::relative(entry.path(), root).generic_string());
+    std::sort(entries.begin(), entries.end());
+    return entries;
+}
+
+// Runs a scope with the process working directory moved, so a scratch file
+// written to a relative path lands where a snapshot can see it.
+class ScopedWorkingDirectory {
+public:
+    explicit ScopedWorkingDirectory(const fs::path& next) : previous_(fs::current_path()) {
+        fs::current_path(next);
+    }
+
+    ScopedWorkingDirectory(const ScopedWorkingDirectory&) = delete;
+    ScopedWorkingDirectory& operator=(const ScopedWorkingDirectory&) = delete;
+
+    ~ScopedWorkingDirectory() {
+        std::error_code ec;
+        fs::current_path(previous_, ec);
+    }
+
+private:
+    fs::path previous_;
+};
+
 // ── Manifest fixtures ───────────────────────────────────────────────────────
 
 ComponentPolicy included_policy(Redistribution redistribution,
@@ -1113,6 +1143,44 @@ TEST_CASE("export then open then preview admits a capsule end to end",
 
     // The identity the preview binds to is the one it recomputed.
     CHECK(preview->manifest.revision_id == digest_or_fail(preview->manifest));
+}
+
+TEST_CASE("a successful preview writes nothing while admission extracts the same member",
+          "[authoring-capsule][preview]") {
+    TempDir temp;
+    const fs::path destination = temp.path() / "inert.capsule";
+    REQUIRE(export_capsule(make_export_request(), destination).has_value());
+
+    auto archive = open_archive(destination);
+    REQUIRE(archive.has_value());
+    auto staging = StagingArea::create(temp.path());
+    REQUIRE(staging.has_value());
+    const fs::path extracted = staging->root() / "dsp" / "main.cpp";
+
+    const ProfileRegistry registry = test_registry();
+    AdmissionOptions options;
+    options.product = "test-product";
+
+    const ScopedWorkingDirectory working_directory(temp.path());
+    const auto before = tree_snapshot(temp.path());
+
+    const auto preview = preview_capsule(*archive, registry, options);
+    REQUIRE(preview.has_value());
+    CHECK(preview->compatibility == CompatibilityVerdict::supported);
+
+    // The preview read and judged a member the manifest declares executable,
+    // and left the tree exactly as it found it. Consent precedes extraction.
+    CHECK(tree_snapshot(temp.path()) == before);
+    CHECK(fs::is_empty(staging->root()));
+    CHECK_FALSE(fs::exists(extracted));
+
+    // The control, on the same archive and the same staging root: admission
+    // does write, and writes that member. Without it, a preview that touched
+    // nothing because the capsule carried nothing would read identically.
+    REQUIRE(admit_to_staging(*archive, *preview, registry, *staging).has_value());
+    CHECK(tree_snapshot(temp.path()) != before);
+    REQUIRE(fs::is_regular_file(extracted));
+    CHECK(read_file(extracted) == bytes_of("int main() { return 0; }\n"));
 }
 
 TEST_CASE("preview rejects a files row whose declared size disagrees with the member",

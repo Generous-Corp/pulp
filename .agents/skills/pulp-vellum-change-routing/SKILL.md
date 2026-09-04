@@ -126,6 +126,33 @@ generic DPR policy, render-lifecycle instrumentation, or framework adapter
 needed to act on that result originates in Vellum; do not implement it in this
 Pulp evidence lane.
 
+## Editing a pinned file stales its handoff row
+
+`docs/status/gpu-vellum-handoff.yaml` pins a `revision` and an `object_id` per
+path. `revision` is the most recent commit touching that path; `object_id` is
+`git rev-parse <revision>:<path>`. Change a pinned file and its row still names
+the previous blob, so `gpu_recipe_catalog.py` reports:
+
+```
+gpu-recipe-catalog: INVALID: handoff entries[N].pulp_paths[M] has stale revision/blob/tree identity
+```
+
+The failure surfaces as a **red required `macos` gate**, through
+`gpu-recipe-catalog-selftest`, far from the file you edited. It is easy to
+misread as someone else's flake: the test is named for the GPU recipe catalog
+and the change that broke it may have nothing to do with GPU. Run
+`python3 tools/scripts/gpu_recipe_catalog.py` locally before pushing; it takes a
+second and answers the question outright.
+
+There is no `--write` mode. Refresh the affected rows only, to the most recent
+commit touching each path and the blob at that revision. That is the identity
+the catalog's own drift test plants staleness against, by deliberately using the
+*second* most recent commit.
+
+**Land the refresh as its own commit, never as an amend.** The pinned revision
+is the commit that holds the edited file, so amending changes that SHA and
+re-stales the pin you just fixed.
+
 ## Validate the contract
 
 Run the closed eight-case suite and projection validator:

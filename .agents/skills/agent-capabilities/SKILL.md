@@ -816,6 +816,30 @@ the bypass trailer by reflex:
   A note costs the same as the trailer and leaves the next person something to
   read.
 
+## A platform header installed for per-binary recompilation is not capability surface
+
+`PulpInstallRules.cmake` installs more than public API. The macOS ObjC cluster
+under `core/view/platform/mac` is shipped as *source*, because ObjC class names
+are process-global and every consumer binary has to recompile those translation
+units with its own class-name suffix. A `.h` arriving in that install block is
+a private header a consumer compiles against, not a header anyone includes.
+
+So adding one fires this gate and there is nothing to classify: the path is
+outside all six `PUBLIC_ROOTS`, no manifest key gains or loses a digest, and
+`agent_capability_manifest.py --check` is green before and after. Run it anyway
+and say so, rather than assuming it from the path.
+
+The thing that *does* need care in that block is unrelated to capabilities and
+easy to miss, so it is written down here because this is the skill an editor of
+`PulpInstallRules.cmake` is sent to. A macOS ObjC translation unit is named in
+three hand-maintained lists: `core/view/CMakeLists.txt`, this file, and
+`_pulp_view_objc_srcs` in `PulpUtils.cmake`. Omitting the install entry makes
+the `EXISTS` probe in `_pulp_apply_view_mac_objc_suffix()` fail, and that
+`return()`s, dropping the per-binary suffix for *every* macOS ObjC class rather
+than the new one. The binary still builds and still runs; it collides only when
+a second Pulp plug-in is loaded beside it, in somebody else's host. The
+`mac-objc-source-list-guard` ctest and its selftest exist to catch that.
+
 ## A green `--check` says nothing about a module outside `PUBLIC_ROOTS`
 
 `PUBLIC_ROOTS` in `tools/scripts/agent_capability_surface.py` lists exactly six

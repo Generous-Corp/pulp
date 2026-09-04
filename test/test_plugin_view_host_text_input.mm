@@ -583,6 +583,16 @@ TEST_CASE("PluginViewHost (mac GPU) — right click routes to the painted overla
         opts.use_gpu = true;
         auto host = PluginViewHost::create(root, opts);
         REQUIRE(host != nullptr);
+        // create() falls back to the CPU host when no Dawn/Metal adapter is
+        // available, so PulpGpuPluginView is absent for a reason that is not a
+        // defect in overlay routing. Without this the test reports a GPU
+        // regression on any machine that simply has no GPU host.
+        if (!host->is_gpu_backed()) {
+            SUCCEED("No GPU-backed plugin host in this process — GPU overlay "
+                    "context-menu test skipped.");
+            [window close];
+            return;
+        }
         host->attach_to_parent((__bridge void*)window.contentView);
         NSView* pulp_view = find_view_with_class_name(
             window.contentView, @"PulpGpuPluginView");

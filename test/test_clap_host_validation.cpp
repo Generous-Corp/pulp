@@ -94,7 +94,11 @@ public:
     void process(audio::BufferView<float>&,
                  const audio::BufferView<const float>&,
                  midi::MidiBuffer&, midi::MidiBuffer&,
-                 const ProcessContext&) override {}
+                 const ProcessContext&) override {
+        const auto* mods = modulation_events();
+        captured_modulation_count = mods ? mods->size() : 0;
+        if (mods && !mods->events().empty()) captured_modulation = mods->events().front();
+    }
 
     std::vector<uint8_t> serialize_plugin_state() const override {
         return {opaque_state.begin(), opaque_state.end()};
@@ -107,6 +111,8 @@ public:
 
     inline static HostValidationProcessor* last_instance = nullptr;
     std::string opaque_state;
+    std::size_t captured_modulation_count = 0;
+    state::ModulationEvent captured_modulation{};
 };
 
 std::unique_ptr<Processor> make_host_validation() {
@@ -152,6 +158,26 @@ struct OneEventInput {
         };
     }
     std::vector<uint8_t> bytes;
+    clap_input_events_t vt{};
+};
+
+struct ManyEventInput {
+    explicit ManyEventInput(std::initializer_list<clap_event_param_mod_t> events) {
+        bytes.reserve(events.size());
+        for (const auto& event : events) {
+            bytes.emplace_back(sizeof(event));
+            std::memcpy(bytes.back().data(), &event, sizeof(event));
+        }
+        vt.ctx = this;
+        vt.size = [](const clap_input_events_t* l) -> uint32_t {
+            return static_cast<uint32_t>(static_cast<ManyEventInput*>(l->ctx)->bytes.size());
+        };
+        vt.get = [](const clap_input_events_t* l, uint32_t index) {
+            return reinterpret_cast<const clap_event_header_t*>(
+                static_cast<ManyEventInput*>(l->ctx)->bytes.at(index).data());
+        };
+    }
+    std::vector<std::vector<uint8_t>> bytes;
     clap_input_events_t vt{};
 };
 
@@ -299,6 +325,48 @@ TEST_CASE("CLAP modulation does not bleed across blocks",
     REQUIRE(inst.run_block(nullptr) == CLAP_PROCESS_CONTINUE);
     const auto value_after_clear = inst.plugin.store.get_modulated(kParamGain);
     REQUIRE_THAT(static_cast<double>(value_after_clear), WithinAbs(0.0, 1e-9));
+}
+
+TEST_CASE("CLAP modulation preserves event sample offset",
+          "[clap][host-validation][modulation][sample-accurate]") {
+    ClapInstance inst(make_host_validation);
+    clap_event_param_mod_t mod{};
+    mod.header = make_hdr(sizeof(mod), CLAP_EVENT_PARAM_MOD);
+    mod.header.time = 37;
+    mod.param_id = kParamGain;
+    mod.amount = 0.25;
+    OneEventInput in(mod);
+    REQUIRE(inst.run_block(&in.vt) == CLAP_PROCESS_CONTINUE);
+    auto* processor = HostValidationProcessor::last_instance;
+    REQUIRE(processor != nullptr);
+    REQUIRE(processor->captured_modulation_count == 1);
+    REQUIRE(processor->captured_modulation.param_id == kParamGain);
+    REQUIRE(processor->captured_modulation.sample_offset == 37);
+    REQUIRE_THAT(static_cast<double>(processor->captured_modulation.amount),
+                 WithinAbs(0.25, 1e-6));
+}
+
+TEST_CASE("CLAP modulation events are sorted and reset per block",
+          "[clap][host-validation][modulation][sample-accurate]") {
+    ClapInstance inst(make_host_validation);
+    clap_event_param_mod_t late{};
+    late.header = make_hdr(sizeof(late), CLAP_EVENT_PARAM_MOD, CLAP_CORE_EVENT_SPACE_ID, 99);
+    late.param_id = kParamGain;
+    late.amount = 0.75;
+    clap_event_param_mod_t early{};
+    early.header = make_hdr(sizeof(early), CLAP_EVENT_PARAM_MOD, CLAP_CORE_EVENT_SPACE_ID, 3);
+    early.param_id = kParamGain;
+    early.amount = -0.25;
+    ManyEventInput input({late, early});
+    REQUIRE(inst.run_block(&input.vt) == CLAP_PROCESS_CONTINUE);
+    auto* processor = HostValidationProcessor::last_instance;
+    REQUIRE(processor != nullptr);
+    REQUIRE(processor->captured_modulation_count == 2);
+    REQUIRE(processor->captured_modulation.sample_offset == 3);
+    REQUIRE_THAT(static_cast<double>(processor->captured_modulation.amount), WithinAbs(-0.25, 1e-6));
+
+    REQUIRE(inst.run_block(nullptr) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(processor->captured_modulation_count == 0);
 }
 
 TEST_CASE("CLAP non-core event namespace is ignored",

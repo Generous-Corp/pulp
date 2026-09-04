@@ -175,6 +175,10 @@ struct PulpClapPlugin {
     // Parameter snapshot for detecting plugin-side changes during process
     std::vector<float> param_snapshot;
     state::ParameterEventQueue param_events;
+    // Timestamp-preserving host PARAM_MOD lane for processors that apply
+    // modulation sample-accurately. The StateStore offset remains a bounded
+    // compatibility snapshot for legacy processors.
+    state::ModulationEventQueue modulation_events;
     // Sample-accurate parameter OUTPUT: the processor pushes offset-tagged events
     // via push_output_param_event(); we merge them (by ascending sample offset)
     // with the plugin's MIDI-out shorts and sysex into out_events, which CLAP
