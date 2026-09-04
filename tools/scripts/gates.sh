@@ -95,6 +95,7 @@ WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 UNBOUNDED_WAIT_LINT="$ROOT/tools/scripts/unbounded_wait_lint.py"
+FORCED_RESTORE_LINT="$ROOT/tools/scripts/forced_restore_lint.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
 SHIPYARD_WATCHDOG_TEST="$ROOT/tools/scripts/test_shipyard_pr_watchdog.py"
 
@@ -564,6 +565,21 @@ if [ -f "$FRAMEWORK_NEUTRALITY" ]; then
     echo "" >&2
     echo "▸ framework-neutrality guard (no foreign-framework vocabulary in Pulp source)" >&2
     if ! "$PYTHON" "$FRAMEWORK_NEUTRALITY" --mode=report; then
+        fail=1
+    fi
+fi
+
+# ── 16. forced-restore lint ────────────────────────────────────────────────
+# Global invariant: a forced worktree restore used as a repair says which state
+# it repairs. `checkout --force -- .` restores nothing when git already believes
+# the worktree matches the index, and exits 0 while doing it, so a cache
+# re-normalised by a line-ending config change survives its own repair. Also
+# checks that restore_source_cache_verbatim_eol() still drops the index, which
+# is the half no comment can satisfy.
+if [ -f "$FORCED_RESTORE_LINT" ]; then
+    echo "" >&2
+    echo "▸ forced-restore lint (a forced worktree restore declares what it repairs)" >&2
+    if ! "$PYTHON" "$FORCED_RESTORE_LINT"; then
         fail=1
     fi
 fi

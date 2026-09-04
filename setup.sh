@@ -542,6 +542,7 @@ ensure_shared_git_source_with_retry() {
     local repo="$2"
     local ref="$3"
     local dir_name="$4"
+    local verbatim_eol="${5:-}"
     local target="$FETCHCONTENT_CACHE_ROOT/$dir_name"
     local lockdir="$FETCHCONTENT_CACHE_ROOT/.${dir_name}.lock"
     local attempts="${PULP_PRIMING_RETRY_ATTEMPTS:-3}"
@@ -550,7 +551,7 @@ ensure_shared_git_source_with_retry() {
 
     for i in $(seq 1 "$attempts"); do
         rc=0
-        ensure_shared_git_source "$label" "$repo" "$ref" "$dir_name" || rc=$?
+        ensure_shared_git_source "$label" "$repo" "$ref" "$dir_name" "$verbatim_eol" || rc=$?
         if [ "$rc" -eq 0 ]; then
             if [ "$i" -gt 1 ]; then
                 info "$label priming succeeded on attempt $i/$attempts"
@@ -622,16 +623,73 @@ git_worktree_is_complete() {
     [ -z "$(git -C "$1" ls-files --deleted 2>/dev/null)" ]
 }
 
+# A source cache whose files are verified against pinned content digests must
+# hold EXACTLY upstream's bytes. Git for Windows defaults core.autocrlf=true, so
+# an ordinary checkout rewrites every LF to CRLF and each pinned SHA-256 then
+# describes a file the checkout can never produce. Pin the conversion off for
+# the one cache that is digest-verified, and leave every other clone — and the
+# machine's own git config — untouched.
+#
+# The repo-local config covers every later checkout in this cache; the clone
+# that first writes the worktree predates it and takes -c flags instead.
+pin_source_cache_verbatim_eol() {
+    local dir="$1"
+    git -C "$dir" config core.autocrlf false
+    git -C "$dir" config core.eol lf
+}
+
+# True when the worktree holds CRLF for a file the index stores as LF — the
+# signature of a checkout written before the pin above was in place. Reported
+# by git itself rather than inferred from a byte scan, so it cannot mistake a
+# file that is genuinely CRLF upstream (i/crlf) for damage.
+source_cache_has_converted_eol() {
+    git -C "$1" ls-files --eol 2>/dev/null \
+        | grep -qE '^i/lf[[:space:]]+w/crlf'
+}
+
+# Rewrite a converted worktree from the index, using the pin above.
+#
+# `git checkout --force -- .` is NOT enough and fails silently: git decides a
+# file is already current from the index's cached stat data, and a CRLF checkout
+# recorded its own stat when it was written. The comparison never reads the
+# bytes, so an old cache is skipped and reports success. (It appears to work
+# right after the bad checkout only because git still distrusts a stat from the
+# same timestamp granularity and falls back to comparing content.)
+# Dropping the index forces the re-scan; `reset --hard` then rebuilds both the
+# index and the worktree from HEAD. This is gitattributes(5)'s own recipe for
+# renormalising a checkout, and it needs no network even on a partial clone.
+restore_source_cache_verbatim_eol() {
+    local dir="$1"
+    local index_path
+    # --git-path answers relative to the repository unless GIT_DIR is absolute.
+    index_path="$(git -C "$dir" rev-parse --git-path index)" || return 1
+    case "$index_path" in /*) ;; *) index_path="$dir/$index_path" ;; esac
+    # The index is rebuilt by the very next command; a failure between the two
+    # leaves a cache the completeness check re-primes rather than trusts.
+    rm -f "$index_path"
+    git -C "$dir" reset --hard --quiet
+}
+
 ensure_shared_git_source() {
     local label="$1"
     local repo="$2"
     local ref="$3"
     local dir_name="$4"
+    # "verbatim-eol" opts this cache out of git's end-of-line conversion; see
+    # pin_source_cache_verbatim_eol. Anything else keeps stock git behaviour.
+    local verbatim_eol="${5:-}"
     local target="$FETCHCONTENT_CACHE_ROOT/$dir_name"
     local lockdir="$FETCHCONTENT_CACHE_ROOT/.${dir_name}.lock"
     local current_remote=""
     local seed_repo=""
     local checkout_ref="$ref"
+
+    # The ${arr[@]+...} guard is what makes an EMPTY array safe to expand under
+    # `set -u`, which the unit-test harness enables when it sources this file.
+    local -a eol_cfg=()
+    if [ "$verbatim_eol" = "verbatim-eol" ]; then
+        eol_cfg=(-c core.autocrlf=false -c core.eol=lf)
+    fi
 
     mkdir -p "$FETCHCONTENT_CACHE_ROOT"
 
@@ -659,8 +717,9 @@ ensure_shared_git_source() {
             if [ -n "$seed_repo" ]; then
                 info "Seeding shared $label source cache from local clone: $seed_repo"
                 if ! dry "git clone --local --no-hardlinks $seed_repo $target"; then
-                    if ! git clone --local --no-hardlinks "$seed_repo" "$target" >/dev/null 2>&1; then
-                        git clone "$seed_repo" "$target"
+                    if ! git ${eol_cfg[@]+"${eol_cfg[@]}"} clone --local --no-hardlinks \
+                            "$seed_repo" "$target" >/dev/null 2>&1; then
+                        git ${eol_cfg[@]+"${eol_cfg[@]}"} clone "$seed_repo" "$target"
                     fi
                 fi
             elif ! dry "git clone --filter=blob:none $repo $target"; then
@@ -669,7 +728,7 @@ ensure_shared_git_source() {
                 # between attempts so the second try can actually
                 # re-run the network fetch.
                 retry_git_clone "$label" \
-                    git clone --filter=blob:none "$repo" "$target"
+                    git ${eol_cfg[@]+"${eol_cfg[@]}"} clone --filter=blob:none "$repo" "$target"
             fi
 
             current_remote="$(git -C "$target" remote get-url origin 2>/dev/null || true)"
@@ -682,6 +741,19 @@ ensure_shared_git_source() {
                [ "$(git -C "$seed_repo" config remote.origin.promisor 2>/dev/null)" = "true" ]; then
                 dry "git -C $target config extensions.partialClone origin" || \
                     restore_partial_clone_wiring "$target" "$(git_partial_clone_filter "$seed_repo")"
+            fi
+        fi
+
+        if [ "$verbatim_eol" = "verbatim-eol" ] && [ -d "$target/.git" ]; then
+            pin_source_cache_verbatim_eol "$target"
+            # A cache primed before the pin existed still holds CRLF, and
+            # `checkout --detach` at the ref it is already on rewrites nothing —
+            # so that damage would outlive every later run on the same machine.
+            # Rewrite the tracked files once, and only when git reports the
+            # conversion actually happened.
+            if source_cache_has_converted_eol "$target"; then
+                warn "$label source cache was written with EOL conversion; restoring upstream bytes"
+                restore_source_cache_verbatim_eol "$target"
             fi
         fi
 
@@ -709,6 +781,9 @@ ensure_shared_git_source() {
             if ! git_worktree_is_complete "$target"; then
                 warn "Shared $label source cache is missing objects; repairing"
                 restore_partial_clone_wiring "$target" "$(git_partial_clone_filter "$target")"
+                # forced-restore: content-absent reason="git_worktree_is_complete just
+                # reported blobs the first attempt could not read, so the files are
+                # missing rather than converted and git sees the difference"
                 git -C "$target" checkout --force "$checkout_ref" -- . || true
             fi
 
@@ -1026,9 +1101,15 @@ ensure_shared_git_source_with_retry "Catch2" "https://github.com/catchorg/Catch2
 # test_setup_source_cache.sh fails if they drift, because a mismatched cache
 # directory name is a SILENT miss: the cache is populated, CMake ignores it, and
 # the clone happens anyway.
+# "verbatim-eol": PulpDependencies.cmake verifies these files against the
+# SHA-256 digests in threejs-runtime-manifest.json, which are upstream's own
+# LF bytes. Git for Windows converts LF to CRLF on checkout by default, which
+# changes every digest and fails the pin — so this one cache checks out
+# verbatim. No other dependency is content-digest verified.
 ensure_shared_git_source_with_retry "three.js" "https://github.com/mrdoob/three.js.git" \
     "077dd13c0e869d9f3dbe55875686f920367de457" \
-    "$(fetchcontent_cache_dir_name "threejs" "077dd13c0e869d9f3dbe55875686f920367de457")"
+    "$(fetchcontent_cache_dir_name "threejs" "077dd13c0e869d9f3dbe55875686f920367de457")" \
+    "verbatim-eol"
 
 # VST3 SDK
 # MIT only from v3.8.0 onward. Every earlier tag (including v3.7.12) ships

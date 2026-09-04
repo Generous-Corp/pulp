@@ -81,14 +81,27 @@ CONTROL_MANIFEST_PERMISSION_TERMS = (
     "client_granted",
     "session_live",
 )
-CONTROL_STANDALONE_HOST_CAPABILITIES = (
-    # Kept in the order the host emits, which is sorted, so a mismatch reads as
-    # a missing or extra entry rather than a reordering. The host declares these
-    # unconditionally; adding an operation there without adding it here fails
-    # every release artifact at verification, not at build.
-    "dev.pulp.gpu/health.read@1",
+# CMake owns this set, not this file. CMakeLists.txt seeds
+# _pulp_control_standalone_capabilities with the operations every build declares,
+# then appends the GPU health probe only under PULP_ENABLE_GPU. Both
+# configurations ship, so any single hardcoded list is wrong for one of them.
+# Keep the split here identical to the split there; the capability-contract tests
+# parse that CMake block and fail if the two declarations drift apart.
+CONTROL_STANDALONE_HOST_BASE_CAPABILITIES = (
     "dev.pulp.instance/read@1",
     "dev.pulp.state/read@1",
+)
+CONTROL_STANDALONE_HOST_GPU_CAPABILITIES = ("dev.pulp.gpu/health.read@1",)
+# The host emits its capabilities sorted, so each accepted configuration is
+# pinned sorted and a reordering reads as a mismatch rather than passing.
+CONTROL_STANDALONE_HOST_CAPABILITY_SETS = (
+    tuple(sorted(CONTROL_STANDALONE_HOST_BASE_CAPABILITIES)),
+    tuple(
+        sorted(
+            CONTROL_STANDALONE_HOST_BASE_CAPABILITIES
+            + CONTROL_STANDALONE_HOST_GPU_CAPABILITIES
+        )
+    ),
 )
 CONTROL_STANDALONE_HOST_MANIFEST_FIELDS = frozenset(
     {
@@ -861,13 +874,25 @@ def verify_control_standalone_host(
         "endpoint_included": True,
         "unsafe_runtime_eval_acknowledged": False,
         "permission_terms": list(CONTROL_MANIFEST_PERMISSION_TERMS),
-        "capabilities": list(CONTROL_STANDALONE_HOST_CAPABILITIES),
     }
     mismatches = {
         key: (document.get(key), value)
         for key, value in expected.items()
         if document.get(key) != value or type(document.get(key)) is not type(value)
     }
+    # capabilities are validated apart from the uniform comparison above because
+    # more than one set is legitimate: a GPU-disabled build declares the base
+    # operations, a GPU-enabled build declares those plus the GPU health probe.
+    capabilities = document.get("capabilities")
+    if (
+        not isinstance(capabilities, list)
+        or tuple(capabilities) not in CONTROL_STANDALONE_HOST_CAPABILITY_SETS
+    ):
+        mismatches["capabilities"] = (
+            capabilities,
+            "one of "
+            + repr([list(entry) for entry in CONTROL_STANDALONE_HOST_CAPABILITY_SETS]),
+        )
     build_id = document.get("build_id")
     if not isinstance(build_id, str) or not re.fullmatch(r"build:[0-9a-f]{32}", build_id):
         mismatches["build_id"] = (build_id, "build: followed by 32 lowercase hex digits")

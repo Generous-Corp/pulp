@@ -205,6 +205,19 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME unbounded-wait-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_unbounded_wait_lint.py")
 
+    # Forced-restore lint: a forced worktree restore used as a repair has to say
+    # which state it repairs. `checkout --force -- .` restores nothing when git
+    # already believes the worktree matches the index, and exits 0 while doing
+    # it, so a cache re-normalised by a line-ending config change survives its
+    # own repair. The selftest is the load-bearing part: it scans the SAME
+    # restore bare and declared, and the SAME primitive intact and with its
+    # index drop removed, so the gate is proven to distinguish them.
+    add_test(NAME forced-restore-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/forced_restore_lint.py"
+        --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME forced-restore-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_forced_restore_lint.py")
+
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
     # -j`, which can exhaust memory / oversubscribe cores on a shared machine.
