@@ -124,6 +124,10 @@ struct DomPointerRelay {
         RelayDispatchScope dispatch_scope(live_target);
         if (!dispatch_scope.entered()) return;
         if (previous) previous(event, is_dom_origin);
+        // A preserved callback may synchronously tear down the imported root.
+        // Never re-enter the tree (or dereference root) after that callback
+        // unless the lifetime token still proves the root is alive.
+        if (!root || root_lifetime.expired()) return;
         // The preserved target callback may synchronously unmount this view.
         // Re-resolve the identity before using it for topology checks; the
         // captured instance id also rejects allocator-address reuse.
@@ -164,6 +168,7 @@ struct DomWheelRelay {
         RelayDispatchScope dispatch_scope(live_target);
         if (!dispatch_scope.entered()) return;
         if (previous) previous(event, is_dom_origin);
+        if (!root || root_lifetime.expired()) return;
         live_target = target_capture.live_in(*root);
         if (!live_target) return;
         auto* live_owner = owner_capture.live_in(*root);
@@ -191,6 +196,7 @@ struct ClickRelay {
         RelayDispatchScope dispatch_scope(live_target);
         if (!dispatch_scope.entered()) return;
         if (previous) previous();
+        if (!root || root_lifetime.expired()) return;
         live_target = target_capture.live_in(*root);
         if (!live_target) return;
         auto* live_owner = owner_capture.live_in(*root);
