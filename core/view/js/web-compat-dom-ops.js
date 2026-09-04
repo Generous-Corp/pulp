@@ -64,7 +64,17 @@ if (!Element.prototype.appendChild ||
             for (var i = 0; i < kids.length; i++) this.appendChild(kids[i]);
             return child;
         }
-        if (child._parentElement) child._parentElement.removeChild(child);
+        // Reparenting must preserve the native widget identity. Calling the
+        // public removeChild() here would invoke __domRemove(), which retires
+        // the native subtree and aliases before __domAppend() gets a chance
+        // to move an existing retained wrapper. Detach only the JS parent
+        // bookkeeping; __domAppend() owns the native move/upgrade transaction.
+        if (child._parentElement) {
+            var oldParent = child._parentElement;
+            var oldIndex = oldParent._children.indexOf(child);
+            if (oldIndex >= 0) oldParent._children.splice(oldIndex, 1);
+            child._parentElement = null;
+        }
         child._parentElement = this;
         this._children.push(child);
         this._ensureNative();
@@ -204,7 +214,21 @@ if (!Element.prototype.appendChild ||
         }
         var idx = this._children.indexOf(refChild);
         if (idx < 0) return this.appendChild(newChild);
-        if (newChild._parentElement) newChild._parentElement.removeChild(newChild);
+        // As in appendChild(), detach the JS relationship without retiring
+        // the native subtree. The C++ append path must see the existing widget
+        // so retained ScrollView aliases and callback identity survive.
+        if (newChild._parentElement) {
+            var oldParent = newChild._parentElement;
+            var oldIndex = oldParent._children.indexOf(newChild);
+            if (oldIndex >= 0) {
+                oldParent._children.splice(oldIndex, 1);
+                // The reference index was captured before removing a child
+                // from this same parent. Account for the shifted slot when
+                // moving an earlier sibling in front of the reference.
+                if (oldParent === this && oldIndex < idx) idx--;
+            }
+            newChild._parentElement = null;
+        }
         newChild._parentElement = this;
         this._children.splice(idx, 0, newChild);
         this._ensureNative();

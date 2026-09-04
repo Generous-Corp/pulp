@@ -28,6 +28,27 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         auto tag = args.get<std::string>(2, "div");
         auto hint = args.get<std::string>(3, "");
         auto* existing = self.widget(childId);
+        // Move an already-upgraded retained wrapper as one transaction. The
+        // wrapper is the actual native owner; moving only its authored child
+        // strands the scroll container and invalidates the alias map. Keep the
+        // unique_ptr recoverable if destination attachment rejects the move.
+        const auto move_wrapper = [](ScrollView* wrapper, View* destination) {
+            if (!wrapper || !destination || wrapper->parent() == destination)
+                return true;
+            auto* old_parent = wrapper->parent();
+            if (!old_parent) return false;
+            auto moved = old_parent->remove_child(wrapper);
+            try {
+                destination->add_child_transactional(moved);
+            } catch (...) {
+                if (moved) {
+                    try { old_parent->add_child_transactional(moved); }
+                    catch (...) { /* preserve the original exception */ }
+                }
+                throw;
+            }
+            return true;
+        };
         if (existing) {
             auto* destination = self.resolve_parent(parentId);
             // Refuse self/descendant reparenting before touching ownership;
@@ -50,10 +71,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                         auto* interaction = wrapper->existing_interaction();
                         auto* focused_before = interaction ? interaction->focused_input : nullptr;
                         auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
-                        if (auto* old_parent = wrapper->parent()) {
-                            auto moved = old_parent->remove_child(wrapper);
-                            destination->add_child(std::move(moved));
-                        }
+                        if (!move_wrapper(wrapper, destination)) return choc::value::Value();
                         if (focused_before) {
                             focused_before->on_focus_changed(true);
                             focused_before->claim_input_focus();
@@ -92,10 +110,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     auto* interaction = wrapper->existing_interaction();
                     auto* focused_before = interaction ? interaction->focused_input : nullptr;
                     auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
-                    if (auto* old_parent = wrapper->parent()) {
-                        auto moved = old_parent->remove_child(wrapper);
-                        destination->add_child(std::move(moved));
-                    }
+                    if (!move_wrapper(wrapper, destination)) return choc::value::Value();
                     if (focused_before) {
                         focused_before->on_focus_changed(true);
                         focused_before->claim_input_focus();

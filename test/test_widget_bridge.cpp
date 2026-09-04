@@ -1587,10 +1587,33 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     CHECK(upgraded->overscroll_behavior() == "contain");
     engine.evaluate("setOverflow(retainedPanelId, 'scroll');");
     CHECK(upgraded->overflow() == View::Overflow::scroll);
-    engine.evaluate("createCol('reparent-destination', '');");
-    engine.evaluate("__domAppend('reparent-destination', retainedPanelId, 'div');");
+    // Exercise the public DOM reparent path, not only the native helper.
+    // appendChild must preserve the existing native identity so the retained
+    // wrapper is moved as a unit instead of being rematerialized.
+    engine.evaluate(R"(
+        var reparentDestination = document.createElement('div');
+        document.body.appendChild(reparentDestination);
+        reparentDestination.appendChild(retainedPanel);
+        globalThis.reparentDestinationId = reparentDestination._id;
+    )");
+    const auto destination_id = engine.evaluate("reparentDestinationId")
+        .getWithDefault<std::string>("");
+    REQUIRE_FALSE(destination_id.empty());
     CHECK(bridge.scroll_wrapper(panel_id) == upgraded);
-    CHECK(upgraded->parent() == bridge.widget("reparent-destination"));
+    CHECK(upgraded->parent() == bridge.widget(destination_id));
+    engine.evaluate(R"(
+        var insertDestination = document.createElement('div');
+        var insertMarker = document.createElement('div');
+        document.body.appendChild(insertDestination);
+        insertDestination.appendChild(insertMarker);
+        insertDestination.insertBefore(retainedPanel, insertMarker);
+        globalThis.insertDestinationId = insertDestination._id;
+    )");
+    const auto insert_destination_id = engine.evaluate("insertDestinationId")
+        .getWithDefault<std::string>("");
+    REQUIRE_FALSE(insert_destination_id.empty());
+    CHECK(bridge.scroll_wrapper(panel_id) == upgraded);
+    CHECK(upgraded->parent() == bridge.widget(insert_destination_id));
     CHECK(upgraded->child_count() == 1);
     CHECK(upgraded->child_at(0) == retained);
     engine.evaluate("__domAppend(retainedPanelId, 'post-upgrade-child', 'div')");
