@@ -64,6 +64,13 @@ if (!Element.prototype.appendChild ||
             for (var i = 0; i < kids.length; i++) this.appendChild(kids[i]);
             return child;
         }
+        // Reject cycles before changing JS parent bookkeeping. The native
+        // bridge also guards this, but reaching it after mutation would leave
+        // the emulated DOM cyclic even when the native operation refuses.
+        if (child === this) throw new Error("HierarchyRequestError");
+        for (var ancestor = this; ancestor; ancestor = ancestor._parentElement) {
+            if (ancestor === child) throw new Error("HierarchyRequestError");
+        }
         // Reparenting must preserve the native widget identity. Calling the
         // public removeChild() here would invoke __domRemove(), which retires
         // the native subtree and aliases before __domAppend() gets a chance
@@ -211,6 +218,10 @@ if (!Element.prototype.appendChild ||
             newChild._children.length = 0;
             for (var i = 0; i < kids.length; i++) this.insertBefore(kids[i], refChild);
             return newChild;
+        }
+        if (newChild === this) throw new Error("HierarchyRequestError");
+        for (var ancestor = this; ancestor; ancestor = ancestor._parentElement) {
+            if (ancestor === newChild) throw new Error("HierarchyRequestError");
         }
         var idx = this._children.indexOf(refChild);
         if (idx < 0) return this.appendChild(newChild);

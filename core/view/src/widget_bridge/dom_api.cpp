@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -71,7 +72,8 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                         auto* interaction = wrapper->existing_interaction();
                         auto* focused_before = interaction ? interaction->focused_input : nullptr;
                         auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
-                        if (!move_wrapper(wrapper, destination)) return choc::value::Value();
+                        if (!move_wrapper(wrapper, destination))
+                            throw std::runtime_error("retained scroll wrapper is detached");
                         if (focused_before) {
                             focused_before->on_focus_changed(true);
                             focused_before->claim_input_focus();
@@ -110,7 +112,8 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     auto* interaction = wrapper->existing_interaction();
                     auto* focused_before = interaction ? interaction->focused_input : nullptr;
                     auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
-                    if (!move_wrapper(wrapper, destination)) return choc::value::Value();
+                    if (!move_wrapper(wrapper, destination))
+                        throw std::runtime_error("retained scroll wrapper is detached");
                     if (focused_before) {
                         focused_before->on_focus_changed(true);
                         focused_before->claim_input_focus();

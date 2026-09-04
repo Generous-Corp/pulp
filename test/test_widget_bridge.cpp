@@ -1599,6 +1599,12 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     const auto destination_id = engine.evaluate("reparentDestinationId")
         .getWithDefault<std::string>("");
     REQUIRE_FALSE(destination_id.empty());
+    engine.evaluate(R"(
+        globalThis.cycleRejected = false;
+        try { reparentDestination.appendChild(document.body); }
+        catch (e) { globalThis.cycleRejected = true; }
+    )");
+    CHECK(engine.evaluate("cycleRejected").getWithDefault<bool>(false));
     CHECK(bridge.scroll_wrapper(panel_id) == upgraded);
     CHECK(upgraded->parent() == bridge.widget(destination_id));
     engine.evaluate(R"(
