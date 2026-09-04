@@ -781,6 +781,9 @@ ensure_shared_git_source() {
             if ! git_worktree_is_complete "$target"; then
                 warn "Shared $label source cache is missing objects; repairing"
                 restore_partial_clone_wiring "$target" "$(git_partial_clone_filter "$target")"
+                # forced-restore: content-absent reason="git_worktree_is_complete just
+                # reported blobs the first attempt could not read, so the files are
+                # missing rather than converted and git sees the difference"
                 git -C "$target" checkout --force "$checkout_ref" -- . || true
             fi
 
