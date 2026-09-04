@@ -515,10 +515,10 @@ private:
         std::string callback_id;
         std::string output;
     };
-    // Callback closures retain callback_alive_, so these queues live on the
-    // bridge rather than on BridgeCallbackState to avoid an ownership cycle.
-    std::vector<std::unique_ptr<View>> callback_retired_widgets_;
-    std::vector<std::unique_ptr<View>> callback_collectable_widgets_;
+    // Retirement of a view removed by a JS handler is owned by the tree root
+    // (View::retire), not by the bridge, so it obeys the same contract as a
+    // removal from a native lifecycle hook. callback_alive_ carries the root
+    // pointer because most callback closures capture only this state.
     std::shared_ptr<BridgeCallbackState> callback_alive_;
     std::shared_ptr<std::mutex> async_exec_mutex_ = std::make_shared<std::mutex>();
     std::shared_ptr<std::vector<AsyncExecResult>> async_exec_results_ =

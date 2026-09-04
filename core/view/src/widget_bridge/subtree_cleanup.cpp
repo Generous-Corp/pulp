@@ -157,8 +157,12 @@ void WidgetBridge::forget_widget_event_state(View& view) {
 }
 
 void WidgetBridge::retire_removed_widget(std::unique_ptr<View> widget) {
-    if (callback_alive_)
-        callback_alive_->retire(std::move(widget));
+    // One retirement authority per tree: the root. Inside a callback the view is
+    // parked on the root's chain and freed when the pass unwinds; outside one it
+    // is destroyed here. The previous bridge-local queue silently degraded to
+    // immediate destruction whenever the callback depth happened to be zero,
+    // which is exactly the case a native lifecycle hook could reach.
+    root_.retire(std::move(widget));
 }
 
 } // namespace pulp::view

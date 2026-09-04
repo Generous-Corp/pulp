@@ -1,6 +1,7 @@
 // widget_bridge/dom_api.cpp - DOM mutation registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -51,20 +52,27 @@ struct InteractionSnapshot {
         while (root->parent()) root = root->parent();
         if (had_focused) {
             if (auto* view = focused.live_in(*root)) {
-                try { view->on_focus_changed(true); }
-                catch (...) {
-                    // Focus restoration is best effort, but a widget callback
-                    // must not prevent independent overlay/popup restoration.
-                }
-                // The virtual focus callback may synchronously replace or
-                // remove the control. Resolve the identity again before
-                // touching the root-owned slot.
-                if (auto* still_live = focused.live_in(*root)) {
-                    auto* state = root->existing_interaction();
-                    if (state && (!state->focused_input ||
-                                  state->focused_input == still_live))
-                        try { still_live->claim_input_focus(); }
-                        catch (...) {}
+                auto* state = root->existing_interaction();
+                // Only restore into a slot nobody else has taken. Between
+                // capture and restore another view may legitimately have
+                // claimed focus; the reparented view must then NOT receive a
+                // gain callback at all, because a view that believes it has
+                // focus while the root points elsewhere is the split state
+                // this restore used to produce.
+                if (!state || !state->focused_input ||
+                    state->focused_input == view) {
+                    // Route through the established protocol rather than
+                    // re-implementing it: transfer_input_focus drains the
+                    // previous owner, delivers the gain hook, revalidates the
+                    // identity after every callback, and only then publishes
+                    // the root slot. Calling on_focus_changed() directly
+                    // skipped the drain and the ordering.
+                    try { transfer_input_focus(*root, view); }
+                    catch (...) {
+                        // Focus restoration is best effort, but a widget
+                        // callback must not prevent independent overlay/popup
+                        // restoration below.
+                    }
                 }
             }
         }
@@ -107,7 +115,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         // wrapper is the actual native owner; moving only its authored child
         // strands the scroll container and invalidates the alias map. Keep the
         // unique_ptr recoverable if destination attachment rejects the move.
-        const auto move_wrapper = [](ScrollView* wrapper, View* destination) {
+        const auto move_wrapper = [&self](ScrollView* wrapper, View* destination) {
             if (!wrapper || !destination) return false;
             if (wrapper->parent() == destination) return true;
             auto* old_parent = wrapper->parent();
@@ -121,8 +129,17 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 destination->add_child_transactional(moved);
             } catch (...) {
                 if (moved) {
-                    try { old_parent->add_child_transactional(moved); }
-                    catch (...) { /* preserve the original exception */ }
+                    try {
+                        old_parent->add_child_transactional(moved);
+                    } catch (...) {
+                        // Neither parent will take it. Drop the non-owning
+                        // bridge records naming this wrapper before releasing
+                        // it, and retire rather than free: a callback above may
+                        // still be executing on it. The original exception is
+                        // the one that propagates.
+                        self.forget_widget_subtree(moved.get());
+                        self.root_.retire(std::move(moved));
+                    }
                 }
                 throw;
             }
@@ -208,6 +225,16 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     InteractionSnapshot interaction;
                     interaction.capture(p);
                     auto removed = p->remove_child(existing);
+                    // remove_child returns null whenever a reentrant gesture,
+                    // popup, focus, or on_detached callback removed the view
+                    // first. Fail closed instead of dereferencing that null
+                    // below: nothing has been mutated yet, so refusing the
+                    // upgrade leaves the tree exactly as the callback left it.
+                    // The ordinary-reparent path below has always checked this;
+                    // the upgrade path is the one Settings reopen goes through.
+                    if (!removed)
+                        throw std::runtime_error(
+                            "retained scroll upgrade lost widget ownership");
                     std::unique_ptr<View> scroll = std::make_unique<ScrollView>();
                     // Keep the authored View as the ScrollView's content
                     // child instead of replacing/destroying it. This
@@ -308,22 +335,42 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 auto* destination = self.resolve_parent(parentId);
                 InteractionSnapshot interaction;
                 interaction.capture(p);
-                // Refresh the cache before structural mutation. The assignment
-                // is then unable to strand a detached subtree if allocation
-                // fails while recording the same authored identity.
-                self.widgets_.cache(childId, existing);
+                // Force the map node to exist before any structural mutation so
+                // the post-commit refresh below cannot fail on allocation. The
+                // identity recorded is the one already there; publishing the
+                // new one waits until the move has actually committed.
+                self.widgets_.reserve(self.widgets_.size() + 1);
                 auto removed = p->remove_child(existing);
                 if (!removed)
                     throw std::runtime_error("native reparent lost widget ownership");
                 try {
                     destination->add_child_transactional(removed);
                 } catch (...) {
+                    // First error wins. The destination rejected the attach and
+                    // `removed` still owns the view, so put it back where it
+                    // came from — but a restore that ALSO throws must not
+                    // replace the original exception, and must not let `removed`
+                    // die on unwind while widgets_/owned_widgets_ still name it.
                     if (removed) {
-                        try { p->add_child_transactional(removed); }
-                        catch (...) { throw; }
+                        try {
+                            p->add_child_transactional(removed);
+                        } catch (...) {
+                            // Both parents refused it. Nothing owns it now
+                            // except this local, and the bridge registries are
+                            // non-owning, so drop the records first and hand the
+                            // view to the root rather than freeing it here mid
+                            // unwind — a callback above may still be running on
+                            // it. Then rethrow the ORIGINAL failure.
+                            self.forget_widget_subtree(removed.get());
+                            self.root_.retire(std::move(removed));
+                        }
                     }
                     throw;
                 }
+                // Publish the identity only after the move commits, so a
+                // rejected attach cannot leave the registry naming a view that
+                // is about to be destroyed.
+                self.widgets_.cache(childId, existing);
                 interaction.restore(destination);
                 return choc::value::Value();
             }

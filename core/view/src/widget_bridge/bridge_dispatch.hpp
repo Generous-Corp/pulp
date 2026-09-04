@@ -2,10 +2,12 @@
 
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/view_lifecycle.hpp>
 
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -14,13 +16,18 @@ namespace pulp::view {
 
 // Shared by every callback installed on bridge-owned views. A JS handler may
 // synchronously remove the native view whose std::function is currently
-// executing. Logical removal happens immediately, while this state retains the
-// detached ownership until the outermost native callback returns.
+// executing. Logical removal happens immediately, while the detached ownership
+// is retained until the outermost native callback returns.
+//
+// That retention now lives on the tree ROOT (View::retire, view_lifecycle.hpp)
+// instead of in bridge-owned vectors, so a view removed by a JS handler and one
+// removed by a native lifecycle hook obey a single contract with a single
+// owner. The root pointer rides here because most callback closures capture
+// only `alive` — they have neither the bridge nor the root in scope — so this
+// is the one object every call site already holds.
 struct BridgeCallbackState {
-    BridgeCallbackState(std::vector<std::unique_ptr<View>>* retired_widgets,
-                        std::vector<std::unique_ptr<View>>* collectable_widgets) noexcept
-        : retired_widgets_(retired_widgets),
-          collectable_widgets_(collectable_widgets) {}
+    explicit BridgeCallbackState(View* dispatch_root) noexcept
+        : dispatch_root_(dispatch_root) {}
 
     std::atomic<bool> alive{true};
 
@@ -31,10 +38,9 @@ struct BridgeCallbackState {
         alive.store(value, order);
     }
 
-    void enter_callback() noexcept;
-    void leave_callback() noexcept;
-    void retire(std::unique_ptr<View> widget);
-    void detach_retirement_queues() noexcept;
+    /// The tree whose mutation gate a callback scope raises. Null for the
+    /// always-alive sentinels and after the owning bridge is retired.
+    View* dispatch_root() const noexcept { return dispatch_root_; }
     void retire_dispatch() noexcept;
 
     void track_engine(std::weak_ptr<const void> token) noexcept {
@@ -48,13 +54,9 @@ struct BridgeCallbackState {
     std::recursive_mutex& dispatch_mutex() noexcept { return dispatch_mutex_; }
 
 private:
-    std::size_t callback_depth_ = 0;
-    std::vector<std::unique_ptr<View>>* retired_widgets_ = nullptr;
-    // The outermost callback cannot destroy its own closure safely from a
-    // local scope destructor: that destructor still runs inside
-    // std::function::operator(). Move completed batches here and collect them
-    // at the start of the next outer callback, after the prior one returned.
-    std::vector<std::unique_ptr<View>>* collectable_widgets_ = nullptr;
+    // Cleared by retire_dispatch() so a callback that fires after its bridge is
+    // retired raises no gate on a tree the bridge no longer serves.
+    View* dispatch_root_ = nullptr;
     // Native input may race an owner-driven realm teardown. Serialize the
     // alive check and engine evaluation with retirement so no callback can
     // dereference the borrowed ScriptEngine after its bridge is retired.
@@ -63,6 +65,15 @@ private:
     bool engine_tracked_ = false;
 };
 
+// Raises the tree's mutation gate for the duration of one native callback, so
+// a JS handler that removes the view it is running on cannot free that view
+// before the callback returns.
+//
+// The lease is `deferred`: this scope is constructed as the first statement of
+// the callback's own `std::function` body, so its destructor runs while
+// `std::function::operator()` is still on the stack. Draining there could
+// destroy the closure that is executing; the retired views are instead freed
+// when the next outermost lease opens.
 class BridgeCallbackScope {
 public:
     explicit BridgeCallbackScope(
@@ -74,6 +85,7 @@ public:
 
 private:
     std::shared_ptr<BridgeCallbackState> state_;
+    std::optional<DispatchLease> lease_;
 };
 
 // A JSON-style JS string literal (double-quoted, fully escaped) for `text`,
