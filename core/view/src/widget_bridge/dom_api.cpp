@@ -155,7 +155,14 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // remove_child() intentionally retires root interaction
                     // slots while detached. Restore slots that belonged to
                     // this retained subtree after its new ancestry is live.
-                    if (focused_before) focused_before->claim_input_focus();
+                    if (focused_before) {
+                        // remove_child() deliberately invokes the base blur
+                        // path while detached. Re-run the virtual gain hook so
+                        // TextEditor/InlineValueEditor restore caret/blink
+                        // state, then republish the root focus slot.
+                        focused_before->on_focus_changed(true);
+                        focused_before->claim_input_focus();
+                    }
                     if (overlay_before) overlay_before->claim_overlay();
                     return choc::value::Value();
                 }
