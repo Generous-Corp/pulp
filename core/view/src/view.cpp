@@ -1766,10 +1766,17 @@ void View::notify_frame_clock_changed() noexcept {
     // cannot loop forever, and never dereference a saved pointer after the
     // callback returns.
     const auto initial_count = children_.size();
-    for (std::size_t i = 0; i < initial_count && i < children_.size(); ++i) {
+    std::size_t processed = 0;
+    for (std::size_t i = 0;
+         processed < initial_count && i < children_.size(); ++processed) {
         View* child = children_[i].get();
         if (child)
             child->notify_frame_clock_changed();
+        // If the callback removed/reordered this slot, process the shifted
+        // sibling at the same index. Otherwise advance normally. The bounded
+        // processed count prevents replacement-at-index loops.
+        if (i >= children_.size() || children_[i].get() == child)
+            ++i;
     }
 }
 

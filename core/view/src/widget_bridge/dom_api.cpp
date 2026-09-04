@@ -306,6 +306,8 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 }
                 // Move the existing subtree to the new parent - don't erase widgets.
                 auto* destination = self.resolve_parent(parentId);
+                InteractionSnapshot interaction;
+                interaction.capture(p);
                 // Refresh the cache before structural mutation. The assignment
                 // is then unable to strand a detached subtree if allocation
                 // fails while recording the same authored identity.
@@ -318,10 +320,11 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 } catch (...) {
                     if (removed) {
                         try { p->add_child_transactional(removed); }
-                        catch (...) { /* preserve the original exception */ }
+                        catch (...) { throw; }
                     }
                     throw;
                 }
+                interaction.restore(destination);
                 return choc::value::Value();
             }
         }
