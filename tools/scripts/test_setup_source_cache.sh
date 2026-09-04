@@ -701,9 +701,14 @@ echo "== verbatim-eol keeps upstream bytes under a Windows-style git config"
     mkdir -p "$FETCHCONTENT_CACHE_ROOT"
     rc=0
     ensure_shared_git_source "Pinned" "file://$tmp/upstream" "$sha" "pinned" "verbatim-eol" \
-        >/dev/null 2>&1 || rc=$?
+        >"$tmp/prime.log" 2>&1 || rc=$?
     pinned="$FETCHCONTENT_CACHE_ROOT/pinned"
     check "$rc" "0" "priming a verbatim-eol cache succeeds"
+    # The clone itself must write upstream bytes. Without this the repair path
+    # would mask a clone that still converts: the files end up correct either
+    # way, and only the absence of a repair distinguishes the two.
+    grep -q "EOL conversion" "$tmp/prime.log" && r=repaired || r=clean
+    check "$r" "clean" "the clone writes verbatim bytes with no repair needed"
     check "$(crlf_count "$pinned/LICENSE")" "0" "no CRLF is written into the pinned cache"
     check "$(sha256_of "$pinned/LICENSE")" "$pinned_license" \
         "the checked-out file hashes to upstream's own bytes"
@@ -721,9 +726,11 @@ echo "== verbatim-eol keeps upstream bytes under a Windows-style git config"
 
     # Seeding from a local clone is a different clone invocation; cover it too.
     ensure_shared_git_source "Pinned" "file://$tmp/upstream" "$sha" "pinned-seeded" "verbatim-eol" \
-        >/dev/null 2>&1
+        >"$tmp/seed.log" 2>&1
     check "$(crlf_count "$FETCHCONTENT_CACHE_ROOT/pinned-seeded/LICENSE")" "0" \
         "a cache seeded from a local clone is verbatim too"
+    grep -q "EOL conversion" "$tmp/seed.log" && r=repaired || r=clean
+    check "$r" "clean" "the seeded clone writes verbatim bytes with no repair needed"
 
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
@@ -745,6 +752,13 @@ echo "== verbatim-eol repairs a cache written before the pin existed"
     poisoned="$FETCHCONTENT_CACHE_ROOT/pinned"
     git clone -q --filter=blob:none "file://$tmp/upstream" "$poisoned" 2>/dev/null
     git -C "$poisoned" checkout -q --detach "$sha"
+    # Age the checkout and let the index record that stat, which is the settled
+    # state of any cache a previous CI run left behind. It matters: while a
+    # file's timestamp is still within the index's own granularity git distrusts
+    # the stat and compares content, which makes a repair that only works by
+    # accident look correct here and fail on every real runner.
+    find "$poisoned" -type f -not -path '*/.git/*' -exec touch -t 202001010000 {} +
+    git -C "$poisoned" update-index --refresh >/dev/null 2>&1 || true
     check "$(crlf_count "$poisoned/LICENSE")" "2" \
         "the cache starts converted (test precondition)"
     source_cache_has_converted_eol "$poisoned" && r=yes || r=no
@@ -760,6 +774,30 @@ echo "== verbatim-eol repairs a cache written before the pin existed"
         "the poisoned cache is restored to upstream bytes"
     check "$(sha256_of "$poisoned/LICENSE")" "$pinned_license" \
         "the repaired file hashes to upstream's own bytes"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== only the digest-verified dependency opts in to a verbatim checkout"
+(
+    # The helper above is inert unless the one dependency whose files are
+    # checked against pinned digests actually asks for it, and no unit test of
+    # the helper can see that. Fails closed: a renamed or removed call site
+    # produces no match and reports a miss rather than a pass.
+    # Fold each invocation onto one line so a reformatted call site reads the
+    # same way, then report the label of every cache that opted in.
+    opted_in="$(awk '
+        /^ *ensure_shared_git_source(_with_retry)? / {
+            buf = $0
+            while (buf ~ /\\$/) { sub(/\\$/, "", buf); getline nxt; buf = buf " " nxt }
+            if (buf ~ /verbatim-eol/) {
+                match(buf, /"[^"]+"/)
+                print substr(buf, RSTART + 1, RLENGTH - 2)
+            }
+        }
+    ' "$SETUP_SH")"
+    check "$opted_in" "three.js" \
+        "the three.js source cache — and only it — opts in to a verbatim checkout"
 
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))

@@ -647,6 +647,29 @@ source_cache_has_converted_eol() {
         | grep -qE '^i/lf[[:space:]]+w/crlf'
 }
 
+# Rewrite a converted worktree from the index, using the pin above.
+#
+# `git checkout --force -- .` is NOT enough and fails silently: git decides a
+# file is already current from the index's cached stat data, and a CRLF checkout
+# recorded its own stat when it was written. The comparison never reads the
+# bytes, so an old cache is skipped and reports success. (It appears to work
+# right after the bad checkout only because git still distrusts a stat from the
+# same timestamp granularity and falls back to comparing content.)
+# Dropping the index forces the re-scan; `reset --hard` then rebuilds both the
+# index and the worktree from HEAD. This is gitattributes(5)'s own recipe for
+# renormalising a checkout, and it needs no network even on a partial clone.
+restore_source_cache_verbatim_eol() {
+    local dir="$1"
+    local index_path
+    # --git-path answers relative to the repository unless GIT_DIR is absolute.
+    index_path="$(git -C "$dir" rev-parse --git-path index)" || return 1
+    case "$index_path" in /*) ;; *) index_path="$dir/$index_path" ;; esac
+    # The index is rebuilt by the very next command; a failure between the two
+    # leaves a cache the completeness check re-primes rather than trusts.
+    rm -f "$index_path"
+    git -C "$dir" reset --hard --quiet
+}
+
 ensure_shared_git_source() {
     local label="$1"
     local repo="$2"
@@ -730,7 +753,7 @@ ensure_shared_git_source() {
             # conversion actually happened.
             if source_cache_has_converted_eol "$target"; then
                 warn "$label source cache was written with EOL conversion; restoring upstream bytes"
-                git -C "$target" checkout --force -- .
+                restore_source_cache_verbatim_eol "$target"
             fi
         fi
 
