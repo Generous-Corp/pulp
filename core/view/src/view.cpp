@@ -791,6 +791,14 @@ std::unique_ptr<View> View::remove_child(View* child) {
             if (view == child) return true;
         return false;
     };
+    // An in-tree drag is owned by the old root. Once the source leaves that
+    // realm there is no valid target coordinate space or arbiter to continue
+    // dispatching into, so terminate it before severing parent links rather
+    // than leaving a root record pointing at a foreign subtree.
+    if (structure_root->active_drag_ &&
+        belongs_to_removed_subtree(structure_root->active_drag_->source)) {
+        structure_root->cancel_drag();
+    }
     if (ComboBox* popup = ComboBox::active_popup_in(*structure_root);
         popup && belongs_to_removed_subtree(popup)) {
         ComboBox::close_active_popup(*structure_root);
