@@ -704,13 +704,19 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
     child->set_host_actions(host_actions_);
     children_.push_back(std::move(child));
     try {
-        children_.back()->on_attached();
+        auto attached_it = std::find_if(children_.begin(), children_.end(),
+            [inserted](const auto& candidate) { return candidate.get() == inserted; });
+        if (attached_it == children_.end())
+            return;
+        (*attached_it)->on_attached();
         // A newly attached subtree may contain clock-aware descendants. Keep
         // this notification inside the same ownership transaction: a throwing
         // descendant hook must not leave an inserted child with its caller's
         // unique_ptr already consumed.
-        if (frame_clock())
-            children_.back()->notify_frame_clock_changed();
+        attached_it = std::find_if(children_.begin(), children_.end(),
+            [inserted](const auto& candidate) { return candidate.get() == inserted; });
+        if (attached_it != children_.end() && frame_clock())
+            (*attached_it)->notify_frame_clock_changed();
     } catch (...) {
         // `on_attached()` is user/framework code and may reject an attach.
         // Do not leave a half-attached child in the native tree: unwind the
@@ -839,9 +845,15 @@ std::unique_ptr<View> View::remove_child(View* child) {
     try {
         child->on_detached();
     } catch (...) {
-        set_subtree_detaching(*child, false);
+        auto live_it = std::find_if(children_.begin(), children_.end(),
+            [child](const auto& candidate) { return candidate.get() == child; });
+        if (live_it != children_.end())
+            set_subtree_detaching(**live_it, false);
         throw;
     }
+    it = std::find_if(children_.begin(), children_.end(),
+        [child](const auto& candidate) { return candidate.get() == child; });
+    if (it == children_.end()) return nullptr;
     child->set_window_host(nullptr);
     child->set_plugin_view_host(nullptr);
     child->set_host_params(nullptr);
