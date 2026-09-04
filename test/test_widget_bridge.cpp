@@ -1544,17 +1544,28 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     REQUIRE_FALSE(panel_id.empty());
     const auto identities_before = bridge.owned_widget_identity_count();
     REQUIRE(identities_before >= 2);
+    bool callback_called = false;
+    REQUIRE(bridge.widget(panel_id) != nullptr);
+    bridge.widget(panel_id)->on_click = [&callback_called] {
+        callback_called = true;
+    };
 
     // Replaying a retained DOM container with the scroll hint replaces the
     // plain View. The registry and ownership vector must now identify the
     // replacement, not the destroyed View.
     engine.evaluate("__domAppend('', retainedPanelId, 'div', 'scroll')");
-    REQUIRE(dynamic_cast<ScrollView*>(bridge.widget(panel_id)) != nullptr);
+    auto* upgraded = dynamic_cast<ScrollView*>(bridge.widget(panel_id));
+    REQUIRE(upgraded != nullptr);
+    REQUIRE(upgraded->on_click != nullptr);
+    upgraded->on_click();
+    CHECK(callback_called);
     CHECK(bridge.owned_widget_identity_count() == identities_before);
 
-    bridge.clear();
+    bridge.quarantine_realm();
+    bridge.clear_quarantined_realm();
     CHECK(bridge.owned_widget_identity_count() == 0);
     CHECK(bridge.widget_cache_count() == 0);
+    CHECK(root.child_count() == 0);
 }
 
 TEST_CASE("WidgetBridge creates modal overlay from JS", "[view][bridge]") {
