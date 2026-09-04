@@ -1760,11 +1760,22 @@ void View::notify_frame_clock_changed() noexcept {
     catch (...) {}
     try { on_frame_clock_changed(); }
     catch (...) {}
-    for (std::size_t i = 0; i < children_.size();) {
-        View* child = children_[i].get();
-        if (child) child->notify_frame_clock_changed();
-        if (i < children_.size() && children_[i].get() == child)
-            ++i;
+    // Snapshot identities before entering any virtual callback.  Reentrant
+    // replacement can otherwise keep an index occupied forever, or destroy
+    // the saved child before the callback returns.  Pointer comparison is
+    // safe for the latter; dereference only after finding the identity live
+    // again in this view's current direct-child set.
+    std::vector<View*> pending;
+    pending.reserve(children_.size());
+    for (auto& child : children_)
+        if (child) pending.push_back(child.get());
+    for (View* identity : pending) {
+        auto it = std::find_if(children_.begin(), children_.end(),
+            [identity](const auto& candidate) {
+                return candidate.get() == identity;
+            });
+        if (it != children_.end() && *it)
+            (*it)->notify_frame_clock_changed();
     }
 }
 
