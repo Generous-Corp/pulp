@@ -1579,6 +1579,12 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     CHECK(upgraded->overscroll_behavior() == "contain");
     engine.evaluate("setOverflow(retainedPanelId, 'scroll');");
     CHECK(upgraded->overflow() == View::Overflow::scroll);
+    engine.evaluate("createCol('reparent-destination', '');");
+    engine.evaluate("__domAppend('reparent-destination', retainedPanelId, 'div');");
+    CHECK(bridge.scroll_wrapper(panel_id) == upgraded);
+    CHECK(upgraded->parent() == bridge.widget("reparent-destination"));
+    CHECK(upgraded->child_count() == 1);
+    CHECK(upgraded->child_at(0) == retained);
     engine.evaluate("__domAppend(retainedPanelId, 'post-upgrade-child', 'div')");
     REQUIRE(bridge.widget("post-upgrade-child") != nullptr);
     CHECK(bridge.widget("post-upgrade-child")->parent() == retained);

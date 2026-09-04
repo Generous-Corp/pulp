@@ -71,6 +71,23 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 existing->restore_implicit_access_role();
                 existing->set_default_hover_feedback(true);
             }
+            // Once a retained authored view has been upgraded, its native
+            // parent is the wrapper. A later ordinary DOM reparent must move
+            // that wrapper as a unit; moving only the content would strand an
+            // empty wrapper and leave the alias map pointing at it.
+            if (auto* wrapper = self.scroll_wrapper(childId);
+                wrapper && std::any_of(
+                    self.owned_widgets_.begin(), self.owned_widgets_.end(),
+                    [wrapper](const auto& state) { return state.view == wrapper; }) &&
+                wrapper->child_count() == 1 && wrapper->child_at(0) == existing) {
+                if (wrapper->parent() != destination) {
+                    if (auto* old_parent = wrapper->parent()) {
+                        auto moved = old_parent->remove_child(wrapper);
+                        destination->add_child(std::move(moved));
+                    }
+                }
+                return choc::value::Value();
+            }
             if (auto* p = existing->parent()) {
                 // A preserved DOM reparent can carry a stronger container
                 // hint than the widget's original materialization.  In
