@@ -29,6 +29,23 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         auto hint = args.get<std::string>(3, "");
         auto* existing = self.widget(childId);
         if (existing) {
+            if (hint == "scroll") {
+                // React may replay the same retained append more than once.
+                // If this content already belongs to our wrapper, keep the
+                // existing identity instead of nesting a second wrapper.
+                if (auto* wrapper = self.scroll_wrapper(childId);
+                    wrapper && wrapper->child_count() == 1 &&
+                    wrapper->child_at(0) == existing) {
+                    auto* destination = self.resolve_parent(parentId);
+                    if (wrapper->parent() != destination) {
+                        if (auto* old_parent = wrapper->parent()) {
+                            auto moved = old_parent->remove_child(wrapper);
+                            destination->add_child(std::move(moved));
+                        }
+                    }
+                    return choc::value::Value();
+                }
+            }
             // document.createElement('button') may eagerly materialize a
             // ToggleButton through _ensureNative before appendChild reaches
             // this fast path. Preserve the HTML element's implicit semantics

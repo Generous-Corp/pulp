@@ -1564,6 +1564,21 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     retained->on_click();
     CHECK(callback_called);
     CHECK(bridge.owned_widget_identity_count() == identities_before + 1);
+    // React/materialized replay is allowed to repeat the same append. It must
+    // preserve the single wrapper/content pair rather than nesting wrappers.
+    engine.evaluate("__domAppend('', retainedPanelId, 'div', 'scroll')");
+    CHECK(bridge.scroll_wrapper(panel_id) == upgraded);
+    CHECK(upgraded->child_count() == 1);
+    CHECK(upgraded->child_at(0) == retained);
+    CHECK(bridge.owned_widget_identity_count() == identities_before + 1);
+    // Scroll-specific style writes target the wrapper, while ordinary widget
+    // APIs continue to target the authored content view.
+    engine.evaluate("setScrollBehavior(retainedPanelId, 'smooth');");
+    CHECK(upgraded->scroll_behavior() == "smooth");
+    engine.evaluate("setOverscrollBehavior(retainedPanelId, 'contain');");
+    CHECK(upgraded->overscroll_behavior() == "contain");
+    engine.evaluate("setOverflow(retainedPanelId, 'scroll');");
+    CHECK(upgraded->overflow() == View::Overflow::scroll);
     engine.evaluate("__domAppend(retainedPanelId, 'post-upgrade-child', 'div')");
     REQUIRE(bridge.widget("post-upgrade-child") != nullptr);
     CHECK(bridge.widget("post-upgrade-child")->parent() == retained);

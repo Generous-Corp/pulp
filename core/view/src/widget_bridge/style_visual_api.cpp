@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/css_gradient.hpp>
 #include "api_registry.hpp"
 #include "css_color.hpp"
@@ -63,7 +64,9 @@ void BridgeRegistrars::register_widget_style_overflow_api(WidgetBridge& self) {
     register_bridge_function(api, "setOverflow", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "hidden");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ :
+            (self.scroll_wrapper(id) ? static_cast<View*>(self.scroll_wrapper(id))
+                                     : self.widget(id));
         if (!v) return choc::value::Value();
         if (mode == "visible")      v->set_overflow(View::Overflow::visible);
         else if (mode == "scroll")  v->set_overflow(View::Overflow::scroll);
