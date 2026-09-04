@@ -176,6 +176,13 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 // the existing-widget fast path silently discard that hint.
                 if (hint == "scroll"
                     && dynamic_cast<ScrollView*>(existing) == nullptr) {
+                    // Reserve every registry that is published after the
+                    // structural upgrade. If allocation is going to fail,
+                    // fail before detaching the authored view; never strand
+                    // an attached wrapper with no bridge alias/owner record.
+                    self.owned_widgets_.reserve(self.owned_widgets_.size() + 1);
+                    self.scroll_wrappers_.reserve(self.scroll_wrappers_.size() + 1);
+                    self.widgets_.reserve(self.widgets_.size() + 1);
                     InteractionSnapshot interaction;
                     interaction.capture(p);
                     auto removed = p->remove_child(existing);
