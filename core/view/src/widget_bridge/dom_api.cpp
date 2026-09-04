@@ -17,6 +17,47 @@
 
 namespace pulp::view {
 
+namespace {
+
+struct InteractionSnapshot {
+    ViewCapture focused;
+    ViewCapture overlay;
+    bool had_focused = false;
+    bool had_overlay = false;
+
+    void capture(View* owner) {
+        if (!owner) return;
+        if (auto* state = owner->existing_interaction()) {
+            if (state->focused_input) {
+                focused.set(state->focused_input);
+                had_focused = true;
+            }
+            if (state->active_overlay) {
+                overlay.set(state->active_overlay);
+                had_overlay = true;
+            }
+        }
+    }
+
+    void restore(View* destination) {
+        if (!destination) return;
+        View* root = destination;
+        while (root->parent()) root = root->parent();
+        if (had_focused) {
+            if (auto* view = focused.live_in(*root)) {
+                view->on_focus_changed(true);
+                view->claim_input_focus();
+            }
+        }
+        if (had_overlay) {
+            if (auto* view = overlay.live_in(*root))
+                view->claim_overlay();
+        }
+    }
+};
+
+} // namespace
+
 void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
@@ -73,16 +114,11 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 if (wrapper_live && wrapper->child_count() == 1 &&
                     wrapper->child_at(0) == existing) {
                     if (wrapper->parent() != destination) {
-                        auto* interaction = wrapper->existing_interaction();
-                        auto* focused_before = interaction ? interaction->focused_input : nullptr;
-                        auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
+                        InteractionSnapshot interaction;
+                        interaction.capture(wrapper);
                         if (!move_wrapper(wrapper, destination))
                             throw std::runtime_error("retained scroll wrapper is detached");
-                        if (focused_before) {
-                            focused_before->on_focus_changed(true);
-                            focused_before->claim_input_focus();
-                        }
-                        if (overlay_before) overlay_before->claim_overlay();
+                        interaction.restore(destination);
                     }
                     return choc::value::Value();
                 }
@@ -113,16 +149,11 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     [wrapper](const auto& state) { return state.view == wrapper; }) &&
                 wrapper->child_count() == 1 && wrapper->child_at(0) == existing) {
                 if (wrapper->parent() != destination) {
-                    auto* interaction = wrapper->existing_interaction();
-                    auto* focused_before = interaction ? interaction->focused_input : nullptr;
-                    auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
+                    InteractionSnapshot interaction;
+                    interaction.capture(wrapper);
                     if (!move_wrapper(wrapper, destination))
                         throw std::runtime_error("retained scroll wrapper is detached");
-                    if (focused_before) {
-                        focused_before->on_focus_changed(true);
-                        focused_before->claim_input_focus();
-                    }
-                    if (overlay_before) overlay_before->claim_overlay();
+                    interaction.restore(destination);
                 }
                 return choc::value::Value();
             }
@@ -134,9 +165,8 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 // the existing-widget fast path silently discard that hint.
                 if (hint == "scroll"
                     && dynamic_cast<ScrollView*>(existing) == nullptr) {
-                    auto* interaction = p->existing_interaction();
-                    auto* focused_before = interaction ? interaction->focused_input : nullptr;
-                    auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
+                    InteractionSnapshot interaction;
+                    interaction.capture(p);
                     auto removed = p->remove_child(existing);
                     std::unique_ptr<View> scroll = std::make_unique<ScrollView>();
                     // Keep the authored View as the ScrollView's content
@@ -193,15 +223,11 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // remove_child() intentionally retires root interaction
                     // slots while detached. Restore slots that belonged to
                     // this retained subtree after its new ancestry is live.
-                    if (focused_before) {
-                        // remove_child() deliberately invokes the base blur
-                        // path while detached. Re-run the virtual gain hook so
-                        // TextEditor/InlineValueEditor restore caret/blink
-                        // state, then republish the root focus slot.
-                        focused_before->on_focus_changed(true);
-                        focused_before->claim_input_focus();
-                    }
-                    if (overlay_before) overlay_before->claim_overlay();
+                    // remove_child() deliberately retires root interaction
+                    // slots while detached. Resolve the captured identities
+                    // only after the new ancestry is live; destroyed or
+                    // replaced owners are ignored safely.
+                    interaction.restore(destination);
                     return choc::value::Value();
                 }
                 // Move the existing subtree to the new parent - don't erase widgets.
