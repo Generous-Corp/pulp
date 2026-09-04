@@ -61,7 +61,23 @@ if (!Element.prototype.appendChild ||
         if (child._isDocumentFragment) {
             var kids = child._children.slice(0);
             child._children.length = 0;
-            for (var i = 0; i < kids.length; i++) this.appendChild(kids[i]);
+            try {
+                for (var i = 0; i < kids.length; i++) this.appendChild(kids[i]);
+            } catch (e) {
+                // Restore JS ownership for every fragment child. Native
+                // append is transactional for each child; this closes the
+                // outer flattening transaction when a later child rejects.
+                for (var ri = 0; ri < kids.length; ri++) {
+                    var owner = kids[ri]._parentElement;
+                    if (owner) {
+                        var oi = owner._children.indexOf(kids[ri]);
+                        if (oi >= 0) owner._children.splice(oi, 1);
+                    }
+                    kids[ri]._parentElement = child;
+                }
+                child._children = kids;
+                throw e;
+            }
             return child;
         }
         // Reject cycles before changing JS parent bookkeeping. The native
@@ -228,7 +244,20 @@ if (!Element.prototype.appendChild ||
         if (newChild._isDocumentFragment) {
             var kids = newChild._children.slice(0);
             newChild._children.length = 0;
-            for (var i = 0; i < kids.length; i++) this.insertBefore(kids[i], refChild);
+            try {
+                for (var i = 0; i < kids.length; i++) this.insertBefore(kids[i], refChild);
+            } catch (e) {
+                for (var ri = 0; ri < kids.length; ri++) {
+                    var owner = kids[ri]._parentElement;
+                    if (owner) {
+                        var oi = owner._children.indexOf(kids[ri]);
+                        if (oi >= 0) owner._children.splice(oi, 1);
+                    }
+                    kids[ri]._parentElement = newChild;
+                }
+                newChild._children = kids;
+                throw e;
+            }
             return newChild;
         }
         if (newChild === this) throw new Error("HierarchyRequestError");
