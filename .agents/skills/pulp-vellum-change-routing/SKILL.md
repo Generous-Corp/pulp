@@ -156,6 +156,15 @@ the catalog's own drift test plants staleness against, by deliberately using the
 is the commit that holds the edited file, so amending changes that SHA and
 re-stales the pin you just fixed.
 
+**Expect one cascade, and re-run the checker after the refresh.** This SKILL.md
+is itself a pinned path, so editing it to record a gotcha stales its own row —
+fixing one pin creates the next. The sequence terminates, because a pin-refresh
+commit touches only the YAML: land the file edits first, then refresh every row
+they staled in a single following commit. Re-run `gpu_recipe_catalog.py` after
+the refresh rather than before, or the second stale row goes out unseen — note
+that `gates.sh` and the pre-push hook do **not** run this check, so a clean
+`gates: ✓ all gates pass` says nothing about your pins.
+
 ## Validate the contract
 
 Run the closed eight-case suite and projection validator:
