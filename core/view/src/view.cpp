@@ -1731,11 +1731,21 @@ void View::set_frame_clock(FrameClock* clock) {
     notify_frame_clock_changed();
 }
 
-void View::notify_frame_clock_changed() {
-    sync_value_bindings();
-    on_frame_clock_changed();
-    for (auto& child : children_) {
+void View::notify_frame_clock_changed() noexcept {
+    // Clock propagation is a structural safety funnel. A custom hook must not
+    // abort an attach/detach transaction after ownership has changed, and a
+    // reentrant hook must not invalidate an iterator over children_. Visit by
+    // index and isolate each callback; later siblings still get a chance to
+    // unsubscribe/refresh even if one hook misbehaves.
+    try { sync_value_bindings(); }
+    catch (...) {}
+    try { on_frame_clock_changed(); }
+    catch (...) {}
+    for (std::size_t i = 0; i < children_.size();) {
+        View* child = children_[i].get();
         if (child) child->notify_frame_clock_changed();
+        if (i < children_.size() && children_[i].get() == child)
+            ++i;
     }
 }
 

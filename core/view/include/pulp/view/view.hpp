@@ -2384,7 +2384,7 @@ private:
     /// Recursively fire `on_frame_clock_changed()` on this view and every
     /// descendant. Used by `set_frame_clock()` so a clock installed on a root
     /// after the subtree was built reaches self-subscribing descendants.
-    void notify_frame_clock_changed();
+    void notify_frame_clock_changed() noexcept;
 
     /// Re-point every FrameClockBinding registered on this view at the
     /// currently reachable clock. Called non-virtually from
