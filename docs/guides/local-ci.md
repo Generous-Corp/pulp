@@ -1624,6 +1624,7 @@ disabling overflow. Nothing about either failure is visible without asking.
 |-------|--------------------|
 | `drift` | A variable was edited without updating the contract (or vice versa). The variable is a reviewed artifact, not a blind edit. |
 | `black-hole` | The lane's labels are satisfiable by no runner. |
+| `queue-stalled` | The lane has no live runner *and* its oldest queued job has waited past the provisioning budget. Work is arriving and nothing is answering it — strictly stronger evidence than `black-hole`, which only says nothing has arrived. |
 | `visibility-incomplete` | The lane's labels matched no runner, *and* a runner scope refused the census — so the check never looked everywhere it needed to. Reported at the lane's normal level (an error for a required lane), never below it: a genuinely dead org-scoped lane is indistinguishable from an unreadable one. |
 | `degraded` | The only matching runners are offline — the host may just be asleep. A warning, not an error: a different failure from a label nobody owns. |
 | `undeclared` | A live routing variable with no lane in the contract. |
@@ -1660,11 +1661,39 @@ release lane — would be condemned on every sweep. Scoping to the consuming
 workflow makes 20 runs reach back months for a handful of API calls. The scan is
 also **lazy**: a lane with a live runner costs zero API calls.
 
+### Service history cannot expire — so read the queue too
+
+Service history is a claim about the **past**, and it has no staleness notion: a
+lane that served jobs for weeks and whose provisioner died three hours ago still
+answers "yes, recently served". That is not a hypothetical. The release lane
+reported *the provisioner is alive and idle* while two releases sat queued behind
+it, because every signal the checker had was historical and every one of them
+looked healthy.
+
+The queue is the only surface where a dead provisioner is visible **while it is
+happening**. So a lane with no live runner is also judged on the age of the
+oldest job currently queued for its exact label set, and crossing
+`service_evidence.queued_stall_seconds` (default 1800) reports `queue-stalled`.
+
+The signal is queue **age**, never queue presence. On a JIT lane the healthy
+sequence is job-queues-first, *then* the provisioner notices and boots — so
+"queued job and no live runner" is the ordinary transient, and a presence-based
+check would fire on every burst and be switched off within a week. The budget is
+derived from the fleet's own trigger (`min_queued_age_seconds` is 0 on m3/m5 and
+600 on m1) with wide margin for VM boot and runner registration, so only a
+genuine stall crosses it.
+
+Like the service scan this is **lazy** — reached only when a lane has no live
+runner — and it is additive: the provider defaults to empty, so a lane with an
+empty queue keeps exactly the verdict it had before.
+
 **Honest limits.** This check proves a lane *can* be served; it does not prove
 jobs *are* being served well. It will not catch a runner that is online but
-wedged, a lane that is slow rather than dead, a capacity shortfall (labels
-resolve, queue still grows), or a black hole in a `runs-on` hard-coded in a
-workflow rather than driven by a variable. An ephemeral lane whose consuming
+wedged, a lane that is slow rather than dead, or a black hole in a `runs-on`
+hard-coded in a workflow rather than driven by a variable. A capacity shortfall
+(labels resolve, queue still grows) is caught only once the queue crosses the
+stall budget above, and only when no runner is live — a lane with one wedged
+runner online and a growing queue still reads healthy. An ephemeral lane whose consuming
 workflow has not run inside the lookback window yields no evidence and is
 reported as a black hole — a false positive that is deliberately biased loud, on
 the grounds that a silent relief valve is what caused this in the first place.

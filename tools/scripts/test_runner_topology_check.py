@@ -1602,5 +1602,126 @@ class TestApiFailureHandling(unittest.TestCase):
             self.assertEqual(gate.main(["--mode", "hint"]), 0)
 
 
+
+# ── Queue age: a dead provisioner behind healthy service history ────────
+
+class TestStalledQueue(unittest.TestCase):
+    """The release lane reported OK / "the provisioner is alive and idle" while
+    two releases sat queued behind it for hours.
+
+    Service history cannot expire, so a lane served for weeks and dead for
+    hours satisfies it. These pin the distinguishing signal: queue AGE.
+    """
+
+    def _lane(self, **kw):
+        return contract([lane(variable="PULP_X_RUNS_ON_JSON", expect=VM_LANE,
+                              provisioning="ephemeral", **kw)])
+
+    def _check(self, c, ages, served=None):
+        return gate.check(
+            c, runners(), {"PULP_X_RUNS_ON_JSON": json.dumps(VM_LANE)},
+            [set(VM_LANE)] if served is None else served,
+            queued_ages=gate.static_queued_ages(ages))
+
+    def test_a_stalled_queue_overrides_healthy_service_history(self):
+        # The exact regression. Service evidence is PRESENT — the pre-fix
+        # check short-circuits to OK on it — but work has waited 9h36m.
+        c = self._lane()
+        f = self._check(c, [9 * 3600 + 36 * 60])
+        self.assertEqual(kinds(f, gate.ERROR), ["queue-stalled"])
+        self.assertEqual(kinds(f, gate.OK), [])
+
+    def test_the_pre_fix_verdict_is_reproduced_without_the_provider(self):
+        # Safety property: every caller that omits the provider keeps its
+        # current verdict, so no existing fixture or lane changes meaning.
+        c = self._lane()
+        f = gate.check(c, runners(),
+                       {"PULP_X_RUNS_ON_JSON": json.dumps(VM_LANE)},
+                       [set(VM_LANE)])
+        self.assertEqual(kinds(f, gate.OK), ["ephemeral-idle"])
+        self.assertEqual(kinds(f, gate.ERROR), [])
+
+    def test_a_young_queued_job_is_the_normal_jit_transient(self):
+        # THE reason this check is queue-age and not queue-presence. On a JIT
+        # lane the job queues first and the provisioner then boots, so a fresh
+        # queued job is health, not failure. A presence-based check would fire
+        # on every burst and be disabled within a week.
+        c = self._lane()
+        f = self._check(c, [30])
+        self.assertEqual(kinds(f, gate.OK), ["ephemeral-idle"])
+        self.assertEqual(kinds(f, gate.ERROR), [])
+
+    def test_the_threshold_is_the_contract_value_not_a_constant(self):
+        # Sweeps the boundary, which also proves the provider is CONSULTED:
+        # an ignored provider would give the same verdict at every age.
+        c = self._lane()
+        c.queued_stall_seconds = 600
+        verdicts = [bool(kinds(self._check(c, [age]), gate.ERROR))
+                    for age in (0, 599, 600, 601)]
+        self.assertEqual(verdicts, [False, False, True, True])
+
+    def test_an_empty_queue_is_not_a_stall(self):
+        c = self._lane()
+        self.assertEqual(kinds(self._check(c, []), gate.OK), ["ephemeral-idle"])
+
+    def test_the_oldest_queued_job_sets_the_verdict(self):
+        # Two releases were queued; the check must speak for the older one.
+        c = self._lane()
+        f = self._check(c, [60, 9 * 3600, 120])
+        self.assertEqual(kinds(f, gate.ERROR), ["queue-stalled"])
+        self.assertIn("540m", f[0].detail)
+
+    def test_a_stalled_dispatch_only_lane_is_also_caught(self):
+        # dispatch-only lanes have the identical blindness: a manual job served
+        # last month satisfies their history check too.
+        c = self._lane(dispatch_only=True)
+        f = self._check(c, [4 * 3600])
+        self.assertEqual(kinds(f, gate.ERROR), ["queue-stalled"])
+
+    def test_an_advisory_lane_stalls_at_warn_not_error(self):
+        c = self._lane(severity="advisory")
+        f = self._check(c, [9 * 3600])
+        self.assertEqual(kinds(f, gate.WARN), ["queue-stalled"])
+        self.assertEqual(kinds(f, gate.ERROR), [])
+
+    def test_a_stall_outranks_a_black_hole_diagnosis(self):
+        # No service history AND a stalled queue: report the live symptom,
+        # which names work that is waiting right now.
+        c = self._lane()
+        f = self._check(c, [9 * 3600], served=[set(STUDIO_LANE)])
+        self.assertEqual(kinds(f, gate.ERROR), ["queue-stalled"])
+
+
+class TestQueuedJobAgeFetch(unittest.TestCase):
+    """The live provider. Filtering is the whole instrument: a queued job on a
+    different lane must not incriminate this one."""
+
+    def _api(self, jobs):
+        def fake(args):
+            if "status=queued" in args[0]:
+                return {"workflow_runs": [{"id": 1, "created_at": None}]}
+            return {"jobs": jobs}
+        return fake
+
+    def test_only_jobs_with_the_exact_label_set_count(self):
+        from datetime import datetime, timedelta, timezone
+        old = (datetime.now(timezone.utc) - timedelta(hours=9)).isoformat()
+        jobs = [
+            {"status": "queued", "labels": VM_LANE, "created_at": old},
+            {"status": "queued", "labels": STUDIO_LANE, "created_at": old},
+            {"status": "queued", "labels": VM_LANE + ["extra"], "created_at": old},
+            {"status": "completed", "labels": VM_LANE, "created_at": old},
+        ]
+        with mock.patch.object(gate, "_api", self._api(jobs)):
+            ages = gate.fetch_queued_job_ages("o/r", VM_LANE)
+        # CONTROL: exactly one of the four qualifies, and it reads ~9h.
+        self.assertEqual(len(ages), 1)
+        self.assertGreater(ages[0], 8 * 3600)
+
+    def test_no_queued_jobs_reads_empty_not_stalled(self):
+        with mock.patch.object(gate, "_api", self._api([])):
+            self.assertEqual(gate.fetch_queued_job_ages("o/r", VM_LANE), [])
+
+
 if __name__ == "__main__":
     unittest.main()
