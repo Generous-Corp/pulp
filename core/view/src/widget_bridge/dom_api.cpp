@@ -52,7 +52,11 @@ struct InteractionSnapshot {
         if (had_focused) {
             if (auto* view = focused.live_in(*root)) {
                 view->on_focus_changed(true);
-                view->claim_input_focus();
+                // The virtual focus callback may synchronously replace or
+                // remove the control. Resolve the identity again before
+                // touching the root-owned slot.
+                if (auto* still_live = focused.live_in(*root))
+                    still_live->claim_input_focus();
             }
         }
         if (had_overlay) {
