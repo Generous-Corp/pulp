@@ -63,7 +63,11 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // layout/hit-testing. The registry points at the wrapper
                     // for scroll APIs; event delivery still reaches the
                     // original child with its identity-safe closures.
-                    scroll->set_bounds(removed->bounds());
+                    const auto content_bounds = removed->bounds();
+                    scroll->set_bounds(content_bounds);
+                    removed->set_bounds({0.0f, 0.0f,
+                                         content_bounds.width,
+                                         content_bounds.height});
                     scroll->add_child(std::move(removed));
                     // The authored View remains owned as the wrapper's
                     // content child; assigning through the registry adds the
