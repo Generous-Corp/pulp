@@ -29,14 +29,23 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         auto hint = args.get<std::string>(3, "");
         auto* existing = self.widget(childId);
         if (existing) {
+            auto* destination = self.resolve_parent(parentId);
+            // Refuse self/descendant reparenting before touching ownership;
+            // otherwise a retained scroll upgrade could create a View cycle.
+            bool cyclic = destination == existing;
+            for (auto* p = destination; !cyclic && p; p = p->parent())
+                cyclic = p == existing;
+            if (cyclic) return choc::value::Value();
             if (hint == "scroll") {
                 // React may replay the same retained append more than once.
                 // If this content already belongs to our wrapper, keep the
                 // existing identity instead of nesting a second wrapper.
-                if (auto* wrapper = self.scroll_wrapper(childId);
-                    wrapper && wrapper->child_count() == 1 &&
+                auto* wrapper = self.scroll_wrapper(childId);
+                const bool wrapper_live = wrapper && std::any_of(
+                    self.owned_widgets_.begin(), self.owned_widgets_.end(),
+                    [wrapper](const auto& state) { return state.view == wrapper; });
+                if (wrapper_live && wrapper->child_count() == 1 &&
                     wrapper->child_at(0) == existing) {
-                    auto* destination = self.resolve_parent(parentId);
                     if (wrapper->parent() != destination) {
                         if (auto* old_parent = wrapper->parent()) {
                             auto moved = old_parent->remove_child(wrapper);
@@ -85,7 +94,6 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     removed->set_bounds({0.0f, 0.0f,
                                          content_bounds.width,
                                          content_bounds.height});
-                    scroll->add_child(std::move(removed));
                     // The authored View remains owned as the wrapper's
                     // content child; assigning through the registry adds the
                     // wrapper's own lifetime identity.
@@ -95,7 +103,13 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // The authored parent id is authoritative during portal
                     // replay. The retained native parent can be the stale
                     // root container even while the JS parent has recovered.
-                    self.resolve_parent(parentId)->add_child(std::move(scroll));
+                    destination->add_child(std::move(scroll));
+                    // Attach the retained content only after its new wrapper
+                    // is attached. This preserves host/frame-clock ordering:
+                    // on_attached() observes the real destination, not an
+                    // unattached intermediate wrapper.
+                    auto* upgraded = self.scroll_wrapper(childId);
+                    upgraded->add_child(std::move(removed));
                     return choc::value::Value();
                 }
                 // Move the existing subtree to the new parent - don't erase widgets.
