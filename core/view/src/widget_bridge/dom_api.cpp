@@ -58,29 +58,13 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     auto removed = p->remove_child(existing);
                     auto scroll = std::make_unique<ScrollView>();
                     scroll->set_id(childId);
-                    // A retained DOM node may already have native event
-                    // callbacks installed.  registrations_ deliberately
-                    // suppresses duplicate registration, so replacing the
-                    // View must carry those callback slots to the new
-                    // ScrollView or the replacement becomes inert.
-                    scroll->on_click = std::move(existing->on_click);
-                    scroll->on_pointer_event =
-                        std::move(existing->on_pointer_event);
-                    scroll->on_dom_pointer_event =
-                        std::move(existing->on_dom_pointer_event);
-                    scroll->on_dom_pointer_move_event =
-                        std::move(existing->on_dom_pointer_move_event);
-                    scroll->on_dom_wheel_event =
-                        std::move(existing->on_dom_wheel_event);
-                    scroll->on_drag = std::move(existing->on_drag);
-                    scroll->on_pointer_move = std::move(existing->on_pointer_move);
-                    scroll->on_gesture_cb = std::move(existing->on_gesture_cb);
-                    scroll->on_context_menu = std::move(existing->on_context_menu);
-                    scroll->on_drop = std::move(existing->on_drop);
-                    scroll->on_hover_enter = std::move(existing->on_hover_enter);
-                    scroll->on_hover_leave = std::move(existing->on_hover_leave);
-                    scroll->on_overlay_dismissed =
-                        std::move(existing->on_overlay_dismissed);
+                    // Do not move callback closures from the retired View:
+                    // generated pointer/hover callbacks capture the old
+                    // native address. Clear the registration claims instead;
+                    // the DOM replay immediately following __domAppend will
+                    // install fresh, replacement-safe closures on the new
+                    // ScrollView.
+                    self.forget_widget_registrations(childId);
                     while (removed->child_count() > 0) {
                         auto* child = removed->child_at(0);
                         scroll->add_child(removed->remove_child(child));

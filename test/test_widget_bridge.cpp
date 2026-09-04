@@ -1544,11 +1544,7 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     REQUIRE_FALSE(panel_id.empty());
     const auto identities_before = bridge.owned_widget_identity_count();
     REQUIRE(identities_before >= 2);
-    bool callback_called = false;
     REQUIRE(bridge.widget(panel_id) != nullptr);
-    bridge.widget(panel_id)->on_click = [&callback_called] {
-        callback_called = true;
-    };
 
     // Replaying a retained DOM container with the scroll hint replaces the
     // plain View. The registry and ownership vector must now identify the
@@ -1556,9 +1552,8 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     engine.evaluate("__domAppend('', retainedPanelId, 'div', 'scroll')");
     auto* upgraded = dynamic_cast<ScrollView*>(bridge.widget(panel_id));
     REQUIRE(upgraded != nullptr);
+    bridge.load_script("registerClick(retainedPanelId)");
     REQUIRE(upgraded->on_click != nullptr);
-    upgraded->on_click();
-    CHECK(callback_called);
     CHECK(bridge.owned_widget_identity_count() == identities_before);
 
     bridge.quarantine_realm();
