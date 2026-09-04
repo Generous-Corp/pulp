@@ -201,12 +201,29 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                                          content_bounds.width,
                                          content_bounds.height});
                     auto* wrapper = static_cast<ScrollView*>(scroll.get());
+                    // Preflight alias publication while the authored subtree
+                    // is still attached. This forces all potentially-failing
+                    // allocations before structural mutation; the catch
+                    // paths below remove the provisional records.
+                    self.owned_widgets_.emplace_back(wrapper);
+                    self.scroll_wrappers_.emplace(childId, wrapper);
+                    bool aliases_published = true;
                     // The authored parent id is authoritative during portal
                     // replay. The retained native parent can be the stale
                     // root container even while the JS parent has recovered.
                     try {
                         destination->add_child_transactional(scroll);
                     } catch (...) {
+                        if (aliases_published) {
+                            self.scroll_wrappers_.erase(childId);
+                            self.owned_widgets_.erase(
+                                std::remove_if(self.owned_widgets_.begin(),
+                                               self.owned_widgets_.end(),
+                                               [wrapper](const auto& state) {
+                                                   return state.view == wrapper;
+                                               }),
+                                self.owned_widgets_.end());
+                        }
                         // The retained content is still owned locally here;
                         // put it back under its original parent before
                         // propagating the attach failure.
@@ -226,6 +243,14 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                         // the original parent/identity before rethrowing.
                         auto stranded = destination->remove_child(wrapper);
                         (void)stranded;
+                        self.scroll_wrappers_.erase(childId);
+                        self.owned_widgets_.erase(
+                            std::remove_if(self.owned_widgets_.begin(),
+                                           self.owned_widgets_.end(),
+                                           [wrapper](const auto& state) {
+                                               return state.view == wrapper;
+                                           }),
+                            self.owned_widgets_.end());
                         try { p->add_child_transactional(removed); }
                         catch (...) { /* preserve the original exception */ }
                         throw;
@@ -235,8 +260,6 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // hook from exposing a half-built wrapper in the bridge
                     // registries; the authored content remains the canonical
                     // widget identity for ordinary DOM/value APIs.
-                    self.owned_widgets_.emplace_back(wrapper);
-                    self.scroll_wrappers_[childId] = wrapper;
                     self.widgets_.cache(childId, content);
                     // remove_child() intentionally retires root interaction
                     // slots while detached. Restore slots that belonged to
