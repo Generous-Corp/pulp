@@ -248,3 +248,33 @@ retain those fields in the PR/landing evidence.
   the unauthenticated API budget is exhausted. The fetcher deliberately sends
   that credential only to `https://api.github.com` and refuses redirects; it is
   never forwarded to release-asset or cross-origin targets.
+- A source dependency pinned by per-file SHA-256 must be checked out with EOL
+  conversion off, or Windows breaks it before anything builds. Git for Windows
+  defaults to `core.autocrlf=true`, so every LF becomes CRLF on checkout, every
+  digest in `tools/cmake/threejs-runtime-manifest.json` mismatches, and
+  `PulpDependencies.cmake` hard-fails with "Three.js runtime file does not match
+  pinned revision". Three.js opts in by passing `verbatim-eol` to
+  `ensure_shared_git_source` in `setup.sh`, which expands to
+  `-c core.autocrlf=false -c core.eol=lf` on the clone and pins both keys
+  repo-locally; the `FetchContent_Declare` carries a matching `GIT_CONFIG` for
+  the no-shared-cache path. Never fix this by normalizing bytes before hashing —
+  the digest's whole job is to prove the shipped files are upstream's exact
+  bytes. Any future digest-pinned *source* dependency needs the same opt-in.
+  Note that `GIT_CONFIG` on `FetchContent_Declare` alone is not enough on the
+  release path: `pulp_register_fetchcontent_source` short-circuits FetchContent
+  whenever the shared cache exists, and the release leg primes that cache with
+  `./setup.sh --ci --deps-only` first.
+- Repairing an already-converted cache with `git checkout --force -- .` silently
+  does nothing. Git decides a file is current from the index's cached stat data
+  and never reads the bytes, and the bad checkout recorded its own stat when it
+  was written; `--force` means "overwrite local modifications", and by the stat
+  cache there are none. `git checkout-index -a -f` and `git read-tree --reset -u`
+  fail the same way. The primitive that works is dropping `.git/index` and then
+  `git reset --hard` (gitattributes(5)'s own renormalisation recipe), which needs
+  no network even on a `--filter=blob:none` partial clone. This trap is not
+  specific to line endings — any repair phrased as "check the worktree out again"
+  hits it. A test written the obvious way (poison, immediately repair, assert)
+  will certify the broken primitive, because git distrusts a stat inside its own
+  timestamp granularity and falls back to comparing content; settle the fixture
+  with `touch -t 202001010000` plus `git update-index --refresh` or the test
+  grades its own homework.
