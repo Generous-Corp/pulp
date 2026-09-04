@@ -705,6 +705,12 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
     children_.push_back(std::move(child));
     try {
         children_.back()->on_attached();
+        // A newly attached subtree may contain clock-aware descendants. Keep
+        // this notification inside the same ownership transaction: a throwing
+        // descendant hook must not leave an inserted child with its caller's
+        // unique_ptr already consumed.
+        if (frame_clock())
+            children_.back()->notify_frame_clock_changed();
     } catch (...) {
         // `on_attached()` is user/framework code and may reject an attach.
         // Do not leave a half-attached child in the native tree: unwind the
@@ -723,6 +729,8 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
         children_.erase(it);
         child = std::move(failed);
         auto* restored = child.get();
+        try { restored->on_detached(); }
+        catch (...) { /* preserve the original attach/clock exception */ }
         restored->parent_ = nullptr;
         restored->set_window_host(nullptr);
         restored->set_plugin_view_host(nullptr);
@@ -736,12 +744,6 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
     // Structural change: this view's (and its cached ancestors') recording no
     // longer includes the new child. Stale them so the next frame re-records.
     invalidate_subtree_caches_up();
-    // If this parent can already reach a FrameClock, tell the newly-grafted
-    // subtree so a self-subscribing descendant (a live Meter built offline)
-    // attaches to the already-present clock instead of silently missing it.
-    if (frame_clock()) {
-        children_.back()->notify_frame_clock_changed();
-    }
 }
 
 std::unique_ptr<View> View::remove_child(View* child) {
@@ -860,7 +862,13 @@ std::unique_ptr<View> View::remove_child(View* child) {
     // self-subscribing descendants (a live Meter that never got its own
     // on_detached — remove_child only fires that on the removed root) drop their
     // subscription now instead of lingering until the next tick.
-    owned->notify_frame_clock_changed();
+    try {
+        owned->notify_frame_clock_changed();
+    } catch (...) {
+        // The structural detach has already committed and ownership is now
+        // local to this return value. A best-effort clock refresh must not turn
+        // a successful removal into a half-moved subtree.
+    }
     // Structural change: this view's (and its cached ancestors') recording still
     // includes the now-removed child. Stale them so the next frame re-records.
     invalidate_subtree_caches_up();
