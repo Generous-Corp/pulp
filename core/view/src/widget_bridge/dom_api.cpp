@@ -94,12 +94,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     removed->set_bounds({0.0f, 0.0f,
                                          content_bounds.width,
                                          content_bounds.height});
-                    // The authored View remains owned as the wrapper's
-                    // content child; assigning through the registry adds the
-                    // wrapper's own lifetime identity.
-                    self.owned_widgets_.emplace_back(scroll.get());
-                    self.scroll_wrappers_[childId] = scroll.get();
-                    self.widgets_.cache(childId, content);
+                    auto* wrapper = scroll.get();
                     // The authored parent id is authoritative during portal
                     // replay. The retained native parent can be the stale
                     // root container even while the JS parent has recovered.
@@ -108,8 +103,15 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // is attached. This preserves host/frame-clock ordering:
                     // on_attached() observes the real destination, not an
                     // unattached intermediate wrapper.
-                    auto* upgraded = self.scroll_wrapper(childId);
-                    upgraded->add_child(std::move(removed));
+                    wrapper->add_child(std::move(removed));
+                    // Publish the wrapper alias only after both structural
+                    // operations succeed. This prevents a throwing attach
+                    // hook from exposing a half-built wrapper in the bridge
+                    // registries; the authored content remains the canonical
+                    // widget identity for ordinary DOM/value APIs.
+                    self.owned_widgets_.emplace_back(wrapper);
+                    self.scroll_wrappers_[childId] = wrapper;
+                    self.widgets_.cache(childId, content);
                     return choc::value::Value();
                 }
                 // Move the existing subtree to the new parent - don't erase widgets.
