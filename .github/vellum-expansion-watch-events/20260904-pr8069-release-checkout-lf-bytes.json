@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260904-pr8069-release-checkout-lf-bytes",
+  "created_at": "2026-09-04T22:40:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record that release-cli.yml now pins core.autocrlf=false and core.eol=lf before the build-cli checkout. Git for Windows rewrites LF to CRLF on checkout, so the release archive verifier failed the pinned gpu-recipes.yaml catalog digest on both Windows legs of v0.832.0 while Linux passed on the same commit, and the all-platform build-cli gate blocked publishing. This makes a Windows release archive byte-identical to a Linux one; it changes only the line endings of packaged text files and adds no product, asset, or catalog content. No implementation authority is transferred and the accepted Vellum expansion boundary is unchanged.",
+  "tests": [
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
