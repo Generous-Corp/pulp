@@ -992,7 +992,16 @@ void WidgetBridge::sync_from_store() {
 View* WidgetBridge::resolve_parent(const std::string& parent_id) {
     if (parent_id.empty()) return &root_;
     auto it = widgets_.find(parent_id);
-    return it != widgets_.end() ? it->second.view : &root_;
+    if (it == widgets_.end() || !it->second.view) return &root_;
+    // Retained DOM containers upgraded to scrolling use an id-less native
+    // ScrollView wrapper. New DOM children still belong to the authored
+    // content View, not to the wrapper's scrollbar chrome.
+    if (auto* scroll = dynamic_cast<ScrollView*>(it->second.view);
+        scroll && scroll->id().empty() && scroll->child_count() == 1) {
+        auto* content = scroll->child_at(0);
+        if (content && content->id() == parent_id) return content;
+    }
+    return it->second.view;
 }
 
 std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,

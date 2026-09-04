@@ -55,7 +55,6 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     && dynamic_cast<ScrollView*>(existing) == nullptr) {
                     auto removed = p->remove_child(existing);
                     auto scroll = std::make_unique<ScrollView>();
-                    scroll->set_id(childId);
                     // Keep the authored View as the ScrollView's content
                     // child instead of replacing/destroying it. This
                     // preserves every callback, style, focus, gesture, and

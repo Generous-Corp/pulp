@@ -1556,12 +1556,17 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     engine.evaluate("__domAppend('', retainedPanelId, 'div', 'scroll')");
     auto* upgraded = dynamic_cast<ScrollView*>(bridge.widget(panel_id));
     REQUIRE(upgraded != nullptr);
+    CHECK(upgraded->id().empty());
     REQUIRE(upgraded->child_count() == 1);
     auto* retained = upgraded->child_at(0);
+    CHECK(retained->id() == panel_id);
     REQUIRE(retained->on_click != nullptr);
     retained->on_click();
     CHECK(callback_called);
     CHECK(bridge.owned_widget_identity_count() == identities_before + 1);
+    engine.evaluate("__domAppend(retainedPanelId, 'post-upgrade-child', 'div')");
+    REQUIRE(bridge.widget("post-upgrade-child") != nullptr);
+    CHECK(bridge.widget("post-upgrade-child")->parent() == retained);
 
     bridge.quarantine_realm();
     bridge.clear_quarantined_realm();
