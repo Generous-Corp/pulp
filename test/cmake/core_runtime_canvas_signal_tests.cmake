@@ -58,6 +58,7 @@ pulp_add_test_suite(pulp-test-crypto LIBRARIES pulp::runtime)
 
 # Ed25519 (RFC 8032).
 pulp_add_test_suite(pulp-test-ed25519 LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-x25519 LIBRARIES pulp::runtime)
 
 # IPC (InterprocessConnection) tests
 add_executable(pulp-connected-child-process-fixture

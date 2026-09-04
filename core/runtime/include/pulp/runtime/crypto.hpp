@@ -187,6 +187,57 @@ bool ed25519_verify(
     const uint8_t* signature_64, size_t signature_size,
     const uint8_t* message, size_t message_size);
 
+// ── X25519 (RFC 7748) ───────────────────────────────────────────────────
+//
+// Elliptic-curve Diffie-Hellman over Curve25519. Used by:
+//   - Forge private-backup capsules, to wrap a content key to the
+//     creator's identity key and to a recovery key
+//
+// Implementation: the same vendored TweetNaCl reference that backs
+// Ed25519 above. `crypto_scalarmult` performs RFC 7748 scalar decoding
+// (clamping) on its own private copy, so a private key here is 32
+// arbitrary bytes and callers must not pre-clamp.
+//
+// Ed25519 keys cannot stand in for these. Ed25519 signs; it carries no
+// key-agreement operation, which is the whole reason this section exists.
+
+/// X25519 key and output sizes (RFC 7748 §5).
+inline constexpr size_t x25519_public_key_size = 32;
+inline constexpr size_t x25519_private_key_size = 32;
+inline constexpr size_t x25519_shared_secret_size = 32;
+
+/// X25519 keypair. Unlike Ed25519's NaCl-form secret, the private key
+/// here is the scalar alone — the public key is not appended.
+struct X25519KeyPair {
+    std::vector<uint8_t> public_key;   ///< 32 bytes
+    std::vector<uint8_t> private_key;  ///< 32 bytes
+};
+
+/// Generate a fresh X25519 keypair using mbedTLS CTR-DRBG for entropy.
+/// Returns std::nullopt on RNG failure (rare; reserved for hardware-RNG
+/// failure on locked-down platforms).
+std::optional<X25519KeyPair> x25519_keypair_generate();
+
+/// Recover the public key for an existing 32-byte private scalar.
+/// Deterministic — this is how a keypair is reconstituted from a stored
+/// or backed-up secret, and how RFC 7748 test vectors are checked.
+std::optional<X25519KeyPair> x25519_keypair_from_private_key(
+    const uint8_t* private_key_32, size_t private_key_size);
+
+/// Compute the raw X25519 shared secret between our private key and a
+/// peer's public key. Returns std::nullopt on an input-size mismatch, and
+/// on an all-zero result — that output means the peer supplied a
+/// small-order point, so the "shared" secret would be a value the peer
+/// already knew (RFC 7748 §6.1).
+///
+/// The result is NOT a key. X25519 output is a curve point, not uniformly
+/// distributed bytes, and using it directly as an AES key is a real
+/// weakness. Run it through a KDF first — `hmac_sha256` above is
+/// sufficient when the salt and context string are fixed by the format.
+std::optional<std::vector<uint8_t>> x25519_shared_secret(
+    const uint8_t* private_key_32, size_t private_key_size,
+    const uint8_t* peer_public_key_32, size_t peer_public_key_size);
+
 // ── Machine ID ──────────────────────────────────────────────────────────
 
 /// Generate a machine-specific fingerprint (deterministic per machine).
