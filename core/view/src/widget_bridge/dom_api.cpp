@@ -87,6 +87,11 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // replay. The retained native parent can be the stale
                     // root container even while the JS parent has recovered.
                     self.resolve_parent(parentId)->add_child(std::move(scroll));
+                    // Keep the retired wrapper alive until the callback/host
+                    // dispatch boundary has unwound; replacing during a
+                    // re-entrant event must not destroy a View whose closure
+                    // is still on the stack.
+                    self.retire_removed_widget(std::move(removed));
                     return choc::value::Value();
                 }
                 // Move the existing subtree to the new parent - don't erase widgets.
