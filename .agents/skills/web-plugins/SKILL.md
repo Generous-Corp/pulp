@@ -337,6 +337,25 @@ Both live in the `skia-gpu-build` skill's wasm section; know they exist:
   both pass while every string measures at **zero width**. Probe font usability
   by drawing a glyph (`unicharToGlyph('A') != 0`), never by counting families.
 
+### The core/view source list exists TWICE, and the web copy is the one that breaks
+
+The wasm build does not reuse `core/view/cmake/PulpViewSources.cmake`. It has
+its own hand-maintained set, `_PULP_WEBUI_VIEW_SOURCES` in
+`tools/cmake/PulpWebUi.cmake`, which names `view.cpp` and its dependencies
+explicitly — the comment there says so outright: *"the wasm build needs the same
+set the native build compiles."*
+
+So **adding a translation unit under `core/view/src/` that `view.cpp` depends on
+means editing BOTH files.** Register it only in `PulpViewSources.cmake` and the
+build is perfect on macOS and Linux, then fails on the web lane at LINK time
+with undefined symbols — far from the file you touched, and only after the
+required native gate has already gone green. `view_lifecycle.cpp` (the
+`DispatchLease` / `View::retire` mutation gate every `View` hook call site now
+takes) is listed in both for exactly this reason.
+
+Same shape as the font list below: whenever a list is duplicated for the web
+target, the web copy is the one that silently rots.
+
 ### The bundled-font list exists TWICE, and the web copy is the one that breaks
 
 There is no platform font manager in a browser, so embedded blobs ARE the font
