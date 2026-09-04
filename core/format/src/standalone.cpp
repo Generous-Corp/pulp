@@ -1032,6 +1032,12 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 
     window->set_close_callback(std::move(close_editor));
 
+    // Installed before the loop starts: a launch-time open (double-click on a
+    // document) is reported from inside run_event_loop(), so a handler wired up
+    // afterwards would never see the file that launched the app.
+    if (open_files_handler_)
+        window->set_open_files_handler(open_files_handler_);
+
 #if PULP_ENABLE_AUDIO_PROBES
     // Audio Inspector tool window. A SEPARATE floating window (sibling of the
     // layout inspector, not a tab in it) that observes `output_probe_`.

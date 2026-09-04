@@ -18,6 +18,7 @@
 #include "app_menu_mac.hpp"
 #include "window_host_mac_capture.h"
 #include "window_host_mac_internal.hpp"
+#include "window_host_mac_open_documents.h"
 #include "window_host_mac_view.h"
 
 #include <TargetConditionals.h>
@@ -1909,9 +1910,16 @@ public:
         return true;
     }
 
+    void set_open_files_handler(
+        std::function<void(const std::vector<std::string>&)> handler) override {
+        mac_open_documents::set_open_files_handler(std::move(handler));
+    }
+
     void run_event_loop_until(std::function<bool()> ready_to_return) override {
         @autoreleasepool {
             [NSApplication sharedApplication];
+            // Must precede [NSApp run] — see the header for why.
+            mac_open_documents::install_app_delegate();
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
             register_cocoa_dispatcher_liveness(dispatcher_alive);
             auto dispatcher_token =
@@ -2352,9 +2360,16 @@ public:
         return true;
     }
 
+    void set_open_files_handler(
+        std::function<void(const std::vector<std::string>&)> handler) override {
+        mac_open_documents::set_open_files_handler(std::move(handler));
+    }
+
     void run_event_loop_until(std::function<bool()> ready_to_return) override {
         @autoreleasepool {
             [NSApplication sharedApplication];
+            // Must precede [NSApp run] — see the header for why.
+            mac_open_documents::install_app_delegate();
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
             register_cocoa_dispatcher_liveness(dispatcher_alive);
             auto dispatcher_token =

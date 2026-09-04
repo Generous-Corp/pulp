@@ -195,7 +195,22 @@ FIXTURE_HANDOFF_SCHEMA = (
 ).read_bytes()
 
 
-def standalone_manifest_payload() -> bytes:
+# Spelled out rather than derived from the module under test: a fixture built
+# from the constant it checks agrees with that constant by construction and can
+# never fail. These are the two sets CMake declares -- the operations every build
+# emits, and those plus the GPU health probe under PULP_ENABLE_GPU.
+STANDALONE_BASE_CAPABILITIES = [
+    "dev.pulp.instance/read@1",
+    "dev.pulp.state/read@1",
+]
+STANDALONE_GPU_CAPABILITIES = [
+    "dev.pulp.gpu/health.read@1",
+    "dev.pulp.instance/read@1",
+    "dev.pulp.state/read@1",
+]
+
+
+def standalone_manifest_payload(capabilities: list[str] | None = None) -> bytes:
     document = {
         "schema": "dev.pulp.control/artifact-manifest@1",
         "schema_version": 1,
@@ -208,13 +223,15 @@ def standalone_manifest_payload() -> bytes:
         "endpoint_included": True,
         "unsafe_runtime_eval_acknowledged": False,
         "permission_terms": list(rac.CONTROL_MANIFEST_PERMISSION_TERMS),
-        "capabilities": list(rac.CONTROL_STANDALONE_HOST_CAPABILITIES),
+        "capabilities": list(
+            STANDALONE_GPU_CAPABILITIES if capabilities is None else capabilities
+        ),
     }
     return rac._canonical_standalone_manifest(document)
 
 
-def standalone_host_payload() -> bytes:
-    digest = hashlib.sha256(standalone_manifest_payload()).hexdigest()
+def standalone_host_payload(capabilities: list[str] | None = None) -> bytes:
+    digest = hashlib.sha256(standalone_manifest_payload(capabilities)).hexdigest()
     return (
         "PULP_STANDALONE_COMPONENT_V1\0"
         "PULP_INSPECT_SHIPPING_MANIFEST_V1\0"
@@ -1735,6 +1752,195 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 "pulp-sdk/sdk-provenance.json",
                 rac.required_sdk_members("linux-x64", historical, "0.763.0"),
             )
+
+
+def cmake_standalone_capability_declaration() -> tuple[list[str], list[str]]:
+    """Read the host's capability sets out of CMakeLists.txt.
+
+    CMake decides what the standalone host declares and this module decides what
+    a release artifact may contain. Nothing compared the two, so the Python list
+    could fall behind the build and the disagreement surfaced only at artifact
+    verification, after a full release build, as an opaque tuple diff.
+
+    Every step below raises rather than returning an empty set: if the CMake
+    block is renamed or restructured, the drift test must fail loudly instead of
+    silently comparing nothing and passing.
+    """
+
+    text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    seed = re.search(
+        r"set\(_pulp_control_standalone_capabilities\s*\"([^\"]*)\"\s*\)",
+        text,
+    )
+    if seed is None:
+        raise AssertionError(
+            "CMakeLists.txt no longer seeds _pulp_control_standalone_capabilities "
+            "in a form this test can read; update the parser with the CMake change"
+        )
+    base = [entry for entry in seed.group(1).split(";") if entry]
+    guarded = re.search(
+        r"if\(PULP_ENABLE_GPU\)\s*"
+        r"list\(APPEND _pulp_control_standalone_capabilities\s*\"([^\"]*)\"\s*\)\s*"
+        r"endif\(\)",
+        text,
+    )
+    if guarded is None:
+        raise AssertionError(
+            "CMakeLists.txt no longer guards a capability behind PULP_ENABLE_GPU "
+            "in a form this test can read; update the parser with the CMake change"
+        )
+    optional = [entry for entry in guarded.group(1).split(";") if entry]
+    if not base or not optional:
+        raise AssertionError(
+            f"parsed an empty capability set from CMakeLists.txt: "
+            f"base={base}, optional={optional}"
+        )
+    return base, optional
+
+
+def standalone_capability_archive(root: Path, capabilities: list[str]) -> Path:
+    """A darwin CLI archive whose standalone host declares exactly these."""
+
+    path = root / rac.cli_asset_name("darwin-arm64")
+    write_archive(
+        path,
+        set(rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, VERSION)),
+        as_zip=False,
+        platform="darwin-arm64",
+        payload_overrides={
+            rac.CONTROL_STANDALONE_HOST_CLI_MANIFEST: standalone_manifest_payload(
+                capabilities
+            ),
+            rac.CONTROL_STANDALONE_HOST_CLI_MEMBER: standalone_host_payload(
+                capabilities
+            ),
+        },
+    )
+    return path
+
+
+class StandaloneHostCapabilityContract(unittest.TestCase):
+    """The accepted capability sets, checked against the build that emits them."""
+
+    def test_python_sets_match_the_cmake_declaration(self) -> None:
+        base, optional = cmake_standalone_capability_declaration()
+        self.assertEqual(
+            sorted(rac.CONTROL_STANDALONE_HOST_BASE_CAPABILITIES), sorted(base)
+        )
+        self.assertEqual(
+            sorted(rac.CONTROL_STANDALONE_HOST_GPU_CAPABILITIES), sorted(optional)
+        )
+
+    def test_accepted_sets_are_exactly_base_and_base_plus_optional(self) -> None:
+        base = tuple(sorted(rac.CONTROL_STANDALONE_HOST_BASE_CAPABILITIES))
+        both = tuple(
+            sorted(
+                rac.CONTROL_STANDALONE_HOST_BASE_CAPABILITIES
+                + rac.CONTROL_STANDALONE_HOST_GPU_CAPABILITIES
+            )
+        )
+        self.assertEqual(rac.CONTROL_STANDALONE_HOST_CAPABILITY_SETS, (base, both))
+
+    def test_accepted_sets_are_sorted_and_unique(self) -> None:
+        # The host emits them sorted, so a mismatch reads as a missing or extra
+        # entry rather than as a reordering.
+        for entry in rac.CONTROL_STANDALONE_HOST_CAPABILITY_SETS:
+            self.assertEqual(list(entry), sorted(entry))
+            self.assertEqual(len(entry), len(set(entry)))
+
+    def test_the_parser_finds_a_real_declaration(self) -> None:
+        # Control: the parser above returns nothing when pointed at the wrong
+        # text, so a passing drift test cannot be an empty comparison.
+        base, optional = cmake_standalone_capability_declaration()
+        self.assertTrue(base)
+        self.assertTrue(optional)
+        self.assertNotEqual(base, optional)
+
+
+class StandaloneHostCapabilityConfigurations(unittest.TestCase):
+    """Both shipping configurations, verified through the production path."""
+
+    def test_gpu_enabled_artifact_verifies(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = standalone_capability_archive(Path(td), STANDALONE_GPU_CAPABILITIES)
+            rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_gpu_disabled_artifact_verifies(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = standalone_capability_archive(Path(td), STANDALONE_BASE_CAPABILITIES)
+            rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_negative_control_rejects_an_unknown_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = standalone_capability_archive(
+                Path(td),
+                sorted(STANDALONE_GPU_CAPABILITIES + ["dev.pulp.disk/write@1"]),
+            )
+            with self.assertRaisesRegex(rac.ContentError, "capabilities"):
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_negative_control_rejects_a_missing_base_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = standalone_capability_archive(
+                Path(td), ["dev.pulp.gpu/health.read@1", "dev.pulp.instance/read@1"]
+            )
+            with self.assertRaisesRegex(rac.ContentError, "capabilities"):
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_negative_control_rejects_unsorted_capabilities(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = standalone_capability_archive(
+                Path(td), list(reversed(STANDALONE_GPU_CAPABILITIES))
+            )
+            with self.assertRaisesRegex(rac.ContentError, "capabilities"):
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+
+class StandaloneHostCapabilityHistoricalFailures(unittest.TestCase):
+    """Both hardcoded lists that shipped, replayed against both configurations.
+
+    The releases cut at v0.829.1 and v0.830.0 verified against a list that
+    omitted the GPU health probe, so every GPU-enabled darwin artifact failed
+    verification after a full build. Adding the probe to that list
+    unconditionally moved the failure instead of removing it: the same
+    comparison then rejects a GPU-disabled artifact. Only a contract that admits
+    both configurations resolves it, and these replays are what prove that.
+    """
+
+    PRE_FIX = ("dev.pulp.instance/read@1", "dev.pulp.state/read@1")
+    INCOMPLETE_FIX = (
+        "dev.pulp.gpu/health.read@1",
+        "dev.pulp.instance/read@1",
+        "dev.pulp.state/read@1",
+    )
+
+    def _replay(self, pinned: tuple[str, ...], capabilities: list[str]) -> None:
+        with mock.patch.object(
+            rac, "CONTROL_STANDALONE_HOST_CAPABILITY_SETS", (pinned,)
+        ):
+            with tempfile.TemporaryDirectory() as td:
+                path = standalone_capability_archive(Path(td), capabilities)
+                rac.verify_cli_archive(path, "darwin-arm64", VERSION)
+
+    def test_pre_fix_list_rejected_the_gpu_enabled_artifact(self) -> None:
+        with self.assertRaisesRegex(rac.ContentError, "capabilities"):
+            self._replay(self.PRE_FIX, STANDALONE_GPU_CAPABILITIES)
+
+    def test_incomplete_fix_rejects_the_gpu_disabled_artifact(self) -> None:
+        with self.assertRaisesRegex(rac.ContentError, "capabilities"):
+            self._replay(self.INCOMPLETE_FIX, STANDALONE_BASE_CAPABILITIES)
+
+    def test_neither_shipped_list_accepted_both_configurations(self) -> None:
+        for pinned in (self.PRE_FIX, self.INCOMPLETE_FIX):
+            accepted = [
+                capabilities
+                for capabilities in (
+                    STANDALONE_BASE_CAPABILITIES,
+                    STANDALONE_GPU_CAPABILITIES,
+                )
+                if list(pinned) == capabilities
+            ]
+            self.assertEqual(len(accepted), 1, pinned)
 
 
 class ActivePlatformsContract(unittest.TestCase):

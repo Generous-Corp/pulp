@@ -89,16 +89,12 @@ let lastRandom = "";      // so Random never offers the same prompt twice runnin
 // not a prompt anybody can judge, and the whole point of showing it before
 // building is that it can be read and edited.
 const RANDOM_MODULE = [
-    "a 12 HP wavefolder with drive and symmetry, plus a CV input for the fold amount",
+    "a 6 HP wavefolder with drive and symmetry, plus a CV input for the fold amount",
     "an 8 HP slew limiter with separate rise and fall, and an end-of-rise gate",
     "a 4 HP dual attenuverter with a shared offset",
-    "a 6 HP sample and hold with an internal noise source and a track mode",
-    "an 8 HP three-band mid/side EQ with a mono-below-frequency control",
+    "a 4 HP sample and hold with an internal noise source and switchable glide",
     "a 10 HP chaotic modulation source with rate, character and two decorrelated outputs",
-    "a 6 HP clock multiplier with swing and a reset input",
     "an 8 HP resonant lowpass gate with a vactrol-style decay",
-    "a 4 HP precision adder for 1V/oct with a semitone quantiser",
-    "a 12 HP granular delay with jitter, pitch spread and a freeze gate",
 ];
 const RANDOM_PATCH = [
     "an ambient generative drone that never repeats",

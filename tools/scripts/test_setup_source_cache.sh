@@ -626,6 +626,182 @@ echo "== shared dependency links are location-independent"
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+# Git for Windows ships core.autocrlf=true, so an ordinary checkout rewrites
+# every LF to CRLF. The three.js runtime cache is the one dependency verified
+# against SHA-256 digests of upstream's own bytes
+# (tools/cmake/threejs-runtime-manifest.json), so a converted checkout can never
+# match its pin and the Windows release leg fails on the first pinned file.
+# These tests simulate that config on any host, and prove both halves of the
+# fix: the opted-in cache keeps the bytes verbatim, and a cache that did NOT opt
+# in still behaves exactly as stock git would.
+
+sha256_stdin() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | cut -d' ' -f1
+    else
+        sha256sum | cut -d' ' -f1
+    fi
+}
+sha256_of()  { sha256_stdin < "$1"; }
+crlf_count() { LC_ALL=C tr -dc '\r' < "$1" | wc -c | tr -d ' '; }
+
+# An upstream that publishes LF text (what three.js does) plus one file that is
+# genuinely CRLF upstream, so the damage detector can be shown not to fire on
+# bytes that were always CRLF.
+make_eol_upstream() {
+    local dir="$1"
+    mkdir -p "$dir/build"
+    git init -q "$dir"
+    git -C "$dir" config user.email t@t.t
+    git -C "$dir" config user.name t
+    git -C "$dir" config uploadpack.allowFilter true
+    git -C "$dir" config uploadpack.allowAnySHA1InWant true
+    # Commit exactly these bytes rather than whatever the ambient config wants.
+    git -C "$dir" config core.autocrlf false
+    printf 'line one\nline two\n'          > "$dir/LICENSE"
+    printf 'export const three = 1;\n'     > "$dir/build/three.module.js"
+    printf 'crlf one\r\ncrlf two\r\n'      > "$dir/crlf-upstream.txt"
+    git -C "$dir" add LICENSE build/three.module.js crlf-upstream.txt
+    git -C "$dir" commit -qm runtime
+}
+
+echo "== verbatim-eol keeps upstream bytes under a Windows-style git config"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    make_eol_upstream "$tmp/upstream"
+    sha="$(git -C "$tmp/upstream" rev-parse HEAD)"
+
+    # A manifest digest is SHA-256 over upstream's own bytes, which is exactly
+    # what the blob holds — so the blob digest IS the pin this cache must match.
+    pinned_license="$(git -C "$tmp/upstream" cat-file blob HEAD:LICENSE | sha256_stdin)"
+    pinned_module="$(git -C "$tmp/upstream" cat-file blob HEAD:build/three.module.js | sha256_stdin)"
+    pinned_crlf="$(git -C "$tmp/upstream" cat-file blob HEAD:crlf-upstream.txt | sha256_stdin)"
+
+    # Simulate Git for Windows for every git invocation below.
+    printf '[core]\n\tautocrlf = true\n' > "$tmp/gitconfig.windows"
+    export GIT_CONFIG_GLOBAL="$tmp/gitconfig.windows"
+
+    # Control first: a cache that does NOT opt in must STILL be converted. If it
+    # is not, the simulated Windows config never took effect and every "no CRLF"
+    # assertion below would pass for the wrong reason.
+    export FETCHCONTENT_CACHE_ROOT="$tmp/control-cache"
+    mkdir -p "$FETCHCONTENT_CACHE_ROOT"
+    ensure_shared_git_source "Control" "file://$tmp/upstream" "$sha" "control" >/dev/null 2>&1
+    control="$FETCHCONTENT_CACHE_ROOT/control"
+    check "$(crlf_count "$control/LICENSE")" "2" \
+        "an unrelated checkout still converts (the simulated Windows config is live)"
+    # --local: the simulated Windows config is global, so a plain read would
+    # report its value for every repo and prove nothing about the pin.
+    check "$(git -C "$control" config --local core.autocrlf || true)" "" \
+        "an unrelated cache carries no end-of-line pin of its own"
+
+    # Subject: the same upstream, opted in.
+    export FETCHCONTENT_CACHE_ROOT="$tmp/pinned-cache"
+    mkdir -p "$FETCHCONTENT_CACHE_ROOT"
+    rc=0
+    ensure_shared_git_source "Pinned" "file://$tmp/upstream" "$sha" "pinned" "verbatim-eol" \
+        >"$tmp/prime.log" 2>&1 || rc=$?
+    pinned="$FETCHCONTENT_CACHE_ROOT/pinned"
+    check "$rc" "0" "priming a verbatim-eol cache succeeds"
+    # The clone itself must write upstream bytes. Without this the repair path
+    # would mask a clone that still converts: the files end up correct either
+    # way, and only the absence of a repair distinguishes the two.
+    grep -q "EOL conversion" "$tmp/prime.log" && r=repaired || r=clean
+    check "$r" "clean" "the clone writes verbatim bytes with no repair needed"
+    check "$(crlf_count "$pinned/LICENSE")" "0" "no CRLF is written into the pinned cache"
+    check "$(sha256_of "$pinned/LICENSE")" "$pinned_license" \
+        "the checked-out file hashes to upstream's own bytes"
+    check "$(sha256_of "$pinned/build/three.module.js")" "$pinned_module" \
+        "a nested runtime file hashes to upstream's own bytes"
+    check "$(git -C "$pinned" config --local core.autocrlf)" "false" \
+        "the cache carries its own pin for every later checkout"
+
+    # A file that is CRLF upstream must keep its own bytes, and must not read as
+    # damage — otherwise the repair path would rewrite what the pin protects.
+    check "$(sha256_of "$pinned/crlf-upstream.txt")" "$pinned_crlf" \
+        "a genuinely-CRLF upstream file keeps its own bytes"
+    source_cache_has_converted_eol "$pinned" && r=yes || r=no
+    check "$r" "no" "CRLF that came from upstream is not reported as conversion damage"
+
+    # Seeding from a local clone is a different clone invocation; cover it too.
+    ensure_shared_git_source "Pinned" "file://$tmp/upstream" "$sha" "pinned-seeded" "verbatim-eol" \
+        >"$tmp/seed.log" 2>&1
+    check "$(crlf_count "$FETCHCONTENT_CACHE_ROOT/pinned-seeded/LICENSE")" "0" \
+        "a cache seeded from a local clone is verbatim too"
+    grep -q "EOL conversion" "$tmp/seed.log" && r=repaired || r=clean
+    check "$r" "clean" "the seeded clone writes verbatim bytes with no repair needed"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== verbatim-eol repairs a cache written before the pin existed"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    make_eol_upstream "$tmp/upstream"
+    sha="$(git -C "$tmp/upstream" rev-parse HEAD)"
+    pinned_license="$(git -C "$tmp/upstream" cat-file blob HEAD:LICENSE | sha256_stdin)"
+
+    printf '[core]\n\tautocrlf = true\n' > "$tmp/gitconfig.windows"
+    export GIT_CONFIG_GLOBAL="$tmp/gitconfig.windows"
+    export FETCHCONTENT_CACHE_ROOT="$tmp/cache"
+    mkdir -p "$FETCHCONTENT_CACHE_ROOT"
+
+    # Exactly what a pre-fix run left behind on a persistent Windows runner.
+    poisoned="$FETCHCONTENT_CACHE_ROOT/pinned"
+    git clone -q --filter=blob:none "file://$tmp/upstream" "$poisoned" 2>/dev/null
+    git -C "$poisoned" checkout -q --detach "$sha"
+    # Age the checkout and let the index record that stat, which is the settled
+    # state of any cache a previous CI run left behind. It matters: while a
+    # file's timestamp is still within the index's own granularity git distrusts
+    # the stat and compares content, which makes a repair that only works by
+    # accident look correct here and fail on every real runner.
+    find "$poisoned" -type f -not -path '*/.git/*' -exec touch -t 202001010000 {} +
+    git -C "$poisoned" update-index --refresh >/dev/null 2>&1 || true
+    check "$(crlf_count "$poisoned/LICENSE")" "2" \
+        "the cache starts converted (test precondition)"
+    source_cache_has_converted_eol "$poisoned" && r=yes || r=no
+    check "$r" "yes" "the damage detector sees the conversion (test precondition)"
+
+    # `checkout --detach` at the sha the cache is already on rewrites nothing, so
+    # a clone-time-only fix would leave this damage in place forever.
+    rc=0
+    ensure_shared_git_source "Pinned" "file://$tmp/upstream" "$sha" "pinned" "verbatim-eol" \
+        >/dev/null 2>&1 || rc=$?
+    check "$rc" "0" "re-priming a poisoned cache succeeds"
+    check "$(crlf_count "$poisoned/LICENSE")" "0" \
+        "the poisoned cache is restored to upstream bytes"
+    check "$(sha256_of "$poisoned/LICENSE")" "$pinned_license" \
+        "the repaired file hashes to upstream's own bytes"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== only the digest-verified dependency opts in to a verbatim checkout"
+(
+    # The helper above is inert unless the one dependency whose files are
+    # checked against pinned digests actually asks for it, and no unit test of
+    # the helper can see that. Fails closed: a renamed or removed call site
+    # produces no match and reports a miss rather than a pass.
+    # Fold each invocation onto one line so a reformatted call site reads the
+    # same way, then report the label of every cache that opted in.
+    opted_in="$(awk '
+        /^ *ensure_shared_git_source(_with_retry)? / {
+            buf = $0
+            while (buf ~ /\\$/) { sub(/\\$/, "", buf); getline nxt; buf = buf " " nxt }
+            if (buf ~ /verbatim-eol/) {
+                match(buf, /"[^"]+"/)
+                print substr(buf, RSTART + 1, RLENGTH - 2)
+            }
+        }
+    ' "$SETUP_SH")"
+    check "$opted_in" "three.js" \
+        "the three.js source cache — and only it — opts in to a verbatim checkout"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo
 if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failing group(s))"

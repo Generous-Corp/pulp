@@ -320,6 +320,23 @@ public:
     }
     bool run_with_editor(bool use_gpu = false);
 
+    /// Install a handler for files the OS asks this app to open — a Finder
+    /// double-click, a drag onto the app icon, or `open -a`. Paths arrive on the
+    /// UI thread.
+    ///
+    /// Set it BEFORE run_with_editor(). The file that launched the app is
+    /// reported while the event loop is still starting, so a handler installed
+    /// afterwards would miss the common case; paths that arrive early are held
+    /// until a handler exists.
+    ///
+    /// Routing is the other half of this. Nothing reaches here unless the app
+    /// bundle declares the document type — pulp_declare_standalone_document_type()
+    /// in CMake — so an app that only installs a handler still never opens a file.
+    void set_open_files_handler(
+        std::function<void(const std::vector<std::string>&)> handler) {
+        open_files_handler_ = std::move(handler);
+    }
+
     /// Restart audio with a new config (stop → reconfigure → start).
     bool apply_config(const StandaloneConfig& new_config);
 
@@ -373,6 +390,8 @@ public:
                                       const StandaloneConfig& config);
 
 private:
+    std::function<void(const std::vector<std::string>&)> open_files_handler_;
+
     // Declared FIRST so it is destroyed LAST: the final detach cancels and
     // joins the tracing auto-flush timer and writes the .pftrace, which must
     // happen after every span this app can still emit. Tracing used to be

@@ -451,8 +451,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/platform/mac/window_host_mac.mm",
           "state": "pulp-owned-retained",
-          "revision": "e5dc8d29c741421fc29cb4c653e2fd520baff7ad",
-          "object_id": "e71e94b849a241f0845cec653a7b736432942e22",
+          "revision": "18bcd1cad5063c4fd9e307e8e16c943d9553a422",
+          "object_id": "1f5a0b53f3ddc11a7716bc904ede83fdc9a26c42",
           "object_type": "blob"
         },
         {
@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "58544f95b0c6d7717d49f5e573205e4667af53fe",
-          "object_id": "d459b142d8c6ae83cf69863a0c1d5f90d61e6e56",
+          "revision": "a6cfaa482b0201f3ec0323fc4c5d5994eb6a113e",
+          "object_id": "2f917939261458bad7053d5c4b338c00613a96cf",
           "object_type": "blob"
         },
         {
@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "fdf3d12885c6b49b5c8e3c7ebb2598e843d48f1c",
-          "object_id": "b725b65a41b006b8b410a77286ada52b80fc7274",
+          "revision": "82e654911c229c3112476d78df145fafeb7a32f9",
+          "object_id": "181a5e3eba60e9eece08fd2603edf5eab3a32e24",
           "object_type": "blob"
         },
         {
@@ -3050,8 +3050,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "2ad93f3694fb6d87ba412b163ca36c353a6d356d",
-          "object_id": "c7cd4967f529f9a9480a35cac27cbee6233dd515",
+          "revision": "fa2cf1dc41bd82d08045d672434acb09222ddd12",
+          "object_id": "e0c9451da28ad56d2f206ade795f86325afb60bf",
           "object_type": "blob"
         },
         {
@@ -3074,8 +3074,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "c34bbd3c0e05353b8587020215b4183fd7693932",
-          "object_id": "3a066bc200e911c08cabeaa65d26b2dca739bd95",
+          "revision": "fa2cf1dc41bd82d08045d672434acb09222ddd12",
+          "object_id": "d00dc42780cb1e1b6085722ccf09b1cc66422743",
           "object_type": "blob"
         }
       ],
