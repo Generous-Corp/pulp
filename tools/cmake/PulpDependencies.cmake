@@ -841,10 +841,16 @@ if(PULP_ENABLE_THREEJS_RUNTIME)
             message(FATAL_ERROR
                 "Three.js cache registration and runtime manifest revisions differ")
         endif()
+        # The digests below are upstream's own LF bytes. Git for Windows
+        # defaults core.autocrlf=true and would rewrite every LF to CRLF on
+        # checkout, so each file would hash to something no pin can describe.
+        # GIT_CONFIG scopes the override to this clone; setup.sh applies the
+        # same pin to the shared cache that usually satisfies this dependency.
         FetchContent_Declare(
             threejs
             GIT_REPOSITORY https://github.com/mrdoob/three.js.git
             GIT_TAG ${PULP_THREEJS_REVISION}
+            GIT_CONFIG core.autocrlf=false core.eol=lf
         )
         FetchContent_MakeAvailable(threejs)
         set(PULP_THREEJS_RUNTIME_DIR "${threejs_SOURCE_DIR}")
