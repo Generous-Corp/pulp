@@ -1,4 +1,5 @@
 #include <pulp/view/view.hpp>
+#include <pulp/view/view_lifecycle.hpp>
 #include <pulp/view/widget_painter.hpp>
 #include <pulp/view/widget_metrics.hpp>
 #include <pulp/view/tracing_badge.hpp>
@@ -72,6 +73,12 @@ std::atomic<int>& subtree_cache_enabled_count() {
     return count;
 }
 
+// How many follow-up frame-clock passes a single notify_frame_clock_changed()
+// will run to service work its own hooks generated. Real trees settle in one;
+// the cap exists so a hook that attaches a clock-aware node every time it is
+// notified degrades to dropped notifications rather than a hung UI thread.
+constexpr int kMaxClockWalkPasses = 8;
+
 } // namespace
 
 View::View()
@@ -131,6 +138,23 @@ View* ViewCapture::live_in(View& root) const noexcept {
 // View destructor stays out-of-line while remaining virtual + public so vtable
 // layout + SDK contract are unchanged.
 View::~View() {
+    // Destroying a View that is still attached, or that has a callback of its
+    // own executing, frees a frame that is still running above us. Both are
+    // contract violations with a supported alternative — remove_child() first,
+    // or hand ownership to View::retire() — so fail loudly in debug rather than
+    // corrupting memory quietly. A child destroyed as part of its parent's
+    // teardown is legitimate and exempted via the parent's destroying_ flag.
+    // Release builds are unchanged. Contract: view_lifecycle.hpp.
+    assert((parent_ == nullptr || parent_->destroying_) &&
+           "View destroyed while still attached; call parent->remove_child() first");
+    assert(dispatch_depth_ == 0 &&
+           "View destroyed while one of its callbacks is executing; "
+           "route ownership through View::retire()");
+    destroying_ = true;
+    // Anything still parked on this root's retirement chain dies with it. Drain
+    // iteratively so a long chain cannot recurse the stack through member
+    // destructors.
+    drain_retired();
     if (gesture_arbiter_)
         gesture_arbiter_->reset();
     // Clear the overlay + focus slots if this dying View holds them. Without
@@ -696,25 +720,65 @@ void View::add_child(std::unique_ptr<View> child) {
 void View::add_child_transactional(std::unique_ptr<View>& child) {
     if (!child) return;
     auto* inserted = child.get();
+    // Address alone cannot identify the child across a callback: a hook may
+    // destroy it and the allocator may hand the same address to a replacement
+    // inserted under this same parent. Every re-find below compares address
+    // AND instance id, so an ABA replacement is never mistaken for our child.
+    const auto inserted_id = inserted->import_binding_instance_id();
+    const auto is_inserted = [inserted, inserted_id](const auto& candidate) {
+        return candidate.get() == inserted &&
+               candidate->import_binding_instance_id() == inserted_id;
+    };
     set_subtree_detaching(*child, false);
     child->parent_ = this;
-    child->set_window_host(window_host_);
-    child->set_plugin_view_host(plugin_view_host_);
-    child->set_host_params(host_params_);
-    child->set_host_actions(host_actions_);
     children_.push_back(std::move(child));
+    // If a frame-clock walk is in flight on this tree, stamp the whole incoming
+    // subtree as already-visited for the current pass. Without this the walk's
+    // restart scan would pick the new nodes up immediately, so a hook that
+    // attaches a clock-aware view every time it is notified could extend the
+    // walk without end. The root records that work is pending and runs one more
+    // bounded pass instead, so nothing is dropped.
+    {
+        View* root = this;
+        while (root->parent_) root = root->parent_;
+        if (root->clock_walk_active_) {
+            const auto epoch = root->clock_epoch_;
+            const auto stamp = [epoch](auto&& self, View& node) noexcept -> void {
+                // Traversal stamp only. Leaving the delivery stamp untouched is
+                // what makes the follow-up pass notify this subtree exactly once.
+                node.clock_walk_epoch_ = epoch;
+                for (auto& descendant : node.children_) self(self, *descendant);
+            };
+            stamp(stamp, *inserted);
+            root->clock_walk_pending_ = true;
+        }
+    }
     try {
-        auto attached_it = std::find_if(children_.begin(), children_.end(),
-            [inserted](const auto& candidate) { return candidate.get() == inserted; });
+        // Host propagation runs through virtual setters, so it is user code and
+        // it belongs INSIDE the transaction. Outside it, a throwing override
+        // left the caller holding a child whose parent_ already pointed here
+        // and whose detaching_ had been cleared — a half-linked tree with no
+        // unwind. Insertion is complete before any of it runs, so the catch
+        // below can restore ownership whichever setter rejects the attach.
+        inserted->set_window_host(window_host_);
+        inserted->set_plugin_view_host(plugin_view_host_);
+        inserted->set_host_params(host_params_);
+        inserted->set_host_actions(host_actions_);
+        auto attached_it = std::find_if(children_.begin(), children_.end(), is_inserted);
         if (attached_it == children_.end())
             return;
-        (*attached_it)->on_attached();
+        {
+            // on_attached() may remove and try to destroy the very child it is
+            // running on. The lease keeps its storage alive until this scope
+            // exits, so the re-find below reads live memory either way.
+            DispatchLease lease(**attached_it);
+            (*attached_it)->on_attached();
+        }
         // A newly attached subtree may contain clock-aware descendants. Keep
         // this notification inside the same ownership transaction: a throwing
         // descendant hook must not leave an inserted child with its caller's
         // unique_ptr already consumed.
-        attached_it = std::find_if(children_.begin(), children_.end(),
-            [inserted](const auto& candidate) { return candidate.get() == inserted; });
+        attached_it = std::find_if(children_.begin(), children_.end(), is_inserted);
         if (attached_it != children_.end() && frame_clock())
             (*attached_it)->notify_frame_clock_changed();
     } catch (...) {
@@ -722,8 +786,7 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
         // Do not leave a half-attached child in the native tree: unwind the
         // ownership insertion and restore the detached state before propagating
         // the exception to the caller's transaction boundary.
-        auto it = std::find_if(children_.begin(), children_.end(),
-            [inserted](const auto& candidate) { return candidate.get() == inserted; });
+        auto it = std::find_if(children_.begin(), children_.end(), is_inserted);
         if (it == children_.end()) {
             // A reentrant attach hook may have removed the child before
             // throwing. Never assume children_.back() is still ours.
@@ -735,13 +798,19 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
         children_.erase(it);
         child = std::move(failed);
         auto* restored = child.get();
-        try { restored->on_detached(); }
-        catch (...) { /* preserve the original attach/clock exception */ }
+        {
+            DispatchLease lease(*restored);
+            try { restored->on_detached(); }
+            catch (...) { /* preserve the original attach/clock exception */ }
+        }
         restored->parent_ = nullptr;
-        restored->set_window_host(nullptr);
-        restored->set_plugin_view_host(nullptr);
-        restored->set_host_params(nullptr);
-        restored->set_host_actions(nullptr);
+        // Every setter below is virtual, i.e. user code, and we are unwinding:
+        // letting one throw out of a catch block calls std::terminate. The
+        // first exception wins, so contain each one and finish the rollback.
+        try { restored->set_window_host(nullptr); } catch (...) {}
+        try { restored->set_plugin_view_host(nullptr); } catch (...) {}
+        try { restored->set_host_params(nullptr); } catch (...) {}
+        try { restored->set_host_actions(nullptr); } catch (...) {}
         set_subtree_detaching(*restored, true);
         publish_structure_change();
         invalidate_subtree_caches_up();
@@ -753,8 +822,18 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
 }
 
 std::unique_ptr<View> View::remove_child(View* child) {
-    auto it = std::find_if(children_.begin(), children_.end(),
-        [child](const auto& p) { return p.get() == child; });
+    if (!child) return nullptr;
+    // Identity is address AND instance id. The gesture, popup, focus, and
+    // detach callbacks below are all re-entrant: one of them may destroy
+    // `child`, and the allocator may then place a NEW view at the same address
+    // under this same parent. An address-only re-find would sever and return
+    // that innocent replacement. The id makes every re-find below ABA-proof.
+    const auto child_id = child->import_binding_instance_id();
+    const auto is_child = [child, child_id](const auto& candidate) {
+        return candidate.get() == child &&
+               candidate->import_binding_instance_id() == child_id;
+    };
+    auto it = std::find_if(children_.begin(), children_.end(), is_child);
     if (it == children_.end()) return nullptr;
 
     std::vector<GestureRecognizer*> removed_recognizers;
@@ -836,23 +915,24 @@ std::unique_ptr<View> View::remove_child(View* child) {
     // callback may have removed (and destroyed) this child, so do not
     // dereference the original raw pointer until its ownership is confirmed
     // again in the live children vector.
-    it = std::find_if(children_.begin(), children_.end(),
-        [child](const auto& candidate) { return candidate.get() == child; });
+    it = std::find_if(children_.begin(), children_.end(), is_child);
     if (it == children_.end()) return nullptr;
     // on_detached() intentionally runs while the old parent/clock is still
     // reachable, but routing must already consider the whole subtree absent.
     set_subtree_detaching(*child, true);
     try {
+        // on_detached() may remove and try to destroy the child it runs on.
+        // Under the lease that destruction is deferred to the outermost lease
+        // exit, so every re-find below reads live memory.
+        DispatchLease lease(*child);
         child->on_detached();
     } catch (...) {
-        auto live_it = std::find_if(children_.begin(), children_.end(),
-            [child](const auto& candidate) { return candidate.get() == child; });
+        auto live_it = std::find_if(children_.begin(), children_.end(), is_child);
         if (live_it != children_.end())
             set_subtree_detaching(**live_it, false);
         throw;
     }
-    it = std::find_if(children_.begin(), children_.end(),
-        [child](const auto& candidate) { return candidate.get() == child; });
+    it = std::find_if(children_.begin(), children_.end(), is_child);
     if (it == children_.end()) return nullptr;
     child->set_window_host(nullptr);
     child->set_plugin_view_host(nullptr);
@@ -878,10 +958,9 @@ std::unique_ptr<View> View::remove_child(View* child) {
         }
     }
     // Any lifecycle/drag callback above may mutate this parent's children.
-    // Re-find by the stable raw address before extracting ownership instead of
-    // dereferencing the iterator captured before those callbacks ran.
-    it = std::find_if(children_.begin(), children_.end(),
-        [child](const auto& p) { return p.get() == child; });
+    // Re-find by identity (address + instance id) before extracting ownership
+    // instead of dereferencing the iterator captured before those callbacks ran.
+    it = std::find_if(children_.begin(), children_.end(), is_child);
     if (it == children_.end()) return nullptr;
     child->parent_ = nullptr;
     auto owned = std::move(*it);
@@ -1750,34 +1829,83 @@ void View::set_frame_clock(FrameClock* clock) {
     notify_frame_clock_changed();
 }
 
-void View::notify_frame_clock_changed() noexcept {
-    // Clock propagation is a structural safety funnel. A custom hook must not
-    // abort an attach/detach transaction after ownership has changed, and a
-    // reentrant hook must not invalidate an iterator over children_. Visit by
-    // index and isolate each callback; later siblings still get a chance to
-    // unsubscribe/refresh even if one hook misbehaves.
+void View::deliver_frame_clock_hooks() noexcept {
+    // Both are extension points and may throw. Isolate each so one misbehaving
+    // widget cannot stop the rest of the tree from re-resolving its clock.
     try { sync_value_bindings(); }
     catch (...) {}
     try { on_frame_clock_changed(); }
     catch (...) {}
-    // Walk only the children that existed at entry.  Do not allocate here:
-    // this function is noexcept.  A callback may remove or replace a child;
-    // advance the index unconditionally so replacement at the same slot
-    // cannot loop forever, and never dereference a saved pointer after the
-    // callback returns.
-    const auto initial_count = children_.size();
-    std::size_t processed = 0;
-    for (std::size_t i = 0;
-         processed < initial_count && i < children_.size(); ++processed) {
-        View* child = children_[i].get();
-        if (child)
-            child->notify_frame_clock_changed();
-        // If the callback removed/reordered this slot, process the shifted
-        // sibling at the same index. Otherwise advance normally. The bounded
-        // processed count prevents replacement-at-index loops.
-        if (i >= children_.size() || children_[i].get() == child)
-            ++i;
+}
+
+void View::walk_frame_clock(std::uint32_t epoch, std::uint32_t sequence) noexcept {
+    // The lease spans the whole function, not just the hooks: this frame keeps
+    // touching `this` (children_, the rescan) after the callbacks return, so
+    // the storage must outlive them even when a hook removes and retires us.
+    DispatchLease lease(*this);
+    // Stamp BEFORE delivering. A hook that reparents this node under a sibling
+    // we have not reached yet must not cause a second visit.
+    clock_walk_epoch_ = epoch;
+    if (clock_delivery_sequence_ != sequence) {
+        clock_delivery_sequence_ = sequence;
+        deliver_frame_clock_hooks();
     }
+    // Restart-scan rather than walk by index. A hook may have removed, added,
+    // reordered, or same-slot-replaced siblings, so any index saved across it
+    // names a different node than it did. Rescanning from zero and skipping
+    // already-stamped children is what makes the pass exactly-once: it cannot
+    // skip an original (the earlier index-and-bounded-count walk did, whenever
+    // a hook removed an earlier sibling or replaced itself in place), and it
+    // cannot revisit one. Stamped children cost one integer compare, so the
+    // common no-mutation case stays linear.
+    for (;;) {
+        View* next = nullptr;
+        for (const auto& candidate : children_) {
+            View* view = candidate.get();
+            if (view && view->clock_walk_epoch_ != epoch) {
+                next = view;
+                break;
+            }
+        }
+        if (!next) return;
+        next->walk_frame_clock(epoch, sequence);
+    }
+}
+
+void View::notify_frame_clock_changed() noexcept {
+    // Clock propagation is a structural safety funnel: it must visit every
+    // node that was attached under this one when the pass began exactly once,
+    // it must survive arbitrary mutation from the hooks it invokes, and it is
+    // noexcept, so it must not allocate. An epoch stamp per view plus the
+    // root-owned retirement gate gives all three without scratch storage.
+    View* root = this;
+    while (root->parent_) root = root->parent_;
+    if (root->clock_walk_active_) {
+        // A hook asked for another propagation while one is in flight. Do not
+        // recurse: the running pass may already be walking part of this
+        // subtree, and re-entering it would deliver twice. Coalesce instead —
+        // record that new work exists and let the outermost call run one more
+        // pass once the current one has unwound.
+        root->clock_walk_pending_ = true;
+        return;
+    }
+    root->clock_walk_active_ = true;
+    // Wrapping is fine: both stamps are only ever compared for equality against
+    // the value of the call currently running.
+    const auto sequence = ++root->clock_sequence_;
+    // A node attached during a pass is stamped with that pass's traversal
+    // epoch, so the pass in flight skips it and a hook that attaches on every
+    // visit cannot extend the walk without end. Its DELIVERY stamp is left
+    // alone, so the follow-up pass below still notifies it — once. Bounded on
+    // purpose: a hook that keeps generating work loses the remaining
+    // notifications rather than spinning the UI thread forever.
+    for (int pass = 0; pass < kMaxClockWalkPasses; ++pass) {
+        root->clock_walk_pending_ = false;
+        walk_frame_clock(++root->clock_epoch_, sequence);
+        if (!root->clock_walk_pending_) break;
+    }
+    root->clock_walk_pending_ = false;
+    root->clock_walk_active_ = false;
 }
 
 // ── Live host→view value sources ────────────────────────────────────────────

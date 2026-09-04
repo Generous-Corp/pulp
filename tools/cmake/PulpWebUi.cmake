@@ -201,6 +201,9 @@ set(_PULP_WEBUI_CANVAS_SOURCES
 # authoring, NO window hosts other than the browser one below.
 set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/view.cpp
+    # The root-owned mutation/lifetime gate every View hook call site takes.
+    # view.cpp does not link without it.
+    ${_PULP_WEBUI_ROOT}/core/view/src/view_lifecycle.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/view_paint.cpp
     # FU-2 partial-repaint damage model — pure, no platform deps. Kept in the
     # web source set so the view lib links identically across native + wasm.
