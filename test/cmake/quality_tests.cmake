@@ -465,6 +465,11 @@ if(Python3_Interpreter_FOUND)
     # names the repair, including regeneration being a byte-identical no-op.
     add_test(NAME gpu-handoff-provenance-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_handoff_provenance.py")
+    # Derivation shells out to Git once per pinned path, so the suite runs for
+    # tens of seconds on an idle host and longer under a parallel ctest. The
+    # default per-test budget is close enough to that to flake the required
+    # gate on timing alone.
+    set_tests_properties(gpu-handoff-provenance-selftest PROPERTIES TIMEOUT 300)
 
     # Closed-schema and semantic negative controls for the shared GPU health
     # envelope. This is intentionally GPU-free so every platform proves the

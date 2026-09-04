@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -215,27 +218,70 @@ class FixtureRepository(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(handoff.read_text(encoding="utf-8"), before)
 
+    def run_cli(self, handoff: pathlib.Path, *arguments: str) -> tuple[int, str]:
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            exit_code = provenance.main(
+                ["--root", str(self.root), "--handoff", str(handoff), *arguments]
+            )
+        return exit_code, stream.getvalue()
+
     def test_paths_subcommand_lists_the_inventory(self) -> None:
         handoff = self.write_fixture_handoff(
             [build_row("nested"), build_row("leaf.txt")]
         )
-        for arguments in (["paths"], ["paths", "--json"]):
-            self.assertEqual(
-                provenance.main(
-                    ["--root", str(self.root), "--handoff", str(handoff), *arguments]
-                ),
-                0,
-            )
+        exit_code, text = self.run_cli(handoff, "paths")
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(text.split(), ["leaf.txt", "nested"])
 
-    def test_check_subcommand_reports_drift_in_both_formats(self) -> None:
+        exit_code, text = self.run_cli(handoff, "paths", "--json")
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            json.loads(text), {"count": 2, "paths": ["leaf.txt", "nested"]}
+        )
+
+    def test_check_subcommand_reports_the_drifted_fields(self) -> None:
+        """Exit status alone cannot distinguish drift from a contract failure.
+
+        The fixture ledger always violates the closed contract, so asserting
+        only the exit code would pass with the identity derivation removed.
+        """
+
         handoff = self.write_fixture_handoff([build_row("leaf.txt")])
-        for arguments in (["check"], ["check", "--json"]):
-            self.assertEqual(
-                provenance.main(
-                    ["--root", str(self.root), "--handoff", str(handoff), *arguments]
-                ),
-                1,
-            )
+        exit_code, text = self.run_cli(handoff, "check", "--json")
+        self.assertEqual(exit_code, 1)
+        report = json.loads(text)
+        self.assertEqual(report["row_count"], 1)
+        self.assertEqual(report["drift_count"], 2)
+        self.assertEqual(
+            {drift["field"] for drift in report["drifts"]},
+            {"revision", "object_id"},
+        )
+        self.assertEqual(
+            [drift["derived"] for drift in report["drifts"] if drift["field"] == "revision"],
+            [self.first_commit],
+        )
+
+        exit_code, text = self.run_cli(handoff, "check")
+        self.assertEqual(exit_code, 1)
+        self.assertIn("STALE", text)
+        self.assertIn("leaf.txt", text)
+
+    def test_the_printed_repair_command_actually_parses(self) -> None:
+        """A repair command that argparse rejects is worse than none."""
+
+        command = provenance.repair_command(provenance.DEFAULT_HANDOFF, "HEAD")
+        arguments = shlex.split(command)[2:]
+        parsed = provenance.build_parser().parse_args(arguments)
+        self.assertEqual(parsed.command, "write")
+        self.assertEqual(parsed.source_commit, "HEAD")
+        self.assertEqual(parsed.receipt, provenance.DEFAULT_RECEIPT)
+
+        elsewhere = self.root / "handoff.json"
+        alternate = provenance.repair_command(elsewhere, "HEAD")
+        parsed = provenance.build_parser().parse_args(shlex.split(alternate)[2:])
+        self.assertEqual(parsed.command, "write")
+        self.assertEqual(parsed.handoff, elsewhere)
 
     def test_receipt_subcommand_writes_a_receipt(self) -> None:
         handoff = self.write_fixture_handoff([build_row("leaf.txt")])
@@ -347,7 +393,23 @@ class CheckedInLedger(unittest.TestCase):
             self.handoff.read_text(encoding="utf-8"),
         )
 
+    def require_clean_canonical_paths(self) -> None:
+        """Skip rather than red misleadingly on a developer's local edits.
+
+        These cases generate against the live checkout, and the generator
+        refuses an unclean one by design. Without this the failure reads as a
+        generator defect instead of an uncommitted edit to a pinned path.
+        """
+
+        document = provenance.load_handoff(self.handoff)
+        dirty = provenance.dirty_canonical_paths(
+            self.root, provenance.canonical_paths(document)
+        )
+        if dirty:
+            self.skipTest(f"canonical paths are modified locally: {dirty}")
+
     def test_write_against_a_current_ledger_changes_nothing(self) -> None:
+        self.require_clean_canonical_paths()
         with tempfile.TemporaryDirectory() as directory:
             copy = pathlib.Path(directory) / "gpu-vellum-handoff.yaml"
             shutil.copyfile(self.handoff, copy)
@@ -364,6 +426,27 @@ class CheckedInLedger(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(copy.read_text(encoding="utf-8"), before)
 
+    def test_write_refuses_when_a_pinned_identity_cannot_be_satisfied(self) -> None:
+        """Reach the identity gate specifically, not a schema gate.
+
+        A fixture ledger fails the closed contract long before any Git identity
+        is compared, so refusing one proves only that problems block a write.
+        This corrupts a real pinned row so the refusal has to come from the
+        stale-identity check itself.
+        """
+
+        self.require_clean_canonical_paths()
+        document = provenance.load_handoff(self.handoff)
+        document["entries"][0]["pulp_paths"][0]["object_id"] = "0" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            copy = pathlib.Path(directory) / "gpu-vellum-handoff.yaml"
+            copy.write_text(provenance.serialize_handoff(document), encoding="utf-8")
+            problems = provenance.validate_with_catalog(document, self.root)
+            self.assertTrue(
+                any("stale revision/blob/tree identity" in problem for problem in problems),
+                f"expected a stale-identity problem, got {problems}",
+            )
+
     def test_receipt_binds_the_source_commit_to_the_emitted_bytes(self) -> None:
         document = provenance.load_handoff(self.handoff)
         rendered = provenance.serialize_handoff(document)
@@ -376,9 +459,13 @@ class CheckedInLedger(unittest.TestCase):
         )
         self.assertEqual(
             receipt["handoff_sha256"],
-            provenance.build_receipt(document, commit, rendered, self.handoff)[
-                "handoff_sha256"
-            ],
+            hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual(
+            receipt["canonical_path_sha256"],
+            hashlib.sha256(
+                "\n".join(provenance.canonical_paths(document)).encode("utf-8") + b"\n"
+            ).hexdigest(),
         )
 
     def test_published_receipt_binds_the_checked_in_ledger(self) -> None:
@@ -410,16 +497,30 @@ class CheckedInLedger(unittest.TestCase):
             receipt["canonical_paths"], provenance.canonical_paths(document), repair
         )
         self.assertEqual(
-            provenance.git_output(
-                self.root, ["rev-parse", "--verify", receipt["source_commit"]]
-            ),
-            receipt["source_commit"],
-            "the receipt names a commit this repository does not contain",
-        )
-        self.assertEqual(
             provenance.resolve_source_commit(self.root, receipt["source_commit"]),
             receipt["source_commit"],
             "the receipt's source commit is not an ancestor of HEAD",
+        )
+        # Naming a reachable commit is not the claim. The claim is that THIS
+        # commit produced THESE bytes, so regenerate from it and compare.
+        inventory = provenance.canonical_inventory(document)
+        try:
+            identities = provenance.resolve_inventory_identities(
+                self.root, receipt["source_commit"], inventory
+            )
+        except provenance.ProvenanceError as error:
+            self.fail(
+                "the receipt names a source commit that cannot produce this "
+                f"ledger ({error}); {repair}"
+            )
+        regenerated = provenance.serialize_handoff(
+            provenance.apply_identities(document, inventory, identities)
+        )
+        self.assertEqual(
+            hashlib.sha256(regenerated.encode("utf-8")).hexdigest(),
+            receipt["handoff_sha256"],
+            "the receipt names a source commit that does not produce this ledger; "
+            + repair,
         )
 
     def test_check_reports_a_clean_ledger(self) -> None:

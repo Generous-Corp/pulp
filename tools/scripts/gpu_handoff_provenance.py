@@ -49,6 +49,13 @@ OBJECT_TYPES = frozenset({"blob", "tree"})
 RECEIPT_SCHEMA = "pulp.gpu-handoff-provenance-receipt.v1"
 GIT_TIMEOUT_SECONDS = 30
 
+# Identity is immutable for a given (checkout, source commit, HEAD, path), and
+# the validator module keeps Git caches of its own that only pay off when it is
+# imported once. Both caches exist so a suite that validates several times does
+# not re-shell the same hundreds of Git queries.
+_IDENTITY_CACHE: dict[tuple[str, str, str, str], "Identity"] = {}
+_CATALOG_MODULE: Any = None
+
 
 class ProvenanceError(RuntimeError):
     """The handoff ledger cannot be regenerated from an authenticated source."""
@@ -131,7 +138,10 @@ def load_handoff(path: pathlib.Path) -> dict[str, Any]:
 def serialize_handoff(document: dict[str, Any]) -> str:
     """Emit the ledger deterministically in the checked-in encoding."""
 
-    return json.dumps(document, indent=2) + "\n"
+    return (
+        json.dumps(document, indent=2, ensure_ascii=True, separators=(",", ": "))
+        + "\n"
+    )
 
 
 def canonical_inventory(document: dict[str, Any]) -> list[PathRow]:
@@ -205,7 +215,19 @@ def resolve_source_commit(root: pathlib.Path, requested: str) -> str:
 
 
 def resolve_identity(root: pathlib.Path, commit: str, path: str) -> Identity:
-    """Derive one row's identity fields from the single source commit."""
+    """Derive one row's identity fields from the single source commit.
+
+    The validator pins each row to HEAD's tree, so an identity whose blob does
+    not match HEAD is rejected no matter how faithfully it describes the source
+    commit. Comparing here turns that into a named refusal instead of drift the
+    caller has to diagnose.
+    """
+
+    head_revision = git_output(root, ["rev-parse", "HEAD"])
+    cache_key = (str(root), commit, head_revision, path)
+    cached = _IDENTITY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
 
     revision = git_output(root, ["log", "-1", "--format=%H", commit, "--", path])
     if not revision:
@@ -213,18 +235,22 @@ def resolve_identity(root: pathlib.Path, commit: str, path: str) -> Identity:
             f"path {path!r} has no commit history at source commit {commit}"
         )
     object_id = git_output(root, ["rev-parse", f"{revision}:{path}"])
-    tree_object_id = git_output(root, ["rev-parse", f"{commit}:{path}"])
-    if object_id != tree_object_id:
+    head_object = git_output(root, ["rev-parse", f"HEAD:{path}"])
+    if object_id != head_object:
         raise ProvenanceError(
-            f"path {path!r} resolves to {object_id} at its owning revision "
-            f"{revision} but {tree_object_id} at source commit {commit}"
+            f"path {path!r} is {object_id} at its owning revision {revision} but "
+            f"{head_object} at HEAD, so no identity derived from source commit "
+            f"{commit} can satisfy the validator; regenerate with "
+            "--source-commit HEAD"
         )
     object_type = git_output(root, ["cat-file", "-t", object_id])
     if object_type not in OBJECT_TYPES:
         raise ProvenanceError(
             f"path {path!r} resolves to unsupported object type {object_type!r}"
         )
-    return Identity(revision, object_id, object_type)
+    identity = Identity(revision, object_id, object_type)
+    _IDENTITY_CACHE[cache_key] = identity
+    return identity
 
 
 def resolve_inventory_identities(
@@ -336,28 +362,41 @@ def validate_with_catalog(document: dict[str, Any], root: pathlib.Path) -> list[
     it; it only refuses to emit output the validator would reject.
     """
 
-    helper = pathlib.Path(__file__).resolve().parent / "gpu_recipe_catalog.py"
-    spec = importlib.util.spec_from_file_location("gpu_handoff_provenance_catalog", helper)
-    if spec is None or spec.loader is None:
-        raise ProvenanceError(f"cannot load the handoff validator from {helper}")
-    catalog = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(catalog)
+    global _CATALOG_MODULE
+    catalog = _CATALOG_MODULE
+    if catalog is None:
+        helper = pathlib.Path(__file__).resolve().parent / "gpu_recipe_catalog.py"
+        spec = importlib.util.spec_from_file_location(
+            "gpu_handoff_provenance_catalog", helper
+        )
+        if spec is None or spec.loader is None:
+            raise ProvenanceError(f"cannot load the handoff validator from {helper}")
+        catalog = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(catalog)
+        _CATALOG_MODULE = catalog
     problems = list(catalog.validate_handoff(document))
     problems.extend(catalog.validate_handoff_routing(document, root))
     return problems
 
 
 def repair_command(handoff: pathlib.Path, commit: str) -> str:
-    """Return the exact invocation that repairs the reported drift."""
+    """Return the exact invocation that repairs the reported drift.
+
+    ``--handoff`` is a top-level option, so it has to precede the subcommand or
+    argparse rejects the very command this prints. ``--receipt`` is included
+    because the published receipt is asserted against the ledger's bytes, so a
+    regeneration without it leaves a different gate red.
+    """
 
     try:
         relative = handoff.resolve().relative_to(ROOT)
-        location = f" --handoff {relative}"
+        location = "" if relative == DEFAULT_HANDOFF.relative_to(ROOT) else f" --handoff {relative}"
     except ValueError:
         location = f" --handoff {handoff}"
-    if location == f" --handoff {DEFAULT_HANDOFF.relative_to(ROOT)}":
-        location = ""
-    return f"python3 tools/scripts/gpu_handoff_provenance.py write{location} --source-commit {commit}"
+    return (
+        f"python3 tools/scripts/gpu_handoff_provenance.py{location} write "
+        f"--source-commit {commit} --receipt"
+    )
 
 
 def build_receipt(
@@ -448,8 +487,16 @@ def command_check(args: argparse.Namespace) -> int:
             print(f"gpu-handoff-provenance: STALE {line}")
         for problem in problems:
             print(f"gpu-handoff-provenance: VALIDATOR {problem}")
-        if drifts or problems:
+        if drifts:
             print(f"gpu-handoff-provenance: repair with: {command}")
+        elif problems:
+            # Contract violations are human edits, not drift. Printing the
+            # regeneration command for them sends the reader to a tool that
+            # cannot fix what the validator is objecting to.
+            print(
+                "gpu-handoff-provenance: every pinned identity matches; the "
+                "problems above are contract violations regeneration cannot repair"
+            )
         else:
             print("gpu-handoff-provenance: OK: every pinned identity matches")
     return 1 if drifts or problems else 0
@@ -509,7 +556,9 @@ def command_write(args: argparse.Namespace) -> int:
 def command_receipt(args: argparse.Namespace) -> int:
     document = load_handoff(args.handoff)
     commit = resolve_source_commit(args.root, args.source_commit)
-    rendered = serialize_handoff(document)
+    # Hash what the file actually holds. Re-serializing would describe bytes
+    # that may differ from the ledger this receipt names.
+    rendered = args.handoff.read_text(encoding="utf-8")
     receipt = build_receipt(document, commit, rendered, args.handoff)
     payload = json.dumps(receipt, indent=2) + "\n"
     if args.output is None:
@@ -575,6 +624,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except subprocess.TimeoutExpired as error:
         print(f"gpu-handoff-provenance: git timed out: {error}", file=sys.stderr)
+        return 2
+    except OSError as error:
+        print(f"gpu-handoff-provenance: cannot write output: {error}", file=sys.stderr)
         return 2
 
 

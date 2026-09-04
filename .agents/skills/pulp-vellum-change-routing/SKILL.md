@@ -151,9 +151,12 @@ second and answers the question outright.
 The generator that owns those identities is a separate tool:
 
 ```bash
-python3 tools/scripts/gpu_handoff_provenance.py check   # every stale row, and the repair command
-python3 tools/scripts/gpu_handoff_provenance.py write   # regenerate from one exact commit
+python3 tools/scripts/gpu_handoff_provenance.py check                       # every stale row, and the repair command
+python3 tools/scripts/gpu_handoff_provenance.py write --receipt             # regenerate, and refresh the receipt
 ```
+
+Pass `--receipt`. The published receipt is asserted against the ledger's bytes,
+so regenerating without it leaves a second gate red for the next reader.
 
 `check` names each stale row, its path, and the field-level correction, so a
 drifted pin no longer has to be located by hand. `write` derives `revision`,
