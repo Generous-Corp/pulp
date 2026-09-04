@@ -145,8 +145,27 @@ View::~View() {
     // corrupting memory quietly. A child destroyed as part of its parent's
     // teardown is legitimate and exempted via the parent's destroying_ flag.
     // Release builds are unchanged. Contract: view_lifecycle.hpp.
-    assert((parent_ == nullptr || parent_->destroying_) &&
-           "View destroyed while still attached; call parent->remove_child() first");
+    //
+    // The test is whether the parent still OWNS this view, not merely whether
+    // parent_ is set. Several deliberate ownership transfers hand a subtree to a
+    // deferred-destruction queue and leave parent_ intact on purpose — realm
+    // retirement does, so a draining native accessibility provider can still
+    // navigate the retired graph (retire_children_for_realm_reset), and the
+    // emergency owner-teardown path never clears it at all. Those are safe: the
+    // parent no longer lists the view, so nothing can route to it. Asserting on
+    // parent_ alone would red the Debug lane on a path that is working
+    // correctly.
+#ifndef NDEBUG
+    const bool parent_still_owns_this = [this] {
+        if (parent_ == nullptr || parent_->destroying_) return false;
+        for (const auto& sibling : parent_->children_)
+            if (sibling.get() == this) return true;
+        return false;
+    }();
+    assert(!parent_still_owns_this &&
+           "View destroyed while its parent still owns it; "
+           "call parent->remove_child() first");
+#endif
     assert(dispatch_depth_ == 0 &&
            "View destroyed while one of its callbacks is executing; "
            "route ownership through View::retire()");

@@ -35,10 +35,16 @@ void MyWidget::on_frame_clock_changed() {
 Outside a callback `retire()` destroys immediately, so it is always safe to
 call. Retiring allocates nothing, which is why a `noexcept` path can use it.
 
-**3. Destroying an attached or actively-dispatched view is a contract
-violation.** Call `remove_child()` first, or `retire()`. Debug builds assert;
-release builds are unchanged. The one legitimate exception is a child destroyed
-as part of its parent's own teardown, which the contract recognizes.
+**3. Destroying a view its parent still owns, or one that is actively
+dispatching, is a contract violation.** Call `remove_child()` first, or
+`retire()`. Debug builds assert; release builds are unchanged.
+
+The ownership test is deliberately "is this view still in its parent's
+`children_`", not "is `parent_` set". Two legitimate paths leave `parent_`
+intact after transferring ownership: a child destroyed as part of its parent's
+own teardown, and realm retirement, which keeps parent links so a draining
+native accessibility provider can still navigate the retired graph. Both are
+safe — the parent no longer lists the view, so nothing can route to it.
 
 ## Identity is address **and** instance id
 
