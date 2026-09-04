@@ -96,6 +96,9 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 // the existing-widget fast path silently discard that hint.
                 if (hint == "scroll"
                     && dynamic_cast<ScrollView*>(existing) == nullptr) {
+                    auto* interaction = p->existing_interaction();
+                    auto* focused_before = interaction ? interaction->focused_input : nullptr;
+                    auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
                     auto removed = p->remove_child(existing);
                     auto scroll = std::make_unique<ScrollView>();
                     // Keep the authored View as the ScrollView's content
@@ -129,6 +132,11 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     self.owned_widgets_.emplace_back(wrapper);
                     self.scroll_wrappers_[childId] = wrapper;
                     self.widgets_.cache(childId, content);
+                    // remove_child() intentionally retires root interaction
+                    // slots while detached. Restore slots that belonged to
+                    // this retained subtree after its new ancestry is live.
+                    if (focused_before) focused_before->claim_input_focus();
+                    if (overlay_before) overlay_before->claim_overlay();
                     return choc::value::Value();
                 }
                 // Move the existing subtree to the new parent - don't erase widgets.
