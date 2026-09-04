@@ -127,6 +127,54 @@ class SignAndReleaseNoTestGate(unittest.TestCase):
         )
 
 
+class ReleaseCliChecksOutLfBytes(unittest.TestCase):
+    """release-cli.yml must pin LF bytes BEFORE the build-cli checkout.
+
+    Git for Windows ships core.autocrlf=true, so a checkout rewrites every LF
+    to CRLF. Any release digest pinned over a text file then hashes to bytes no
+    pin can describe. v0.832.0's Windows legs failed with "pulp-sdk/share/pulp/
+    gpu-recipes.yaml differs from the selected release catalog digest" while the
+    Linux legs passed on the same commit, and every text member of a published
+    Windows archive measures 100% CRLF with byte counts closing exactly.
+
+    The step is load-bearing and ordering-sensitive: `git config --global` only
+    affects a checkout that happens AFTER it. This asserts both that it exists
+    and that it precedes the checkout, so a reorder cannot silently disarm it.
+    """
+
+    def setUp(self) -> None:
+        self.assertTrue(RELEASE_CLI.exists(), f"missing workflow file: {RELEASE_CLI}")
+        self.document = yaml.safe_load(RELEASE_CLI.read_text())
+        self.steps = self.document["jobs"]["build-cli"]["steps"]
+
+    def test_build_cli_disables_autocrlf_before_checkout(self) -> None:
+        config_index = None
+        checkout_index = None
+        for index, step in enumerate(self.steps):
+            run = step.get("run") or ""
+            if "core.autocrlf" in run and "false" in run and config_index is None:
+                config_index = index
+            if str(step.get("uses", "")).startswith("actions/checkout") and (
+                checkout_index is None
+            ):
+                checkout_index = index
+        self.assertIsNotNone(
+            checkout_index, "build-cli has no actions/checkout step to protect"
+        )
+        self.assertIsNotNone(
+            config_index,
+            "build-cli must set `git config --global core.autocrlf false` so the "
+            "Windows checkout keeps upstream LF bytes; without it the release "
+            "archive verifier fails on the gpu-recipes.yaml catalog digest.",
+        )
+        self.assertLess(
+            config_index,
+            checkout_index,
+            "core.autocrlf must be set BEFORE the checkout — a `git config` after "
+            "it cannot undo line endings already written to the working tree.",
+        )
+
+
 class ReleaseCliLinuxNoWebView(unittest.TestCase):
     """release-cli.yml must NOT pass PULP_BUILD_WEBVIEW=ON on Linux.
 

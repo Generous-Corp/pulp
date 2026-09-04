@@ -299,6 +299,22 @@ jobs:
           # step (--system persists across steps regardless of HOME).
           git config --system --add safe.directory '*'
           git --version; cmake --version | head -1; g++ --version | head -1; git-lfs version || git lfs version || true
+
+      # Git for Windows ships core.autocrlf=true, so a checkout rewrites every
+      # LF to CRLF. Any release digest pinned over a text file then hashes to
+      # bytes no pin can describe, and the archive verifier fails far from the
+      # cause: v0.832.0's Windows legs failed with "pulp-sdk/share/pulp/
+      # gpu-recipes.yaml differs from the selected release catalog digest" while
+      # Linux passed on the same commit. Pin upstream LF bytes so a Windows
+      # archive is byte-identical to a Linux one. Same failure mode, and same
+      # remedy, as the Three.js runtime pin in tools/cmake/PulpDependencies.cmake
+      # — force LF rather than relaxing the digest, so the SDK keeps shipping
+      # identical catalog bytes on every platform.
+      - name: Check out release sources with upstream LF bytes
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
       - uses: actions/checkout@v5
         with:
           # lfs: false — release-cli fetches the Skia binaries explicitly via

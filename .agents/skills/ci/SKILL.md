@@ -7436,6 +7436,52 @@ The fallback is last, not first. `sign-and-release.yml` must prefer the isolated
 PR pool. A split route can finish all CLI/SDK assets while the signing leg
 remains queued with no runner, leaving the release draft unpublished.
 
+## A Windows-only digest failure is CRLF, not corruption
+
+When a release leg fails a **content digest** on Windows while **Linux passes on
+the same commit**, stop looking at the file. Git for Windows ships
+`core.autocrlf=true`, so the checkout rewrites every LF to CRLF and any pinned
+text file hashes to bytes no pin can describe.
+
+This blocked v0.832.0 (and with it five stacked tags), failing both Windows legs
+with `pulp-sdk/share/pulp/gpu-recipes.yaml differs from the selected release
+catalog digest`. It matters because `release-cli.yml`'s publish job gates on the
+**all-platform** `build-cli` matrix — a failed Windows leg blocks publishing even
+when darwin is green, so "we only care about macOS" is true for the PR gate and
+false for the release.
+
+Confirm it in one step — compare byte counts, not content:
+
+```bash
+# a text member of a Windows archive vs its LF blob: size delta == newline count
+git cat-file -s "$TAG:docs/status/gpu-recipes.yaml"     # e.g. 5716, 212 LF, 0 CRLF
+# the archive's copy will be 5716 + 212 = 5928, 100% CRLF, 0 bare LF
+```
+
+The fix is to force upstream LF **before** the checkout — never to relax the
+digest (that knowingly ships a Windows SDK whose bytes differ from every other
+platform's, against the "embeds these exact catalog bytes" contract):
+
+```yaml
+- name: Check out release sources with upstream LF bytes
+  shell: bash
+  run: |
+    git config --global core.autocrlf false
+    git config --global core.eol lf
+- uses: actions/checkout@v5
+```
+
+Ordering is load-bearing: `git config` **after** a checkout cannot undo line
+endings already written to the working tree. `ReleaseCliChecksOutLfBytes` in
+`tools/scripts/test_release_workflow_test_step.py` asserts both the step's
+existence and its position.
+
+Same failure class, already fixed once elsewhere: the Three.js runtime pin in
+`tools/cmake/PulpDependencies.cmake` (its comment states the diagnosis). If you
+hit a third instance, prefer `* text=auto eol=lf` in `.gitattributes` as the
+durable repo-wide guard — but note that only helps **future** tags, since a
+checkout reads the tag's own tree.
+
 ## "Tag exists but no published release" → the reconciler owns this
 
 `release-reconcile.yml` (every 30 min) is the single owner of "did every recent

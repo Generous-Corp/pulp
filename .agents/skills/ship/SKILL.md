@@ -1222,6 +1222,31 @@ When a fork release drops or adds a slice, update the manifest
 keep a platform in the `REQUIRE_GPU=ON` case blocks while its asset is
 actually published.
 
+### A Windows leg failing an archive digest is CRLF, and it blocks the whole release
+
+The archive verifier hashes raw tar/zip member bytes. Git for Windows ships
+`core.autocrlf=true`, so a checkout rewrites LF to CRLF and any digest-pinned
+text file hashes to bytes no pin can describe — on Windows only, while Linux
+passes on the identical commit. Because `release-cli.yml`'s publish job gates on
+the all-platform `build-cli` matrix, that one leg keeps the release object from
+ever being created, so the symptom you see is "tag exists, no release."
+
+Force upstream LF bytes **before** the `build-cli` checkout (a `git config`
+afterwards is too late), and never relax the digest instead — the SDK contract is
+that every platform embeds identical catalog bytes:
+
+```yaml
+- name: Check out release sources with upstream LF bytes
+  shell: bash
+  run: |
+    git config --global core.autocrlf false
+    git config --global core.eol lf
+```
+
+Diagnosis is arithmetic, not inspection: a CRLF'd text member's size equals its
+LF size plus its newline count (`NOTICE.md` 79246 + 1892 = 81138). See the `ci`
+skill for the full write-up and the regression tests.
+
 ### Backfilling a stuck release tag
 
 `auto-release.yml` creates the tag immediately on merge, but
