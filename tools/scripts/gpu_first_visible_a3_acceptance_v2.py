@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import json
 import math
@@ -50,13 +51,32 @@ A4_SCENARIOS = (
     "super-convolver-web",
 )
 BLOCKERS = ("product-policy", "required-coverage")
-POLICY_REPOSITORIES = {
-    "Generous-Corp/pulp", "Generous-Corp/forge", "danielraffel/pulp-planning",
-}
+PLANNING_POLICY_REPOSITORY = "danielraffel/pulp-planning"
+PLANNING_POLICY_DIRECTORY = "research/evidence/gpu-ux/a3-budget"
+A0_GPU_BASELINE = "docs/analysis/gpu-ux-baseline.md"
+SUPPORT_MATRIX = "docs/status/support-matrix.yaml"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+POLICY_BUDGET_ID = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 ARTIFACT_KEYS = {"path", "sha256"}
 CANONICAL_RECEIPT = "docs/validation/gpu-first-visible-a3-acceptance.json"
+BUILD_AUTHORITY_DIGEST_FIELDS = (
+    "host_sha256", "application_sha256", "plugin_sha256", "provider_sha256",
+    "build_sha256", "content_sha256", "signature_sha256",
+)
+BUILD_AUTHORITY_TEXT_FIELDS = (
+    "host_bundle_id", "host_version", "adapter", "adapter_configuration",
+    "interaction_lifecycle", "steady_state_workload",
+)
+BUILD_AUTHORITY_FIELDS = (*BUILD_AUTHORITY_DIGEST_FIELDS, *BUILD_AUTHORITY_TEXT_FIELDS)
+DERIVED_CAMPAIGN_IDENTITY_FIELDS = {
+    "pulp_revision", "forge_revision", "machine_id", "hardware", "os",
+    "host_kind", "application_kind", "plugin_format", "display_id", "refresh_hz",
+}
+VISIBLE_POLICY_IDENTITY_FIELDS = {
+    "editor_open_origin", "interaction_origin", "interaction_stimulus",
+    "interaction_expected_state", "interaction_measurement_endpoint",
+}
 
 
 class V2AcceptanceError(ValueError):
@@ -265,6 +285,36 @@ def _positive_int(value: Any, label: str) -> int:
     return value
 
 
+def git_blob_digest(data: bytes) -> str:
+    """Return the Git object ID for regular-file bytes, not a security digest."""
+    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+
+
+def signature_set_digest(signatures: Any, label: str) -> tuple[str, frozenset[str]]:
+    """Validate a signature set and return its documented canonical digest."""
+    if (
+        not isinstance(signatures, list)
+        or not signatures
+        or any(not isinstance(value, str) or not value for value in signatures)
+        or len(set(signatures)) != len(signatures)
+    ):
+        raise V2AcceptanceError(f"{label} must be a nonempty unique signature set")
+    canonical = json.dumps(sorted(signatures), separators=(",", ":")) + "\n"
+    return hashlib.sha256(canonical.encode()).hexdigest(), frozenset(signatures)
+
+
+def _github_time(value: Any, label: str) -> dt.datetime:
+    if not isinstance(value, str):
+        raise V2AcceptanceError(f"{label} is missing")
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise V2AcceptanceError(f"{label} is invalid") from error
+    if parsed.tzinfo is None:
+        raise V2AcceptanceError(f"{label} must include a timezone")
+    return parsed
+
+
 def validate_product_policy(
     receipt: dict[str, Any], evidence_root: Path,
 ) -> tuple[dict[str, Any], str, set[str]]:
@@ -276,7 +326,7 @@ def validate_product_policy(
         binding["validation"], evidence_root, "product_policy.validation"
     )
     exact_keys(policy, {
-        "schema", "version", "budget_id", "source", "approval", "clock",
+        "schema", "version", "budget_id", "clock",
         "editor_open_origin", "first_nonblank_endpoint", "statistic",
         "first_applicable_pulp_revision", "first_applicable_forge_revision",
         "reference_host", "roles", "required_coverage", "a4_scenario_budgets",
@@ -285,41 +335,18 @@ def validate_product_policy(
     if (
         policy["schema"] != "pulp.gpu-first-visible-budget-authority.v1"
         or policy["version"] != 1
+        or not isinstance(policy["budget_id"], str)
+        or not POLICY_BUDGET_ID.fullmatch(policy["budget_id"])
         or policy["clock"] != "mach_continuous_time"
         or policy["editor_open_origin"] != "editor-open-requested"
         or policy["first_nonblank_endpoint"] != "first-nonblank-presented-frame"
         or policy["statistic"] != "p95"
     ):
         raise V2AcceptanceError("product policy has the wrong closed measurement semantics")
-    source = exact_keys(
-        policy["source"], {"repository", "revision", "path", "blob"},
-        "product policy source",
-    )
-    if (
-        source["repository"] not in POLICY_REPOSITORIES
-        or not GIT_SHA.fullmatch(source["revision"])
-        or not GIT_SHA.fullmatch(source["blob"])
-        or not isinstance(source["path"], str)
-        or not source["path"]
-    ):
-        raise V2AcceptanceError("product policy source authority is invalid")
-    approval = exact_keys(
-        policy["approval"],
-        {"github_user_id", "mode", "pr_url", "approved_head"},
-        "product policy approval",
-    )
-    if (
-        approval["github_user_id"] != 25807
-        or approval["mode"] not in {"author", "approval"}
-        or not isinstance(approval["pr_url"], str)
-        or not approval["pr_url"].startswith("https://github.com/")
-        or approval["approved_head"] != source["revision"]
-    ):
-        raise V2AcceptanceError("product policy is not bound to Daniel's immutable approval")
     exact_keys(validation, {
         "schema", "version", "status", "checked_at", "fresh_live_state",
-        "protected_commit", "repository", "revision", "path", "blob",
-        "github_user_id", "approved_head",
+        "protected_commit", "repository", "publication_commit", "path", "blob",
+        "github_user_id", "approval_mode", "pr_url", "approved_head",
     }, "product policy validation")
     if (
         validation["schema"] != "pulp.gpu-first-visible-product-policy-validation.v1"
@@ -328,13 +355,22 @@ def validate_product_policy(
         or validation["fresh_live_state"] is not True
         or validation["protected_commit"] is not True
         or validation["github_user_id"] != 25807
-        or validation["repository"] != source["repository"]
-        or validation["revision"] != source["revision"]
-        or validation["path"] != source["path"]
-        or validation["blob"] != source["blob"]
-        or validation["approved_head"] != approval["approved_head"]
+        or validation["repository"] != PLANNING_POLICY_REPOSITORY
+        or not GIT_SHA.fullmatch(str(validation["publication_commit"]))
+        or not GIT_SHA.fullmatch(str(validation["approved_head"]))
+        or not GIT_SHA.fullmatch(str(validation["blob"]))
+        or validation["approval_mode"] not in {"author", "approval"}
+        or not isinstance(validation["path"], str)
+        or not validation["path"]
+        or not isinstance(validation["pr_url"], str)
+        or not validation["pr_url"].startswith("https://github.com/")
     ):
         raise V2AcceptanceError("product policy validation does not prove fresh protected authority")
+    if (
+        validation["path"]
+        != f"{PLANNING_POLICY_DIRECTORY}/{policy['budget_id']}.product-policy.json"
+    ):
+        raise V2AcceptanceError("planning product policy path does not match its budget authority")
     host = exact_keys(
         policy["reference_host"],
         {"host_id", "machine_id", "hardware", "os", "display", "refresh_hz"},
@@ -352,6 +388,7 @@ def validate_product_policy(
         exact_keys(row, {
             "role_id", "first_visible_p95_ns", "first_interaction",
             "steady_cpu_frame_p95_ns", "steady_gpu_frame_p95_ns",
+            "build_authority",
         }, f"product policy role {row.get('role_id')}")
         _positive_int(row["first_visible_p95_ns"], "first-visible threshold")
         _positive_int(row["steady_cpu_frame_p95_ns"], "steady CPU threshold")
@@ -375,6 +412,29 @@ def validate_product_policy(
                 if not isinstance(interaction[field], str) or not interaction[field]:
                     raise V2AcceptanceError(f"{row['role_id']} interaction.{field} is missing")
             _positive_int(interaction["p95_ns"], "first-interaction threshold")
+        build_authority = exact_keys(row["build_authority"], {
+            *BUILD_AUTHORITY_FIELDS, "expected_signatures",
+        }, f"product policy role {row['role_id']} build authority")
+        for field in BUILD_AUTHORITY_DIGEST_FIELDS:
+            if not isinstance(build_authority[field], str) or not SHA256.fullmatch(
+                build_authority[field]
+            ):
+                raise V2AcceptanceError(
+                    f"product policy role {row['role_id']} build authority {field} is invalid"
+                )
+        for field in BUILD_AUTHORITY_TEXT_FIELDS:
+            if not isinstance(build_authority[field], str) or not build_authority[field]:
+                raise V2AcceptanceError(
+                    f"product policy role {row['role_id']} build authority {field} is missing"
+                )
+        signature_digest, _ = signature_set_digest(
+            build_authority["expected_signatures"],
+            f"product policy role {row['role_id']} expected signatures",
+        )
+        if build_authority["signature_sha256"] != signature_digest:
+            raise V2AcceptanceError(
+                f"product policy role {row['role_id']} signature authority digest is invalid"
+            )
     coverage = exact_keys(
         policy["required_coverage"],
         {"predicate", "adapter", "configuration", "support_matrix", "a1_evidence"},
@@ -389,26 +449,38 @@ def validate_product_policy(
     for index, ref in enumerate(coverage["a1_evidence"]):
         exact_keys(ref, ARTIFACT_KEYS, f"required coverage A1 evidence {index}")
     nested_digests = {coverage["support_matrix"]["sha256"]}
-    validate_generated_evidence(
+    policy_pulp_revision = policy["first_applicable_pulp_revision"]
+    support_matrix_path = validate_generated_evidence(
         coverage["support_matrix"], evidence_root, "support-matrix",
-        receipt["implementation_head"], nested_digests,
+        policy_pulp_revision, nested_digests,
     )
+    if support_matrix_path != SUPPORT_MATRIX:
+        raise V2AcceptanceError("required coverage is not bound to the protected support matrix")
+    a1_paths: set[str] = set()
     for index, ref in enumerate(coverage["a1_evidence"]):
-        validate_generated_evidence(
-            ref, evidence_root, "a1-evidence", receipt["implementation_head"],
+        a1_paths.add(validate_generated_evidence(
+            ref, evidence_root, "a1-evidence", policy_pulp_revision,
             nested_digests,
-        )
+        ))
         nested_digests.add(ref["sha256"])
+    if A0_GPU_BASELINE not in a1_paths:
+        raise V2AcceptanceError("required coverage lacks the A0-named protected GPU baseline")
     canary = exact_keys(policy["canary"], {
         "binary_sha256", "content_sha256", "signature_sha256",
-        "editor_open_origin", "interaction_lifecycle", "steady_state_workload",
+        "adapter", "adapter_configuration", "editor_open_origin",
+        "interaction_lifecycle", "steady_state_workload",
     }, "product policy canary")
     for field in ("binary_sha256", "content_sha256", "signature_sha256"):
         if not isinstance(canary[field], str) or not SHA256.fullmatch(canary[field]):
             raise V2AcceptanceError(f"product policy canary.{field} is invalid")
-    for field in ("editor_open_origin", "interaction_lifecycle", "steady_state_workload"):
+    for field in (
+        "adapter", "adapter_configuration", "editor_open_origin",
+        "interaction_lifecycle", "steady_state_workload",
+    ):
         if not isinstance(canary[field], str) or not canary[field]:
             raise V2AcceptanceError(f"product policy canary.{field} is missing")
+    if canary["editor_open_origin"] != policy["editor_open_origin"]:
+        raise V2AcceptanceError("product policy canary editor-open origin differs from measurement authority")
     scenarios = policy["a4_scenario_budgets"]
     if not isinstance(scenarios, list) or [
         row.get("scenario_id") for row in scenarios if isinstance(row, dict)
@@ -424,10 +496,10 @@ def validate_product_policy(
     return policy, binding["authority"]["sha256"], nested_digests
 
 
-def validate_generated_evidence(
+def resolve_generated_evidence_binding(
     wrapper_ref: dict[str, Any], evidence_root: Path, kind: str,
-    implementation_head: str, nested_digests: set[str],
-) -> None:
+    implementation_head: str,
+) -> tuple[dict[str, Any], Path, Path, dict[str, Any]]:
     wrapper = resolve_artifact(wrapper_ref, evidence_root, f"required coverage {kind}")
     exact_keys(wrapper, {
         "schema", "version", "kind", "implementation_head", "producer",
@@ -448,6 +520,16 @@ def validate_generated_evidence(
     )
     if not os.access(producer, os.X_OK):
         raise V2AcceptanceError(f"required coverage {kind} producer is not executable")
+    return wrapper, producer, artifact, provenance
+
+
+def validate_generated_evidence(
+    wrapper_ref: dict[str, Any], evidence_root: Path, kind: str,
+    implementation_head: str, nested_digests: set[str],
+) -> str:
+    wrapper, producer, artifact, provenance = resolve_generated_evidence_binding(
+        wrapper_ref, evidence_root, kind, implementation_head,
+    )
     completed = subprocess.run(
         [str(producer), "verify-a3-evidence", "--kind", kind, "--artifact", str(artifact), "--json"],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False,
@@ -472,6 +554,7 @@ def validate_generated_evidence(
         provenance[field]["sha256"]
         for field in ("build_verifier_receipt", "source_build_receipt")
     )
+    return wrapper["artifact"]["path"]
 
 
 def validate_existing_build_proof(
@@ -548,6 +631,7 @@ def validate_existing_build_proof(
 
 def validate_sample(
     sample: Any, *, role_id: str, state: str, token: str, order: int, seed: int,
+    expected_signatures: frozenset[str],
 ) -> dict[str, Any]:
     sample = exact_keys(sample, {
         "trial_id", "order", "seed", "first_visible_ns", "first_interaction_ns",
@@ -572,17 +656,21 @@ def validate_sample(
     expected_categories = list(TRACE_CATEGORIES) if state == "candidate-active-session" else []
     if sample["trace_categories"] != expected_categories:
         raise V2AcceptanceError(f"raw sample {token} has missing or extra trace categories")
-    if not isinstance(sample["signatures_present"], list) or not sample["signatures_present"]:
-        raise V2AcceptanceError(f"raw sample {token} lacks bound signatures")
+    _, observed_signatures = signature_set_digest(
+        sample["signatures_present"], f"raw sample {token} observed signatures",
+    )
+    if observed_signatures != expected_signatures:
+        raise V2AcceptanceError(f"raw sample {token} does not contain the exact expected signature set")
     return sample
 
 
 def validate_raw_campaign(
     raw: Any, *, role_id: str, policy_sha256: str,
+    policy_interaction: dict[str, Any], expected_signatures: frozenset[str],
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
     raw = exact_keys(raw, {
         "schema", "version", "role_id", "manifest_seed", "trial_order",
-        "timer_noise_samples_ns", "states",
+        "interaction_authority", "timer_noise_samples_ns", "states",
     }, f"{role_id} raw samples")
     if raw["schema"] != "pulp.gpu-first-visible-a3-role-samples.v2" or raw["version"] != 2 or raw["role_id"] != role_id:
         raise V2AcceptanceError(f"{role_id} raw samples have the wrong identity")
@@ -590,6 +678,16 @@ def validate_raw_campaign(
     order = derived_trial_order(policy_sha256, role_id)
     if raw["manifest_seed"] != seed or raw["trial_order"] != order:
         raise V2AcceptanceError(f"{role_id} raw samples have the wrong pairing order or seed")
+    expected_interaction = None
+    if role_id in VISIBLE_ROLES:
+        expected_interaction = {
+            "origin": policy_interaction["origin"],
+            "stimulus": policy_interaction["stimulus"],
+            "expected_state": policy_interaction["expected_state_change"],
+            "measurement_endpoint": policy_interaction["endpoint"],
+        }
+    if raw["interaction_authority"] != expected_interaction:
+        raise V2AcceptanceError(f"{role_id} raw samples do not bind exact interaction authority")
     timer = raw["timer_noise_samples_ns"]
     if not isinstance(timer, list) or len(timer) != 10000 or any(
         not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in timer
@@ -613,6 +711,7 @@ def validate_raw_campaign(
                 validate_sample(
                     sample, role_id=role_id, state=state, token=token,
                     order=by_token[token], seed=seed,
+                    expected_signatures=expected_signatures,
                 )
         result[state] = groups
     return result
@@ -865,6 +964,193 @@ def replay_trace_analyzer(campaign: dict[str, Any], evidence_root: Path, impleme
     }
 
 
+def product_policy_publication_errors(
+    validation: dict[str, Any], policy_bytes: bytes, ghapp: str,
+) -> list[str]:
+    """Prove policy bytes, publication ancestry, and exact-head approval live."""
+    errors: list[str] = []
+    repository = validation["repository"]
+    publication = validation["publication_commit"]
+    policy_path = validation["path"]
+    expected_blob = validation["blob"]
+    approved_head = validation["approved_head"]
+    if git_blob_digest(policy_bytes) != expected_blob:
+        errors.append("bound product policy bytes do not match the protected Git blob")
+
+    branch = _command_json([ghapp, "api", f"repos/{repository}/branches/main"])
+    protected_head = branch.get("commit", {}).get("sha")
+    if branch.get("protected") is not True or not GIT_SHA.fullmatch(str(protected_head)):
+        errors.append("product policy repository main is not a live protected branch")
+        return errors
+
+    comparison = _command_json([
+        ghapp, "api", f"repos/{repository}/compare/{publication}...{protected_head}",
+    ])
+    if (
+        comparison.get("base_commit", {}).get("sha") != publication
+        or comparison.get("merge_base_commit", {}).get("sha") != publication
+        or comparison.get("status") not in {"ahead", "identical"}
+        or comparison.get("behind_by") != 0
+    ):
+        errors.append("product policy publication is not an ancestor of protected main")
+
+    for label, revision in (
+        ("approved head", approved_head),
+        ("publication", publication),
+        ("protected main", protected_head),
+    ):
+        contents = _command_json([
+            ghapp, "api", f"repos/{repository}/contents/{policy_path}?ref={revision}",
+        ])
+        if (
+            contents.get("type") != "file"
+            or contents.get("path") != policy_path
+            or contents.get("sha") != expected_blob
+        ):
+            errors.append(f"product policy {label} does not contain the exact approved blob")
+
+    match = re.fullmatch(
+        r"https://github\.com/([^/]+/[^/]+)/pull/([0-9]+)", validation["pr_url"]
+    )
+    if match is None or match.group(1) != repository:
+        errors.append("product policy approval URL does not identify its repository")
+        return errors
+    pr_number = int(match.group(2))
+    pull = _command_json([ghapp, "api", f"repos/{repository}/pulls/{pr_number}"])
+    created_at = pull.get("created_at")
+    merged_at = pull.get("merged_at")
+    if (
+        pull.get("state") != "closed"
+        or not isinstance(created_at, str)
+        or not isinstance(merged_at, str)
+        or pull.get("merge_commit_sha") != publication
+        or pull.get("base", {}).get("ref") != "main"
+    ):
+        errors.append("product policy publication is not the recorded merged main PR")
+        return errors
+    created_time = _github_time(created_at, "product policy PR created_at")
+    merged_time = _github_time(merged_at, "product policy PR merged_at")
+    if created_time >= merged_time:
+        errors.append("product policy PR merge does not postdate PR creation")
+        return errors
+    if pull.get("head", {}).get("sha") != approved_head:
+        errors.append("product policy approval is not bound to the exact approved head")
+        return errors
+    reviews = _fetch_all_pages(ghapp, f"repos/{repository}/pulls/{pr_number}/reviews")
+    effective: tuple[dt.datetime, int, dict[str, Any]] | None = None
+    for review in reviews:
+        if (
+            review.get("user", {}).get("id") == 25807
+            and review.get("user", {}).get("type") == "User"
+            and review.get("commit_id") == approved_head
+            and review.get("state") in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
+        ):
+            try:
+                submitted = _github_time(
+                    review.get("submitted_at"), "product policy review submitted_at"
+                )
+            except V2AcceptanceError:
+                continue
+            review_id = review.get("id")
+            if created_time <= submitted <= merged_time and isinstance(review_id, int):
+                candidate = (submitted, review_id, review)
+                if effective is None or candidate[:2] > effective[:2]:
+                    effective = candidate
+    exact_head_approved = effective is not None and effective[2].get("state") == "APPROVED"
+    if validation["approval_mode"] == "approval" and not exact_head_approved:
+        errors.append("product policy lacks an effective pre-merge exact-head Daniel approval")
+    elif validation["approval_mode"] == "author" and not exact_head_approved:
+        commit = _command_json([
+            ghapp, "api", f"repos/{repository}/commits/{approved_head}",
+        ])
+        authored_at = commit.get("commit", {}).get("committer", {}).get("date")
+        try:
+            authored_time = _github_time(
+                authored_at, "product policy exact-head commit committer date"
+            )
+        except V2AcceptanceError:
+            authored_time = None
+        verification = commit.get("commit", {}).get("verification", {})
+        if (
+            commit.get("sha") != approved_head
+            or commit.get("author", {}).get("id") != 25807
+            or commit.get("author", {}).get("type") != "User"
+            or commit.get("committer", {}).get("id") != 25807
+            or commit.get("committer", {}).get("type") != "User"
+            or verification.get("verified") is not True
+            or verification.get("reason") != "valid"
+            or not isinstance(verification.get("signature"), str)
+            or not verification["signature"]
+            or not isinstance(verification.get("payload"), str)
+            or not verification["payload"]
+            or authored_time is None
+            or authored_time > merged_time
+        ):
+            errors.append(
+                "product policy author mode lacks an exact-head Daniel approval or "
+                "cryptographically attributable exact-head commit action"
+            )
+    return errors
+
+
+def protected_required_coverage_errors(
+    policy: dict[str, Any], evidence_root: Path, pulp_head: str, ghapp: str,
+) -> list[str]:
+    """Bind coverage bytes to their claimed source revision and protected head."""
+    coverage = policy["required_coverage"]
+    refs = [
+        (coverage["support_matrix"], "support-matrix"),
+        *((ref, "a1-evidence") for ref in coverage["a1_evidence"]),
+    ]
+    errors: list[str] = []
+    policy_revision = policy["first_applicable_pulp_revision"]
+    comparison = _command_json([
+        ghapp, "api", f"repos/Generous-Corp/pulp/compare/{policy_revision}...{pulp_head}",
+    ])
+    if (
+        comparison.get("base_commit", {}).get("sha") != policy_revision
+        or comparison.get("merge_base_commit", {}).get("sha") != policy_revision
+        or comparison.get("status") != "ahead"
+        or not isinstance(comparison.get("ahead_by"), int)
+        or comparison["ahead_by"] <= 0
+        or comparison.get("behind_by") != 0
+    ):
+        errors.append("product policy first-applicable Pulp revision is not strict protected-main ancestry")
+    for ref, kind in refs:
+        try:
+            wrapper, _producer, artifact, _provenance = resolve_generated_evidence_binding(
+                ref, evidence_root, kind, policy_revision,
+            )
+        except V2AcceptanceError as error:
+            errors.append(f"required coverage source/producer binding is invalid: {error}")
+            continue
+        path = wrapper["artifact"]["path"]
+        expected_blob = git_blob_digest(artifact.read_bytes())
+        for revision, label in (
+            (policy_revision, "claimed source revision"),
+            (pulp_head, "current protected head"),
+        ):
+            try:
+                contents = _command_json([
+                    ghapp, "api",
+                    f"repos/Generous-Corp/pulp/contents/{path}?ref={revision}",
+                ])
+            except (V2AcceptanceError, json.JSONDecodeError) as error:
+                errors.append(
+                    f"required coverage lookup failed at {label}: {path}: {error}"
+                )
+                continue
+            if (
+                contents.get("type") != "file"
+                or contents.get("path") != path
+                or contents.get("sha") != expected_blob
+            ):
+                errors.append(
+                    f"required coverage is not the exact protected Pulp blob at {label}: {path}"
+                )
+    return errors
+
+
 def live_protected_main_errors(
     receipt: dict[str, Any], receipt_path: Path, repository: Path, evidence_root: Path,
 ) -> list[str]:
@@ -890,43 +1176,19 @@ def live_protected_main_errors(
         indexed_blob = subprocess.run(["git", "rev-parse", f"HEAD:{CANONICAL_RECEIPT}"], cwd=repository, check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         if contents.get("type") != "file" or contents.get("path") != CANONICAL_RECEIPT or contents.get("sha") != local_blob or local_blob != indexed_blob:
             errors.append("live main does not contain the exact canonical receipt blob")
-        policy = resolve_artifact(
+        policy_path = resolve_artifact_path(
             receipt["product_policy"]["authority"], evidence_root,
             "product_policy.authority",
         )
-        source = policy["source"]
-        owner_repo = source["repository"]
-        policy_contents = _command_json([
-            ghapp, "api", f"repos/{owner_repo}/contents/{source['path']}?ref={source['revision']}",
-        ])
-        if (
-            policy_contents.get("type") != "file"
-            or policy_contents.get("path") != source["path"]
-            or policy_contents.get("sha") != source["blob"]
-        ):
-            errors.append("product policy source is not the exact live Git blob")
-        protected_heads = _fetch_all_pages(
-            ghapp, f"repos/{owner_repo}/commits/{source['revision']}/branches-where-head"
+        validation = resolve_artifact(
+            receipt["product_policy"]["validation"], evidence_root,
+            "product_policy.validation",
         )
-        if not any(row.get("protected") is True for row in protected_heads):
-            errors.append("product policy revision is not the head of a protected branch")
-        approval = policy["approval"]
-        match = re.fullmatch(r"https://github\.com/([^/]+/[^/]+)/pull/([0-9]+)", approval["pr_url"])
-        if match is None or match.group(1) != owner_repo:
-            errors.append("product policy approval URL does not identify its source repository")
-        else:
-            pr_number = int(match.group(2))
-            pull = _command_json([ghapp, "api", f"repos/{owner_repo}/pulls/{pr_number}"])
-            if pull.get("head", {}).get("sha") != approval["approved_head"]:
-                errors.append("product policy approval is not bound to the exact approved head")
-            if approval["mode"] == "author":
-                if pull.get("user", {}).get("id") != 25807:
-                    errors.append("product policy author identity is not Daniel's immutable user ID")
-            else:
-                reviews = _fetch_all_pages(ghapp, f"repos/{owner_repo}/pulls/{pr_number}/reviews")
-                matching = [row for row in reviews if row.get("user", {}).get("id") == 25807 and row.get("state") == "APPROVED" and row.get("commit_id") == approval["approved_head"]]
-                if not matching:
-                    errors.append("product policy lacks Daniel's live exact-head approval")
+        policy_bytes = policy_path.read_bytes()
+        errors.extend(product_policy_publication_errors(validation, policy_bytes, ghapp))
+        errors.extend(protected_required_coverage_errors(
+            json.loads(policy_bytes), evidence_root, head, ghapp,
+        ))
         classic = _classic_protection(ghapp)
         rules = _fetch_all_pages(ghapp, "repos/Generous-Corp/pulp/rules/branches/main")
         required = required_check_identities(classic, rules)
@@ -1003,6 +1265,100 @@ def validate_v2(
     campaigns = receipt["campaigns"]
     if [row.get("role_id") for row in campaigns if isinstance(row, dict)] != list(ROLE_IDS):
         raise V2AcceptanceError("complete receipt requires the exact seven ordered role campaigns")
+    campaign_by_role = {row["role_id"]: row for row in campaigns}
+    standalone_identity = campaign_by_role["pulp-standalone"]["identity"]
+    constrained_identity = campaign_by_role["constrained-adapter"]["identity"]
+    expected_signatures_by_role: dict[str, frozenset[str]] = {}
+    for role_id, campaign in campaign_by_role.items():
+        identity = campaign["identity"]
+        expected_identity_fields = {
+            *DERIVED_CAMPAIGN_IDENTITY_FIELDS,
+            *BUILD_AUTHORITY_FIELDS,
+            "expected_signatures",
+        }
+        if role_id in VISIBLE_ROLES:
+            expected_identity_fields.update(VISIBLE_POLICY_IDENTITY_FIELDS)
+        if role_id == "constrained-adapter":
+            expected_identity_fields.add("adapter_predicate")
+        exact_keys(identity, expected_identity_fields, f"{role_id} campaign identity")
+        campaign_signature_digest, campaign_expected_signatures = signature_set_digest(
+            identity["expected_signatures"], f"{role_id} expected signatures",
+        )
+        if identity["signature_sha256"] != campaign_signature_digest:
+            raise V2AcceptanceError(f"{role_id} signature authority digest is invalid")
+        build_authority = policy_roles[role_id]["build_authority"]
+        _, authority_expected_signatures = signature_set_digest(
+            build_authority["expected_signatures"],
+            f"{role_id} protected expected signatures",
+        )
+        if (
+            campaign_expected_signatures != authority_expected_signatures
+            or any(
+                identity[field] != build_authority[field]
+                for field in BUILD_AUTHORITY_FIELDS
+            )
+        ):
+            raise V2AcceptanceError(
+                f"{role_id} does not match its protected role build/runtime authority"
+            )
+        expected_signatures_by_role[role_id] = authority_expected_signatures
+    canary = policy["canary"]
+    for role_id, identity in (
+        ("pulp-standalone", standalone_identity),
+        ("constrained-adapter", constrained_identity),
+    ):
+        if (
+            identity["application_sha256"] != canary["binary_sha256"]
+            or identity["content_sha256"] != canary["content_sha256"]
+            or identity["signature_sha256"] != canary["signature_sha256"]
+            or (
+                role_id == "pulp-standalone"
+                and (
+                    identity.get("adapter") != canary["adapter"]
+                    or identity.get("adapter_configuration")
+                    != canary["adapter_configuration"]
+                )
+            )
+            or identity.get("editor_open_origin") != canary["editor_open_origin"]
+            or identity.get("interaction_lifecycle") != canary["interaction_lifecycle"]
+            or identity.get("steady_state_workload") != canary["steady_state_workload"]
+        ):
+            raise V2AcceptanceError(f"{role_id} is not the authority-bound Pulp standalone canary")
+    coverage = policy["required_coverage"]
+    if (
+        constrained_identity.get("adapter") != coverage["adapter"]
+        or constrained_identity.get("adapter_predicate") != coverage["predicate"]
+        or constrained_identity.get("adapter_configuration") != coverage["configuration"]
+    ):
+        raise V2AcceptanceError(
+            "constrained-adapter does not bind the authority adapter/configuration"
+        )
+    authorized_constrained_deltas = {
+        "adapter", "adapter_predicate", "adapter_configuration",
+    }
+    standalone_product = {
+        key: value for key, value in standalone_identity.items()
+        if key not in authorized_constrained_deltas
+    }
+    constrained_product = {
+        key: value for key, value in constrained_identity.items()
+        if key not in authorized_constrained_deltas
+    }
+    standalone_product["expected_signatures"] = sorted(expected_signatures_by_role["pulp-standalone"])
+    constrained_product["expected_signatures"] = sorted(expected_signatures_by_role["constrained-adapter"])
+    if standalone_product != constrained_product:
+        raise V2AcceptanceError("constrained-adapter changes more than adapter/configuration")
+    headless_identity = campaign_by_role["headless-reference"]["identity"]
+    if (
+        headless_identity["content_sha256"] != standalone_identity["content_sha256"]
+        or headless_identity["signature_sha256"] != standalone_identity["signature_sha256"]
+    ):
+        raise V2AcceptanceError("headless-reference does not use the Pulp standalone content/signatures")
+    forge_content_digests = {
+        campaign_by_role[role_id]["identity"]["content_sha256"] for role_id in FORGE_ROLES
+    }
+    if len(forge_content_digests) != 1:
+        raise V2AcceptanceError("Forge campaigns do not use the same exact content")
     verdicts: dict[str, str] = {}
     nested_artifact_digests: set[str] = set(policy_nested_digests)
     for campaign in campaigns:
@@ -1012,6 +1368,10 @@ def validate_v2(
         if (
             identity["pulp_revision"] != receipt["implementation_head"]
             or identity["machine_id"] != policy["reference_host"]["machine_id"]
+            or identity["hardware"] != policy["reference_host"]["hardware"]
+            or identity["os"] != policy["reference_host"]["os"]
+            or identity["display_id"] != policy["reference_host"]["display"]
+            or identity["refresh_hz"] != policy["reference_host"]["refresh_hz"]
             or identity["host_kind"] != spec[1]
             or identity["application_kind"] != spec[2]
             or identity["plugin_format"] != spec[3]
@@ -1021,10 +1381,29 @@ def validate_v2(
             raise V2AcceptanceError(f"{role_id} does not bind the authority Forge revision")
         if role_id not in FORGE_ROLES and identity["forge_revision"] is not None:
             raise V2AcceptanceError(f"{role_id} carries an unrelated Forge revision")
-        if role_id == "constrained-adapter" and identity["adapter"] != policy["required_coverage"]["adapter"]:
-            raise V2AcceptanceError("constrained-adapter does not use the authority-selected adapter")
+        policy_interaction = policy_roles[role_id]["first_interaction"]
+        interaction_fields = {
+            "interaction_origin": "origin",
+            "interaction_stimulus": "stimulus",
+            "interaction_expected_state": "expected_state_change",
+            "interaction_measurement_endpoint": "endpoint",
+        }
+        if role_id in VISIBLE_ROLES:
+            if identity.get("editor_open_origin") != policy["editor_open_origin"]:
+                raise V2AcceptanceError(
+                    f"{role_id} campaign does not bind the protected editor-open origin"
+                )
+            if any(identity.get(field) != policy_interaction[policy_field]
+                   for field, policy_field in interaction_fields.items()):
+                raise V2AcceptanceError(f"{role_id} campaign does not bind exact interaction authority")
+        elif any(field in identity for field in interaction_fields):
+            raise V2AcceptanceError("headless-reference cannot carry visible interaction authority")
         raw = resolve_artifact(campaign["raw_samples"], evidence_root, f"{role_id}.raw_samples")
-        samples = validate_raw_campaign(raw, role_id=role_id, policy_sha256=policy_sha256)
+        samples = validate_raw_campaign(
+            raw, role_id=role_id, policy_sha256=policy_sha256,
+            policy_interaction=policy_interaction,
+            expected_signatures=expected_signatures_by_role[role_id],
+        )
         nested_artifact_digests.update(
             replay_trace_analyzer(campaign, evidence_root, receipt["implementation_head"])
         )

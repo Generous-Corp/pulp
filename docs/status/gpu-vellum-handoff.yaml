@@ -638,8 +638,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/contracts/gpu-first-visible-a3-acceptance-v2.schema.json",
           "state": "pulp-owned-retained",
-          "revision": "c95affdf98ea486a8724c31f35c1673001ef4e6d",
-          "object_id": "18c02256be5c14125d4ce09853e907231a86a32a",
+          "revision": "cffa6fa0c2e35592a43bbbf1de5cb6e1c3fe42af",
+          "object_id": "5d538286b1cd8bb532d43ffa0f537a93222046a3",
           "object_type": "blob"
         },
         {
@@ -774,8 +774,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_acceptance_v2.py",
           "state": "pulp-owned-retained",
-          "revision": "831bc76bac8c6733c75d0848c51f697eb6fa0f0f",
-          "object_id": "3f7927e471c6d88976a3e621a371035bec2d6768",
+          "revision": "e8877a8c6944d6197b4ed93f673e09a7917cf6f2",
+          "object_id": "01400ebffc56657e0235bc87357d7e0cd76ece48",
           "object_type": "blob"
         },
         {
@@ -870,8 +870,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
           "state": "pulp-owned-retained",
-          "revision": "831bc76bac8c6733c75d0848c51f697eb6fa0f0f",
-          "object_id": "f39f8e3b58c3b6415c99cca7912c2dc14902e977",
+          "revision": "cffa6fa0c2e35592a43bbbf1de5cb6e1c3fe42af",
+          "object_id": "c5a07fff2cae89eea657269c74ac2f48c1b3963b",
           "object_type": "blob"
         },
         {
