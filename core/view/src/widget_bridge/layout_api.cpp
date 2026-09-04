@@ -234,7 +234,7 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
     register_bridge_function(api, "setFlex", [&self, read_dimension](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto key = args.get<std::string>(1, "");
-        View* v = id.empty() ? &self.root_ : self.widget(id);
+        View* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
         auto& f = v->flex();
         const auto previous = f;
@@ -808,7 +808,7 @@ void BridgeRegistrars::register_layout_box_model_api(WidgetBridge& self) {
     register_bridge_function(api, "setBoxSizing", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto kw = args.get<std::string>(1, "content-box");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
         auto& f = v->flex();
         if (kw == "border-box") {
@@ -839,7 +839,7 @@ void BridgeRegistrars::register_layout_position_api(WidgetBridge& self) {
         }
         auto id = args.get<std::string>(0, "");
         auto pos = args.get<std::string>(1, "static");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
         if (pos == "relative") v->set_position(View::Position::relative);
         else if (pos == "absolute") v->set_position(View::Position::absolute);
