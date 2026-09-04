@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 import shutil
@@ -295,6 +296,47 @@ class CheckedInLedger(unittest.TestCase):
             provenance.build_receipt(document, commit, rendered, self.handoff)[
                 "handoff_sha256"
             ],
+        )
+
+    def test_published_receipt_binds_the_checked_in_ledger(self) -> None:
+        """The published receipt must describe the ledger that is shipped.
+
+        It goes stale when the ledger is regenerated without its receipt, which
+        is the only way the receipt could claim a source it did not produce.
+        """
+
+        self.assertTrue(
+            provenance.DEFAULT_RECEIPT.exists(),
+            f"{provenance.DEFAULT_RECEIPT} is absent",
+        )
+        receipt = json.loads(
+            provenance.DEFAULT_RECEIPT.read_text(encoding="utf-8")
+        )
+        repair = (
+            "regenerate with: python3 tools/scripts/gpu_handoff_provenance.py "
+            "write --receipt"
+        )
+        self.assertEqual(receipt["schema"], provenance.RECEIPT_SCHEMA)
+        self.assertEqual(
+            receipt["handoff_sha256"],
+            hashlib.sha256(self.handoff.read_bytes()).hexdigest(),
+            repair,
+        )
+        document = provenance.load_handoff(self.handoff)
+        self.assertEqual(
+            receipt["canonical_paths"], provenance.canonical_paths(document), repair
+        )
+        self.assertEqual(
+            provenance.git_output(
+                self.root, ["rev-parse", "--verify", receipt["source_commit"]]
+            ),
+            receipt["source_commit"],
+            "the receipt names a commit this repository does not contain",
+        )
+        self.assertEqual(
+            provenance.resolve_source_commit(self.root, receipt["source_commit"]),
+            receipt["source_commit"],
+            "the receipt's source commit is not an ancestor of HEAD",
         )
 
     def test_check_reports_a_clean_ledger(self) -> None:
