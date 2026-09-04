@@ -137,10 +137,13 @@ the previous blob, so `gpu_recipe_catalog.py` reports:
 gpu-recipe-catalog: INVALID: handoff entries[N].pulp_paths[M] has stale revision/blob/tree identity
 ```
 
-The failure surfaces as a **red required `macos` gate**, through
-`gpu-recipe-catalog-selftest`, far from the file you edited. It is easy to
-misread as someone else's flake: the test is named for the GPU recipe catalog
-and the change that broke it may have nothing to do with GPU. Run
+The failure surfaces through `gpu-recipe-catalog-selftest`, far from the file you
+edited. It is easy to misread as someone else's flake: the test is named for the
+GPU recipe catalog and the change that broke it may have nothing to do with GPU.
+Do not expect it on one specific lane — it is an ordinary ctest, so it fails on
+whichever full-suite lane finishes first, and it has been observed reddening both
+the required `macos` gate and `Linux (x64) [github-hosted]`. A green macOS gate is
+therefore not evidence that your pins are fresh. Run
 `python3 tools/scripts/gpu_recipe_catalog.py` locally before pushing; it takes a
 second and answers the question outright.
 
