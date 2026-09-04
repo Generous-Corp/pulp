@@ -45,28 +45,32 @@ struct InteractionSnapshot {
         }
     }
 
-    void restore(View* destination) {
+    void restore(View* destination) noexcept {
         if (!destination) return;
         View* root = destination;
         while (root->parent()) root = root->parent();
         if (had_focused) {
             if (auto* view = focused.live_in(*root)) {
-                view->on_focus_changed(true);
+                try { view->on_focus_changed(true); }
+                catch (...) { return; }
                 // The virtual focus callback may synchronously replace or
                 // remove the control. Resolve the identity again before
                 // touching the root-owned slot.
                 if (auto* still_live = focused.live_in(*root))
-                    still_live->claim_input_focus();
+                    try { still_live->claim_input_focus(); }
+                    catch (...) {}
             }
         }
         if (had_overlay) {
             if (auto* view = overlay.live_in(*root))
-                view->claim_overlay();
+                try { view->claim_overlay(); }
+                catch (...) {}
         }
         if (had_popup) {
             if (auto* view = dynamic_cast<ComboBox*>(popup.live_in(*root));
                 view && !view->is_open())
-                view->restore_open_state();
+                try { view->restore_open_state(); }
+                catch (...) {}
         }
     }
 };
@@ -209,16 +213,24 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // is still attached. This forces all potentially-failing
                     // allocations before structural mutation; the catch
                     // paths below remove the provisional records.
-                    self.owned_widgets_.emplace_back(wrapper);
+                    bool alias_published = false;
+                    // Allocate the map node first. If vector growth throws,
+                    // erase this provisional node before propagating.
                     self.scroll_wrappers_.emplace(childId, wrapper);
-                    bool aliases_published = true;
+                    try {
+                        self.owned_widgets_.emplace_back(wrapper);
+                        alias_published = true;
+                    } catch (...) {
+                        self.scroll_wrappers_.erase(childId);
+                        throw;
+                    }
                     // The authored parent id is authoritative during portal
                     // replay. The retained native parent can be the stale
                     // root container even while the JS parent has recovered.
                     try {
                         destination->add_child_transactional(scroll);
                     } catch (...) {
-                        if (aliases_published) {
+                        if (alias_published) {
                             self.scroll_wrappers_.erase(childId);
                             self.owned_widgets_.erase(
                                 std::remove_if(self.owned_widgets_.begin(),
