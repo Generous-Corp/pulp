@@ -20,6 +20,11 @@ WHAT IT CHECKS
     undeclared   — a live `*_RUNS_ON_JSON` variable with no lane. A new lane
                    added without a contract row.
     black-hole   — the lane's labels are satisfiable by no runner.
+    queue-stalled
+                 — the lane has no live runner AND work has been queued on it
+                   for longer than the provisioning budget. Distinct from
+                   black-hole: the lane is contracted and was served recently,
+                   so history looks healthy while the provisioner is dead.
     visibility-incomplete
                  — the labels matched nothing, but a runner scope REFUSED the
                    query, so the census never looked everywhere. Reported at
@@ -132,6 +137,7 @@ class Contract:
     routing_controls: dict[str, RoutingControl]
     lookback_hours: int
     runs_per_workflow: int
+    queued_stall_seconds: int = 1800
     event_class_v2: dict[str, Any] | None = None
 
 
@@ -196,6 +202,7 @@ def load_contract(path: Path) -> Contract:
         routing_controls=controls,
         lookback_hours=int(evidence.get("lookback_hours", 168)),
         runs_per_workflow=int(evidence.get("runs_per_workflow", 20)),
+        queued_stall_seconds=int(evidence.get("queued_stall_seconds", 1800)),
         event_class_v2=data.get("event_class_v2"),
     )
 
@@ -773,6 +780,47 @@ def static_evidence(served: list[set[str]]):
     return lambda _lane: served
 
 
+def static_queued_ages(ages: list[int]):
+    """A queued-age provider backed by a fixed list (fixtures, tests)."""
+    return lambda _lane, _labels: list(ages)
+
+
+def fetch_queued_job_ages(repo: str, labels: list[str]) -> list[int]:
+    """Seconds each currently-QUEUED job has been waiting for this label set.
+
+    Exact label equality, matching `has_service_evidence`: a job requesting a
+    superset was routed by a different lane, so its wait says nothing about
+    this one.
+
+    This reads the queue rather than history on purpose. Service history is a
+    claim about the past and cannot expire, so a lane that served jobs for
+    weeks and died an hour ago still satisfies it. The queue is the only
+    surface where a dead provisioner is visible while it is happening.
+    """
+    now = datetime.now(timezone.utc)
+    want = set(labels)
+    ages: list[int] = []
+    try:
+        runs = _api([f"repos/{repo}/actions/runs?status=queued&per_page=50"])
+    except subprocess.CalledProcessError:
+        return []
+    for run in runs.get("workflow_runs", []) or []:
+        try:
+            jobs = _api([f"repos/{repo}/actions/runs/{run['id']}/jobs"])
+        except subprocess.CalledProcessError:
+            continue
+        for job in jobs.get("jobs", []) or []:
+            if job.get("status") != "queued":
+                continue
+            if set(job.get("labels", [])) != want:
+                continue
+            stamp = job.get("created_at") or run.get("created_at")
+            if not stamp:
+                continue
+            ages.append(int((now - _parse_ts(stamp)).total_seconds()))
+    return ages
+
+
 def check_selector_parsing(
     contract: Contract, workflows_dir: Path
 ) -> list[Finding]:
@@ -820,6 +868,7 @@ def check(
     evidence: Any,
     workflows_dir: Path | None = None,
     unread_scopes: list[str] | None = None,
+    queued_ages: Any = None,
 ) -> list[Finding]:
     """`evidence` is a callable lane -> list of served label sets, invoked ONLY
     when an ephemeral lane has no live runner. A list is accepted for
@@ -832,9 +881,18 @@ def check(
     `unread_scopes` names the runner scopes that refused the census (see
     `RunnerInventory`). It downgrades no verdict — it only replaces the claim
     "nothing serves this lane" with the claim the evidence actually supports.
+    `queued_ages` is a callable (lane, labels) -> list of seconds that jobs
+    have been queued on the lane, invoked under the same laziness rule as
+    `evidence`. It defaults to empty, which reproduces every verdict this
+    check made before it existed: no caller that omits it can see a changed
+    result.
     """
     if not callable(evidence):
         evidence = static_evidence(evidence)
+    if queued_ages is None:
+        queued_ages = static_queued_ages([])
+    elif not callable(queued_ages):
+        queued_ages = static_queued_ages(queued_ages)
     findings = check_event_class_evidence(contract)
     declared = {lane.variable for lane in contract.lanes}
 
@@ -878,7 +936,7 @@ def check(
 
     for lane in contract.lanes:
         findings.extend(_check_lane(lane, contract, runners, variables, evidence,
-                                    unread_scopes or []))
+                                    unread_scopes or [], queued_ages))
 
     return findings
 
@@ -890,8 +948,11 @@ def _check_lane(
     variables: dict[str, str],
     evidence: Any,
     unread_scopes: list[str],
+    queued_ages: Any = None,
 ) -> list[Finding]:
     findings: list[Finding] = []
+    if queued_ages is None:
+        queued_ages = static_queued_ages([])
 
     if lane.variable not in variables:
         if lane.require_explicit_value:
@@ -916,7 +977,8 @@ def _check_lane(
             return findings
         return _check_target(lane, contract, runners, evidence, lane.unset_fallback,
                              origin="workflow fallback (variable unset)",
-                             unread_scopes=unread_scopes)
+                             unread_scopes=unread_scopes,
+                             queued_ages=queued_ages)
 
     # ── drift: the variable must match what the contract says it routes to.
     actual_raw = variables[lane.variable]
@@ -978,7 +1040,8 @@ def _check_lane(
         target = lane.expect
 
     findings.extend(_check_target(lane, contract, runners, evidence, target,
-                                  origin="variable", unread_scopes=unread_scopes))
+                                  origin="variable", unread_scopes=unread_scopes,
+                                  queued_ages=queued_ages))
     return findings
 
 
@@ -990,9 +1053,12 @@ def _check_target(
     target: Any,
     origin: str,
     unread_scopes: list[str] | None = None,
+    queued_ages: Any = None,
 ) -> list[Finding]:
     """Can anything actually serve this `runs-on` value?"""
     findings: list[Finding] = []
+    if queued_ages is None:
+        queued_ages = static_queued_ages([])
     kind = classify_target(target, contract)
     shown = json.dumps(target)
 
@@ -1028,6 +1094,29 @@ def _check_target(
             f"{labels_str} is satisfied only by OFFLINE runners "
             f"({', '.join(sorted(r.name for r in matches))}). The host may be "
             "asleep; jobs queue until it returns.",
+        ))
+        return findings
+
+    # A lane with no runner AND work piling up on it is not "idle".
+    #
+    # Queue AGE is the signal, never queue presence. On a JIT lane the healthy
+    # sequence is job-queues-first, then the provisioner notices and boots, so
+    # "queued job + no live runner" is the ordinary transient - a check in that
+    # shape would fire on every burst and be switched off within a week. What
+    # cannot be normal is work still waiting after the provisioning budget.
+    #
+    # This runs BEFORE the service-history short-circuits below because history
+    # cannot expire: a lane served for weeks and dead for hours satisfies it
+    # and reports "the provisioner is alive and idle" over a stalled queue.
+    stalled = max(queued_ages(lane, target), default=0)
+    if stalled and stalled >= contract.queued_stall_seconds:
+        findings.append(Finding(
+            _level_for(lane), "queue-stalled", lane.variable,
+            f"{labels_str} has no live runner and its oldest queued job has "
+            f"waited {stalled // 60}m, past the "
+            f"{contract.queued_stall_seconds // 60}m provisioning budget. "
+            "Work is arriving and nothing is answering it. "
+            f"Purpose: {lane.purpose}",
         ))
         return findings
 
@@ -1173,6 +1262,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--variables-json", type=Path)
     ap.add_argument("--jobs-json", type=Path,
                     help="Fixture of served label sets (list of label lists).")
+    ap.add_argument("--queued-jobs-json", type=Path,
+                    help="Fixture of queued-job ages in seconds (list of ints).")
     ap.add_argument("--workflows-dir", type=Path,
                     help="Workflow directory used to find a lane's consumers.")
     ap.add_argument("--fleet-profile", type=Path, action="append", default=[],
@@ -1212,6 +1303,9 @@ def main(argv: list[str] | None = None) -> int:
         evidence = static_evidence(
             parse_served_label_sets(json.loads(args.jobs_json.read_text()))
             if args.jobs_json else [])
+        queued_ages = static_queued_ages(
+            [int(v) for v in json.loads(args.queued_jobs_json.read_text())]
+            if args.queued_jobs_json else [])
     else:
         try:
             inventory = fetch_runner_inventory(args.repo)
@@ -1240,8 +1334,13 @@ def main(argv: list[str] | None = None) -> int:
                 args.repo, contract.lookback_hours, consumers,
                 contract.runs_per_workflow, manual_only=lane.dispatch_only)
 
+        def queued_ages(lane: Lane, labels: Any) -> list[int]:
+            # Same laziness contract as `evidence`: only reached when a lane
+            # has no live runner, so a healthy fleet pays no API calls.
+            return fetch_queued_job_ages(args.repo, labels)
+
     findings = check(contract, runners, variables, evidence, workflows_dir,
-                     unread_scopes)
+                     unread_scopes, queued_ages)
     if profile_inputs or receipt_inputs or source_manifest:
         findings.extend(
             finding for finding in check_event_class_evidence(
