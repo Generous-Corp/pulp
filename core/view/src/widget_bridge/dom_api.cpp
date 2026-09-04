@@ -47,10 +47,18 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 if (wrapper_live && wrapper->child_count() == 1 &&
                     wrapper->child_at(0) == existing) {
                     if (wrapper->parent() != destination) {
+                        auto* interaction = wrapper->existing_interaction();
+                        auto* focused_before = interaction ? interaction->focused_input : nullptr;
+                        auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
                         if (auto* old_parent = wrapper->parent()) {
                             auto moved = old_parent->remove_child(wrapper);
                             destination->add_child(std::move(moved));
                         }
+                        if (focused_before) {
+                            focused_before->on_focus_changed(true);
+                            focused_before->claim_input_focus();
+                        }
+                        if (overlay_before) overlay_before->claim_overlay();
                     }
                     return choc::value::Value();
                 }
@@ -81,10 +89,18 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     [wrapper](const auto& state) { return state.view == wrapper; }) &&
                 wrapper->child_count() == 1 && wrapper->child_at(0) == existing) {
                 if (wrapper->parent() != destination) {
+                    auto* interaction = wrapper->existing_interaction();
+                    auto* focused_before = interaction ? interaction->focused_input : nullptr;
+                    auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
                     if (auto* old_parent = wrapper->parent()) {
                         auto moved = old_parent->remove_child(wrapper);
                         destination->add_child(std::move(moved));
                     }
+                    if (focused_before) {
+                        focused_before->on_focus_changed(true);
+                        focused_before->claim_input_focus();
+                    }
+                    if (overlay_before) overlay_before->claim_overlay();
                 }
                 return choc::value::Value();
             }
