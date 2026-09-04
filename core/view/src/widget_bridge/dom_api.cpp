@@ -22,8 +22,10 @@ namespace {
 struct InteractionSnapshot {
     ViewCapture focused;
     ViewCapture overlay;
+    ViewCapture popup;
     bool had_focused = false;
     bool had_overlay = false;
+    bool had_popup = false;
 
     void capture(View* owner) {
         if (!owner) return;
@@ -35,6 +37,10 @@ struct InteractionSnapshot {
             if (state->active_overlay) {
                 overlay.set(state->active_overlay);
                 had_overlay = true;
+            }
+            if (state->active_popup) {
+                popup.set(state->active_popup);
+                had_popup = true;
             }
         }
     }
@@ -52,6 +58,11 @@ struct InteractionSnapshot {
         if (had_overlay) {
             if (auto* view = overlay.live_in(*root))
                 view->claim_overlay();
+        }
+        if (had_popup) {
+            if (auto* view = dynamic_cast<ComboBox*>(popup.live_in(*root));
+                view && !view->is_open())
+                view->restore_open_state();
         }
     }
 };
