@@ -53,45 +53,26 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 // the existing-widget fast path silently discard that hint.
                 if (hint == "scroll"
                     && dynamic_cast<ScrollView*>(existing) == nullptr) {
-                    const auto replaced_instance_id =
-                        existing->import_binding_instance_id();
                     auto removed = p->remove_child(existing);
                     auto scroll = std::make_unique<ScrollView>();
                     scroll->set_id(childId);
-                    // Do not move callback closures from the retired View:
-                    // generated pointer/hover callbacks capture the old
-                    // native address. Clear the registration claims instead;
-                    // the DOM replay immediately following __domAppend will
-                    // install fresh, replacement-safe closures on the new
-                    // ScrollView.
-                    self.forget_widget_registrations(childId);
-                    while (removed->child_count() > 0) {
-                        auto* child = removed->child_at(0);
-                        scroll->add_child(removed->remove_child(child));
-                    }
-                    // This is a replacement, not a normal reparent.  Remove
-                    // the retired View's ownership identity before assigning
-                    // the new ScrollView through the registry slot; using
-                    // cache() alone leaves the replacement unowned and the
-                    // retired identity dangling after realm cleanup.
-                    self.owned_widgets_.erase(
-                        std::remove_if(
-                            self.owned_widgets_.begin(),
-                            self.owned_widgets_.end(),
-                            [replaced_instance_id](const auto& owned) {
-                                return owned.instance_id == replaced_instance_id;
-                            }),
-                        self.owned_widgets_.end());
+                    // Keep the authored View as the ScrollView's content
+                    // child instead of replacing/destroying it. This
+                    // preserves every callback, style, focus, gesture, and
+                    // DOM identity while the wrapper supplies native scroll
+                    // layout/hit-testing. The registry points at the wrapper
+                    // for scroll APIs; event delivery still reaches the
+                    // original child with its identity-safe closures.
+                    scroll->set_bounds(removed->bounds());
+                    scroll->add_child(std::move(removed));
+                    // The authored View remains owned as the wrapper's
+                    // content child; assigning through the registry adds the
+                    // wrapper's own lifetime identity.
                     self.widgets_[childId] = scroll.get();
                     // The authored parent id is authoritative during portal
                     // replay. The retained native parent can be the stale
                     // root container even while the JS parent has recovered.
                     self.resolve_parent(parentId)->add_child(std::move(scroll));
-                    // Keep the retired wrapper alive until the callback/host
-                    // dispatch boundary has unwound; replacing during a
-                    // re-entrant event must not destroy a View whose closure
-                    // is still on the stack.
-                    self.retire_removed_widget(std::move(removed));
                     return choc::value::Value();
                 }
                 // Move the existing subtree to the new parent - don't erase widgets.
