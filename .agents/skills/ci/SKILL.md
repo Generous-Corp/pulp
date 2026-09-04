@@ -810,6 +810,18 @@ Watch for three traps when reading this by hand:
   failures; don't conflate them.
 - **The fleet mutates while you look.** Runner count changed between two API
   calls during this investigation. Re-read before concluding.
+- **Service history cannot expire — so it cannot prove a lane is alive NOW.**
+  It is a claim about the past with no staleness notion: a lane served for weeks
+  and dead for three hours still satisfies it. That is how the release lane
+  reported "the provisioner is alive and idle" with two releases queued behind
+  it. The only surface where a dead provisioner is visible *while it is
+  happening* is the queue, so the checker also reads queued-job age
+  (`queued_stall_seconds`, default 1800s) and reports `queue-stalled`. Read that
+  finding as "work is arriving and nothing is answering it" — strictly stronger
+  evidence than `black-hole`, which only says nothing has *arrived*. Note the
+  signal is queue **age**, never queue presence: on a JIT lane the job queues
+  first and the provisioner then boots, so "queued + no runner" is the ordinary
+  transient and a presence-based check would fire on every burst.
 
 Related instance of the same class: `build.yml`'s busy probe needs
 `Administration: Read` to call `actions/runners`; the default `GITHUB_TOKEN`
