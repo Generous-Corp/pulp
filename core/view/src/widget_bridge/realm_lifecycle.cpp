@@ -173,6 +173,7 @@ void WidgetBridge::clear_quarantined_realm() {
 
     owned_widgets_.clear();
     widgets_.clear();
+    scroll_wrappers_.clear();
     registrations_.clear();
 }
 
@@ -221,6 +222,7 @@ void WidgetBridge::clear_realm(const DeadlineCheck& deadline_check) {
     }
     owned_widgets_.clear();
     widgets_.clear();
+    scroll_wrappers_.clear();
     registrations_.clear();
 }
 

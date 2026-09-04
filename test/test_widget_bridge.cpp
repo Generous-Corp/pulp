@@ -1554,7 +1554,7 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     // plain View. The registry and ownership vector must now identify the
     // replacement, not the destroyed View.
     engine.evaluate("__domAppend('', retainedPanelId, 'div', 'scroll')");
-    auto* upgraded = dynamic_cast<ScrollView*>(bridge.widget(panel_id));
+    auto* upgraded = bridge.scroll_wrapper(panel_id);
     REQUIRE(upgraded != nullptr);
     CHECK(upgraded->id().empty());
     REQUIRE(upgraded->child_count() == 1);

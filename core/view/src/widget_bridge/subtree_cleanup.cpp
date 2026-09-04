@@ -127,6 +127,7 @@ void WidgetBridge::forget_widget_subtree(
         if (deadline_check) deadline_check();
         release_param_gesture_route(id);
         widgets_.erase(id);
+        scroll_wrappers_.erase(id);
         forget_widget_registrations(id);
     }
     prune_dangling_bindings();

@@ -63,6 +63,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // for scroll APIs; event delivery still reaches the
                     // original child with its identity-safe closures.
                     const auto content_bounds = removed->bounds();
+                    auto* content = removed.get();
                     scroll->set_bounds(content_bounds);
                     removed->set_bounds({0.0f, 0.0f,
                                          content_bounds.width,
@@ -71,7 +72,9 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // The authored View remains owned as the wrapper's
                     // content child; assigning through the registry adds the
                     // wrapper's own lifetime identity.
-                    self.widgets_[childId] = scroll.get();
+                    self.owned_widgets_.emplace_back(scroll.get());
+                    self.scroll_wrappers_[childId] = scroll.get();
+                    self.widgets_.cache(childId, content);
                     // The authored parent id is authoritative during portal
                     // replay. The retained native parent can be the stale
                     // root container even while the JS parent has recovered.

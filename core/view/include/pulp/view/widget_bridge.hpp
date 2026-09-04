@@ -177,6 +177,11 @@ public:
     // Get a widget by its JS-assigned ID
     View* widget(const std::string& id);
 
+    // ScrollView wrappers created for retained DOM containers are kept
+    // separate from the authored widget registry so normal ID APIs continue
+    // to address the original content View.
+    ScrollView* scroll_wrapper(const std::string& id) const noexcept;
+
     // Sync all widget values from the parameter store
     void sync_from_store();
 
@@ -451,6 +456,7 @@ private:
     // so duplicate IDs cannot lose delayed-quarantine ownership.
     std::vector<BridgeWidgetState> owned_widgets_;
     WidgetRegistry widgets_;
+    std::unordered_map<std::string, ScrollView*> scroll_wrappers_;
 
     // Idempotency guards for native-event registrations, one record per widget
     // id. Re-running a registrar on every React commit must not replace or stack
