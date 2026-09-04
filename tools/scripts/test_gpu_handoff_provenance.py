@@ -192,6 +192,89 @@ class FixtureRepository(unittest.TestCase):
             ["leaf.txt", "nested"],
         )
 
+    def write_fixture_handoff(self, rows: list[dict[str, object]]) -> pathlib.Path:
+        handoff = self.root / "handoff.json"
+        handoff.write_text(
+            provenance.serialize_handoff(self.document(rows)), encoding="utf-8"
+        )
+        return handoff
+
+    def test_write_refuses_output_the_validator_would_reject(self) -> None:
+        """Fail-closed: the existing validator stays the acceptance authority.
+
+        The fixture ledger cannot satisfy the closed handoff contract, so a
+        correct generator must decline to write it even though every identity
+        it derived is accurate.
+        """
+
+        handoff = self.write_fixture_handoff([build_row("leaf.txt")])
+        before = handoff.read_text(encoding="utf-8")
+        exit_code = provenance.main(
+            ["--root", str(self.root), "--handoff", str(handoff), "write"]
+        )
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(handoff.read_text(encoding="utf-8"), before)
+
+    def test_paths_subcommand_lists_the_inventory(self) -> None:
+        handoff = self.write_fixture_handoff(
+            [build_row("nested"), build_row("leaf.txt")]
+        )
+        for arguments in (["paths"], ["paths", "--json"]):
+            self.assertEqual(
+                provenance.main(
+                    ["--root", str(self.root), "--handoff", str(handoff), *arguments]
+                ),
+                0,
+            )
+
+    def test_check_subcommand_reports_drift_in_both_formats(self) -> None:
+        handoff = self.write_fixture_handoff([build_row("leaf.txt")])
+        for arguments in (["check"], ["check", "--json"]):
+            self.assertEqual(
+                provenance.main(
+                    ["--root", str(self.root), "--handoff", str(handoff), *arguments]
+                ),
+                1,
+            )
+
+    def test_receipt_subcommand_writes_a_receipt(self) -> None:
+        handoff = self.write_fixture_handoff([build_row("leaf.txt")])
+        output = self.root / "receipts" / "receipt.json"
+        self.assertEqual(
+            provenance.main(
+                [
+                    "--root",
+                    str(self.root),
+                    "--handoff",
+                    str(handoff),
+                    "receipt",
+                    "--output",
+                    str(output),
+                ]
+            ),
+            0,
+        )
+        receipt = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(receipt["source_commit"], self.second_commit)
+        self.assertEqual(receipt["canonical_paths"], ["leaf.txt"])
+
+    def test_an_unresolvable_source_commit_is_an_environment_error(self) -> None:
+        handoff = self.write_fixture_handoff([build_row("leaf.txt")])
+        self.assertEqual(
+            provenance.main(
+                [
+                    "--root",
+                    str(self.root),
+                    "--handoff",
+                    str(handoff),
+                    "check",
+                    "--source-commit",
+                    "0" * 40,
+                ]
+            ),
+            2,
+        )
+
     def test_write_refuses_an_unclean_checkout(self) -> None:
         handoff = self.root / "handoff.json"
         handoff.write_text(
