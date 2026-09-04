@@ -695,6 +695,7 @@ void View::add_child(std::unique_ptr<View> child) {
 
 void View::add_child_transactional(std::unique_ptr<View>& child) {
     if (!child) return;
+    auto* inserted = child.get();
     set_subtree_detaching(*child, false);
     child->parent_ = this;
     child->set_window_host(window_host_);
@@ -709,8 +710,17 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
         // Do not leave a half-attached child in the native tree: unwind the
         // ownership insertion and restore the detached state before propagating
         // the exception to the caller's transaction boundary.
-        auto failed = std::move(children_.back());
-        children_.pop_back();
+        auto it = std::find_if(children_.begin(), children_.end(),
+            [inserted](const auto& candidate) { return candidate.get() == inserted; });
+        if (it == children_.end()) {
+            // A reentrant attach hook may have removed the child before
+            // throwing. Never assume children_.back() is still ours.
+            publish_structure_change();
+            invalidate_subtree_caches_up();
+            throw;
+        }
+        auto failed = std::move(*it);
+        children_.erase(it);
         child = std::move(failed);
         auto* restored = child.get();
         restored->parent_ = nullptr;

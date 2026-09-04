@@ -998,7 +998,16 @@ View* WidgetBridge::resolve_parent(const std::string& parent_id) {
 
 ScrollView* WidgetBridge::scroll_wrapper(const std::string& id) const noexcept {
     auto it = scroll_wrappers_.find(id);
-    return it == scroll_wrappers_.end() ? nullptr : it->second;
+    if (it == scroll_wrappers_.end() || !it->second) return nullptr;
+    // The alias map is deliberately non-owning. During realm replacement a
+    // wrapper can leave the owned identity vector before the map cleanup runs;
+    // fail closed here so every scroll-specific caller avoids a stale/ABA raw
+    // pointer rather than dereferencing it.
+    const auto live = std::any_of(owned_widgets_.begin(), owned_widgets_.end(),
+        [candidate = it->second](const auto& state) {
+            return state.view == candidate;
+        });
+    return live ? it->second : nullptr;
 }
 
 View* WidgetBridge::style_target(const std::string& id) noexcept {
