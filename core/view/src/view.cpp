@@ -697,7 +697,25 @@ void View::add_child(std::unique_ptr<View> child) {
     child->set_host_params(host_params_);
     child->set_host_actions(host_actions_);
     children_.push_back(std::move(child));
-    children_.back()->on_attached();
+    try {
+        children_.back()->on_attached();
+    } catch (...) {
+        // `on_attached()` is user/framework code and may reject an attach.
+        // Do not leave a half-attached child in the native tree: unwind the
+        // ownership insertion and restore the detached state before propagating
+        // the exception to the caller's transaction boundary.
+        auto failed = std::move(children_.back());
+        children_.pop_back();
+        failed->parent_ = nullptr;
+        failed->set_window_host(nullptr);
+        failed->set_plugin_view_host(nullptr);
+        failed->set_host_params(nullptr);
+        failed->set_host_actions(nullptr);
+        set_subtree_detaching(*failed, true);
+        publish_structure_change();
+        invalidate_subtree_caches_up();
+        throw;
+    }
     // Structural change: this view's (and its cached ancestors') recording no
     // longer includes the new child. Stale them so the next frame re-records.
     invalidate_subtree_caches_up();

@@ -1604,6 +1604,17 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     CHECK(root.child_count() == 0);
 }
 
+TEST_CASE("View add_child rolls back when attach hook throws",
+          "[view][lifetime][exception-safety]") {
+    struct ThrowingAttach final : View {
+        void on_attached() override { throw std::runtime_error("attach failed"); }
+    };
+    View root;
+    REQUIRE_THROWS_WITH(root.add_child(std::make_unique<ThrowingAttach>()),
+                        "attach failed");
+    CHECK(root.child_count() == 0);
+}
+
 TEST_CASE("WidgetBridge creates modal overlay from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;
