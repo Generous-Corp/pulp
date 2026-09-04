@@ -690,6 +690,11 @@ void View::publish_structure_change() noexcept {
 }
 
 void View::add_child(std::unique_ptr<View> child) {
+    add_child_transactional(child);
+}
+
+void View::add_child_transactional(std::unique_ptr<View>& child) {
+    if (!child) return;
     set_subtree_detaching(*child, false);
     child->parent_ = this;
     child->set_window_host(window_host_);
@@ -706,12 +711,14 @@ void View::add_child(std::unique_ptr<View> child) {
         // the exception to the caller's transaction boundary.
         auto failed = std::move(children_.back());
         children_.pop_back();
-        failed->parent_ = nullptr;
-        failed->set_window_host(nullptr);
-        failed->set_plugin_view_host(nullptr);
-        failed->set_host_params(nullptr);
-        failed->set_host_actions(nullptr);
-        set_subtree_detaching(*failed, true);
+        child = std::move(failed);
+        auto* restored = child.get();
+        restored->parent_ = nullptr;
+        restored->set_window_host(nullptr);
+        restored->set_plugin_view_host(nullptr);
+        restored->set_host_params(nullptr);
+        restored->set_host_actions(nullptr);
+        set_subtree_detaching(*restored, true);
         publish_structure_change();
         invalidate_subtree_caches_up();
         throw;

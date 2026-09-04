@@ -112,6 +112,9 @@ public:
     // ── Child management ─────────────────────────────────────────────────
 
     void add_child(std::unique_ptr<View> child);
+    // Transactional variant used by structural adapters that must recover the
+    // owned child if an attach hook rejects it. On throw, `child` is restored.
+    void add_child_transactional(std::unique_ptr<View>& child);
     std::unique_ptr<View> remove_child(View* child);
 
     /// Process-wide compatibility generation retained for existing SDK users.

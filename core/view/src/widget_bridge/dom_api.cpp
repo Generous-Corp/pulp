@@ -100,7 +100,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     auto* focused_before = interaction ? interaction->focused_input : nullptr;
                     auto* overlay_before = interaction ? interaction->active_overlay : nullptr;
                     auto removed = p->remove_child(existing);
-                    auto scroll = std::make_unique<ScrollView>();
+                    std::unique_ptr<View> scroll = std::make_unique<ScrollView>();
                     // Keep the authored View as the ScrollView's content
                     // child instead of replacing/destroying it. This
                     // preserves every callback, style, focus, gesture, and
@@ -114,16 +114,36 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     removed->set_bounds({0.0f, 0.0f,
                                          content_bounds.width,
                                          content_bounds.height});
-                    auto* wrapper = scroll.get();
+                    auto* wrapper = static_cast<ScrollView*>(scroll.get());
                     // The authored parent id is authoritative during portal
                     // replay. The retained native parent can be the stale
                     // root container even while the JS parent has recovered.
-                    destination->add_child(std::move(scroll));
+                    try {
+                        destination->add_child_transactional(scroll);
+                    } catch (...) {
+                        // The retained content is still owned locally here;
+                        // put it back under its original parent before
+                        // propagating the attach failure.
+                        try { p->add_child_transactional(removed); }
+                        catch (...) { /* preserve the original exception */ }
+                        throw;
+                    }
                     // Attach the retained content only after its new wrapper
                     // is attached. This preserves host/frame-clock ordering:
                     // on_attached() observes the real destination, not an
                     // unattached intermediate wrapper.
-                    wrapper->add_child(std::move(removed));
+                    try {
+                        wrapper->add_child_transactional(removed);
+                    } catch (...) {
+                        // add_child_transactional restores `removed` on a
+                        // throwing hook. Remove the empty wrapper and restore
+                        // the original parent/identity before rethrowing.
+                        auto stranded = destination->remove_child(wrapper);
+                        (void)stranded;
+                        try { p->add_child_transactional(removed); }
+                        catch (...) { /* preserve the original exception */ }
+                        throw;
+                    }
                     // Publish the wrapper alias only after both structural
                     // operations succeed. This prevents a throwing attach
                     // hook from exposing a half-built wrapper in the bridge
