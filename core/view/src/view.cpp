@@ -826,6 +826,13 @@ std::unique_ptr<View> View::remove_child(View* child) {
         // it also prevents a callback-retired overlay from being reused by the
         // next synthetic or platform click.
     }
+    // The gesture, popup, and focus callbacks above are re-entrant.  A
+    // callback may have removed (and destroyed) this child, so do not
+    // dereference the original raw pointer until its ownership is confirmed
+    // again in the live children vector.
+    it = std::find_if(children_.begin(), children_.end(),
+        [child](const auto& candidate) { return candidate.get() == child; });
+    if (it == children_.end()) return nullptr;
     // on_detached() intentionally runs while the old parent/clock is still
     // reachable, but routing must already consider the whole subtree absent.
     set_subtree_detaching(*child, true);

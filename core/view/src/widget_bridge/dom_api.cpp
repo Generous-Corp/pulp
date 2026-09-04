@@ -52,7 +52,10 @@ struct InteractionSnapshot {
         if (had_focused) {
             if (auto* view = focused.live_in(*root)) {
                 try { view->on_focus_changed(true); }
-                catch (...) { return; }
+                catch (...) {
+                    // Focus restoration is best effort, but a widget callback
+                    // must not prevent independent overlay/popup restoration.
+                }
                 // The virtual focus callback may synchronously replace or
                 // remove the control. Resolve the identity again before
                 // touching the root-owned slot.
@@ -216,12 +219,15 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     bool alias_published = false;
                     // Allocate the map node first. If vector growth throws,
                     // erase this provisional node before propagating.
-                    self.scroll_wrappers_.emplace(childId, wrapper);
+                    auto [alias_it, alias_inserted] =
+                        self.scroll_wrappers_.emplace(childId, wrapper);
+                    if (!alias_inserted)
+                        throw std::runtime_error("duplicate retained scroll wrapper id");
                     try {
                         self.owned_widgets_.emplace_back(wrapper);
                         alias_published = true;
                     } catch (...) {
-                        self.scroll_wrappers_.erase(childId);
+                        self.scroll_wrappers_.erase(alias_it);
                         throw;
                     }
                     // The authored parent id is authoritative during portal
@@ -231,7 +237,7 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                         destination->add_child_transactional(scroll);
                     } catch (...) {
                         if (alias_published) {
-                            self.scroll_wrappers_.erase(childId);
+                            self.scroll_wrappers_.erase(alias_it);
                             self.owned_widgets_.erase(
                                 std::remove_if(self.owned_widgets_.begin(),
                                                self.owned_widgets_.end(),
