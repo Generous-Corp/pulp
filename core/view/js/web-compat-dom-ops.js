@@ -71,6 +71,9 @@ if (!Element.prototype.appendChild ||
         for (var ancestor = this; ancestor; ancestor = ancestor._parentElement) {
             if (ancestor === child) throw new Error("HierarchyRequestError");
         }
+        var previousParent = child._parentElement;
+        var previousIndex = previousParent
+            ? previousParent._children.indexOf(child) : -1;
         // Reparenting must preserve the native widget identity. Calling the
         // public removeChild() here would invoke __domRemove(), which retires
         // the native subtree and aliases before __domAppend() gets a chance
@@ -117,7 +120,16 @@ if (!Element.prototype.appendChild ||
                 }
             }
         }
-        __domAppend(this._id, child._id, child.tagName.toLowerCase(), __domAppendHint);
+        try {
+            __domAppend(this._id, child._id, child.tagName.toLowerCase(), __domAppendHint);
+        } catch (e) {
+            var rollbackIndex = this._children.indexOf(child);
+            if (rollbackIndex >= 0) this._children.splice(rollbackIndex, 1);
+            child._parentElement = previousParent;
+            if (previousParent && previousIndex >= 0)
+                previousParent._children.splice(previousIndex, 0, child);
+            throw e;
+        }
         child._nativeCreated = true;
         if (child._textContent) setText(child._id, child._textContent);
         // Replay presentational `width`/`height` HTML attributes that
@@ -223,6 +235,9 @@ if (!Element.prototype.appendChild ||
         for (var ancestor = this; ancestor; ancestor = ancestor._parentElement) {
             if (ancestor === newChild) throw new Error("HierarchyRequestError");
         }
+        var previousParent = newChild._parentElement;
+        var previousIndex = previousParent
+            ? previousParent._children.indexOf(newChild) : -1;
         var idx = this._children.indexOf(refChild);
         if (idx < 0) return this.appendChild(newChild);
         // As in appendChild(), detach the JS relationship without retiring
@@ -246,7 +261,16 @@ if (!Element.prototype.appendChild ||
         __pulpRememberNativeElement__(newChild);
         var __insertHint = (typeof __pulpElementWantsScrollView__ === "function" &&
             __pulpElementWantsScrollView__(newChild)) ? "scroll" : "";
-        __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase(), __insertHint);
+        try {
+            __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase(), __insertHint);
+        } catch (e) {
+            var rollbackIndex = this._children.indexOf(newChild);
+            if (rollbackIndex >= 0) this._children.splice(rollbackIndex, 1);
+            newChild._parentElement = previousParent;
+            if (previousParent && previousIndex >= 0)
+                previousParent._children.splice(previousIndex, 0, newChild);
+            throw e;
+        }
         newChild._nativeCreated = true;
         if (newChild._textContent) setText(newChild._id, newChild._textContent);
         // Same pre-mount attribute replay path as appendChild, including
