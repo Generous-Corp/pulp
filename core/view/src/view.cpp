@@ -1760,22 +1760,16 @@ void View::notify_frame_clock_changed() noexcept {
     catch (...) {}
     try { on_frame_clock_changed(); }
     catch (...) {}
-    // Snapshot identities before entering any virtual callback.  Reentrant
-    // replacement can otherwise keep an index occupied forever, or destroy
-    // the saved child before the callback returns.  Pointer comparison is
-    // safe for the latter; dereference only after finding the identity live
-    // again in this view's current direct-child set.
-    std::vector<View*> pending;
-    pending.reserve(children_.size());
-    for (auto& child : children_)
-        if (child) pending.push_back(child.get());
-    for (View* identity : pending) {
-        auto it = std::find_if(children_.begin(), children_.end(),
-            [identity](const auto& candidate) {
-                return candidate.get() == identity;
-            });
-        if (it != children_.end() && *it)
-            (*it)->notify_frame_clock_changed();
+    // Walk only the children that existed at entry.  Do not allocate here:
+    // this function is noexcept.  A callback may remove or replace a child;
+    // advance the index unconditionally so replacement at the same slot
+    // cannot loop forever, and never dereference a saved pointer after the
+    // callback returns.
+    const auto initial_count = children_.size();
+    for (std::size_t i = 0; i < initial_count && i < children_.size(); ++i) {
+        View* child = children_[i].get();
+        if (child)
+            child->notify_frame_clock_changed();
     }
 }
 

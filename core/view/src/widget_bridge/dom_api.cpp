@@ -59,21 +59,32 @@ struct InteractionSnapshot {
                 // The virtual focus callback may synchronously replace or
                 // remove the control. Resolve the identity again before
                 // touching the root-owned slot.
-                if (auto* still_live = focused.live_in(*root))
-                    try { still_live->claim_input_focus(); }
-                    catch (...) {}
+                if (auto* still_live = focused.live_in(*root)) {
+                    auto* state = root->existing_interaction();
+                    if (state && (!state->focused_input ||
+                                  state->focused_input == still_live))
+                        try { still_live->claim_input_focus(); }
+                        catch (...) {}
+                }
             }
         }
         if (had_overlay) {
-            if (auto* view = overlay.live_in(*root))
-                try { view->claim_overlay(); }
-                catch (...) {}
+            if (auto* view = overlay.live_in(*root)) {
+                auto* state = root->existing_interaction();
+                if (state && (!state->active_overlay ||
+                              state->active_overlay == view))
+                    try { view->claim_overlay(); }
+                    catch (...) {}
+            }
         }
         if (had_popup) {
             if (auto* view = dynamic_cast<ComboBox*>(popup.live_in(*root));
-                view && !view->is_open())
-                try { view->restore_open_state(); }
-                catch (...) {}
+                view && !view->is_open()) {
+                auto* active = ComboBox::active_popup_in(*root);
+                if (!active || active == view)
+                    try { view->restore_open_state(); }
+                    catch (...) {}
+            }
         }
     }
 };
