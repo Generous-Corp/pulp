@@ -34,11 +34,15 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
         // strands the scroll container and invalidates the alias map. Keep the
         // unique_ptr recoverable if destination attachment rejects the move.
         const auto move_wrapper = [](ScrollView* wrapper, View* destination) {
-            if (!wrapper || !destination || wrapper->parent() == destination)
-                return true;
+            if (!wrapper || !destination) return false;
+            if (wrapper->parent() == destination) return true;
             auto* old_parent = wrapper->parent();
             if (!old_parent) return false;
             auto moved = old_parent->remove_child(wrapper);
+            // A reentrant lifecycle/drag callback may have removed the
+            // wrapper while remove_child was running. Never treat a null
+            // ownership result as a successful native move.
+            if (!moved) return false;
             try {
                 destination->add_child_transactional(moved);
             } catch (...) {
