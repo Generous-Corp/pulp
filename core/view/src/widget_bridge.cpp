@@ -1001,6 +1001,15 @@ ScrollView* WidgetBridge::scroll_wrapper(const std::string& id) const noexcept {
     return it == scroll_wrappers_.end() ? nullptr : it->second;
 }
 
+View* WidgetBridge::style_target(const std::string& id) noexcept {
+    if (auto* wrapper = scroll_wrapper(id)) {
+        const auto live = std::any_of(owned_widgets_.begin(), owned_widgets_.end(),
+            [wrapper](const auto& state) { return state.view == wrapper; });
+        if (live) return wrapper;
+    }
+    return widget(id);
+}
+
 std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
                                                         const std::string& id) {
     // Shared lowercase widget-tag → native widget table. Keep in lockstep with

@@ -15,7 +15,7 @@ void BridgeRegistrars::register_widget_style_background_color_api(WidgetBridge& 
     register_bridge_function(api, "setBackground", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (v && !hex.empty()) v->set_background_color(parse_bridge_css_color(hex));
         return choc::value::Value();
     });
@@ -35,7 +35,7 @@ void BridgeRegistrars::register_widget_style_shadow_api(WidgetBridge& self) {
         auto oy = static_cast<float>(args.get<double>(3, 0.0));
         auto opacity = static_cast<float>(args.get<double>(4, 1.0));
         auto radius = static_cast<float>(args.get<double>(5, 0.0));
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
         auto color = parse_bridge_css_color(hex);
         opacity = std::clamp(opacity, 0.0f, 1.0f);
@@ -52,7 +52,7 @@ void BridgeRegistrars::register_widget_style_opacity_api(WidgetBridge& self) {
     register_bridge_function(api, "setOpacity", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto alpha = args.get<double>(1, 1.0);
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (v) v->set_opacity(static_cast<float>(alpha));
         return choc::value::Value();
     });

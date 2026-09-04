@@ -1570,6 +1570,14 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     CHECK(bridge.scroll_wrapper(panel_id) == upgraded);
     CHECK(upgraded->child_count() == 1);
     CHECK(upgraded->child_at(0) == retained);
+    engine.evaluate("setVisible(retainedPanelId, 0);");
+    CHECK_FALSE(upgraded->visible());
+    engine.evaluate("setVisible(retainedPanelId, 1);");
+    CHECK(upgraded->visible());
+    engine.evaluate("setPointerEvents(retainedPanelId, 'none');");
+    CHECK(upgraded->pointer_events() == View::PointerEvents::none);
+    engine.evaluate("setOpacity(retainedPanelId, 0.5);");
+    CHECK(upgraded->opacity() == Catch::Approx(0.5f));
     CHECK(bridge.owned_widget_identity_count() == identities_before + 1);
     // Scroll-specific style writes target the wrapper, while ordinary widget
     // APIs continue to target the authored content view.

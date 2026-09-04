@@ -182,6 +182,11 @@ public:
     // to address the original content View.
     ScrollView* scroll_wrapper(const std::string& id) const noexcept;
 
+    // Return the native style/hit-test surface for an authored id. Retained
+    // scroll containers use a wrapper for clipping and geometry; ordinary
+    // widgets continue to resolve through the authored registry.
+    View* style_target(const std::string& id) noexcept;
+
     // Sync all widget values from the parameter store
     void sync_from_store();
 

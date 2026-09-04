@@ -14,7 +14,7 @@ void BridgeRegistrars::register_widget_style_cursor_direction_api(WidgetBridge& 
     register_bridge_function(api, "setCursor", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto c = args.get<std::string>(1, "default");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
         // Map the CSS cursor keyword set to the View::CursorStyle slots that exist
         // today (4 base + 7 resize + invisible + multi-directional = 12
