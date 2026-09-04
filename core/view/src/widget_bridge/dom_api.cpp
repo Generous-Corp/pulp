@@ -205,11 +205,23 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     return choc::value::Value();
                 }
                 // Move the existing subtree to the new parent - don't erase widgets.
+                auto* destination = self.resolve_parent(parentId);
+                // Refresh the cache before structural mutation. The assignment
+                // is then unable to strand a detached subtree if allocation
+                // fails while recording the same authored identity.
+                self.widgets_.cache(childId, existing);
                 auto removed = p->remove_child(existing);
-                // Reparenting preserves the original creator; this is a cache
-                // refresh, not a new ownership claim for this bridge.
-                self.widgets_.cache(childId, removed.get());
-                self.resolve_parent(parentId)->add_child(std::move(removed));
+                if (!removed)
+                    throw std::runtime_error("native reparent lost widget ownership");
+                try {
+                    destination->add_child_transactional(removed);
+                } catch (...) {
+                    if (removed) {
+                        try { p->add_child_transactional(removed); }
+                        catch (...) { /* preserve the original exception */ }
+                    }
+                    throw;
+                }
                 return choc::value::Value();
             }
         }
