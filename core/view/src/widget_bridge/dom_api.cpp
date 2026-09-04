@@ -8,6 +8,7 @@
 #include <pulp/view/widgets/svg_rect.hpp>
 #include "api_registry.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -52,6 +53,8 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 // the existing-widget fast path silently discard that hint.
                 if (hint == "scroll"
                     && dynamic_cast<ScrollView*>(existing) == nullptr) {
+                    const auto replaced_instance_id =
+                        existing->import_binding_instance_id();
                     auto removed = p->remove_child(existing);
                     auto scroll = std::make_unique<ScrollView>();
                     scroll->set_id(childId);
@@ -59,7 +62,20 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                         auto* child = removed->child_at(0);
                         scroll->add_child(removed->remove_child(child));
                     }
-                    self.widgets_.cache(childId, scroll.get());
+                    // This is a replacement, not a normal reparent.  Remove
+                    // the retired View's ownership identity before assigning
+                    // the new ScrollView through the registry slot; using
+                    // cache() alone leaves the replacement unowned and the
+                    // retired identity dangling after realm cleanup.
+                    self.owned_widgets_.erase(
+                        std::remove_if(
+                            self.owned_widgets_.begin(),
+                            self.owned_widgets_.end(),
+                            [replaced_instance_id](const auto& owned) {
+                                return owned.instance_id == replaced_instance_id;
+                            }),
+                        self.owned_widgets_.end());
+                    self.widgets_[childId] = scroll.get();
                     // The authored parent id is authoritative during portal
                     // replay. The retained native parent can be the stale
                     // root container even while the JS parent has recovered.

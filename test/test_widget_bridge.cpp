@@ -1524,6 +1524,39 @@ TEST_CASE("WidgetBridge routing-parity sweep — _ensureNative createElement pat
     }
 }
 
+TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
+          "[view][bridge][scroll][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var retainedPanel = document.createElement('div');
+        var retainedChild = document.createElement('div');
+        retainedPanel.appendChild(retainedChild);
+        document.body.appendChild(retainedPanel);
+        globalThis.retainedPanelId = retainedPanel._id;
+    )");
+    const auto panel_id = engine.evaluate("retainedPanelId")
+        .getWithDefault<std::string>("");
+    REQUIRE_FALSE(panel_id.empty());
+    const auto identities_before = bridge.owned_widget_identity_count();
+    REQUIRE(identities_before >= 2);
+
+    // Replaying a retained DOM container with the scroll hint replaces the
+    // plain View. The registry and ownership vector must now identify the
+    // replacement, not the destroyed View.
+    engine.evaluate("__domAppend('', retainedPanelId, 'div', 'scroll')");
+    REQUIRE(dynamic_cast<ScrollView*>(bridge.widget(panel_id)) != nullptr);
+    CHECK(bridge.owned_widget_identity_count() == identities_before);
+
+    bridge.clear();
+    CHECK(bridge.owned_widget_identity_count() == 0);
+    CHECK(bridge.widget_cache_count() == 0);
+}
+
 TEST_CASE("WidgetBridge creates modal overlay from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;
