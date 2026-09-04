@@ -858,6 +858,12 @@ std::unique_ptr<View> View::remove_child(View* child) {
             state->active_overlay = nullptr;
         }
     }
+    // Any lifecycle/drag callback above may mutate this parent's children.
+    // Re-find by the stable raw address before extracting ownership instead of
+    // dereferencing the iterator captured before those callbacks ran.
+    it = std::find_if(children_.begin(), children_.end(),
+        [child](const auto& p) { return p.get() == child; });
+    if (it == children_.end()) return nullptr;
     child->parent_ = nullptr;
     auto owned = std::move(*it);
     children_.erase(it);
