@@ -459,6 +459,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-provenance-hydration-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_gpu_provenance_commits.py")
 
+    # The handoff ledger pins a revision, blob, and tree per referenced path, so
+    # any commit touching a pinned path stales rows far from the edit. This
+    # covers the generator that owns those identities and the drift check that
+    # names the repair, including regeneration being a byte-identical no-op.
+    add_test(NAME gpu-handoff-provenance-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_handoff_provenance.py")
+
     # Closed-schema and semantic negative controls for the shared GPU health
     # envelope. This is intentionally GPU-free so every platform proves the
     # contract even when no real adapter is available.
