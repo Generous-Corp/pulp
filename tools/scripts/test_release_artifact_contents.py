@@ -1433,6 +1433,57 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_crlf_gpu_recipe_catalog_fires(self) -> None:
+        # The exact v0.832.0 Windows failure, as a unit test. Git for Windows
+        # defaults core.autocrlf=true, so a checkout rewrites every LF to CRLF
+        # and the catalog hashes to bytes no pin can describe — while the same
+        # commit passes on Linux. Feed the verifier the CRLF form of the real
+        # source file and require it to reject it.
+        source = ROOT / "docs/status/gpu-recipes.yaml"
+        lf_bytes = source.read_bytes()
+        crlf_bytes = lf_bytes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        # Guard the fixture itself: if the checked-in file ever stops being LF,
+        # this test would compare a value to itself and pass forever.
+        self.assertNotIn(b"\r\n", lf_bytes)
+        self.assertNotEqual(crlf_bytes, lf_bytes)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            member = "pulp-sdk/share/pulp/gpu-recipes.yaml"
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(
+                root / rac.sdk_asset_name("linux-x64"),
+                sdk,
+                as_zip=False,
+                payload_overrides={member: crlf_bytes},
+            )
+            with self.assertRaisesRegex(
+                rac.ContentError, "selected release catalog digest"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_lf_gpu_recipe_catalog_passes(self) -> None:
+        # Positive control for the CRLF test above: the identical archive built
+        # with upstream LF bytes must VERIFY. Without this, a verifier that
+        # rejected every archive would satisfy the negative test.
+        source = ROOT / "docs/status/gpu-recipes.yaml"
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            member = "pulp-sdk/share/pulp/gpu-recipes.yaml"
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(
+                root / rac.sdk_asset_name("linux-x64"),
+                sdk,
+                as_zip=False,
+                payload_overrides={member: source.read_bytes()},
+            )
+            rac.verify_platform(
+                root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+            )
+
     def test_gpu_recipe_catalog_matrix_digests_match_source(self) -> None:
         sources = {
             "pulp-sdk/share/pulp/gpu-recipes.yaml": ROOT
