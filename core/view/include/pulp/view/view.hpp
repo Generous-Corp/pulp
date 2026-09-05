@@ -112,7 +112,24 @@ public:
     // ── Child management ─────────────────────────────────────────────────
 
     void add_child(std::unique_ptr<View> child);
+    // Transactional variant used by structural adapters that must recover the
+    // owned child if an attach hook rejects it. On throw, `child` is restored.
+    void add_child_transactional(std::unique_ptr<View>& child);
+    /// Detaches `child` and returns its ownership, or `nullptr` when `child` is
+    /// no longer this parent's child under the same instance id. A null result
+    /// always means "not ours anymore" — never "moved for you".
     std::unique_ptr<View> remove_child(View* child);
+
+    /// Destroys `owned` at the first moment it is safe to do so.
+    ///
+    /// A hook may remove the very View whose callback is executing. Dropping
+    /// that ownership on the spot would free the frame still running above, so
+    /// hand it here instead: while any DispatchLease is open on this tree the
+    /// view is parked on the root's intrusive retirement chain and freed when
+    /// the outermost lease exits; outside a lease it is destroyed immediately.
+    /// Callers may therefore call this unconditionally. Retiring costs no
+    /// allocation, so a `noexcept` path can use it. See view_lifecycle.hpp.
+    void retire(std::unique_ptr<View> owned) noexcept;
 
     /// Process-wide compatibility generation retained for existing SDK users.
     /// New internal caches should prefer root_structure_generation() so an
@@ -2335,9 +2352,20 @@ private:
     friend class WidgetBridge;
     friend class ViewCapture;
     friend class ScrollView;
+    friend class DispatchLease;
     friend Point point_to_local(Point root_pos, View* target, View* root);
 
     void note_layout_mutation() noexcept;
+
+    /// Destroy everything parked on this root's retirement chain. Iterative, so
+    /// a long chain cannot recurse the stack.
+    void drain_retired() noexcept;
+    /// Deliver this view's own clock hooks, each isolated. Never walks children.
+    void deliver_frame_clock_hooks() noexcept;
+    /// Traverse this view and every descendant still attached at entry exactly
+    /// once for `epoch`, delivering the clock hooks to those not yet notified
+    /// in `sequence`. See notify_frame_clock_changed().
+    void walk_frame_clock(std::uint64_t epoch, std::uint64_t sequence) noexcept;
 
     /// Invert this view's scalar and explicit affine paint transforms for
     /// hit-testing/pointer localization. The historical name remains ABI/source
@@ -2381,7 +2409,7 @@ private:
     /// Recursively fire `on_frame_clock_changed()` on this view and every
     /// descendant. Used by `set_frame_clock()` so a clock installed on a root
     /// after the subtree was built reaches self-subscribing descendants.
-    void notify_frame_clock_changed();
+    void notify_frame_clock_changed() noexcept;
 
     /// Re-point every FrameClockBinding registered on this view at the
     /// currently reachable clock. Called non-virtually from
@@ -2483,6 +2511,43 @@ private:
     // ViewCapture treats this as already absent even while on_detached() still
     // needs the old parent link to release parent-owned resources.
     std::atomic<bool> detaching_{false};
+    // ── Mutation/lifetime gate (view_lifecycle.hpp) ──────────────────────
+    // Number of DispatchLeases open anywhere on this tree. Only the ROOT's
+    // copy is raised; retirement drains when it falls back to zero.
+    std::uint32_t lease_depth_ = 0;
+    // Leases naming THIS view specifically. Non-zero means a callback on it is
+    // executing, so destroying it now would free a live frame.
+    std::uint16_t dispatch_depth_ = 0;
+    // Set for the duration of ~View so a child destroyed as part of its
+    // parent's teardown does not trip the "destroyed while attached" assert.
+    bool destroying_ = false;
+    // True while a frame-clock walk is in flight on this ROOT. Children added
+    // during a walk are stamped as already-visited so they wait for the next
+    // pass instead of being visited mid-mutation.
+    bool clock_walk_active_ = false;
+    // Root-only. Set when a hook requests propagation during an active walk;
+    // the outermost caller runs one more bounded pass to service it.
+    bool clock_walk_pending_ = false;
+    // Root-only, and meaningful only while a walk is in flight: the traversal
+    // token of the pass currently running, published so a mid-pass attach can
+    // stamp the incoming subtree as belonging to it.
+    std::uint64_t clock_epoch_ = 0;
+    // Per view. The traversal stamp makes a pass visit each node at most once
+    // even while hooks mutate children_; the delivery stamp makes the whole
+    // call notify each node at most once across all of its passes. They are
+    // separate because a later pass must be free to walk THROUGH an
+    // already-notified node to reach a descendant attached mid-pass.
+    //
+    // Both hold PROCESS-GLOBAL monotonic tokens, never per-root counters. A
+    // view outlives its root — remove_child hands a detached subtree its own
+    // root and notifies it immediately — so a stamp must mean the same thing in
+    // every tree. See next_clock_walk_token() in view.cpp.
+    std::uint64_t clock_walk_epoch_ = 0;
+    std::uint64_t clock_delivery_sequence_ = 0;
+    // Intrusive owning retirement chain. Root-only head; each retired view
+    // carries the link to the next, so parking one allocates nothing.
+    std::unique_ptr<View> retired_head_;
+    std::unique_ptr<View> retired_next_;
     View* parent_ = nullptr;
     std::vector<std::unique_ptr<View>> children_;
     std::string id_;

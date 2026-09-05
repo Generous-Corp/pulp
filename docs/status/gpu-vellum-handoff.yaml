@@ -467,24 +467,24 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/view.cpp",
           "state": "pulp-owned-retained",
-          "revision": "36ae5bc251fe8f90f823f8b66edaa0495d5abdf4",
-          "object_id": "14ee2df639ab02a75dacf123ea7da66dd601b00f",
+          "revision": "397d960b7d3c933932593ce64562f87d0289da77",
+          "object_id": "974aa5e81f64e18ddc06f141fd586cdb7edc5b14",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "328c67e02f16f90b8c422d65099037019f0d6065",
-          "object_id": "8ac310cd1feb513494fb13705fe46efee8b52fa4",
+          "revision": "0783b65515c5fe5a5d129e41960004188c002eef",
+          "object_id": "0026f6318bc2154cf9fef40e4b8eb392dcdc8aab",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge/bridge_dispatch.cpp",
           "state": "pulp-owned-retained",
-          "revision": "b4ba22f1d700621366afdbc72bb8615336964cd1",
-          "object_id": "0c0ad6f12f40a64dc5fd59a63b064f114b79b833",
+          "revision": "0783b65515c5fe5a5d129e41960004188c002eef",
+          "object_id": "6ca1e62ef229c4061e0644975298e569d9f7c9ac",
           "object_type": "blob"
         }
       ],
@@ -2783,8 +2783,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/web-plugins/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "ec876ca312c5134f147dfd7d3b256fe6ad0e2368",
-          "object_id": "de1bf7b7f580c99c92337ed4b1aff281a4a4b39b",
+          "revision": "65b9c2babc0671fbaab5ca9cd33528ffdb5770e7",
+          "object_id": "d5d43a4b81eebc2baa6320ae7ca8b32ecb07a81a",
           "object_type": "blob"
         },
         {

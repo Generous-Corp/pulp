@@ -14,8 +14,8 @@ void BridgeRegistrars::register_widget_style_visibility_api(WidgetBridge& self) 
     register_bridge_function(api, "setVisible", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto vis = args.get<double>(1, 1) > 0.5;
-        auto it = self.widgets_.find(id);
-        if (it != self.widgets_.end()) it->second->set_visible(vis);
+        if (auto* v = id.empty() ? &self.root_ : self.style_target(id))
+            v->set_visible(vis);
         return choc::value::Value();
     });
 }
@@ -35,7 +35,7 @@ void BridgeRegistrars::register_widget_style_interaction_api(WidgetBridge& self)
     register_bridge_function(api, "setPointerEvents", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "auto");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
         if (mode == "none") {
             v->set_hit_testable(false);
@@ -59,7 +59,7 @@ void BridgeRegistrars::register_widget_style_interaction_api(WidgetBridge& self)
     register_bridge_function(api, "setBackfaceVisibility", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "visible");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (v) v->set_backface_visible(mode != "hidden");
         return choc::value::Value();
     });
@@ -68,7 +68,7 @@ void BridgeRegistrars::register_widget_style_interaction_api(WidgetBridge& self)
     register_bridge_function(api, "setVisibility", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto vis = args.get<std::string>(1, "visible");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (v) {
             // visibility:hidden = still takes space but not painted
             // We use opacity 0 + still visible for layout

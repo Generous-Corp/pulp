@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20260905-imported-ui-view-lifecycle-gate",
+  "kind": "change",
+  "created_at": "2026-09-05T04:55:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "A Pulp View invokes overridable code and then keeps executing on `this`, so an imported UI's JavaScript handler could remove and destroy the very view whose member was running. This adds a Pulp-owned root-scoped DispatchLease plus View::retire, and brackets Pulp's own hook call sites with it. The retained UI kernel is touched only at core/view/src/pointer_dispatch.cpp, where transfer_input_focus and drain_root_focus already invoke on_focus_changed and then revalidate through ViewCapture: the leases hold that view's storage across those two calls so the existing revalidation reads live memory instead of freed memory. No signature, ordering, or public contract in the slice changes, and no dispatch decision moves. This is Pulp-only. The lifetime rule it encodes is generic, and a Vellum-native retained UI will need an equivalent, but it should derive one from its own ownership model rather than copy Pulp's root-owned intrusive retirement chain, which is shaped by WidgetBridge's callback-depth deferral and by Pulp's ViewCapture identity. There is no named immutable Vellum framework commit to backport against, and this records no Vellum acknowledgement.",
+  "tests": [
+    "pulp-test-pointer-focus-lifecycle",
+    "pulp-test-view-lifecycle-bridge",
+    "pulp-test-view-lifecycle-contract",
+    "pulp-test-view-pool",
+    "pulp-test-widget-bridge"
+  ],
+  "disposition": "pulp-only"
+}

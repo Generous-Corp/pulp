@@ -1,6 +1,7 @@
 #include <pulp/view/pointer_dispatch.hpp>
 
 #include <pulp/view/ui_components.hpp>  // ScrollView
+#include <pulp/view/view_lifecycle.hpp>
 #include "pointer_dispatch_internal.hpp"
 
 #include <algorithm>
@@ -149,6 +150,10 @@ bool drain_root_focus(View& root, const ViewCapture& protected_target,
         if (still_in_tree(current, &root)) {
             ViewCapture current_capture;
             current_capture.set(current);
+            // The blur hook is user code and may remove and destroy `current`.
+            // The lease keeps its storage alive; the capture tells us whether
+            // it is still the same view in the same tree afterwards.
+            DispatchLease lease(*current);
             current->release_input_focus();
             if (View* live_current = current_capture.live_in(root))
                 live_current->View::on_focus_changed(false);
@@ -204,7 +209,13 @@ bool transfer_input_focus(View& root, View* target) {
     if (!target_focusable) return true;
     if (root.interaction().focused_input == target) return true;
 
-    target->on_focus_changed(true);
+    {
+        // The gain hook may remove and destroy `target`. Hold its storage for
+        // the call; the capture below decides whether it is still the same
+        // view, still in this tree.
+        DispatchLease lease(*target);
+        target->on_focus_changed(true);
+    }
     target = target_capture.live_in(root);
     if (!target) return false;
     // A gain callback may also claim a replacement. The explicit clicked

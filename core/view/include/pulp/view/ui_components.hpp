@@ -100,6 +100,9 @@ public:
     void on_text_input(const TextInputEvent& event) override;
 
     bool is_open() const { return open_; }
+    /// Reopen after a retained subtree move when the dropdown was active.
+    /// The bridge uses this only after identity-validated reparenting.
+    void restore_open_state() { open_dropdown(); }
     /// True when the menu currently renders ABOVE the field (it would spill past
     /// the viewport bottom). Scroll-aware: reflects the field's on-screen
     /// position, so scrolling the page can change the answer.

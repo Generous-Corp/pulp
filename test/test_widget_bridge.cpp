@@ -22,6 +22,7 @@
 #include <pulp/view/virtual_grid.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #if __has_include(<pulp/render/gpu_surface.hpp>)
 #include <pulp/render/gpu_surface.hpp>
 #define PULP_TEST_HAS_GPU_SURFACE 1
@@ -339,8 +340,13 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
 
     auto* captured = dynamic_cast<CanvasWidget*>(bridge.widget("captured"));
     auto* behavior = dynamic_cast<CanvasWidget*>(bridge.widget("behavior"));
+    auto* behavior_root = bridge.widget("behavior-root");
     REQUIRE(captured != nullptr);
     REQUIRE(behavior != nullptr);
+    REQUIRE(behavior_root != nullptr);
+    // Keep the authored behavior subtree out of this synthetic hit-test lane;
+    // its owner is exercised through the retained sibling relay below.
+    behavior_root->set_pointer_events(View::PointerEvents::none);
     REQUIRE(captured->command_count() == 0);
     captured->set_bounds({20, 30, 100, 80});
     REQUIRE(captured->opacity() == 0.0f);
@@ -350,19 +356,30 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
     REQUIRE(root.hit_test({50, 60}) == captured);
 
     int edges = 0;
+    int native_downs = 0;
     REQUIRE(engine.evaluate(R"js(
         bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0,
           'behavior-wrapper')
     )js").getWithDefault<bool>(false));
-    REQUIRE_FALSE(captured->on_dom_pointer_event);
+    REQUIRE(captured->pointer_events() == View::PointerEvents::auto_);
+    REQUIRE(behavior->pointer_events() == View::PointerEvents::none);
+    REQUIRE(root.hit_test({50, 60}) == captured);
 
     // React commits behavior after the DesignIR sibling can already be
     // attached. A later idempotent rebind must leave input on the live source,
     // never copy it to the hidden final-space target.
     auto* behavior_wrapper = bridge.widget("behavior-wrapper");
     REQUIRE(behavior_wrapper != nullptr);
-    behavior_wrapper->on_dom_pointer_event = [&edges](const MouseEvent&, bool) {
+    // Give the owner a distinct local origin so the relay's coordinate remap
+    // is exercised rather than merely forwarding the retained canvas point.
+    behavior_wrapper->set_bounds({10, 20, 200, 200});
+    Point observed_owner_position;
+    behavior_wrapper->on_dom_pointer_event = [&edges, &native_downs,
+                                               &observed_owner_position](
+        const MouseEvent& event, bool) {
         ++edges;
+        if (event.is_down) ++native_downs;
+        observed_owner_position = event.position;
     };
     REQUIRE(engine.evaluate(R"js(
         bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0,
@@ -373,25 +390,57 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
     REQUIRE(behavior->command_count() == 2);
     REQUIRE(captured->command_count() == 2);
     CHECK(&captured->commands() == &behavior->commands());
-    CHECK(behavior->opacity() == 1.0f);
-    CHECK(captured->opacity() == 0.0f);
-    CHECK(captured->pointer_events() == View::PointerEvents::none);
+    CHECK(behavior->opacity() == 0.0f);
+    CHECK(captured->opacity() == 1.0f);
+    CHECK(captured->pointer_events() == View::PointerEvents::auto_);
     const int before_redraw = host.count;
     bridge.load_script("canvasClear('behavior'); canvasFillRect('behavior', 8, 9, 10, 11, '#f0f');");
     REQUIRE(host.count > before_redraw);
     REQUIRE(behavior->command_count() == 1);
     REQUIRE(captured->command_count() == 1);
 
-    REQUIRE_FALSE(captured->on_dom_pointer_event);
+    REQUIRE(captured->pointer_events() == View::PointerEvents::auto_);
     REQUIRE(behavior_wrapper->on_dom_pointer_event);
+    // The retained DesignIR canvas is a sibling of the authored behavior
+    // wrapper. A real root click must still enter the wrapper callback through
+    // the native relay installed by bindCanvasBehaviorAt; invoking the wrapper
+    // callback directly would not exercise hit testing or the target handoff.
+    REQUIRE(captured->on_dom_pointer_event);
+    REQUIRE(root.hit_test({50, 60}) == captured);
+    edges = 0;
+    native_downs = 0;
+    root.simulate_click({50, 60});
+    REQUIRE(native_downs == 1);
+    REQUIRE(edges == 2); // pointerdown + pointerup
+    REQUIRE(observed_owner_position.x == Catch::Approx(40.0f));
+    REQUIRE(observed_owner_position.y == Catch::Approx(40.0f));
+
     MouseEvent down;
     down.phase = MousePhase::press;
     down.button = MouseButton::left;
     down.is_down = true;
     down.position = {10, 12};
     down.window_position = down.position;
+    // Keep the direct-owner assertion independent from the native click above.
+    edges = 0;
     behavior_wrapper->on_dom_pointer_event(down, true);
     REQUIRE(edges == 1);
+
+    // A canvas can own its own React handlers. It must stay hidden from native
+    // hit testing while the retained target relays into that source callback.
+    int source_downs = 0;
+    behavior->on_dom_pointer_event = [&source_downs](const MouseEvent& event,
+                                                      bool) {
+        if (event.is_down) ++source_downs;
+    };
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('chromium:backend-node:42', 'behavior-root', 0,
+          'behavior')
+    )js").getWithDefault<bool>(false));
+    REQUIRE(behavior->pointer_events() == View::PointerEvents::none);
+    source_downs = 0;
+    root.simulate_click({50, 60});
+    REQUIRE(source_downs == 1);
 
     REQUIRE_FALSE(engine.evaluate(
         "bindCanvasBehaviorAt('missing', 'behavior-root', 0)")
@@ -425,6 +474,416 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
         "setVisibleAtAnchor('browser:paint-authority', true)")
         .getWithDefault<bool>(true));
     REQUIRE_FALSE(paint->visible());
+}
+
+TEST_CASE("WidgetBridge rejects self-owned retained canvas bindings", "[view][bridge][canvas-binding]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        createCol('source-root', 'root');
+        createCanvas('source', 'source-root');
+        createCanvas('target', 'source-root');
+        setAnchor('target', 'self-owned-anchor');
+    )js");
+
+    auto* source = dynamic_cast<CanvasWidget*>(bridge.widget("source"));
+    auto* target = dynamic_cast<CanvasWidget*>(bridge.widget("target"));
+    REQUIRE(source != nullptr);
+    REQUIRE(target != nullptr);
+    REQUIRE_FALSE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('self-owned-anchor', 'source-root', 0,
+          'target')
+    )js").getWithDefault<bool>(true));
+    REQUIRE(target->pointer_events() == View::PointerEvents::auto_);
+    REQUIRE_FALSE(target->on_dom_pointer_event);
+    REQUIRE_FALSE(target->on_click);
+}
+
+TEST_CASE("WidgetBridge rejects overlapping canvas owner topology",
+          "[view][bridge][canvas-binding]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        createCol('source-root', 'root');
+        createCanvas('source', 'source-root');
+        createCanvas('target', 'source-root');
+        setAnchor('target', 'ancestor-owned-anchor');
+    )js");
+
+    auto* source_root = bridge.widget("source-root");
+    auto* source = dynamic_cast<CanvasWidget*>(bridge.widget("source"));
+    auto* target = dynamic_cast<CanvasWidget*>(bridge.widget("target"));
+    REQUIRE(source_root != nullptr);
+    REQUIRE(source != nullptr);
+    REQUIRE(target != nullptr);
+    source->set_pointer_events(View::PointerEvents::none);
+    source_root->set_bounds({0, 0, 400, 300});
+    target->set_bounds({20, 30, 100, 80});
+
+    source_root->on_dom_pointer_event = [](const MouseEvent&, bool) {};
+    source_root->on_click = [] {};
+    REQUIRE_FALSE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('ancestor-owned-anchor', 'source-root', 0,
+          'source-root')
+    )js").getWithDefault<bool>(true));
+    // Rejection happens before paint/input mutation, leaving the target's
+    // existing callback slots untouched.
+    REQUIRE_FALSE(target->on_dom_pointer_event);
+    REQUIRE_FALSE(target->on_click);
+}
+
+TEST_CASE("WidgetBridge composes pre-existing target event callbacks",
+          "[view][bridge][canvas-binding]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        createCanvas('captured', 'root');
+        setAnchor('captured', 'composed-anchor');
+        createCol('behavior-root', 'root');
+        createCol('behavior-owner', 'behavior-root');
+        createCanvas('source', 'behavior-owner');
+    )js");
+
+    auto* captured = dynamic_cast<CanvasWidget*>(bridge.widget("captured"));
+    auto* source = dynamic_cast<CanvasWidget*>(bridge.widget("source"));
+    auto* owner = bridge.widget("behavior-owner");
+    auto* behavior_root = bridge.widget("behavior-root");
+    REQUIRE(captured != nullptr);
+    REQUIRE(source != nullptr);
+    REQUIRE(owner != nullptr);
+    REQUIRE(behavior_root != nullptr);
+    behavior_root->set_pointer_events(View::PointerEvents::none);
+    captured->set_bounds({20, 30, 100, 80});
+    owner->set_bounds({10, 20, 200, 200});
+
+    int target_pointer = 0;
+    int owner_pointer = 0;
+    int target_moves = 0;
+    int owner_moves = 0;
+    int target_wheels = 0;
+    int owner_wheels = 0;
+    int target_clicks = 0;
+    int owner_clicks = 0;
+    Point owner_position;
+    captured->on_dom_pointer_event = [&target_pointer](const MouseEvent&, bool) {
+        ++target_pointer;
+    };
+    captured->on_dom_pointer_move_event = [&target_moves](const MouseEvent&, bool) {
+        ++target_moves;
+    };
+    captured->on_dom_wheel_event = [&target_wheels](const MouseEvent&, bool) {
+        ++target_wheels;
+    };
+    captured->on_click = [&target_clicks] { ++target_clicks; };
+    owner->on_dom_pointer_event = [&owner_pointer, &owner_position](
+        const MouseEvent& event, bool) {
+        ++owner_pointer;
+        owner_position = event.position;
+    };
+    owner->on_dom_pointer_move_event = [&owner_moves](const MouseEvent&, bool) {
+        ++owner_moves;
+    };
+    owner->on_dom_wheel_event = [&owner_wheels](const MouseEvent&, bool) {
+        ++owner_wheels;
+    };
+    owner->on_click = [&owner_clicks] { ++owner_clicks; };
+
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('composed-anchor', 'behavior-root', 0,
+          'behavior-owner')
+    )js").getWithDefault<bool>(false));
+    // React commits may call the binding hook repeatedly. Rebinding must
+    // replace only the owner capture, not stack another copy of either the
+    // retained-target callback or the owner relay.
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('composed-anchor', 'behavior-root', 0,
+          'behavior-owner')
+    )js").getWithDefault<bool>(false));
+    root.simulate_click({50, 60});
+    REQUIRE(target_pointer == 2);
+    REQUIRE(owner_pointer == 2);
+    REQUIRE(target_clicks == 1);
+    REQUIRE(owner_clicks == 1);
+    REQUIRE(owner_position.x == Catch::Approx(40.0f));
+    REQUIRE(owner_position.y == Catch::Approx(40.0f));
+
+    root.simulate_drag({50, 60}, {60, 70}, 1);
+    REQUIRE(target_moves == 1);
+    REQUIRE(owner_moves == 1);
+
+    deliver_mouse_wheel(root, {50, 60}, 0.0f, 1.0f, WheelHost{});
+    REQUIRE(target_wheels == 1);
+    REQUIRE(owner_wheels == 1);
+}
+
+TEST_CASE("WidgetBridge relays become inert across owner replacement",
+          "[view][bridge][canvas-binding][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        createCanvas('captured', 'root');
+        setAnchor('captured', 'replacement-anchor');
+        createCol('behavior-root', 'root');
+        createCol('owner', 'behavior-root');
+        createCanvas('source', 'owner');
+    )js");
+    auto* captured = dynamic_cast<CanvasWidget*>(bridge.widget("captured"));
+    auto* behavior_root = bridge.widget("behavior-root");
+    auto* owner = bridge.widget("owner");
+    REQUIRE(captured != nullptr);
+    REQUIRE(behavior_root != nullptr);
+    REQUIRE(owner != nullptr);
+    behavior_root->set_pointer_events(View::PointerEvents::none);
+    captured->set_bounds({20, 30, 100, 80});
+    int old_owner_downs = 0;
+    owner->on_dom_pointer_event = [&old_owner_downs](const MouseEvent& event,
+                                                      bool) {
+        if (event.is_down) ++old_owner_downs;
+    };
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('replacement-anchor', 'behavior-root', 0,
+          'owner')
+    )js").getWithDefault<bool>(false));
+
+    REQUIRE(engine.evaluate("removeWidget('owner')").isVoid());
+    // The relay still lives on the retained target while the removed subtree
+    // is in the bridge's retirement window, but its ViewCapture must reject the
+    // detached owner rather than dereferencing or invoking its callback.
+    root.simulate_click({50, 60});
+    REQUIRE(old_owner_downs == 0);
+
+    bridge.load_script(R"js(
+        createCol('owner', 'behavior-root');
+        createCanvas('source', 'owner');
+    )js");
+    auto* replacement = bridge.widget("owner");
+    REQUIRE(replacement != nullptr);
+    int replacement_downs = 0;
+    replacement->on_dom_pointer_event = [&replacement_downs](
+        const MouseEvent& event, bool) {
+        if (event.is_down) ++replacement_downs;
+    };
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('replacement-anchor', 'behavior-root', 0,
+          'owner')
+    )js").getWithDefault<bool>(false));
+    root.simulate_click({50, 60});
+    REQUIRE(replacement_downs == 1);
+}
+
+TEST_CASE("WidgetBridge restores prior source and owner hit-test state on rebind",
+          "[view][bridge][canvas-binding]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        createCanvas('captured', 'root');
+        setAnchor('captured', 'state-anchor');
+        createCol('behavior-root', 'root');
+        createCol('owner-a', 'behavior-root');
+        createCanvas('source-a', 'owner-a');
+        createCol('owner-b', 'behavior-root');
+        createCanvas('source-b', 'owner-b');
+    )js");
+    auto* captured = dynamic_cast<CanvasWidget*>(bridge.widget("captured"));
+    auto* behavior_root = bridge.widget("behavior-root");
+    auto* owner_a = bridge.widget("owner-a");
+    auto* owner_b = bridge.widget("owner-b");
+    auto* source_a = dynamic_cast<CanvasWidget*>(bridge.widget("source-a"));
+    auto* source_b = dynamic_cast<CanvasWidget*>(bridge.widget("source-b"));
+    REQUIRE(captured != nullptr);
+    REQUIRE(behavior_root != nullptr);
+    REQUIRE(owner_a != nullptr);
+    REQUIRE(owner_b != nullptr);
+    REQUIRE(source_a != nullptr);
+    REQUIRE(source_b != nullptr);
+    behavior_root->set_pointer_events(View::PointerEvents::none);
+    captured->set_bounds({20, 30, 100, 80});
+
+    owner_a->set_pointer_events(View::PointerEvents::box_none);
+    owner_b->set_pointer_events(View::PointerEvents::box_only);
+    source_a->set_pointer_events(View::PointerEvents::box_only);
+    source_a->set_opacity(0.25f);
+    source_b->set_pointer_events(View::PointerEvents::box_none);
+    source_b->set_opacity(0.5f);
+
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('state-anchor', 'behavior-root', 0, 'owner-a')
+    )js").getWithDefault<bool>(false));
+    REQUIRE(owner_a->pointer_events() == View::PointerEvents::auto_);
+    REQUIRE(source_a->pointer_events() == View::PointerEvents::none);
+    REQUIRE(source_a->opacity() == 0.0f);
+
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('state-anchor', 'behavior-root', 1, 'owner-b')
+    )js").getWithDefault<bool>(false));
+    REQUIRE(owner_a->pointer_events() == View::PointerEvents::box_none);
+    REQUIRE(owner_b->pointer_events() == View::PointerEvents::auto_);
+    REQUIRE(source_a->pointer_events() == View::PointerEvents::box_only);
+    REQUIRE(source_a->opacity() == Catch::Approx(0.25f));
+    REQUIRE(source_b->pointer_events() == View::PointerEvents::none);
+    REQUIRE(source_b->opacity() == 0.0f);
+
+    // Dropping the behavior owner restores owner B as well. The source remains
+    // hidden because the target is still bound to source B's retained program.
+    REQUIRE(engine.evaluate(
+        "bindCanvasBehaviorAt('state-anchor', 'behavior-root', 1)")
+        .getWithDefault<bool>(false));
+    REQUIRE(owner_b->pointer_events() == View::PointerEvents::box_only);
+    REQUIRE(source_b->pointer_events() == View::PointerEvents::none);
+    REQUIRE(source_b->opacity() == 0.0f);
+}
+
+TEST_CASE("WidgetBridge rejects source and target overlap before hiding source",
+          "[view][bridge][canvas-binding]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        createCol('source-root', 'root');
+        createCanvas('source', 'source-root');
+        createCanvas('target', 'source');
+        setAnchor('target', 'nested-target-anchor');
+    )js");
+    auto* source = dynamic_cast<CanvasWidget*>(bridge.widget("source"));
+    auto* target = dynamic_cast<CanvasWidget*>(bridge.widget("target"));
+    REQUIRE(source != nullptr);
+    REQUIRE(target != nullptr);
+    source->set_opacity(0.4f);
+    source->set_pointer_events(View::PointerEvents::box_only);
+    REQUIRE_FALSE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('nested-target-anchor', 'source-root', 0)
+    )js").getWithDefault<bool>(true));
+    REQUIRE(source->opacity() == Catch::Approx(0.4f));
+    REQUIRE(source->pointer_events() == View::PointerEvents::box_only);
+    REQUIRE(target->pointer_events() == View::PointerEvents::auto_);
+}
+
+TEST_CASE("WidgetBridge rejects relay-owned canvas cycles",
+          "[view][bridge][canvas-binding][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Keep both potential owners in one source root so each binding satisfies
+    // bindCanvasBehaviorAt's ownership containment contract. The two retained
+    // targets are siblings; ancestry checks alone therefore cannot detect the
+    // cycle, while the owner-graph guard must reject the second bind.
+    bridge.load_script(R"js(
+        createCol('behavior-root', 'root');
+        createCanvas('source-a', 'behavior-root');
+        createCanvas('source-b', 'behavior-root');
+        createCanvas('target-a', 'behavior-root');
+        setAnchor('target-a', 'cycle-anchor-a');
+        createCanvas('target-b', 'behavior-root');
+        setAnchor('target-b', 'cycle-anchor-b');
+    )js");
+
+    auto* behavior_root = bridge.widget("behavior-root");
+    auto* target_a = dynamic_cast<CanvasWidget*>(bridge.widget("target-a"));
+    auto* source_a = dynamic_cast<CanvasWidget*>(bridge.widget("source-a"));
+    auto* source_b = dynamic_cast<CanvasWidget*>(bridge.widget("source-b"));
+    auto* target_b = dynamic_cast<CanvasWidget*>(bridge.widget("target-b"));
+    REQUIRE(behavior_root != nullptr);
+    REQUIRE(source_a != nullptr);
+    REQUIRE(source_b != nullptr);
+    REQUIRE(target_a != nullptr);
+    REQUIRE(target_b != nullptr);
+    behavior_root->set_pointer_events(View::PointerEvents::box_none);
+    source_a->set_pointer_events(View::PointerEvents::none);
+    source_b->set_pointer_events(View::PointerEvents::none);
+    target_a->set_bounds({20, 30, 100, 80});
+    target_b->set_bounds({200, 30, 100, 80});
+
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('cycle-anchor-a', 'behavior-root', 0,
+          'target-b')
+    )js").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('cycle-anchor-b', 'behavior-root', 1,
+          'target-a')
+    )js").getWithDefault<bool>(true));
+
+    // The first binding remains usable; rejecting the second one must not
+    // clear its relay or leave native dispatch in a recursive state.
+    int owner_downs = 0;
+    target_b->on_dom_pointer_event = [&owner_downs](const MouseEvent& event,
+                                                     bool) {
+        if (event.is_down) ++owner_downs;
+    };
+    root.simulate_click({50, 60});
+    REQUIRE(owner_downs == 1);
+}
+
+TEST_CASE("WidgetBridge permits several canvases sharing one owner",
+          "[view][bridge][canvas-binding]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 500, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        createCol('behavior-root', 'root');
+        createCol('owner', 'behavior-root');
+        createCanvas('source-a', 'behavior-root');
+        createCanvas('source-b', 'behavior-root');
+        createCanvas('target-a', 'root');
+        setAnchor('target-a', 'shared-anchor-a');
+        createCanvas('target-b', 'root');
+        setAnchor('target-b', 'shared-anchor-b');
+    )js");
+
+    auto* behavior_root = bridge.widget("behavior-root");
+    auto* owner = bridge.widget("owner");
+    auto* target_a = dynamic_cast<CanvasWidget*>(bridge.widget("target-a"));
+    auto* target_b = dynamic_cast<CanvasWidget*>(bridge.widget("target-b"));
+    REQUIRE(behavior_root != nullptr);
+    REQUIRE(owner != nullptr);
+    REQUIRE(target_a != nullptr);
+    REQUIRE(target_b != nullptr);
+    behavior_root->set_pointer_events(View::PointerEvents::none);
+    target_a->set_bounds({20, 30, 100, 80});
+    target_b->set_bounds({220, 30, 100, 80});
+
+    int owner_downs = 0;
+    owner->on_dom_pointer_event = [&owner_downs](const MouseEvent& event, bool) {
+        if (event.is_down) ++owner_downs;
+    };
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('shared-anchor-a', 'behavior-root', 0, 'owner')
+    )js").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate(R"js(
+        bindCanvasBehaviorAt('shared-anchor-b', 'behavior-root', 1, 'owner')
+    )js").getWithDefault<bool>(false));
+
+    root.simulate_click({50, 60});
+    root.simulate_click({250, 60});
+    REQUIRE(owner_downs == 2);
 }
 
 TEST_CASE("WidgetBridge creates fader from JS", "[view][bridge]") {
@@ -1063,6 +1522,126 @@ TEST_CASE("WidgetBridge routing-parity sweep — _ensureNative createElement pat
         REQUIRE(w != nullptr);
         REQUIRE(c.is_native(w));
     }
+}
+
+TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
+          "[view][bridge][scroll][lifetime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var retainedPanel = document.createElement('div');
+        var retainedChild = document.createElement('div');
+        retainedPanel.appendChild(retainedChild);
+        document.body.appendChild(retainedPanel);
+        globalThis.retainedPanelId = retainedPanel._id;
+    )");
+    const auto panel_id = engine.evaluate("retainedPanelId")
+        .getWithDefault<std::string>("");
+    REQUIRE_FALSE(panel_id.empty());
+    const auto identities_before = bridge.owned_widget_identity_count();
+    REQUIRE(identities_before >= 2);
+    REQUIRE(bridge.widget(panel_id) != nullptr);
+    bool callback_called = false;
+    bridge.widget(panel_id)->on_click = [&callback_called] {
+        callback_called = true;
+    };
+
+    // Replaying a retained DOM container with the scroll hint replaces the
+    // plain View. The registry and ownership vector must now identify the
+    // replacement, not the destroyed View.
+    engine.evaluate("__domAppend('', retainedPanelId, 'div', 'scroll')");
+    auto* upgraded = bridge.scroll_wrapper(panel_id);
+    REQUIRE(upgraded != nullptr);
+    CHECK(upgraded->id().empty());
+    REQUIRE(upgraded->child_count() == 1);
+    auto* retained = upgraded->child_at(0);
+    CHECK(retained->id() == panel_id);
+    REQUIRE(retained->on_click != nullptr);
+    retained->on_click();
+    CHECK(callback_called);
+    CHECK(bridge.owned_widget_identity_count() == identities_before + 1);
+    // React/materialized replay is allowed to repeat the same append. It must
+    // preserve the single wrapper/content pair rather than nesting wrappers.
+    engine.evaluate("__domAppend('', retainedPanelId, 'div', 'scroll')");
+    CHECK(bridge.scroll_wrapper(panel_id) == upgraded);
+    CHECK(upgraded->child_count() == 1);
+    CHECK(upgraded->child_at(0) == retained);
+    engine.evaluate("setVisible(retainedPanelId, 0);");
+    CHECK_FALSE(upgraded->visible());
+    engine.evaluate("setVisible(retainedPanelId, 1);");
+    CHECK(upgraded->visible());
+    engine.evaluate("setPointerEvents(retainedPanelId, 'none');");
+    CHECK(upgraded->pointer_events() == View::PointerEvents::none);
+    engine.evaluate("setOpacity(retainedPanelId, 0.5);");
+    CHECK(upgraded->opacity() == Catch::Approx(0.5f));
+    CHECK(bridge.owned_widget_identity_count() == identities_before + 1);
+    // Scroll-specific style writes target the wrapper, while ordinary widget
+    // APIs continue to target the authored content view.
+    engine.evaluate("setScrollBehavior(retainedPanelId, 'smooth');");
+    CHECK(upgraded->scroll_behavior() == "smooth");
+    engine.evaluate("setOverscrollBehavior(retainedPanelId, 'contain');");
+    CHECK(upgraded->overscroll_behavior() == "contain");
+    engine.evaluate("setOverflow(retainedPanelId, 'scroll');");
+    CHECK(upgraded->overflow() == View::Overflow::scroll);
+    // Exercise the public DOM reparent path, not only the native helper.
+    // appendChild must preserve the existing native identity so the retained
+    // wrapper is moved as a unit instead of being rematerialized.
+    engine.evaluate(R"(
+        var reparentDestination = document.createElement('div');
+        document.body.appendChild(reparentDestination);
+        reparentDestination.appendChild(retainedPanel);
+        globalThis.reparentDestinationId = reparentDestination._id;
+    )");
+    const auto destination_id = engine.evaluate("reparentDestinationId")
+        .getWithDefault<std::string>("");
+    REQUIRE_FALSE(destination_id.empty());
+    engine.evaluate(R"(
+        globalThis.cycleRejected = false;
+        try { reparentDestination.appendChild(document.body); }
+        catch (e) { globalThis.cycleRejected = true; }
+    )");
+    CHECK(engine.evaluate("cycleRejected").getWithDefault<bool>(false));
+    CHECK(bridge.scroll_wrapper(panel_id) == upgraded);
+    CHECK(upgraded->parent() == bridge.widget(destination_id));
+    engine.evaluate(R"(
+        var insertDestination = document.createElement('div');
+        var insertMarker = document.createElement('div');
+        document.body.appendChild(insertDestination);
+        insertDestination.appendChild(insertMarker);
+        insertDestination.insertBefore(retainedPanel, insertMarker);
+        globalThis.insertDestinationId = insertDestination._id;
+    )");
+    const auto insert_destination_id = engine.evaluate("insertDestinationId")
+        .getWithDefault<std::string>("");
+    REQUIRE_FALSE(insert_destination_id.empty());
+    CHECK(bridge.scroll_wrapper(panel_id) == upgraded);
+    CHECK(upgraded->parent() == bridge.widget(insert_destination_id));
+    CHECK(upgraded->child_count() == 1);
+    CHECK(upgraded->child_at(0) == retained);
+    engine.evaluate("__domAppend(retainedPanelId, 'post-upgrade-child', 'div')");
+    REQUIRE(bridge.widget("post-upgrade-child") != nullptr);
+    CHECK(bridge.widget("post-upgrade-child")->parent() == retained);
+
+    bridge.quarantine_realm();
+    bridge.clear_quarantined_realm();
+    CHECK(bridge.owned_widget_identity_count() == 0);
+    CHECK(bridge.widget_cache_count() == 0);
+    CHECK(root.child_count() == 0);
+}
+
+TEST_CASE("View add_child rolls back when attach hook throws",
+          "[view][lifetime][exception-safety]") {
+    struct ThrowingAttach final : View {
+        void on_attached() override { throw std::runtime_error("attach failed"); }
+    };
+    View root;
+    REQUIRE_THROWS_WITH(root.add_child(std::make_unique<ThrowingAttach>()),
+                        "attach failed");
+    CHECK(root.child_count() == 0);
 }
 
 TEST_CASE("WidgetBridge creates modal overlay from JS", "[view][bridge]") {
