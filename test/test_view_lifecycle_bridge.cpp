@@ -110,6 +110,52 @@ TEST_CASE("retained scroll upgrade fails closed when the removal is stolen",
     REQUIRE(container_raw->child_count() == 0);
 }
 
+TEST_CASE("the retained scroll upgrade keeps the content's flex role",
+          "[view][bridge][scroll][lifecycle][layout]") {
+    // The upgrade replaces a retained container with a ScrollView wrapper that
+    // takes the container's place in the parent's layout. It therefore has to
+    // take its LAYOUT ROLE, not just its current pixel rectangle.
+    //
+    // Copying only bounds silently converts a flex-sized container into a
+    // fixed-size one: the wrapper freezes at whatever height the content
+    // happened to have at upgrade time and never grows again. An authored
+    // `flex: 1; min-height: 0` body — the standard scrollable-panel idiom, and
+    // what a Settings panel uses — then collapses to its pre-layout height.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 600});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    auto header = std::make_unique<View>();
+    header->set_id("header");
+    header->flex().preferred_height = 80.0f;
+    root.add_child(std::move(header));
+
+    auto body = std::make_unique<View>();
+    body->set_id("body");
+    body->flex().flex_grow = 1.0f;
+    View* body_raw = body.get();
+    root.add_child(std::move(body));
+
+    root.layout_children();
+    // Positive control: flex really does hand the body the remaining space
+    // BEFORE the upgrade, or the assertion afterwards proves nothing.
+    const float flexed_height = body_raw->bounds().height;
+    REQUIRE(flexed_height > 400.0f);
+
+    REQUIRE(bridge.widget("body") == body_raw);
+    engine.evaluate("__domAppend('', 'body', 'div', 'scroll')");
+
+    auto* wrapper = bridge.scroll_wrapper("body");
+    REQUIRE(wrapper != nullptr);
+    root.layout_children();
+
+    // The wrapper now occupies the body's slot, so it must still grow into it.
+    CHECK(wrapper->flex().flex_grow == 1.0f);
+    CHECK(wrapper->bounds().height > 400.0f);
+}
+
 TEST_CASE("a reparent that fails at both ends keeps the first error and strands nothing",
           "[view][bridge][reparent][lifecycle]") {
 #ifndef NDEBUG
