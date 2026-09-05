@@ -5,6 +5,7 @@
 // Contract: core/view/include/pulp/view/view_lifecycle.hpp.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/state/store.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -12,6 +13,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/view_lifecycle.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include <memory>
 #include <stdexcept>
@@ -108,6 +110,42 @@ TEST_CASE("retained scroll upgrade fails closed when the removal is stolen",
     // The panel left the tree by its own hand, and the upgrade published no
     // half-built wrapper in its place.
     REQUIRE(container_raw->child_count() == 0);
+}
+
+TEST_CASE("an imported UI's text scales through one bridge knob",
+          "[view][bridge][typography]") {
+    // An imported design carries its type sizes as literals scattered through
+    // the authored source — Spectr's chrome measures 9-11px, legible in a
+    // browser tab and small in a plugin window. There was no single value a
+    // host could turn, so the only way to resize it was editing every literal,
+    // which a reimport then reverts. setFontSize is the one funnel every styled
+    // text size passes through, so the scale belongs there.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createLabel('a', 'hello', ''); setFontSize('a', 10);");
+    auto* unscaled = dynamic_cast<Label*>(bridge.widget("a"));
+    REQUIRE(unscaled != nullptr);
+    // Positive control: the default really is neutral, so a difference below is
+    // the scale and not some other effect of re-running the script.
+    REQUIRE(bridge.imported_text_scale() == 1.0f);
+    REQUIRE(unscaled->font_size() == Catch::Approx(10.0f));
+
+    bridge.set_imported_text_scale(1.5f);
+    engine.evaluate("setFontSize('a', 10)");
+    CHECK(unscaled->font_size() == Catch::Approx(15.0f));
+
+    // Rejected inputs must leave the last good value rather than silently
+    // making text invisible or unbounded.
+    bridge.set_imported_text_scale(0.0f);
+    CHECK(bridge.imported_text_scale() == Catch::Approx(1.5f));
+    bridge.set_imported_text_scale(-2.0f);
+    CHECK(bridge.imported_text_scale() == Catch::Approx(1.5f));
+    bridge.set_imported_text_scale(100.0f);
+    CHECK(bridge.imported_text_scale() == Catch::Approx(4.0f));
 }
 
 TEST_CASE("the retained scroll upgrade keeps the content's flex role",
