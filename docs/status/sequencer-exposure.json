@@ -2621,6 +2621,7 @@
         "core/playback/src/program.cpp",
         "core/playback/src/program_compiler.cpp",
         "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/include/pulp/playback/program_wire.hpp",
         "core/playback/src/program_wire.cpp",
         "test/test_timeline_nesting_playback.cpp",
         "test/cmake/timeline_tests.cmake",
@@ -2645,6 +2646,12 @@
           "path": "core/playback/src/sequence_content_lowerer.cpp",
           "needles": [
             "sounding"
+          ]
+        },
+        {
+          "path": "core/playback/include/pulp/playback/program_wire.hpp",
+          "needles": [
+            "ControllerEventsUnsupported"
           ]
         }
       ],
