@@ -3,6 +3,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/view_lifecycle.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
@@ -80,18 +81,33 @@ struct InteractionSnapshot {
             if (auto* view = overlay.live_in(*root)) {
                 auto* state = root->existing_interaction();
                 if (state && (!state->active_overlay ||
-                              state->active_overlay == view))
+                              state->active_overlay == view)) {
+                    // claim_overlay() is overridable and can run author code.
+                    // A bridge function is NOT inside a BridgeCallbackScope —
+                    // those only wrap view-installed event callbacks — so
+                    // without this the tree's lease depth here is zero and a
+                    // hook could destroy `view` outright.
+                    DispatchLease lease(*view);
                     try { view->claim_overlay(); }
                     catch (...) {}
+                }
             }
         }
         if (had_popup) {
             if (auto* view = dynamic_cast<ComboBox*>(popup.live_in(*root));
                 view && !view->is_open()) {
                 auto* active = ComboBox::active_popup_in(*root);
-                if (!active || active == view)
+                if (!active || active == view) {
+                    // restore_open_state() reaches ComboBox::open_dropdown(),
+                    // which runs transfer_input_focus() — arbitrary blur/gain
+                    // callbacks — and then keeps writing open_/hover_index_/
+                    // dropdown_scroll_ on itself afterwards. The leases inside
+                    // transfer_input_focus close before that tail runs, so the
+                    // gate has to be held from out here.
+                    DispatchLease lease(*view);
                     try { view->restore_open_state(); }
                     catch (...) {}
+                }
             }
         }
     }
@@ -348,18 +364,27 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 // new one waits until the move has actually committed.
                 self.widgets_.reserve(self.widgets_.size() + 1);
                 auto removed = p->remove_child(existing);
-                // NOTE: this pre-existing throw, like any C++ exception raised
-                // inside a bridge function, unwinds through QuickJS's C frames,
-                // which do not release the JS objects they own. A Debug build
-                // catches it at teardown as
-                // `Assertion failed: (list_empty(&rt->gc_obj_list))` in
-                // JS_FreeRuntime; a Release build leaks silently. Reproduced on
-                // this exact path with a control that raises no C++ exception
-                // and tears down cleanly. The fix belongs at the
-                // register_bridge_function boundary and is deliberately NOT
-                // bundled into the lifecycle change. Until it lands, fail closed
-                // by returning — as the retained-upgrade path above now does —
-                // rather than adding new throws to bridge functions.
+                // Every throw in this file — this one included — arrived with
+                // the retained-reparent work; `origin/main`'s dom_api.cpp
+                // contains none. What is pre-existing is the ENGINE-side
+                // hazard they run into: a C++ exception raised inside a bridge
+                // function unwinds through QuickJS's C frames, which never
+                // release the JS objects they own. JS_CallInternal's cleanup
+                // and js_call_c_function's stack-frame restore are both skipped,
+                // so a Debug build aborts at teardown with
+                // `Assertion failed: (list_empty(&rt->gc_obj_list))` and a
+                // Release build leaks silently.
+                //
+                // The chokepoint that could fix it is the engine's native
+                // callback trampoline, NOT register_bridge_function — host
+                // objects and promise functions reach the same unguarded path
+                // without going through it. That belongs in its own change.
+                //
+                // Until then, prefer failing closed by returning (as the
+                // retained-upgrade path above does) over adding throws here.
+                // This one is left as-is rather than converted: a parent that
+                // will not yield ownership is a genuine invariant violation, and
+                // silently returning would hide it from the caller entirely.
                 if (!removed)
                     throw std::runtime_error("native reparent lost widget ownership");
                 try {

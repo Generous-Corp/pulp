@@ -119,12 +119,13 @@ TEST_CASE("a reparent that fails at both ends keeps the first error and strands 
     // objects they own, so a Debug build aborts at teardown with
     // `Assertion failed: (list_empty(&rt->gc_obj_list))` in JS_FreeRuntime.
     //
-    // That leak is PRE-EXISTING and unrelated to the rollback under test: the
-    // same abort reproduces on the untouched
-    // `throw std::runtime_error("native reparent lost widget ownership")` path,
-    // while an identical scenario that raises no C++ exception tears down
-    // cleanly. The fix belongs at the register_bridge_function boundary and is
-    // deliberately not bundled here.
+    // The ENGINE-side leak is pre-existing and unrelated to the rollback under
+    // test — an identical scenario that raises no C++ exception tears down
+    // cleanly. The throws that reach it are not: `origin/main`'s dom_api.cpp has
+    // none, so every one of them arrived with the retained-reparent work. The
+    // fix belongs at the engine's native callback trampoline (host objects and
+    // promise functions reach it without passing through
+    // register_bridge_function) and is deliberately not bundled here.
     //
     // So: run in Release, and SKIP loudly in Debug rather than red the lane for
     // a defect this test did not introduce and does not cover. A skip is not a

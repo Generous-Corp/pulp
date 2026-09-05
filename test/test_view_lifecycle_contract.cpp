@@ -218,7 +218,12 @@ TEST_CASE("a view retired from inside its own callback outlives that callback",
 
     REQUIRE(destructions_seen_inside_callback == 0);
     // Touching the retired view's own state after retiring it must be safe.
-    REQUIRE(clock_notifications_after_retire == 1);
+    //
+    // TWO notifications, not one, and that is correct: the first is this walk,
+    // the second is remove_child telling the now-detached subtree its clock went
+    // away — which is the whole reason remove_child refreshes it. Counting one
+    // here would mean the detached refresh had been swallowed.
+    REQUIRE(clock_notifications_after_retire == 2);
     // ...and the deferral must actually end. A lease that never lowers its
     // depth would leave this at 0.
     REQUIRE(destructions == 1);
@@ -268,9 +273,15 @@ TEST_CASE("frame-clock propagation visits every original child exactly once",
 
     root.set_frame_clock(&clock);
 
-    REQUIRE(a->clock_notifications == 1);
-    REQUIRE(b->clock_notifications == 1);
-    // The regression this contract exists to prevent.
+    // A and B are REMOVED by the hook, so each is notified twice: once by this
+    // walk, once by remove_child refreshing the detached subtree whose clock is
+    // now null. Asserting one here would be asserting that the detached refresh
+    // never happened.
+    REQUIRE(a->clock_notifications == 2);
+    REQUIRE(b->clock_notifications == 2);
+    // C and D are untouched bystanders. Exactly one each — no skip, no repeat.
+    // This is the regression the contract exists to prevent: the old bounded
+    // index walk never notified C at all.
     REQUIRE(c->clock_notifications == 1);
     REQUIRE(d->clock_notifications == 1);
     REQUIRE(root.child_count() == 2);
@@ -299,8 +310,15 @@ TEST_CASE("frame-clock propagation does not revisit a reordered child",
 
     root.set_frame_clock(&clock);
 
-    for (Probe* kid : kids)
-        REQUIRE(kid->clock_notifications == 1);
+    // The two untouched children see exactly one notification each — a walk
+    // that tracked position rather than identity would have delivered to the
+    // moved child twice within this pass and skipped one of these.
+    REQUIRE(kids[0]->clock_notifications == 1);
+    REQUIRE(kids[1]->clock_notifications == 1);
+    // The moved child sees exactly two, and both are real clock changes rather
+    // than a double visit: null when it was detached, then the clock again when
+    // it was re-attached. It is never delivered twice for the same state.
+    REQUIRE(kids[2]->clock_notifications == 2);
     root.set_frame_clock(nullptr);
 }
 
@@ -327,6 +345,47 @@ TEST_CASE("a child attached during a frame-clock walk is notified exactly once",
     // Deferred out of the pass that was running when it was attached, but not
     // dropped: the follow-up pass delivers it, and only once.
     REQUIRE(late->clock_notifications == 1);
+    root.set_frame_clock(nullptr);
+}
+
+TEST_CASE("a detached subtree is notified even when it inherits a root's stamps",
+          "[view][lifecycle][frame-clock]") {
+    // The regression this guards is a silent one, and the ordering matters:
+    // the whole tree is assembled BEFORE the clock is installed, which is what
+    // hosts actually do (set_frame_clock's own comment says so). Every node is
+    // therefore stamped by the root's FIRST walk.
+    //
+    // remove_child then hands the detached subtree its own root and notifies it
+    // so self-subscribing descendants drop a clock they can no longer reach.
+    // With per-root counters that fresh root's first walk drew the SAME token
+    // the old root's first walk had already written, so every descendant read
+    // as already-visited and the notification was skipped entirely — leaving a
+    // live subscription on a clock the subtree cannot see. Process-global
+    // tokens make a stamp mean the same thing in every tree.
+    View root;
+    FrameClock clock;
+
+    auto container = std::make_unique<Probe>();
+    Probe* container_raw = container.get();
+    auto leaf = std::make_unique<Probe>();
+    Probe* leaf_raw = leaf.get();
+    container_raw->add_child(std::move(leaf));
+    root.add_child(std::move(container));
+
+    root.set_frame_clock(&clock);
+    // Control: the first walk must actually have stamped them, or the collision
+    // this test exists for could never arise and the assertions below are void.
+    REQUIRE(container_raw->clock_notifications == 1);
+    REQUIRE(leaf_raw->clock_notifications == 1);
+    REQUIRE(leaf_raw->frame_clock() == &clock);
+
+    auto removed = root.remove_child(container_raw);
+    REQUIRE(removed != nullptr);
+
+    // Both the detached root AND its descendant must be told, exactly once.
+    REQUIRE(container_raw->clock_notifications == 2);
+    REQUIRE(leaf_raw->clock_notifications == 2);
+    REQUIRE(leaf_raw->frame_clock() == nullptr);
     root.set_frame_clock(nullptr);
 }
 

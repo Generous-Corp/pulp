@@ -2365,7 +2365,7 @@ private:
     /// Traverse this view and every descendant still attached at entry exactly
     /// once for `epoch`, delivering the clock hooks to those not yet notified
     /// in `sequence`. See notify_frame_clock_changed().
-    void walk_frame_clock(std::uint32_t epoch, std::uint32_t sequence) noexcept;
+    void walk_frame_clock(std::uint64_t epoch, std::uint64_t sequence) noexcept;
 
     /// Invert this view's scalar and explicit affine paint transforms for
     /// hit-testing/pointer localization. The historical name remains ABI/source
@@ -2530,18 +2530,22 @@ private:
     bool clock_walk_pending_ = false;
     // Root-only walk epoch, and the per-view stamp recording the last epoch in
     // which this view was visited. Together they make the walk exactly-once.
-    // Root-only. clock_epoch_ identifies one TRAVERSAL pass; clock_sequence_
-    // identifies one notify_frame_clock_changed() call, which may need several
-    // passes to service work its own hooks created.
-    std::uint32_t clock_epoch_ = 0;
-    std::uint32_t clock_sequence_ = 0;
+    // Root-only, and meaningful only while a walk is in flight: the traversal
+    // token of the pass currently running, published so a mid-pass attach can
+    // stamp the incoming subtree as belonging to it.
+    std::uint64_t clock_epoch_ = 0;
     // Per view. The traversal stamp makes a pass visit each node at most once
     // even while hooks mutate children_; the delivery stamp makes the whole
     // call notify each node at most once across all of its passes. They are
     // separate because a later pass must be free to walk THROUGH an
     // already-notified node to reach a descendant attached mid-pass.
-    std::uint32_t clock_walk_epoch_ = 0;
-    std::uint32_t clock_delivery_sequence_ = 0;
+    //
+    // Both hold PROCESS-GLOBAL monotonic tokens, never per-root counters. A
+    // view outlives its root — remove_child hands a detached subtree its own
+    // root and notifies it immediately — so a stamp must mean the same thing in
+    // every tree. See next_clock_walk_token() in view.cpp.
+    std::uint64_t clock_walk_epoch_ = 0;
+    std::uint64_t clock_delivery_sequence_ = 0;
     // Intrusive owning retirement chain. Root-only head; each retired view
     // carries the link to the next, so parking one allocates nothing.
     std::unique_ptr<View> retired_head_;
