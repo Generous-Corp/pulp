@@ -571,19 +571,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     // program carrying both.
                     const auto& content = std::get<timeline::MidiContent>(clip.content());
                     for (const auto& lane : content.lanes()) {
-                        // Only the wire's own structural bounds are storage
-                        // invariants; an address that cannot be encoded, or two
-                        // lanes claiming one address, has no defined sounding
-                        // value and is named rather than silently resolved.
-                        if (!timeline::midi_lane_address_well_formed(lane.address))
-                            return fail({CompileErrorCode::MidiExpressionLaneInvalid, lane.id,
-                                         request_->document_revision});
-                        const auto clashes = [&](const timeline::MidiExpressionLane& other) {
-                            return other.id != lane.id && other.address == lane.address;
-                        };
-                        if (std::any_of(content.lanes().begin(), content.lanes().end(), clashes))
-                            return fail({CompileErrorCode::MidiExpressionLaneInvalid, lane.id,
-                                         request_->document_revision});
+                        // Address well-formedness and uniqueness are storage
+                        // invariants enforced by MidiContent::create, so a lane
+                        // arriving here is already encodable and unambiguous;
+                        // re-checking would be a second owner of one rule.
                         for (const auto& point : lane.points) {
                             if (current_controller_events_.size() >= max_controller_events)
                                 return fail({CompileErrorCode::MidiExpressionLaneBudgetExceeded,

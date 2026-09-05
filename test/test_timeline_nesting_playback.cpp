@@ -893,6 +893,26 @@ Project trimmed_nested_lane_project(MidiExpressionLane lane = controller_lane())
     return take(Project::create(std::move(input)));
 }
 
+// The mirror of the fixture above: source_start 480 admits the child's SECOND
+// half, so the retained window starts inside the child and anything authored
+// before it has to be chased rather than dropped.
+Project left_trimmed_nested_lane_project(MidiExpressionLane lane = controller_lane()) {
+    auto content = take(MidiContent::create({NoteEvent{{13}, {600}, {240}, 40'000, 64, 0}}, {}, 0,
+                                            {std::move(lane)}));
+    auto child_clip = take(Clip::create({12}, {0}, {960}, std::move(content)));
+    auto child =
+        take(Sequence::create({10}, "child", TickDuration{960}, {track(11, {child_clip})}));
+    auto root = take(Sequence::create({2}, "root", std::nullopt,
+                                      {track(3, {nested_clip(4, 10, 480, 480, 480)})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "left trimmed nested lane";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
 // Compiles and returns the compiler status, so a test can assert the typed
 // refusal a lane shape earns without rebuilding the harness each time.
 CompilerStatus compile_status(std::shared_ptr<const Project> project) {
@@ -956,7 +976,7 @@ TEST_CASE("A trimmed nested lane chases the value sounding at its window start")
     //
     // Remove the chase step in the lowerer and this assertion fails by finding
     // no events at all, which is the loss it exists to catch.
-    const auto program = compile(shared(trimmed_nested_lane_project()));
+    const auto program = compile(shared(left_trimmed_nested_lane_project()));
     const auto events = program->find_track({3})->arrangement_controller_events();
     REQUIRE(events.size() == 1);
     REQUIRE(events[0].value == 0xffffffff);
@@ -974,7 +994,7 @@ TEST_CASE("A lane authoring nothing before its window start contributes no value
     // fabricate a default.
     auto lane = controller_lane();
     lane.points = {{{21}, {900}, 0x1234}}; // after the retained window start
-    const auto program = compile(shared(trimmed_nested_lane_project(lane)));
+    const auto program = compile(shared(left_trimmed_nested_lane_project(lane)));
     const auto events = program->find_track({3})->arrangement_controller_events();
     for (const auto& event : events)
         REQUIRE(event.origin != ControllerProgramEventOrigin::Chased);
@@ -985,7 +1005,7 @@ TEST_CASE("An authored value at the window start outranks the chased one") {
     // wins outright and nothing is derived beside it.
     auto lane = controller_lane();
     lane.points = {{{21}, {0}, 0x11}, {{22}, {240}, 0x22}, {{23}, {480}, 0x33}};
-    const auto program = compile(shared(trimmed_nested_lane_project(lane)));
+    const auto program = compile(shared(left_trimmed_nested_lane_project(lane)));
     const auto events = program->find_track({3})->arrangement_controller_events();
     REQUIRE_FALSE(events.empty());
     REQUIRE(events[0].value == 0x33);
@@ -993,24 +1013,32 @@ TEST_CASE("An authored value at the window start outranks the chased one") {
     REQUIRE(events[0].point_id == ItemId{23});
 }
 
-TEST_CASE("A lane whose address cannot be encoded is named rather than resolved") {
+TEST_CASE("A right-trimmed lane drops the points its window never reaches") {
+    // The placement admits the child's first half, so a point past that edge is
+    // never reached. Emitting it would play a controller value the trim
+    // deliberately excluded, which is the mirror of the chase loss.
     auto lane = controller_lane();
-    lane.address.group = 200; // wider than the wire gives it
-    const auto status = compile_status(shared(flat_note_project({lane})));
-    REQUIRE(status.has_error);
-    REQUIRE(status.last_error.code == CompileErrorCode::MidiExpressionLaneInvalid);
-    REQUIRE(status.last_error.item == ItemId{20});
+    lane.points = {{{21}, {0}, 0x11}, {{22}, {240}, 0x22}, {{23}, {700}, 0x33}};
+    const auto program = compile(shared(trimmed_nested_lane_project(lane)));
+    const auto events = program->find_track({3})->arrangement_controller_events();
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].value == 0x11);
+    REQUIRE(events[1].value == 0x22);
 }
 
-TEST_CASE("Two lanes claiming one address are refused") {
-    // The storage header forbids it because there would be two authored answers
-    // for the value at a position and no rule picking between them.
+TEST_CASE("Lane address well-formedness is enforced where it is owned") {
+    // The compiler never sees a malformed or duplicated address because the
+    // content that carries it cannot be built. Asserting it here rather than at
+    // compile keeps one owner for the invariant instead of two that can drift.
+    auto wide = controller_lane();
+    wide.address.group = 200; // wider than the wire gives it
+    REQUIRE_FALSE(MidiContent::create({NoteEvent{{13}, {120}, {240}, 40'000, 64, 0}}, {}, 0,
+                                      {wide}));
     auto second = controller_lane();
     second.id = {30};
     second.points = {{{31}, {0}, 7}};
-    const auto status = compile_status(shared(flat_note_project({controller_lane(), second})));
-    REQUIRE(status.has_error);
-    REQUIRE(status.last_error.code == CompileErrorCode::MidiExpressionLaneInvalid);
+    REQUIRE_FALSE(MidiContent::create({NoteEvent{{13}, {120}, {240}, 40'000, 64, 0}}, {}, 0,
+                                      {controller_lane(), second}));
 }
 
 TEST_CASE("Trimming a nested clip shortens its fades and keeps their shape") {

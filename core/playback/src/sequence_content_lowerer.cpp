@@ -405,6 +405,12 @@ class SequenceContentLowerer::Impl {
             for (const auto& lane : notes->lanes()) {
                 timeline::MidiExpressionLane rebased{lane.id, lane.address, {}};
                 const timeline::MidiLanePoint* sounding = nullptr;
+                // The retained window is half-open in child-local ticks:
+                // points before it establish what is sounding on entry, points
+                // after it are never reached and must not be emitted, or a
+                // trimmed clip would play controller values the placement
+                // deliberately excluded.
+                const auto window_end = pending.left_trim + pending.target_duration.value;
                 for (const auto& point : lane.points) {
                     if (point.position.value < pending.left_trim) {
                         // Ordered by position, so the last one seen below the
@@ -412,6 +418,8 @@ class SequenceContentLowerer::Impl {
                         sounding = &point;
                         continue;
                     }
+                    if (point.position.value >= window_end)
+                        break; // ordered, so nothing later is reachable either
                     rebased.points.push_back({point.id,
                                               timebase::TickPosition{point.position.value -
                                                                      pending.left_trim},

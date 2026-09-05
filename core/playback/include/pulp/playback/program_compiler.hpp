@@ -134,9 +134,6 @@ enum class CompileErrorCode : std::uint8_t {
     // values, whereas trimming still has no defined inherited value even once
     // that renderer exists.
     MidiExpressionLaneUnsupported,
-    /// A lane whose wire address does not fit the width the wire gives it, or
-    /// two lanes claiming one address so no rule picks the sounding value.
-    MidiExpressionLaneInvalid,
     /// The arrangement authors more controller values than one program may
     /// carry. Bounded like every other expansion so a pathological document
     /// cannot make compilation unbounded.
