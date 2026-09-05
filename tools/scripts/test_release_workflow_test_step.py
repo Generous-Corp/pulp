@@ -127,6 +127,64 @@ class SignAndReleaseNoTestGate(unittest.TestCase):
         )
 
 
+class ReleaseCliDispatchAttestsItsTag(unittest.TestCase):
+    """A workflow_dispatch must run on the tag it publishes.
+
+    GitHub derives build provenance from the OIDC run context — the ref the
+    workflow file was loaded from — not from whatever `actions/checkout` fetches
+    afterwards. So a dispatch from `main` attests `refs/heads/main` and main's
+    HEAD commit even though it built the tag's sources, and the artifact is
+    labelled with a commit whose tree never produced it.
+
+    v0.832.0 shipped that way: its provenance records
+    `git+.../pulp@refs/heads/main` with main's HEAD, the tag commit appears in no
+    attestation, and a consumer running
+    `gh attestation verify --source-digest <tag commit>` correctly refuses it.
+    That is the laundering shape --source-digest exists to reject, so the guard
+    belongs on the producing side.
+
+    This asserts the guard exists, is scoped to workflow_dispatch, compares
+    against github.sha, and runs before anything is built.
+    """
+
+    def setUp(self) -> None:
+        self.assertTrue(RELEASE_CLI.exists(), f"missing workflow file: {RELEASE_CLI}")
+        self.document = yaml.safe_load(RELEASE_CLI.read_text())
+
+    def _guard(self) -> tuple[int, dict]:
+        steps = self.document["jobs"]["resolve-macos-runner"]["steps"]
+        for index, step in enumerate(steps):
+            run = step.get("run") or ""
+            if "RUN_SHA" in run and "tag_sha" in run:
+                return index, step
+        self.fail(
+            "release-cli.yml must refuse a workflow_dispatch whose run ref is not "
+            "the tag it publishes; without it the release's provenance names the "
+            "dispatch ref instead of the tag commit and is unverifiable downstream."
+        )
+
+    def test_guard_is_scoped_to_dispatch_and_compares_the_tag_commit(self) -> None:
+        _, step = self._guard()
+        self.assertIn("workflow_dispatch", str(step.get("if", "")))
+        run = step["run"]
+        self.assertIn("$RUN_SHA", run)
+        self.assertIn("exit 1", run)
+        env = step.get("env") or {}
+        self.assertIn("github.sha", str(env.get("RUN_SHA", "")))
+        self.assertIn("inputs.version", str(env.get("RELEASE_VERSION", "")))
+
+    def test_guard_runs_before_the_build_job(self) -> None:
+        # resolve-macos-runner gates build-cli, so a guard there stops every leg.
+        needs = self.document["jobs"]["build-cli"].get("needs")
+        needs = [needs] if isinstance(needs, str) else list(needs or [])
+        self.assertIn(
+            "resolve-macos-runner",
+            needs,
+            "the guard only protects the release if build-cli depends on the job "
+            "that carries it",
+        )
+
+
 class ReleaseCliChecksOutLfBytes(unittest.TestCase):
     """release-cli.yml must pin LF bytes BEFORE the build-cli checkout.
 
