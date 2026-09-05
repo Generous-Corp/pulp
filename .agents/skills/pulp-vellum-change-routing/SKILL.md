@@ -147,23 +147,48 @@ therefore not evidence that your pins are fresh. Run
 `python3 tools/scripts/gpu_recipe_catalog.py` locally before pushing; it takes a
 second and answers the question outright.
 
-There is no `--write` mode. Refresh the affected rows only, to the most recent
-commit touching each path and the blob at that revision. That is the identity
-the catalog's own drift test plants staleness against, by deliberately using the
-*second* most recent commit.
+`gpu_recipe_catalog.py` has no `--write` mode and is deliberately validate-only.
+The generator that owns those identities is a separate tool:
+
+```bash
+python3 tools/scripts/gpu_handoff_provenance.py check                       # every stale row, and the repair command
+python3 tools/scripts/gpu_handoff_provenance.py write --receipt             # regenerate, and refresh the receipt
+```
+
+Pass `--receipt`. The published receipt is asserted against the ledger's bytes,
+so regenerating without it leaves a second gate red for the next reader.
+
+`check` names each stale row, its path, and the field-level correction, so a
+drifted pin no longer has to be located by hand. `write` derives `revision`,
+`object_id`, and `object_type` for every declared path from a single commit
+(`--source-commit`, default `HEAD`, which must be an ancestor of `HEAD`), so a
+regenerated ledger can never mix trees from different revisions. It refuses to
+run against an unclean checkout, and it refuses to emit anything
+`gpu_recipe_catalog.py` would reject, so the fail-closed validator stays the
+authority on acceptance.
+
+Do not hand-edit these rows. Hand editing is what turned a one-row correction
+into dozens of stale identities: the rows are denormalized, one path can appear
+in several packages, and a path's owning revision moves whenever any commit
+touches it.
 
 **Land the refresh as its own commit, never as an amend.** The pinned revision
 is the commit that holds the edited file, so amending changes that SHA and
 re-stales the pin you just fixed.
 
 **Expect one cascade, and re-run the checker after the refresh.** This SKILL.md
-is itself a pinned path, so editing it to record a gotcha stales its own row —
+is itself a pinned path, so editing it to record a gotcha stales its own row:
 fixing one pin creates the next. The sequence terminates, because a pin-refresh
-commit touches only the YAML: land the file edits first, then refresh every row
-they staled in a single following commit. Re-run `gpu_recipe_catalog.py` after
-the refresh rather than before, or the second stale row goes out unseen — note
-that `gates.sh` and the pre-push hook do **not** run this check, so a clean
-`gates: ✓ all gates pass` says nothing about your pins.
+commit touches only the YAML, and the YAML excludes itself from the inventory.
+Land the file edits first, then regenerate in a single following commit. Re-run
+`gpu_recipe_catalog.py` after the refresh rather than before, or the second
+stale row goes out unseen. Note that `gates.sh` and the pre-push hook do **not**
+run this check, so a clean `gates: ✓ all gates pass` says nothing about your
+pins.
+
+The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
+unregenerated ledger fails locally and in CI with the repair command in the
+failure message rather than only as a stale-identity report.
 
 ## Validate the contract
 
