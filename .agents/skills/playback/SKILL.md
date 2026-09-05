@@ -1200,3 +1200,33 @@ Two consequences when editing that script. The selftest's fixture generator has
 to agree with `verify()` about which half each name carries, which is what
 `linkable_floor_names()` is for. And an entry reports a missing build file
 rather than passing quietly, so it cannot outlive its subject.
+
+## Nested-trim fixtures: check which edge you are actually trimming
+
+`nested_clip(id, sequence_id, start, duration, source_start = 0)` defaults
+`source_start` to **0**, which produces a *right* trim: the reference admits
+the child's first `duration` ticks. `test_timeline_nesting_playback.cpp`'s
+long-standing `trimmed_nested_lane_project` uses that default, so `left_trim`
+is always zero there.
+
+This matters because controller **chase** is a left-trim concern: it only runs
+when the retained window starts inside the child. A chase implementation
+verified only against that fixture has never executed — the tests pass while
+the code is unreached. Use `source_start > 0` (see
+`left_trimmed_nested_lane_project`) to exercise chase, and keep a right-trim
+case too, since dropping points past the window end is the mirror failure.
+
+The retained window is half-open in child-local ticks: points before it set
+what sounds on entry, points at or after `left_trim + target_duration` are
+never reached and must not be emitted.
+
+## The program wire refuses what it cannot represent
+
+`program_wire_encoded_size` rejects programs it has no section for — audio
+programs, and now any program carrying controller events
+(`ControllerEventsUnsupported`). A controller value is not safe to ignore, so
+the wire fails closed rather than returning a copy that plays the notes with
+the expression gone. Note the tempo-point check fires *before* the per-track
+loop, so a fixture passing no tempo points is refused for that reason first —
+an encode-refusal test in a suite without a tempo fixture will pass for the
+wrong reason.
