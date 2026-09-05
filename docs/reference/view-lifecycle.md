@@ -131,10 +131,12 @@ Correctness comes from the stamp, which makes revisiting impossible; the cursor
 is only an optimisation, and a final sweep from zero catches anything a mutation
 shifted behind it.
 
-One notification per node per call is a **floor, not a ceiling**. A node whose
-clock genuinely changes more than once during an operation is told each time — a
-view removed mid-walk is notified by the walk and again by `remove_child`'s
-detached refresh, because its clock really did become null. Handlers are
+Exactly-once is a property of a single **walk**, and is a floor rather than a
+ceiling for an *operation*. A node whose clock genuinely changes more than once
+is told each time: a view removed mid-walk is notified by that walk and again by
+the separate `notify_frame_clock_changed()` that `remove_child` makes on the
+detached subtree, because its clock really did become null in between. Two
+walks, one notification each — not one walk delivering twice. Handlers are
 expected to be drop-then-resubscribe idempotent, and every in-tree one is.
 
 A node attached *during* a pass is stamped with that pass's traversal epoch, so
