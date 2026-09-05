@@ -17,6 +17,9 @@ constexpr auto kTargetSignature =
 
 gh::HealthResult passing_health() {
     gh::HealthResult result;
+    result.schema = gh::kSchemaV1;
+    result.version = gh::kVersionV1;
+    result.measured_at_utc.clear();
     result.run_id = "gpu-evidence-1";
     result.render_requested = true;
     result.verdict = gh::Verdict::pass;

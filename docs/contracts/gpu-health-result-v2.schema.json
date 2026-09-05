@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-health-result-v2.schema.json",
+  "title": "Pulp GPU health result v2",
+  "type": "object",
+  "required": ["schema", "version", "run_id", "measured_at_utc", "render_requested", "verdict", "health_state", "probes", "recommendations"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "pulp.gpu-health-result.v2" },
+    "version": { "const": 2 },
+    "run_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "measured_at_utc": { "type": "string", "description": "Exact Gregorian UTC time YYYY-MM-DDTHH:MM:SSZ; year 0000 and leap seconds are unsupported.", "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$" },
+    "render_requested": { "type": "boolean" },
+    "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+    "health_state": { "enum": ["healthy", "failed", "unavailable", "unverified", "lost"] },
+    "probes": {
+      "type": "array", "minItems": 1, "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": ["probe_id", "required", "verdict", "adapter", "measurements", "events"],
+        "additionalProperties": false,
+        "properties": {
+          "probe_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "required": { "type": "boolean" },
+          "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+          "adapter": {
+            "type": "object",
+            "required": ["status", "class", "backend", "name", "vendor", "architecture", "device"],
+            "additionalProperties": false,
+            "properties": {
+              "status": { "enum": ["authentic", "unverified", "unavailable"] },
+              "class": { "enum": ["hardware", "software", "null", "unknown"] },
+              "backend": { "type": ["string", "null"] },
+              "name": { "type": ["string", "null"] },
+              "vendor": { "type": ["string", "null"] },
+              "architecture": { "type": ["string", "null"] },
+              "device": { "type": ["string", "null"] }
+            }
+          },
+          "measurements": {
+            "type": "object",
+            "required": ["command_submitted", "readback_completed", "pixel_output_produced", "content_floor_passed", "compute_initialized", "compute_oracle_passed", "device_lost", "non_transparent_pixel_count", "distinct_color_count", "rgba_fingerprint"],
+            "additionalProperties": false,
+            "properties": {
+              "command_submitted": { "type": ["boolean", "null"] },
+              "readback_completed": { "type": ["boolean", "null"] },
+              "pixel_output_produced": { "type": ["boolean", "null"] },
+              "content_floor_passed": { "type": ["boolean", "null"] },
+              "compute_initialized": { "type": ["boolean", "null"] },
+              "compute_oracle_passed": { "type": ["boolean", "null"] },
+              "device_lost": { "type": ["boolean", "null"] },
+              "non_transparent_pixel_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 9223372036854775807 },
+              "distinct_color_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 9223372036854775807 },
+              "rgba_fingerprint": { "type": ["integer", "null"], "minimum": 0, "maximum": 9223372036854775807 }
+            }
+          },
+          "events": {
+            "type": "array", "minItems": 1, "maxItems": 10,
+            "items": {
+              "type": "object",
+              "required": ["sequence", "stage", "verdict", "code", "detail"],
+              "additionalProperties": false,
+              "properties": {
+                "sequence": { "type": "integer", "minimum": 0 },
+                "stage": { "enum": ["configuration", "adapter", "shader_compile", "pipeline_create", "render", "submit", "readback", "content", "compute", "device_state"] },
+                "verdict": { "enum": ["pass", "fail", "unavailable", "unverified"] },
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "gpu.adapter.fail", "gpu.adapter.null", "gpu.adapter.pass", "gpu.adapter.unavailable", "gpu.adapter.unverified",
+                    "gpu.compute.fail", "gpu.compute.pass", "gpu.compute.unavailable", "gpu.compute.unverified",
+                    "gpu.configuration.fail", "gpu.configuration.pass", "gpu.configuration.unavailable", "gpu.configuration.unverified",
+                    "gpu.content.fail", "gpu.content.pass", "gpu.content.unavailable", "gpu.content.unverified",
+                    "gpu.device_state.fail", "gpu.device_state.pass", "gpu.device_state.unavailable", "gpu.device_state.unverified",
+                    "gpu.pipeline_create.fail", "gpu.pipeline_create.pass", "gpu.pipeline_create.unavailable", "gpu.pipeline_create.unverified",
+                    "gpu.readback.fail", "gpu.readback.pass", "gpu.readback.unavailable", "gpu.readback.unverified",
+                    "gpu.render.fail", "gpu.render.pass", "gpu.render.unavailable", "gpu.render.unverified",
+                    "gpu.shader_compile.fail", "gpu.shader_compile.pass", "gpu.shader_compile.unavailable", "gpu.shader_compile.unverified",
+                    "gpu.submit.fail", "gpu.submit.pass", "gpu.submit.unavailable", "gpu.submit.unverified",
+                    "gpu_compute_adapter_acquired", "gpu_compute_adapter_identity_unverified", "gpu_compute_device_lost",
+                    "gpu_compute_execution_failed", "gpu_compute_initialization_unavailable", "gpu_compute_not_built",
+                    "gpu_compute_oracle_mismatch", "gpu_compute_oracle_passed", "render_not_requested",
+                    "renderer3d_adapter_unavailable", "renderer3d_blank_output", "renderer3d_content_floor_passed",
+                    "renderer3d_not_compiled", "renderer3d_setup_failed", "renderer3d_readback_completed",
+                    "renderer3d_readback_failed", "renderer3d_render_completed", "renderer3d_submit_completed",
+                    "skia_graphite_content_floor_passed", "skia_graphite_content_mismatch", "skia_graphite_frame_failed",
+                    "skia_graphite_readback_completed", "skia_graphite_render_completed", "skia_graphite_unavailable",
+                    "wgsl.async_uncaptured_error"
+                  ]
+                },
+                "detail": { "type": "string", "minLength": 1, "maxLength": 1024 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "recommendations": {
+      "type": "array", "maxItems": 32,
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+    }
+  }
+}

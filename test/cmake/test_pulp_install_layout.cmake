@@ -99,6 +99,82 @@ if(NOT _gpu_health_schema_compare_rc EQUAL 0)
         "Installed GPU health result schema differs from the source contract.")
 endif()
 
+set(_installed_gpu_health_v2_schema
+    "${_prefix}/share/pulp/contracts/gpu-health-result-v2.schema.json")
+if(NOT EXISTS "${_installed_gpu_health_v2_schema}")
+    message(FATAL_ERROR
+        "GPU health result v2 schema is missing from the installed SDK:\n"
+        "${_installed_gpu_health_v2_schema}")
+endif()
+set(_source_gpu_health_v2_schema
+    "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-health-result-v2.schema.json")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${_source_gpu_health_v2_schema}" "${_installed_gpu_health_v2_schema}"
+    RESULT_VARIABLE _gpu_health_v2_schema_compare_rc)
+if(NOT _gpu_health_v2_schema_compare_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed GPU health result v2 schema differs from the source contract.")
+endif()
+
+set(_installed_gpu_health_attestation_verification_schema
+    "${_prefix}/share/pulp/contracts/gpu-health-run-attestation-verification-v1.schema.json")
+if(NOT EXISTS "${_installed_gpu_health_attestation_verification_schema}")
+    message(FATAL_ERROR
+        "GPU health attestation verification schema is missing from the installed SDK:\n"
+        "${_installed_gpu_health_attestation_verification_schema}")
+endif()
+set(_source_gpu_health_attestation_verification_schema
+    "${CMAKE_CURRENT_LIST_DIR}/../../docs/contracts/gpu-health-run-attestation-verification-v1.schema.json")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E compare_files
+            "${_source_gpu_health_attestation_verification_schema}"
+            "${_installed_gpu_health_attestation_verification_schema}"
+    RESULT_VARIABLE _gpu_health_attestation_verification_schema_compare_rc)
+if(NOT _gpu_health_attestation_verification_schema_compare_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Installed GPU health attestation verification schema differs from the source contract.")
+endif()
+
+foreach(_gpu_health_verifier_file IN ITEMS
+        verify_gpu_health_run_attestation.py gpu_health_contract.py json_schema_lite.py)
+    set(_installed_gpu_health_verifier_file
+        "${_prefix}/share/pulp/gpu-health-run-attestation-verifier/${_gpu_health_verifier_file}")
+    set(_source_gpu_health_verifier_file
+        "${CMAKE_CURRENT_LIST_DIR}/../../tools/scripts/${_gpu_health_verifier_file}")
+    if(NOT EXISTS "${_installed_gpu_health_verifier_file}")
+        message(FATAL_ERROR
+            "GPU health attestation verifier member is missing from the installed SDK: "
+            "${_installed_gpu_health_verifier_file}")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E compare_files
+                "${_source_gpu_health_verifier_file}"
+                "${_installed_gpu_health_verifier_file}"
+        RESULT_VARIABLE _gpu_health_verifier_file_compare_rc)
+    if(NOT _gpu_health_verifier_file_compare_rc EQUAL 0)
+        message(FATAL_ERROR
+            "Installed GPU health attestation verifier member differs from source: "
+            "${_gpu_health_verifier_file}")
+    endif()
+endforeach()
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}"
+            "${_prefix}/share/pulp/gpu-health-run-attestation-verifier/verify_gpu_health_run_attestation.py"
+            --help
+    RESULT_VARIABLE _gpu_health_verifier_help_rc
+    OUTPUT_VARIABLE _gpu_health_verifier_help_stdout
+    ERROR_VARIABLE _gpu_health_verifier_help_stderr)
+if(NOT _gpu_health_verifier_help_rc EQUAL 0 OR
+   NOT _gpu_health_verifier_help_stdout MATCHES "--attestation-revision" OR
+   NOT _gpu_health_verifier_help_stdout MATCHES "--expected-producer-binary-path" OR
+   _gpu_health_verifier_help_stdout MATCHES "--expected-producer-build-id" OR
+   _gpu_health_verifier_help_stdout MATCHES "--expected-producer-code-signature")
+    message(FATAL_ERROR
+        "Installed GPU health attestation verifier is not runnable as a closed bundle:\n"
+        "${_gpu_health_verifier_help_stdout}\n${_gpu_health_verifier_help_stderr}")
+endif()
+
 set(_installed_gpu_trace_human_review_schema
     "${_prefix}/share/pulp/contracts/gpu-trace-human-review-v1.schema.json")
 if(NOT EXISTS "${_installed_gpu_trace_human_review_schema}")

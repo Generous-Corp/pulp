@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <string_view>
 
 namespace gh = pulp::tooling::gpu_health;
 
@@ -11,6 +12,7 @@ namespace {
 gh::HealthResult passing_result() {
     gh::HealthResult result;
     result.run_id = "roundtrip";
+    result.measured_at_utc = "2026-09-01T07:00:00Z";
     result.render_requested = true;
     result.verdict = gh::Verdict::pass;
     result.health_state = gh::HealthState::healthy;
@@ -35,7 +37,7 @@ gh::HealthResult passing_result() {
 
 } // namespace
 
-TEST_CASE("GPU health v1 result round-trips through its closed JSON model",
+TEST_CASE("GPU health v2 result round-trips through its closed JSON model",
           "[gpu][doctor][contract]") {
     const auto result = passing_result();
     std::string error;
@@ -48,7 +50,7 @@ TEST_CASE("GPU health v1 result round-trips through its closed JSON model",
     REQUIRE(gh::to_json(*parsed) == gh::to_json(result));
 }
 
-TEST_CASE("GPU health v1 parser rejects missing and unknown fields",
+TEST_CASE("GPU health v2 parser rejects missing and unknown fields",
           "[gpu][doctor][contract]") {
     const auto json = gh::to_json(passing_result());
     std::string error;
@@ -66,7 +68,7 @@ TEST_CASE("GPU health v1 parser rejects missing and unknown fields",
     REQUIRE(error.find("unknown member") != std::string::npos);
 }
 
-TEST_CASE("GPU health v1 rejects unsupported identity and evidence claims",
+TEST_CASE("GPU health v2 rejects unsupported identity and evidence claims",
           "[gpu][doctor][contract]") {
     std::string error;
 
@@ -100,4 +102,68 @@ TEST_CASE("GPU health v1 rejects unsupported identity and evidence claims",
     unknown_code.probes[0].events[0].code = "gpu.render.renamed";
     REQUIRE_FALSE(gh::validate(unknown_code, &error));
     REQUIRE(error.find("not registered") != std::string::npos);
+
+    auto malformed_time = passing_result();
+    malformed_time.measured_at_utc = "2026-09-01T07:00:00+01:00";
+    REQUIRE_FALSE(gh::validate(malformed_time, &error));
+    REQUIRE(error.find("measured_at_utc") != std::string::npos);
+
+    auto leap_day = passing_result();
+    leap_day.measured_at_utc = "2000-02-29T23:59:59Z";
+    REQUIRE(gh::validate(leap_day, &error));
+
+    for (const std::string_view impossible : {
+             "0000-01-01T00:00:00Z", "1900-02-29T00:00:00Z",
+             "2023-02-29T00:00:00Z",
+             "2024-02-30T00:00:00Z", "2026-04-31T00:00:00Z",
+             "2026-13-01T00:00:00Z", "2026-01-01T24:00:00Z",
+             "2026-01-01T00:60:00Z", "2026-01-01T00:00:60Z",
+         }) {
+        auto invalid_time = passing_result();
+        invalid_time.measured_at_utc = impossible;
+        INFO(impossible);
+        REQUIRE_FALSE(gh::validate(invalid_time, &error));
+        REQUIRE(error.find("measured_at_utc") != std::string::npos);
+    }
+}
+
+TEST_CASE("GPU health v1 remains a closed timestamp-free compatibility shape",
+          "[gpu][doctor][contract]") {
+    auto v1 = passing_result();
+    v1.schema = gh::kSchemaV1;
+    v1.version = gh::kVersionV1;
+    v1.measured_at_utc.clear();
+    std::string error;
+    REQUIRE(gh::validate(v1, &error));
+    const auto json = gh::to_json(v1);
+    REQUIRE(json.find("measured_at_utc") == std::string::npos);
+    const auto parsed = gh::from_json(json, &error);
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->schema == gh::kSchemaV1);
+    REQUIRE(parsed->version == gh::kVersionV1);
+    REQUIRE(parsed->measured_at_utc.empty());
+
+    auto injected = json;
+    injected.insert(injected.find("\"render_requested\""),
+                    "\"measured_at_utc\":\"2026-09-01T07:00:00Z\",");
+    REQUIRE_FALSE(gh::from_json(injected, &error).has_value());
+    REQUIRE(error.find("unknown member") != std::string::npos);
+}
+
+TEST_CASE("GPU health v2 requires its machine measurement timestamp",
+          "[gpu][doctor][contract]") {
+    auto v2 = passing_result();
+    v2.measured_at_utc.clear();
+    std::string error;
+    REQUIRE_FALSE(gh::validate(v2, &error));
+    REQUIRE(error.find("measured_at_utc") != std::string::npos);
+
+    auto json = gh::to_json(passing_result());
+    const auto begin = json.find("\"measured_at_utc\":");
+    REQUIRE(begin != std::string::npos);
+    const auto end = json.find(',', begin);
+    REQUIRE(end != std::string::npos);
+    json.erase(begin, end - begin + 1);
+    REQUIRE_FALSE(gh::from_json(json, &error).has_value());
+    REQUIRE(error.find("measured_at_utc") != std::string::npos);
 }

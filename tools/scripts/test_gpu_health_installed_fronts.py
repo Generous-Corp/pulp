@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -30,6 +31,7 @@ def main() -> int:
         cwd = Path(td)
         cpp_cli = bindir / ("pulp-cpp.exe" if os.name == "nt" else "pulp-cpp")
         executables: list[str] = []
+        cpp_evidence: dict[str, object] | None = None
         if cpp_cli.is_file():
             executables.append("pulp-cpp")
         elif args.require_cpp:
@@ -44,9 +46,11 @@ def main() -> int:
                          cwd=cwd, env=env)
             assert result.returncode == 2, (executable, result.returncode, result.stderr)
             evidence = json.loads(result.stdout)
-            assert evidence["schema"] == "pulp.gpu-health-result.v1"
+            assert evidence["schema"] == "pulp.gpu-health-result.v2"
             assert evidence["render_requested"] is False
             assert evidence["verdict"] == "unverified"
+            if executable == "pulp-cpp":
+                cpp_evidence = evidence
 
         requests = "\n".join((
             json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
@@ -62,13 +66,51 @@ def main() -> int:
         if cpp_cli.is_file():
             assert result["structuredContent"]["exit_code"] == 2
             evidence = result["structuredContent"]["evidence"]
-            assert evidence["schema"] == "pulp.gpu-health-result.v1"
+            assert evidence["schema"] == "pulp.gpu-health-result.v2"
             assert evidence["render_requested"] is False
             assert evidence["verdict"] == "unverified"
         else:
             assert "structuredContent" not in result
             error = json.loads(result["content"][0]["text"])
             assert error["error"]["code"] == "cli-unavailable"
+
+        if cpp_evidence is not None and os.name != "nt":
+            stale_bin = cwd / "stale-install" / "bin"
+            stale_bin.mkdir(parents=True)
+            shutil.copy2(bindir / "pulp-mcp", stale_bin / "pulp-mcp")
+            stale_evidence = dict(cpp_evidence)
+            stale_evidence["schema"] = "pulp.gpu-health-result.v1"
+            stale_evidence["version"] = 1
+            stale_evidence.pop("measured_at_utc")
+            (stale_bin / "evidence.json").write_text(
+                json.dumps(stale_evidence, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            stale_cli = stale_bin / "pulp-cpp"
+            stale_cli.write_text(
+                "#!/bin/sh\n"
+                'cat "$(dirname "$0")/evidence.json"\n'
+                "exit 2\n",
+                encoding="utf-8",
+            )
+            stale_cli.chmod(0o755)
+            stale_mcp = run(
+                [str(stale_bin / "pulp-mcp")], cwd=cwd, env=env, stdin=requests
+            )
+            assert stale_mcp.returncode == 0, (
+                stale_mcp.returncode, stale_mcp.stderr, stale_mcp.stdout
+            )
+            stale_messages = [
+                json.loads(line) for line in stale_mcp.stdout.splitlines() if line.strip()
+            ]
+            stale_result = next(
+                message for message in stale_messages if message.get("id") == 2
+            )["result"]
+            assert stale_result["isError"] is True
+            assert "structuredContent" not in stale_result
+            stale_error = json.loads(stale_result["content"][0]["text"])
+            assert stale_error["error"]["code"] == "incompatible-cli-contract"
+            assert "same release" in stale_error["error"]["message"]
 
     print("gpu_health_installed_fronts_verified "
           f"cli={','.join(executables)} mcp=path-unrelated-cwd")

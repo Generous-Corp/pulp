@@ -225,7 +225,7 @@ acquires no GPU device, performs no render or compute work, and reports the run
 as unverified.
 
 The diagnostic emits the versioned
-[`pulp.gpu-health-result.v1`](../contracts/gpu-health-result-v1.schema.json)
+[`pulp.gpu-health-result.v2`](../contracts/gpu-health-result-v2.schema.json)
 contract and exits 0 for a real pass, 1 for a completed measured failure, or 2
 when requested evidence is unavailable or unverified. Backend selection and
 adapter identity are separate facts: never infer a hardware or discrete adapter
@@ -234,6 +234,30 @@ not hardware proof. Probe identities are independent and do not assert
 same-device correlation. Exit 0 requires authentic identity from at least one
 required probe plus required render/readback/content proof; use the per-probe
 fields when correlation matters.
+
+New active-probe results include `measured_at_utc`, captured immediately before
+probe execution. The field remains optional when parsing stored v1 results for
+compatibility, but authenticated run attestations require it and calculate
+freshness from that measurement time rather than the later signature time.
+
+For protected physical-machine coverage, pair the result with the independently
+verified
+[`pulp.gpu-health-run-attestation.v1`](../contracts/gpu-health-run-attestation-v1.schema.json)
+workflow in the [GPU validation checklist](../guides/gpu-validation-checklist.md#authenticate-a-published-hardware-run).
+The host signature binds the stable machine, exact selected probe/configuration,
+adapter name/backend/device, result path/digest/run ID, signed producer path and
+exact binary digest, canonical schema, implementation revision, and the
+preceding evidence-publication revision. The independent caller must supply the
+exact expected implementation revision and probe ID; ancestry or another
+passing probe with the same adapter identity is not equivalent. Protected Git
+ancestry of the later attestation publication remains a separate verifier check.
+Version 1 does not authenticate platform build IDs or OS code-signature
+metadata; downstream policy must not authorize on caller-supplied descriptions
+of either.
+Successful verification emits the closed
+[`pulp.gpu-health-run-attestation-verification.v1`](../contracts/gpu-health-run-attestation-verification-v1.schema.json)
+record; downstream policy consumes that record rather than scraping diagnostic
+text or treating the signed attestation alone as a verifier verdict.
 
 The render check consumes the existing `Renderer3D` and `HeadlessSurface`
 interfaces; it does not create another renderer. `HeadlessSurface` is a

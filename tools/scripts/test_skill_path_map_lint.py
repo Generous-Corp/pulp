@@ -107,6 +107,36 @@ class JsonSchemaLiteTests(unittest.TestCase):
                 self.assertEqual(jsl.validate(good, schema), [], f"{good!r} should pass")
                 self.assertTrue(jsl.validate(bad, schema), f"{bad!r} should fail")
 
+    def test_direct_local_definition_reference_accepts_and_rejects(self) -> None:
+        schema = {
+            "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{4}$"}},
+            "type": "object",
+            "required": ["digest"],
+            "properties": {"digest": {"$ref": "#/$defs/digest"}},
+            "additionalProperties": False,
+        }
+        self.assertEqual(jsl.validate({"digest": "0a1f"}, schema), [])
+        self.assertTrue(jsl.validate({"digest": "0A1F"}, schema))
+
+    def test_nonlocal_and_missing_references_fail_loudly(self) -> None:
+        for reference in ("other.json#/$defs/value", "#/$defs/missing"):
+            with self.subTest(reference=reference), self.assertRaises(
+                jsl.UnsupportedKeyword
+            ):
+                jsl.validate("x", {"$defs": {}, "$ref": reference})
+
+    def test_malformed_or_recursive_definitions_fail_loudly(self) -> None:
+        schemas = (
+            {"$defs": []},
+            {"$defs": {"loop": {"$ref": "#/$defs/loop"}},
+             "$ref": "#/$defs/loop"},
+        )
+        for schema in schemas:
+            with self.subTest(schema=schema), self.assertRaises(
+                jsl.UnsupportedKeyword
+            ):
+                jsl.validate("x", schema)
+
     def test_boolean_is_not_an_integer(self) -> None:
         self.assertTrue(jsl.validate(True, {"type": "integer"}))
 

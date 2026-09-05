@@ -68,6 +68,7 @@ TEST_CASE("GPU health provider aggregates real-work evidence into a pass",
     std::string error;
     REQUIRE(provider.calls == 3);
     REQUIRE(result.verdict == gh::Verdict::pass);
+    REQUIRE_FALSE(result.measured_at_utc.empty());
     REQUIRE(result.health_state == gh::HealthState::healthy);
     REQUIRE(gh::exit_code(result) == 0);
     REQUIRE(gh::validate(result, &error));
