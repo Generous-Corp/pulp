@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import release_reconcile as rr  # noqa: E402
 from release_reconcile import (  # noqa: E402
     CIRCUIT_OPEN,
     DEFERRED,
@@ -856,6 +857,82 @@ class NeverDestructive(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("manually dispatch the repaired workflow", source)
         self.assertNotIn("reconciler will re-dispatch within 30 minutes", source)
+
+
+
+class TagImmutableClassifier(unittest.TestCase):
+    """The circuit must open on a tag-immutable failure and ONLY on one.
+
+    v0.831.0 failed at step 17 `Configure` on a pinned-runtime digest mismatch
+    and was re-dispatched every sweep, each attempt claiming a dedicated release
+    VM it could never use. The step-name allowlist could not see it.
+
+    The naive fix — adding "Configure" to VALIDATION_STEP_PREFIXES — passes the
+    first test here and FAILS the second, which is the whole point: `Configure`
+    also fails on fetch timeouts and cache misses, and opening the circuit on
+    those converts a recoverable flake into a permanently stuck release.
+    """
+
+    DIGEST_LOG = (
+        "CMake Error at tools/cmake/PulpDependencies.cmake:872 (message):\n"
+        "  Three.js runtime file does not match pinned revision r170: LICENSE\n"
+    )
+    TRANSIENT_LOG = (
+        "curl: (28) Operation timed out after 30001 milliseconds\n"
+        "CMake Error: failed to fetch dependency archive\n"
+    )
+
+    def _jobs(self):
+        return [
+            {
+                "id": 42,
+                "name": "CLI windows-x64",
+                "conclusion": "failure",
+                "steps": [{"name": "Configure", "conclusion": "failure"}],
+            }
+        ]
+
+    def test_digest_mismatch_opens_the_circuit_on_the_first_sweep(self) -> None:
+        failures, _ = rr.validation_outcomes(
+            self._jobs(), lambda job_id: self.DIGEST_LOG
+        )
+        self.assertTrue(
+            failures,
+            "a pinned-revision digest mismatch is a property of the immutable "
+            "tag and must open the circuit immediately, not after N retries",
+        )
+        self.assertIn("tag-immutable", " ".join(failures))
+
+    def test_transient_configure_failure_still_re_dispatches(self) -> None:
+        # THE TEST THAT MATTERS. A fetch timeout is not a fact about the tag; a
+        # re-run can succeed. Opening the circuit here would strand a release
+        # that would otherwise have published.
+        failures, _ = rr.validation_outcomes(
+            self._jobs(), lambda job_id: self.TRANSIENT_LOG
+        )
+        self.assertEqual(
+            failures,
+            {},
+            "a transient configure failure must stay on the retry path; opening "
+            "the circuit on it converts a recoverable flake into a stuck release",
+        )
+
+    def test_one_classifier_answers_the_capacity_question_too(self) -> None:
+        # Same predicate, two callers — the reconciler asks "re-dispatch?" and
+        # the capacity path asks "may this run keep a dedicated runner?". They
+        # must not grow separate definitions of "doomed".
+        self.assertEqual(
+            rr.run_is_doomed(self._jobs(), lambda job_id: self.DIGEST_LOG),
+            "does not match pinned revision",
+        )
+        self.assertIsNone(
+            rr.run_is_doomed(self._jobs(), lambda job_id: self.TRANSIENT_LOG)
+        )
+
+    def test_unfetchable_log_leaves_the_tag_on_the_retry_path(self) -> None:
+        # Missing evidence is not evidence of doom.
+        failures, _ = rr.validation_outcomes(self._jobs(), lambda job_id: "")
+        self.assertEqual(failures, {})
 
 
 if __name__ == "__main__":

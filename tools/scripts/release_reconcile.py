@@ -22,7 +22,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 SEMVER_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # Pulls the tag out of a job name like "Resolve macOS runner — v0.659.0".
@@ -63,6 +63,63 @@ VALIDATION_STEP_PREFIXES = (
     "Smoke CLI",
     "Verify release archive product matrix",
 )
+
+
+# Failures that are a property of the IMMUTABLE TAG rather than of the attempt.
+# The step-name allowlist above cannot express these: they surface from steps
+# that also fail transiently, so the step name alone is not evidence.
+#
+# `Configure` is the motivating case and the reason this is signature-based
+# rather than a sixth prefix. v0.831.0 failed at step 17 `Configure` on a
+# pinned-runtime digest mismatch and was re-dispatched every sweep, each attempt
+# claiming a dedicated release VM it could never use. But `Configure` also fails
+# for fetch timeouts and cache misses, and opening the circuit on THOSE would
+# convert a recoverable flake into a permanently stuck release — strictly worse
+# than the bug being fixed. So match the failure, not the step.
+#
+# A pinned-revision digest mismatch is a fact about the tag's tree: the pin and
+# the bytes it names are both frozen at the tag, so every retry recomputes the
+# same digest and fails identically. Re-running provably cannot change it.
+TAG_IMMUTABLE_FAILURE_SIGNATURES = (
+    "does not match pinned revision",
+)
+
+
+def tag_immutable_failure(log_text: str) -> str | None:
+    """Return the signature proving a failure is a property of the tag, if any.
+
+    One classifier, two callers: the reconciler asks "should I re-dispatch?" and
+    the capacity path asks "may this run keep a dedicated runner?". Both mean the
+    same thing — can a re-run change the outcome — so they must not grow separate
+    definitions of "doomed" that can later disagree.
+    """
+    for signature in TAG_IMMUTABLE_FAILURE_SIGNATURES:
+        if signature in log_text:
+            return signature
+    return None
+
+
+def run_is_doomed(
+    jobs: Iterable[dict],
+    log_fetcher: "Callable[[int], str] | None" = None,
+) -> str | None:
+    """Return a signature if no re-run of these jobs could succeed.
+
+    The capacity-side caller. A run whose failure a re-run COULD fix keeps its
+    claim on a dedicated runner; only a tag-immutable failure releases it. This
+    deliberately does not treat "some leg failed" as doomed — a failed leg can be
+    re-run, and cancelling to reclaim a VM would trade a recoverable release for
+    a runner slot.
+    """
+    if log_fetcher is None:
+        return None
+    for job in jobs:
+        if job.get("conclusion") != "failure":
+            continue
+        signature = tag_immutable_failure(log_fetcher(job.get("id")))
+        if signature:
+            return signature
+    return None
 
 
 INCOMPLETE = "incomplete"    # published, but missing assets — unfixable by us
@@ -348,6 +405,26 @@ def collect(
     # and failed runs carry the step-level evidence that distinguishes immutable
     # product validation from retryable workflow/infrastructure failure.
     job_cache: dict[int, list[dict]] = {}
+    # Logs are fetched only for jobs that already FAILED, and memoised per job,
+    # so a healthy sweep costs no extra API calls. A log that cannot be fetched
+    # yields "" — i.e. "no signature" — which leaves the tag on the retry path
+    # rather than opening the circuit on missing evidence.
+    log_cache: dict[int, str] = {}
+
+    def log_fetcher(job_id: int | None) -> str:
+        if job_id is None:
+            return ""
+        if job_id not in log_cache:
+            try:
+                completed = subprocess.run(
+                    ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL, text=True, timeout=60, check=False,
+                )
+                log_cache[job_id] = completed.stdout if completed.returncode == 0 else ""
+            except (subprocess.SubprocessError, OSError):
+                log_cache[job_id] = ""
+        return log_cache[job_id]
     for r in flat_runs:
         if not needs_job_details(r):
             continue
@@ -393,7 +470,9 @@ def collect(
                     a["name"] for a in (rel or {}).get("assets", [])
                 ),
                 run_states=tuple(r["status"] for r in tag_runs),
-                validation_failures=latest_validation_failures(tag_runs, job_cache),
+                validation_failures=latest_validation_failures(
+                    tag_runs, job_cache, log_fetcher=log_fetcher
+                ),
                 # A tag push produces one `push` run; every run beyond that is a
                 # re-dispatch, ours or a human's.
                 dispatch_attempts=sum(
@@ -419,12 +498,25 @@ def validation_failures(jobs: Iterable[dict]) -> tuple[str, ...]:
 
 def validation_outcomes(
     jobs: Iterable[dict],
+    log_fetcher: "Callable[[int], str] | None" = None,
 ) -> tuple[dict[str, str], set[str]]:
-    """Return failed and passed product gates, keyed by platform and gate."""
+    """Return failed and passed product gates, keyed by platform and gate.
+
+    `log_fetcher` is optional so every existing caller keeps working; when it is
+    supplied, a failed step outside the name allowlist is additionally checked
+    against the tag-immutable signatures. It is consulted only for jobs that
+    already failed, so a healthy sweep fetches no logs.
+    """
     failures: dict[str, str] = {}
     passed: set[str] = set()
     for job in jobs:
         job_name = job.get("name", "unknown job")
+        if log_fetcher is not None and job.get("conclusion") == "failure":
+            signature = tag_immutable_failure(log_fetcher(job.get("id")))
+            if signature:
+                failures[f"{job_name}|tag-immutable"] = (
+                    f"{job_name}: {signature} (tag-immutable; a re-run cannot change it)"
+                )
         for step in job.get("steps", []):
             name = step.get("name", "")
             prefix = next(
@@ -446,7 +538,9 @@ def validation_outcomes(
 
 
 def latest_validation_failures(
-    runs: Iterable[dict], job_cache: dict[int, list[dict]]
+    runs: Iterable[dict],
+    job_cache: dict[int, list[dict]],
+    log_fetcher: Callable[[int | None], str] | None = None,
 ) -> tuple[str, ...]:
     """Return current validation evidence, allowing a later pass to clear it."""
     attempts: list[tuple[str, int, bool, list[dict]]] = []
@@ -466,7 +560,7 @@ def latest_validation_failures(
     cleared: set[str] = set()
     active: dict[str, str] = {}
     for _, _, may_clear, jobs in newest_first:
-        failures, passed = validation_outcomes(jobs)
+        failures, passed = validation_outcomes(jobs, log_fetcher)
         for gate, why in failures.items():
             if gate not in cleared and gate not in active:
                 active[gate] = why

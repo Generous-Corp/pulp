@@ -416,10 +416,17 @@ def validate_source_root(root: Path, revision: str, label: str) -> dict[str, str
 
 
 def terminate_child(process: subprocess.Popen[bytes]) -> None:
+    # killpg reports "not our process group any more" two ways, not one. ESRCH
+    # (ProcessLookupError) means the group is gone; EPERM (PermissionError)
+    # means the pid was recycled into a group this process may not signal.
+    # Both mean the child we spawned is no longer there, so both end the wait.
+    # Catching only ESRCH lets a recycled pid raise EPERM out of teardown and
+    # fail an otherwise-passing run.
+    gone = (ProcessLookupError, PermissionError)
     process_group = process.pid
     try:
         os.killpg(process_group, signal.SIGTERM)
-    except ProcessLookupError:
+    except gone:
         return
 
     deadline = time.monotonic() + 3
@@ -427,13 +434,13 @@ def terminate_child(process: subprocess.Popen[bytes]) -> None:
         process.poll()
         try:
             os.killpg(process_group, 0)
-        except ProcessLookupError:
+        except gone:
             break
         time.sleep(0.02)
     else:
         try:
             os.killpg(process_group, signal.SIGKILL)
-        except ProcessLookupError:
+        except gone:
             pass
     try:
         process.wait(timeout=1)

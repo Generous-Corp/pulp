@@ -138,6 +138,50 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
 
+      # A dispatch must be a RETRY OF A TAG-PUSH, never "main's workflow building
+      # some other tag's sources". GitHub derives build provenance from the OIDC
+      # run context — the ref the workflow file was loaded from — so a dispatch
+      # from `main` attests `refs/heads/main` and main's HEAD commit no matter
+      # which tag it checks out and builds. The artifact is then labelled with a
+      # commit whose tree never produced it, and a consumer pinning
+      # `gh attestation verify --source-digest <tag commit>` correctly refuses
+      # it. That laundering shape — a trusted workflow ref vouching for an
+      # arbitrary checkout — is exactly what --source-digest exists to reject, so
+      # the defect belongs here rather than in the consumer.
+      #
+      # v0.832.0 was published this way and its provenance names main's HEAD
+      # instead of the tag commit, which is unverifiable downstream. Requiring
+      # the run's own ref to BE the tag keeps dispatch available for retrying a
+      # flaky tag-push run while making that mislabelling impossible. If a tag's
+      # own workflow is broken, the tag is abandoned and superseded by a new tag
+      # cut from the fixed default branch — a tag is immutable, including the
+      # workflow file it carries.
+      - name: Dispatch must run on the tag it publishes
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RUN_SHA: ${{ github.sha }}
+          RUN_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          tag_sha="$(gh api "repos/$REPO/commits/$RELEASE_VERSION" --jq .sha)"
+          if [ -z "$tag_sha" ]; then
+            echo "::error::$RELEASE_VERSION does not resolve to a commit in $REPO"
+            exit 1
+          fi
+          if [ "$tag_sha" != "$RUN_SHA" ]; then
+            echo "::error::Refusing to publish $RELEASE_VERSION from $RUN_REF ($RUN_SHA)."
+            echo "::error::Build provenance would name $RUN_SHA, not the tag commit $tag_sha,"
+            echo "::error::so the release would be unverifiable by any consumer that pins the tag."
+            echo "::error::Re-dispatch with --ref $RELEASE_VERSION. If that tag's own workflow is"
+            echo "::error::broken, cut a NEW tag from the fixed default branch instead."
+            exit 1
+          fi
+          echo "dispatch ref matches $RELEASE_VERSION ($tag_sha)"
+
       - name: Reject marker-era source substitution
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref != '' }}
         shell: bash

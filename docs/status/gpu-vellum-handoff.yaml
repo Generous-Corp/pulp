@@ -838,8 +838,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_first_visible_a3_role_producer.py",
           "state": "pulp-owned-retained",
-          "revision": "5060b7e7d0c0e4032e5c781df6e43d0cfa0fd95d",
-          "object_id": "b22d39b18d6a6d36a0590dad104c6a26902baeab",
+          "revision": "05d46e4e6e45c9092c8ea49b6c18bcc8a731e7d2",
+          "object_id": "44dc22751e887e0c6b03652c74afd471fdb2a87a",
           "object_type": "blob"
         },
         {
@@ -894,8 +894,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
           "state": "pulp-owned-retained",
-          "revision": "4c0aba424f28d08337ec323ed155c4ec39b79b37",
-          "object_id": "e33b8e3e6748ffaf1676103a0c06c008d9497de4",
+          "revision": "05d46e4e6e45c9092c8ea49b6c18bcc8a731e7d2",
+          "object_id": "8d8775f0c352b4e447b61d06204a76afc4b032cb",
           "object_type": "blob"
         }
       ],
@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "fe3273c6152809edf8c2e8ef93bc198c873469c3",
-          "object_id": "1434dcdaee6863edb741e54c2fdf02d879a64e38",
+          "revision": "21c88dcd3dbdcaeb4262856b321a2a07ce81ba76",
+          "object_id": "f74282a3e0dd5a1a7e5b1e0cf27fd3d3fc18df86",
           "object_type": "blob"
         },
         {

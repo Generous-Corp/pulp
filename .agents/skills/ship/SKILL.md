@@ -1222,6 +1222,16 @@ When a fork release drops or adds a slice, update the manifest
 keep a platform in the `REQUIRE_GPU=ON` case blocks while its asset is
 actually published.
 
+### A dispatch-published release is unverifiable by a provenance-pinning consumer
+
+Publishing an old tag by `workflow_dispatch` from `main` works, and the bytes are
+fine, but the SLSA provenance names **main's HEAD** rather than the tag commit —
+GitHub derives it from the run's OIDC context, not from the checkout. A consumer
+running `gh attestation verify --source-digest <tag commit>` then refuses the
+artifact, and it is right to. Supersede a broken tag with a new one cut from the
+fixed default branch instead; never relax the consumer's check to make it green.
+See the `ci` skill for the full write-up and the guard that now enforces it.
+
 ### A Windows leg failing an archive digest is CRLF, and it blocks the whole release
 
 The archive verifier hashes raw tar/zip member bytes. Git for Windows ships

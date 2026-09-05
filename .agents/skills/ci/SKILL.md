@@ -314,6 +314,35 @@ them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and ex
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
 
+### Editing a `gpu-vellum-handoff.yaml`-pinned path is a TWO-commit operation
+
+`docs/status/gpu-vellum-handoff.yaml` pins every referenced Pulp path to an
+exact revision, object id and object type. Change one of those files and the
+pinned row goes stale, so `gpu-recipe-catalog-selftest` and
+`gpu-handoff-provenance-selftest` fail — **in CI, ~20 minutes later**. On
+2026-09-05 three separate PRs each discovered it that way in one night, and one
+of them additionally went `DIRTY` colliding with another PR's regenerated
+receipt, because the ledger is a serialization point every such PR must pass
+through.
+
+The repair is a tool-generated identity refresh, never a hand edit:
+
+```bash
+python3 tools/scripts/gpu_handoff_provenance.py write   # regenerate
+python3 tools/scripts/gpu_handoff_provenance.py check   # verify (~25s, git log per row)
+```
+
+**Hand-resolving the receipt is the trap**: it passes the merge conflict and
+then fails the receipt's own checker. Merge first, then regenerate against the
+merged tree.
+
+`gates.sh` now runs `gpu_handoff_pin_freshness.py`, which is diff-scoped and
+sub-second and fails the push when a pinned path changed without the ledger
+being touched. It deliberately proves only *that* — it does not re-verify the
+identity fields, because doing so costs ~25s per push. A green gate means "you
+did not forget", not "the pins are correct"; the `check` command above is what
+proves the latter.
+
 ### A changed-path preamble needs exact trees, not full repository history
 
 Do not set the `build.yml` `classify` checkout back to `fetch-depth: 0`. GitHub
@@ -7435,6 +7464,51 @@ The fallback is last, not first. `sign-and-release.yml` must prefer the isolated
 `macos-15`. It must not import the Developer ID private key on the shared local
 PR pool. A split route can finish all CLI/SDK assets while the signing leg
 remains queued with no runner, leaving the release draft unpublished.
+
+## A dispatch publishes, but it mislabels provenance — so it cannot be the fix
+
+`workflow_dispatch` of `release-cli.yml` from `main` builds an older tag's
+sources using **main's** workflow file. That is genuinely useful — it is how a
+workflow-level fix reaches a tag cut before the fix landed — and it is why a
+release-lane fix should be titled `build(release):`/`fix(release):` on `main`
+rather than needing a new tag.
+
+**But the resulting release is unverifiable downstream.** GitHub derives build
+provenance from the OIDC run context — the ref the workflow file was loaded
+from — not from what `actions/checkout` fetches afterwards. So the attestation
+records:
+
+```
+externalParameters.workflow.ref = refs/heads/main
+resolvedDependencies[0]         = git+.../pulp@refs/heads/main
+                                  gitCommit = <main's HEAD>
+```
+
+and the tag's own commit appears in **no** attestation. Any consumer pinning the
+tag then fails, correctly:
+
+```
+gh attestation verify <sdk.tar.gz> --source-digest <tag commit>
+Error: expected SourceRepositoryDigest to be <tag commit>, got <main HEAD>
+```
+
+Do **not** read that as a broken consumer and do not drop `--source-digest` to
+clear it. A trusted workflow ref vouching for an arbitrary checkout is the exact
+laundering shape that flag exists to reject.
+
+The rule: **a tag is immutable including the workflow file it carries.** When a
+tag's workflow is broken, supersede it with a new tag cut from the fixed default
+branch; do not repair it by dispatch. `release-cli.yml` now enforces this — a
+dispatch whose own ref is not the tag it publishes fails before anything builds,
+so dispatch stays available for retrying a flaky tag-push run and nothing else.
+
+If you are diagnosing a release that published but a downstream pin refuses,
+check provenance before the bytes:
+
+```bash
+ghapp api "repos/OWNER/REPO/attestations/sha256:<asset digest>" \
+  --jq '.attestations[].bundle.dsseEnvelope.payload' | base64 -d | grep -o 'refs/[^"]*'
+```
 
 ## A Windows-only digest failure is CRLF, not corruption
 
