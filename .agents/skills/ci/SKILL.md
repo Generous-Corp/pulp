@@ -7436,6 +7436,51 @@ The fallback is last, not first. `sign-and-release.yml` must prefer the isolated
 PR pool. A split route can finish all CLI/SDK assets while the signing leg
 remains queued with no runner, leaving the release draft unpublished.
 
+## A dispatch publishes, but it mislabels provenance — so it cannot be the fix
+
+`workflow_dispatch` of `release-cli.yml` from `main` builds an older tag's
+sources using **main's** workflow file. That is genuinely useful — it is how a
+workflow-level fix reaches a tag cut before the fix landed — and it is why a
+release-lane fix should be titled `build(release):`/`fix(release):` on `main`
+rather than needing a new tag.
+
+**But the resulting release is unverifiable downstream.** GitHub derives build
+provenance from the OIDC run context — the ref the workflow file was loaded
+from — not from what `actions/checkout` fetches afterwards. So the attestation
+records:
+
+```
+externalParameters.workflow.ref = refs/heads/main
+resolvedDependencies[0]         = git+.../pulp@refs/heads/main
+                                  gitCommit = <main's HEAD>
+```
+
+and the tag's own commit appears in **no** attestation. Any consumer pinning the
+tag then fails, correctly:
+
+```
+gh attestation verify <sdk.tar.gz> --source-digest <tag commit>
+Error: expected SourceRepositoryDigest to be <tag commit>, got <main HEAD>
+```
+
+Do **not** read that as a broken consumer and do not drop `--source-digest` to
+clear it. A trusted workflow ref vouching for an arbitrary checkout is the exact
+laundering shape that flag exists to reject.
+
+The rule: **a tag is immutable including the workflow file it carries.** When a
+tag's workflow is broken, supersede it with a new tag cut from the fixed default
+branch; do not repair it by dispatch. `release-cli.yml` now enforces this — a
+dispatch whose own ref is not the tag it publishes fails before anything builds,
+so dispatch stays available for retrying a flaky tag-push run and nothing else.
+
+If you are diagnosing a release that published but a downstream pin refuses,
+check provenance before the bytes:
+
+```bash
+ghapp api "repos/OWNER/REPO/attestations/sha256:<asset digest>" \
+  --jq '.attestations[].bundle.dsseEnvelope.payload' | base64 -d | grep -o 'refs/[^"]*'
+```
+
 ## A Windows-only digest failure is CRLF, not corruption
 
 When a release leg fails a **content digest** on Windows while **Linux passes on
