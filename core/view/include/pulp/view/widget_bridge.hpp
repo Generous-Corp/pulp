@@ -177,6 +177,16 @@ public:
     // Get a widget by its JS-assigned ID
     View* widget(const std::string& id);
 
+    // ScrollView wrappers created for retained DOM containers are kept
+    // separate from the authored widget registry so normal ID APIs continue
+    // to address the original content View.
+    ScrollView* scroll_wrapper(const std::string& id) const noexcept;
+
+    // Return the native style/hit-test surface for an authored id. Retained
+    // scroll containers use a wrapper for clipping and geometry; ordinary
+    // widgets continue to resolve through the authored registry.
+    View* style_target(const std::string& id) noexcept;
+
     // Sync all widget values from the parameter store
     void sync_from_store();
 
@@ -451,6 +461,7 @@ private:
     // so duplicate IDs cannot lose delayed-quarantine ownership.
     std::vector<BridgeWidgetState> owned_widgets_;
     WidgetRegistry widgets_;
+    std::unordered_map<std::string, ScrollView*> scroll_wrappers_;
 
     // Idempotency guards for native-event registrations, one record per widget
     // id. Re-running a registrar on every React commit must not replace or stack
@@ -504,10 +515,10 @@ private:
         std::string callback_id;
         std::string output;
     };
-    // Callback closures retain callback_alive_, so these queues live on the
-    // bridge rather than on BridgeCallbackState to avoid an ownership cycle.
-    std::vector<std::unique_ptr<View>> callback_retired_widgets_;
-    std::vector<std::unique_ptr<View>> callback_collectable_widgets_;
+    // Retirement of a view removed by a JS handler is owned by the tree root
+    // (View::retire), not by the bridge, so it obeys the same contract as a
+    // removal from a native lifecycle hook. callback_alive_ carries the root
+    // pointer because most callback closures capture only this state.
     std::shared_ptr<BridgeCallbackState> callback_alive_;
     std::shared_ptr<std::mutex> async_exec_mutex_ = std::make_shared<std::mutex>();
     std::shared_ptr<std::vector<AsyncExecResult>> async_exec_results_ =

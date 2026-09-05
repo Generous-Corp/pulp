@@ -63,7 +63,7 @@ void BridgeRegistrars::register_animation_style_api(WidgetBridge& self) {
         auto id = args.get<std::string>(0, "");
         auto dur = static_cast<float>(args.get<double>(1, 0.15));
         // Store transition duration on the view's theme as a dimension token.
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (v) {
             auto theme = v->theme();
             theme.dimensions["transition.duration"] = dur;
@@ -78,7 +78,7 @@ void BridgeRegistrars::register_animation_style_api(WidgetBridge& self) {
     register_bridge_function(api, "setTransition", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto css = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
         if (css.empty() || css == "none") {
             v->clear_transitions();
@@ -96,7 +96,7 @@ void BridgeRegistrars::register_animation_style_api(WidgetBridge& self) {
     register_bridge_function(api, "setTransitionProperty", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto props = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
         std::vector<TransitionSpec> ts;
         std::string acc;

@@ -908,7 +908,14 @@ function materializedCanvasBehaviorOwnerId(index) {
         const event = String(key).slice(separator + 1);
         if (!eventsByOwner.has(id)) eventsByOwner.set(id, new Set());
         eventsByOwner.get(id).add(event);
-        if (event.startsWith('pointer')) owners.add(id);
+        // A materialized owner is not required to expose the Pointer Events
+        // spelling. React/native bridges may register click-only, mouse-only,
+        // wheel-only, or split-channel handlers. Treat every dispatch channel
+        // as evidence of ownership; the later geometry/ancestry checks still
+        // disambiguate unrelated chrome callbacks.
+        if (event === 'click' || event === 'wheel'
+            || event.startsWith('pointer') || event.startsWith('mouse'))
+          owners.add(id);
       }
     }
   }

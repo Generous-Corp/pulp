@@ -61,10 +61,46 @@ if (!Element.prototype.appendChild ||
         if (child._isDocumentFragment) {
             var kids = child._children.slice(0);
             child._children.length = 0;
-            for (var i = 0; i < kids.length; i++) this.appendChild(kids[i]);
+            try {
+                for (var i = 0; i < kids.length; i++) this.appendChild(kids[i]);
+            } catch (e) {
+                // Restore JS ownership for every fragment child. Native
+                // append is transactional for each child; this closes the
+                // outer flattening transaction when a later child rejects.
+                for (var ri = 0; ri < kids.length; ri++) {
+                    var owner = kids[ri]._parentElement;
+                    if (owner) {
+                        var oi = owner._children.indexOf(kids[ri]);
+                        if (oi >= 0) owner._children.splice(oi, 1);
+                    }
+                    kids[ri]._parentElement = child;
+                }
+                child._children = kids;
+                throw e;
+            }
             return child;
         }
-        if (child._parentElement) child._parentElement.removeChild(child);
+        // Reject cycles before changing JS parent bookkeeping. The native
+        // bridge also guards this, but reaching it after mutation would leave
+        // the emulated DOM cyclic even when the native operation refuses.
+        if (child === this) throw new Error("HierarchyRequestError");
+        for (var ancestor = this; ancestor; ancestor = ancestor._parentElement) {
+            if (ancestor === child) throw new Error("HierarchyRequestError");
+        }
+        var previousParent = child._parentElement;
+        var previousIndex = previousParent
+            ? previousParent._children.indexOf(child) : -1;
+        // Reparenting must preserve the native widget identity. Calling the
+        // public removeChild() here would invoke __domRemove(), which retires
+        // the native subtree and aliases before __domAppend() gets a chance
+        // to move an existing retained wrapper. Detach only the JS parent
+        // bookkeeping; __domAppend() owns the native move/upgrade transaction.
+        if (child._parentElement) {
+            var oldParent = child._parentElement;
+            var oldIndex = oldParent._children.indexOf(child);
+            if (oldIndex >= 0) oldParent._children.splice(oldIndex, 1);
+            child._parentElement = null;
+        }
         child._parentElement = this;
         this._children.push(child);
         this._ensureNative();
@@ -100,7 +136,16 @@ if (!Element.prototype.appendChild ||
                 }
             }
         }
-        __domAppend(this._id, child._id, child.tagName.toLowerCase(), __domAppendHint);
+        try {
+            __domAppend(this._id, child._id, child.tagName.toLowerCase(), __domAppendHint);
+        } catch (e) {
+            var rollbackIndex = this._children.indexOf(child);
+            if (rollbackIndex >= 0) this._children.splice(rollbackIndex, 1);
+            child._parentElement = previousParent;
+            if (previousParent && previousIndex >= 0)
+                previousParent._children.splice(previousIndex, 0, child);
+            throw e;
+        }
         child._nativeCreated = true;
         if (child._textContent) setText(child._id, child._textContent);
         // Replay presentational `width`/`height` HTML attributes that
@@ -199,19 +244,62 @@ if (!Element.prototype.appendChild ||
         if (newChild._isDocumentFragment) {
             var kids = newChild._children.slice(0);
             newChild._children.length = 0;
-            for (var i = 0; i < kids.length; i++) this.insertBefore(kids[i], refChild);
+            try {
+                for (var i = 0; i < kids.length; i++) this.insertBefore(kids[i], refChild);
+            } catch (e) {
+                for (var ri = 0; ri < kids.length; ri++) {
+                    var owner = kids[ri]._parentElement;
+                    if (owner) {
+                        var oi = owner._children.indexOf(kids[ri]);
+                        if (oi >= 0) owner._children.splice(oi, 1);
+                    }
+                    kids[ri]._parentElement = newChild;
+                }
+                newChild._children = kids;
+                throw e;
+            }
             return newChild;
         }
+        if (newChild === this) throw new Error("HierarchyRequestError");
+        for (var ancestor = this; ancestor; ancestor = ancestor._parentElement) {
+            if (ancestor === newChild) throw new Error("HierarchyRequestError");
+        }
+        var previousParent = newChild._parentElement;
+        var previousIndex = previousParent
+            ? previousParent._children.indexOf(newChild) : -1;
         var idx = this._children.indexOf(refChild);
         if (idx < 0) return this.appendChild(newChild);
-        if (newChild._parentElement) newChild._parentElement.removeChild(newChild);
+        // As in appendChild(), detach the JS relationship without retiring
+        // the native subtree. The C++ append path must see the existing widget
+        // so retained ScrollView aliases and callback identity survive.
+        if (newChild._parentElement) {
+            var oldParent = newChild._parentElement;
+            var oldIndex = oldParent._children.indexOf(newChild);
+            if (oldIndex >= 0) {
+                oldParent._children.splice(oldIndex, 1);
+                // The reference index was captured before removing a child
+                // from this same parent. Account for the shifted slot when
+                // moving an earlier sibling in front of the reference.
+                if (oldParent === this && oldIndex < idx) idx--;
+            }
+            newChild._parentElement = null;
+        }
         newChild._parentElement = this;
         this._children.splice(idx, 0, newChild);
         this._ensureNative();
         __pulpRememberNativeElement__(newChild);
         var __insertHint = (typeof __pulpElementWantsScrollView__ === "function" &&
             __pulpElementWantsScrollView__(newChild)) ? "scroll" : "";
-        __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase(), __insertHint);
+        try {
+            __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase(), __insertHint);
+        } catch (e) {
+            var rollbackIndex = this._children.indexOf(newChild);
+            if (rollbackIndex >= 0) this._children.splice(rollbackIndex, 1);
+            newChild._parentElement = previousParent;
+            if (previousParent && previousIndex >= 0)
+                previousParent._children.splice(previousIndex, 0, newChild);
+            throw e;
+        }
         newChild._nativeCreated = true;
         if (newChild._textContent) setText(newChild._id, newChild._textContent);
         // Same pre-mount attribute replay path as appendChild, including

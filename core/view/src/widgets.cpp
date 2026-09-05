@@ -1714,6 +1714,9 @@ bool InlineValueEditor::on_key_event(const KeyEvent& event) {
 }
 
 void InlineValueEditor::on_focus_changed(bool gained) {
+    // Preserve the base focus state used by host routing and restoration;
+    // commit/cancel remains the editor-specific side effect.
+    View::on_focus_changed(gained);
     if (!gained && editing_) commit_edit();
 }
 

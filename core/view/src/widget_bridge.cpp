@@ -462,8 +462,7 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     : engine_(engine), root_(root), store_(store),
       granted_capabilities_(granted_capabilities), gpu_surface_(gpu_surface),
       widgets_(owned_widgets_),
-      callback_alive_(std::make_shared<BridgeCallbackState>(
-          &callback_retired_widgets_, &callback_collectable_widgets_)) {
+      callback_alive_(std::make_shared<BridgeCallbackState>(&root_)) {
     callback_alive_->track_engine(engine.liveness_token());
     if (detail::widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
@@ -992,7 +991,31 @@ void WidgetBridge::sync_from_store() {
 View* WidgetBridge::resolve_parent(const std::string& parent_id) {
     if (parent_id.empty()) return &root_;
     auto it = widgets_.find(parent_id);
-    return it != widgets_.end() ? it->second.view : &root_;
+    if (it == widgets_.end() || !it->second.view) return &root_;
+    return it->second.view;
+}
+
+ScrollView* WidgetBridge::scroll_wrapper(const std::string& id) const noexcept {
+    auto it = scroll_wrappers_.find(id);
+    if (it == scroll_wrappers_.end() || !it->second) return nullptr;
+    // The alias map is deliberately non-owning. During realm replacement a
+    // wrapper can leave the owned identity vector before the map cleanup runs;
+    // fail closed here so every scroll-specific caller avoids a stale/ABA raw
+    // pointer rather than dereferencing it.
+    const auto live = std::any_of(owned_widgets_.begin(), owned_widgets_.end(),
+        [candidate = it->second](const auto& state) {
+            return state.view == candidate;
+        });
+    return live ? it->second : nullptr;
+}
+
+View* WidgetBridge::style_target(const std::string& id) noexcept {
+    if (auto* wrapper = scroll_wrapper(id)) {
+        const auto live = std::any_of(owned_widgets_.begin(), owned_widgets_.end(),
+            [wrapper](const auto& state) { return state.view == wrapper; });
+        if (live) return wrapper;
+    }
+    return widget(id);
 }
 
 std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
