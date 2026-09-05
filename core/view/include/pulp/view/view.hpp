@@ -2528,8 +2528,6 @@ private:
     // Root-only. Set when a hook requests propagation during an active walk;
     // the outermost caller runs one more bounded pass to service it.
     bool clock_walk_pending_ = false;
-    // Root-only walk epoch, and the per-view stamp recording the last epoch in
-    // which this view was visited. Together they make the walk exactly-once.
     // Root-only, and meaningful only while a walk is in flight: the traversal
     // token of the pass currently running, published so a mid-pass attach can
     // stamp the incoming subtree as belonging to it.

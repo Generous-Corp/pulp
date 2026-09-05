@@ -108,11 +108,34 @@ storage:
   each node at most once — a later pass may walk *through* an already-notified
   node to reach a descendant attached mid-pass.
 
-Children are found by rescanning `children_` from index 0 after every hook, not
-by a saved index. An index does not survive a callback: an earlier sibling may
-have been removed, so the same index now names a different node. The previous
-index walker demonstrably skipped nodes — remove yourself and an earlier sibling
-from a hook and the next sibling was never notified.
+**Both stamps hold process-global monotonic tokens, never per-root counters.**
+This is the invariant to protect. A view does not stay under one root:
+`remove_child` hands a detached subtree its own root and refreshes its clock
+immediately, so self-subscribing descendants drop a clock they can no longer
+reach. With per-root counters those number lines alias — a fresh root's first
+walk draws token 1, and every descendant stamped by its previous root's first
+walk already reads 1, so the whole subtree is skipped as "already visited" and
+never told. A `Meter`, a `LottieView`, or `TextEditor`'s caret blink then keeps a
+subscription to a clock it cannot see. Anyone tempted to make these counters
+per-root again is reintroducing that silent regression.
+
+Children are found by scanning `children_` for the next unstamped node, resuming
+where the last scan stopped and restarting from index 0 whenever the structure
+generation moved across a callback. An index cannot simply be incremented across
+a hook — an earlier sibling may have been removed, so the same index now names a
+different node, which is exactly how the previous bounded-index walker skipped
+nodes (remove yourself and an earlier sibling from a hook and the next sibling
+was never notified). But re-deriving the cursor from zero after *every* child is
+quadratic in the sibling count, and the no-mutation case is the quadratic one.
+Correctness comes from the stamp, which makes revisiting impossible; the cursor
+is only an optimisation, and a final sweep from zero catches anything a mutation
+shifted behind it.
+
+One notification per node per call is a **floor, not a ceiling**. A node whose
+clock genuinely changes more than once during an operation is told each time — a
+view removed mid-walk is notified by the walk and again by `remove_child`'s
+detached refresh, because its clock really did become null. Handlers are
+expected to be drop-then-resubscribe idempotent, and every in-tree one is.
 
 A node attached *during* a pass is stamped with that pass's traversal epoch, so
 the running pass skips it and a hook that attaches on every notification cannot

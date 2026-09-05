@@ -82,12 +82,11 @@ struct InteractionSnapshot {
                 auto* state = root->existing_interaction();
                 if (state && (!state->active_overlay ||
                               state->active_overlay == view)) {
-                    // claim_overlay() is overridable and can run author code.
-                    // A bridge function is NOT inside a BridgeCallbackScope —
-                    // those only wrap view-installed event callbacks — so
-                    // without this the tree's lease depth here is zero and a
-                    // hook could destroy `view` outright.
-                    DispatchLease lease(*view);
+                    // No lease here, deliberately: claim_overlay() is
+                    // non-virtual and its whole body assigns two slots. It
+                    // cannot reach author code, so there is nothing for a gate
+                    // to defend against. The popup branch below is the one that
+                    // needs one.
                     try { view->claim_overlay(); }
                     catch (...) {}
                 }
