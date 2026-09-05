@@ -69,6 +69,15 @@ struct MidiLanePoint {
     ItemId id;
     timebase::TickPosition position;
     std::uint32_t value = 0;
+    /// Whether flattening derived this point at a retained-window boundary
+    /// rather than reading it where the user placed it.
+    ///
+    /// An authored document never sets this: it is written only when a nested
+    /// clip is trimmed and the value sounding on entry came from a point
+    /// before the retained window. The point keeps the identity of the entry
+    /// it read, so the derivation stays traceable and reproducible, and a
+    /// consumer re-editing the arrangement can tell the two apart.
+    bool chased = false;
 
     constexpr auto operator<=>(const MidiLanePoint&) const = default;
 };

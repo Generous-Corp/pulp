@@ -387,17 +387,53 @@ class SequenceContentLowerer::Impl {
                 if (retained(modifier.note_id))
                     modifiers.push_back(modifier);
             const auto seed = notes->modifier_seed();
-            // Trimming a nested clip has no defined answer for a controller
-            // lane yet: a point before the retained window can still be the
-            // value that is sounding inside it, so neither dropping nor
-            // carrying it is correct. The named refusal says which decision is
-            // missing; silently rebuilding without the lanes would lower a clip
-            // whose controllers stopped existing.
-            if (!notes->lanes().empty())
-                return {.error = SequenceLoweringError{CompileErrorCode::TrimmedMidiLaneUnsupported,
-                                                       pending.child.id()}};
+            // A point before the retained window can still be the value
+            // sounding inside it, so neither dropping nor carrying it verbatim
+            // is right. The rule is the one the lane's own storage documents:
+            // the sounding value at a position is the last point at or before
+            // it. So each lane keeps the points inside the window, rebased onto
+            // it, and gains a derived point at its start carrying whatever was
+            // last said before it. The derived point keeps the identity of the
+            // entry it read, which is what makes the result reproducible rather
+            // than merely plausible.
+            //
+            // A lane that authored nothing at or before the window start has no
+            // value sounding on entry, and correctly contributes no derived
+            // point — absent, not zero, because zero is itself a controller
+            // value a user can author and mean.
+            std::vector<timeline::MidiExpressionLane> lanes;
+            for (const auto& lane : notes->lanes()) {
+                timeline::MidiExpressionLane rebased{lane.id, lane.address, {}};
+                const timeline::MidiLanePoint* sounding = nullptr;
+                for (const auto& point : lane.points) {
+                    if (point.position.value < pending.left_trim) {
+                        // Ordered by position, so the last one seen below the
+                        // boundary is the one still sounding at it.
+                        sounding = &point;
+                        continue;
+                    }
+                    rebased.points.push_back({point.id,
+                                              timebase::TickPosition{point.position.value -
+                                                                     pending.left_trim},
+                                              point.value, point.chased});
+                }
+                // A lane that authors a point exactly at the window start
+                // already says what sounds on entry, so nothing is derived: the
+                // authored value wins, and adding a derived point beside it
+                // would put two entries at one position with no rule ordering
+                // them.
+                const bool authored_at_start =
+                    !rebased.points.empty() && rebased.points.front().position.value == 0;
+                if (sounding != nullptr && !authored_at_start)
+                    rebased.points.insert(rebased.points.begin(),
+                                          {sounding->id, timebase::TickPosition{0},
+                                           sounding->value, true});
+                if (!rebased.points.empty())
+                    lanes.push_back(std::move(rebased));
+            }
             auto rebuilt = timeline::MidiContent::create(std::move(pending.clipped_notes),
-                                                         std::move(modifiers), seed);
+                                                         std::move(modifiers), seed,
+                                                         std::move(lanes));
             if (!rebuilt)
                 return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                        pending.child.id()}};
