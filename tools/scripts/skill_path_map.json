@@ -543,6 +543,8 @@
         "tools/scripts/generate_vellum_ownership_projection.py",
         "tools/scripts/vellum_freeze_check.py",
         "docs/status/gpu-vellum-handoff.yaml",
+        "tools/scripts/gpu_handoff_provenance.py",
+        "tools/scripts/test_gpu_handoff_provenance.py",
         "docs/contracts/gpu-dpr-corpus-v2-template.json",
         "docs/contracts/gpu-dpr-experiment-v2.schema.json",
         "docs/contracts/gpu-dpr-live-verification-v1.schema.json",
