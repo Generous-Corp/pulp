@@ -38,6 +38,133 @@ to inspect bundle discovery and ABI details. If it reports a completed failure,
 preserve the JSON result and reproduce with the focused render/compute tests
 before moving to a live application.
 
+## Authenticate a published hardware run
+
+A checked-in `pulp doctor gpu --json` file proves measured GPU behavior, but
+its JSON alone does not authenticate the machine that produced it. For a run
+that will support a protected hardware-coverage claim, publish the result and
+the canonical
+[`pulp.gpu-health-run-attestation.v1`](../contracts/gpu-health-run-attestation-v1.schema.json)
+schema in one commit, then produce the signed sibling attestation and publish
+that file in a later commit. The separation is required because a file cannot
+contain the SHA of the commit that contains that same file without a circular
+hash.
+
+The producer reads the health result and schema from the exact evidence commit,
+selects one required passing probe with authentic hardware name/backend/device,
+hashes the exact producer binary, and signs the canonical statement with a
+pre-provisioned Ed25519 SSH host key. It never creates a key or changes host
+configuration:
+
+```bash
+private-host-inventory read-stable-machine-id | \
+python3 tools/scripts/gpu_health_run_attestation.py \
+  --repository "$PWD" \
+  --health-result docs/validation/gpu-health/a1/m5/pulp-doctor-gpu.json \
+  --output docs/validation/gpu-health/a1/m5/run-attestation.json \
+  --signing-key /path/to/pre-provisioned/m5-ed25519 \
+  --host-id m5 --stable-machine-id-stdin \
+  --configuration 'power=low;fallback=false' \
+  --probe-id gpu-compute-magnitude \
+  --implementation-revision '<40-character implementation SHA>' \
+  --evidence-publication-revision '<40-character result/schema commit SHA>' \
+  --producer-binary /absolute/path/to/pulp-cpp
+```
+
+The private inventory tool must write exactly one non-empty LF-terminated UTF-8
+identifier of at most 1024 bytes. The producer refuses an interactive terminal,
+NUL, multiple lines, trailing data, invalid UTF-8, and oversized input. No
+machine identifier is accepted through argv or environment variables, and
+stdin has no competing JSON or evidence role. The raw value must not be copied
+into the evidence tree or logs. The producer hashes it immediately and
+publishes only
+`stable_machine_id_sha256`, computed as SHA-256 over the ASCII domain
+`pulp.gpu-health.machine.v1`, one NUL byte, and the exact UTF-8 bytes of the raw
+identifier. This non-reversible pseudonym deliberately makes the same machine
+linkable across Pulp GPU-health evidence, but it is domain-separated from raw
+identifier hashes and other application namespaces. `host_id` remains a
+non-sensitive logical alias such as `m5`, never a serial number or user name.
+
+Verification is independent of the producer. Its local trusted-host registry
+maps one logical `host_id` to the expected machine pseudonym and SSH public key;
+the registry contains neither the raw stable identifier nor a private key. The
+verifier requires the implementation,
+evidence, and containing attestation revisions to form the expected ancestry,
+requires the latter two to be ancestors of the named protected ref, re-reads
+the schema and health result from Git, re-hashes the live producer binary,
+requires the caller's exact implementation revision and selected probe as well
+as the remaining selection policy, verifies the host signature, and
+applies an explicit freshness ceiling to the GPU result's machine-produced
+`measured_at_utc`. Re-signing an old result cannot refresh that timestamp:
+
+```bash
+python3 tools/scripts/verify_gpu_health_run_attestation.py \
+  --repository "$PWD" \
+  --attestation-revision '<40-character commit containing run-attestation.json>' \
+  --attestation-path docs/validation/gpu-health/a1/m5/run-attestation.json \
+  --protected-ref origin/main \
+  --trusted-hosts /path/to/local/trusted-gpu-hosts.json \
+  --producer-binary /private/read-only/snapshot/pulp-cpp \
+  --expected-producer-binary-path /absolute/signed/path/to/pulp-cpp \
+  --expected-implementation-revision '<40-character implementation SHA>' \
+  --expected-host-id m5 \
+  --expected-stable-machine-id-sha256 '<64 lowercase hex pseudonym>' \
+  --expected-configuration 'power=low;fallback=false' \
+  --expected-probe-id gpu-compute-magnitude \
+  --expected-adapter-name '<exact Dawn adapter name>' \
+  --expected-backend Metal --expected-device '<exact Dawn device identity>' \
+  --max-age-seconds 1800
+```
+
+`--expected-implementation-revision` is policy data, not a revision expression:
+it must be the exact lowercase 40-hex commit ID. The attestation revision and
+protected ref are resolved once to immutable commits; the verifier's freshness
+clock is always the current system UTC time and has no command-line override.
+`--expected-producer-binary-path` is the exact logical path signed by the
+attestation. `--producer-binary` is only the local regular-file byte source: the
+verifier opens it without symlink traversal, hashes that one descriptor, and
+fails if its inode, path, size, or timestamps change during the read. It may
+therefore be a private read-only snapshot at a different path. The snapshot
+path is never emitted; the verification record retains the signed logical path
+and the verified digest.
+
+Version 1 does not authenticate a platform build ID, code-signature identity,
+team ID, CDHash, or package-signing metadata. Caller-supplied strings are not
+evidence and the producer and verifier reject the former build/signature CLI
+options. Consumers, including A3 policy, must authorize only the signed logical
+path, the descriptor-read SHA-256, and the protected Git publication bindings.
+A future platform-specific metadata extractor requires a new versioned
+contract before such metadata can carry authority.
+
+On success, stdout is exactly one canonical JSON record conforming to
+[`pulp.gpu-health-run-attestation-verification.v1`](../contracts/gpu-health-run-attestation-verification-v1.schema.json).
+The closed record retains the resolved protected, evidence, and attestation
+commits; Git blob IDs and SHA-256 digests for the attestation, v2 health result,
+and all three canonical schemas; every selection/host/producer policy value;
+the trusted-registry digest and matched Ed25519 fingerprint; signature result;
+and the verified chronology. It also identifies verification contract version
+1 and hashes the verifier entrypoint plus its two adjacent source-owned Python
+dependencies. Consumers must compare those three artifact digests to their own
+approved evidence before execution; the verifier cannot establish trust in
+itself merely by reporting its own digest. Failure is nonzero, writes the
+diagnostic to stderr, and emits no partial or pass-shaped stdout.
+
+The SDK installs the schema under `share/pulp/contracts` and the complete
+verifier bundle under `share/pulp/gpu-health-run-attestation-verifier`. The
+canonical verification schema is read from the evidence-publication commit,
+so that schema must already exist at the recorded evidence revision and pass
+the same protected-ancestry publication proof. The trusted registry stays
+local and private-policy-controlled; the record contains only its path and
+digest, never its public-key text or a raw machine identifier.
+
+The trusted-host registry is a closed JSON object with
+`schema: pulp.gpu-health-trusted-hosts.v1`, `version: 1`, and a `hosts` array.
+Each host has exactly `host_id`, `stable_machine_id_sha256`, and `public_key`
+(the single-line `ssh-ed25519 ...` public key). A missing trust entry, stale run,
+unprotected commit, changed binary/result/schema, older-but-ancestral
+implementation, alternate passing probe, or cross-host/configuration/adapter
+reuse is a verification failure, never unavailable-as-pass.
+
 ## DPR experiment evidence (A4 v2)
 
 The committed A4 corpus defines an evidence-only experiment; it does not change

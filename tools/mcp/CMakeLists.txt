@@ -9,14 +9,14 @@ configure_file(
     @ONLY)
 
 file(READ
-    "${PROJECT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json"
+    "${PROJECT_SOURCE_DIR}/docs/contracts/gpu-health-result-v2.schema.json"
     PULP_GPU_HEALTH_RESULT_SCHEMA_JSON)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/gpu_health_result_schema.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/gpu_health_result_schema.h"
     @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${PROJECT_SOURCE_DIR}/docs/contracts/gpu-health-result-v1.schema.json")
+    "${PROJECT_SOURCE_DIR}/docs/contracts/gpu-health-result-v2.schema.json")
 
 file(READ
     "${PROJECT_SOURCE_DIR}/docs/contracts/gpu-probe-result-v1.schema.json"

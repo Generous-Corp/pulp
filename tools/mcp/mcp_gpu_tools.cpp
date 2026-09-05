@@ -195,8 +195,15 @@ std::string handle_gpu_doctor(const std::string& params_json) {
     const auto evidence = pulp::tooling::gpu_health::from_json(run.output, &parse_error);
     if (!evidence.has_value())
         return local_error(run.status, "malformed-cli-output",
-                           "pulp-cpp doctor gpu returned invalid v1 evidence: " + parse_error,
+                           "pulp-cpp doctor gpu returned invalid versioned evidence: " + parse_error,
                            run.output);
+    if (evidence->schema != pulp::tooling::gpu_health::kSchema ||
+        evidence->version != pulp::tooling::gpu_health::kVersion)
+        return local_error(
+            run.status, "incompatible-cli-contract",
+            "the sibling pulp-cpp emitted a legacy GPU-health contract; reinstall "
+            "pulp-cpp and pulp-mcp from the same release",
+            run.output);
 
     const bool expected_render_requested = no_render_token != "true";
     if (evidence->render_requested != expected_render_requested)

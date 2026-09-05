@@ -782,6 +782,51 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.817.0"),
         )
 
+    def test_gpu_health_run_attestation_is_required_from_its_release_floor(self) -> None:
+        member = (
+            "pulp-sdk/share/pulp/contracts/"
+            "gpu-health-run-attestation-v1.schema.json"
+        )
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.827.2"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.828.0"),
+        )
+
+    def test_gpu_health_run_attestation_verification_bundle_is_release_floored(self) -> None:
+        members = {
+            "pulp-sdk/share/pulp/contracts/"
+            "gpu-health-run-attestation-verification-v1.schema.json",
+            "pulp-sdk/share/pulp/gpu-health-run-attestation-verifier/"
+            "verify_gpu_health_run_attestation.py",
+            "pulp-sdk/share/pulp/gpu-health-run-attestation-verifier/"
+            "gpu_health_contract.py",
+            "pulp-sdk/share/pulp/gpu-health-run-attestation-verifier/"
+            "json_schema_lite.py",
+        }
+        before = rac.required_sdk_members(
+            "linux-x64", rac.DEFAULT_MATRIX, "0.827.2"
+        )
+        at_floor = rac.required_sdk_members(
+            "linux-x64", rac.DEFAULT_MATRIX, "0.828.0"
+        )
+        self.assertTrue(members.isdisjoint(before))
+        self.assertLessEqual(members, at_floor)
+
+    def test_gpu_health_v2_contract_is_required_from_its_release_floor(self) -> None:
+        member = "pulp-sdk/share/pulp/contracts/gpu-health-result-v2.schema.json"
+        self.assertNotIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.827.2"),
+        )
+        self.assertIn(
+            member,
+            rac.required_sdk_members("linux-x64", rac.DEFAULT_MATRIX, "0.828.0"),
+        )
+
     def test_threejs_runtime_is_required_from_its_release_floor(self) -> None:
         member = "pulp-sdk/share/pulp/threejs/build/three.webgpu.js"
         self.assertNotIn(
@@ -1001,6 +1046,34 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 rac.verify_platform(
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
                 )
+
+    def test_negative_control_missing_attestation_verification_member_fires(self) -> None:
+        members = (
+            "pulp-sdk/share/pulp/contracts/"
+            "gpu-health-run-attestation-verification-v1.schema.json",
+            "pulp-sdk/share/pulp/gpu-health-run-attestation-verifier/"
+            "verify_gpu_health_run_attestation.py",
+            "pulp-sdk/share/pulp/gpu-health-run-attestation-verifier/"
+            "gpu_health_contract.py",
+            "pulp-sdk/share/pulp/gpu-health-run-attestation-verifier/"
+            "json_schema_lite.py",
+        )
+        for member in members:
+            with self.subTest(member=member), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                sdk = set(
+                    rac.required_sdk_members(
+                        "linux-x64", rac.DEFAULT_MATRIX, "0.828.0"
+                    )
+                )
+                sdk.remove(member)
+                path = root / rac.sdk_asset_name("linux-x64")
+                write_archive(path, sdk, as_zip=False, platform="linux-x64")
+                with self.assertRaisesRegex(rac.ContentError, Path(member).name):
+                    rac.verify_sdk_archive(
+                        path, "linux-x64", "0.828.0", SOURCE_SHA,
+                        rac.DEFAULT_MATRIX,
+                    )
 
     def test_negative_control_stale_vanished_target_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1277,6 +1350,39 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
             with self.assertRaisesRegex(
                 rac.ContentError, "gpu-health-result-v1.schema.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_missing_gpu_health_v2_contract_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove(
+                "pulp-sdk/share/pulp/contracts/gpu-health-result-v2.schema.json"
+            )
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "gpu-health-result-v2.schema.json"
+            ):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_missing_gpu_health_run_attestation_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove(
+                "pulp-sdk/share/pulp/contracts/"
+                "gpu-health-run-attestation-v1.schema.json"
+            )
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(
+                rac.ContentError, "gpu-health-run-attestation-v1.schema.json"
             ):
                 rac.verify_platform(
                     root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
@@ -1707,6 +1813,11 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             del document["sdk_provenance_floor"]
             del document["capability_handoff_floor"]
             del document["gpu_health_contract_floor"]
+            del document["gpu_health_v2_contract_floor"]
+            del document["gpu_health_run_attestation_contract_floor"]
+            del document[
+                "gpu_health_run_attestation_verification_contract_floor"
+            ]
             del document["gpu_probe_contract_floor"]
             del document["gpu_recipe_catalog_floor"]
             del document["gpu_recipe_catalog_sha256"]
@@ -1723,6 +1834,15 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
             self.assertEqual(historical.capability_handoff_floor, "999999.0.0")
             self.assertEqual(historical.gpu_health_contract_floor, "999999.0.0")
+            self.assertEqual(historical.gpu_health_v2_contract_floor, "999999.0.0")
+            self.assertEqual(
+                historical.gpu_health_run_attestation_contract_floor,
+                "999999.0.0",
+            )
+            self.assertEqual(
+                historical.gpu_health_run_attestation_verification_contract_floor,
+                "999999.0.0",
+            )
             self.assertEqual(historical.gpu_probe_contract_floor, "999999.0.0")
             self.assertEqual(historical.gpu_recipe_catalog_floor, "999999.0.0")
             self.assertEqual(historical.gpu_recipe_catalog_sha256, {})

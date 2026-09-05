@@ -219,6 +219,9 @@ bool validate(const HealthReadResult& result, std::string* error) {
         error->clear();
     if (result.schema != kHealthReadSchema || result.version != kHealthReadVersion)
         return fail("GPU health-read schema identity is unsupported");
+    if (result.health.schema != kSchemaV1 || result.health.version != kVersionV1 ||
+        !result.health.measured_at_utc.empty())
+        return fail("GPU health-read v1 requires its closed GPU health result v1 snapshot");
     std::string health_error;
     if (!validate(result.health, &health_error))
         return fail("nested GPU health snapshot is invalid: " + health_error);

@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Produce a host-signed attestation for a published GPU-health result."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import datetime as dt
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+import json_schema_lite
+from gpu_health_contract import parse_utc_timestamp, semantic_errors
+
+SCHEMA = "pulp.gpu-health-run-attestation.v1"
+NAMESPACE = SCHEMA
+SCHEMA_PATH = "docs/contracts/gpu-health-run-attestation-v1.schema.json"
+HEALTH_SCHEMA_PATH = "docs/contracts/gpu-health-result-v2.schema.json"
+MACHINE_ID_DOMAIN = b"pulp.gpu-health.machine.v1\0"
+MAX_STABLE_MACHINE_ID_BYTES = 1024
+
+
+def fail(message: str) -> None:
+    raise SystemExit(f"gpu-health attestation: {message}")
+
+
+def canonical(value: object) -> bytes:
+    return (json.dumps(value, allow_nan=False, ensure_ascii=False,
+                       separators=(",", ":"), sort_keys=True) + "\n").encode()
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_stable_machine_id_sha256(stream, *, is_tty: bool | None = None) -> str:
+    """Read one private LF-terminated UTF-8 identifier and return only its digest."""
+    interactive = stream.isatty() if is_tty is None else is_tty
+    if interactive:
+        fail("stable machine ID stdin must be a non-interactive pipe")
+    value = stream.read(MAX_STABLE_MACHINE_ID_BYTES + 2)
+    if len(value) > MAX_STABLE_MACHINE_ID_BYTES + 1:
+        fail("stable machine ID stdin exceeds the 1024-byte limit")
+    if not value.endswith(b"\n"):
+        fail("stable machine ID stdin must contain exactly one LF-terminated value")
+    raw = value[:-1]
+    if not raw:
+        fail("stable machine ID stdin must not be empty")
+    if b"\0" in raw:
+        fail("stable machine ID stdin must not contain NUL")
+    if b"\n" in raw or b"\r" in raw:
+        fail("stable machine ID stdin must not contain multiple lines or trailing data")
+    try:
+        raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        fail("stable machine ID stdin must be valid UTF-8")
+    return sha256(MACHINE_ID_DOMAIN + raw)
+
+
+def strict_json(data: bytes) -> dict:
+    def pairs(values: list[tuple[str, object]]) -> dict:
+        result = {}
+        for key, value in values:
+            if key in result:
+                fail(f"GPU-health result contains duplicate key {key!r}")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(
+            data, object_pairs_hook=pairs,
+            parse_constant=lambda constant: fail(
+                f"GPU-health result contains non-finite value {constant}"),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"GPU-health result is not strict JSON: {error}")
+    if not isinstance(value, dict):
+        fail("GPU-health result must be an object")
+    return value
+
+
+def git_bytes(repo: Path, revision: str, path: str) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "show", f"{revision}:{path}"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if result.returncode:
+        fail(f"{path} is not a blob at evidence publication {revision}")
+    return result.stdout
+
+
+def public_key(signing_key: Path) -> str:
+    result = subprocess.run(
+        ["ssh-keygen", "-y", "-f", str(signing_key)], text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if result.returncode:
+        fail("ssh-keygen could not read the Ed25519 signing key")
+    key = result.stdout.strip()
+    if not key.startswith("ssh-ed25519 "):
+        fail("the signing key is not Ed25519")
+    return key
+
+
+def fingerprint(key: str) -> str:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8") as public:
+        public.write(key + "\n")
+        public.flush()
+        result = subprocess.run(
+            ["ssh-keygen", "-lf", public.name, "-E", "sha256"], text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+    if result.returncode or "SHA256:" not in result.stdout:
+        fail("ssh-keygen could not fingerprint the signing key")
+    return "SHA256:" + result.stdout.split("SHA256:", 1)[1].split()[0]
+
+
+def selected_probe(health: dict, probe_id: str) -> dict:
+    all_probes = health.get("probes")
+    if not isinstance(all_probes, list) or not all(isinstance(p, dict) for p in all_probes):
+        fail("GPU-health result probes must be an array of objects")
+    probes = [p for p in all_probes if p.get("probe_id") == probe_id]
+    if len(probes) != 1:
+        fail(f"GPU-health result must contain exactly one {probe_id!r} probe")
+    probe = probes[0]
+    adapter = probe.get("adapter", {})
+    required = ("name", "backend", "device")
+    if (not probe.get("required") or probe.get("verdict") != "pass"
+            or adapter.get("status") != "authentic"
+            or adapter.get("class") != "hardware"
+            or any(not isinstance(adapter.get(field), str) or not adapter[field]
+                   for field in required)):
+        fail("selected probe is not a passing authentic hardware identity with name/backend/device")
+    return probe
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("--repository", type=Path, required=True)
+    parser.add_argument("--health-result", required=True,
+                        help="repository-relative result path")
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--signing-key", type=Path, required=True)
+    parser.add_argument("--host-id", required=True)
+    parser.add_argument("--stable-machine-id-stdin", action="store_true", required=True)
+    parser.add_argument("--configuration", required=True)
+    parser.add_argument("--probe-id", required=True)
+    parser.add_argument("--implementation-revision", required=True)
+    parser.add_argument("--evidence-publication-revision", required=True)
+    parser.add_argument("--producer-binary", type=Path, required=True)
+    parser.add_argument("--created-at", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    machine_id_sha256 = read_stable_machine_id_sha256(sys.stdin.buffer)
+
+    for label, revision in (("implementation", args.implementation_revision),
+                            ("evidence publication", args.evidence_publication_revision)):
+        if len(revision) != 40 or any(c not in "0123456789abcdef" for c in revision):
+            fail(f"{label} revision must be an exact lowercase 40-character Git SHA")
+    repo = args.repository.resolve()
+    health_bytes = git_bytes(repo, args.evidence_publication_revision, args.health_result)
+    schema_bytes = git_bytes(repo, args.evidence_publication_revision, SCHEMA_PATH)
+    health_schema_bytes = git_bytes(
+        repo, args.evidence_publication_revision, HEALTH_SCHEMA_PATH
+    )
+    health = strict_json(health_bytes)
+    health_schema = strict_json(health_schema_bytes)
+    if health_schema.get("$id") != \
+            "https://pulp.audio/contracts/gpu-health-result-v2.schema.json":
+        fail("canonical GPU-health schema has the wrong identity")
+    schema_problems = json_schema_lite.validate(health, health_schema)
+    if schema_problems:
+        fail(f"GPU-health result violates its canonical schema: {schema_problems[0]}")
+    semantic_problems = semantic_errors(health)
+    if semantic_problems:
+        fail(f"GPU-health result violates its semantic contract: {semantic_problems[0]}")
+    if not health.get("measured_at_utc"):
+        fail("GPU-health result lacks a machine-produced measured_at_utc")
+    probe = selected_probe(health, args.probe_id)
+    binary = args.producer_binary.resolve()
+    try:
+        binary_bytes = binary.read_bytes()
+    except OSError as error:
+        fail(f"cannot read producer binary: {error}")
+    created_at = args.created_at or (
+        dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        .isoformat().replace("+00:00", "Z")
+    )
+    try:
+        parse_utc_timestamp(created_at, "created_at")
+    except ValueError as error:
+        fail(str(error))
+    statement = {
+        "schema": SCHEMA,
+        "version": 1,
+        "created_at": created_at,
+        "implementation_revision": args.implementation_revision,
+        "evidence_publication_revision": args.evidence_publication_revision,
+        "host": {
+            "host_id": args.host_id,
+            "stable_machine_id_sha256": machine_id_sha256,
+        },
+        "selection": {
+            "configuration": args.configuration,
+            "probe_id": args.probe_id,
+            "adapter_name": probe["adapter"]["name"],
+            "backend": probe["adapter"]["backend"],
+            "device": probe["adapter"]["device"],
+        },
+        "producer": {
+            "binary_path": str(binary),
+            "binary_sha256": sha256(binary_bytes),
+        },
+        "gpu_health_result": {
+            "path": args.health_result,
+            "sha256": sha256(health_bytes),
+            "run_id": health["run_id"],
+            "schema": health["schema"],
+            "measured_at_utc": health["measured_at_utc"],
+        },
+        "canonical_health_schema": {
+            "path": HEALTH_SCHEMA_PATH,
+            "sha256": sha256(health_schema_bytes),
+        },
+        "canonical_schema": {"path": SCHEMA_PATH, "sha256": sha256(schema_bytes)},
+    }
+    key = public_key(args.signing_key)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        message = Path(temp_dir) / "statement.json"
+        message.write_bytes(canonical(statement))
+        result = subprocess.run(
+            ["ssh-keygen", "-Y", "sign", "-f", str(args.signing_key),
+             "-n", NAMESPACE, str(message)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        if result.returncode:
+            fail("ssh-keygen could not sign the run statement")
+        signature = Path(str(message) + ".sig").read_bytes()
+    statement["authentication"] = {
+        "algorithm": "ssh-ed25519",
+        "namespace": NAMESPACE,
+        "signer_key_fingerprint": fingerprint(key),
+        "signature": base64.b64encode(signature).decode("ascii"),
+    }
+    attestation_schema = strict_json(schema_bytes)
+    if attestation_schema.get("$id") != \
+            "https://pulp.audio/contracts/gpu-health-run-attestation-v1.schema.json":
+        fail("canonical run-attestation schema has the wrong identity")
+    schema_problems = json_schema_lite.validate(statement, attestation_schema)
+    if schema_problems:
+        fail(f"run attestation violates its canonical schema: {schema_problems[0]}")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_bytes(canonical(statement))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
