@@ -41,6 +41,9 @@ pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
 # Per-class recycling ViewPool + View::prepare_for_reuse
 pulp_add_test_suite(pulp-test-view-pool LIBRARIES pulp::view)
+# View mutation/lifetime contract: identity across callbacks, transactional
+# attach, root-owned retirement, exactly-once frame-clock propagation.
+pulp_add_test_suite(pulp-test-view-lifecycle-contract LIBRARIES pulp::view)
 # Recycling virtualized list primitive
 pulp_add_test_suite(pulp-test-virtual-list LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-virtual-list-sample-manager LIBRARIES pulp::view)

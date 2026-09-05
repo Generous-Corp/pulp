@@ -1,4 +1,5 @@
 #include <pulp/view/view.hpp>
+#include <pulp/view/view_lifecycle.hpp>
 #include <pulp/view/widget_painter.hpp>
 #include <pulp/view/widget_metrics.hpp>
 #include <pulp/view/tracing_badge.hpp>
@@ -72,6 +73,29 @@ std::atomic<int>& subtree_cache_enabled_count() {
     return count;
 }
 
+// How many follow-up frame-clock passes a single notify_frame_clock_changed()
+// will run to service work its own hooks generated. Real trees settle in one;
+// the cap exists so a hook that attaches a clock-aware node every time it is
+// notified degrades to dropped notifications rather than a hung UI thread.
+constexpr int kMaxClockWalkPasses = 8;
+
+// Frame-clock walk tokens. PROCESS-GLOBAL and monotonic, never per-root.
+//
+// The stamps these produce are written onto individual views but compared
+// against a walk in progress, and a view does not stay under one root: a
+// subtree detached by remove_child becomes its own root and is notified
+// immediately. With per-root counters those two number lines alias — a detached
+// root's first walk is epoch 1, and every descendant stamped by its previous
+// root's first walk already reads 1, so the whole subtree is skipped as
+// "already visited" and never told its clock went away. A self-subscribing
+// descendant (Meter, TextEditor's caret blink, LottieView) then keeps a
+// subscription to a clock it can no longer reach. One global sequence makes a
+// stamp mean the same thing in every tree, so the collision cannot arise.
+std::uint64_t next_clock_walk_token() noexcept {
+    static std::atomic<std::uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
 } // namespace
 
 View::View()
@@ -131,6 +155,42 @@ View* ViewCapture::live_in(View& root) const noexcept {
 // View destructor stays out-of-line while remaining virtual + public so vtable
 // layout + SDK contract are unchanged.
 View::~View() {
+    // Destroying a View that is still attached, or that has a callback of its
+    // own executing, frees a frame that is still running above us. Both are
+    // contract violations with a supported alternative — remove_child() first,
+    // or hand ownership to View::retire() — so fail loudly in debug rather than
+    // corrupting memory quietly. A child destroyed as part of its parent's
+    // teardown is legitimate and exempted via the parent's destroying_ flag.
+    // Release builds are unchanged. Contract: view_lifecycle.hpp.
+    //
+    // The test is whether the parent still OWNS this view, not merely whether
+    // parent_ is set. Several deliberate ownership transfers hand a subtree to a
+    // deferred-destruction queue and leave parent_ intact on purpose — realm
+    // retirement does, so a draining native accessibility provider can still
+    // navigate the retired graph (retire_children_for_realm_reset), and the
+    // emergency owner-teardown path never clears it at all. Those are safe: the
+    // parent no longer lists the view, so nothing can route to it. Asserting on
+    // parent_ alone would red the Debug lane on a path that is working
+    // correctly.
+#ifndef NDEBUG
+    const bool parent_still_owns_this = [this] {
+        if (parent_ == nullptr || parent_->destroying_) return false;
+        for (const auto& sibling : parent_->children_)
+            if (sibling.get() == this) return true;
+        return false;
+    }();
+    assert(!parent_still_owns_this &&
+           "View destroyed while its parent still owns it; "
+           "call parent->remove_child() first");
+#endif
+    assert(dispatch_depth_ == 0 &&
+           "View destroyed while one of its callbacks is executing; "
+           "route ownership through View::retire()");
+    destroying_ = true;
+    // Anything still parked on this root's retirement chain dies with it. Drain
+    // iteratively so a long chain cannot recurse the stack through member
+    // destructors.
+    drain_retired();
     if (gesture_arbiter_)
         gesture_arbiter_->reset();
     // Clear the overlay + focus slots if this dying View holds them. Without
@@ -690,28 +750,126 @@ void View::publish_structure_change() noexcept {
 }
 
 void View::add_child(std::unique_ptr<View> child) {
+    add_child_transactional(child);
+}
+
+void View::add_child_transactional(std::unique_ptr<View>& child) {
+    if (!child) return;
+    auto* inserted = child.get();
+    // Address alone cannot identify the child across a callback: a hook may
+    // destroy it and the allocator may hand the same address to a replacement
+    // inserted under this same parent. Every re-find below compares address
+    // AND instance id, so an ABA replacement is never mistaken for our child.
+    const auto inserted_id = inserted->import_binding_instance_id();
+    const auto is_inserted = [inserted, inserted_id](const auto& candidate) {
+        return candidate.get() == inserted &&
+               candidate->import_binding_instance_id() == inserted_id;
+    };
     set_subtree_detaching(*child, false);
     child->parent_ = this;
-    child->set_window_host(window_host_);
-    child->set_plugin_view_host(plugin_view_host_);
-    child->set_host_params(host_params_);
-    child->set_host_actions(host_actions_);
     children_.push_back(std::move(child));
-    children_.back()->on_attached();
+    // If a frame-clock walk is in flight on this tree, stamp the whole incoming
+    // subtree as already-visited for the current pass. Without this the walk's
+    // restart scan would pick the new nodes up immediately, so a hook that
+    // attaches a clock-aware view every time it is notified could extend the
+    // walk without end. The root records that work is pending and runs one more
+    // bounded pass instead, so nothing is dropped.
+    {
+        View* root = this;
+        while (root->parent_) root = root->parent_;
+        if (root->clock_walk_active_) {
+            const auto epoch = root->clock_epoch_;
+            const auto stamp = [epoch](auto&& self, View& node) noexcept -> void {
+                // Traversal stamp only. Leaving the delivery stamp untouched is
+                // what makes the follow-up pass notify this subtree exactly once.
+                node.clock_walk_epoch_ = epoch;
+                for (auto& descendant : node.children_) self(self, *descendant);
+            };
+            stamp(stamp, *inserted);
+            root->clock_walk_pending_ = true;
+        }
+    }
+    try {
+        // Host propagation runs through virtual setters, so it is user code and
+        // it belongs INSIDE the transaction. Outside it, a throwing override
+        // left the caller holding a child whose parent_ already pointed here
+        // and whose detaching_ had been cleared — a half-linked tree with no
+        // unwind. Insertion is complete before any of it runs, so the catch
+        // below can restore ownership whichever setter rejects the attach.
+        inserted->set_window_host(window_host_);
+        inserted->set_plugin_view_host(plugin_view_host_);
+        inserted->set_host_params(host_params_);
+        inserted->set_host_actions(host_actions_);
+        auto attached_it = std::find_if(children_.begin(), children_.end(), is_inserted);
+        if (attached_it == children_.end())
+            return;
+        {
+            // on_attached() may remove and try to destroy the very child it is
+            // running on. The lease keeps its storage alive until this scope
+            // exits, so the re-find below reads live memory either way.
+            DispatchLease lease(**attached_it);
+            (*attached_it)->on_attached();
+        }
+        // A newly attached subtree may contain clock-aware descendants. Keep
+        // this notification inside the same ownership transaction: a throwing
+        // descendant hook must not leave an inserted child with its caller's
+        // unique_ptr already consumed.
+        attached_it = std::find_if(children_.begin(), children_.end(), is_inserted);
+        if (attached_it != children_.end() && frame_clock())
+            (*attached_it)->notify_frame_clock_changed();
+    } catch (...) {
+        // `on_attached()` is user/framework code and may reject an attach.
+        // Do not leave a half-attached child in the native tree: unwind the
+        // ownership insertion and restore the detached state before propagating
+        // the exception to the caller's transaction boundary.
+        auto it = std::find_if(children_.begin(), children_.end(), is_inserted);
+        if (it == children_.end()) {
+            // A reentrant attach hook may have removed the child before
+            // throwing. Never assume children_.back() is still ours.
+            publish_structure_change();
+            invalidate_subtree_caches_up();
+            throw;
+        }
+        auto failed = std::move(*it);
+        children_.erase(it);
+        child = std::move(failed);
+        auto* restored = child.get();
+        {
+            DispatchLease lease(*restored);
+            try { restored->on_detached(); }
+            catch (...) { /* preserve the original attach/clock exception */ }
+        }
+        restored->parent_ = nullptr;
+        // Every setter below is virtual, i.e. user code, and we are unwinding:
+        // letting one throw out of a catch block calls std::terminate. The
+        // first exception wins, so contain each one and finish the rollback.
+        try { restored->set_window_host(nullptr); } catch (...) {}
+        try { restored->set_plugin_view_host(nullptr); } catch (...) {}
+        try { restored->set_host_params(nullptr); } catch (...) {}
+        try { restored->set_host_actions(nullptr); } catch (...) {}
+        set_subtree_detaching(*restored, true);
+        publish_structure_change();
+        invalidate_subtree_caches_up();
+        throw;
+    }
     // Structural change: this view's (and its cached ancestors') recording no
     // longer includes the new child. Stale them so the next frame re-records.
     invalidate_subtree_caches_up();
-    // If this parent can already reach a FrameClock, tell the newly-grafted
-    // subtree so a self-subscribing descendant (a live Meter built offline)
-    // attaches to the already-present clock instead of silently missing it.
-    if (frame_clock()) {
-        children_.back()->notify_frame_clock_changed();
-    }
 }
 
 std::unique_ptr<View> View::remove_child(View* child) {
-    auto it = std::find_if(children_.begin(), children_.end(),
-        [child](const auto& p) { return p.get() == child; });
+    if (!child) return nullptr;
+    // Identity is address AND instance id. The gesture, popup, focus, and
+    // detach callbacks below are all re-entrant: one of them may destroy
+    // `child`, and the allocator may then place a NEW view at the same address
+    // under this same parent. An address-only re-find would sever and return
+    // that innocent replacement. The id makes every re-find below ABA-proof.
+    const auto child_id = child->import_binding_instance_id();
+    const auto is_child = [child, child_id](const auto& candidate) {
+        return candidate.get() == child &&
+               candidate->import_binding_instance_id() == child_id;
+    };
+    auto it = std::find_if(children_.begin(), children_.end(), is_child);
     if (it == children_.end()) return nullptr;
 
     std::vector<GestureRecognizer*> removed_recognizers;
@@ -754,6 +912,14 @@ std::unique_ptr<View> View::remove_child(View* child) {
             if (view == child) return true;
         return false;
     };
+    // An in-tree drag is owned by the old root. Once the source leaves that
+    // realm there is no valid target coordinate space or arbiter to continue
+    // dispatching into, so terminate it before severing parent links rather
+    // than leaving a root record pointing at a foreign subtree.
+    if (structure_root->active_drag_ &&
+        belongs_to_removed_subtree(structure_root->active_drag_->source)) {
+        structure_root->cancel_drag();
+    }
     if (ComboBox* popup = ComboBox::active_popup_in(*structure_root);
         popup && belongs_to_removed_subtree(popup)) {
         ComboBox::close_active_popup(*structure_root);
@@ -781,15 +947,29 @@ std::unique_ptr<View> View::remove_child(View* child) {
         // it also prevents a callback-retired overlay from being reused by the
         // next synthetic or platform click.
     }
+    // The gesture, popup, and focus callbacks above are re-entrant.  A
+    // callback may have removed (and destroyed) this child, so do not
+    // dereference the original raw pointer until its ownership is confirmed
+    // again in the live children vector.
+    it = std::find_if(children_.begin(), children_.end(), is_child);
+    if (it == children_.end()) return nullptr;
     // on_detached() intentionally runs while the old parent/clock is still
     // reachable, but routing must already consider the whole subtree absent.
     set_subtree_detaching(*child, true);
     try {
+        // on_detached() may remove and try to destroy the child it runs on.
+        // Under the lease that destruction is deferred to the outermost lease
+        // exit, so every re-find below reads live memory.
+        DispatchLease lease(*child);
         child->on_detached();
     } catch (...) {
-        set_subtree_detaching(*child, false);
+        auto live_it = std::find_if(children_.begin(), children_.end(), is_child);
+        if (live_it != children_.end())
+            set_subtree_detaching(**live_it, false);
         throw;
     }
+    it = std::find_if(children_.begin(), children_.end(), is_child);
+    if (it == children_.end()) return nullptr;
     child->set_window_host(nullptr);
     child->set_plugin_view_host(nullptr);
     child->set_host_params(nullptr);
@@ -813,6 +993,11 @@ std::unique_ptr<View> View::remove_child(View* child) {
             state->active_overlay = nullptr;
         }
     }
+    // Any lifecycle/drag callback above may mutate this parent's children.
+    // Re-find by identity (address + instance id) before extracting ownership
+    // instead of dereferencing the iterator captured before those callbacks ran.
+    it = std::find_if(children_.begin(), children_.end(), is_child);
+    if (it == children_.end()) return nullptr;
     child->parent_ = nullptr;
     auto owned = std::move(*it);
     children_.erase(it);
@@ -825,7 +1010,13 @@ std::unique_ptr<View> View::remove_child(View* child) {
     // self-subscribing descendants (a live Meter that never got its own
     // on_detached — remove_child only fires that on the removed root) drop their
     // subscription now instead of lingering until the next tick.
-    owned->notify_frame_clock_changed();
+    try {
+        owned->notify_frame_clock_changed();
+    } catch (...) {
+        // The structural detach has already committed and ownership is now
+        // local to this return value. A best-effort clock refresh must not turn
+        // a successful removal into a half-moved subtree.
+    }
     // Structural change: this view's (and its cached ancestors') recording still
     // includes the now-removed child. Stale them so the next frame re-records.
     invalidate_subtree_caches_up();
@@ -1674,12 +1865,108 @@ void View::set_frame_clock(FrameClock* clock) {
     notify_frame_clock_changed();
 }
 
-void View::notify_frame_clock_changed() {
-    sync_value_bindings();
-    on_frame_clock_changed();
-    for (auto& child : children_) {
-        if (child) child->notify_frame_clock_changed();
+void View::deliver_frame_clock_hooks() noexcept {
+    // Both are extension points and may throw. Isolate each so one misbehaving
+    // widget cannot stop the rest of the tree from re-resolving its clock.
+    try { sync_value_bindings(); }
+    catch (...) {}
+    try { on_frame_clock_changed(); }
+    catch (...) {}
+}
+
+void View::walk_frame_clock(std::uint64_t epoch, std::uint64_t sequence) noexcept {
+    // The lease spans the whole function, not just the hooks: this frame keeps
+    // touching `this` (children_, the rescan) after the callbacks return, so
+    // the storage must outlive them even when a hook removes and retires us.
+    DispatchLease lease(*this);
+    // Stamp BEFORE delivering. A hook that reparents this node under a sibling
+    // we have not reached yet must not cause a second visit.
+    clock_walk_epoch_ = epoch;
+    if (clock_delivery_sequence_ != sequence) {
+        clock_delivery_sequence_ = sequence;
+        deliver_frame_clock_hooks();
     }
+    // Scan children for the next unstamped one, resuming where the last scan
+    // stopped. An index cannot simply be incremented across a callback — a hook
+    // may have removed, added, reordered, or same-slot-replaced siblings, so the
+    // same index now names a different node, which is exactly how the earlier
+    // bounded-index walk skipped originals. But re-deriving the cursor from
+    // scratch after EVERY child is O(K^2) in the sibling count, and the
+    // no-mutation case is the quadratic one: 8000 flat siblings cost ~226 ms per
+    // propagation, measured, against ~0.4 ms with the cursor below.
+    //
+    // So: advance the cursor when the structure did not move, and only fall back
+    // to a full restart when it did. Correctness comes from the stamp, which
+    // makes revisiting impossible; the cursor is purely an optimisation, and a
+    // final rescan from zero catches anything a mutation shifted behind it.
+    std::size_t cursor = 0;
+    for (;;) {
+        View* next = nullptr;
+        std::size_t found_at = 0;
+        for (std::size_t i = cursor; i < children_.size(); ++i) {
+            View* view = children_[i].get();
+            if (view && view->clock_walk_epoch_ != epoch) {
+                next = view;
+                found_at = i;
+                break;
+            }
+        }
+        if (!next) {
+            // Nothing ahead of the cursor. If the cursor had moved, a mutation
+            // may have left an unstamped node behind it, so sweep once from the
+            // top before concluding the subtree is done.
+            if (cursor == 0) return;
+            cursor = 0;
+            continue;
+        }
+        const auto generation_before =
+            g_view_structure_generation.load(std::memory_order_relaxed);
+        next->walk_frame_clock(epoch, sequence);
+        const bool structure_moved =
+            g_view_structure_generation.load(std::memory_order_relaxed) !=
+            generation_before;
+        cursor = structure_moved ? 0 : found_at + 1;
+    }
+}
+
+void View::notify_frame_clock_changed() noexcept {
+    // Clock propagation is a structural safety funnel: it must visit every
+    // node that was attached under this one when the pass began exactly once,
+    // it must survive arbitrary mutation from the hooks it invokes, and it is
+    // noexcept, so it must not allocate. An epoch stamp per view plus the
+    // root-owned retirement gate gives all three without scratch storage.
+    View* root = this;
+    while (root->parent_) root = root->parent_;
+    if (root->clock_walk_active_) {
+        // A hook asked for another propagation while one is in flight. Do not
+        // recurse: the running pass may already be walking part of this
+        // subtree, and re-entering it would deliver twice. Coalesce instead —
+        // record that new work exists and let the outermost call run one more
+        // pass once the current one has unwound.
+        root->clock_walk_pending_ = true;
+        return;
+    }
+    root->clock_walk_active_ = true;
+    // Tokens are drawn from one process-global monotonic sequence, never from a
+    // per-root counter — a view's stamp has to mean the same thing after the
+    // view changes roots. See next_clock_walk_token().
+    const auto sequence = next_clock_walk_token();
+    // A node attached during a pass is stamped with that pass's traversal
+    // epoch, so the pass in flight skips it and a hook that attaches on every
+    // visit cannot extend the walk without end. Its DELIVERY stamp is left
+    // alone, so the follow-up pass below still notifies it — once. Bounded on
+    // purpose: a hook that keeps generating work loses the remaining
+    // notifications rather than spinning the UI thread forever.
+    for (int pass = 0; pass < kMaxClockWalkPasses; ++pass) {
+        root->clock_walk_pending_ = false;
+        // Published on the root so add_child_transactional can stamp anything
+        // attached mid-pass as belonging to the pass already in flight.
+        root->clock_epoch_ = next_clock_walk_token();
+        walk_frame_clock(root->clock_epoch_, sequence);
+        if (!root->clock_walk_pending_) break;
+    }
+    root->clock_walk_pending_ = false;
+    root->clock_walk_active_ = false;
 }
 
 // ── Live host→view value sources ────────────────────────────────────────────

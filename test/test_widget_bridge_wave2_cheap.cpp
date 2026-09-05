@@ -51,7 +51,7 @@ pulp::view::CanvasWidget* canvasFromBridge(pulp::view::WidgetBridge& bridge,
 
 TEST_CASE("Bridge callback retirement waits for in-flight engine dispatch",
           "[view][bridge][events][lifetime]") {
-    auto state = std::make_shared<BridgeCallbackState>(nullptr, nullptr);
+    auto state = std::make_shared<BridgeCallbackState>(nullptr);
     std::atomic<bool> entered{false};
     std::atomic<bool> release{false};
     std::atomic<bool> release_wait_timed_out{false};

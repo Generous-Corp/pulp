@@ -26,6 +26,7 @@ target_sources(pulp-view-core PRIVATE
     src/value_source.cpp
     src/value_source_binding.cpp
     src/view.cpp
+    src/view_lifecycle.cpp
     src/view_paint.cpp
     src/repaint_damage.cpp
     src/pointer_coalescer.cpp

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260905-imported-ui-view-lifecycle-gate-watch",
+  "created_at": "2026-09-05T05:24:51Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "This change adds a root-scoped View mutation/lifetime gate (DispatchLease plus View::retire) so an imported UI's JavaScript handler cannot destroy the View whose callback is executing, and makes frame-clock propagation exactly-once per walk. It reaches four watched families only through their path selectors, and changes nothing any of them is about. render-assets-and-backends carries the bulk via the core/view/** selector: every file there is View ownership, identity and callback sequencing. No render backend, raster path, GPU surface, asset pipeline, or Skia/Dawn code is touched. design-source-ingest and design-output-and-packaging are crossed by exactly one file, tools/import-design/jsx-runtime/materialized_runtime_entry.mjs, whose materialized-owner heuristic arrived with the retained-reparent commits this branch replays and is unrelated to the lifetime gate; no importer, DesignIR schema, codegen output, or packaging artifact changes. visual-proof-harness is crossed by exactly one file, test/cmake/view_widget_bridge_tests.cmake, only to register two new Catch2 suites; no fixture, baseline, screenshot, or harness contract changes. Registered as watch-only so the families' coverage stays honest about a lifetime change that crossed their selectors. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-meter-source",
+    "pulp-test-pointer-focus-lifecycle",
+    "pulp-test-view",
+    "pulp-test-view-lifecycle-bridge",
+    "pulp-test-view-lifecycle-contract",
+    "pulp-test-view-pool",
+    "pulp-test-widget-bridge"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

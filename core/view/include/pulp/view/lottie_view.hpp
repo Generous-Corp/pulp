@@ -53,6 +53,7 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_attached() override;
     void on_detached() override;
+    void on_frame_clock_changed() override;
 
 private:
     void subscribe_clock();
@@ -69,6 +70,9 @@ private:
     bool playing_ = true;
     bool looping_ = true;
     int clock_subscription_ = -1;
+    // frame_clock() becomes null after detachment; retain the actual clock so
+    // a descendant subscription can always be removed from its old host.
+    FrameClock* subscription_clock_ = nullptr;
     bool unsupported_logged_ = false;
 };
 

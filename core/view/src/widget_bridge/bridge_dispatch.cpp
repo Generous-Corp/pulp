@@ -9,47 +9,23 @@
 
 namespace pulp::view {
 
-void BridgeCallbackState::enter_callback() noexcept {
-    if (callback_depth_ == 0 && collectable_widgets_)
-        collectable_widgets_->clear();
-    ++callback_depth_;
-}
-
-void BridgeCallbackState::leave_callback() noexcept {
-    if (callback_depth_ == 0) return;
-    --callback_depth_;
-    if (callback_depth_ == 0 && retired_widgets_ && collectable_widgets_) {
-        collectable_widgets_->clear();
-        collectable_widgets_->swap(*retired_widgets_);
-    }
-}
-
-void BridgeCallbackState::retire(std::unique_ptr<View> widget) {
-    if (!widget) return;
-    if (callback_depth_ == 0 || !retired_widgets_) return;
-    retired_widgets_->push_back(std::move(widget));
-}
-
-void BridgeCallbackState::detach_retirement_queues() noexcept {
-    retired_widgets_ = nullptr;
-    collectable_widgets_ = nullptr;
-}
-
 void BridgeCallbackState::retire_dispatch() noexcept {
     std::lock_guard<std::recursive_mutex> lock(dispatch_mutex_);
     alive.store(false, std::memory_order_release);
-    detach_retirement_queues();
+    // A callback closure can outlive its bridge. Drop the root so a late
+    // dispatch raises no gate on a tree this bridge no longer serves.
+    dispatch_root_ = nullptr;
 }
 
 BridgeCallbackScope::BridgeCallbackScope(
     const std::shared_ptr<BridgeCallbackState>& state) noexcept
     : state_(state) {
-    if (state_) state_->enter_callback();
+    if (!state_) return;
+    if (View* root = state_->dispatch_root())
+        lease_.emplace(*root, DispatchLease::Drain::deferred);
 }
 
-BridgeCallbackScope::~BridgeCallbackScope() {
-    if (state_) state_->leave_callback();
-}
+BridgeCallbackScope::~BridgeCallbackScope() = default;
 
 std::string js_string_literal(std::string_view text) {
     return choc::json::toString(choc::value::createString(std::string(text)), false);
@@ -88,7 +64,7 @@ void safe_dispatch_eval(ScriptEngine& engine, const std::string& js, const char*
     // The no-flag path targets a known-valid engine reference; delegate through
     // an always-alive flag so both overloads share one implementation.
     static const auto always_alive =
-        std::make_shared<BridgeCallbackState>(nullptr, nullptr);
+        std::make_shared<BridgeCallbackState>(nullptr);
     safe_dispatch_eval(always_alive, &engine, js, context);
 }
 
@@ -108,7 +84,7 @@ void dispatch_event(ScriptEngine& engine,
                     const std::string& event_name,
                     std::string_view payload_expr) {
     static const auto always_alive =
-        std::make_shared<BridgeCallbackState>(nullptr, nullptr);
+        std::make_shared<BridgeCallbackState>(nullptr);
     dispatch_event(always_alive, &engine, id, event_name, payload_expr);
 }
 

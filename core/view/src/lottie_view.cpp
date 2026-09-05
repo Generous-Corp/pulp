@@ -125,12 +125,21 @@ void LottieView::on_attached() { subscribe_clock(); }
 
 void LottieView::on_detached() { unsubscribe_clock(); }
 
+void LottieView::on_frame_clock_changed() {
+    // Descendants do not receive on_detached/on_attached when a retained
+    // wrapper is moved. The existing frame-clock propagation is the safe,
+    // non-structural lifecycle funnel for that case.
+    unsubscribe_clock();
+    subscribe_clock();
+}
+
 void LottieView::subscribe_clock() {
     if (clock_subscription_ >= 0) return;
     if (!playing_ || !valid()) return;
     if (motion_policy_is_off()) return;  // static frame; no ticking needed
     FrameClock* clock = frame_clock();
     if (!clock) return;
+    subscription_clock_ = clock;
     clock_subscription_ = clock->subscribe([this](float dt) {
         advance(dt);
         // Keep the subscription while actively playing; drop it otherwise so an
@@ -139,17 +148,20 @@ void LottieView::subscribe_clock() {
         // resubscribe — otherwise the >=0 guard in subscribe_clock() would block
         // it forever (frozen animation after the first pause or non-loop end).
         const bool keep = playing_ && valid();
-        if (!keep) clock_subscription_ = -1;
+        if (!keep) {
+            clock_subscription_ = -1;
+            subscription_clock_ = nullptr;
+        }
         return keep;
     });
 }
 
 void LottieView::unsubscribe_clock() {
     if (clock_subscription_ < 0) return;
-    if (FrameClock* clock = frame_clock()) {
-        clock->unsubscribe(clock_subscription_);
-    }
+    if (subscription_clock_)
+        subscription_clock_->unsubscribe(clock_subscription_);
     clock_subscription_ = -1;
+    subscription_clock_ = nullptr;
 }
 
 }  // namespace pulp::view
