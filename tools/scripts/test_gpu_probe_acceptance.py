@@ -54,6 +54,35 @@ def write_png(path: Path, *, patterned: bool = True) -> None:
 
 
 class GpuProbeAcceptanceTests(unittest.TestCase):
+    def test_doctor_result_capture_is_atomic_and_replaces_complete_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            destination = directory / "forge-gpu-doctor.json"
+            destination.write_bytes(b"previous-complete-result\n")
+
+            RECORDER.write_bytes_atomically(destination, b'{"verdict":"pass"}\n')
+
+            self.assertEqual(destination.read_bytes(), b'{"verdict":"pass"}\n')
+            self.assertEqual(
+                list(directory.glob(f".{destination.name}.*")), []
+            )
+
+    def test_doctor_result_capture_failure_preserves_previous_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            destination = directory / "forge-gpu-doctor.json"
+            original = b"previous-complete-result\n"
+            destination.write_bytes(original)
+            with mock.patch.object(
+                RECORDER.os, "replace", side_effect=OSError("injected rename failure")
+            ):
+                with self.assertRaises(OSError):
+                    RECORDER.write_bytes_atomically(destination, b"partial-result\n")
+            self.assertEqual(destination.read_bytes(), original)
+            self.assertEqual(
+                list(directory.glob(f".{destination.name}.*")), []
+            )
+
     def publish(self, staging: Path, output: Path) -> None:
         claim = RECORDER.retain_staged_evidence(staging)
         try:
@@ -131,6 +160,11 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
         screenshot = directory / "forge-modular-screenshot.png"
         write_png(screenshot)
         doctor = json.loads((ROOT / "test/fixtures/gpu-ux/pass-hardware.json").read_text())
+        doctor.update(
+            schema="pulp.gpu-health-result.v2",
+            version=2,
+            measured_at_utc="2026-09-01T07:00:00Z",
+        )
         (directory / "forge-gpu-doctor.json").write_text(json.dumps(doctor))
         head = subprocess_text(["git", "rev-parse", "HEAD"], ROOT)
         source_blobs = VERIFIER._git_blobs(head, VERIFIER.EXPECTED_SOURCE_BLOBS_V2)
@@ -450,6 +484,32 @@ class GpuProbeAcceptanceTests(unittest.TestCase):
             self.assertIn(
                 f"current checkout source blob drift for {helper}", errors
             )
+
+    def test_v2_source_binding_tracks_both_health_schema_versions_independently(self):
+        expected = (
+            "docs/contracts/gpu-health-result-v1.schema.json",
+            "docs/contracts/gpu-health-result-v2.schema.json",
+        )
+        self.assertEqual(VERIFIER.GPU_HEALTH_SCHEMA_SOURCE_PATHS, expected)
+        self.assertTrue(set(expected).issubset(VERIFIER.EXPECTED_SOURCE_BLOBS_V2))
+        for target in expected:
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self.v2_fixture(root)
+                original = VERIFIER._checkout_blobs
+
+                def drifted_checkout(paths, *, _target=target):
+                    blobs = original(paths)
+                    blobs[_target] = "f" * 40
+                    return blobs
+
+                with mock.patch.object(
+                    VERIFIER, "_checkout_blobs", side_effect=drifted_checkout
+                ):
+                    errors = VERIFIER.verify(root)
+                self.assertIn(
+                    f"current checkout source blob drift for {target}", errors
+                )
 
     def test_v2_source_binding_includes_artifact_publication_boundary(self):
         boundary = {

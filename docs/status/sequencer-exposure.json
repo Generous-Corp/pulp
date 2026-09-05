@@ -1860,6 +1860,18 @@
           "needles": [
             "kTimelineMcpToolsDocumentChunks"
           ]
+        },
+        {
+          "path": "test/test_mcp_server.cpp",
+          "needles": [
+            "TimelineMcpToolsDocumentChunks"
+          ]
+        },
+        {
+          "path": "tools/mcp/CMakeLists.txt",
+          "needles": [
+            "timeline_mcp_tools.h"
+          ]
         }
       ],
       "surfaces": {
@@ -2236,16 +2248,17 @@
         {
           "path": "tools/cmake/PulpInstallRules.cmake",
           "needles": [
-            "pulp-tool-gpu-health-model",
-            "gpu-health-read-result-v1.schema.json",
-            "control_gpu_health_read_executor.hpp"
+          "pulp-tool-gpu-health-model",
+          "gpu-health-read-result-v1.schema.json",
+          "control_gpu_health_read_executor.hpp",
+          "gpu-health-run-attestation-v1.schema.json"
           ]
         }
       ],
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The selected SDK installs the CPU-only GPU health model target, typed health and control contracts, and exact GPU-health provider and executor headers needed by installed diagnostics without a source checkout.",
+          "rationale": "The selected SDK installs the CPU-only GPU health model target, typed health and control contracts, authenticated run-attestation schemas, and exact GPU-health provider and executor headers needed by installed diagnostics without a source checkout.",
           "evidence": [
             {
               "kind": "sdk_target",
@@ -2253,7 +2266,8 @@
               "needles": [
                 "pulp-tool-gpu-health-model",
                 "gpu-health-read-result-v1.schema.json",
-                "control_gpu_health_read_executor.hpp"
+                "control_gpu_health_read_executor.hpp",
+                "gpu-health-run-attestation-v1.schema.json"
               ]
             }
           ]

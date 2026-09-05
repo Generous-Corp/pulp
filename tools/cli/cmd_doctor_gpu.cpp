@@ -18,7 +18,7 @@ int cmd_doctor_gpu(const std::vector<std::string>& args) {
                          "render/readback oracles.\n"
                          "  --no-render  Report inventory as unverified without "
                          "acquiring a GPU device\n"
-                         "  --json       Emit pulp.gpu-health-result.v1 JSON\n";
+                         "  --json       Emit pulp.gpu-health-result.v2 JSON\n";
             return 0;
         } else {
             std::cerr << "pulp doctor gpu: unknown option '" << arg << "'\n"

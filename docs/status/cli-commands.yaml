@@ -748,7 +748,7 @@ commands:
         description: Audit the Pulp FetchContent shared-source cache (~/Library/Caches/Pulp/fetchcontent-src on macOS, equivalent paths elsewhere). Exits 1 on any dangling-symlink, stale-commit, or root-owned entry. Same discovery code runs as a preflight inside `pulp build` and `pulp test`; bypass via PULP_SKIP_CACHE_PREFLIGHT=1.
       - name: --json
         kind: flag
-        description: With --versions, --caches, or `gpu`, emit the diagnostic as a single JSON object. GPU results use `pulp.gpu-health-result.v1` and preserve pass, completed-fail, unavailable, and unverified states.
+        description: With --versions, --caches, or `gpu`, emit the diagnostic as a single JSON object. GPU results use `pulp.gpu-health-result.v2` and preserve pass, completed-fail, unavailable, and unverified states.
       - name: --no-render
         kind: flag
         description: With `gpu`, run inventory/preflight only without acquiring a GPU device or performing render/compute work. The result is unverified rather than passed.

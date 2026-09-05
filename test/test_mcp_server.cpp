@@ -763,7 +763,7 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("no_render":{"type":"boolean")JSON");
     require_contains(tools, R"JSON("outputSchema":{"type":"object")JSON");
     require_contains(tools, R"JSON("exit_code":{"type":"integer","enum":[0,1,2])JSON");
-    require_contains(tools, R"JSON("schema": { "const": "pulp.gpu-health-result.v1")JSON");
+    require_contains(tools, R"JSON("schema": { "const": "pulp.gpu-health-result.v2")JSON");
     require_contains(tools, R"JSON("required": { "type": "boolean")JSON");
     require_contains(tools, R"JSON("name":"pulp_docs_search")JSON");
     REQUIRE(tools.find(R"JSON("name":"pulp_inspect_audio")JSON") == std::string::npos);
@@ -823,11 +823,31 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status", "[mcp][tools][gp
 #endif
     const auto evidence_path = bin / "gpu-health-evidence.json";
     const auto argv_path = bin / "gpu-health-argv.txt";
-    const auto write_cli = [&](int status, const std::string& fixture_name) {
+    const auto write_cli = [&](int status, const std::string& fixture_name,
+                               bool active_contract = true) {
         std::ifstream fixture(repo_root_path() / "test" / "fixtures" / "gpu-ux" / fixture_name);
         REQUIRE(fixture);
+        std::string active_json{std::istreambuf_iterator<char>(fixture),
+                                std::istreambuf_iterator<char>()};
+        if (active_contract) {
+            const auto schema_offset =
+                active_json.find("\"schema\": \"pulp.gpu-health-result.v1\"");
+            REQUIRE(schema_offset != std::string::npos);
+            active_json.replace(
+                schema_offset,
+                std::string("\"schema\": \"pulp.gpu-health-result.v1\"").size(),
+                "\"schema\": \"pulp.gpu-health-result.v2\"");
+            const auto version_offset = active_json.find("\"version\": 1");
+            REQUIRE(version_offset != std::string::npos);
+            active_json.replace(version_offset, std::string("\"version\": 1").size(),
+                                "\"version\": 2");
+            const auto render_offset = active_json.find("\"render_requested\"");
+            REQUIRE(render_offset != std::string::npos);
+            active_json.insert(render_offset,
+                               "\"measured_at_utc\": \"2026-09-01T07:00:00Z\",\n  ");
+        }
         std::ofstream evidence(evidence_path, std::ios::trunc);
-        evidence << fixture.rdbuf();
+        evidence << active_json;
         evidence.close();
         std::ofstream script(cli, std::ios::trunc);
 #if defined(_WIN32)
@@ -872,7 +892,7 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status", "[mcp][tools][gp
                                      outcome.no_render ? R"JSON({"no_render":true})JSON"
                                                        : R"JSON({"no_render":false})JSON"));
         require_contains(response, "\"exit_code\":" + std::to_string(outcome.status));
-        require_contains(response, R"JSON("schema":"pulp.gpu-health-result.v1")JSON");
+        require_contains(response, R"JSON("schema":"pulp.gpu-health-result.v2")JSON");
         require_contains(response, "\"verdict\":\"" + std::string(outcome.verdict) + "\"");
         if (outcome.status == 0)
             REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
@@ -906,6 +926,13 @@ TEST_CASE("MCP GPU doctor preserves typed evidence and status", "[mcp][tools][gp
     const auto mode_mismatch =
         handle_request(tool_call("55", "pulp_gpu_doctor", R"JSON({"no_render":true})JSON"));
     require_contains(mode_mismatch, "incoherent-cli-output");
+
+    write_cli(0, "pass-hardware.json", false);
+    const auto stale_contract =
+        handle_request(tool_call("551", "pulp_gpu_doctor", R"JSON({"no_render":false})JSON"));
+    require_contains(stale_contract, "incompatible-cli-contract");
+    require_contains(stale_contract, "reinstall pulp-cpp and pulp-mcp from the same release");
+    REQUIRE(stale_contract.find(R"JSON("structuredContent")JSON") == std::string::npos);
 
     std::ofstream(evidence_path, std::ios::trunc) << "{}\n";
     const auto malformed =

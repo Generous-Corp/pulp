@@ -76,6 +76,40 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+def write_bytes_atomically(path: Path, payload: bytes) -> None:
+    """Publish one bounded evidence file without exposing a partial write."""
+    path = path.resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        temporary = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as destination:
+                destination.write(payload)
+                destination.flush()
+                os.fsync(destination.fileno())
+            os.replace(temporary, path)
+            temporary = None
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -1191,8 +1225,9 @@ def prove_forge(
             raise AcceptanceError(
                 "Forge-cwd GPU doctor returned malformed JSON"
             ) from error
-        doctor_path.write_text(
-            json.dumps(doctor_payload, indent=2, sort_keys=True) + "\n"
+        write_bytes_atomically(
+            doctor_path,
+            (json.dumps(doctor_payload, indent=2, sort_keys=True) + "\n").encode(),
         )
         source_claim.assert_full()
         sdk_input_claim.assert_full()

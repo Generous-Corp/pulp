@@ -19,6 +19,14 @@ if(TARGET pulp-test-gpu-health-provider)
     endif()
 endif()
 
+if(Python3_EXECUTABLE)
+    add_test(NAME gpu-health-run-attestation
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_run_attestation.py")
+    set_tests_properties(gpu-health-run-attestation PROPERTIES
+        LABELS "gpu;gpu-health;attestation;contract")
+endif()
+
 if(PULP_ENABLE_INSPECTOR)
 function(_pulp_attach_a3_control_build_identity target source_path)
     set(_revision "0000000000000000000000000000000000000000")

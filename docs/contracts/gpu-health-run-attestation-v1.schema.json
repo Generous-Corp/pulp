@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-health-run-attestation-v1.schema.json",
+  "title": "Pulp GPU health run attestation v1",
+  "description": "Authenticates a logical producer path and exact producer bytes by SHA-256. Platform build identifiers and OS code-signature metadata are not authenticated by v1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "created_at", "implementation_revision", "evidence_publication_revision", "host", "selection", "producer", "gpu_health_result", "canonical_health_schema", "canonical_schema", "authentication"],
+  "properties": {
+    "schema": { "const": "pulp.gpu-health-run-attestation.v1" },
+    "version": { "const": 1 },
+    "created_at": { "type": "string", "description": "Exact Gregorian UTC time YYYY-MM-DDTHH:MM:SSZ; year 0000 and leap seconds are unsupported.", "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$" },
+    "implementation_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "evidence_publication_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "host": {
+      "type": "object", "additionalProperties": false,
+      "required": ["host_id", "stable_machine_id_sha256"],
+      "properties": {
+        "host_id": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "stable_machine_id_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "selection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["configuration", "probe_id", "adapter_name", "backend", "device"],
+      "properties": {
+        "configuration": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "probe_id": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "adapter_name": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "backend": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "device": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      }
+    },
+    "producer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["binary_path", "binary_sha256"],
+      "properties": {
+        "binary_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "binary_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "gpu_health_result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "run_id", "schema", "measured_at_utc"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "schema": { "const": "pulp.gpu-health-result.v2" },
+        "measured_at_utc": { "type": "string", "description": "Exact Gregorian UTC time YYYY-MM-DDTHH:MM:SSZ; year 0000 and leap seconds are unsupported.", "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$" }
+      }
+    },
+    "canonical_health_schema": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "const": "docs/contracts/gpu-health-result-v2.schema.json" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "canonical_schema": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "const": "docs/contracts/gpu-health-run-attestation-v1.schema.json" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "authentication": {
+      "type": "object", "additionalProperties": false,
+      "required": ["algorithm", "namespace", "signer_key_fingerprint", "signature"],
+      "properties": {
+        "algorithm": { "const": "ssh-ed25519" },
+        "namespace": { "const": "pulp.gpu-health-run-attestation.v1" },
+        "signer_key_fingerprint": { "type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]+$" },
+        "signature": { "type": "string", "pattern": "^[A-Za-z0-9+/]+={0,2}$", "minLength": 1 }
+      }
+    }
+  }
+}
