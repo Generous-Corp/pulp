@@ -447,7 +447,12 @@ class _FakeGh:
     def __init__(self, *, open_prs: int = 0, open_prs_seq: list[int] | None = None,
                  list_rc: int = 0, list_rc_seq: list[int] | None = None,
                  create_rc: int = 0, create_stderr: str = "",
-                 merge_rc: int = 0, draft_pr: bool = False) -> None:
+                 merge_rc: int = 0, draft_pr: bool = False,
+                 covers: bool = True) -> None:
+        # Does the open bump PR's branch already contain the merge being
+        # deferred for? Default True so existing deferral tests keep expressing
+        # the SAFE case; the stale-defer regression sets it False.
+        self.covers = covers
         self.open_prs = open_prs
         self.open_prs_seq = list(open_prs_seq) if open_prs_seq else None
         self.list_rc = list_rc
@@ -475,6 +480,23 @@ class _FakeGh:
             return subprocess.CompletedProcess(
                 args, self.create_rc, stdout="", stderr=self.create_stderr)
         if head == ("pr", "view"):
+            if "headRefOid" in args:
+                # Model the PR branch tip against the REAL repo, so the guard's
+                # `merge-base --is-ancestor` is exercised for real rather than
+                # stubbed: covering => the current head (an ancestor of itself),
+                # stale => the root commit, which cannot contain a later merge.
+                rev = "HEAD" if self.covers else "HEAD"
+                if self.covers:
+                    oid = subprocess.run(
+                        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                        capture_output=True, text=True).stdout.strip()
+                else:
+                    oid = subprocess.run(
+                        ["git", "-C", str(repo), "rev-list", "--max-parents=0",
+                         "HEAD"], capture_output=True, text=True
+                    ).stdout.strip().splitlines()[0]
+                return subprocess.CompletedProcess(
+                    args, 0, stdout=json.dumps({"headRefOid": oid}), stderr="")
             return subprocess.CompletedProcess(
                 args, 0, stdout=("true\n" if self.draft_pr else "false\n"),
                 stderr="")
@@ -585,6 +607,50 @@ class PrRouteTest(unittest.TestCase):
         # ...but it RE-ARMED the existing PR (self-heals a prior failed arm).
         self.assertTrue(fake.did("pr", "merge"))
         self.assertIn("--merge", fake.calls[-1])
+
+    def test_pr_route_refuses_to_defer_to_a_bump_pr_cut_before_this_merge(self) -> None:
+        """deferring to an older bump PR DROPS this merge's intent.
+
+        The 2026-09-03 sequence: #8041 was opened at 09:05 for an earlier
+        change; #8031 merged at 09:39 touching an SDK trigger path; the run
+        deferred to #8041; #8041 landed at 10:20 carrying only its own range;
+        and the next run reported "no version intent in range". Net effect:
+        main stayed at VERSION 0.829.0 and the newest tag pointed at a commit
+        that predates the change. Because Forge pins Pulp by exact SHA and
+        validates that the SHA resolves to a released tag, that change could
+        never be adopted downstream at all.
+
+        So a defer is only safe when the open PR's branch already contains this
+        merge. Here it does not, and the run must NOT report a green "pending".
+        """
+        fake = _FakeGh(open_prs=1, covers=False)
+        val._gh = fake
+        status, plan = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(
+            status, "stale-defer",
+            "deferring to a bump PR cut before this merge silently drops the "
+            "merge's version intent; it must fail loudly instead",
+        )
+        # The plan is still returned, so the intent is visible rather than lost.
+        self.assertTrue(plan)
+        # The lock is respected either way: no rival PR is opened.
+        self.assertFalse(fake.did("pr", "create"))
+
+    def test_pr_route_treats_unknown_pr_coverage_as_unsafe(self) -> None:
+        """An unresolvable PR tip must not be read as "covers"."""
+        fake = _FakeGh(open_prs=1)
+        val._gh = fake
+        original = val._bump_pr_covers
+        val._bump_pr_covers = lambda repo, number, head: None  # query failed
+        try:
+            status, _ = val.apply_via_pr(self.clone, self._cfg())
+        finally:
+            val._bump_pr_covers = original
+        self.assertEqual(
+            status, "stale-defer",
+            "unknown coverage must fail closed: a red run retries, a green "
+            "defer loses the intent permanently",
+        )
 
     def test_pr_route_defers_when_create_races(self) -> None:
         # Lock check passes but `pr create` loses the race → GitHub rejects the
