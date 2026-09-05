@@ -1,6 +1,6 @@
 {
   "$schema": "Declarative runner-routing contract. Each lane binds a GitHub repo variable (`*_RUNS_ON_JSON`) to the label set it is INTENDED to route to, and to the kind of runner expected to serve it. Consumed by tools/scripts/runner_topology_check.py, which reconciles this file against the LIVE repo variables and LIVE registered runners, plus optional read-only TartCI profile/receipt/private-manifest fixtures. A lane whose labels no runner can satisfy is a routing black hole: jobs queue forever and GitHub reports no error. Editing a repo variable without editing its lane here is drift, and the checker fails on it. Docs: docs/guides/local-ci.md.",
-  "_note_expect": "`expect` records the label set or declared off-switch sentinel the lane is CONTRACTED to use. It is the reviewed artifact: changing a repo variable is only legitimate when this file changes with it. `expect` is not automatically correct \u2014 a lane can be contracted to labels nothing serves, which is exactly the failure this checker exists to surface.",
+  "_note_expect": "`expect` records the label set or declared off-switch sentinel the lane is CONTRACTED to use. It is the reviewed artifact: changing a repo variable is only legitimate when this file changes with it. `expect` is not automatically correct — a lane can be contracted to labels nothing serves, which is exactly the failure this checker exists to surface.",
   "github_hosted_labels": [
     "ubuntu-latest",
     "ubuntu-24.04",
@@ -18,7 +18,7 @@
   "sentinels": [
     "local-only"
   ],
-  "_note_sentinels": "Magic values that mean 'this lane is deliberately switched off', not a label to route to. `build.yml` documents `local-only` as the explicit off switch for macOS overflow \u2014 emptiness cannot disable it, because GitHub treats unset and empty identically and the workflow's `||` default re-fills it.",
+  "_note_sentinels": "Magic values that mean 'this lane is deliberately switched off', not a label to route to. `build.yml` documents `local-only` as the explicit off switch for macOS overflow — emptiness cannot disable it, because GitHub treats unset and empty identically and the workflow's `||` default re-fills it.",
   "routing_controls": {
     "PULP_LOCAL_MAC_RUNNER_LABEL": {
       "expect": "pulp-gate-fast",
@@ -63,10 +63,10 @@
     "lookback_hours": 720,
     "runs_per_workflow": 20,
     "queued_stall_seconds": 1800,
-    "_why_queued_stall_seconds": "Service history is a claim about the past and cannot expire, so a lane served for weeks and dead for hours still satisfies it \u2014 which is how a release lane with two releases stuck behind it reported 'the provisioner is alive and idle'. The queue is the only surface where a dead provisioner is visible while it is happening. The signal must be queue AGE, not queue presence: on a JIT lane the job queues FIRST and the provisioner then boots, so 'queued + no runner' is the ordinary transient and a check in that shape would fire on every burst. 1800s is derived from the fleet's own trigger \u2014 planning/fleet/local-macos-desired.json sets min_queued_age_seconds to 0 on m3/m5 and 600 on m1 \u2014 leaving a wide margin over the worst-case trigger plus VM boot and runner registration, so only a genuine stall crosses it.",
-    "_why": "Tart runners register JIT/ephemeral (tools/ci/tart-runner.sh, tart-runner-linux.sh): they exist only while a job runs and vanish when idle. So 'no runner carries this label' does NOT prove a black hole for an ephemeral lane \u2014 it may just be idle. Those lanes are judged on service history instead: has a job been dispatched to this exact label set recently? A label set with no runner AND no service has nothing provisioning it, which IS a black hole.",
-    "_why_per_workflow": "Evidence is gathered from the workflows that CONSUME the lane, not from a repo-wide run sweep. On a busy repo the newest 100 runs measured well under an hour of history, so a repo-wide scan would condemn any lane used less often than that \u2014 the release lanes fire per release, not per hour. Scoping to the consuming workflow makes 20 runs reach back months for a few API calls, and the scan is lazy: a lane with a live runner costs nothing.",
-    "_why_lookback": "720h (30d) covers a normal release cadence with margin. A lane whose consuming workflow has not run at all in the window yields no evidence, which is reported as a black hole \u2014 see the honest-limits note in docs/guides/local-ci.md."
+    "_why_queued_stall_seconds": "Service history is a claim about the past and cannot expire, so a lane served for weeks and dead for hours still satisfies it — which is how a release lane with two releases stuck behind it reported 'the provisioner is alive and idle'. The queue is the only surface where a dead provisioner is visible while it is happening. The signal must be queue AGE, not queue presence: on a JIT lane the job queues FIRST and the provisioner then boots, so 'queued + no runner' is the ordinary transient and a check in that shape would fire on every burst. 1800s is derived from the fleet's own trigger — planning/fleet/local-macos-desired.json sets min_queued_age_seconds to 0 on m3/m5 and 600 on m1 — leaving a wide margin over the worst-case trigger plus VM boot and runner registration, so only a genuine stall crosses it.",
+    "_why": "Tart runners register JIT/ephemeral (tools/ci/tart-runner.sh, tart-runner-linux.sh): they exist only while a job runs and vanish when idle. So 'no runner carries this label' does NOT prove a black hole for an ephemeral lane — it may just be idle. Those lanes are judged on service history instead: has a job been dispatched to this exact label set recently? A label set with no runner AND no service has nothing provisioning it, which IS a black hole.",
+    "_why_per_workflow": "Evidence is gathered from the workflows that CONSUME the lane, not from a repo-wide run sweep. On a busy repo the newest 100 runs measured well under an hour of history, so a repo-wide scan would condemn any lane used less often than that — the release lanes fire per release, not per hour. Scoping to the consuming workflow makes 20 runs reach back months for a few API calls, and the scan is lazy: a lane with a live runner costs nothing.",
+    "_why_lookback": "720h (30d) covers a normal release cadence with margin. A lane whose consuming workflow has not run at all in the window yields no evidence, which is reported as a black hole — see the honest-limits note in docs/guides/local-ci.md."
   },
   "must_remain_unset": {
     "variables": [
@@ -129,10 +129,8 @@
     },
     {
       "variable": "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
-      "purpose": "macOS build overflow for saturated required work. Operative value is GitHub-hosted macos-15: overflow exists to ADD capacity when the local JIT pool is full, so pointing it at the same local labels would be a no-op under the exact saturation it must relieve. The `local-only` sentinel remains the documented off-switch (build.yml) for deliberately pinning overflow work to the local pool; it is a disable flag, not a label set.",
-      "expect": [
-        "macos-15"
-      ],
+      "purpose": "macOS build overflow for saturated required work. CONTRACTED OFF: the operative value is the `local-only` sentinel, which pins overflow work to the local pool and is the documented off-switch in build.yml. Hosted `macos-15` overflow stays disabled for cost control (CLAUDE.md), so the sentinel is the intended steady state rather than a deviation from it. UNSETTING the variable is NOT the way to disable this lane: unset restores the `macos-15` hosted fallback recorded in unset_fallback, which is the opposite of the intent. Previously this lane contracted [\"macos-15\"] while the live value was the sentinel, so a severity:required lane sat at a permanent ERROR [drift] for an intended state -- a standing red that teaches readers to skim past the report and lets a genuine drift hide in the noise.",
+      "expect": "local-only",
       "unset_fallback": [
         "macos-15"
       ],
@@ -174,7 +172,7 @@
     },
     {
       "variable": "PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON",
-      "purpose": "Control-plane Linux job for release-cli.yml and sign-and-release.yml (resolve/publish coordination, not a binary build). Resolution is PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON -> PULP_LOCAL_LINUX_RUNS_ON_JSON -> ubuntu-latest, so the Mac Pro Linux x64 lane is the next preference in the chain. Contracted hosted today: this job coordinates a release, and pointing it at the local lane is not a variable decision alone \u2014 the Mac Pro runners live in a RESTRICTED org runner group, so whether a given workflow may use them is governed by that group's workflow-ref restriction as well as by the selector. Set this only with a dispatch proof recorded for this specific consuming workflow.",
+      "purpose": "Control-plane Linux job for release-cli.yml and sign-and-release.yml (resolve/publish coordination, not a binary build). Resolution is PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON -> PULP_LOCAL_LINUX_RUNS_ON_JSON -> ubuntu-latest, so the Mac Pro Linux x64 lane is the next preference in the chain. Contracted hosted today: this job coordinates a release, and pointing it at the local lane is not a variable decision alone — the Mac Pro runners live in a RESTRICTED org runner group, so whether a given workflow may use them is governed by that group's workflow-ref restriction as well as by the selector. Set this only with a dispatch proof recorded for this specific consuming workflow.",
       "expect": "ubuntu-latest",
       "unset_fallback": [
         "ubuntu-latest"
@@ -210,28 +208,28 @@
     },
     {
       "variable": "PULP_SANITIZER_ASAN_RUNS_ON_JSON",
-      "purpose": "ASan lane \u2014 GitHub-hosted, clean per run.",
+      "purpose": "ASan lane — GitHub-hosted, clean per run.",
       "expect": "macos-15",
       "provisioning": "github-hosted",
       "severity": "advisory"
     },
     {
       "variable": "PULP_SANITIZER_UBSAN_RUNS_ON_JSON",
-      "purpose": "UBSan lane \u2014 GitHub-hosted on the current Apple Clang/libc++ toolchain, clean per run.",
+      "purpose": "UBSan lane — GitHub-hosted on the current Apple Clang/libc++ toolchain, clean per run.",
       "expect": "macos-26",
       "provisioning": "github-hosted",
       "severity": "advisory"
     },
     {
       "variable": "PULP_SANITIZER_RTSAN_RUNS_ON_JSON",
-      "purpose": "RTSan lane \u2014 GitHub-hosted, clean per run.",
+      "purpose": "RTSan lane — GitHub-hosted, clean per run.",
       "expect": "macos-15",
       "provisioning": "github-hosted",
       "severity": "advisory"
     },
     {
       "variable": "PULP_COVERAGE_MACOS_RUNS_ON_JSON",
-      "purpose": "Coverage lane \u2014 GitHub-hosted, clean per run (warm-dir ODR keeps it off self-hosted).",
+      "purpose": "Coverage lane — GitHub-hosted, clean per run (warm-dir ODR keeps it off self-hosted).",
       "expect": "macos-15",
       "provisioning": "github-hosted",
       "severity": "advisory"
