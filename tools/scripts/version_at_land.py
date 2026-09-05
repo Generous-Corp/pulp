@@ -485,6 +485,34 @@ def _strictly_increasing(repo: Path, config: Config, plan: list[Assignment],
     return kept
 
 
+def _bump_pr_covers(repo: Path, number: str, head: str) -> bool | None:
+    """Will the open bump PR carry the intent of the merge at `head`?
+
+    `True`  — its branch already contains `head`, so deferring is safe.
+    `False` — it was cut BEFORE `head`; deferring would drop this merge's intent.
+    `None`  — unknown (query failed); treat as unsafe, never as safe.
+
+    Deferral must not assume the open bump PR represents the deferring merge: a
+    bump PR opened EARLIER lands carrying only its own range. The next run's drain base then starts after that merge, so the skipped
+    intent is never recovered: on 2026-09-03 `tools/rack/**` changed, #8041 (cut
+    before it) merged without it, and main stayed at VERSION 0.829.0 with the
+    newest tag pointing at a commit that predates the change. Because Forge pins
+    Pulp by exact SHA and validates the SHA resolves to a released tag, such a
+    change can never be adopted downstream at all.
+    """
+    res = _gh(repo, "pr", "view", number, "--json", "headRefOid", check=False)
+    if res.returncode != 0:
+        return None
+    try:
+        tip = (json.loads(res.stdout or "{}") or {}).get("headRefOid")
+    except json.JSONDecodeError:
+        return None
+    if not tip:
+        return None
+    probe = _git(repo, "merge-base", "--is-ancestor", head, tip, check=False)
+    return probe.returncode == 0
+
+
 def _list_open_bump_pr(repo: Path) -> tuple[bool, str | None]:
     """`(ok, number)` for the open PR on `BUMP_BRANCH`.
 
@@ -614,6 +642,14 @@ def apply_via_pr(
     # or a persistently-unarmable PR would wedge the drain silently.
     ok, existing = _list_open_bump_pr(repo)
     if ok and existing is not None:
+        # Defer ONLY to a bump PR that will actually carry this merge's intent.
+        # A PR cut before `head` lands without it, and the next drain base starts
+        # after that landing, so the intent is dropped permanently rather than
+        # postponed. Unknown coverage is treated as NOT covering: a red run that
+        # retries is recoverable, a silent green defer is not.
+        covers = _bump_pr_covers(repo, existing, head)
+        if covers is not True:
+            return "stale-defer", plan
         return ("pending" if _arm_auto_merge(repo, existing) else "arm-failed"), plan
 
     edited = _write_plan(repo, config, plan)
@@ -777,6 +813,13 @@ def main(argv: list[str]) -> int:
             for a in plan:
                 print(f"version-at-land: {a.surface} {verb} {a.current} -> "
                       f"{a.assigned} ({a.level})")
+        elif status == "stale-defer":
+            sys.stderr.write(
+                "version-at-land: the open bump PR was cut BEFORE this merge, so "
+                "deferring to it would drop this merge's version intent "
+                "permanently. Failing so the drain retries once that PR "
+                "lands and a fresh bump can carry this range.\n")
+            return 1
         elif status == "arm-failed":
             sys.stderr.write(
                 "version-at-land: bump PR opened but auto-merge could not be "
