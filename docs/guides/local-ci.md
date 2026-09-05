@@ -1784,10 +1784,20 @@ consuming workflow before calling one of these a black hole:
   pool that already backs the required gate — which is why hosted starvation
   (2026-05-18, 2026-06-09) no longer blocks publishing. Setting it *overrides*
   that chain, so it is only correct for a proven dedicated release lane.
-- **`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` is hosted on purpose.** Overflow
-  exists to add capacity when the local pool is saturated, so pointing it at
-  the same local labels is a no-op under the exact condition it must relieve.
-  `local-only` is a documented off-switch, not a label set.
+- **`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` is currently OFF, by contract.**
+  The lane is designed to be hosted — overflow exists to add capacity when the
+  local pool is saturated, so pointing it at the same local labels is a no-op
+  under the exact condition it must relieve. But hosted macOS overflow is
+  disabled for cost control, so the live value is the `local-only` sentinel: a
+  documented off-switch, not a label set. `runner_topology.json` contracts that
+  sentinel as this lane's `expect`, so the intended off state reads as
+  compliant rather than as drift. It previously contracted `["macos-15"]` while
+  the variable held the sentinel, which parked a `severity: required` lane at a
+  permanent `ERROR [drift]` for its own intended state — a standing red trains
+  readers to skim the report, and a genuine drift then hides in the noise.
+  **Do not "fix" this by unsetting the variable:** `unset_fallback` is
+  `["macos-15"]`, so unsetting re-enables the hosted overflow the sentinel
+  exists to disable. The variable must stay explicitly set.
 - **`PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` is hosted because darwin-x64 is
   cross-compiled on Apple Silicon**, not built on the native Intel image. The
   Mac mini native-Intel lane (`PULP_NATIVE_INTEL_RUNS_ON_JSON`) is a separate
