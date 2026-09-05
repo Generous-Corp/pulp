@@ -314,6 +314,35 @@ them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and ex
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
 
+### Editing a `gpu-vellum-handoff.yaml`-pinned path is a TWO-commit operation
+
+`docs/status/gpu-vellum-handoff.yaml` pins every referenced Pulp path to an
+exact revision, object id and object type. Change one of those files and the
+pinned row goes stale, so `gpu-recipe-catalog-selftest` and
+`gpu-handoff-provenance-selftest` fail — **in CI, ~20 minutes later**. On
+2026-09-05 three separate PRs each discovered it that way in one night, and one
+of them additionally went `DIRTY` colliding with another PR's regenerated
+receipt, because the ledger is a serialization point every such PR must pass
+through.
+
+The repair is a tool-generated identity refresh, never a hand edit:
+
+```bash
+python3 tools/scripts/gpu_handoff_provenance.py write   # regenerate
+python3 tools/scripts/gpu_handoff_provenance.py check   # verify (~25s, git log per row)
+```
+
+**Hand-resolving the receipt is the trap**: it passes the merge conflict and
+then fails the receipt's own checker. Merge first, then regenerate against the
+merged tree.
+
+`gates.sh` now runs `gpu_handoff_pin_freshness.py`, which is diff-scoped and
+sub-second and fails the push when a pinned path changed without the ledger
+being touched. It deliberately proves only *that* — it does not re-verify the
+identity fields, because doing so costs ~25s per push. A green gate means "you
+did not forget", not "the pins are correct"; the `check` command above is what
+proves the latter.
+
 ### A changed-path preamble needs exact trees, not full repository history
 
 Do not set the `build.yml` `classify` checkout back to `fetch-depth: 0`. GitHub
