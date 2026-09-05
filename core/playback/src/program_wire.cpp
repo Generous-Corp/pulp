@@ -143,6 +143,10 @@ measure(const PlaybackProgram& program,
             return Measured(
                 runtime::Err(Error{Code::AudioProgramUnsupported,
                                    section_id(ProgramWireSection::Tracks), track.id().value}));
+        if (!track.arrangement_controller_events().empty())
+            return Measured(
+                runtime::Err(Error{Code::ControllerEventsUnsupported,
+                                   section_id(ProgramWireSection::Tracks), track.id().value}));
         const auto& production = track.arrangement_production();
         if (production.mode != timeline::ProductionMode::Synchronous ||
             production.reproducibility != timeline::ReproducibilityClass::Deterministic ||

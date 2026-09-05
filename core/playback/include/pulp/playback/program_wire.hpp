@@ -218,6 +218,10 @@ enum class ProgramWireErrorCode : std::uint8_t {
     /// A track carries an audio renderer program, which this version does not
     /// represent. Refused rather than dropped. `detail` carries the track id.
     AudioProgramUnsupported,
+    /// The program carries controller/expression values and the wire has no
+    /// section for them yet. Dropping them would render the notes with the
+    /// expression gone, so the program is refused rather than half-encoded.
+    ControllerEventsUnsupported,
     /// A track has a non-default production declaration, which this wire
     /// version cannot carry. Refused rather than silently strengthening the
     /// adopting realm's replay claim. `detail` carries the track id.

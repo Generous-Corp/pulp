@@ -1,4 +1,5 @@
 #include "timeline_nesting_test_support.hpp"
+#include <pulp/playback/program_wire.hpp>
 #include "../core/playback/src/sequence_content_lowerer.hpp"
 
 #include <array>
