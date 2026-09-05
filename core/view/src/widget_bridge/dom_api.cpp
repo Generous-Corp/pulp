@@ -228,13 +228,20 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // remove_child returns null whenever a reentrant gesture,
                     // popup, focus, or on_detached callback removed the view
                     // first. Fail closed instead of dereferencing that null
-                    // below: nothing has been mutated yet, so refusing the
-                    // upgrade leaves the tree exactly as the callback left it.
-                    // The ordinary-reparent path below has always checked this;
-                    // the upgrade path is the one Settings reopen goes through.
+                    // below: nothing has been mutated yet, so returning leaves
+                    // the tree exactly as the callback left it. The
+                    // ordinary-reparent path below has always checked this; the
+                    // upgrade path is the one a Settings-style portal reopen
+                    // goes through.
+                    //
+                    // A no-op rather than a throw, deliberately. There is
+                    // nothing left to upgrade — the element the caller named is
+                    // gone — which is the same situation the cycle guard above
+                    // returns empty for. It also keeps a C++ exception from
+                    // unwinding back into QuickJS, which leaks JS objects; see
+                    // the note on the ordinary-reparent path below.
                     if (!removed)
-                        throw std::runtime_error(
-                            "retained scroll upgrade lost widget ownership");
+                        return choc::value::Value();
                     std::unique_ptr<View> scroll = std::make_unique<ScrollView>();
                     // Keep the authored View as the ScrollView's content
                     // child instead of replacing/destroying it. This
@@ -341,6 +348,18 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 // new one waits until the move has actually committed.
                 self.widgets_.reserve(self.widgets_.size() + 1);
                 auto removed = p->remove_child(existing);
+                // NOTE: this pre-existing throw, like any C++ exception raised
+                // inside a bridge function, unwinds through QuickJS's C frames,
+                // which do not release the JS objects they own. A Debug build
+                // catches it at teardown as
+                // `Assertion failed: (list_empty(&rt->gc_obj_list))` in
+                // JS_FreeRuntime; a Release build leaks silently. Reproduced on
+                // this exact path with a control that raises no C++ exception
+                // and tears down cleanly. The fix belongs at the
+                // register_bridge_function boundary and is deliberately NOT
+                // bundled into the lifecycle change. Until it lands, fail closed
+                // by returning — as the retained-upgrade path above now does —
+                // rather than adding new throws to bridge functions.
                 if (!removed)
                     throw std::runtime_error("native reparent lost widget ownership");
                 try {
