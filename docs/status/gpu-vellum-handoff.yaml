@@ -467,8 +467,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/view.cpp",
           "state": "pulp-owned-retained",
-          "revision": "e55fda577cb83ae63f360cf930f1a8da42bd85f5",
-          "object_id": "27786ed6ff3f12d37c2702c801c78a54df174aec",
+          "revision": "397d960b7d3c933932593ce64562f87d0289da77",
+          "object_id": "974aa5e81f64e18ddc06f141fd586cdb7edc5b14",
           "object_type": "blob"
         },
         {
