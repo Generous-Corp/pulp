@@ -28,10 +28,19 @@ namespace {
 struct SelfRemovingOnDetach : View {
     bool armed = false;
     View* root_for_retire = nullptr;
-    int detaches = 0;
+    // Counters live OUTSIDE the view. Retiring inside a callback is exactly
+    // what this probe does, so the view is legitimately destroyed when the
+    // outermost lease drains — before the test's assertions run. Reading a
+    // member afterwards is a use-after-free, and it reads as an intermittent
+    // failure rather than a crash.
+    int* detaches = nullptr;
+    int* destructions = nullptr;
 
+    ~SelfRemovingOnDetach() override {
+        if (destructions) ++*destructions;
+    }
     void on_detached() override {
-        ++detaches;
+        if (detaches) ++*detaches;
         if (!armed) return;
         armed = false;
         if (View* parent = this->parent()) {
@@ -66,10 +75,14 @@ TEST_CASE("retained scroll upgrade fails closed when the removal is stolen",
     View* container_raw = container.get();
     root.add_child(std::move(container));
 
+    int detaches = 0;
+    int destructions = 0;
     auto panel = std::make_unique<SelfRemovingOnDetach>();
     panel->set_id("panel");
     SelfRemovingOnDetach* panel_raw = panel.get();
     panel_raw->root_for_retire = &root;
+    panel_raw->detaches = &detaches;
+    panel_raw->destructions = &destructions;
     container_raw->add_child(std::move(panel));
 
     // POSITIVE CONTROL: the bridge must actually resolve this native view by
@@ -87,10 +100,13 @@ TEST_CASE("retained scroll upgrade fails closed when the removal is stolen",
     // Fired at least once; the hook's own reentrant remove_child delivers it a
     // second time, which is the documented consequence of mutating from inside
     // a lifecycle callback rather than a defect.
-    REQUIRE(panel_raw->detaches >= 1);
+    REQUIRE(detaches >= 1);
+    // Retirement really did complete: the view is gone by the time the
+    // outermost lease unwound, not leaked and not still parked.
+    REQUIRE(destructions == 1);
     REQUIRE(bridge.scroll_wrapper("panel") == nullptr);
-    // The panel left the tree by its own hand and is retired, not leaked into
-    // a half-built wrapper.
+    // The panel left the tree by its own hand, and the upgrade published no
+    // half-built wrapper in its place.
     REQUIRE(container_raw->child_count() == 0);
 }
 
