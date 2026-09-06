@@ -361,6 +361,13 @@ int Label::effective_font_weight() const {
     return font_weight_;
 }
 
+std::string Label::effective_font_family() const {
+    if (!font_family_.empty()) return font_family_;
+    if (auto inherited = inheritable_font_family(); inherited.has_value())
+        if (!inherited.value().empty()) return inherited.value();
+    return "Inter";
+}
+
 float Label::intrinsic_height() const {
     // Cascade font_size before computing height so descendants of a parent
     // that called setInheritableFontSize report a height that matches what
@@ -385,12 +392,7 @@ float Label::intrinsic_height() const {
     // under the GPU clip-rect. Real fTop/fBottom metrics already cover that
     // case (they include caps + descenders by construction) plus the empirical
     // safety margin.
-    std::string effective_family = font_family_;
-    if (effective_family.empty()) {
-        if (auto inh = inheritable_font_family(); inh.has_value())
-            effective_family = inh.value();
-    }
-    if (effective_family.empty()) effective_family = "Inter";
+    std::string effective_family = effective_font_family();
 
     auto& shaper = canvas::global_text_shaper();
     auto resolved_attributed = has_attributed_
@@ -520,12 +522,7 @@ float Label::measured_height(float available_width) const {
         return std::ceil(lh * static_cast<float>(std::max(1, line_count)));
     }
 
-    std::string family = font_family_;
-    if (family.empty()) {
-        if (auto inherited = inheritable_font_family(); inherited.has_value())
-            family = inherited.value();
-    }
-    if (family.empty()) family = "Inter";
+    std::string family = effective_font_family();
     auto& shaper = canvas::global_text_shaper();
     auto prepared = has_attributed_
         ? shaper.prepare(resolved_attributed_string(), resolved_font_features())
@@ -573,12 +570,7 @@ float Label::baseline_y() const {
             effective_font_size = inh.value();
     }
 
-    std::string effective_family = font_family_;
-    if (effective_family.empty()) {
-        if (auto inh = inheritable_font_family(); inh.has_value())
-            effective_family = inh.value();
-    }
-    if (effective_family.empty()) effective_family = "Inter";
+    std::string effective_family = effective_font_family();
 
     // Skia's SkFontMetrics-derived ascent (PreparedText::ascent() flips
     // SkFontMetrics::fAscent positive). The painter computes baseline_y
@@ -676,19 +668,13 @@ float Label::intrinsic_width() const {
     // to a character-width estimator otherwise — same fallback that
     // Canvas::measure_text() uses on the recording / non-Skia backends.
     //
-    // Use the Label's actual font_family, not a hardcoded "Inter". Different
+    // Measure the Label's actual family, not a hardcoded "Inter". Different
     // families have very different metrics: monospaced fonts such as IBM Plex
-    // Mono are materially wider than proportional Inter at the same size.
-    // Under-reserving width clips imported labels (for example,
-    // "XOVER → lo_freq") because Yoga reserves Inter's width while the painter
-    // draws the requested family. Mirror paint()'s precedence: font_family_ if
-    // set, else inheritable_font_family() cascade, else default "Inter".
-    std::string effective_family = font_family_;
-    if (effective_family.empty()) {
-        if (auto inh = inheritable_font_family(); inh.has_value())
-            effective_family = inh.value();
-    }
-    if (effective_family.empty()) effective_family = "Inter";
+    // Mono are materially wider than proportional Inter at the same size, so
+    // reserving Inter's width for a face the painter draws wider clips
+    // imported labels (for example, "XOVER → lo_freq"). paint() resolves
+    // the family through the same effective_font_family().
+    std::string effective_family = effective_font_family();
 
     auto& shaper = canvas::global_text_shaper();
     auto prepared = has_attributed_
@@ -724,12 +710,7 @@ Label::ResolvedTextStyle Label::resolve_text_style() const {
         if (auto inh = inheritable_letter_spacing(); inh.has_value())
             rs.letter_spacing = inh.value();
     }
-    rs.family = font_family_;
-    if (rs.family.empty()) {
-        if (auto inherited = inheritable_font_family(); inherited.has_value())
-            rs.family = inherited.value();
-    }
-    if (rs.family.empty()) rs.family = "Inter";
+    rs.family = effective_font_family();
     rs.font_slant = font_style_;
 
     // text-align cascade — own value wins, else inherited.
@@ -1186,9 +1167,10 @@ void Label::paint(canvas::Canvas& canvas) {
     }
 
     // Propagate setFontFamily / setFontWeight / setLetterSpacing through to
-    // the canvas backend so JS calls actually change rasterised glyphs. Empty
-    // font_family_ falls back to the default theme face.
-    const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
+    // the canvas backend so JS calls actually change rasterised glyphs. The
+    // family comes from effective_font_family() so the face drawn here is the
+    // one intrinsic_width() reserved room for.
+    std::string family = effective_font_family();
     canvas.set_font_full(family, effective_font_size, weight,
                           font_style_, effective_letter_spacing);
 
