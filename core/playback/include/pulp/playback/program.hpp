@@ -7,6 +7,7 @@
 #include <pulp/runtime/result.hpp>
 #include <pulp/runtime/slot.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
+#include <pulp/timeline/midi_lane.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/production_mode.hpp>
 
@@ -91,6 +92,70 @@ struct CompiledNoteModifier {
 const CompiledNoteModifier* find_note_modifier(std::span<const CompiledNoteModifier> modifiers,
                                                timeline::ItemId note_id) noexcept;
 
+/// Whether a lowered controller value was authored at its own position or
+/// synthesized at a window boundary to answer "what is sounding here".
+///
+/// A chased value is not a weaker value: it is the authored stream's real
+/// reading at that instant. The distinction is kept because a consumer that
+/// re-edits the arrangement must be able to tell a point the user placed from
+/// one the compiler derived, and because dropping it would make flattening
+/// lossy in a way no later pass could detect.
+enum class ControllerProgramEventOrigin : std::uint8_t { Authored, Chased };
+
+/// Immutable controller/expression value lowered by the program compiler.
+///
+/// This is the runtime counterpart of timeline::MidiExpressionLane, and it
+/// deliberately mirrors NoteProgramEvent: the sample position is authoritative
+/// for half-open block scheduling against the exact CompiledTempoMap the owning
+/// PlaybackProgram was built with, while the tick stays available for
+/// diagnostics and state snapshots.
+///
+/// The full wire `address` is carried rather than a Pulp-local controller
+/// enumeration, so a controller family nobody anticipated needs new values and
+/// never a new type — the same reason the storage lane keeps the wire encoding.
+/// `lane_id` and `point_id` preserve authored provenance through flattening, so
+/// a value can still be traced back to the lane and the point that produced it
+/// after a nested sequence has been expanded. A chased value keeps the
+/// provenance of the point it read, which is what makes it reproducible.
+struct ControllerProgramEvent {
+    timebase::SamplePosition sample;
+    timebase::TickPosition tick;
+    timeline::ItemId clip_id;
+    timeline::ItemId lane_id;
+    timeline::ItemId point_id;
+    timeline::MidiLaneAddress address;
+    std::uint32_t value = 0;
+    ControllerProgramEventOrigin origin = ControllerProgramEventOrigin::Authored;
+    constexpr auto operator<=>(const ControllerProgramEvent&) const = default;
+};
+
+/// Total order for controller events sharing a block.
+///
+/// Sample position decides first, then tick, because distinct ticks can
+/// quantize to one compiled sample and tick order stays authoritative within
+/// it. Beyond that the order is by address, so two streams that resolve at the
+/// same instant are emitted in a stable, wire-meaningful sequence rather than
+/// in whatever order the lanes happened to be stored. A chased value sorts
+/// before an authored one at an identical position: the boundary reading
+/// establishes what is sounding on entry, and an authored point at that exact
+/// instant is the user overriding it.
+constexpr bool controller_program_event_less(const ControllerProgramEvent& lhs,
+                                             const ControllerProgramEvent& rhs) noexcept {
+    if (lhs.sample != rhs.sample)
+        return lhs.sample < rhs.sample;
+    if (lhs.tick != rhs.tick)
+        return lhs.tick < rhs.tick;
+    if (lhs.address != rhs.address)
+        return lhs.address < rhs.address;
+    if (lhs.origin != rhs.origin)
+        return lhs.origin < rhs.origin; // chased first at one exact position
+    if (lhs.clip_id != rhs.clip_id)
+        return lhs.clip_id < rhs.clip_id;
+    if (lhs.lane_id != rhs.lane_id)
+        return lhs.lane_id < rhs.lane_id;
+    return lhs.point_id < rhs.point_id;
+}
+
 constexpr bool note_program_event_less(const NoteProgramEvent& lhs,
                                        const NoteProgramEvent& rhs) noexcept {
     if (lhs.sample != rhs.sample)
@@ -132,6 +197,16 @@ class TrackProgram {
     }
     std::span<const NoteProgramEvent> arrangement_note_events() const noexcept {
         return note_events_;
+    }
+    /// Controller and expression values in `controller_program_event_less`
+    /// order. Empty for a track that authors no lanes, so an arrangement
+    /// without controllers pays one empty-span check and carries no data.
+    ///
+    /// This is the surface a host or a Forge node consumes to reproduce the
+    /// authored streams: every event carries its own wire address and its
+    /// authored provenance, so no side table is needed to interpret it.
+    std::span<const ControllerProgramEvent> arrangement_controller_events() const noexcept {
+        return controller_events_;
     }
     /// Sorted by note id. Empty for a track whose notes all play by default.
     std::span<const CompiledNoteModifier> note_modifiers() const noexcept {
@@ -175,6 +250,7 @@ class TrackProgram {
                  ProviderSelectorProgram provider, RendererStatePolicy requested_state_policy,
                  RendererStatePolicy state_policy, std::vector<timeline::ItemId> clip_ids,
                  std::vector<NoteProgramEvent> note_events,
+                 std::vector<ControllerProgramEvent> controller_events,
                  std::vector<CompiledNoteModifier> note_modifiers,
                  std::shared_ptr<const AudioTrackRendererProgram> audio_program,
                  std::vector<timeline::ItemId> device_placement_ids,
@@ -191,6 +267,7 @@ class TrackProgram {
     RendererStatePolicy state_policy_ = RendererStatePolicy::CarryByItemId;
     std::vector<timeline::ItemId> clip_ids_;
     std::vector<NoteProgramEvent> note_events_;
+    std::vector<ControllerProgramEvent> controller_events_;
     std::vector<CompiledNoteModifier> note_modifiers_;
     std::shared_ptr<const AudioTrackRendererProgram> audio_program_;
     std::vector<timeline::ItemId> device_placement_ids_;

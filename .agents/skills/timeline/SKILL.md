@@ -2926,3 +2926,19 @@ Every root measured there reaches timebase, so every list carries it.
 When a link edge changes anywhere under the engine, expect to update those lists
 and the target table in `docs/guides/timeline-sdk.md`, whose stated counts are
 part of the same claim.
+
+## MIDI expression lanes: who owns which invariant
+
+`MidiContent::create` — not the compiler, not a consumer — owns lane-address
+well-formedness and uniqueness. A lane whose address exceeds the wire's field
+widths, or two lanes claiming one address, cannot be built at all. So a
+consumer that re-checks those conditions is writing unreachable code, and a
+test that asserts the refusal at the consumer will fail inside its own fixture
+builder rather than at the point it thinks it is testing. Assert address
+invariants against `MidiContent::create` and let downstream code assume a lane
+it receives is already encodable and unambiguous.
+
+`MidiLanePoint::chased` distinguishes a value the user placed from one
+flattening derived at a retained-window boundary. An authored document never
+sets it. It is appended last in the struct precisely so existing positional
+brace initialisation keeps compiling — keep it last if you add more.

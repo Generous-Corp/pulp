@@ -134,6 +134,10 @@ enum class CompileErrorCode : std::uint8_t {
     // values, whereas trimming still has no defined inherited value even once
     // that renderer exists.
     MidiExpressionLaneUnsupported,
+    /// The arrangement authors more controller values than one program may
+    /// carry. Bounded like every other expansion so a pathological document
+    /// cannot make compilation unbounded.
+    MidiExpressionLaneBudgetExceeded,
     // A nested SequenceRef trims a MIDI leaf whose owner has an authored groove
     // that does not state canonical no-feel. The flatten-first path cannot
     // decide whether displaced events outside the retained source window should
