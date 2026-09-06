@@ -1808,6 +1808,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
 | `stretch` | Offline time-stretch / pitch / varispeed: character modes, fine-tune presets, A/B eval toolkit, honest quality state |
 | `tart-ci` | Tart golden-VM macOS CI: layered goldens, ephemeral per-job runners, vm-image manifest, caching/rebake, host-keychain safety |
+| `text-metrics` | Label + captured-text metrics: half-leading against real ink, negative leading, measure/paint font-face parity, verifying a baseline change moved a number |
 | `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |
 | `trace-analysis` | "Why is this slow?" investigation harness over a Perfetto `.pftrace`: chain-of-evidence loop, wall-vs-CPU-time, follow-the-blocker, exhaustive verification, Pulp domain hints (dsp/frame/js/gpu/cross-platform) |
 | `trace-sql` | SQL discipline for Pulp traces via `trace_processor`: idempotent `CREATE OR REPLACE PERFETTO` views, `GLOB`/`dur=-1`/`EXTRACT_ARG`, stable-key joins, plus the Pulp trace-stdlib views |
