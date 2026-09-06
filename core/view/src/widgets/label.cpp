@@ -1426,13 +1426,6 @@ void Label::paint(canvas::Canvas& canvas) {
             }
         }
     }
-    // Two different references, deliberately. The captured branch reproduces
-    // Chromium's own half-leading, which it computed against the font EM box,
-    // so that reference must stay `font_size` or a captured 16px box around a
-    // 12px font stops yielding the 2px top leading Chromium drew. Native
-    // layout instead centers real ink, so `text_h` below uses ascent+descent.
-    const float captured_em_reference = has_attributed_
-        ? automatic_lh : effective_font_size;
     const float single_line_text_height = has_attributed_
         ? automatic_lh : single_line_ink_height;
     if (has_attributed_ && shaped_layout != nullptr &&
@@ -1508,8 +1501,16 @@ void Label::paint(canvas::Canvas& canvas) {
         // Chromium's captured top, add its half-leading, then the active face
         // ascent. Do not center the complete owner bounds a second time.
         const auto& first_line = shaped_layout->lines.front();
-        const float half_leading = std::max(
-            0.0f, (first_line.height - captured_em_reference) * 0.5f);
+        // One reference, not two. Half-leading is the surplus of the line BOX
+        // over the ink it carries, so it has to be measured against the same
+        // ascent + descent the baseline then descends by. Measuring it against
+        // the em box while descending by a real ascent double-counts the
+        // difference between them and paints the line low by exactly that gap.
+        // Unclamped for the same reason the native branch above is: a face
+        // whose ink exceeds the captured box has negative leading and CSS lets
+        // its glyphs overflow evenly, top and bottom.
+        const float half_leading =
+            (first_line.height - single_line_text_height) * 0.5f;
         baseline_y = first_line.y + half_leading + first_line_ascent;
     }
 
