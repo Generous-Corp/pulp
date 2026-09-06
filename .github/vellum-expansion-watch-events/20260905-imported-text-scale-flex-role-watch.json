@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260905-imported-text-scale-flex-role-watch",
+  "created_at": "2026-09-05T17:55:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Two changes to the WidgetBridge, both about how an imported UI is sized. First, the retained ScrollView upgrade now carries the replaced content's FLEX ROLE and not only its pixel rectangle: the wrapper takes the content's place in the parent's layout, so copying bounds alone silently converted a flex-sized container into a fixed-size one and froze an authored `flex: 1; min-height: 0` body at its pre-layout height. Second, setFontSize gains a host-settable scale with a neutral 1.0 default, clamped to [0.5, 4.0], because an imported design carries its type sizes as scattered authored literals and setFontSize is the single funnel all of them pass through. This reaches render-assets-and-backends only through the core/view/** path selector; every touched file is bridge-side layout and typography plumbing. No render backend, raster path, GPU surface, asset pipeline, or Skia/Dawn code is touched, and no importer, DesignIR schema, or codegen output changes. Registered as watch-only so the family's coverage stays honest about a sizing change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-view-lifecycle-bridge",
+    "pulp-test-widget-bridge"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
