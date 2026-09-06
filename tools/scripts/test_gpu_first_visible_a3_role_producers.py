@@ -37,6 +37,76 @@ PRODUCERS = {
 }
 
 
+def assert_terminate_child_survives_recycled_pid_eperm() -> None:
+    """terminate_child must treat EPERM like ESRCH at every killpg site.
+
+    A pid recycled into a process group this process may not signal raises
+    PermissionError, not ProcessLookupError.  Either way the child we spawned
+    is gone.  Letting EPERM escape turns an ordinary teardown into a failed
+    run, which is how an unrelated change reds the required macOS gate.
+    """
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.pid = 424242
+            self.killed = False
+
+        def poll(self) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+        def kill(self) -> None:
+            self.killed = True
+
+    def run_with(killpg, monotonic=None):
+        saved_killpg = producer_support.os.killpg
+        saved_monotonic = producer_support.time.monotonic
+        producer_support.os.killpg = killpg
+        if monotonic is not None:
+            producer_support.time.monotonic = monotonic
+        try:
+            producer_support.terminate_child(FakeProcess())
+        finally:
+            producer_support.os.killpg = saved_killpg
+            producer_support.time.monotonic = saved_monotonic
+
+    # Site 1: the initial SIGTERM raises EPERM.
+    calls: list[int] = []
+
+    def killpg_sigterm_eperm(_pgid: int, sig: int) -> None:
+        calls.append(sig)
+        raise PermissionError(1, "Operation not permitted")
+
+    run_with(killpg_sigterm_eperm)
+    assert calls == [signal.SIGTERM], calls
+
+    # Site 2: SIGTERM lands, the liveness probe then raises EPERM.
+    probe_calls: list[int] = []
+
+    def killpg_probe_eperm(_pgid: int, sig: int) -> None:
+        probe_calls.append(sig)
+        if sig == 0:
+            raise PermissionError(1, "Operation not permitted")
+
+    run_with(killpg_probe_eperm)
+    assert probe_calls == [signal.SIGTERM, 0], probe_calls
+
+    # Site 3: the group stays visible until the deadline, then SIGKILL raises
+    # EPERM.  Drive the clock so the bounded wait does not cost real seconds.
+    kill_calls: list[int] = []
+    ticks = iter([0.0] + [100.0] * 64)
+
+    def killpg_sigkill_eperm(_pgid: int, sig: int) -> None:
+        kill_calls.append(sig)
+        if sig == signal.SIGKILL:
+            raise PermissionError(1, "Operation not permitted")
+
+    run_with(killpg_sigkill_eperm, monotonic=lambda: next(ticks))
+    assert kill_calls == [signal.SIGTERM, signal.SIGKILL], kill_calls
+
+
 def assert_entrypoints_ignore_role_support_bytecode() -> None:
     with tempfile.TemporaryDirectory(prefix="pulp-a3-role-entrypoint-pyc-") as temporary:
         root = Path(temporary)
@@ -1197,9 +1267,11 @@ def main() -> int:
             assert receipt["outcome"] == "skip"
             assert receipt["dependencies"] == ["reaper:editor-open-smoke"]
 
+        assert_terminate_child_survives_recycled_pid_eperm()
+
         print(
             "gpu-first-visible-a3-role-producers: "
-            "positive=5 blocked=2 planted_negatives=39 cleanup_controls=2"
+            "positive=5 blocked=2 planted_negatives=39 cleanup_controls=2 termination_eperm=3"
         )
     return 0
 

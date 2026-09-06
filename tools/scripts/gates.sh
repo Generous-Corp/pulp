@@ -18,6 +18,8 @@
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
+#   - gpu-handoff-pin (a pinned gpu-vellum-handoff path changed without the
+#     ledger being refreshed in the same range)
 #   - silent-revert (no byte-exact undo of a recently-landed commit)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift, and checks the
 #     attribution text against the license files actually on disk)
@@ -78,6 +80,7 @@ NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
+GHP="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 SRG="$ROOT/tools/scripts/silent_revert_guard.py"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
@@ -285,6 +288,24 @@ if [ -f "$PGL" ]; then
     echo "" >&2
     echo "▸ planning-gitlink guard (no accidental submodule pointer bump)" >&2
     if ! "$PYTHON" "$PGL" --base "$BASE" --mode=report; then
+        fail=1
+    fi
+fi
+
+# ── 6b2. gpu-handoff pin freshness ──────────────────────────────────────────
+# docs/status/gpu-vellum-handoff.yaml pins referenced Pulp paths to an exact
+# revision, so editing one of those files is inherently a two-commit operation:
+# the change, then a tool-generated identity refresh. Nothing checked that, and
+# on 2026-09-05 three separate PRs each discovered it ~20 minutes later in CI
+# via gpu-recipe-catalog-selftest / gpu-handoff-provenance-selftest.
+# Diff-scoped and sub-second: it only looks at whether a changed file is pinned.
+# It deliberately does NOT re-verify the identity fields — that is
+# `gpu_handoff_provenance.py check`, which costs ~25s because it runs a git log
+# per pinned path, and it is named in the failure output.
+if [ -f "$GHP" ]; then
+    echo "" >&2
+    echo "▸ gpu-handoff pin freshness (pinned path changed => refresh the ledger)" >&2
+    if ! "$PYTHON" "$GHP" --base "$BASE" --mode=report; then
         fail=1
     fi
 fi

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260905-pr8077-release-dispatch-attests-its-tag",
+  "created_at": "2026-09-05T06:05:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record that release-cli.yml now refuses a workflow_dispatch whose own ref is not the tag it publishes. GitHub derives build provenance from the OIDC run context, so a dispatch from the default branch attested that branch's HEAD rather than the tag commit, and v0.832.0 shipped with provenance a tag-pinning consumer cannot verify. The change only ADDS a refusal before anything is built: it removes a publishing path, adds no product, asset, or catalog content, changes no artifact bytes, and narrows rather than widens what the release workflow may do. No implementation authority is transferred and the accepted Vellum expansion boundary is unchanged.",
+  "tests": [
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
