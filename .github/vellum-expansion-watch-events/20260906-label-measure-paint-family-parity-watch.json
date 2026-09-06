@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260906-label-measure-paint-family-parity-watch",
+  "created_at": "2026-09-06T21:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Label::paint() resolved its font family as own-family-else-Inter, skipping the inherited step that Label::intrinsic_width(), baseline_offset(), measured_height(), and resolve_text_style() all walk. A Label with no own family under a parent that sets one was therefore measured against the inherited face and painted with Inter, so Yoga reserved one face's advance while the painter drew another; on a pinned box the surplus clipped inside the box with no overflow and no diagnostic. The change makes paint walk the identical own -> inherited -> Inter cascade and pins the measure >= paint invariant in tests. This reaches render-assets-and-backends only through the core/view/** path selector; the touched code is widget-side typography resolution feeding an existing set_font_full call. No render backend, raster path, GPU surface, asset pipeline, or Skia/Dawn code is touched, no font is registered or resolved differently by the canvas, and no importer, DesignIR schema, or codegen output changes. Registered as watch-only so the family's coverage stays honest about a typography-resolution change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-widgets-label"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -14,6 +14,8 @@
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/font_resolver.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 
 #include <string>
 
@@ -1411,4 +1413,237 @@ TEST_CASE("Label re-shapes when a font registration bumps the generation",
         REQUIRE(text_shaper_prepare_call_count() - after_warm == 1);
     }
     REQUIRE(commands_of(after, DrawCommand::Type::fill_text).size() >= 2);
+}
+
+// ── measure/paint parity ────────────────────────────────────────────────────
+//
+// A single-line non-vertical Label is sized by Yoga from intrinsic_width().
+// When the resulting box is pinned (flex_shrink 0) the painter gets no room
+// to overflow, so any advance beyond the measured width clips inside the box
+// with no diagnostic at all — "SNAPSHOT" renders as "SNAPSHO". The two sides
+// therefore have to resolve typography identically, and measure must be an
+// upper bound on paint.
+
+namespace {
+
+// The font state Label::paint() installs on the canvas, paired with the run it
+// actually draws. Reading paint's own inputs back out of the recorded command
+// stream keeps this a measurement OF the paint path rather than a second
+// independent guess at the same numbers.
+struct PaintedRun {
+    std::string family;
+    std::string text;
+    float font_size = 0.0f;
+    int font_weight = 400;
+    int font_slant = 0;
+    float letter_spacing = 0.0f;
+    bool valid = false;
+};
+
+PaintedRun painted_run_of(const RecordingCanvas& canvas) {
+    PaintedRun run;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == DrawCommand::Type::set_font_full) {
+            run.family = command.text;
+            run.font_size = command.f[0];
+            run.font_weight = static_cast<int>(command.f[1]);
+            run.font_slant = static_cast<int>(command.f[2]);
+            run.letter_spacing = command.f[3];
+        } else if (command.type == DrawCommand::Type::fill_text) {
+            run.text = command.text;
+            run.valid = true;
+            break;  // a single-line Label draws exactly one run
+        }
+    }
+    return run;
+}
+
+// Paint into a box far wider than the text so neither ellipsis truncation nor
+// wrapping perturbs the run under test.
+PaintedRun paint_once(Label& label) {
+    label.set_bounds({0, 0, 400, 40});
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    return painted_run_of(canvas);
+}
+
+// Width the painted run advances, shaped through the same TextShaper entry
+// point intrinsic_width() measures with. Same instrument on both sides, so a
+// difference is a difference in the inputs, not in the ruler.
+float painted_run_width(const PaintedRun& run) {
+    return global_text_shaper()
+        .prepare(run.text, run.family, run.font_size, run.font_weight,
+                 run.font_slant, run.letter_spacing)
+        .total_width();
+}
+
+}  // namespace
+
+TEST_CASE("Label paint resolves the font family intrinsic_width measured",
+          "[view][widget][label][measure-paint-parity]") {
+    SECTION("own family wins") {
+        Label label("SNAPSHOT");
+        label.set_font_size(10.0f);
+        label.set_font_family("IBM Plex Mono");
+        const auto run = paint_once(label);
+        REQUIRE(run.valid);
+        CHECK(run.family == "IBM Plex Mono");
+    }
+
+    SECTION("inherited family when the Label sets none") {
+        View parent;
+        parent.set_inheritable_font_family("IBM Plex Mono");
+        auto owned = std::make_unique<Label>("SNAPSHOT");
+        auto* label = owned.get();
+        label->set_font_size(10.0f);
+        parent.add_child(std::move(owned));
+
+        const auto run = paint_once(*label);
+        REQUIRE(run.valid);
+        // intrinsic_width() resolves own family -> inherited -> "Inter".
+        // Paint has to walk the identical cascade; skipping the inherited
+        // step makes Yoga reserve one face's advance while the painter draws
+        // another, and a pinned box clips the difference.
+        CHECK(run.family == "IBM Plex Mono");
+    }
+
+    SECTION("Inter when neither own nor inherited family is set") {
+        Label label("SNAPSHOT");
+        label.set_font_size(10.0f);
+        const auto run = paint_once(label);
+        REQUIRE(run.valid);
+        CHECK(run.family == "Inter");
+    }
+}
+
+TEST_CASE("Label intrinsic_width covers the advance paint requests",
+          "[view][widget][label][measure-paint-parity]") {
+    auto covers = [](Label& label) {
+        const float measured = label.intrinsic_width();
+        const auto run = paint_once(label);
+        REQUIRE(run.valid);
+        const float painted = painted_run_width(run);
+        INFO("family=" << run.family << " text=" << run.text
+             << " size=" << run.font_size << " spacing=" << run.letter_spacing
+             << " measured=" << measured << " painted=" << painted);
+        CHECK(measured + 0.01f >= painted);
+    };
+
+    SECTION("default family") {
+        Label label("SNAPSHOT");
+        label.set_font_size(10.0f);
+        covers(label);
+    }
+
+    SECTION("explicit letter spacing") {
+        Label label("SNAPSHOT");
+        label.set_font_size(10.0f);
+        label.set_letter_spacing(1.5f);
+        covers(label);
+    }
+
+    SECTION("uppercase text transform") {
+        Label label("snapshot");
+        label.set_font_size(10.0f);
+        label.set_text_transform(Label::TextTransform::uppercase);
+        covers(label);
+    }
+
+    SECTION("unregistered family falls back on both sides") {
+        Label label("SNAPSHOT");
+        label.set_font_size(10.0f);
+        label.set_font_family("Pulp Unregistered Test Face");
+        covers(label);
+    }
+
+    SECTION("inherited unregistered family") {
+        View parent;
+        parent.set_inheritable_font_family("Pulp Unregistered Test Face");
+        auto owned = std::make_unique<Label>("SNAPSHOT");
+        auto* label = owned.get();
+        label->set_font_size(10.0f);
+        parent.add_child(std::move(owned));
+        covers(*label);
+    }
+}
+
+// Negative control for the advance measurement above: doubling the string must
+// roughly double the advance. A ruler that cannot see that is not measuring
+// text, and every parity verdict resting on it would be worthless.
+TEST_CASE("painted run advance scales with the length of the run",
+          "[view][widget][label][measure-paint-parity]") {
+    Label single("SNAPSHOT");
+    single.set_font_size(10.0f);
+    Label doubled("SNAPSHOTSNAPSHOT");
+    doubled.set_font_size(10.0f);
+
+    const float one = painted_run_width(paint_once(single));
+    const float two = painted_run_width(paint_once(doubled));
+    INFO("one=" << one << " two=" << two);
+    REQUIRE(one > 0.0f);
+    CHECK(two > one * 1.8f);
+    CHECK(two < one * 2.2f);
+}
+
+// ── measure/paint parity, in Skia raster ────────────────────────────────────
+//
+// The command-stream tests above read paint's own inputs back out of a
+// RecordingCanvas, which proves paint ASKS for the right family. They cannot
+// prove the rasterizer then draws that face — a canvas command is a request,
+// not ink. This renders the same Label two ways through CPU Skia and compares
+// the pixels.
+//
+// Both cases are given identical explicit bounds, so layout is held constant
+// and the ONLY free variable is which face paint resolves. Case A names the
+// family on the Label; case B leaves the Label's own family empty and puts the
+// same family on an ancestor's inheritable slot — the shape the widget bridge
+// actually produces, because it stores a container's font-family there for
+// descendant Labels to pick up. When paint honours the inherited step both
+// cases resolve to one face and the rasters coincide; when paint skips it,
+// case B silently falls back to Inter and the ink diverges.
+
+TEST_CASE("Label paints the inherited family in Skia raster", "[label][skia][parity]") {
+    constexpr uint32_t kW = 400;
+    constexpr uint32_t kH = 40;
+    constexpr float kScale = 2.0f;
+    // Long enough that a face swap displaces the tail by more than antialiasing.
+    const std::string kText = "SNAPSHOT PRESETS SCULPT";
+    const std::string kFamily = "JetBrains Mono";  // bundled, and not Inter
+
+    auto render = [&](bool inherit_family) {
+        View parent;
+        parent.set_bounds({0, 0, float(kW), float(kH)});
+        if (inherit_family) parent.set_inheritable_font_family(kFamily);
+
+        auto owned = std::make_unique<Label>();
+        Label* label = owned.get();
+        label->set_text(kText);
+        label->set_font_size(16.0f);
+        if (!inherit_family) label->set_font_family(kFamily);
+        parent.add_child(std::move(owned));
+        // Pin both cases to the same box: layout is held constant so the only
+        // difference the pixels can carry is the face paint chose.
+        label->set_bounds({0, 0, float(kW), float(kH)});
+
+        return render_to_png(parent, kW, kH, kScale, ScreenshotBackend::skia);
+    };
+
+    const auto own_family = render(false);
+    if (own_family.empty()) SKIP("Skia raster screenshot backend unavailable");
+    const auto inherited_family = render(true);
+    REQUIRE_FALSE(inherited_family.empty());
+
+    // Partial-Skia lanes no-op raster text; skip rather than false-fail. Without
+    // this floor the comparison would pass on two identically blank frames.
+    const auto stats = analyze_screenshot_content(own_family);
+    if (!stats.passes_content_floor()) SKIP("native raster unavailable in this build");
+
+    const auto result = compare_screenshots(own_family, inherited_family);
+    REQUIRE(result.valid);
+    INFO("similarity=" << result.similarity
+         << " mean_error=" << result.mean_error
+         << " differing_pixels=" << result.diff_pixels);
+    // Same text, same box, same face: the two renders are the same image.
+    CHECK(result.similarity > 0.999f);
+    CHECK(result.diff_pixels == 0);
 }
