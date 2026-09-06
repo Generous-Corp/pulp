@@ -87,7 +87,7 @@ jobs:
       # fails without it. A self-hosted runner happened to have python3.12 on
       # PATH; a hosted image guarantees no particular minor version there, so
       # pin it explicitly rather than inheriting whatever the image ships.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
