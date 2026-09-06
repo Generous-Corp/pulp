@@ -1134,9 +1134,21 @@ void Label::paint(canvas::Canvas& canvas) {
     }
 
     // Propagate setFontFamily / setFontWeight / setLetterSpacing through to
-    // the canvas backend so JS calls actually change rasterised glyphs. Empty
-    // font_family_ falls back to the default theme face.
-    const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
+    // the canvas backend so JS calls actually change rasterised glyphs.
+    //
+    // Walk the same own -> inherited -> "Inter" cascade intrinsic_width(),
+    // baseline_offset(), measured_height(), and resolve_text_style() walk. A
+    // container View stores its font-family on the inheritable slot, so
+    // skipping that step measures a Label against the inherited face and
+    // draws it with Inter. Yoga then reserves one face's advance while the
+    // painter needs another's, and a box pinned to the intrinsic width clips
+    // the surplus with no overflow to make it visible.
+    std::string family = font_family_;
+    if (family.empty()) {
+        if (auto inherited = inheritable_font_family(); inherited.has_value())
+            family = inherited.value();
+    }
+    if (family.empty()) family = "Inter";
     canvas.set_font_full(family, effective_font_size, weight,
                           font_style_, effective_letter_spacing);
 
