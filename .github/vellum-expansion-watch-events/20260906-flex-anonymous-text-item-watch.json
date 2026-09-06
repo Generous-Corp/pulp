@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260906-flex-anonymous-text-item-watch",
+  "created_at": "2026-09-06T23:55:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "build_yoga_subtree attached a Yoga measure function only when a view had no managed children, so a text-bearing view that also had element children contributed zero layout weight for its own text while Label::paint still drew that text at the view's content origin -- the first element child's position. The container collapsed to its children and the text painted underneath them, with correct intrinsic measurements present but never consulted. The change builds the anonymous inline box CSS would: a measured Yoga child whose context points back at the owning view, whose resolved rect becomes the owner's text slot, so measurement and paint agree. This reaches render-assets-and-backends only through the core/view/** path selector; the touched code is Yoga tree construction and the Label paint transform. No render backend, raster path, GPU surface, asset pipeline, or Skia/Dawn code is touched, and no importer, DesignIR schema, or codegen output changes -- both real lowering paths (the @pulp/react reconciler and the web-compat DOM shim) were measured and already emitted correct sibling structure, so no lowering behaviour moves. visual-proof-harness is crossed by exactly one file, test/cmake/view_widget_bridge_tests.cmake, only to register one new Catch2 suite; no fixture, baseline, screenshot, or harness contract changes. Registered as watch-only so the families' coverage stays honest about a layout change that crossed their selectors. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-widget-bridge-flex-text-children"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
