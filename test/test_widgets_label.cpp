@@ -1412,3 +1412,68 @@ TEST_CASE("Label re-shapes when a font registration bumps the generation",
     }
     REQUIRE(commands_of(after, DrawCommand::Type::fill_text).size() >= 2);
 }
+
+TEST_CASE("Label centers real ink, not the em square",
+          "[view][widget][label][alignment][baseline]") {
+    // `font_size` is the em square, not the ink the face actually draws. A
+    // baseline placed at `font_size * 0.85` therefore sits at a ratio no real
+    // typeface has, so two labels centered in equal boxes paint their ink at
+    // different heights and `align-items: baseline` aligns a row on a number
+    // nothing draws at. Centering is defined on ascent + descent, which makes
+    // the ink's own midpoint land on the box's midpoint at every size.
+    auto& shaper = pulp::canvas::global_text_shaper();
+    const auto face = shaper.prepare(" ", "Inter", 13.0f, 400, 0);
+    if (!face.metrics_are_real()) return;  // no Skia: nothing to assert
+
+    const float box_h = 44.0f;
+    for (float fs : {11.0f, 13.0f, 16.0f, 28.0f}) {
+        Label label("Hg");
+        label.set_font_family("Inter");
+        label.set_font_size(fs);
+        label.set_vertical_align(TextVerticalAlign::center);
+        label.set_bounds({0, 0, 120, box_h});
+
+        RecordingCanvas canvas;
+        label.paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+
+        const auto m = shaper.prepare(" ", "Inter", fs, 400, 0);
+        const float baseline = fills[0].f[1];
+        // Ink spans [baseline - ascent, baseline + descent]; its midpoint is
+        // the box midpoint exactly when the box is centered on the ink.
+        const float ink_center = baseline + (m.descent() - m.ascent()) * 0.5f;
+        INFO("font_size " << fs << " baseline " << baseline);
+        CHECK(ink_center == Catch::Approx(box_h * 0.5f).margin(0.01f));
+    }
+}
+
+TEST_CASE("Label centering does not move when line-height changes",
+          "[view][widget][label][alignment][baseline]") {
+    // A line box taller than its ink distributes the surplus evenly above and
+    // below (CSS half-leading), so the leading cancels out of a centered
+    // baseline. Dropping the top half spends the whole surplus below the
+    // glyphs, which paints the same string higher as line-height grows -- two
+    // labels in equal boxes then disagree by half the line-height difference.
+    auto& shaper = pulp::canvas::global_text_shaper();
+    if (!shaper.prepare(" ", "Inter", 13.0f, 400, 0).metrics_are_real()) return;
+
+    auto baseline_with = [](float line_height) {
+        Label label("Hg");
+        label.set_font_family("Inter");
+        label.set_font_size(13.0f);
+        label.set_multi_line(true);  // take the line-box painter
+        label.set_vertical_align(TextVerticalAlign::center);
+        if (line_height > 0) label.set_line_height(line_height);
+        label.set_bounds({0, 0, 200, 44});
+        RecordingCanvas canvas;
+        label.paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[1];
+    };
+
+    const float tight = baseline_with(16.0f);
+    const float loose = baseline_with(40.0f);
+    CHECK(tight == Catch::Approx(loose).margin(0.01f));
+}
