@@ -14,6 +14,8 @@
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/font_resolver.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 
 #include <string>
 
@@ -1581,4 +1583,67 @@ TEST_CASE("painted run advance scales with the length of the run",
     REQUIRE(one > 0.0f);
     CHECK(two > one * 1.8f);
     CHECK(two < one * 2.2f);
+}
+
+// ── measure/paint parity, in Skia raster ────────────────────────────────────
+//
+// The command-stream tests above read paint's own inputs back out of a
+// RecordingCanvas, which proves paint ASKS for the right family. They cannot
+// prove the rasterizer then draws that face — a canvas command is a request,
+// not ink. This renders the same Label two ways through CPU Skia and compares
+// the pixels.
+//
+// Both cases are given identical explicit bounds, so layout is held constant
+// and the ONLY free variable is which face paint resolves. Case A names the
+// family on the Label; case B leaves the Label's own family empty and puts the
+// same family on an ancestor's inheritable slot — the shape the widget bridge
+// actually produces, because it stores a container's font-family there for
+// descendant Labels to pick up. When paint honours the inherited step both
+// cases resolve to one face and the rasters coincide; when paint skips it,
+// case B silently falls back to Inter and the ink diverges.
+
+TEST_CASE("Label paints the inherited family in Skia raster", "[label][skia][parity]") {
+    constexpr uint32_t kW = 400;
+    constexpr uint32_t kH = 40;
+    constexpr float kScale = 2.0f;
+    // Long enough that a face swap displaces the tail by more than antialiasing.
+    const std::string kText = "SNAPSHOT PRESETS SCULPT";
+    const std::string kFamily = "JetBrains Mono";  // bundled, and not Inter
+
+    auto render = [&](bool inherit_family) {
+        View parent;
+        parent.set_bounds({0, 0, float(kW), float(kH)});
+        if (inherit_family) parent.set_inheritable_font_family(kFamily);
+
+        auto owned = std::make_unique<Label>();
+        Label* label = owned.get();
+        label->set_text(kText);
+        label->set_font_size(16.0f);
+        if (!inherit_family) label->set_font_family(kFamily);
+        parent.add_child(std::move(owned));
+        // Pin both cases to the same box: layout is held constant so the only
+        // difference the pixels can carry is the face paint chose.
+        label->set_bounds({0, 0, float(kW), float(kH)});
+
+        return render_to_png(parent, kW, kH, kScale, ScreenshotBackend::skia);
+    };
+
+    const auto own_family = render(false);
+    if (own_family.empty()) SKIP("Skia raster screenshot backend unavailable");
+    const auto inherited_family = render(true);
+    REQUIRE_FALSE(inherited_family.empty());
+
+    // Partial-Skia lanes no-op raster text; skip rather than false-fail. Without
+    // this floor the comparison would pass on two identically blank frames.
+    const auto stats = analyze_screenshot_content(own_family);
+    if (!stats.passes_content_floor()) SKIP("native raster unavailable in this build");
+
+    const auto result = compare_screenshots(own_family, inherited_family);
+    REQUIRE(result.valid);
+    INFO("similarity=" << result.similarity
+         << " mean_error=" << result.mean_error
+         << " differing_pixels=" << result.diff_pixels);
+    // Same text, same box, same face: the two renders are the same image.
+    CHECK(result.similarity > 0.999f);
+    CHECK(result.diff_pixels == 0);
 }
