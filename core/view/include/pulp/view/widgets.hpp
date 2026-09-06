@@ -1402,6 +1402,13 @@ public:
     std::function<void()> on_gesture_end;
 
     void paint(canvas::Canvas& canvas) override;
+    /// The control's own default box height. A childless leaf that reports
+    /// no intrinsic size gets no Yoga measure function, so in a row with
+    /// `align-items: center` and no authored height it lays out at zero
+    /// height -- and because the thumb's minor axis is derived from the box
+    /// height, the handle collapses to zero area and only the track keyline
+    /// paints. 16 is the thumb minor-axis size `paint()` already targets.
+    float intrinsic_height() const override { return 16.0f; }
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_enter() override;
