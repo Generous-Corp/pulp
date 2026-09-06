@@ -5,6 +5,7 @@
 // Contract: core/view/include/pulp/view/view_lifecycle.hpp.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/state/store.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -12,6 +13,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/view_lifecycle.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include <memory>
 #include <stdexcept>
@@ -108,6 +110,88 @@ TEST_CASE("retained scroll upgrade fails closed when the removal is stolen",
     // The panel left the tree by its own hand, and the upgrade published no
     // half-built wrapper in its place.
     REQUIRE(container_raw->child_count() == 0);
+}
+
+TEST_CASE("an imported UI's text scales through one bridge knob",
+          "[view][bridge][typography]") {
+    // An imported design carries its type sizes as literals scattered through
+    // the authored source — Spectr's chrome measures 9-11px, legible in a
+    // browser tab and small in a plugin window. There was no single value a
+    // host could turn, so the only way to resize it was editing every literal,
+    // which a reimport then reverts. setFontSize is the one funnel every styled
+    // text size passes through, so the scale belongs there.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createLabel('a', 'hello', ''); setFontSize('a', 10);");
+    auto* unscaled = dynamic_cast<Label*>(bridge.widget("a"));
+    REQUIRE(unscaled != nullptr);
+    // Positive control: the default really is neutral, so a difference below is
+    // the scale and not some other effect of re-running the script.
+    REQUIRE(bridge.imported_text_scale() == 1.0f);
+    REQUIRE(unscaled->font_size() == Catch::Approx(10.0f));
+
+    bridge.set_imported_text_scale(1.5f);
+    engine.evaluate("setFontSize('a', 10)");
+    CHECK(unscaled->font_size() == Catch::Approx(15.0f));
+
+    // Rejected inputs must leave the last good value rather than silently
+    // making text invisible or unbounded.
+    bridge.set_imported_text_scale(0.0f);
+    CHECK(bridge.imported_text_scale() == Catch::Approx(1.5f));
+    bridge.set_imported_text_scale(-2.0f);
+    CHECK(bridge.imported_text_scale() == Catch::Approx(1.5f));
+    bridge.set_imported_text_scale(100.0f);
+    CHECK(bridge.imported_text_scale() == Catch::Approx(4.0f));
+}
+
+TEST_CASE("the retained scroll upgrade keeps the content's flex role",
+          "[view][bridge][scroll][lifecycle][layout]") {
+    // The upgrade replaces a retained container with a ScrollView wrapper that
+    // takes the container's place in the parent's layout. It therefore has to
+    // take its LAYOUT ROLE, not just its current pixel rectangle.
+    //
+    // Copying only bounds silently converts a flex-sized container into a
+    // fixed-size one: the wrapper freezes at whatever height the content
+    // happened to have at upgrade time and never grows again. An authored
+    // `flex: 1; min-height: 0` body — the standard scrollable-panel idiom, and
+    // what a Settings panel uses — then collapses to its pre-layout height.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 600});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    auto header = std::make_unique<View>();
+    header->set_id("header");
+    header->flex().preferred_height = 80.0f;
+    root.add_child(std::move(header));
+
+    auto body = std::make_unique<View>();
+    body->set_id("body");
+    body->flex().flex_grow = 1.0f;
+    View* body_raw = body.get();
+    root.add_child(std::move(body));
+
+    root.layout_children();
+    // Positive control: flex really does hand the body the remaining space
+    // BEFORE the upgrade, or the assertion afterwards proves nothing.
+    const float flexed_height = body_raw->bounds().height;
+    REQUIRE(flexed_height > 400.0f);
+
+    REQUIRE(bridge.widget("body") == body_raw);
+    engine.evaluate("__domAppend('', 'body', 'div', 'scroll')");
+
+    auto* wrapper = bridge.scroll_wrapper("body");
+    REQUIRE(wrapper != nullptr);
+    root.layout_children();
+
+    // The wrapper now occupies the body's slot, so it must still grow into it.
+    CHECK(wrapper->flex().flex_grow == 1.0f);
+    CHECK(wrapper->bounds().height > 400.0f);
 }
 
 TEST_CASE("a reparent that fails at both ends keeps the first error and strands nothing",

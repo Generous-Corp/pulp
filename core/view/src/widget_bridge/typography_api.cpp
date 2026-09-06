@@ -213,6 +213,10 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         auto* v = self.widget(id);
         if (!v || !finite_float(args.get<double>(1, 14), size) || size <= 0.0f)
             return choc::value::Value();
+        // The one funnel every styled text size from an imported UI passes
+        // through, so scaling here reaches all of them without any authored
+        // literal being touched. Default scale is 1.0 and changes nothing.
+        size *= self.imported_text_scale();
         if (auto* l = dynamic_cast<Label*>(v)) {
             l->set_font_size(size);
         } else if (auto* e = dynamic_cast<TextEditor*>(v)) {

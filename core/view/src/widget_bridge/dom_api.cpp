@@ -272,6 +272,22 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                                          content_bounds.width,
                                          content_bounds.height});
                     auto* wrapper = static_cast<ScrollView*>(scroll.get());
+                    // The wrapper takes the retained view's PLACE in the
+                    // parent's layout, so it must take its layout ROLE, not
+                    // just its pixel rectangle. Copying bounds alone silently
+                    // converts a flex-sized container into a fixed-size one:
+                    // an authored `flex: 1; min-height: 0` body — the standard
+                    // scrollable-panel idiom — freezes at whatever height it
+                    // happened to have when the upgrade ran, and never grows
+                    // again. Yoga is the layout engine here, so the flex style
+                    // IS the sizing contract; leaving it behind drops the
+                    // container out of the layout it was authored into.
+                    wrapper->flex() = removed->flex();
+                    // Inside a scroll container the content sizes to its own
+                    // content so there is something to scroll. It must not keep
+                    // growing or shrinking against the wrapper it now fills.
+                    removed->flex().flex_grow = 0.0f;
+                    removed->flex().flex_shrink = 0.0f;
                     // Preflight alias publication while the authored subtree
                     // is still attached. This forces all potentially-failing
                     // allocations before structural mutation; the catch

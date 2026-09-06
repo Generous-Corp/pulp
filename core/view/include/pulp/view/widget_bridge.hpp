@@ -21,6 +21,7 @@
 #include <pulp/state/store.hpp>
 
 namespace pulp::view { struct ClaudeBundle; }
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -99,6 +100,24 @@ public:
     void set_value_channel_access(ValueChannelAccess access);
     /// The visitor must not retain a channel set or source after it returns.
     void visit_value_channels(const ValueChannelVisitor& visitor) const;
+
+    /// Multiplies every font size an imported UI asks for through setFontSize.
+    ///
+    /// An imported design carries its type sizes as literals — a panel authored
+    /// at 9-11px is legible in a browser tab and small in a plugin window — and
+    /// they are scattered across the authored source, so there is no single
+    /// value a host can turn. This is that value. It is applied at the one
+    /// bridge funnel every styled text size passes through, so a host or plugin
+    /// can size an imported UI for its own context without editing (or
+    /// re-editing, after each reimport) any authored literal.
+    ///
+    /// Default 1.0 changes nothing. Values are clamped to a sane range so a bad
+    /// number cannot make text invisible or unbounded.
+    void set_imported_text_scale(float scale) noexcept {
+        if (!(scale > 0.0f)) return;  // NaN-safe: rejects 0, negatives and NaN
+        imported_text_scale_ = std::clamp(scale, 0.5f, 4.0f);
+    }
+    float imported_text_scale() const noexcept { return imported_text_scale_; }
 
     CapabilitySet granted_capabilities() const noexcept { return granted_capabilities_; }
     // True iff a GpuSurface is attached AND its adapter reports
@@ -519,6 +538,7 @@ private:
     // (View::retire), not by the bridge, so it obeys the same contract as a
     // removal from a native lifecycle hook. callback_alive_ carries the root
     // pointer because most callback closures capture only this state.
+    float imported_text_scale_ = 1.0f;
     std::shared_ptr<BridgeCallbackState> callback_alive_;
     std::shared_ptr<std::mutex> async_exec_mutex_ = std::make_shared<std::mutex>();
     std::shared_ptr<std::vector<AsyncExecResult>> async_exec_results_ =
