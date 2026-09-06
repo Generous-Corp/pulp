@@ -2742,7 +2742,9 @@
         "core/playback/include/pulp/playback/program_compiler.hpp",
         "test/test_timeline_nesting_playback.cpp",
         "tools/scripts/negative_capability_allowlist.json",
-        "docs/status/sequencer-exposure.json"
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md"
       ],
       "evidence": [
         {
@@ -2765,6 +2767,13 @@
           "path": "tools/scripts/negative_capability_allowlist.json",
           "needles": [
             "NestedGainSinkUnsupported"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "NestedGainSinkUnsupported",
+            "composes by multiplying"
           ]
         }
       ],
