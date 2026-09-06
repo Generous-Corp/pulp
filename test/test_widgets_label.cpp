@@ -1413,7 +1413,7 @@ TEST_CASE("Label re-shapes when a font registration bumps the generation",
     REQUIRE(commands_of(after, DrawCommand::Type::fill_text).size() >= 2);
 }
 
-TEST_CASE("Label centers real ink, not the em square",
+TEST_CASE("Label centers real ink rather than the em square",
           "[view][widget][label][alignment][baseline]") {
     // `font_size` is the em square, not the ink the face actually draws. A
     // baseline placed at `font_size * 0.85` therefore sits at a ratio no real
