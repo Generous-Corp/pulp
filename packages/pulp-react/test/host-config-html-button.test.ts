@@ -1,6 +1,9 @@
 // Lowercase HTML buttons imported through Chromium/DesignIR must retain DOM
 // styling and captured typography. They therefore lower to a generic native
-// box plus a full-box Label child; explicit Pulp <Button> remains TextButton.
+// box plus a caption Label child; explicit Pulp <Button> remains TextButton.
+// The caption stays in normal flow so the button is sized by its text the way
+// the browser box was — an absolute caption contributes no intrinsic size and
+// collapses every text-sized button to padding plus border.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createMockBridge, type MockBridge } from '../src/bridge.js';
@@ -36,10 +39,12 @@ describe('HTML button materialization', () => {
             ]);
         expect(bridge.calls.find(c => c.fn === 'createLabel')?.args)
             .toEqual(['action__text', 'PRECISION', 'action']);
+        // In flow, and with no insets pinning it to the owner box, so the
+        // caption's measured text width still sizes the button.
         expect(bridge.calls.filter(c => c.fn === 'setPosition' ||
             c.fn === 'setTop' || c.fn === 'setRight' ||
-            c.fn === 'setBottom' || c.fn === 'setLeft').map(c => c.fn))
-            .toEqual(['setPosition', 'setTop', 'setRight', 'setBottom', 'setLeft']);
+            c.fn === 'setBottom' || c.fn === 'setLeft').map(c => c.args))
+            .toEqual([['action__text', 'static']]);
         expect(bridge.calls.find(c => c.fn === 'setPointerEvents')?.args)
             .toEqual(['action__text', 'none']);
         expect(instance.textTargetId).toBe('action__text');
@@ -70,6 +75,18 @@ describe('HTML button materialization', () => {
             .toEqual([
                 ['action', 'align_items', 'center'],
                 ['action', 'justify_content', 'center'],
+            ]);
+        // The empty caption stub must not claim a flex slot beside the
+        // authored nested children, so it stays a full-box overlay.
+        expect(bridge.calls.filter(c => c.fn === 'setPosition' ||
+            c.fn === 'setTop' || c.fn === 'setRight' ||
+            c.fn === 'setBottom' || c.fn === 'setLeft').map(c => c.args))
+            .toEqual([
+                ['action__text', 'absolute'],
+                ['action__text', 0],
+                ['action__text', 0],
+                ['action__text', 0],
+                ['action__text', 0],
             ]);
     });
 
