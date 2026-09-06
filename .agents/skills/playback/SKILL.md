@@ -1230,3 +1230,37 @@ the expression gone. Note the tempo-point check fires *before* the per-track
 loop, so a fixture passing no tempo points is refused for that reason first —
 an encode-refusal test in a suite without a tempo fixture will pass for the
 wrong reason.
+
+## Nested gain composes by multiplying; pan and a placement fade cannot
+
+`sequence_content_lowerer.cpp` flattens a `SequenceRef` into leaf clips on the
+referring track, so anything the child track owned has to find a home on a leaf
+or be refused. Gain has one: nesting stacks gain stages in series, and the
+flattened leaf carries their product —
+`placement.gain * child_track.gain * leaf.gain`, composing again at each extra
+level. Unity is exactly the identity, so a transparent nesting returns the
+float the leaf authored rather than a rounded near-miss, and an equality
+assertion on the composed value is measuring composition rather than rounding
+when the fixture uses powers of two.
+
+Three neighbouring cases have no such home and keep their own refusal rather
+than being folded away — the code names which obstacle it hit:
+
+- `NestedMixerPanUnsupported` — a clip carries no stereo placement at all, and
+  the parent track's single pan also serves everything else on that track.
+  Unlike gain there is no sink for *any* content kind.
+- `NestedPlacementFadeUnsupported` — a fade on the `SequenceRef` placement is
+  one envelope across the whole nested window, while a leaf can only fade from
+  its own edge. A leaf lying inside the fade region needs a partial ramp
+  `ClipPlaybackProperties` cannot express. An expressiveness limit, not a
+  choice between two defensible answers.
+- `NestedGainSinkUnsupported` — a composed gain lands on the leaf's clip gain,
+  and **clip gain only reaches a renderer for media content**. Note, registered
+  and opaque leaves compile to events, and nothing scales an event by the gain
+  of the clip that carried it, so folding a child fader into one would discard
+  it silently. This is the easy thing to get wrong: the composition looks
+  correct in the lowerer and is simply never read.
+
+So a nested child holding notes still refuses a fader, and the fixture that
+proves it must use media content to see composition at all. Read the composed
+value through `TrackProgram::audio_program()->clips()[n].gain_linear`.
