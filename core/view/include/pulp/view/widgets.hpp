@@ -304,6 +304,18 @@ public:
     /// panels where weight came from the cascade.
     int effective_font_weight() const;
 
+    /// The font family this Label paints with: its own `font_family()` if set,
+    /// else the nearest ancestor's `inheritable_font_family()`, else "Inter".
+    ///
+    /// Every stage that reasons about this text has to resolve the family the
+    /// same way. `intrinsic_width()` hands Yoga an advance, `paint()` hands the
+    /// canvas a face, and if those disagree Yoga reserves one face's width
+    /// while the painter needs another's. An auto-width Label absorbs that by
+    /// overflowing; a Label pinned to its intrinsic width has nowhere to put
+    /// the surplus, so the tail clips inside the box with nothing to show that
+    /// it happened.
+    std::string effective_font_family() const;
+
     /// Baseline offset from the top of the Label's measured box, used by Yoga's
     /// `YGNodeSetBaselineFunc` to honor `align-items: baseline` on
     /// flex containers. Returns
