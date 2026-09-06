@@ -1083,6 +1083,22 @@ void Label::paint_attributed_lines_(canvas::Canvas& canvas,
 }
 
 void Label::paint(canvas::Canvas& canvas) {
+    // A Label that also has element children draws its own text inside the
+    // anonymous inline box the layout pass reserved for it on the flex line.
+    // Without that slot the text would start at the same content origin the
+    // first child lays out from and the two would overlap.
+    if (!has_own_text_box()) {
+        paint_text_(canvas, {0.0f, 0.0f, bounds().width, bounds().height});
+        return;
+    }
+    const Rect box = own_text_box();
+    canvas.save();
+    canvas.translate(box.x, box.y);
+    paint_text_(canvas, {0.0f, 0.0f, box.width, box.height});
+    canvas.restore();
+}
+
+void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
     // While the inline editor is open it IS the label's visible surface; the
     // static text underneath would show through the field's own background
     // wherever that background is transparent.
@@ -1150,10 +1166,10 @@ void Label::paint(canvas::Canvas& canvas) {
     if (vertical) {
         canvas.save();
         if (text_direction_ == canvas::TextDirection::top_to_bottom) {
-            canvas.translate(bounds().width * 0.5f + effective_font_size * 0.35f, 0);
+            canvas.translate(text_box.width * 0.5f + effective_font_size * 0.35f, 0);
             canvas.rotate(3.14159265f / 2.0f);
         } else {
-            canvas.translate(bounds().width * 0.5f - effective_font_size * 0.35f, bounds().height);
+            canvas.translate(text_box.width * 0.5f - effective_font_size * 0.35f, text_box.height);
             canvas.rotate(-3.14159265f / 2.0f);
         }
     }
@@ -1218,21 +1234,21 @@ void Label::paint(canvas::Canvas& canvas) {
     if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
     else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
     const bool captured_cache_usable =
-        bounds().width > 0.0f &&
+        text_box.width > 0.0f &&
         cached_line_layout_usable(display_text, effective_font_size,
-                                  effective_letter_spacing, bounds().width);
+                                  effective_letter_spacing, text_box.width);
     const bool paint_as_lines = multi_line_ || captured_wrap_fallback_ ||
                                 captured_cache_usable || has_attributed_;
-    const float shape_width = bounds().width > 0.0f
-        ? bounds().width : std::numeric_limits<float>::max();
+    const float shape_width = text_box.width > 0.0f
+        ? text_box.width : std::numeric_limits<float>::max();
     const bool use_shaper_wrap = paint_as_lines &&
-        (bounds().width > 0.0f || has_attributed_);
+        (text_box.width > 0.0f || has_attributed_);
 
     // Reuse the cached shaped layout when nothing the shaper depends on has
     // changed, so paint() avoids re-running prepare() + layout_with_lines()
     // (which allocate a PreparedText and per-line strings) every frame inside
     // View::paint_all's no-alloc region. The key captures every shaper input:
-    // display_text, the resolved family/size, the wrap width (bounds().width,
+    // display_text, the resolved family/size, the wrap width (text_box.width,
     // which changes on every resize), the resolved line height, and the break
     // mode and the effective max-lines decision. On a hit the layout is read in place
     // (no copy, no re-shape); the output is byte-identical to a recompute.
@@ -1259,7 +1275,7 @@ void Label::paint(canvas::Canvas& canvas) {
         ShapedLayoutKey key{display_text, std::move(shaped_family_key), font_variant(),
                             effective_font_size, effective_font_weight(),
                             font_style_, effective_letter_spacing,
-                            bounds().width, lh,
+                            text_box.width, lh,
                             static_cast<int>(break_mode),
                             shaped_max_lines,
                             captured_cache_usable,
@@ -1350,10 +1366,10 @@ void Label::paint(canvas::Canvas& canvas) {
             baseline_y = first_line_ascent;
             break;
         case canvas::TextVerticalAlign::bottom:
-            baseline_y = bounds().height - text_h + first_line_ascent;
+            baseline_y = text_box.height - text_h + first_line_ascent;
             break;
         case canvas::TextVerticalAlign::baseline:
-            baseline_y = bounds().height * 0.75f;
+            baseline_y = text_box.height * 0.75f;
             break;
         case canvas::TextVerticalAlign::center:
         default:
@@ -1361,7 +1377,7 @@ void Label::paint(canvas::Canvas& canvas) {
             // first line's baseline. For single-line this collapses to
             // bounds.h/2 + 0.35*font_size (the historic formula) because
             // text_h == effective_font_size and 0.85 - 0.5 == 0.35.
-            baseline_y = (bounds().height - text_h) * 0.5f + first_line_ascent;
+            baseline_y = (text_box.height - text_h) * 0.5f + first_line_ascent;
             break;
     }
     if (captured_cache_usable && shaped_layout != nullptr &&
@@ -1392,11 +1408,11 @@ void Label::paint(canvas::Canvas& canvas) {
             break;
         case LabelAlign::center:
             canvas.set_text_align(canvas::TextAlign::center);
-            x = bounds().width * 0.5f;
+            x = text_box.width * 0.5f;
             break;
         case LabelAlign::right:
             canvas.set_text_align(canvas::TextAlign::right);
-            x = bounds().width;
+            x = text_box.width;
             break;
         case LabelAlign::justify:
             // Emit canvas TextAlign::justify so backends that wire
@@ -1441,10 +1457,10 @@ void Label::paint(canvas::Canvas& canvas) {
         // (CSS truncates at the trailing edge for all three). UTF-8-safe via
         // codepoint binary-search in truncate_to_width().
         float draw_x = x;
-        float available_width = bounds().width;
+        float available_width = text_box.width;
         if (captured_single_line) {
             draw_x = shaped_layout->lines.front().x_offset;
-            available_width = std::max(0.0f, bounds().width - draw_x);
+            available_width = std::max(0.0f, text_box.width - draw_x);
         }
         if (text_overflow_ellipsis())
             draw_text = truncate_to_width(canvas, display_text, available_width);
@@ -1472,7 +1488,7 @@ void Label::paint(canvas::Canvas& canvas) {
                                     text_overflow_ellipsis() &&
                                         shaped_layout->line_count == 1 &&
                                         shaped_layout->lines.front().width >
-                                            bounds().width,
+                                            text_box.width,
                                     captured_cache_usable);
         } else if (use_shaper_wrap) {
             // Shaped-layout iteration path. TextShaper already split
@@ -1500,7 +1516,7 @@ void Label::paint(canvas::Canvas& canvas) {
                 ++emitted;
             }
         } else {
-            // Legacy `\n`-only split path. Used when bounds().width is 0 /
+            // Legacy `\n`-only split path. Used when text_box.width is 0 /
             // unbounded (the shaper has no max_width to break against).
             // Existing consumers see exactly the previous behavior in that
             // case.
