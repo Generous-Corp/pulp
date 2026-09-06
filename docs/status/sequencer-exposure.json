@@ -2624,6 +2624,7 @@
         "core/playback/include/pulp/playback/program_wire.hpp",
         "core/playback/src/program_wire.cpp",
         "test/test_timeline_nesting_playback.cpp",
+        "test/test_playback_program_wire.cpp",
         "test/cmake/timeline_tests.cmake",
         "docs/status/sequencer-exposure.json",
         ".agents/skills/playback/SKILL.md",
@@ -2661,6 +2662,13 @@
           "needles": [
             "source_start",
             "ControllerEventsUnsupported"
+          ]
+        },
+        {
+          "path": "test/test_playback_program_wire.cpp",
+          "needles": [
+            "ControllerEventsUnsupported",
+            "controller_lane_project"
           ]
         }
       ],

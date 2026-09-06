@@ -218,6 +218,33 @@ std::shared_ptr<const Project> many_track_project(std::size_t track_count) {
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
+/// One continuous controller stream a clip can carry beside its notes. The
+/// address is a plain channel-voice controller, and the identities stay clear
+/// of the note and clip identities the builder below uses.
+MidiExpressionLane controller_lane() {
+    return MidiExpressionLane{{21},
+                              MidiLaneAddress{0, 0, 11, 0, 74},
+                              {{{22}, {0}, 0}, {{23}, {kTicksPerQuarter}, 0xffff'ffff}}};
+}
+
+/// One flat MIDI track, with or without a controller lane, so the refusal and
+/// its control differ in exactly the lane the wire has no section for.
+std::shared_ptr<const Project> controller_lane_project(std::vector<MidiExpressionLane> lanes) {
+    auto content = take(MidiContent::create(
+        {NoteEvent{{30}, {0}, {kTicksPerQuarter}, 0xffff, 60, 0}}, {}, 0, std::move(lanes)));
+    auto clip = take(Clip::create({20}, {0}, {kTicksPerQuarter * 4}, std::move(content)));
+    auto sequence = take(Sequence::create(
+        {2}, "root", std::nullopt,
+        std::vector<Track>{take(Track::create({10}, "expressive", {std::move(clip)}))}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "controller lane";
+    input.next_item_id = 1000;
+    input.root_sequence_id = {2};
+    input.sequences.push_back(std::move(sequence));
+    return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
 /// One track playing one audio clip, which is the program shape this version of
 /// the wire deliberately does not represent.
 std::shared_ptr<const Project> audio_project(std::uint64_t frames) {
@@ -1005,6 +1032,40 @@ TEST_CASE("program wire encoder refuses what it cannot represent", "[playback][w
     auto misread = decode_program_wire(aligned.span().subspan(4, size));
     REQUIRE_FALSE(misread);
     REQUIRE(misread.error().code == ProgramWireErrorCode::MisalignedBuffer);
+}
+
+TEST_CASE("program wire encoder refuses a track carrying controller events", "[playback][wire]") {
+    // The wire has no controller section. Encoding the notes alone would put a
+    // program on the wire whose expression is gone, and nothing downstream
+    // could tell that from a project that authored none, so the encoder refuses
+    // the whole program rather than half-encoding it.
+    CompiledProgram with_lane{controller_lane_project({controller_lane()})};
+    const auto expressive = with_lane.store.read();
+    const auto* expressive_track = expressive->find_track({10});
+    REQUIRE(expressive_track != nullptr);
+    REQUIRE_FALSE(expressive_track->arrangement_controller_events().empty());
+
+    auto refused = program_wire_encoded_size(*expressive, kTempoPoints);
+    REQUIRE_FALSE(refused);
+    // Discriminate on the code, not merely on failure. The tempo-map check runs
+    // before the per-track loop, so measuring with points that did not compile
+    // this map refuses for that reason instead and a bare REQUIRE_FALSE would
+    // read as green while proving nothing about controller events.
+    REQUIRE(refused.error().code == ProgramWireErrorCode::ControllerEventsUnsupported);
+    REQUIRE(refused.error().section == static_cast<std::uint32_t>(ProgramWireSection::Tracks));
+    REQUIRE(refused.error().detail == 10);
+
+    // The control the assertion above needs: the same arrangement without the
+    // lane, measured against the same tempo points, encodes. A refusal for any
+    // other reason would otherwise be indistinguishable from the one under test.
+    CompiledProgram without_lane{controller_lane_project({})};
+    const auto plain = without_lane.store.read();
+    const auto* plain_track = plain->find_track({10});
+    REQUIRE(plain_track != nullptr);
+    REQUIRE(plain_track->arrangement_controller_events().empty());
+    REQUIRE(plain_track->arrangement_note_events().size() ==
+            expressive_track->arrangement_note_events().size());
+    REQUIRE(program_wire_encoded_size(*plain, kTempoPoints));
 }
 
 TEST_CASE("program wire carries producer identity alongside the generation", "[playback][wire]") {
