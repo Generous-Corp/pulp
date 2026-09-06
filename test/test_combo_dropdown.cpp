@@ -935,3 +935,106 @@ TEST_CASE("ComboBox: open-menu Enter on a separator does not commit", "[combo]")
     REQUIRE(changed_to != 1);  // separator index 1 was never committed
     REQUIRE(combo.selected_text() != "---");
 }
+
+// ── Dismissal contract ───────────────────────────────────────────────────
+//
+// Two ways a user abandons an open dropdown: Escape, or a click somewhere
+// else. Both are CANCELS — the row the user browsed to with the arrow keys
+// must be discarded, not committed. Asserting only that the menu closed
+// misses the half of the contract that can silently write a value the user
+// never accepted, so both cases below assert the selection AND that
+// `on_change` never fired.
+
+TEST_CASE("ComboBox: Escape closes the menu without committing the browsed row",
+          "[combo]") {
+    ComboBox::close_active_popup();
+
+    ComboBox combo;
+    combo.set_bounds({0, 0, 140, 28});
+    combo.set_items({"Alpha", "Beta", "Gamma"});
+    combo.set_selected(0);
+
+    int change_count = 0;
+    combo.on_change = [&](int) { ++change_count; };
+
+    KeyEvent enter;
+    enter.key = KeyCode::enter;
+    enter.is_down = true;
+    REQUIRE(combo.on_key_event(enter));
+    REQUIRE(combo.is_open());
+
+    // Browse away from the selection. The highlight moves; the value must not.
+    KeyEvent down;
+    down.key = KeyCode::down;
+    down.is_down = true;
+    REQUIRE(combo.on_key_event(down));
+    REQUIRE(combo.on_key_event(down));
+    REQUIRE(combo.hovered_index() == 2);
+    REQUIRE(combo.selected() == 0);  // still uncommitted
+
+    KeyEvent escape;
+    escape.key = KeyCode::escape;
+    escape.is_down = true;
+    REQUIRE(combo.on_key_event(escape));
+
+    REQUIRE_FALSE(combo.is_open());
+    REQUIRE(combo.selected() == 0);
+    REQUIRE(combo.selected_text() == "Alpha");
+    REQUIRE(change_count == 0);
+
+    ComboBox::close_active_popup();
+}
+
+TEST_CASE("ComboBox: an outside click routed through the view tree cancels the menu",
+          "[combo]") {
+    ComboBox::close_active_popup();
+
+    // A real hosted tree, not a detached widget: the combo plus a sibling that
+    // occupies a point the open menu does not cover.
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_bounds({0, 0, 160, 28});
+    combo->set_items({"Alpha", "Beta", "Gamma"});
+    combo->set_selected(0);
+    root.add_child(std::move(owned));
+
+    auto sib = std::make_unique<View>();
+    View* sibling = sib.get();
+    sibling->set_bounds({0, 240, 160, 40});  // well below the open menu
+    root.add_child(std::move(sib));
+
+    KeyEvent enter;
+    enter.key = KeyCode::enter;
+    enter.is_down = true;
+    REQUIRE(combo->on_key_event(enter));
+    REQUIRE(combo->is_open());
+
+    int change_count = 0;
+    combo->on_change = [&](int) { ++change_count; };
+
+    // Resolve every press through the tree, then hand the resolved target to
+    // `notify_global_click` — the portable seam each platform host calls on
+    // press. Calling `close_dropdown()` here would prove nothing about routing.
+    //
+    // Positive control FIRST: a press inside the open menu resolves to the
+    // combo (its hit_test claims the overlay) and must LEAVE IT OPEN, so the
+    // dismissal below cannot be a routing path that always dismisses.
+    View* inside = root.hit_test({20.0f, 40.0f});
+    REQUIRE(inside == combo);
+    ComboBox::notify_global_click(inside);
+    REQUIRE(combo->is_open());
+
+    // The real outside click: the tree resolves it to the sibling, not the combo.
+    View* outside = root.hit_test({20.0f, 260.0f});
+    REQUIRE(outside == sibling);
+    ComboBox::notify_global_click(outside);
+
+    REQUIRE_FALSE(combo->is_open());
+    REQUIRE(combo->selected() == 0);  // dismissal is a cancel, not a commit
+    REQUIRE(change_count == 0);
+
+    ComboBox::close_active_popup();
+}

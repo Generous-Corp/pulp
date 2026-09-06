@@ -253,3 +253,85 @@ TEST_CASE("ContextMenu paint renders without a window", "[view][context-menu]") 
     menu->paint(canvas);
     REQUIRE(canvas.command_count() > before);
 }
+
+// ── Up-arrow navigation ──────────────────────────────────────────────────
+//
+// `move_hover(-1)` had no coverage at all: every keyboard case above drives
+// the menu with Down. Up is not the mirror image of Down for free — it has
+// its own seeding branch (no hover yet → start from the BOTTOM row) and its
+// own edge behaviour (at the top, stay put rather than wrap or go negative),
+// and both are reachable only through Up.
+
+TEST_CASE("ContextMenu keyboard up seeds from the bottom and skips separators",
+          "[view][context-menu]") {
+    auto root = make_root();
+    std::optional<int> got;
+
+    auto* menu = ContextMenu::show(
+        root.get(), {kAnchorX, kAnchorY},
+        {{1, "First"}, Item::make_separator(), {3, "Third"}},
+        [&](std::optional<int> id) { got = id; });
+
+    // No hover yet → the first Up seeds from the bottom end.
+    REQUIRE(menu->hovered_index() == -1);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::up)));
+    REQUIRE(menu->hovered_index() == 2);
+
+    // Up must SKIP the separator (row 1) and land on row 0.
+    REQUIRE(menu->on_key_event(key_down(KeyCode::up)));
+    REQUIRE(menu->hovered_index() == 0);
+
+    // Up at the top edge stays put — it must not wrap or go negative.
+    REQUIRE(menu->on_key_event(key_down(KeyCode::up)));
+    REQUIRE(menu->hovered_index() == 0);
+
+    // Return commits the highlighted row and closes the menu.
+    REQUIRE(menu->on_key_event(key_down(KeyCode::enter)));
+    REQUIRE(got.has_value());
+    REQUIRE(*got == 1);
+    REQUIRE(root->child_count() == 0);
+}
+
+TEST_CASE("ContextMenu keyboard up skips disabled rows",
+          "[view][context-menu]") {
+    auto root = make_root();
+    std::optional<int> got;
+
+    auto* menu = ContextMenu::show(
+        root.get(), {kAnchorX, kAnchorY},
+        {{1, "Enabled"}, {2, "Disabled", /*enabled=*/false}, {3, "AlsoEnabled"}},
+        [&](std::optional<int> id) { got = id; });
+
+    REQUIRE(menu->on_key_event(key_down(KeyCode::up)));  // seeds on row 2
+    REQUIRE(menu->hovered_index() == 2);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::up)));  // skip disabled row 1
+    REQUIRE(menu->hovered_index() == 0);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::enter)));
+    REQUIRE(got.has_value());
+    REQUIRE(*got == 1);
+}
+
+// The existing outside-click case calls `on_mouse_event` on the menu directly,
+// which assumes the routing rather than exercising it. Drive the press from the
+// root instead, so the tree is what decides the menu is the target.
+TEST_CASE("ContextMenu outside click routed from the root dismisses with nullopt",
+          "[view][context-menu]") {
+    auto root = make_root();
+    std::optional<int> got = 99;  // sentinel
+    bool fired = false;
+
+    auto* menu = ContextMenu::show(
+        root.get(), {kAnchorX, kAnchorY},
+        {{1, "One"}, {2, "Two"}},
+        [&](std::optional<int> id) { fired = true; got = id; });
+
+    // Control: the menu really is what the tree resolves at that far corner —
+    // its hit_test claims the whole overlay precisely so outside clicks reach it.
+    REQUIRE(root->hit_test({380.0f, 380.0f}) == menu);
+
+    root->simulate_click({380.0f, 380.0f});
+
+    REQUIRE(fired);
+    REQUIRE_FALSE(got.has_value());
+    REQUIRE(root->child_count() == 0);
+}
