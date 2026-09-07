@@ -62,12 +62,34 @@ jobs:
   macos-local:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     name: macOS local smoke
-    runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '"macos-15"') }}
+    # This lane routes on its OWN selector, deliberately NOT the required gate's
+    # PULP_LOCAL_MACOS_RUNS_ON_JSON. Borrowing that variable made these jobs
+    # unschedulable: it carries `pulp-gate-fast`, an array `runs-on` requires
+    # EVERY label, and no runner in either scope mints that one — so the jobs
+    # queued forever, which GitHub reports as pending rather than as an error.
+    # Every other consumer of that variable feeds it to a resolver; this
+    # workflow was the only one using it literally.
+    #
+    # Unset (the default) means GitHub-hosted macos-15, which is right for this
+    # lane: it is advisory and low-frequency (path-filtered pushes to main, a
+    # nightly cron, and manual dispatch -- never per-PR), and staying off the
+    # fleet means it can never contend with the required macOS gate. Set this
+    # variable only to opt the lane back onto self-hosted runners, and declare a
+    # matching lane in tools/scripts/runner_topology.json when you do.
+    runs-on: ${{ fromJSON(vars.PULP_VISUAL_HARNESS_MACOS_RUNS_ON_JSON || '"macos-15"') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 1
+
+      # The locked skia-python wheel is built for 3.12, and the step below hard-
+      # fails without it. A self-hosted runner happened to have python3.12 on
+      # PATH; a hosted image guarantees no particular minor version there, so
+      # pin it explicitly rather than inheriting whatever the image ships.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Install locked visual smoke dependencies
         run: |
@@ -88,7 +110,21 @@ jobs:
   layout-snapshots:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     name: Yoga layout snapshots
-    runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '"macos-15"') }}
+    # This lane routes on its OWN selector, deliberately NOT the required gate's
+    # PULP_LOCAL_MACOS_RUNS_ON_JSON. Borrowing that variable made these jobs
+    # unschedulable: it carries `pulp-gate-fast`, an array `runs-on` requires
+    # EVERY label, and no runner in either scope mints that one — so the jobs
+    # queued forever, which GitHub reports as pending rather than as an error.
+    # Every other consumer of that variable feeds it to a resolver; this
+    # workflow was the only one using it literally.
+    #
+    # Unset (the default) means GitHub-hosted macos-15, which is right for this
+    # lane: it is advisory and low-frequency (path-filtered pushes to main, a
+    # nightly cron, and manual dispatch -- never per-PR), and staying off the
+    # fleet means it can never contend with the required macOS gate. Set this
+    # variable only to opt the lane back onto self-hosted runners, and declare a
+    # matching lane in tools/scripts/runner_topology.json when you do.
+    runs-on: ${{ fromJSON(vars.PULP_VISUAL_HARNESS_MACOS_RUNS_ON_JSON || '"macos-15"') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
