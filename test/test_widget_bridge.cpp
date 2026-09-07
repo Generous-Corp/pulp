@@ -1633,6 +1633,126 @@ TEST_CASE("WidgetBridge scroll upgrade transfers ownership identity",
     CHECK(root.child_count() == 0);
 }
 
+TEST_CASE("WidgetBridge scroll upgrade leaves the retained content content-sized",
+          "[view][bridge][scroll][layout]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The scrollable-panel idiom, exactly as authored: `flex: 1; min-height: 0;
+    // overflow-y: auto; padding-top: 50`. CSS `flex: 1` is shorthand for
+    // grow 1 / shrink 1 / BASIS 0 — the basis is the part that bites.
+    bridge.load_script(R"(
+        var panel = document.createElement('div');
+        document.body.appendChild(panel);
+        globalThis.panelId = panel._id;
+        setFlex(panelId, 'direction', 'col');
+        setFlex(panelId, 'flex_grow', 1);
+        setFlex(panelId, 'flex_shrink', 1);
+        setFlex(panelId, 'flex_basis', 0);
+        setFlex(panelId, 'padding_top', 50);
+        for (var i = 0; i < 3; ++i) {
+            var row = document.createElement('div');
+            panel.appendChild(row);
+            setFlex(row._id, 'height', 40);
+        }
+    )");
+    const auto panel_id = engine.evaluate("panelId").getWithDefault<std::string>("");
+    REQUIRE_FALSE(panel_id.empty());
+
+    engine.evaluate("__domAppend('', panelId, 'div', 'scroll')");
+    auto* wrapper = bridge.scroll_wrapper(panel_id);
+    REQUIRE(wrapper != nullptr);
+    REQUIRE(wrapper->child_count() == 1);
+    auto* content = wrapper->child_at(0);
+    REQUIRE(content != nullptr);
+    REQUIRE(content->child_count() == 3);
+
+    root.layout_children();
+
+    // The wrapper took the retained view's place on the parent's flex line, so
+    // it grows into the parent the way the authored panel did.
+    CHECK(wrapper->bounds().height == Catch::Approx(300.0f));
+
+    // The content is OFF that flex line now. Every flex-line knob has to be
+    // cleared, the basis included: a leftover basis of 0 with grow 0 resolves
+    // the content's main size to 0, so the box is just its padding and every
+    // in-flow row shrinks to nothing against a zero-height content box. The
+    // panel then paints blank while intrinsic_height() still reports the full
+    // content height, which is why this fails silently rather than loudly.
+    CHECK(content->bounds().height == Catch::Approx(170.0f));
+    for (std::size_t index = 0; index < content->child_count(); ++index) {
+        INFO("row " << index << " must keep its authored height");
+        CHECK(content->child_at(index)->bounds().height == Catch::Approx(40.0f));
+    }
+
+    // Padding belongs to the inner box alone. Copied onto the wrapper as well,
+    // it is applied twice and the first row starts at 100 instead of 50.
+    CHECK(content->bounds().y == Catch::Approx(0.0f));
+    CHECK(content->child_at(0)->bounds().y == Catch::Approx(50.0f));
+}
+
+TEST_CASE("WidgetBridge scroll upgrade keeps padding on the inner box when restyled",
+          "[view][bridge][scroll][layout]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Same authored panel, but the padding is written AFTER the upgrade --
+    // which is what a re-render does. The upgrade splits the authored style
+    // across two boxes and clears the wrapper's padding to do it, so a later
+    // padding write must land on the inner box or the split is undone one
+    // property at a time.
+    bridge.load_script(R"(
+        var panel = document.createElement('div');
+        document.body.appendChild(panel);
+        globalThis.panelId = panel._id;
+        setFlex(panelId, 'direction', 'col');
+        setFlex(panelId, 'flex_grow', 1);
+        setFlex(panelId, 'flex_shrink', 1);
+        setFlex(panelId, 'flex_basis', 0);
+        for (var i = 0; i < 3; ++i) {
+            var row = document.createElement('div');
+            panel.appendChild(row);
+            setFlex(row._id, 'height', 40);
+        }
+    )");
+    const auto panel_id = engine.evaluate("panelId").getWithDefault<std::string>("");
+    REQUIRE_FALSE(panel_id.empty());
+
+    engine.evaluate("__domAppend('', panelId, 'div', 'scroll')");
+    auto* wrapper = bridge.scroll_wrapper(panel_id);
+    REQUIRE(wrapper != nullptr);
+    REQUIRE(wrapper->child_count() == 1);
+    auto* content = wrapper->child_at(0);
+    REQUIRE(content != nullptr);
+
+    engine.evaluate("setFlex(panelId, 'padding_top', 50);");
+    engine.evaluate("setFlex(panelId, 'padding_right', 4);");
+
+    // The wrapper is the outer box and owns no padding at all.
+    CHECK(wrapper->flex().padding_top < 0.0f);
+    CHECK(wrapper->flex().padding_right < 0.0f);
+    CHECK(content->flex().padding_top == Catch::Approx(50.0f));
+    CHECK(content->flex().padding_right == Catch::Approx(4.0f));
+
+    root.layout_children();
+
+    // Applied to both boxes the inset doubles and the first row starts at 100.
+    CHECK(content->bounds().y == Catch::Approx(0.0f));
+    CHECK(content->child_at(0)->bounds().y == Catch::Approx(50.0f));
+
+    // Margin is the mirror case and must stay on the OUTER box, so the same
+    // redirect must not swallow every box-model property on its way past.
+    engine.evaluate("setFlex(panelId, 'margin_top', 7);");
+    CHECK(wrapper->flex().margin_top == Catch::Approx(7.0f));
+    CHECK(content->flex().margin_top < 0.0f);
+}
+
 TEST_CASE("View add_child rolls back when attach hook throws",
           "[view][lifetime][exception-safety]") {
     struct ThrowingAttach final : View {

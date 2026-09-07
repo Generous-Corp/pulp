@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260906-label-face-metrics-and-scroll-upgrade-watch",
+  "created_at": "2026-09-06T20:16:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Four sizing and text-placement fixes an imported UI needs, all of them measured against the imported document rather than guessed. Label now places its ink from the real face metrics the shaper already reports (ascent, descent, line height) instead of a hardcoded font_size * 0.85 ascent ratio, which mis-seated every glyph by 0.2428 em -- 3.16px at font-size 13 -- and made vertically centred text sit high across the whole imported panel; the face metrics are exposed as a public FaceMetrics accessor so a caller can derive the same baseline without painting. The retained ScrollView upgrade keeps padding on the INNER retained box rather than duplicating it onto the wrapper, so an authored padding is applied once, not twice. RangeSlider gains its own default box height, because inheriting the generic View default collapsed the track to zero and hid the thumb. And the React host config keeps lowered button captions in flow so a caption wraps instead of being pushed out of its button. This reaches render-assets-and-backends only through the core/view/** path selector: every touched file is label ink placement, bridge-side layout plumbing, a widget's default metrics, or the React reconciler's host config. No render backend, raster path, GPU surface, asset pipeline, or Skia/Dawn code is touched, and no importer, DesignIR schema, or codegen output changes. Registered as watch-only so the family's coverage stays honest about a text-placement change that crossed its selector without changing what the family proves. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-widgets-label",
+    "pulp-test-widget-bridge"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

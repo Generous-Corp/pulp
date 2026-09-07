@@ -747,25 +747,73 @@ Label::ResolvedTextStyle Label::resolve_text_style() const {
     if (align == LabelAlign::auto_) align = LabelAlign::left;  // LTR-only
     rs.text_align = align;
 
-    // Single-line first-line baseline — same formula as paint() with
-    // text_h == font_size (multi-line paint recomputes text_h itself).
+    // Single-line first-line baseline — same formula, and the same face
+    // metrics, paint() places ink with. This drives the inspector's caret and
+    // selection geometry, so a formula that diverged from paint's would draw
+    // a caret that misses the glyphs it is supposed to sit on.
+    const auto fm = face_metrics(rs.family, rs.font_size, rs.font_weight,
+                                 rs.font_slant);
+    const float ink_h = fm.real ? fm.ascent + fm.descent : rs.font_size;
+    const float asc = fm.ascent;
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
-            rs.baseline_y = rs.font_size * 0.85f;
+            rs.baseline_y = asc;
             break;
         case canvas::TextVerticalAlign::bottom:
-            rs.baseline_y = bounds().height - rs.font_size + rs.font_size * 0.85f;
+            rs.baseline_y = bounds().height - ink_h + asc;
             break;
         case canvas::TextVerticalAlign::baseline:
             rs.baseline_y = bounds().height * 0.75f;
             break;
         case canvas::TextVerticalAlign::center:
         default:
-            rs.baseline_y = (bounds().height - rs.font_size) * 0.5f
-                            + rs.font_size * 0.85f;
+            rs.baseline_y = (bounds().height - ink_h) * 0.5f + asc;
             break;
     }
     return rs;
+}
+
+Label::FaceMetrics Label::face_metrics(const std::string& family,
+                                          float font_size, int font_weight,
+                                          int font_style) const {
+    // Registering a font resamples the resolved typeface, so a cache that
+    // ignored the generation would serve fallback metrics forever to a Label
+    // that first painted before an async register_font_url() completed.
+    const auto font_gen = canvas::font_registration_generation();
+    if (face_metrics_valid_ && face_metrics_family_ == family &&
+        face_metrics_font_size_ == font_size &&
+        face_metrics_font_weight_ == font_weight &&
+        face_metrics_font_style_ == font_style &&
+        face_metrics_font_gen_ == font_gen)
+        return face_metrics_cache_;
+
+    auto& shaper = canvas::global_text_shaper();
+    // Metrics come from the face, not the string. Shape a single space so the
+    // measurement is independent of this Label's text and the cache survives
+    // text that changes every frame.
+    const auto prepared =
+        shaper.prepare(" ", family, font_size, font_weight, font_style);
+    FaceMetrics m;
+    if (prepared.metrics_are_real() && prepared.ascent() > 0.0f) {
+        m.ascent = prepared.ascent();
+        m.descent = prepared.descent();
+        m.real = true;
+    } else {
+        // No Skia, or the family did not resolve. Keep the historic
+        // rule-of-thumb rather than collapsing the baseline to zero, and say
+        // so, since callers gate the correction on `real`.
+        m.ascent = font_size * 0.85f;
+        m.descent = font_size * 0.15f;
+        m.real = false;
+    }
+    face_metrics_family_ = family;
+    face_metrics_font_size_ = font_size;
+    face_metrics_font_weight_ = font_weight;
+    face_metrics_font_style_ = font_style;
+    face_metrics_font_gen_ = font_gen;
+    face_metrics_cache_ = m;
+    face_metrics_valid_ = true;
+    return m;
 }
 
 std::string Label::apply_text_transform(const std::string& in) const {
@@ -878,9 +926,13 @@ Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
     }
 
     // Band aligned to the TOP of the text (where top-aligned label text
-    // renders), matching the overlay's existing top-anchored band. The
-    // ascent top sits ~0.85*font_size above the baseline.
-    m.local_band_y = rs.baseline_y - rs.font_size * 0.85f;
+    // renders), matching the overlay's existing top-anchored band. The ascent
+    // top sits one real ascent above the baseline — the same distance the
+    // painter places the first line's ink at, so the band cannot drift off
+    // the glyphs on a face whose ascent is not 0.85 em.
+    const auto band_fm = face_metrics(rs.family, rs.font_size, rs.font_weight,
+                                      rs.font_slant);
+    m.local_band_y = rs.baseline_y - band_fm.ascent;
     m.band_height = rs.font_size * 1.3f;
     return m;
 }
@@ -1166,6 +1218,16 @@ void Label::paint(canvas::Canvas& canvas) {
     const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
     float automatic_lh = effective_font_size * lh_mult;
     float first_line_ascent = effective_font_size * 0.85f;
+    // The ink box a single line occupies. `font_size` is the em square, not
+    // the ink: centering against it places the glyphs by a ratio the face
+    // does not actually have, which is why two labels centered in equal
+    // boxes paint their ink at different heights. Use the resolved face's
+    // real ascent + descent -- the same metrics `intrinsic_height()` sized
+    // the box from and `baseline_y()` reports to Yoga for `align-items:
+    // baseline`, so all three finally describe one line box.
+    // Resolved below, once we know whether the shaper already produced a
+    // layout we can read these off instead of measuring the face separately.
+    float single_line_ink_height = effective_font_size;
     canvas::AttributedString resolved_attributed;
     std::vector<canvas::Canvas::FontFeature> attributed_features;
     if (has_attributed_) {
@@ -1326,8 +1388,28 @@ void Label::paint(canvas::Canvas& canvas) {
     const bool captured_single_line =
         captured_cache_usable && shaped_layout != nullptr &&
         shaped_layout->line_count == 1;
+    // Real ink for the face `paint()` draws with. A wrapped or attributed
+    // label already has a shaped layout, so read its first line rather than
+    // measuring the face a second time; only an unwrapped single-line label
+    // has to ask, and that answer is cached per resolved face.
+    if (!has_attributed_) {
+        if (shaped_layout != nullptr && !captured_cache_usable &&
+            !shaped_layout->lines.empty() &&
+            shaped_layout->lines.front().ascent > 0.0f) {
+            first_line_ascent = shaped_layout->lines.front().ascent;
+            single_line_ink_height = first_line_ascent +
+                                     shaped_layout->lines.front().descent;
+        } else {
+            const auto fm = face_metrics(family, effective_font_size,
+                                         effective_font_weight(), font_style_);
+            if (fm.real) {
+                first_line_ascent = fm.ascent;
+                single_line_ink_height = fm.ascent + fm.descent;
+            }
+        }
+    }
     const float single_line_text_height = has_attributed_
-        ? automatic_lh : effective_font_size;
+        ? automatic_lh : single_line_ink_height;
     if (has_attributed_ && shaped_layout != nullptr &&
         !captured_cache_usable && !shaped_layout->lines.empty() &&
         shaped_layout->lines.front().ascent > 0.0f)
@@ -1344,24 +1426,52 @@ void Label::paint(canvas::Canvas& canvas) {
                   return height;
               }()
         : single_line_text_height;
+    // A line BOX is taller than the ink it carries whenever line-height
+    // exceeds ascent + descent, and CSS splits that surplus evenly above and
+    // below the ink (half-leading). Placing the first baseline at `top +
+    // ascent` spends the whole surplus below the glyphs, so the same string
+    // paints higher as line-height grows -- two labels centered in equal boxes
+    // then disagree by half the difference in their line-heights, which is the
+    // visible mis-centering here. Add the half-leading, and centering reduces
+    // to `(height - ink) / 2 + ascent`: independent of line-height, and the
+    // identical formula the captured-line-box branch below already uses.
+    //
+    // Attributed text is deliberately excluded: `baseline_y()` reports the
+    // prepared ascent with no leading, and per-range paint is asserted to draw
+    // exactly there so rows of mixed-size spans share one baseline. Shifting
+    // only the painter would break that agreement, which is the same class of
+    // bug this change exists to remove.
+    const float first_line_box_h =
+        paint_as_lines && !captured_single_line ? lh : single_line_text_height;
+    // Deliberately unclamped. A line box SHORTER than its ink has negative
+    // leading -- CSS lets the glyphs overflow it, evenly top and bottom -- and
+    // clamping at zero would reintroduce the very line-height dependence this
+    // removes, because Inter's ink is ~1.43 em and so exceeds any line-height
+    // under ~1.43. The clamp belongs only to the captured branch below, whose
+    // reference is Chromium's em box rather than the face's ink.
+    const float first_half_leading =
+        has_attributed_
+            ? 0.0f
+            : (first_line_box_h - single_line_ink_height) * 0.5f;
     float baseline_y;
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
-            baseline_y = first_line_ascent;
+            baseline_y = first_half_leading + first_line_ascent;
             break;
         case canvas::TextVerticalAlign::bottom:
-            baseline_y = bounds().height - text_h + first_line_ascent;
+            baseline_y = bounds().height - text_h + first_half_leading +
+                         first_line_ascent;
             break;
         case canvas::TextVerticalAlign::baseline:
             baseline_y = bounds().height * 0.75f;
             break;
         case canvas::TextVerticalAlign::center:
         default:
-            // Center the visible block within bounds, then offset to the
-            // first line's baseline. For single-line this collapses to
-            // bounds.h/2 + 0.35*font_size (the historic formula) because
-            // text_h == effective_font_size and 0.85 - 0.5 == 0.35.
-            baseline_y = (bounds().height - text_h) * 0.5f + first_line_ascent;
+            // Center the visible block, then descend to the first baseline.
+            // For a single line this is `(height - ink) / 2 + ascent` whatever
+            // the line-height is.
+            baseline_y = (bounds().height - text_h) * 0.5f + first_half_leading +
+                         first_line_ascent;
             break;
     }
     if (captured_cache_usable && shaped_layout != nullptr &&
@@ -1373,8 +1483,16 @@ void Label::paint(canvas::Canvas& canvas) {
         // Chromium's captured top, add its half-leading, then the active face
         // ascent. Do not center the complete owner bounds a second time.
         const auto& first_line = shaped_layout->lines.front();
-        const float half_leading = std::max(
-            0.0f, (first_line.height - single_line_text_height) * 0.5f);
+        // One reference, not two. Half-leading is the surplus of the line BOX
+        // over the ink it carries, so it has to be measured against the same
+        // ascent + descent the baseline then descends by. Measuring it against
+        // the em box while descending by a real ascent double-counts the
+        // difference between them and paints the line low by exactly that gap.
+        // Unclamped for the same reason the native branch above is: a face
+        // whose ink exceeds the captured box has negative leading and CSS lets
+        // its glyphs overflow evenly, top and bottom.
+        const float half_leading =
+            (first_line.height - single_line_text_height) * 0.5f;
         baseline_y = first_line.y + half_leading + first_line_ascent;
     }
 

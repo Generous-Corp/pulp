@@ -283,11 +283,48 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                     // IS the sizing contract; leaving it behind drops the
                     // container out of the layout it was authored into.
                     wrapper->flex() = removed->flex();
-                    // Inside a scroll container the content sizes to its own
-                    // content so there is something to scroll. It must not keep
-                    // growing or shrinking against the wrapper it now fills.
-                    removed->flex().flex_grow = 0.0f;
-                    removed->flex().flex_shrink = 0.0f;
+                    // The authored style now describes TWO boxes, so it has to
+                    // be split rather than duplicated. The wrapper is the OUTER
+                    // box: it participates in the parent's flex line and owns
+                    // the authored margins. The retained view is the INNER box:
+                    // it owns the authored padding and sizes to its own content
+                    // so there is something to scroll.
+                    auto& outer = wrapper->flex();
+                    auto& inner = content->flex();
+
+                    // Padding belongs to the inner box only. Left on both, an
+                    // authored `padding-top` is applied twice — once by the
+                    // wrapper, once by the content it now contains — and the
+                    // content starts at double the authored inset.
+                    outer.padding = 0.0f;
+                    outer.padding_top = outer.padding_right =
+                        outer.padding_bottom = outer.padding_left = -1.0f;
+                    outer.dim_padding_top = outer.dim_padding_right =
+                        outer.dim_padding_bottom = outer.dim_padding_left = Dimension{};
+
+                    // Margins belong to the outer box only, for the same reason
+                    // in the other direction.
+                    inner.margin = 0.0f;
+                    inner.margin_top = inner.margin_right =
+                        inner.margin_bottom = inner.margin_left = -1.0f;
+                    inner.dim_margin_top = inner.dim_margin_right =
+                        inner.dim_margin_bottom = inner.dim_margin_left = Dimension{};
+
+                    // The content is no longer on the parent's flex line, so
+                    // EVERY flex-line knob must be cleared — the basis included.
+                    // The scrollable-panel idiom `flex: 1` expands to
+                    // `flex-grow: 1; flex-shrink: 1; flex-basis: 0%`, so
+                    // clearing only grow and shrink leaves a basis of zero
+                    // behind: the content's main size resolves to 0 + padding,
+                    // every in-flow descendant then shrinks to nothing against
+                    // that zero-height content box, and the panel paints blank
+                    // while intrinsic_height() still reports the full content
+                    // height. Basis unset (-1) restores Yoga's `auto`, which
+                    // sizes the box from its content.
+                    inner.flex_grow = 0.0f;
+                    inner.flex_shrink = 0.0f;
+                    inner.flex_basis = -1.0f;
+                    inner.dim_flex_basis = Dimension{};
                     // Preflight alias publication while the authored subtree
                     // is still attached. This forces all potentially-failing
                     // allocations before structural mutation; the catch
