@@ -2730,6 +2730,103 @@
           ]
         }
       }
+    },
+    {
+      "id": "nested-sequence-gain-composition",
+      "title": "Nested SequenceRef gain composition with a documented precedence model",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "f2a1c7d4-6b93-4e08-9a15-3c7e5b21d0af",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "composed_gain",
+            "consumes_clip_gain",
+            "inherited_gain"
+          ]
+        },
+        {
+          "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+          "needles": [
+            "NestedMixerPanUnsupported",
+            "NestedGainSinkUnsupported",
+            "NestedPlacementFadeUnsupported"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "NestedGainSinkUnsupported"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "NestedGainSinkUnsupported",
+            "composes by multiplying"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Gain composition changes what the lowerer writes into a flattened leaf, not what the SDK declares. A consumer already reads the result through the existing public AudioClipRendererProgram::gain_linear, and the three new CompileErrorCode members are diagnostics on an existing public enum rather than a new capability. Nothing here needs a new installed header, so claiming an installed-SDK surface would advertise a type that does not exist.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+              "needles": [
+                "NestedMixerPanUnsupported",
+                "NestedGainSinkUnsupported",
+                "NestedPlacementFadeUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "`pulp seq` can author a track mixer and a clip's playback properties, but nothing reports whether a given nesting will compose or refuse, so an author still discovers a refusal at compile time. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to proposal-safe writers and can then surface the refusal codes.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-sequence-gain-composition"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema carries no operation that reports nested-mixer composability or its refusal codes. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-sequence-gain-composition"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A live timeline authority is absent for the sequencer generally, not merely for nested mixer state. Owner: NW-D, and only where that source is Pulp-owned; otherwise it stays a recorded cross-repository dependency.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "nested-sequence-gain-composition"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises what a nested sequence preserves. An agent building reusable patterns still cannot discover that a child fader composes over media and refuses over notes. Owner: NW-D, once the runtime it would advertise is complete across the remaining NW-C slices.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-sequence-gain-composition"
+          ]
+        }
+      }
     }
   ],
   "tombstones": []

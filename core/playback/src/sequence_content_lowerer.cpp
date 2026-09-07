@@ -9,6 +9,55 @@
 
 namespace pulp::playback {
 
+namespace {
+
+/// Whether a flattened leaf of this content kind actually consumes clip gain.
+///
+/// A `MediaRef` leaf's gain reaches the renderer as
+/// `AudioClipRendererProgram::gain_linear`, so a composed factor survives
+/// flattening and is audible. An `EmptyContent` leaf sounds nothing, so scaling
+/// it neither loses nor changes anything. Every other kind compiles to events —
+/// notes, registered-content fragments, an opaque payload — and no renderer
+/// scales an event by the gain of the clip that carried it, so folding a child
+/// fader into one would discard it with nothing to read the loss from.
+bool consumes_clip_gain(const timeline::ClipContent& content) noexcept {
+    return std::holds_alternative<timeline::MediaRef>(content) ||
+           std::holds_alternative<timeline::EmptyContent>(content);
+}
+
+} // namespace
+
+/// Flattens `SequenceRef` placements into leaf clips on the referring track.
+///
+/// ## Gain precedence through a nested placement
+///
+/// Nesting stacks gain stages in series — the placement clip that admits the
+/// child window, the child track's own fader, and the leaf clip's authored gain
+/// — so the flattened leaf carries their **product**:
+///
+///     leaf.gain = placement.gain * child_track.gain * leaf.gain
+///
+/// Multiplication is the rule because that is what the stages mean when they
+/// are not flattened: a child sequence feeding a parent is a submix bus, and a
+/// -6 dB fader under a -6 dB placement plays at -12 dB. Nothing overrides
+/// anything, so the result does not depend on the order the stages are read,
+/// and nesting one more level deep composes by multiplying again. Unity at any
+/// stage is exactly the identity, so a transparent nesting produces the same
+/// float the leaf authored rather than a rounded near-miss.
+///
+/// Two neighbouring pieces of mixer state deliberately do **not** compose, and
+/// each keeps a distinct refusal rather than being folded away:
+///
+///  * **Pan** (`NestedMixerPanUnsupported`) — a clip has no stereo placement of
+///    its own, and the parent track's single pan also serves whatever else that
+///    track holds. There is no value to write it into.
+///  * **A placement fade** (`NestedPlacementFadeUnsupported`) — one envelope
+///    over the whole nested window, while a leaf can only fade from its own
+///    edge. A leaf inside the fade region needs a partial ramp the clip model
+///    cannot express.
+///
+/// And a composed gain that has nowhere to land is refused rather than dropped
+/// (`NestedGainSinkUnsupported`): see `consumes_clip_gain`.
 class SequenceContentLowerer::Impl {
   public:
     Impl(const timeline::Project& project, const timebase::CompiledTempoMap& tempo_map,
@@ -116,7 +165,7 @@ class SequenceContentLowerer::Impl {
         auto appended = append(std::move(sentinel).value(), clip.id());
         if (appended.error)
             return appended;
-        push_reference(clip, *reference, 1);
+        push_reference(clip, *reference, 1, 1.0f);
         return {};
     }
 
@@ -129,6 +178,12 @@ class SequenceContentLowerer::Impl {
         std::size_t depth = 0;
         std::size_t track_index = 0;
         std::size_t clip_index = 0;
+        // Product of every enclosing placement's clip gain and every enclosing
+        // child track's fader, down to but excluding the track being walked.
+        float inherited_gain = 1.0f;
+        // The fader of the child track currently being walked, set once when
+        // the walk enters it.
+        float track_gain = 1.0f;
     };
 
     struct PendingLeaf {
@@ -143,6 +198,10 @@ class SequenceContentLowerer::Impl {
         std::size_t note_index = 0;
         std::vector<timeline::NoteEvent> clipped_notes;
         timeline::ItemId context_sequence_id;
+        // Everything the nesting contributes on top of this leaf's own gain.
+        // Exactly 1.0f when the nesting is transparent, which is the value that
+        // makes composition a no-op rather than a rounding event.
+        float composed_gain = 1.0f;
     };
 
     StepResult append(timeline::Clip clip, timeline::ItemId source,
@@ -174,10 +233,20 @@ class SequenceContentLowerer::Impl {
             return SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
                                          placement.id()};
         const auto playback = placement.playback_properties();
-        if (playback.gain_linear != 1.0f || playback.fade_in_duration != 0 ||
-            playback.fade_out_duration != 0)
-            return SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
+        // A placement fade is one envelope over the whole nested window. A
+        // flattened leaf can only carry a fade measured from its own edge, so a
+        // leaf lying inside that region would need a partial ramp — starting
+        // part-way up and ending part-way up — which ClipPlaybackProperties
+        // cannot express at all. This is an expressiveness limit, not a choice
+        // between two defensible answers, so it stays refused.
+        if (playback.fade_in_duration != 0 || playback.fade_out_duration != 0)
+            return SequenceLoweringError{CompileErrorCode::NestedPlacementFadeUnsupported,
                                          placement.id()};
+        // Gain, by contrast, composes into the flattened leaves; the class
+        // comment states the precedence rule. Only the values that cannot
+        // enter a product at all are rejected here.
+        if (!std::isfinite(playback.gain_linear) || playback.gain_linear < 0.0f)
+            return SequenceLoweringError{CompileErrorCode::InvalidStructure, placement.id()};
         if (!project_.find_sequence(reference.sequence_id))
             return SequenceLoweringError{CompileErrorCode::InvalidStructure, reference.sequence_id};
         if (reference.source_start.value >
@@ -187,10 +256,11 @@ class SequenceContentLowerer::Impl {
     }
 
     void push_reference(const timeline::Clip& placement, const timeline::SequenceRef& reference,
-                        std::size_t depth) {
-        frames_.push_back(
-            {placement, reference, project_.find_sequence(reference.sequence_id),
-             reference.source_start + timebase::TickDuration{placement.duration().value}, depth});
+                        std::size_t depth, float inherited_gain) {
+        auto& frame = frames_.emplace_back(ReferenceFrame{
+            placement, reference, project_.find_sequence(reference.sequence_id),
+            reference.source_start + timebase::TickDuration{placement.duration().value}, depth});
+        frame.inherited_gain = inherited_gain * placement.playback_properties().gain_linear;
     }
 
     StepResult step_reference() {
@@ -200,19 +270,28 @@ class SequenceContentLowerer::Impl {
             return {};
         }
         const auto& track = frame.sequence->tracks()[frame.track_index];
-        if (frame.clip_index == 0 &&
-            (!track.device_chain().empty() || !track.automation_lanes().empty() ||
-             !track.take_lanes().empty() || track.freeze() || track.active_take_lane_id().valid() ||
-             track.record_armed() ||
-             // Flattening a nested track folds it into the parent, which has no
-             // place to put a child fader: the child's gain and pan would simply
-             // stop applying. Refuse rather than silently play the child at
-             // unity — the same choice the clip-level guard above makes for clip
-             // gain and fades. Composing mixer state through nesting is a
-             // separate feature, not a default.
-             !(track.mixer() == timeline::TrackMixer{})))
-            return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
-                                                   track.id()}};
+        if (frame.clip_index == 0) {
+            if (!track.device_chain().empty() || !track.automation_lanes().empty() ||
+                !track.take_lanes().empty() || track.freeze() ||
+                track.active_take_lane_id().valid() || track.record_armed())
+                return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
+                                                       track.id()}};
+            const auto mixer = track.mixer();
+            // Pan has no sink. Flattening folds the child into the parent
+            // track, and the parent's single pan also serves whatever else that
+            // track holds, so the child's balance can be neither carried nor
+            // dropped without changing something the author did not touch.
+            if (mixer.pan != 0.0f)
+                return {.error = SequenceLoweringError{CompileErrorCode::NestedMixerPanUnsupported,
+                                                       track.id()}};
+            if (!std::isfinite(mixer.gain_linear) || mixer.gain_linear < 0.0f)
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::InvalidStructure, track.id()}};
+            // The fader enters the product instead of being refused; it leaves
+            // the product again when the walk moves to the next track, because
+            // this assignment runs once per track entry.
+            frame.track_gain = mixer.gain_linear;
+        }
         if (frame.clip_index == track.clips().size()) {
             ++frame.track_index;
             frame.clip_index = 0;
@@ -239,6 +318,8 @@ class SequenceContentLowerer::Impl {
             timebase::TickDuration{clipped_end.value - clipped_start.value};
         const auto left_trim = clipped_start.value - child.start().value;
         const auto right_trim = child.end().value - clipped_end.value;
+        // Everything the nesting adds on top of this leaf's own authored gain.
+        const auto composed_gain = frame.inherited_gain * frame.track_gain;
         if (std::holds_alternative<timeline::RegisteredContent>(child.content()) &&
             (left_trim != 0 || right_trim != 0))
             return {.error = SequenceLoweringError{
@@ -289,10 +370,13 @@ class SequenceContentLowerer::Impl {
                 return {.error = error};
             if (auto charged = charge_reference(child.id()); charged.error)
                 return charged;
-            push_reference(nested_clip.value(), reference, depth);
+            push_reference(nested_clip.value(), reference, depth, composed_gain);
             return {};
         }
 
+        if (composed_gain != 1.0f && !consumes_clip_gain(child.content()))
+            return {.error = SequenceLoweringError{CompileErrorCode::NestedGainSinkUnsupported,
+                                                   child.id()}};
         if (next_generated_id_ == 0 ||
             next_generated_id_ == std::numeric_limits<std::uint64_t>::max())
             return {.error = SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded,
@@ -309,6 +393,7 @@ class SequenceContentLowerer::Impl {
             0,
             {},
             frame.sequence->id(),
+            composed_gain,
         };
         if (!std::holds_alternative<timeline::MidiContent>(child.content()))
             return finish_pending_leaf();
@@ -492,6 +577,16 @@ class SequenceContentLowerer::Impl {
         const auto duration = static_cast<std::uint64_t>(pending.target_duration.value);
         playback.fade_in_duration = std::min(playback.fade_in_duration, duration);
         playback.fade_out_duration = std::min(playback.fade_out_duration, duration);
+        if (pending.composed_gain != 1.0f) {
+            const auto composed = pending.composed_gain * playback.gain_linear;
+            // Both factors are finite and non-negative, but their product can
+            // still leave float range, and an infinite gain is not a louder
+            // clip — it is an unrenderable one.
+            if (!std::isfinite(composed))
+                return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                       pending.child.id()}};
+            playback.gain_linear = composed;
+        }
         auto flattened = timeline::Clip::create(pending.generated_id, pending.target_start,
                                                 pending.target_duration, std::move(content),
                                                 playback, pending.child.time_conform());
