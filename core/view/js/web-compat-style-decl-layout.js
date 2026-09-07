@@ -35,6 +35,16 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
     switch (key) {
         // Display / flex direction
         case "display":
+            // Diagnostic for the Spectr modal that cannot be dismissed: Escape,
+            // outside click and the close control all leave it up, and it is
+            // not yet known whether this branch is reached at all on the hide.
+            // Distinguishing "the style never arrives" from "setVisible does
+            // not take effect" is the whole remaining question, and three
+            // guesses at it have already been wrong.
+            if (typeof __pulpLogDisplayWrites__ !== "undefined"
+                && __pulpLogDisplayWrites__ && typeof console !== "undefined") {
+                console.log("[display-write] id=" + id + " resolved=" + resolved);
+            }
             if (resolved === "none") { setVisible(id, false); }
             else if (resolved === "flex" || resolved === "block" ||
                      resolved === "inline-block" || resolved === "inline-flex") {
