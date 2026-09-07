@@ -67,6 +67,30 @@ inherited face, so a wider painted face simply overflows and clips. It clips
 Fix shape: one `effective_font_family()` helper, used by paint and every metric,
 so the walk cannot drift again.
 
+## A Label with element children does not paint at its own origin
+
+A `Label` that carries both text and element children is a flex container whose
+own text is an **anonymous inline box** — a real item on the flex line, sized and
+positioned by the layout pass alongside the element children. Painting that text
+at the Label's content origin (`bounds()`) instead of at the box layout reserved
+for it puts the text and the first child at the same coordinates, and they
+overlap.
+
+So the paint path has to take the text box as a parameter rather than read
+`bounds()`. Every `bounds().width` / `bounds().height` inside the text painter is
+a latent instance of this bug: wrap width, alignment origin, the `x` for centre
+and right alignment, the available width for ellipsis, and the vertical baseline
+arithmetic all mean *the text box*, not the widget. A Label with no element
+children has a text box equal to its bounds, which is why the wrong version looks
+correct in every fixture that does not mix text and children.
+
+The related layout-side fact, which is what makes this easy to misdiagnose:
+`build_yoga_subtree` attaches a measure func only when `!has_managed_children`.
+A Label with both text and element children therefore contributes **zero layout
+weight for its own text** — the anonymous box gets no intrinsic size from the
+shaper. A test that only asserts child geometry passes while the text is
+unplaced, so assert the text box itself.
+
 ## Gotchas
 
 - **Captured line boxes in tests are usually hand-authored fixtures, not real

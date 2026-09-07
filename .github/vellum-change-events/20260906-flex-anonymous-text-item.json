@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20260906-flex-anonymous-text-item",
+  "kind": "change",
+  "created_at": "2026-09-06T23:40:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "A container that carries both its own text and element children contributed zero layout weight for that text. build_yoga_subtree attaches a measure func only when a node has no managed children, so a Label with children painted its text at the content origin while the flex line was sized as if the text were not there -- the text then overlapped the first child. CSS resolves this by wrapping the raw text in an anonymous inline box that participates in layout as a sibling of the element children, and this change builds exactly that: when a Label has managed children and non-empty text, an extra leading Yoga child is inserted carrying the measure and baseline funcs and a context pointing back at the owning view. The retained UI kernel is touched only at core/view/src/yoga_layout.cpp. No public signature, no measure-func contract, and no child-ordering rule outside this synthesized node changes; a Label with text and no children, or children and no text, builds the same tree it built before. This is Pulp-only. The anonymous-inline-box rule it encodes is generic CSS behaviour and a Vellum-native retained UI will need an equivalent, but it should derive one from its own text-ownership model rather than copy Pulp's Label-typed dynamic_cast and clear_own_text_box handshake, which exist because Pulp stores a container's text on the container itself. There is no named immutable Vellum framework commit to backport against, and this records no Vellum acknowledgement.",
+  "tests": [
+    "pulp-test-design-import",
+    "pulp-test-widget-bridge"
+  ],
+  "disposition": "pulp-only"
+}

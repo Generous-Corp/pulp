@@ -621,6 +621,16 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
     bool has_managed_children = !children.empty() && view.layout_mode() != LayoutMode::grid &&
                                 !view.owns_child_layout();
 
+    // A Label that also has element children needs CSS's anonymous inline box:
+    // its own text must take a slot on the flex line rather than being painted
+    // at the same content origin its first child lays out from. Cleared on
+    // every pass so a Label that loses its children (or its text) stops
+    // reporting a stale slot.
+    auto* text_owner = dynamic_cast<Label*>(&view);
+    if (text_owner) text_owner->clear_own_text_box();
+    const bool wants_anonymous_text_box =
+        has_managed_children && text_owner != nullptr && !text_owner->text().empty();
+
     if (!has_managed_children) {
         const auto intrinsic = sanitize_yoga_measurement(
             view.intrinsic_width(), view.intrinsic_height());
@@ -643,12 +653,25 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
     if (!has_managed_children)
         return;
 
+    uint32_t insert_at = 0;
+    if (wants_anonymous_text_box) {
+        // The anonymous box carries the owner as its context so it measures the
+        // owner's text; apply_yoga_results recognises a child node whose
+        // context IS its parent view as the anonymous box rather than as a real
+        // child, and writes the resolved rect back as the text slot.
+        YGNodeRef ygText = YGNodeNewWithConfig(config);
+        YGNodeSetContext(ygText, &view);
+        YGNodeSetMeasureFunc(ygText, yoga_measure);
+        YGNodeSetBaselineFunc(ygText, yoga_baseline);
+        YGNodeInsertChild(node, ygText, insert_at++);
+    }
+
     for (size_t i = 0; i < children.size(); ++i) {
         auto* child = children[i];
         YGNodeRef ygChild = YGNodeNewWithConfig(config);
         build_yoga_subtree(*child, ygChild, node_tally, config, wants_subpixel,
                            viewport_width, viewport_height);
-        YGNodeInsertChild(node, ygChild, static_cast<uint32_t>(i));
+        YGNodeInsertChild(node, ygChild, insert_at++);
     }
 }
 
@@ -658,6 +681,20 @@ static void apply_yoga_results(View& parent, YGNodeRef node) {
         YGNodeRef childNode = YGNodeGetChild(node, i);
         auto* child = static_cast<View*>(YGNodeGetContext(childNode));
         if (!child) continue;
+
+        // The anonymous inline box for the parent's own text: it points back at
+        // the parent, so record the slot and do not treat it as a child.
+        if (child == &parent) {
+            if (auto* owner = dynamic_cast<Label*>(child)) {
+                owner->set_own_text_box({
+                    YGNodeLayoutGetLeft(childNode),
+                    YGNodeLayoutGetTop(childNode),
+                    YGNodeLayoutGetWidth(childNode),
+                    YGNodeLayoutGetHeight(childNode)
+                });
+            }
+            continue;
+        }
 
         child->set_bounds({
             YGNodeLayoutGetLeft(childNode),

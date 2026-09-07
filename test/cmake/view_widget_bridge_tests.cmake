@@ -1011,3 +1011,9 @@ set_tests_properties(visual-harness-self-test PROPERTIES
 # Off-UI-thread query service (R7): worker + marshal-back, and the JS bridge API.
 pulp_add_test_suite(pulp-test-query-service LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-widget-bridge-query LIBRARIES pulp::view pulp::state)
+
+# Widget bridge — flex containers carrying both their own text and element
+# children. CSS gives a container's bare text its own anonymous slot on the
+# flex line; this suite pins that the widget layer does the same instead of
+# painting the text under its first element child.
+pulp_add_test_suite(pulp-test-widget-bridge-flex-text-children LIBRARIES pulp::view)
