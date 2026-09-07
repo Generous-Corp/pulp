@@ -824,20 +824,30 @@ CompileError compile_error_for(const Project& project) {
 
 } // namespace
 
-TEST_CASE("A nested child track carrying a non-transparent mixer is refused") {
-    // Flattening would fold the child into the parent with nowhere to put its
-    // fader, so its gain would silently stop applying. The compiler must refuse
-    // and name the offending track rather than play it at unity.
+TEST_CASE("A nested child fader over content that cannot carry it is refused") {
+    // The child's clips here are notes. A composed gain lands on the flattened
+    // leaf's clip gain, and no renderer scales a note event by the gain of the
+    // clip that carried it, so folding the fader in would discard it with
+    // nothing to read the loss from. Refuse, and name the leaf that has no sink
+    // rather than the track that supplied the fader.
     const auto gained = nested_project_with_child_mixer(TrackMixer{0.5f, 0.0f});
     const auto gain_error = compile_error_for(gained);
-    REQUIRE(gain_error.code == CompileErrorCode::NestedSequenceUnsupported);
-    REQUIRE(gain_error.item == ItemId{11});
+    REQUIRE(gain_error.code == CompileErrorCode::NestedGainSinkUnsupported);
+    REQUIRE(gain_error.item == ItemId{12});
 
-    // Pan is refused on the same grounds as gain.
+    // Pan is refused on stronger grounds than gain, and keeps its own code: a
+    // clip has no stereo placement at all, so there is no value to compose
+    // into for any content kind. The refusal names the track that owns it.
     const auto panned = nested_project_with_child_mixer(TrackMixer{1.0f, -0.5f});
     const auto pan_error = compile_error_for(panned);
-    REQUIRE(pan_error.code == CompileErrorCode::NestedSequenceUnsupported);
+    REQUIRE(pan_error.code == CompileErrorCode::NestedMixerPanUnsupported);
     REQUIRE(pan_error.item == ItemId{11});
+
+    // Pan is checked before gain, so a track carrying both is reported as the
+    // one that can never compose rather than the one that merely lacks a sink
+    // here.
+    const auto both = nested_project_with_child_mixer(TrackMixer{0.5f, -0.5f});
+    REQUIRE(compile_error_for(both).code == CompileErrorCode::NestedMixerPanUnsupported);
 }
 
 TEST_CASE("A nested child track with a transparent mixer still lowers") {
@@ -847,6 +857,202 @@ TEST_CASE("A nested child track with a transparent mixer still lowers") {
     auto program = compile(shared(project));
     const auto events = program->find_track({3})->arrangement_note_events();
     REQUIRE_FALSE(events.empty());
+}
+
+namespace {
+
+// The three gain stages a nested media placement stacks in series, settable
+// independently so one builder produces the composed case, the identity
+// control, and each refusal.
+struct NestedGainStages {
+    ClipPlaybackProperties placement{};
+    TrackMixer child_mixer{};
+    ClipPlaybackProperties leaf{};
+};
+
+std::vector<float> unit_ramp() {
+    std::vector<float> ramp(24'000);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame)
+        ramp[frame] = static_cast<float>(frame + 1) / static_cast<float>(ramp.size());
+    return ramp;
+}
+
+// One media leaf inside one nested sequence, under a placement on track 3.
+Project nested_gain_project(NestedGainStages stages, std::size_t frame_count) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, frame_count, stages.leaf);
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "child";
+    child_input.clips = {child_media};
+    child_input.mixer = stages.child_mixer;
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {take(Track::create(std::move(child_input)))}));
+    auto placement = take(Clip::create({4}, {kTicksPerQuarter}, {kTicksPerQuarter},
+                                       SequenceRef{{10}, {0}}, stages.placement));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested gain";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {{50, "ramp", frame_count, {48'000, 1}, hash}};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+// The same media leaf reached through TWO placements, so composition has to
+// happen once per level rather than once overall.
+Project doubly_nested_gain_project(NestedGainStages stages, std::size_t frame_count) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto leaf_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, frame_count, stages.leaf);
+    TrackInput leaf_input;
+    leaf_input.id = {11};
+    leaf_input.name = "leaf";
+    leaf_input.clips = {leaf_media};
+    leaf_input.mixer = stages.child_mixer;
+    auto leaf = take(Sequence::create({10}, "leaf", TickDuration{kTicksPerQuarter},
+                                      {take(Track::create(std::move(leaf_input)))}));
+
+    auto inner_placement =
+        take(Clip::create({22}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}, stages.placement));
+    TrackInput middle_input;
+    middle_input.id = {21};
+    middle_input.name = "middle";
+    middle_input.clips = {inner_placement};
+    middle_input.mixer = stages.child_mixer;
+    auto middle = take(Sequence::create({20}, "middle", TickDuration{kTicksPerQuarter},
+                                        {take(Track::create(std::move(middle_input)))}));
+
+    auto outer_placement = take(Clip::create({4}, {kTicksPerQuarter}, {kTicksPerQuarter},
+                                             SequenceRef{{20}, {0}}, stages.placement));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {outer_placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "doubly nested gain";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {{50, "ramp", frame_count, {48'000, 1}, hash}};
+    input.sequences = {root, middle, leaf};
+    return take(Project::create(std::move(input)));
+}
+
+CompileError compile_error_with_assets(const Project& project,
+                                       const std::shared_ptr<const DecodedAudioAssetPool>& assets) {
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = shared(project);
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    request.audio_assets = assets;
+    REQUIRE(compiler.submit(std::move(request)));
+    const auto status = compiler.status();
+    REQUIRE(status.has_error);
+    REQUIRE_FALSE(store.has_value());
+    return status.last_error;
+}
+
+} // namespace
+
+TEST_CASE("Nested gain stages compose by multiplying into the flattened leaf") {
+    const auto ramp = unit_ramp();
+    const auto data = audio_data({ramp});
+    const auto assets = pool({{{50}, data}});
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+
+    // Powers of two so the product is exact in float and an equality assertion
+    // is measuring composition rather than rounding.
+    const NestedGainStages halved{
+        {.gain_linear = 0.5f}, TrackMixer{0.5f, 0.0f}, {.gain_linear = 0.5f}};
+    CompiledFixture composed(shared(nested_gain_project(halved, ramp.size())), map_120(), assets);
+    auto composed_program = composed.store.read();
+    const auto* composed_audio = composed_program->find_track({3})->audio_program();
+    REQUIRE(composed_audio != nullptr);
+    REQUIRE(composed_audio->clips().size() == 1);
+    REQUIRE(composed_audio->clips()[0].gain_linear == 0.5f * 0.5f * 0.5f);
+
+    // The contract is not just "some smaller number": nesting must be
+    // transparent, so the composed placement has to render exactly like the
+    // one clip somebody would have authored by hand at the product gain.
+    auto direct_media = musical_media_clip(4, kTicksPerQuarter, kTicksPerQuarter, 50, ramp.size(),
+                                           {.gain_linear = 0.125f});
+    CompiledFixture flattened(project_with_tracks({track(3, {direct_media})},
+                                                  {{50, "ramp", ramp.size(), {48'000, 1}, hash}}),
+                              map_120(), assets);
+    auto flattened_program = flattened.store.read();
+    Output composed_output(1, 256);
+    Output flattened_output(1, 256);
+    REQUIRE(ArrangementAudioRenderer::process(
+                *composed_program, snapshot(*composed_program, 256, 24'100),
+                composed_output.view()) == AudioRenderStatus::Rendered);
+    REQUIRE(ArrangementAudioRenderer::process(
+                *flattened_program, snapshot(*flattened_program, 256, 24'100),
+                flattened_output.view()) == AudioRenderStatus::Rendered);
+    REQUIRE(composed_output.storage == flattened_output.storage);
+    // Without this the comparison above would pass on two silent buffers.
+    REQUIRE(composed_output.storage[0][0] != 0.0f);
+
+    // The identity control. A transparent nesting must leave the leaf's own
+    // authored gain exactly as authored — not a product that happens to be
+    // close — or every equality above is measuring an accident.
+    const NestedGainStages transparent{{}, TrackMixer{}, {.gain_linear = 0.3f}};
+    CompiledFixture identity(shared(nested_gain_project(transparent, ramp.size())), map_120(),
+                             assets);
+    auto identity_program = identity.store.read();
+    REQUIRE(identity_program->find_track({3})->audio_program()->clips()[0].gain_linear == 0.3f);
+}
+
+TEST_CASE("Nested gain composes once per level of nesting") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    // Two placements and two child faders, each at 0.5, over a unity leaf.
+    const NestedGainStages halved{{.gain_linear = 0.5f}, TrackMixer{0.5f, 0.0f}, {}};
+    CompiledFixture deep(shared(doubly_nested_gain_project(halved, ramp.size())), map_120(),
+                         assets);
+    auto program = deep.store.read();
+    const auto* audio = program->find_track({3})->audio_program();
+    REQUIRE(audio != nullptr);
+    REQUIRE(audio->clips().size() == 1);
+    // Outer placement, middle track fader, inner placement, leaf track fader.
+    REQUIRE(audio->clips()[0].gain_linear == 0.0625f);
+}
+
+TEST_CASE("Nested mixer state with no composition rule keeps its own refusal") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+
+    // A placement fade is one envelope over the whole nested window, and a leaf
+    // can only fade from its own edge, so it stays refused under its own code
+    // even though the media leaf beneath it could carry a gain perfectly well.
+    const NestedGainStages faded_placement{
+        {.gain_linear = 1.0f, .fade_in_duration = static_cast<std::uint64_t>(kTicksPerQuarter / 2)},
+        TrackMixer{},
+        {}};
+    const auto fade_error =
+        compile_error_with_assets(nested_gain_project(faded_placement, ramp.size()), assets);
+    REQUIRE(fade_error.code == CompileErrorCode::NestedPlacementFadeUnsupported);
+    REQUIRE(fade_error.item == ItemId{4});
+
+    // Pan over the very same media leaf: the sink that accepts gain has no
+    // stereo placement to accept a balance.
+    const NestedGainStages panned{{}, TrackMixer{1.0f, -0.5f}, {}};
+    const auto pan_error =
+        compile_error_with_assets(nested_gain_project(panned, ramp.size()), assets);
+    REQUIRE(pan_error.code == CompileErrorCode::NestedMixerPanUnsupported);
+    REQUIRE(pan_error.item == ItemId{11});
+
+    // The positive control for both: identical fixtures with those two stages
+    // neutral compile, so the refusals above are naming the state they claim to
+    // and not simply rejecting every media placement.
+    CompiledFixture allowed(shared(nested_gain_project({{}, TrackMixer{}, {}}, ramp.size())),
+                            map_120(), assets);
+    auto program = allowed.store.read();
+    REQUIRE(program->find_track({3})->audio_program()->clips().size() == 1);
 }
 
 namespace {

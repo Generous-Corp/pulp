@@ -151,6 +151,25 @@ enum class CompileErrorCode : std::uint8_t {
     UnresolvedRegisteredContent,
     RegisteredContentCompileFailed,
     RegisteredContentFragmentQuotaExceeded,
+    // A nested child track carries a stereo balance. Flattening folds the child
+    // into the parent track, and a clip has no pan of its own, so the only
+    // panner left in the result is the parent's — which also serves every other
+    // clip on that track. Folding the child's pan into it would repan unrelated
+    // material, and dropping it would silently centre the child, so the balance
+    // is refused until a flattened leaf can carry its own placement.
+    NestedMixerPanUnsupported,
+    // A composed nested gain had nowhere to land. Gain composes by multiplying
+    // into the flattened leaf's own clip gain, which only reaches a renderer
+    // for content that reads it; note, registered and opaque leaves compile to
+    // events no renderer scales by clip gain. Refuse rather than fold a child
+    // fader into a value nothing will read.
+    NestedGainSinkUnsupported,
+    // A SequenceRef placement carries a fade. That fade is one envelope over
+    // the whole nested window, while a flattened leaf can only carry a fade
+    // measured from its own edge, so a leaf lying inside the fade region would
+    // need a partial ramp the clip model cannot express. Refuse until the
+    // window envelope has a representation of its own.
+    NestedPlacementFadeUnsupported,
 };
 
 struct CompileError {
