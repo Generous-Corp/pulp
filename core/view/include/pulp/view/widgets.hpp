@@ -567,6 +567,35 @@ private:
     canvas::PreparedText attributed_prepare_cache_;
     std::uint64_t attributed_prepare_font_gen_ = 0;
     bool attributed_prepare_valid_ = false;
+
+    /// Real ink metrics of the face `paint()` actually draws with.
+    ///
+    /// A baseline placed at `font_size * 0.85` is a rule-of-thumb, and
+    /// `PreparedText::ascent()` documents that paint code should use the
+    /// resolved face instead. It is also inconsistent with the box this
+    /// Label reports: `intrinsic_height()` measures the line box from the
+    /// typeface's real ink extremes, so a face whose ascent is not 0.85 em
+    /// gets a box sized one way and ink placed another. Two labels centered
+    /// in equal-height boxes then paint their ink at different heights, and
+    /// `align-items: baseline` aligns rows on a number nothing draws at,
+    /// because `baseline_y()` already reports the real ascent.
+    ///
+    /// Metrics depend on the resolved face alone, never on the string, so a
+    /// Label whose text changes every frame still hits this cache.
+    struct FaceMetrics {
+        float ascent = 0.0f;
+        float descent = 0.0f;
+        bool real = false;
+    };
+    FaceMetrics face_metrics(const std::string& family, float font_size,
+                             int font_weight, int font_style) const;
+    mutable std::string face_metrics_family_;
+    mutable float face_metrics_font_size_ = 0.0f;
+    mutable int face_metrics_font_weight_ = 400;
+    mutable int face_metrics_font_style_ = 0;
+    mutable std::uint64_t face_metrics_font_gen_ = 0;
+    mutable FaceMetrics face_metrics_cache_;
+    mutable bool face_metrics_valid_ = false;
 public:
     /// Set text direction (LTR, RTL, vertical top-to-bottom, vertical bottom-to-top).
     void set_text_direction(canvas::TextDirection d) { text_direction_ = d; }
@@ -1433,6 +1462,13 @@ public:
     std::function<void()> on_gesture_end;
 
     void paint(canvas::Canvas& canvas) override;
+    /// The control's own default box height. A childless leaf that reports
+    /// no intrinsic size gets no Yoga measure function, so in a row with
+    /// `align-items: center` and no authored height it lays out at zero
+    /// height -- and because the thumb's minor axis is derived from the box
+    /// height, the handle collapses to zero area and only the track keyline
+    /// paints. 16 is the thumb minor-axis size `paint()` already targets.
+    float intrinsic_height() const override { return 16.0f; }
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_enter() override;

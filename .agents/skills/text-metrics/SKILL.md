@@ -112,6 +112,32 @@ unplaced, so assert the text box itself.
   measured per span: `basis.width`, `resolved_face`, `resolved_faces[]`, and the
   full `requested.*` block. That is the ground truth for "how wide should this
   text be" — not a re-measurement.
+- **`font_size` is the em square, not the ink — never centre against it.**
+  Vertically centring a single line with `(box_height - font_size) * 0.5` places
+  the glyphs by a ratio the face does not actually have, so two labels centred in
+  equal boxes paint their ink at visibly different heights. The ink box is the
+  resolved face's `ascent + descent`; centre against that and add `ascent` to
+  reach the baseline. The historic `font_size * 0.85` first-line rule is the same
+  mistake in closed form: it is right only for a face whose ascent happens to be
+  0.85 em, and wrong by a few pixels for every face that is not. Keep 0.85 solely
+  as the no-Skia / unresolved-family fallback, and flag it (`FaceMetrics::real`)
+  so callers can tell a measured number from a guessed one.
+- **Face metrics must be cached against the font-registration generation, not
+  just the face key.** Registering a font resamples the resolved typeface, so a
+  cache keyed only on family/size/weight/slant keeps serving *fallback* metrics
+  forever to any Label that first painted before an async `register_font_url()`
+  landed — the text silently keeps the 0.85 guess even though the real face
+  arrived. Include `canvas::font_registration_generation()` in the cache key.
+- **Measure the face, not the string.** Shape a single space to get ascent and
+  descent: the metrics belong to the face, so a per-string measurement both costs
+  more and defeats the cache on any label whose text changes every frame. Where a
+  shaped layout already exists (wrapped or attributed text), read its first
+  line's ascent instead of measuring the face a second time.
+- **Three consumers must agree or the bug is invisible.** `intrinsic_height()`
+  sizes the box, `baseline_y()` is what Yoga gets for `align-items: baseline`,
+  and `paint()` places the ink. If they do not derive from one line box, the
+  layout is self-consistent and still paints text off-centre, and the inspector's
+  caret and selection band drift off the glyphs they are supposed to sit on.
 
 ## How to verify a change here
 
