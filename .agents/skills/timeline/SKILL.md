@@ -2942,3 +2942,26 @@ it receives is already encodable and unambiguous.
 flattening derived at a retained-window boundary. An authored document never
 sets it. It is appended last in the struct precisely so existing positional
 brace initialisation keeps compiling — keep it last if you add more.
+
+## `TrackMixer` on a nested track is not equally composable field by field
+
+A `Sequence` reached through a `SequenceRef` is flattened onto the referring
+track, so the child track object disappears and only its clips survive. That
+makes the two `TrackMixer` fields behave differently, which is not obvious from
+a struct whose members look symmetric:
+
+- `gain_linear` composes. It multiplies into each flattened leaf's
+  `ClipPlaybackProperties::gain_linear`, together with the placement clip's own
+  gain, so authoring a child fader is meaningful — but only over content whose
+  clip gain a renderer actually reads, which today means media.
+- `pan` does not compose and cannot. `ClipPlaybackProperties` has no stereo
+  placement, and the parent track's single pan also serves whatever else lives
+  on that track, so a child balance has nowhere to go. Authoring one makes the
+  nesting refuse.
+
+Do not reason about a nested child's mixer as "the mixer either survives or it
+does not". Check which field, and for gain check what the leaf content is.
+`docs/status/sequencer-exposure.json` row `nested-sequence-gain-composition`
+records the precedence model and the remaining gaps; the refusal codes live in
+`CompileErrorCode` and each carries an entry in
+`tools/scripts/negative_capability_allowlist.json`.
