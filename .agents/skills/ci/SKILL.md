@@ -3502,6 +3502,25 @@ use no model. A code/test/conflict blocker receives one deduplicated
 `shipyard:needs-agent` signal plus a failed `shipyard/steward-recovery` status;
 the recovery dispatcher is a separate exception path.
 
+> **PAUSED 2026-09-07 — do not perform this handoff, and do not pass
+> `--workstream-id`.** `[merge_steward] auto_handoff` is `false` in
+> `.shipyard/config.toml` (Pulp #8107) while the Linear/workstream ledger work
+> is frozen pending new requirements. An explicit `--workstream-id` still opts
+> in, so passing one now produces a fleet where a few PRs are steward-managed
+> and most are not — which is worse than either state alone. Land PRs with
+> `shipyard pr`, and adopt an orphaned one with `shipyard ship --pr <n>`.
+>
+> Two corrections to the text below, so it is not followed as written:
+> **(1)** "A PR-scoped handle is no longer accepted" is **no longer true** —
+> Shipyard #585 restored the lowercase PR-scoped fallback (`owner/repo#<pr>`),
+> because requiring an already-lowercase slug made the hatch unreachable for
+> `Generous-Corp/pulp` and every other repo with a capital in its slug.
+> **(2)** The handoff no longer refuses merely because an agent shell exports
+> `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`; that fence now applies only to
+> explicit routes.
+>
+> The rest of this section is retained for when the pause is lifted.
+
 `shipyard pr` does **not** imply this durable controller handoff. After the PR
 exists and its remote head is final, the submitting agent must run:
 
