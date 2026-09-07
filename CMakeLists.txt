@@ -215,6 +215,14 @@ option(PULP_ENABLE_INSPECTOR
 # includer) — a PRIVATE def would give the library and its consumers a
 # different sizeof(StandaloneApp) (ODR).
 option(PULP_ENABLE_AUDIO_PROBES "Wire the RT output-boundary probe into the standalone host (dev/examples ON, release-ship OFF)" ON)
+# Driving the UI before a headless screenshot (click a control, invoke a
+# declared command, scroll a container). Dev/CI only: a SHIPPING plugin that can
+# synthesize gestures on itself inside a DAW could fake the very gestures a host
+# records as automation, so the execution is compiled out unless this is ON.
+# Only the execution is gated -- the StandaloneConfig fields stay declared
+# unconditionally, because gating members of the public header is what gave
+# PULP_ENABLE_AUDIO_PROBES its ODR footgun (see the note above it).
+option(PULP_ENABLE_UI_DRIVING "Allow headless captures to drive the UI before the shutter (dev/CI ON, release-ship OFF)" ON)
 option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SDK" OFF)
 option(PULP_ENABLE_RACK "Enable optional VCV Rack module support with a developer-supplied SDK" OFF)
 set(PULP_RACK_SDK_DIR "" CACHE PATH "Path to a developer-supplied VCV Rack SDK (kept outside the source tree)")

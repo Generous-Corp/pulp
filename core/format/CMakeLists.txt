@@ -208,6 +208,25 @@ else()
     target_compile_definitions(pulp-format-core PUBLIC PULP_ENABLE_AUDIO_PROBES=0)
 endif()
 
+# PULP_ENABLE_UI_DRIVING lets a headless capture click a control, invoke a
+# declared command, or scroll a container before the shutter, so a panel that
+# only exists after an interaction can be photographed at all.
+#
+# PRIVATE, deliberately, and this is the difference from the probe flag above:
+# it gates only the implementation in standalone.cpp and no member of any public
+# header, so consumers cannot disagree about a type's layout and there is no ODR
+# exposure. The StandaloneConfig fields stay declared unconditionally for the
+# same reason.
+#
+# Dev/CI default ON. A shipping plugin that can synthesize gestures on itself
+# inside a DAW could fake the gestures a host records as automation, so
+# release-ship builds configure this OFF and the driving is compiled out.
+if(PULP_ENABLE_UI_DRIVING)
+    target_compile_definitions(pulp-format-core PRIVATE PULP_ENABLE_UI_DRIVING=1)
+else()
+    target_compile_definitions(pulp-format-core PRIVATE PULP_ENABLE_UI_DRIVING=0)
+endif()
+
 # Host-quirks default policy (host-quirks enforcement plan).
 #
 # Selects the baseline tier filter detect_quirks() / resolved_quirks() apply

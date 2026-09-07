@@ -1,4 +1,6 @@
 #include <pulp/format/standalone.hpp>
+
+#include <pulp/view/layout_snapshot.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
@@ -49,6 +51,115 @@
 #include <pulp/runtime/trace_session.hpp>
 
 namespace pulp::format {
+
+namespace {
+
+view::View* find_view_by_id(view::View& view, const std::string& id) {
+    if (view.id() == id) return &view;
+    for (auto* child : view.sorted_children_by_z_index())
+        if (auto* hit = find_view_by_id(*child, id)) return hit;
+    return nullptr;
+}
+
+void collect_scroll_views(view::View& view, std::vector<view::ScrollView*>& out) {
+    if (auto* scroll = dynamic_cast<view::ScrollView*>(&view)) out.push_back(scroll);
+    for (auto* child : view.sorted_children_by_z_index())
+        collect_scroll_views(*child, out);
+}
+
+} // namespace
+
+namespace detail {
+
+// Drive a surface for a capture. The grammar is three verbs and no scripting,
+// which is what lets it live outside the capability broker: `pulp control` can
+// already drive a live instance through dev.pulp.runtime/evaluate@1, but that
+// is arbitrary code against someone's running plugin and rightly needs a
+// broker, an instance and consent. None of those compose with a one-shot
+// headless capture, and none of them are warranted by "click the thing, then
+// photograph it".
+void apply_screenshot_action(const std::string& action,
+                             Processor* processor,
+                             view::View* root) {
+#if !PULP_ENABLE_UI_DRIVING
+    (void)processor;
+    (void)root;
+    runtime::log_error("Standalone: screenshot action '{}' ignored — this build "
+                       "has UI driving compiled out", action);
+    return;
+#else
+    const auto colon = action.find(':');
+    if (colon == std::string::npos) {
+        runtime::log_error("Standalone: screenshot action '{}' has no verb; "
+                           "expected command:<id>, click:<view-id> or "
+                           "scroll:<view-id>=<fraction>", action);
+        return;
+    }
+    const std::string verb = action.substr(0, colon);
+    std::string rest = action.substr(colon + 1);
+
+    if (verb == "command") {
+        if (processor == nullptr) {
+            runtime::log_error("Standalone: no processor for '{}'", action);
+            return;
+        }
+        // Only IDs the plugin itself declares are accepted, so this cannot
+        // reach anything the plugin has not already made public.
+        for (const auto id : processor->commands()) {
+            if (std::to_string(static_cast<long long>(id)) != rest) continue;
+            if (!processor->perform_command(id))
+                runtime::log_error("Standalone: command {} declined", rest);
+            return;
+        }
+        runtime::log_error("Standalone: command '{}' is not declared by this "
+                           "plugin; nothing was driven", rest);
+        return;
+    }
+
+    if (root == nullptr) {
+        runtime::log_error("Standalone: no editor view for '{}'", action);
+        return;
+    }
+
+    if (verb == "click") {
+        if (auto* target = find_view_by_id(*root, rest)) {
+            const auto b = target->bounds();
+            target->simulate_click(b.width * 0.5f, b.height * 0.5f);
+            return;
+        }
+        runtime::log_error("Standalone: no view with id '{}'; nothing was "
+                           "clicked", rest);
+        return;
+    }
+
+    if (verb == "scroll") {
+        float fraction = 1.0f;
+        std::string id = rest;
+        if (const auto eq = rest.find('='); eq != std::string::npos) {
+            id = rest.substr(0, eq);
+            fraction = std::strtof(rest.c_str() + eq + 1, nullptr);
+        }
+        std::vector<view::ScrollView*> found;
+        collect_scroll_views(*root, found);
+        for (auto* scroll : found) {
+            if (!id.empty() && scroll->id() != id) continue;
+            const float max_y = scroll->content_size().height
+                              - scroll->bounds().height;
+            if (max_y <= 0.0f) continue;
+            scroll->set_scroll(scroll->scroll_x(), max_y * fraction);
+            return;
+        }
+        runtime::log_error("Standalone: no scrollable container{}{}; nothing "
+                           "was scrolled", id.empty() ? "" : " with id ", id);
+        return;
+    }
+
+    runtime::log_error("Standalone: unknown screenshot action verb '{}'", verb);
+#endif
+}
+
+} // namespace detail
+
 
 detail::StandaloneTestInputResult detail::StandaloneTestInputHost::inject_note(
     StandaloneTestMidiNote note) {
@@ -1195,6 +1306,35 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             ? effective_config.screenshot_frame_delay : 30;
         cap.path = effective_config.screenshot_path;
         auto* editor_view = bridge->view();
+
+        // Drive the surface before the shutter. Without this a headless run can
+        // only ever photograph the launch state, so any panel reached by a
+        // click — a settings modal, a preset browser — was unphotographable,
+        // and those are the surfaces most worth reviewing. `pulp control` can
+        // drive a live instance, but it needs a broker, a registered instance
+        // and consent, so it does not compose with a one-shot headless capture.
+        if (!effective_config.screenshot_actions.empty()) {
+            cap.settle_frames = std::max(0, effective_config.screenshot_settle_frames);
+            if (cap.settle_frames >= cap.delay) cap.settle_frames = cap.delay / 2;
+            cap.actions_fn = [this, editor_view,
+                              actions = effective_config.screenshot_actions] {
+                for (const auto& action : actions)
+                    detail::apply_screenshot_action(action, processor_.get(),
+                                                    editor_view);
+            };
+        }
+        if (!effective_config.screenshot_layout_path.empty()) {
+            cap.layout_fn = [editor_view,
+                             layout_path = effective_config.screenshot_layout_path] {
+                if (editor_view == nullptr) return;
+                view::LayoutTreeSnapshotOptions options;
+                options.surface = "standalone";
+                options.viewport_width = editor_view->bounds().width;
+                options.viewport_height = editor_view->bounds().height;
+                std::ofstream out(layout_path);
+                out << view::dump_layout_tree(*editor_view, options);
+            };
+        }
 #if PULP_ENABLE_AUDIO_PROBES
         // Sibling capture of the Audio Inspector's OWN window surface, written
         // next to the main screenshot as "<stem>.audio-inspector.png" when the

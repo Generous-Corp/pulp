@@ -89,6 +89,32 @@ struct StandaloneConfig {
     // headless screenshot capture for free. Set via set_config() or by
     // parsing `--screenshot=PATH` from argv in main().
     std::string screenshot_path;
+
+    // Drive the surface before the shutter, so a panel reached by a click can
+    // be photographed at all. Each entry is one action, applied in order:
+    //
+    //   command:<id>        invoke a Processor command by its declared ID.
+    //                       This is the generic lever: any plugin that returns
+    //                       an ID from Processor::commands() is drivable
+    //                       without the SDK knowing anything about it.
+    //   click:<view-id>     simulate a click on the View with that id().
+    //   scroll:<id>=<frac>  scroll a ScrollView to a fraction of its range;
+    //                       an empty id takes the first scrollable container.
+    //
+    // An action naming something that is not present is reported and skipped
+    // rather than silently ignored — a capture that quietly failed to open the
+    // panel it was asked to open would look exactly like a passing capture of
+    // a broken one.
+    std::vector<std::string> screenshot_actions;
+    // Frames between the actions and the capture, for layout and animation to
+    // settle. Taken out of screenshot_frame_delay, not added to it.
+    int screenshot_settle_frames = 20;
+
+    // Write the laid-out view tree beside the PNG. Whole-image statistics
+    // cannot see two labels painting on top of each other or a label wider
+    // than its box, because both preserve the image's colour distribution;
+    // the tree can. Empty disables.
+    std::string screenshot_layout_path;
     // Frames to wait before capture. Default 30 (~0.5s @60fps) gives the
     // first React-driven layout + effects pass time to settle.
     int screenshot_frame_delay = 30;
