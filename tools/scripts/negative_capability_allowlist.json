@@ -20,7 +20,28 @@
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
       "status": "live-defect",
-      "reason": "set_clip_sequence_ref composes with set_clip_playback_properties, set_track_mixer, set_track_freeze and the take, automation and device-chain surfaces, but flattening has nowhere to fold clip gain and fades, a child fader, a child device chain, takes, freeze, a non-musical anchor, or a trim that cuts a conformed source or a fade, so each of those authored combinations refuses instead of playing wrong."
+      "reason": "set_clip_sequence_ref composes with set_track_freeze and the take, automation and device-chain surfaces, but flattening has nowhere to fold a child device chain, an automation lane, takes, freeze, record-arm, a non-musical anchor, or a trim that cuts a conformed source or a child clip's own fade, so each of those authored combinations refuses instead of playing wrong. Clip and track GAIN no longer refuse here: they compose by multiplying into the flattened leaf, and the cases that composition still cannot answer carry their own codes below."
+    },
+    {
+      "code": "NestedMixerPanUnsupported",
+      "file": "core/playback/src/sequence_content_lowerer.cpp",
+      "owner": "playback",
+      "status": "live-defect",
+      "reason": "set_track_mixer authors a stereo balance on a track that a SequenceRef then nests. Flattening folds the child into the parent track, a clip carries no pan of its own, and the parent's single pan also serves every other clip on that track, so the child's balance can be neither written anywhere nor dropped without silently centring the child. Unlike gain there is no sink for any content kind; the refusal stands until a flattened leaf can carry its own stereo placement."
+    },
+    {
+      "code": "NestedGainSinkUnsupported",
+      "file": "core/playback/src/sequence_content_lowerer.cpp",
+      "owner": "playback",
+      "status": "live-defect",
+      "reason": "A nested gain composes by multiplying into the flattened leaf's clip gain, which only reaches a renderer for media content; note, registered and opaque leaves compile to events and no renderer scales an event by the gain of the clip that carried it. Folding a child fader into one would discard it with nothing to read the loss from, so the compile refuses and names the leaf. The refusal stands until event rendering has a defined response to clip gain, which is a product question about velocity and level, not a lowering detail."
+    },
+    {
+      "code": "NestedPlacementFadeUnsupported",
+      "file": "core/playback/src/sequence_content_lowerer.cpp",
+      "owner": "playback",
+      "status": "live-defect",
+      "reason": "set_clip_playback_properties authors a fade on the SequenceRef placement itself. That fade is one envelope across the whole nested window, while a flattened leaf can only carry a fade measured from its own edge, so a leaf lying inside the fade region would need a partial ramp starting and ending part way up that ClipPlaybackProperties cannot express. This is an expressiveness limit rather than a choice between two defensible answers; the refusal stands until the window envelope has a representation of its own."
     }
   ]
 }
