@@ -727,6 +727,12 @@
         "tools/launchd/pulp-qemu-runner-windows.plist.template"
       ]
     },
+    "text-metrics": {
+      "paths": [
+        ".agents/skills/text-metrics/**",
+        "core/view/src/widgets/label.cpp"
+      ]
+    },
     "threejs-bridge": {
       "paths": [
         "examples/threejs-*/**"
