@@ -129,6 +129,32 @@ function call(name: string, ...args: unknown[]): unknown {
     return fn(...args);
 }
 
+// A lowercase HTML <button> is sized by its caption, exactly like the browser
+// box it was imported from. Keep that caption in normal flow so it contributes
+// its intrinsic text size; an absolutely positioned caption contributes
+// nothing and collapses every text-sized button to padding plus border.
+// An empty caption stub sitting beside authored nested markup is the one case
+// that must not claim a flex slot, so it stays a zero-contribution overlay
+// until a later commit gives it text.
+function applyButtonCaptionLayout(textId: string, hasText: boolean): void {
+    call('setPosition', textId, hasText ? 'static' : 'absolute');
+    if (hasText) return;
+    call('setTop', textId, 0);
+    call('setRight', textId, 0);
+    call('setBottom', textId, 0);
+    call('setLeft', textId, 0);
+}
+
+/// Lower an HTML text element to a Label carrying CSS's default
+/// `white-space: normal`. A native Label defaults to a single line and clips
+/// mid-word, whereas the browser box this markup was imported from wraps. An
+/// element that authored its own `whiteSpace` still wins — applyAllProps runs
+/// after createWidget.
+function createHtmlLabel(id: string, text: string, parentId: string): void {
+    call('createLabel', id, text, parentId);
+    call('setWhiteSpace', id, 'normal');
+}
+
 // ── element-name → bridge createX dispatch ──────────────────────────
 function createWidget(type: Type, id: string, parentId: string, props: Props): void {
     switch (type) {
@@ -191,7 +217,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     // instead of as stacked synthetic Label siblings.
                     const txt = asText(props.children);
                     if (txt !== undefined && txt.length > 0) {
-                        call('createLabel', id, txt, parentId);
+                        createHtmlLabel(id, txt, parentId);
                     } else {
                         call('createCol', id, parentId);
                     }
@@ -208,7 +234,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     // the nested element content.
                     const txt = asText(props.children);
                     if (txt !== undefined) {
-                        call('createLabel', id, txt, parentId);
+                        createHtmlLabel(id, txt, parentId);
                     } else {
                         // Mixed or element children — use a row container
                         // so child labels flow horizontally like inline
@@ -235,17 +261,14 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     call('setFlex', id, 'align_items', 'center');
                     call('setFlex', id, 'justify_content', 'center');
                     const textId = id + '__text';
+                    // Always create the caption—even for nested markup—so a
+                    // dynamic nested↔plain-text React update has a stable
+                    // target. Captured line boxes are owner-relative and are
+                    // rebased onto the caption's measured local offset by the
+                    // materialization applier, so the caption does not have to
+                    // span the whole button box for replay to stay exact.
                     call('createLabel', textId, text, id);
-                    // The browser's text line boxes are relative to the
-                    // complete button box. Give the Label that same box so
-                    // captured offsets/baselines remain directly usable.
-                    // Always create it—even for nested markup—so a dynamic
-                    // nested↔plain-text React update has a stable target.
-                    call('setPosition', textId, 'absolute');
-                    call('setTop', textId, 0);
-                    call('setRight', textId, 0);
-                    call('setBottom', textId, 0);
-                    call('setLeft', textId, 0);
+                    applyButtonCaptionLayout(textId, text.length > 0);
                     call('setPointerEvents', textId, 'none');
                     // Preserve native HTML semantics on the authored box. In
                     // addition to accessibility this opts the generic View
@@ -756,6 +779,12 @@ export const PulpHostConfig: HostConfig<
                 if (typeof g.setText === 'function') {
                     call('setText', instance.textTargetId ?? instance.id, newText);
                 }
+                // A caption that gains or loses text changes whether it may
+                // size its owner. Re-resolve its box on the same commit.
+                if (instance.textTargetId) {
+                    applyButtonCaptionLayout(
+                        instance.textTargetId, newText.length > 0);
+                }
             }
         }
     },
@@ -774,6 +803,11 @@ export const PulpHostConfig: HostConfig<
         markMaterializedTreeDirty();
         if (typeof g.setText === 'function') {
             call('setText', instance.textTargetId ?? instance.id, '');
+        }
+        // Nested markup is mounting in place of the caption. Return it to a
+        // zero-contribution overlay so it takes no flex slot beside them.
+        if (instance.textTargetId) {
+            applyButtonCaptionLayout(instance.textTargetId, false);
         }
     },
 
@@ -998,6 +1032,13 @@ function bindSourceLocation(child: Instance): void {
 function materializeUnder(parentId: string, child: Instance): void {
     if (child.onBridge) return;
     createWidget(child.type, child.id, parentId, child.props);
+    // A loose text node wraps by default in CSS (`white-space: normal`), but a
+    // native Label defaults to one line and clips mid-word instead. Synthetic
+    // text targets have no author style of their own to carry the default in,
+    // so state it explicitly — otherwise every imported paragraph inside a
+    // width-constrained box truncates. An element that authored its own
+    // `whiteSpace` still wins: applyAllProps runs after this.
+    if (child.anonymousTextTarget) call('setWhiteSpace', child.id, 'normal');  // same CSS default as createHtmlLabel
     if (child._dom && typeof child._dom === 'object' && child.textTargetId) {
         (child._dom as Record<string, unknown>).__pulpTextTargetId = child.textTargetId;
     }

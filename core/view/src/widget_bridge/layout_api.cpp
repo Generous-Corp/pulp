@@ -236,6 +236,20 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
         auto key = args.get<std::string>(1, "");
         View* v = id.empty() ? &self.root_ : self.style_target(id);
         if (!v) return choc::value::Value();
+        // Padding is an INNER-box property. A retained scroll container is
+        // two boxes: the wrapper owns the parent's flex line and the authored
+        // margins, the retained content owns the authored padding and sizes to
+        // its own content so there is something to scroll. The upgrade
+        // establishes that by clearing the wrapper's padding -- but
+        // `style_target` hands every later style write to the wrapper, so an
+        // authored `padding-top` restored after the upgrade lands on the box
+        // the split just cleared while the content still carries the value it
+        // was given before it. The inset is then applied twice and the first
+        // row of content starts at double the authored offset. Route padding
+        // back to the inner box so the split survives restyling.
+        if (key.rfind("padding", 0) == 0 && self.scroll_wrapper(id) != nullptr) {
+            if (auto* content = self.widget(id)) v = content;
+        }
         auto& f = v->flex();
         const auto previous = f;
         auto val = args.get<double>(2, 0);

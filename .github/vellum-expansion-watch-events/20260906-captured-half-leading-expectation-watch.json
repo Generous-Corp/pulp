@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260906-captured-half-leading-expectation-watch",
+  "created_at": "2026-09-06T23:12:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "A codegen test's expected baseline offset changes from a rule-of-thumb constant to a derived one. CSS half-leading is single-reference: within a line box of height L carrying ink of height ascent + descent, the baseline sits at (L - ink) / 2 + ascent. The previous expectation, 11.7, was 1.5 + 0.85 * 12 -- it measured the surplus against the em box and then descended by a real face ascent, double-counting the difference between the two references. The corrected expectation, 12.2139, measures the surplus against the same ink the baseline then descends by: Inter at 12px carries 17.162109px of ink, so a captured 15px line box has negative half-leading (-1.081) and the glyphs overflow it evenly, which CSS permits. This reaches design-source-ingest only through the test/test_design_import_codegen.cpp path selector. No importer, no DesignIR schema, no capture format, no codegen emitter and no source-contract changes; the only edit is the numeric expectation and the derivation comment that explains it. The captured 15.0 line box in that fixture is hand-authored rather than a real Chromium capture, which is why the old constant survived. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector without changing what the family proves. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-design-import"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
