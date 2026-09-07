@@ -527,13 +527,42 @@ repository = "Generous-Corp/pulp"
 [merge]
 require_platforms = ["macos", "linux", "windows"]
 
-# On protected main, make PR creation and durable steward ownership one
-# operation. Shipyard reads this policy from origin/main rather than the PR
-# branch, writes an exact-head server receipt, revalidates the open PR/head,
-# and only then attaches shipyard:managed. The submitting agent may exit as
-# soon as `shipyard pr` has completed this handoff.
+# PAUSED 2026-09-07. Set back to true once Shipyard's handoff validator is
+# fixed; this is a one-line revert and nothing else here changes.
+#
+# What this normally does: on protected main, make PR creation and durable
+# steward ownership one operation. Shipyard reads this policy from origin/main
+# rather than the PR branch, writes an exact-head server receipt, revalidates
+# the open PR/head, and only then attaches shipyard:managed. The submitting
+# agent may exit as soon as `shipyard pr` has completed this handoff.
+#
+# WHY IT IS PAUSED. Since 2026-08-31 the handoff rejects every agent-run
+# `shipyard pr` against this repo, AFTER the branch is pushed, with
+# "--workstream-id must be a canonical GEN-style handle". Two independent
+# guards combine to make that unavoidable here:
+#
+#   1. Shipyard synthesizes the fallback id as `{repo}#{pr}` preserving case,
+#      then its escape hatch requires the slug to be ALREADY LOWERCASE. This
+#      repo is `Generous-Corp/pulp`, so the hatch is false by construction.
+#   2. Even with a lowercase slug, the hatch is refused when an agent route is
+#      detected, and CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID are set in every
+#      agent shell.
+#
+# Deterministic, not flaky. Observed cost: a pushed branch with an unowned PR
+# that had to be adopted by hand with `shipyard ship --pr <n>`.
+#
+# COST OF THE PAUSE, stated plainly: new PRs here are not steward-managed.
+# `runner steward` classifies them Unmanaged and attaches shipyard:unmanaged,
+# so it will not queue, re-run, cancel or recovery-signal them. That is the
+# pre-2026-08-14 landing path: `shipyard ship` still validates and merges on
+# its own, and nothing in ship/queue/watch depends on the managed label. The
+# recovery worker goes idle rather than broken, since it requires that label.
+#
+# An explicit `shipyard pr --workstream-id GEN-N` still opts in, so agent
+# guidance must not pass one while this is paused or the fleet splits into
+# managed and unmanaged PRs.
 [merge_steward]
-auto_handoff = true
+auto_handoff = false
 
 # ── Governance (required-check contract) ───────────────────────────────────
 # The GitHub checks that must be green before `main` accepts a merge. This
