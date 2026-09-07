@@ -4417,6 +4417,10 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "text-metrics",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "threejs-bridge",
         "disposition": "candidate-shared-later"
       },
