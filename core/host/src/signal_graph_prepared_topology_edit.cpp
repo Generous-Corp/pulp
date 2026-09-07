@@ -86,6 +86,11 @@ class PreparedOwnedBuiltInSlot final : public PluginSlot {
     }
     int latency_samples() const override { return inner_->latency_samples(); }
     int tail_samples() const override { return inner_->tail_samples(); }
+    // Forwarded alongside the number it qualifies. Without this the wrapper
+    // inherits the base default of `Available`, so a backend that cannot read a
+    // latency at all is reported as confidently answering zero, and a caller
+    // that checks before reading gets a fact where none exists.
+    LatencyQuery latency_query() const override { return inner_->latency_query(); }
 
   private:
     std::unique_ptr<PluginSlot> inner_;
