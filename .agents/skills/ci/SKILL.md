@@ -8122,3 +8122,32 @@ Prefer an unset variable with a GitHub-hosted default for advisory,
 low-frequency lanes. Staying off the self-hosted fleet is a stronger guarantee
 than a low fleet priority, because the lane cannot contend with the required
 gate at all.
+
+## `shipyard pr` can push your branch and then refuse the handoff
+
+Since 2026-08-31 the steward handoff validates `--workstream-id` against a
+`^GEN-[1-9][0-9]*$` shape, and its legacy escape hatch cannot fire in this repo.
+Two guards combine:
+
+- `shipyard pr` synthesizes the fallback id as `{repo}#{pr}` **preserving case**,
+  while the hatch requires an **already-lowercase** slug. This repo is
+  `Generous-Corp/pulp`, so the hatch is false by construction.
+- Even lowercased, the hatch is refused once an agent route is detected, and
+  `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID` are set in every agent shell.
+
+The failure is deterministic, not flaky, and it happens **after the branch is
+pushed** — leaving a real PR with no `shipyard:managed` label and no local
+ship-state, which makes it invisible to `shipyard status` and to the queue tick.
+
+**Do not re-run `shipyard pr`** when you hit it; that risks a duplicate PR.
+Find the PR that was created and adopt it:
+
+```sh
+ghapp pr list --repo Generous-Corp/pulp --head <your-branch> --state all
+shipyard ship --pr <n>
+```
+
+`[merge_steward] auto_handoff` in `.shipyard/config.toml` is currently **paused**
+for this reason, so the auto path no longer runs at all. While it is paused, do
+**not** pass `--workstream-id` — an explicit id still opts in, and a fleet where
+some PRs are managed and most are not is worse than either state alone.
