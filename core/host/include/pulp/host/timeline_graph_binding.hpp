@@ -5,6 +5,7 @@
 #include <pulp/host/timeline_device_resolver.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/automation_limits.hpp>
+#include <pulp/playback/event_compensation.hpp>
 #include <pulp/playback/note_renderer.hpp>
 #include <pulp/runtime/slot.hpp>
 
@@ -106,6 +107,21 @@ enum class TimelineGraphAdmissionCode : std::uint8_t {
     UnsupportedDeviceState,
     MixedDeviceOwnership,
     DeviceFactoryFailed,
+    /// A device's backend cannot report latency, or asked and the plugin
+    /// errored. The number is a placeholder rather than a fact, and treating an
+    /// unanswered question as a confident zero is exactly what a delay proof
+    /// would then certify, so admission fails closed instead.
+    EventDeviceLatencyUnavailable,
+    /// A device reported a negative latency, or one past the graph's declared
+    /// per-node ceiling. `actual` carries the reported value and `limit` the
+    /// ceiling.
+    EventDeviceLatencyOutOfRange,
+    /// A track offers live input into an event chain that is compensated by
+    /// reading ahead. Scheduled events can be issued early; a live note cannot,
+    /// so the two would diverge by exactly the chain's event latency. The pair
+    /// is refused until a per-track monitor policy defines what the musician
+    /// hears.
+    EventChainLiveInputUnsupported,
 };
 
 /// Structured admission result. Capacity failures always report the exact
@@ -142,6 +158,9 @@ enum class TimelineGraphProcessCode : std::uint8_t {
     AutomationDeliveryFailed,
     RoutedDispatchFailed,
     CleanupFailed,
+    /// A compensating event shift met a transport range that locates events by
+    /// host beat rather than by document sample.
+    EventCompensationUnsupported,
 };
 
 struct TimelineGraphProcessResult {
@@ -221,6 +240,11 @@ class TimelineGraphPlaybackBinding {
     NodeId midi_input_node_for(timeline::ItemId track_id) const noexcept;
     /// Returns the ephemeral graph node for a resolver-owned placement.
     NodeId device_node_for(timeline::ItemId placement_id) const noexcept;
+    /// The prepared event-scheduling shift for a track, resolved once at
+    /// admission from the device latencies the resolver discovered. Zero for an
+    /// unknown track and for every chain with no event-domain latency.
+    playback::EventCompensationShift
+    event_compensation_shift_for(timeline::ItemId track_id) const noexcept;
     playback::RendererProgramKey renderer_key_for(timeline::ItemId track_id) const noexcept;
     playback::RendererCarryState renderer_state_for(timeline::ItemId track_id) const noexcept;
 

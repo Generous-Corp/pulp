@@ -90,9 +90,14 @@ artifact is needed. Never modify canonical project JSON text directly.
   Removing a placement still referenced by automation or modulation fails
   closed; it never silently cascades.
 - Typed device declarations describe authored topology only. They do not lower
-  note effects, instantiate hosts, or promise sample-accurate event-stream PDC.
-  Treat that runtime contract as open until `docs/policies/event-stream-pdc.md`
-  is resolved.
+  note effects or instantiate hosts. The event-stream delay-compensation
+  contract they will eventually be lowered against is settled in
+  `docs/policies/event-stream-pdc.md`: latency is samples, discovered once on
+  the control thread, and compensation shifts the scheduling window rather than
+  the event data. Event-to-event device *execution* is still open, so every
+  chain the runtime admits today resolves to a zero shift. Never put a latency
+  field in the Timeline document; the shift is a host fact and belongs to the
+  binding.
 - `ClipTimeAnchor::Musical` follows tempo in ticks. `Absolute` uses
   `SamplePosition`, an integer sample count, and a normalized `RationalRate`,
   remaining fixed as tempo changes. Phase 1 rejects mixed anchors within one

@@ -182,6 +182,7 @@ endif()
 pulp_add_test_suite(pulp-test-playback-note-renderer
     SOURCES test_playback_note_renderer.cpp
         test_playback_note_modifiers.cpp
+        test_playback_event_pdc.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
@@ -347,6 +348,7 @@ pulp_add_test_suite(pulp-test-timeline-offline-renderer
 
 pulp_add_test_suite(pulp-test-timeline-graph-binding
     SOURCES test_timeline_graph_binding.cpp
+        test_timeline_event_pdc_admission.cpp
         test_timeline_graph_automation_delivery.cpp
         test_timeline_graph_binding_lifecycle.cpp
         test_timeline_graph_binding_publication.cpp

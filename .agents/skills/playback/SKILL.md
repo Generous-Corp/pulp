@@ -147,6 +147,45 @@ the renderer rejects a program compiled against another map. Overlapping
 logical notes on one MIDI key are reference-counted into one physical note-on
 and one final note-off.
 
+Event-stream delay compensation rides on that same `process()`. The three-argument
+overload takes an `EventCompensationShift` (samples, `std::int64_t`) and reads
+each transport range from `range.timeline_sample_start + shift` instead of the
+range's own origin, so a chain that delays the events themselves still lands
+them on the sample the document authored. Non-obvious parts, in the order they
+bite:
+
+- **Shift the window, never the event data.** `PlaybackProgram` is immutable and
+  shared by the offline and realtime paths. Folding a host latency into
+  `NoteProgramEvent::sample` makes the program a function of the host graph and
+  forces a recompile on every device swap. The addend belongs on `range_start`.
+- **Per range, never per block.** A block straddling a loop wrap carries two
+  monotonic ranges; shifting the block would read the second from the first's
+  origin and replay the pre-wrap window. The no-chase-on-seek rule applies to the
+  *shifted* range for the same reason.
+- **A changed shift is held until the transport stops.** The renderer latches the
+  first value it is given and only adopts a different one while
+  `is_playing` is false, reporting `shift_relatch_pending` until then. Adopting
+  mid-playback would displace every later event by the delta.
+- **A host-beat-mapped range refuses a compensating shift**
+  (`NoteRenderCode::CompensationUnsupported`). That range locates events by
+  authored tick against the host's beat window, so a document-sample shift has
+  nowhere to land, and converting it to ticks is what the unit rule forbids.
+- **Reading ahead past an enabled loop's end refuses**
+  (`NoteRenderCode::CompensationLoopWrapUnsupported`). What belongs in that
+  window is the content after the wrap, not the document positions past the loop
+  point; wrap-aware read-ahead is a separate mechanism that does not exist yet,
+  so the crossing fails closed rather than playing events the pass never reaches.
+  The guard is skipped entirely when nothing compensates.
+- **An event-to-audio device contributes nothing to the shift.** The graph's own
+  delay compensation already aligns its audio output against every sibling
+  branch; adding it again pulls the stream early by exactly the amount the graph
+  handled. Only event-domain latency moves the window. Accumulate it with
+  `accumulate_event_chain_shift()`, which range-checks against the ceiling the
+  caller supplies rather than declaring a second latency constant.
+
+The full contract, including what is still open, is
+`docs/policies/event-stream-pdc.md`.
+
 Compile an unattached `AutomationLane` with `AutomationProgram::compile()` on
 the control/worker thread. The immutable program owns its exact tempo map and
 retains tick-domain segment semantics. Each compile also receives a nonzero
