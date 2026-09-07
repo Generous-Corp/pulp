@@ -4083,6 +4083,32 @@ You don't need the same VM setup as the original developer. Options:
 
 Local CI config is intentionally gitignored. Keep your host topology local, and prefer the machine-global config path so every worktree uses the same host map by default.
 
+## Steward auto-handoff is PAUSED (2026-09-07)
+
+`.shipyard/config.toml` sets `[merge_steward] auto_handoff = false`. Normally it
+is `true`, making PR creation and durable steward ownership one operation.
+
+It is paused because since 2026-08-31 the handoff rejects every agent-run
+`shipyard pr` against this repo, **after the branch is pushed**, with
+`--workstream-id must be a canonical GEN-style handle`. Two guards combine to
+make that unavoidable here: Shipyard synthesizes the fallback id as `{repo}#{pr}`
+preserving case and its escape hatch requires an already-lowercase slug (this
+repo is `Generous-Corp/pulp`), and even lowercased the hatch is refused once an
+agent route is detected — `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID` are set in
+every agent shell. Deterministic, not flaky.
+
+While paused, new PRs are not steward-managed: `runner steward` marks them
+`shipyard:unmanaged` and will not queue, re-run, cancel or recovery-signal them.
+That is the pre-2026-08-14 landing path — `shipyard ship` validates and merges on
+its own, and ship/queue/watch never consult the managed label. The recovery
+worker goes idle rather than broken.
+
+**Do not pass `--workstream-id` while this is paused**, or the fleet splits into
+managed and unmanaged PRs, which is worse than either state alone.
+
+Restore by setting `auto_handoff = true` once Shipyard's validator accepts a
+mixed-case slug from an agent shell.
+
 ## Troubleshooting
 
 ### `JSONDecodeError` on Shipyard queue file
