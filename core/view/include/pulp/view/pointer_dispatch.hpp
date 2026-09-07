@@ -29,6 +29,32 @@ void dispatch_dom_pointer_event(View& root, View* target,
                                 const MouseEvent& event, bool moving,
                                 bool bubble = true);
 
+/// The result of one buttonless pointer move: the view the cursor should be
+/// taken from, and that view's style.
+struct HoverCursorResolution {
+    View* target = nullptr;             ///< null when nothing was under the point
+    View::CursorStyle style = View::CursorStyle::default_;
+};
+
+/// Deliver a buttonless pointer move and report the cursor a host should show.
+///
+/// This is the whole no-button half of a platform host's pointer handling, in
+/// one place so a host and a test cannot drift apart: a test that re-implements
+/// the host's sequence is testing its own copy, and the copy is what goes stale.
+///
+/// Three steps, in this order:
+///   1. `simulate_hover` — hover state and `on_hover_move`. Runs no JavaScript.
+///   2. a DOM `pointermove`/`mousemove` on the hit view. This is where a
+///      web-authored UI decides its cursor (grab over a draggable region,
+///      col-resize over a handle). Without it an element reports the cursor it
+///      mounted with no matter where the pointer is.
+///   3. a FRESH hit test, because a move handler may have unmounted or replaced
+///      the view under the pointer, and the cursor must come from the tree as
+///      it now stands.
+HoverCursorResolution deliver_hover_and_resolve_cursor(View& root,
+                                                       Point root_pt,
+                                                       std::uint16_t modifiers = 0);
+
 /// Route a right-click at `root_pos` to the view under it. Returns true when a
 /// view had an `on_context_menu` handler and it was invoked.
 ///

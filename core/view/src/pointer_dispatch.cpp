@@ -167,6 +167,26 @@ bool drain_root_focus(View& root, const ViewCapture& protected_target,
 }
 }  // namespace
 
+HoverCursorResolution deliver_hover_and_resolve_cursor(View& root,
+                                                       Point root_pt,
+                                                       std::uint16_t modifiers) {
+    root.simulate_hover(root_pt);
+
+    MouseEvent move;
+    move.position = root_pt;
+    move.window_position = root_pt;
+    move.is_down = false;
+    move.phase = MousePhase::hover;
+    move.modifiers = modifiers;
+    if (auto* move_target = root.hit_test(root_pt))
+        dispatch_dom_pointer_event(root, move_target, move, /*moving=*/true);
+
+    HoverCursorResolution result;
+    result.target = root.hit_test(root_pt);
+    if (result.target) result.style = result.target->cursor();
+    return result;
+}
+
 void dispatch_dom_pointer_event(View& root, View* target,
                                 const MouseEvent& event, bool moving,
                                 bool bubble) {

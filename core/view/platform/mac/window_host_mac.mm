@@ -1196,9 +1196,14 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 combo->on_mouse_event(me);
             }
 
-            self.rootView->simulate_hover(pt);
-
-            auto* target = self.rootView->hit_test(pt);
+            // The whole buttonless-move sequence lives in
+            // pointer_dispatch so a probe can run EXACTLY what this runs
+            // instead of re-implementing it: hover state, then a DOM
+            // pointermove (where a web-authored UI decides its cursor), then a
+            // fresh hit test in case a move handler replaced the view.
+            const auto hover = pulp::view::deliver_hover_and_resolve_cursor(
+                *self.rootView, pt, modifiers_from_ns_flags(event.modifierFlags));
+            auto* target = hover.target;
             // The inspector overlay may override the cursor for
             // its move/resize affordances (it owns mouse-move before normal
             // hit-testing). A returned style >= 0 wins over the hit view's
@@ -1217,7 +1222,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             if (target || inspector_cursor >= 0) {
                 auto style = inspector_cursor >= 0
                     ? static_cast<pulp::view::View::CursorStyle>(inspector_cursor)
-                    : target->cursor();
+                    : hover.style;
                 pulp::view::mac_geometry::set_ns_cursor_for_style(style);
             }
 
