@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260906-visual-harness-own-runner-selector",
+  "created_at": "2026-09-06T16:45:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Routing-only change to the Visual Harness workflow. Both macOS jobs selected their runner through PULP_LOCAL_MACOS_RUNS_ON_JSON, the required macOS gate's variable, which carries the pulp-gate-fast label. An array runs-on requires a runner to carry EVERY label and no runner in either the repo or the org scope mints that one, so these jobs were unschedulable: 48 of them recorded an empty runner_name and were auto-cancelled while the ubuntu jobs in the same runs succeeded. GitHub does not error on an unservable label, it queues, so the lane read as slow rather than broken and went unreported since 2026-08-27. The || fallback did not save it, because that fires only when the variable is UNSET, never when it is set to an unservable value. This workflow was the only consumer using that variable literally in runs-on; every other consumer passes it to a resolver that can route elsewhere, which is why this lane alone went dark. The fix gives the lane its own selector, unset by default, so it lands on GitHub-hosted macos-15. That suits an advisory, low-frequency lane (path-filtered pushes to main, a nightly cron and manual dispatch, never per-PR) and it means the harness can never contend with the required macOS gate for fleet capacity. actions/setup-python is also pinned so the locked skia-python 3.12 wheel resolves on any runner rather than relying on whatever minor version the previous host happened to expose. No harness code, fixture, snapshot, threshold, renderer, or Skia pin changes; the tests the family covers are identical and only the machine they run on moves. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "macOS local smoke",
+    "Yoga layout snapshots",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

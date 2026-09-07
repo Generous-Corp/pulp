@@ -8085,3 +8085,40 @@ checkout); it appeared only on a machine that had built once, which is exactly
 the machine verifying the fix. That is fixed now, but the shape is worth
 remembering: when a local run disagrees with CI, suspect the local *tree* before
 the local *change*.
+
+## A routing variable used LITERALLY in `runs-on` has no fallback, and GitHub will not tell you
+
+Most Pulp workflows pass a `PULP_*_RUNS_ON_JSON` variable into a resolver step
+that can pick a different route when the configured one cannot be served. A few
+use it directly:
+
+```yaml
+runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '"macos-15"') }}
+```
+
+The `||` looks like a safety net. It is not: it fires only when the variable is
+**unset**. If the variable is set to a label set nothing can serve, the fallback
+never runs and the job is unschedulable — and since an array `runs-on` requires
+runners to carry **every** label, adding one dead label to a shared variable
+kills every literal consumer of it.
+
+GitHub does not error on an unservable label. It queues. So the lane reads as
+slow, and a lane nobody watches can stay dark for weeks: the Visual Harness
+macOS jobs lost 48 jobs this way (empty `runner_name`, auto-cancelled) after
+`pulp-gate-fast` stopped being minted, while the ubuntu jobs in the same runs
+succeeded — a control on the same instrument, which is what proved it was
+routing rather than an idle pool.
+
+Two rules:
+
+- A lane routing literally must own its **own** variable. Never borrow another
+  lane's, least of all the required gate's: an edit made for the gate then
+  silently redirects lanes nobody was thinking about.
+- Before adding a label to a shared routing variable, check who consumes it
+  literally: `git grep -n "runs-on:.*<VAR>" .github/workflows/`. A resolver
+  consumer tolerates a dead label; a literal one does not.
+
+Prefer an unset variable with a GitHub-hosted default for advisory,
+low-frequency lanes. Staying off the self-hosted fleet is a stronger guarantee
+than a low fleet priority, because the lane cannot contend with the required
+gate at all.
