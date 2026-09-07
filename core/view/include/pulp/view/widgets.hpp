@@ -208,6 +208,17 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
 
+    /// Layout slot for this Label's own text when it also has element
+    /// children. CSS wraps a container's bare text in an anonymous inline box
+    /// that takes its own place on the flex line; this rect is that box, in
+    /// the Label's local coordinates. A negative width means there is no
+    /// anonymous box and the text uses the Label's whole content area — the
+    /// ordinary childless case.
+    Rect own_text_box() const { return own_text_box_; }
+    bool has_own_text_box() const { return own_text_box_.width >= 0.0f; }
+    void set_own_text_box(Rect box) { own_text_box_ = box; }
+    void clear_own_text_box() { own_text_box_ = {0.0f, 0.0f, -1.0f, -1.0f}; }
+
     /// Intrinsic width — measured text width.
     /// Uses TextShaper (HarfBuzz/SkParagraph) when available, otherwise
     /// falls back to the same character-width estimate the base Canvas
@@ -431,6 +442,9 @@ private:
     canvas::AttributedString resolved_attributed_string() const;
 
     std::string text_;
+    /// Anonymous-inline-box slot for text_ when this Label also has
+    /// element children. Negative width == no slot.
+    Rect own_text_box_{0.0f, 0.0f, -1.0f, -1.0f};
     std::string font_family_;     ///< Empty == widget default ("Inter")
     float font_size_ = 14.0f;
     int font_weight_ = 400;       ///< 400=normal, 700=bold
@@ -454,6 +468,11 @@ private:
     bool has_own_text_color_ = false;
     canvas::AttributedString attributed_runs_;  ///< per-range styled text (mixed)
     bool has_attributed_ = false;
+    /// Draw text_ into `text_box`, whose origin the caller has already
+    /// translated onto. Alignment, wrap width, and vertical rotation all
+    /// resolve against that box rather than the Label's full bounds.
+    void paint_text_(canvas::Canvas& canvas, Rect text_box);
+
     void paint_decoration_(canvas::Canvas& canvas, float x, float width,
                            float baseline, float font_size,
                            const canvas::Color& color);
