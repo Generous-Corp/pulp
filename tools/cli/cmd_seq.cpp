@@ -6,6 +6,7 @@
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/tools/timeline/agent.hpp>
+#include <pulp/tools/timeline/writer_profile.hpp>
 
 #include <charconv>
 #include <cstdint>
@@ -31,6 +32,8 @@ void print_seq_usage() {
                  "  validate <project.json>\n"
                  "  explain <project.json> [--sample-rate <hz>]\n"
                  "  apply <project.json> <commands.json> [--out <project.json>]\n"
+                 "        [--writer-profile <proposal|editor|trusted>]\n"
+                 "  capabilities [--writer-profile <proposal|editor|trusted>]\n"
                  "  export <project.json> --format <smf|dawproject> --plan\n"
                  "  export <project.json> --format <smf|dawproject> --out <new-artifact>\n"
                  "         [--accept-loss <concept>]...\n"
@@ -171,6 +174,15 @@ bool same_parent_directory(const fs::path& left, const fs::path& right) {
     return error ? *left_parent == *right_parent : equivalent;
 }
 
+/// Resolves a `--writer-profile` selection, or reports the unknown name.
+///
+/// An unrecognized name is a usage error rather than a fallback to a more
+/// permissive authority.
+std::optional<pulp::tools::timeline::WriterProfile>
+seq_writer_profile(std::string_view name) {
+    return pulp::tools::timeline::writer_profile_by_name(name);
+}
+
 int bad_seq_usage(std::string_view message) {
     std::cerr << "pulp seq: " << message << "\n\n";
     print_seq_usage();
@@ -215,11 +227,63 @@ int cmd_seq(const std::vector<std::string>& args) {
         return emit(pulp::tools::timeline::explain(ProjectSource::file(project), sample_rate));
     }
 
+    if (subcommand == "capabilities") {
+        if (args.size() != 1 && args.size() != 3)
+            return bad_seq_usage("capabilities accepts an optional --writer-profile");
+        if (args.size() == 3) {
+            if (args[1] != "--writer-profile")
+                return bad_seq_usage("unknown capabilities option: " + args[1]);
+            const auto profile = seq_writer_profile(args[2]);
+            if (!profile)
+                return bad_seq_usage(
+                    "unknown --writer-profile: " + args[2] + "; expected one of " +
+                    std::string(pulp::tools::timeline::selectable_writer_profile_names()));
+            std::cout << pulp::tools::timeline::writer_profile_json(*profile) << "\n";
+            return 0;
+        }
+        std::cout << "{\"profiles\":["
+                  << pulp::tools::timeline::writer_profile_json(
+                         pulp::tools::timeline::proposal_writer_profile())
+                  << ","
+                  << pulp::tools::timeline::writer_profile_json(
+                         pulp::tools::timeline::editor_writer_profile())
+                  << ","
+                  << pulp::tools::timeline::writer_profile_json(
+                         pulp::tools::timeline::trusted_writer_profile())
+                  << "]}\n";
+        return 0;
+    }
+
     if (subcommand == "apply") {
-        if (args.size() != 3 && args.size() != 5)
+        if (args.size() < 3)
             return bad_seq_usage("apply requires project and command JSON paths");
         const auto project_path = pulp::tools::timeline::filesystem_path_from_utf8(args[1]);
         const auto command_path = pulp::tools::timeline::filesystem_path_from_utf8(args[2]);
+        // The CLI is an operator surface, so its default authority is the
+        // quota-bounded editor profile. A caller selects a narrower proposal
+        // authority, or the unrestricted trusted one, by name.
+        auto profile = pulp::tools::timeline::editor_writer_profile();
+        fs::path output;
+        std::string output_argument;
+        for (std::size_t index = 3; index < args.size(); ++index) {
+            if (args[index] != "--out" && args[index] != "--writer-profile")
+                return bad_seq_usage("unknown apply option: " + args[index]);
+            if (index + 1 >= args.size())
+                return bad_seq_usage("apply option requires a value: " + args[index]);
+            const auto& value = args[index + 1];
+            if (args[index] == "--out") {
+                output = pulp::tools::timeline::filesystem_path_from_utf8(value);
+                output_argument = value;
+            } else if (args[index] == "--writer-profile") {
+                const auto selected = seq_writer_profile(value);
+                if (!selected)
+                    return bad_seq_usage(
+                        "unknown --writer-profile: " + value + "; expected one of " +
+                        std::string(pulp::tools::timeline::selectable_writer_profile_names()));
+                profile = *selected;
+            }
+            ++index;
+        }
         const auto maximum_command_bytes = pulp::timeline::DecodeLimits{}.max_input_bytes;
         const auto commands = read_text_bounded(command_path, maximum_command_bytes);
         if (!commands.text) {
@@ -231,14 +295,8 @@ int cmd_seq(const std::vector<std::string>& args) {
             std::cerr << "pulp seq: could not read command file: " << args[2] << "\n";
             return 1;
         }
-        fs::path output;
-        if (args.size() == 5) {
-            if (args[3] != "--out")
-                return bad_seq_usage("unknown apply option: " + args[3]);
-            output = pulp::tools::timeline::filesystem_path_from_utf8(args[4]);
-        }
         auto result = pulp::tools::timeline::command_apply(ProjectSource::file(project_path),
-                                                           *commands.text);
+                                                           *commands.text, profile);
         if (!result || output.empty())
             return emit(std::move(result));
         const auto project = project_member(result.json);
@@ -249,16 +307,16 @@ int cmd_seq(const std::vector<std::string>& args) {
             return 2;
         }
         if (!project) {
-            std::cerr << "pulp seq: could not write project: " << args[4] << "\n";
+            std::cerr << "pulp seq: could not write project: " << output_argument << "\n";
             return 1;
         }
         const auto written = write_text_atomic(output, *project);
         if (written == AtomicWriteOutcome::NotReplaced) {
-            std::cerr << "pulp seq: could not write project: " << args[4] << "\n";
+            std::cerr << "pulp seq: could not write project: " << output_argument << "\n";
             return 1;
         }
         if (written == AtomicWriteOutcome::ReplacedButDirectorySyncFailed) {
-            std::cerr << "pulp seq: project was replaced at " << args[4]
+            std::cerr << "pulp seq: project was replaced at " << output_argument
                       << ", but its parent directory could not be synchronized; durability is "
                          "uncertain\n";
             return 1;

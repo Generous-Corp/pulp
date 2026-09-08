@@ -89,6 +89,22 @@ def _session_property() -> dict:
     }
 
 
+def _writer_profile_property() -> dict:
+    # Deliberately an open string rather than an enum. The profile names are
+    # owned by the tools/timeline writer boundary, which already refuses an
+    # unknown name as a usage error; restating the list here would put the
+    # authoritative copy in the lower layer and let the two drift.
+    return {
+        "type": "string",
+        "minLength": 1,
+        "description": (
+            "Writer authority to register under, by name. Defaults to the "
+            "non-destructive proposal profile; an unknown name is refused rather "
+            "than downgraded."
+        ),
+    }
+
+
 def _command_envelope(command_types: list[str]) -> dict:
     type_name_schema = {"type": "string", "not": {}}
     if command_types:
@@ -134,7 +150,13 @@ def generate(manifest: dict) -> str:
         {
             "name": "pulp_timeline_project_open",
             "description": "Open a timeline project document and return its parsed, validated state.",
-            "inputSchema": _input_schema({"project": _project_property()}, ["project"]),
+            "inputSchema": _input_schema(
+                {
+                    "project": _project_property(),
+                    "writer_profile": _writer_profile_property(),
+                },
+                ["project"],
+            ),
             "x-pulp-operation": "project.open",
             "x-pulp-document-types": document_types,
         },
@@ -149,6 +171,7 @@ def generate(manifest: dict) -> str:
                 {
                     "project": _project_property(),
                     "session_id": _session_property(),
+                    "writer_profile": _writer_profile_property(),
                     "commands": {
                         "type": "array",
                         "minItems": 1,

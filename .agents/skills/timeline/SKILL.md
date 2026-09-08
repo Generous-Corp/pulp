@@ -1278,15 +1278,17 @@ neither is ordered the way you would guess:
   above `JournalDurability`: the tree builds clean and `JournalDurability` silently
   moves from 20 to 21. `test_timeline_transactions.cpp` pins the ordinals for this
   reason; extend it when you append.
-- **There is no `switch` over `ConflictCode` anywhere, so a new code is a silent
-  fallthrough rather than a compile-time event.** The only dispatch is the
-  if/else chain in `transaction_failure()`
-  (`tools/mcp/timeline_session_store.cpp`), whose tail maps every unhandled code
-  to the string `"transaction_conflict"`; every other consumer is a two-way `==`.
-  A new enumerator therefore compiles with zero `-Wswitch` warnings and reaches
-  clients as the same generic string it always did. If a client must distinguish
-  the new cause, extend that chain in the same change — the enum alone is
-  invisible past the process boundary.
+- **`conflict_code_name()` is an exhaustive `switch` with no `default:`, so a new
+  code IS a compile-time event.** It lives in
+  `tools/timeline/src/writer_profile.cpp` and is the single mapping both offline
+  boundaries emit through; adding an enumerator without a case fails the build on
+  `-Wswitch` rather than reaching clients under a generic string. Keep it that
+  way: a `default:` label would restore the silent fallthrough this replaced,
+  where every unhandled code arrived as `"transaction_conflict"` and a client had
+  no way to tell a capability denial from a journal failure. The trailing
+  `return` after the switch is for an out-of-range cast only, not a catch-all for
+  a forgotten enumerator. Every other consumer is still a two-way `==`, so a
+  client that must distinguish a new cause needs its own update as well.
 - **`CommandJournal::replay` must relabel a reducer failure, not propagate it.**
   Replay re-reduces each journaled entry; returning the reducer's error unchanged
   makes "this entry stopped reducing" byte-for-byte identical to "the model
@@ -2861,6 +2863,39 @@ session rather than in a wrapper a caller could route around.
 The mask itself is non-destructive by default. The legacy no-argument
 `register_writer()` remains explicitly unrestricted for source-compatible
 trusted callers; new agent-facing call sites must pass a mask.
+
+The two offline boundaries no longer take that legacy overload. Both name a
+profile from `pulp/tools/timeline/writer_profile.hpp` instead:
+
+| Profile | Authority | Quota |
+|---|---|---|
+| `proposal` | every class, no `Remove` | small, finite |
+| `editor` | every class and intent | finite |
+| `trusted` | every class and intent | none (`SIZE_MAX`) |
+
+The MCP boundary defaults to `proposal`, the CLI to `editor`, and both accept a
+by-name selector (`writer_profile` on `pulp_timeline_project_open` and
+`pulp_timeline_command_apply`; `--writer-profile` on `pulp seq apply`). An
+unrecognized name is a usage error and never falls back to a wider authority.
+
+Two things about that boundary are load-bearing:
+
+- **The profile is a required parameter on both `command_apply` overloads**, not
+  a defaulted one. The `std::string_view` overload forwards to the
+  `ProjectSource` one, so a default on only the latter would have let the
+  forwarding call supply an authority nobody chose. Requiring it makes the
+  bypass impossible to write rather than merely discouraged.
+- **Profiles and refusals cross the boundary as names, never as bits.**
+  `capability_bit` is `class_index * kCommandIntentCount + intent`, so inserting
+  a `CommandClass` renumbers every bit above it; a caller that learned an index
+  would silently start asserting a different authority. `pulp seq capabilities`
+  and the open response therefore report class/intent name pairs, and a refusal
+  names its `conflict_code` plus, for a denied authority, the class and intent
+  it required.
+
+A refusal names the command's own declared authority. A container removal also
+requires its children's classes, so for those the reported pair is the
+command's own axis and not the exhaustive set admission checked.
 
 Authority follows effects, including effects nested in one command. Complete
 note replacement requires create/remove authority for its note-ID set

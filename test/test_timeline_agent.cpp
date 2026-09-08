@@ -5,6 +5,7 @@
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/tools/timeline/agent.hpp>
+#include <pulp/tools/timeline/writer_profile.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -203,8 +204,8 @@ TEST_CASE("timeline agent applies typed commands and renders the resulting proje
     REQUIRE(explained.json.find(R"("reproducibility":"deterministic","sequence_id")") !=
             std::string::npos);
 
-    const auto changed =
-        tools::timeline::command_apply(original_project, gain_command(1'056'964'608));
+    const auto changed = tools::timeline::command_apply(
+        original_project, gain_command(1'056'964'608), tools::timeline::editor_writer_profile());
     REQUIRE(changed);
     REQUIRE(changed.json.find(R"("revision":"1")") != std::string::npos);
     const auto changed_project = project_from_result(changed.json);
@@ -391,7 +392,8 @@ TEST_CASE("timeline agent schema and errors are typed and fail closed") {
 
     const auto unknown = tools::timeline::command_apply(
         empty_project_json(),
-        R"([{"data":{},"type_name":"pulp.timeline.command.unknown","version":1}])");
+        R"([{"data":{},"type_name":"pulp.timeline.command.unknown","version":1}])",
+        tools::timeline::editor_writer_profile());
     REQUIRE_FALSE(unknown);
     REQUIRE(unknown.exit_code == 2);
     REQUIRE(unknown.json.find(R"("stage":"apply")") != std::string::npos);
