@@ -425,9 +425,8 @@ fn build_with_dependency_policy<S: Spawner>(
     if args.trace {
         writeln!(
             out,
-            "\nTraced build in {}\n               Capture:  pulp trace start   (exercise the plug-in/app, then) pulp trace stop\n               `pulp trace stop` prints the .pftrace path; inspect it with\n                         pulp trace query --file <path>\n               Development only — never ship a binary from {}.",
-            build_dir.display(),
-            crate::project::TRACE_BUILD_SUBDIR
+            "{}",
+            trace_next_steps(&build_dir.display().to_string())
         )
         .map_err(io_err)?;
     }
@@ -440,6 +439,38 @@ fn build_with_dependency_policy<S: Spawner>(
         return spawner.run(&test);
     }
     Ok(rc)
+}
+
+/// The `pulp trace …` commands the traced-build epilogue points at, as argv
+/// tails (everything after `pulp trace`). Held as data so a test can feed each
+/// one through the real trace parser: a suggestion that does not parse is worse
+/// than no suggestion, and prose in a `writeln!` cannot be checked by anything.
+pub const TRACE_NEXT_COMMANDS: [&[&str]; 3] = [
+    &["start"],
+    &["stop"],
+    &["query", "\"<sql>\"", "--trace", "<path>"],
+];
+
+fn render_trace_command(argv: &[&str]) -> String {
+    format!("pulp trace {}", argv.join(" "))
+}
+
+/// The "you have a traced build, now collect a trace" epilogue.
+///
+/// Split out of the build path so the suggested commands are testable. The
+/// whole point of the feature is that the next step is obvious.
+pub fn trace_next_steps(build_dir: &str) -> String {
+    let start = render_trace_command(TRACE_NEXT_COMMANDS[0]);
+    let stop = render_trace_command(TRACE_NEXT_COMMANDS[1]);
+    let query = render_trace_command(TRACE_NEXT_COMMANDS[2]);
+    format!(
+        "\nTraced build in {build_dir}\n\
+         \x20 Capture:  {start}   (exercise the plug-in/app, then) {stop}\n\
+         \x20 `{stop}` prints the .pftrace path; inspect it with\n\
+         \x20           {query}\n\
+         \x20 Development only — never ship a binary from {}.",
+        crate::project::TRACE_BUILD_SUBDIR
+    )
 }
 
 /// Build the platform bootstrap invocation used before the first configure of
@@ -1650,6 +1681,48 @@ mod tests {
     use crate::proc::testing::RecordingSpawner;
     use crate::test_support::EnvVarGuard;
 
+    /// Every command the traced-build epilogue prints must be one the real
+    /// trace parser accepts. This caught `pulp trace query --file <path>`,
+    /// whose actual flag is `--trace`: a printed next step that does not parse
+    /// defeats the point of the feature.
+    #[test]
+    fn trace_next_steps_only_suggests_commands_that_parse() {
+        for argv in TRACE_NEXT_COMMANDS {
+            let concrete: Vec<String> = argv
+                .iter()
+                .map(|tok| match *tok {
+                    "\"<sql>\"" => "select 1".to_owned(),
+                    "<path>" => "/tmp/pulp-epilogue-test.pftrace".to_owned(),
+                    other => other.to_owned(),
+                })
+                .collect();
+            crate::cmd::trace::parse(&concrete).unwrap_or_else(|e| {
+                panic!(
+                    "epilogue suggests `pulp trace {}`, which the trace parser rejects: {e}",
+                    argv.join(" ")
+                )
+            });
+        }
+    }
+
+    /// Control for the test above: prove the parser is capable of rejecting at
+    /// all, so a green run there is evidence rather than a no-op.
+    #[test]
+    fn trace_parser_rejects_the_flag_the_epilogue_used_to_print() {
+        let bad = ["query", "select 1", "--file", "/tmp/x.pftrace"].map(String::from);
+        assert!(crate::cmd::trace::parse(&bad).is_err());
+    }
+
+    #[test]
+    fn trace_next_steps_renders_its_suggested_commands() {
+        let text = trace_next_steps("/repo/build-trace");
+        for argv in TRACE_NEXT_COMMANDS {
+            let rendered = format!("pulp trace {}", argv.join(" "));
+            assert!(text.contains(&rendered), "missing `{rendered}` in:\n{text}");
+        }
+        assert!(text.contains("/repo/build-trace"), "{text}");
+    }
+
     fn standalone_project(root: &Path) -> ActiveProject {
         std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
         ActiveProject::new(root.to_path_buf(), true)
@@ -1726,7 +1799,8 @@ mod tests {
     #[test]
     fn trace_flags_reject_combinations_that_would_leak_a_traced_build() {
         let bad_usage = |args: &[&str]| {
-            let parsed = parse_build_args(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+            let parsed =
+                parse_build_args(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
             match check_trace_flags(&parsed) {
                 Err(CliError::BadUsage(msg)) => msg,
                 other => panic!("expected BadUsage for {args:?}, got {other:?}"),
@@ -1741,7 +1815,8 @@ mod tests {
         // supplied, so the rejections above are the specific combinations and
         // not a blanket refusal of --trace.
         let ok = |args: &[&str]| {
-            let parsed = parse_build_args(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+            let parsed =
+                parse_build_args(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
             check_trace_flags(&parsed).is_ok()
         };
         assert!(ok(&["--trace"]));

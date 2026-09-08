@@ -393,7 +393,7 @@ int cmd_build(const std::vector<std::string>& args) {
                      "then) pulp trace stop\n"
                   << "  The .pftrace path is printed by `pulp trace stop`; "
                      "inspect it with\n"
-                  << "            pulp trace query --file <path>\n"
+                  << "            pulp trace query \"<sql>\" --trace <path>\n"
                   << "  Development only — never ship a binary from "
                   << build_dir.filename().string() << ".\n";
     }
