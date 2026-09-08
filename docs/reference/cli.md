@@ -108,6 +108,7 @@ pulp build --check-identity --allow-identity-change  # Treat identity drift as a
 pulp build --js-engine=v8      # Force the JS engine backend and reconfigure
 pulp build --arch=universal    # Fat arm64+x86_64 build (runs on every Mac) — use for distribution
 pulp build --arch=arm64        # Thin Apple Silicon only (or =x86_64 for Intel-only; default =host)
+pulp build --trace             # Build with Perfetto tracing compiled in, into build-trace/
 pulp build --format wam        # Build the WAMv2 (Emscripten) web plugin into build-wam/
 pulp build --format wclap      # Build the WebCLAP (wasi-sdk) module into build-wclap/
 pulp build -f wclap -j8        # Short form, with a cmake passthrough flag
@@ -121,6 +122,12 @@ Extra arguments are passed through to `cmake --build`.
 - `--format wclap` configures plain `cmake` with the wasi-sdk toolchain (`tools/cmake/wasi-toolchain.cmake`) into `build-wclap/`, producing a CLAP-in-WebAssembly `.wasm`. Errors clearly if the toolchain file is not in the checkout.
 
 Web formats build to `.wasm`/`.js` and are not installed to native plug-in folders, so `--format` cannot be combined with `--install`, `--validate`, or `--watch`. See [web-plugin-support.md](web-plugin-support.md) for hosting the output.
+
+`--trace` configures with `-DPULP_TRACING=ON` into `build-trace/`, so the binaries emit Perfetto traces that `pulp trace start` / `pulp trace stop` capture. It uses a **separate build tree** on purpose: `PULP_TRACING` reaches every translation unit, so toggling it inside one build directory would force a full rebuild in each direction. The cost is disk, not build time — the first traced build is a cold build, and after that the two trees rebuild independently.
+
+For a standalone project the resolved SDK must itself carry Perfetto; an ordinary release SDK cannot be traced no matter what the project configures. Install one with `pulp sdk install --local --profile trace` (see [`pulp sdk install`](#pulp-sdk)). `pulp status` reports whether tracing is available in this project.
+
+A traced build must not ship: it links Perfetto and carries a retained sentinel that `pulp ship` rejects. `--trace` therefore refuses `--install` unless you also pass `--allow-tracing`, and cannot be combined with `--format wam|wclap`.
 
 `--check-identity` runs the same comparison as `pulp identity check` before the configure step, so a PR that changes an AU 4CC / VST3 FUID / CLAP id / AAX product code without re-recording the lock fails the build with a per-field diff. See `docs/reference/identity-lock.md`.
 
@@ -1996,6 +2003,8 @@ pulp sdk install --version 0.2.0              # Install a specific version
 pulp sdk install --local                      # Build and install the SDK from the current Pulp checkout
 pulp sdk install --local --profile forge-dev --print-path
                                               # Print an immutable Apple Silicon Forge-development SDK prefix
+pulp sdk install --local --profile trace --print-path
+                                              # Same, with Perfetto tracing compiled in
 pulp sdk available                            # List SDK versions available on GitHub releases
 pulp sdk status                               # Show cached and locally-built SDK versions
 pulp sdk clean                                # Remove all cached SDK versions
@@ -2037,6 +2046,41 @@ cmake -S /path/to/forge -B /path/to/forge/build-local \
 diagnostics go to stderr. This profile does not dynamically load DSP into an
 existing Forge binary: Forge still recompiles normally against the selected SDK,
 which keeps compile-time APIs and linked libraries coherent.
+
+#### `--profile trace`
+
+The `trace` profile is the same immutable flow with `PULP_TRACING=ON`, published
+under `$PULP_HOME/sdk-dev/trace-v1/...`. It exists so that getting a traceable
+SDK never requires hand-editing a CMake cache or copying a prefix into place.
+
+Tracing is part of the SDK identity, so a traced and an untraced build of the
+same commit get different prefixes and can never overwrite one another.
+
+The staged install is rejected — and therefore never published — unless the
+built artifacts really carry Perfetto:
+
+- `PULP_TRACING` is `ON` in the build cache,
+- `lib/libpulp-runtime.a` contains the retained tracing ship sentinel, and
+- the exported CMake package declares `Pulp::tracing`.
+
+That is the point of the profile. A prefix under `trace-v1/` cannot promise
+tracing it lacks, which is the failure mode a hand-copied `<version>-trace`
+directory produced: the name was the only claim anyone had checked.
+
+Consumers read the capability rather than the name. `find_package(Pulp)` sets
+`PULP_HAS_TRACING` from the presence of the exported target, so a build can
+branch on it:
+
+```cmake
+find_package(Pulp REQUIRED)
+if(NOT PULP_HAS_TRACING)
+    message(FATAL_ERROR "this SDK cannot emit traces; install --profile trace")
+endif()
+```
+
+Traced SDKs are development artifacts: `sdk-provenance.json` records
+`"profile": "trace"` with `"tracing": true` and keeps
+`distribution_eligible: false`, and `pulp ship` refuses the resulting build.
 
 ### dev
 

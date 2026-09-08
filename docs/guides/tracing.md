@@ -11,6 +11,69 @@ before you touch it.
 
 ---
 
+## Turning tracing on
+
+Tracing is one CMake option, but you should never have to reach for `cmake`
+directly — or, worse, copy a prefix and rename it. A directory named `-trace`
+proves nothing; only the symbols inside it do, and every path below verifies
+those symbols before handing you the result.
+
+### In a Pulp checkout
+
+```bash
+pulp build --trace          # configures -DPULP_TRACING=ON into build-trace/
+pulp trace start            # ... exercise the thing ...
+pulp trace stop             # prints the .pftrace path
+```
+
+`--trace` uses its own build tree. `PULP_TRACING` reaches every translation
+unit, so toggling it inside one build directory would force a full rebuild each
+way; two trees mean you can switch instantly at the cost of disk. Your ordinary
+`build/` is untouched.
+
+### In a standalone project (`pulp.toml`)
+
+A standalone project links an installed SDK, so tracing has to be compiled into
+**that SDK** — a project cannot add Perfetto to archives that do not contain it.
+Install a traced SDK once:
+
+```bash
+PULP_TRACE_SDK="$(pulp sdk install --local --profile trace --print-path)"
+pulp build --trace
+```
+
+The `trace` profile builds from a clean detached clone of the current commit and
+publishes to an immutable prefix under `$PULP_HOME/sdk-dev/trace-v1/`, but only
+after checking that the staged install really carries Perfetto: `PULP_TRACING`
+in the cache, the retained tracing sentinel inside `lib/libpulp-runtime.a`, and
+an exported `Pulp::tracing` target. If any of those is missing the install is
+rejected rather than published, so a prefix under that root always traces.
+
+Reuse is free — a second call with the same commit and toolchain returns the
+existing prefix without rebuilding.
+
+### Checking what you have
+
+```bash
+pulp status                 # reports whether tracing is available here
+pulp sdk status             # lists development SDKs and their profiles
+```
+
+Consumers can branch on the capability in CMake, reading the exported target
+rather than a directory name:
+
+```cmake
+find_package(Pulp REQUIRED)
+if(NOT PULP_HAS_TRACING)
+    message(FATAL_ERROR "this SDK cannot emit traces; install --profile trace")
+endif()
+```
+
+`PULP_HAS_TRACING` is set from `if(TARGET Pulp::tracing)`, and that target is
+exported only under `PULP_TRACING=ON`. It is evidence, not a claim.
+
+---
+
 ## Available analysis surface
 
 Capture, offline SQL, and three closed GPU analyses are available today. Rust

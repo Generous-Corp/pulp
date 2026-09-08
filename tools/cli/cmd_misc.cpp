@@ -283,6 +283,18 @@ int cmd_status(const std::vector<std::string>& args) {
         std::cout << "Build: not configured (run `pulp build`)\n";
     }
 
+    // Tracing lives in its own build tree, so an ordinary `build/` without it
+    // says nothing about whether this project can trace. Report the capability
+    // explicitly: an empty capture from a build that was never configured for
+    // tracing looks exactly like an empty capture from a bug.
+    if (build_has_tracing_enabled(root / "build-trace" / "CMakeCache.txt")) {
+        std::cout << "Tracing: available (build-trace/ configured with PULP_TRACING=ON)\n";
+    } else if (build_has_tracing_enabled(build_dir / "CMakeCache.txt")) {
+        std::cout << "Tracing: available (build/ configured with PULP_TRACING=ON)\n";
+    } else {
+        std::cout << "Tracing: not built (run `pulp build --trace`)\n";
+    }
+
     const auto governance = detect_build_governance();
     std::cout << "Build governance: Tier " << governance.tier
               << " (" << governance.detail << ")\n";

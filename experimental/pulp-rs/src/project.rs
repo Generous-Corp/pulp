@@ -333,4 +333,33 @@ CMAKE_BUILD_TYPE:STRING=Release
         );
         assert!(ap.tracing_compiled_in());
     }
+
+    #[test]
+    fn trace_build_configured_requires_the_cache_not_the_name() {
+        let td = tempfile::tempdir().unwrap();
+        write_file(&td.path().join("pulp.toml"), "");
+        let ap = resolve(td.path()).unwrap();
+        assert!(!ap.trace_build_configured());
+
+        // A directory that merely wears the name is not evidence. This is the
+        // exact failure the trace lane exists to prevent, so assert it before
+        // asserting the positive case.
+        std::fs::create_dir_all(ap.trace_build_dir()).unwrap();
+        write_file(
+            &ap.trace_build_dir().join("CMakeCache.txt"),
+            "PULP_TRACING:BOOL=OFF\n",
+        );
+        assert!(!ap.trace_build_configured());
+
+        write_file(
+            &ap.trace_build_dir().join("CMakeCache.txt"),
+            "PULP_TRACING:BOOL=ON\n",
+        );
+        assert!(ap.trace_build_configured());
+
+        // Control: the traced tree is separate from the ordinary one, so the
+        // reading above came from build-trace/ and not from build/.
+        assert_ne!(ap.trace_build_dir(), ap.build_dir);
+        assert!(!ap.tracing_compiled_in());
+    }
 }

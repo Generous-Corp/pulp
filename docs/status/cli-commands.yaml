@@ -33,6 +33,12 @@ commands:
       - name: --skip-validation
         kind: flag
         description: Debug-only escape hatch for `--install`; bypasses validation and is rejected unless paired with `--install`.
+      - name: --trace
+        kind: flag
+        description: "Configure with `-DPULP_TRACING=ON` into `build-trace/` so the build emits Perfetto traces. Uses a separate build tree because `PULP_TRACING` reaches every translation unit. For a standalone project the resolved SDK must itself have been built with tracing (`pulp sdk install --local --profile trace`). Cannot be combined with `--format wam|wclap`."
+      - name: --allow-tracing
+        kind: flag
+        description: Required with `--trace --install`; acknowledges that a tracing-enabled build is being copied into the user's plug-in folders. Rejected without `--trace`.
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)
@@ -2386,7 +2392,7 @@ commands:
     summary: Manage the pinned Pulp SDK installation at ~/.pulp/sdk*/ used by standalone projects.
     subcommands:
       - name: install
-        summary: Download and cache the pinned SDK from GitHub releases; --local builds from the current checkout; --profile forge-dev creates an immutable development-only arm64 SDK; --version X.Y.Z pins a version
+        summary: Download and cache the pinned SDK from GitHub releases; --local builds from the current checkout; --profile forge-dev and --profile trace create immutable development-only arm64 SDKs; --version X.Y.Z pins a version
         args:
           - name: --version
             kind: option
@@ -2397,11 +2403,11 @@ commands:
           - name: --profile
             kind: option
             required: false
-            description: "Local SDK policy profile; forge-dev requires a clean committed Apple Silicon checkout and enables GPU, design import, AU, VST3, CLAP, and Standalone support"
+            description: "Local SDK policy profile. Both profiles require a clean committed Apple Silicon checkout and enable GPU, design import, AU, VST3, CLAP, and Standalone support. `trace` additionally compiles in Perfetto and is published only if the built archives really carry it."
           - name: --print-path
             kind: flag
             required: false
-            description: Print only the completed forge-dev SDK prefix on stdout for command substitution; build progress remains on stderr
+            description: Print only the completed development SDK prefix on stdout for command substitution; build progress remains on stderr
       - name: available
         summary: List SDK versions available on GitHub releases
       - name: status

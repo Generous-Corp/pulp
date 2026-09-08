@@ -102,6 +102,38 @@ pub struct BuildArgs {
 
 /// Parse `pulp-rs build` flags.
 #[must_use]
+/// Reject flag combinations that would produce a tracing-enabled artifact
+/// somewhere it does not belong.
+///
+/// A traced build links Perfetto and carries the retained ship sentinel, so it
+/// must stay a development artifact. Copying one into the user's plug-in folder
+/// is the first step toward a DAW loading it, so `--install` has to be said out
+/// loud. Web plugin formats build through a different toolchain entirely and
+/// have no Perfetto backend at all, so the combination is a mistake rather than
+/// a limitation worth silently ignoring.
+pub fn check_trace_flags(args: &BuildArgs) -> Result<()> {
+    if args.allow_tracing && !args.trace {
+        return Err(CliError::BadUsage(
+            "--allow-tracing only applies with --trace".to_owned(),
+        ));
+    }
+    if args.install && args.trace && !args.allow_tracing {
+        return Err(CliError::BadUsage(
+            "--install with --trace would install a tracing-enabled build; pass \
+             --allow-tracing if that is genuinely what you want"
+                .to_owned(),
+        ));
+    }
+    if args.trace && args.web_format.is_some() {
+        return Err(CliError::BadUsage(
+            "--trace cannot be combined with --format wam|wclap (Perfetto tracing \
+             is a native-toolchain feature)"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn parse_build_args(args: &[String]) -> BuildArgs {
     let mut out = BuildArgs::default();
     out.raw_tail = args.to_vec();
@@ -230,30 +262,11 @@ fn build_with_dependency_policy<S: Spawner>(
             "--skip-validation only applies with --install".to_owned(),
         ));
     }
-    if args.allow_tracing && !args.trace {
-        return Err(CliError::BadUsage(
-            "--allow-tracing only applies with --trace".to_owned(),
-        ));
-    }
-    // A traced build carries Perfetto and must never ship. Copying one into the
-    // user's plug-in folder is the first step toward a DAW loading it, so make
-    // the operator say it out loud.
-    if args.install && args.trace && !args.allow_tracing {
-        return Err(CliError::BadUsage(
-            "--install with --trace would install a tracing-enabled build;              pass --allow-tracing if that is genuinely what you want"
-                .to_owned(),
-        ));
-    }
+    check_trace_flags(args)?;
 
     // Web plugin formats build through a different toolchain and build dir, and
     // are not part of the native install/validate/watch pipelines.
     if let Some(fmt) = &args.web_format {
-        if args.trace {
-            return Err(CliError::BadUsage(
-                "--trace cannot be combined with --format wam|wclap                  (Perfetto tracing is a native-toolchain feature)"
-                    .to_owned(),
-            ));
-        }
         if args.install || args.validate || args.watch {
             return Err(CliError::BadUsage(
                 "--format wam|wclap cannot be combined with --install, --validate, or --watch \
@@ -1695,6 +1708,46 @@ mod tests {
             std::fs::set_permissions(&target, perms).unwrap();
         }
         target
+    }
+
+    #[test]
+    fn parse_build_args_captures_trace_flags() {
+        let a = parse_build_args(&["--trace".to_owned(), "--allow-tracing".to_owned()]);
+        assert!(a.trace && a.allow_tracing);
+        // Control: neither is set by default, so the assertion above reflects
+        // the flags rather than a field that is always true.
+        let b = parse_build_args(&["--test".to_owned()]);
+        assert!(!b.trace && !b.allow_tracing);
+        // Unknown flags still fall through to passthrough, so --trace is being
+        // matched rather than merely tolerated.
+        assert_eq!(b.passthrough.len(), 0);
+    }
+
+    #[test]
+    fn trace_flags_reject_combinations_that_would_leak_a_traced_build() {
+        let bad_usage = |args: &[&str]| {
+            let parsed = parse_build_args(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+            match check_trace_flags(&parsed) {
+                Err(CliError::BadUsage(msg)) => msg,
+                other => panic!("expected BadUsage for {args:?}, got {other:?}"),
+            }
+        };
+
+        assert!(bad_usage(&["--allow-tracing"]).contains("--allow-tracing only applies"));
+        assert!(bad_usage(&["--trace", "--install"]).contains("--allow-tracing"));
+        assert!(bad_usage(&["--trace", "--format", "wam"]).contains("--format wam|wclap"));
+
+        // Controls: every one of those is accepted once the missing piece is
+        // supplied, so the rejections above are the specific combinations and
+        // not a blanket refusal of --trace.
+        let ok = |args: &[&str]| {
+            let parsed = parse_build_args(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+            check_trace_flags(&parsed).is_ok()
+        };
+        assert!(ok(&["--trace"]));
+        assert!(ok(&["--trace", "--install", "--allow-tracing"]));
+        assert!(ok(&["--format", "wam"]));
+        assert!(ok(&["--install"]));
     }
 
     #[test]
