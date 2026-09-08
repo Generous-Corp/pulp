@@ -402,7 +402,7 @@
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
-          "rationale": "The offline MCP tools do not expose AgentView outline, paging, or dirty-set projection.",
+          "rationale": "The offline MCP tools do not expose AgentView outline or paging, and no tool projects AgentView::diff's bounded outline diff. MCP does already ship a dirty-set projection, timeline_dirty_set_json in tools/mcp/timeline_session_store.cpp surfaced by pulp_timeline_diff, but that is the session store's own dirty set rather than AgentView's revision-ranged OutlineDiff, so the gap is the AgentView projection specifically and not dirty-set reporting in general.",
           "dependencies": [
             "offline-agent-view-projection"
           ],
@@ -2612,7 +2612,7 @@
       "id": "midi-expression-playback",
       "title": "MIDI expression and controller playback with nested-lane boundary chase",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "65511aee-f118-40e3-b01a-9e31435ec670",
       "owned_paths": [
         "core/timeline/include/pulp/timeline/midi_lane.hpp",
@@ -2630,6 +2630,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8096,
+        "accepted_head": "2e0f4684780d8cf7b822d0f51ad035a1c1ffc4e7",
+        "merge_sha": "8e20653beffcd9c9b398025392ec723ea54d78a0",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/include/pulp/playback/program.hpp",
@@ -2675,7 +2681,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "ControllerProgramEvent, its total order, and TrackProgram::arrangement_controller_events() are public installed headers. Every event carries its own MIDI wire address plus authored lane and point identity, so a consumer reproduces the authored streams without a side table. This is deliberately public rather than engine-internal so Forge Sequencer and Forge Modular can consume it through their own lane.",
+          "rationale": "ControllerProgramEvent, its total order, and TrackProgram::arrangement_controller_events() are public installed headers. Every event carries its own MIDI wire address plus authored lane and point identity, so a consumer reproduces the authored streams without a side table. This is deliberately public rather than engine-internal so Forge Sequencer and Forge Modular can consume it through their own lane, but only in process: the exposure stops at the program wire. encode_program_wire() refuses any controller-bearing program with ProgramWireErrorCode::ControllerEventsUnsupported because the wire format has no controller section yet, so a consumer that crosses a process or plugin boundary cannot carry these events until that section lands. Read the exposed claim as in-process only.",
           "evidence": [
             {
               "kind": "sdk_header",
@@ -2735,7 +2741,7 @@
       "id": "nested-sequence-gain-composition",
       "title": "Nested SequenceRef gain composition with a documented precedence model",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "f2a1c7d4-6b93-4e08-9a15-3c7e5b21d0af",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -2746,6 +2752,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8104,
+        "accepted_head": "c989173936d548490f71a393423b138d247de385",
+        "merge_sha": "a07941336a80b1c1d7a6e449bdb43291be217c78",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
