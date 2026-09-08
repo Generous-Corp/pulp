@@ -4,7 +4,10 @@
 #include "install_paths_mac.hpp"
 #include "tartci_lease.hpp"
 
+#include <fstream>
 #include <iostream>
+#include <iterator>
+#include <string>
 
 namespace {
 
@@ -43,6 +46,18 @@ void print_skip_validation_banner() {
               << color::reset() << "\n";
 }
 
+// True when an installed SDK prefix exports the tracing interface target.
+// PulpInstallRules exports Pulp::tracing only under PULP_TRACING=ON, so its
+// presence is evidence the archives really carry Perfetto rather than a claim
+// made by a directory name.
+bool sdk_supports_tracing(const fs::path& sdk_dir) {
+    std::ifstream in(sdk_dir / "lib" / "cmake" / "Pulp" / "PulpTargets.cmake");
+    if (!in) return false;
+    const std::string text((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    return text.find("Pulp::tracing") != std::string::npos;
+}
+
 }  // namespace
 
 int cmd_build(const std::vector<std::string>& args) {
@@ -55,25 +70,11 @@ int cmd_build(const std::vector<std::string>& args) {
     }
     pulp_debug("cmd_build: project root resolved");
 
-    auto build_dir = project_root / "build";
-    bool needs_configure = !fs::exists(build_dir / "CMakeCache.txt");
-    bool needs_dependency_bootstrap = !standalone_mode && needs_configure;
-
-    // Heal source trees configured before dependency provisioning was
-    // completed. Those caches are syntactically valid but silently omit whole
-    // plug-in formats and their tests.
-    if (!standalone_mode && !needs_configure
-        && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt")) {
-        needs_configure = true;
-        needs_dependency_bootstrap = true;
-    }
-
-    // Check if CMakeLists.txt is newer than CMakeCache
-    if (!needs_configure && fs::exists(build_dir / "CMakeCache.txt")) {
-        auto cmake_time = fs::last_write_time(project_root / "CMakeLists.txt");
-        auto cache_time = fs::last_write_time(build_dir / "CMakeCache.txt");
-        if (cmake_time > cache_time) needs_configure = true;
-    }
+    // Flags are parsed before the build directory is chosen: --trace selects a
+    // different one. PULP_TRACING reaches every translation unit, so sharing a
+    // build directory between traced and untraced builds would force a full
+    // rebuild on every toggle. Two directories cost disk once instead.
+    bool force_configure = false;
 
     // Extract flags before passing args through
     std::string js_engine;
@@ -85,6 +86,8 @@ int cmd_build(const std::vector<std::string>& args) {
     // Item 7.4b: install after build (with validation gate by default).
     bool install_mode = false;
     bool skip_validation = false;
+    bool trace_mode = false;
+    bool allow_tracing_install = false;
     std::string test_filter;
     std::vector<std::string> passthrough_args;
     for (auto& arg : args) {
@@ -108,6 +111,14 @@ int cmd_build(const std::vector<std::string>& args) {
             skip_validation = true;
             continue;
         }
+        if (arg == "--trace") {
+            trace_mode = true;
+            continue;
+        }
+        if (arg == "--allow-tracing") {
+            allow_tracing_install = true;
+            continue;
+        }
         if (arg.rfind("--test-filter=", 0) == 0) {
             test_filter = arg.substr(14);
             watch_test = true;
@@ -127,7 +138,7 @@ int cmd_build(const std::vector<std::string>& args) {
                 std::cerr << "Error: --js-engine must be auto, quickjs, jsc, or v8\n";
                 return 1;
             }
-            needs_configure = true;  // Engine change requires reconfigure
+            force_configure = true;  // Engine change requires reconfigure
         } else if (arg == "--arch") {
             std::cerr << "Error: --arch requires a value "
                          "(host, universal, arm64, or x86_64)\n";
@@ -139,7 +150,7 @@ int cmd_build(const std::vector<std::string>& args) {
                 std::cerr << "Error: --arch must be host, universal, arm64, or x86_64\n";
                 return 1;
             }
-            needs_configure = true;  // Arch change requires reconfigure
+            force_configure = true;  // Arch change requires reconfigure
         } else {
             passthrough_args.push_back(arg);
         }
@@ -157,6 +168,43 @@ int cmd_build(const std::vector<std::string>& args) {
         std::cerr << "Error: --install cannot be combined with --watch "
                      "(watch loops would re-install on every save).\n";
         return 2;
+    }
+    // A traced build is a development artifact: it carries Perfetto and the
+    // ship guard rejects it. Installing one into ~/Library/Audio/Plug-Ins is
+    // how a traced binary ends up loaded by a DAW and, later, handed to
+    // somebody else. Require the operator to say so out loud.
+    if (install_mode && trace_mode && !allow_tracing_install) {
+        std::cerr << "Error: --install with --trace would install a "
+                     "tracing-enabled build.\n"
+                     "  Traced binaries must never be shipped. Re-run with "
+                     "--allow-tracing if you\n"
+                     "  genuinely want a traced plug-in in your local plug-in "
+                     "folder.\n";
+        return 2;
+    }
+    if (allow_tracing_install && !trace_mode) {
+        std::cerr << "Error: --allow-tracing only applies with --trace.\n";
+        return 2;
+    }
+
+    auto build_dir = project_root / (trace_mode ? "build-trace" : "build");
+    bool needs_configure = force_configure || !fs::exists(build_dir / "CMakeCache.txt");
+    bool needs_dependency_bootstrap = !standalone_mode && needs_configure;
+
+    // Heal source trees configured before dependency provisioning was
+    // completed. Those caches are syntactically valid but silently omit whole
+    // plug-in formats and their tests.
+    if (!standalone_mode && !needs_configure
+        && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt")) {
+        needs_configure = true;
+        needs_dependency_bootstrap = true;
+    }
+
+    // Check if CMakeLists.txt is newer than CMakeCache
+    if (!needs_configure && fs::exists(build_dir / "CMakeCache.txt")) {
+        auto cmake_time = fs::last_write_time(project_root / "CMakeLists.txt");
+        auto cache_time = fs::last_write_time(build_dir / "CMakeCache.txt");
+        if (cmake_time > cache_time) needs_configure = true;
     }
 
     if (!enforce_project_cli_compatibility(project_root,
@@ -202,9 +250,23 @@ int cmd_build(const std::vector<std::string>& args) {
                 return 1;
             }
             configure_cmd += " -DCMAKE_PREFIX_PATH=" + shell_quote(sdk.resolved_sdk_dir);
+            // A consumer project cannot compile Perfetto in by itself: tracing
+            // lives in the SDK's own archives. Say so here rather than letting
+            // the build succeed and produce a binary that emits nothing.
+            if (trace_mode && !sdk_supports_tracing(sdk.resolved_sdk_dir)) {
+                std::cerr << "Error: the resolved SDK at " << sdk.resolved_sdk_dir
+                          << "\n         was built without Perfetto, so --trace "
+                             "cannot produce a trace.\n"
+                             "  Build a traced SDK, then point this project at it:\n"
+                             "    pulp sdk install --local --profile trace "
+                             "--print-path\n"
+                             "    PULP_SDK_DIR=<that path> pulp build --trace\n";
+                return 1;
+            }
             pulp_debug("cmd_build: SDK resolved");
         } else {
             configure_cmd += " -DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON";
+            if (trace_mode) configure_cmd += " -DPULP_TRACING=ON";
         }
 
         // JS engine selection
@@ -321,6 +383,19 @@ int cmd_build(const std::vector<std::string>& args) {
         std::cout << ".\n";
         return failed == 0 ? 0 : 1;
 #endif
+    }
+
+    // Silence after a traced build is the defect this whole feature exists to
+    // remove, so always name where the trace comes from next.
+    if (trace_mode) {
+        std::cout << "\nTraced build in " << build_dir.string() << "\n"
+                  << "  Capture:  pulp trace start   (run your plug-in/app, "
+                     "then) pulp trace stop\n"
+                  << "  The .pftrace path is printed by `pulp trace stop`; "
+                     "inspect it with\n"
+                  << "            pulp trace query --file <path>\n"
+                  << "  Development only — never ship a binary from "
+                  << build_dir.filename().string() << ".\n";
     }
 
     if (!watch_mode) return rc;

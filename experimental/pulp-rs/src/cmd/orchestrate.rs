@@ -87,6 +87,13 @@ pub struct BuildArgs {
     /// treats drift as a soft warning instead of failing the build.
     /// Mirrors `pulp identity check --allow-identity-change`.
     pub allow_identity_change: bool,
+    /// `--trace` — configure with `-DPULP_TRACING=ON` into `build-trace/`.
+    /// Development only: the resulting binaries carry Perfetto and are
+    /// rejected by the ship guard.
+    pub trace: bool,
+    /// `--allow-tracing` — required to pair `--trace` with `--install`, so a
+    /// traced plug-in never reaches the user's plug-in folder by accident.
+    pub allow_tracing: bool,
     /// `--format <fmt>` / `-f <fmt>` — build a web plugin format instead of
     /// the native one. `wam` (Emscripten → AudioWorklet) or `wclap` (wasi-sdk
     /// → CLAP-in-WebAssembly). `None` builds the native plugin formats.
@@ -107,6 +114,8 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
             "--validate" => out.validate = true,
             "--install" => out.install = true,
             "--skip-validation" => out.skip_validation = true,
+            "--trace" => out.trace = true,
+            "--allow-tracing" => out.allow_tracing = true,
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
             // `--format <fmt>` / `-f <fmt>` consume the next token as the value.
@@ -149,6 +158,12 @@ fn build_delegate_argv(args: &BuildArgs) -> Vec<String> {
         }
         if args.skip_validation {
             synthesized.push("--skip-validation".to_owned());
+        }
+        if args.trace {
+            synthesized.push("--trace".to_owned());
+        }
+        if args.allow_tracing {
+            synthesized.push("--allow-tracing".to_owned());
         }
         if let Some(engine) = &args.js_engine {
             synthesized.push(format!("--js-engine={engine}"));
@@ -215,10 +230,30 @@ fn build_with_dependency_policy<S: Spawner>(
             "--skip-validation only applies with --install".to_owned(),
         ));
     }
+    if args.allow_tracing && !args.trace {
+        return Err(CliError::BadUsage(
+            "--allow-tracing only applies with --trace".to_owned(),
+        ));
+    }
+    // A traced build carries Perfetto and must never ship. Copying one into the
+    // user's plug-in folder is the first step toward a DAW loading it, so make
+    // the operator say it out loud.
+    if args.install && args.trace && !args.allow_tracing {
+        return Err(CliError::BadUsage(
+            "--install with --trace would install a tracing-enabled build;              pass --allow-tracing if that is genuinely what you want"
+                .to_owned(),
+        ));
+    }
 
     // Web plugin formats build through a different toolchain and build dir, and
     // are not part of the native install/validate/watch pipelines.
     if let Some(fmt) = &args.web_format {
+        if args.trace {
+            return Err(CliError::BadUsage(
+                "--trace cannot be combined with --format wam|wclap                  (Perfetto tracing is a native-toolchain feature)"
+                    .to_owned(),
+            ));
+        }
         if args.install || args.validate || args.watch {
             return Err(CliError::BadUsage(
                 "--format wam|wclap cannot be combined with --install, --validate, or --watch \
@@ -235,6 +270,17 @@ fn build_with_dependency_policy<S: Spawner>(
         let cpp_argv = build_delegate_argv(args);
         let stub = "pulp-rs build --install --watch: install/watch validation stays on the \
                     C++ parser; install pulp-cpp to enable.";
+        let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
+        return Ok(rc);
+    }
+
+    if args.trace && proj.standalone {
+        // A consumer project cannot compile Perfetto in by itself — tracing
+        // lives in the SDK archives. The C++ delegate already owns SDK
+        // resolution, so it also owns the "does this SDK actually trace?"
+        // check rather than a second, drifting copy here.
+        let cpp_argv = build_delegate_argv(args);
+        let stub = "pulp build --trace for a standalone project needs the SDK resolver;                     install pulp-cpp to enable.";
         let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
         return Ok(rc);
     }
@@ -294,8 +340,21 @@ fn build_with_dependency_policy<S: Spawner>(
         }
     }
 
+    let build_dir = if args.trace {
+        proj.trace_build_dir()
+    } else {
+        proj.build_dir.clone()
+    };
+    let configured = if args.trace {
+        // Only a cache that really says PULP_TRACING=ON counts as configured.
+        // Reusing a stale untraced cache under this path is exactly how a
+        // "trace" tree ends up unable to trace.
+        proj.trace_build_configured()
+    } else {
+        proj.is_configured()
+    };
     let needs_configure =
-        !proj.is_configured() || (!proj.standalone && !proj.checkout_dependencies_enabled());
+        !configured || (!proj.standalone && !proj.checkout_dependencies_enabled());
     if needs_configure {
         if !proj.standalone {
             if skip_dependency_bootstrap {
@@ -317,11 +376,14 @@ fn build_with_dependency_policy<S: Spawner>(
 
         let mut cfg = Invocation::new("cmake")
             .arg("-B")
-            .arg(proj.build_dir.to_string_lossy().into_owned())
+            .arg(build_dir.to_string_lossy().into_owned())
             .arg("-S")
             .arg(proj.root.to_string_lossy().into_owned());
         if !proj.standalone {
             cfg = cfg.arg("-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON");
+        }
+        if args.trace {
+            cfg = cfg.arg("-DPULP_TRACING=ON");
         }
         if let Some(ref e) = args.js_engine {
             cfg = cfg.arg(format!("-DPULP_JS_ENGINE={e}"));
@@ -335,7 +397,7 @@ fn build_with_dependency_policy<S: Spawner>(
 
     let mut build = Invocation::new("cmake")
         .arg("--build")
-        .arg(proj.build_dir.to_string_lossy().into_owned());
+        .arg(build_dir.to_string_lossy().into_owned());
     for a in &args.passthrough {
         build = build.arg(a.clone());
     }
@@ -344,10 +406,23 @@ fn build_with_dependency_policy<S: Spawner>(
         return Ok(rc);
     }
 
+    // Silence after a traced build is the same defect as a mislabelled traced
+    // SDK: the developer paid for tracing and is left guessing how to collect
+    // one. Always name the build tree and the next command.
+    if args.trace {
+        writeln!(
+            out,
+            "\nTraced build in {}\n               Capture:  pulp trace start   (exercise the plug-in/app, then) pulp trace stop\n               `pulp trace stop` prints the .pftrace path; inspect it with\n                         pulp trace query --file <path>\n               Development only — never ship a binary from {}.",
+            build_dir.display(),
+            crate::project::TRACE_BUILD_SUBDIR
+        )
+        .map_err(io_err)?;
+    }
+
     if args.test {
         let test = Invocation::new("ctest")
             .arg("--test-dir")
-            .arg(proj.build_dir.to_string_lossy().into_owned())
+            .arg(build_dir.to_string_lossy().into_owned())
             .arg("--output-on-failure");
         return spawner.run(&test);
     }
@@ -1034,6 +1109,22 @@ pub fn status_with<G: GitProbe>(cwd: &Path, git: &G, out: &mut impl Write) -> Re
         )
         .map_err(io_err)?;
     }
+
+    // Answer "can I get a trace out of this tree?" without making anyone read a
+    // CMake cache. Report the separate traced tree, and when there is none, the
+    // one command that creates it.
+    writeln!(
+        out,
+        "Tracing: {}",
+        if proj.trace_build_configured() {
+            "available (build-trace/ configured with PULP_TRACING=ON)"
+        } else if proj.tracing_compiled_in() {
+            "available (build/ configured with PULP_TRACING=ON)"
+        } else {
+            "not built (run `pulp build --trace`)"
+        }
+    )
+    .map_err(io_err)?;
 
     write_pr_workflow_status(&proj, out)?;
     write_import_design_default_status(out)?;

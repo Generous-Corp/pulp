@@ -72,6 +72,31 @@ impl ActiveProject {
             .unwrap_or(false)
     }
 
+    /// The build directory `--trace` uses.
+    ///
+    /// Traced and untraced builds get separate trees on purpose:
+    /// `PULP_TRACING` reaches every translation unit, so toggling it inside one
+    /// build directory forces a full rebuild each way. Two trees trade disk for
+    /// the ability to switch instantly.
+    #[must_use]
+    pub fn trace_build_dir(&self) -> PathBuf {
+        self.root.join(TRACE_BUILD_SUBDIR)
+    }
+
+    /// True when `build-trace/` exists and its cache really says
+    /// `PULP_TRACING:BOOL=ON`.
+    ///
+    /// The directory name is never taken as evidence. A tree that merely
+    /// carries the name reports `false`, which is the whole point: the failure
+    /// this feature exists to prevent is a thing labelled "trace" that cannot
+    /// trace.
+    #[must_use]
+    pub fn trace_build_configured(&self) -> bool {
+        std::fs::read_to_string(self.trace_build_dir().join("CMakeCache.txt"))
+            .map(|text| cache_has_tracing_on(&text))
+            .unwrap_or(false)
+    }
+
     /// True when a source checkout's configured feature matrix includes the
     /// pinned plug-in SDKs expected on this platform. A false result forces
     /// dependency provisioning and reconfiguration instead of preserving an
@@ -99,6 +124,9 @@ impl ActiveProject {
                 .exists()
     }
 }
+
+/// Build directory used by `pulp build --trace`, kept separate from `build/`.
+pub const TRACE_BUILD_SUBDIR: &str = "build-trace";
 
 /// Scan CMakeCache text for an active `PULP_TRACING:BOOL=ON` entry.
 ///
