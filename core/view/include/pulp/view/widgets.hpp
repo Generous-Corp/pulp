@@ -247,6 +247,19 @@ public:
     /// containers keep the legacy one-line metric.
     float measured_height(float available_width) const;
 
+    /// Width-aware painted width: how far this Label's glyphs actually reach
+    /// at `available_width`, as opposed to the horizontal space Yoga reserves
+    /// for it.
+    ///
+    /// The two differ, and the gap is not cosmetic. `intrinsic_width()` is a
+    /// layout hint and returns 0 for a wrapped Label on purpose, so the parent
+    /// drives wrapping; a caller that reports it as painted geometry describes
+    /// every wrapped label as occupying no width at all. This reports the
+    /// shaped extent instead: the widest visible line, honoring `line_clamp_`.
+    /// Single-line labels and unbounded widths fall back to
+    /// `intrinsic_width()`, which is already the shaped width for them.
+    float measured_width(float available_width) const;
+
     /// One captured line of text: where it sits in this Label's box, and which
     /// slice of the text it holds (UTF-16 code units, as the capture indexes).
     struct CachedLineBox {
@@ -527,6 +540,34 @@ private:
                    font_gen == o.font_gen;
         }
     };
+    /// Everything needed to shape this Label's text the way `paint()` will:
+    /// resolved font, text-transform applied, line height, break mode.
+    ///
+    /// Height and width are two readings of one shaped block, so they share
+    /// this setup rather than each rebuilding it. Two copies would be free to
+    /// drift on font inheritance or text-transform, and a measured box the
+    /// glyphs do not occupy is worse than no measurement.
+    struct ShapingSetup {
+        std::string display_text;
+        float line_height = 0.0f;
+        float font_size = 0.0f;
+        float letter_spacing = 0.0f;
+        float shaping_line_height = 0.0f;
+        canvas::BreakMode break_mode = canvas::BreakMode::normal;
+    };
+    ShapingSetup shaping_setup() const;
+
+    /// Shape the text described by `setup`. Split from `shaping_setup()` so
+    /// the captured-line fast path can decide it does not need to shape at
+    /// all — `TextShaper::prepare()` is the expensive half.
+    canvas::PreparedText prepare_shaped(const ShapingSetup& setup) const;
+
+    /// Lay `prepared` out at `available_width` using `setup`'s break mode and
+    /// line height — the one call whose result both measures read.
+    canvas::ShapedLayout shaper_layout_for(const canvas::PreparedText& prepared,
+                                           const ShapingSetup& setup,
+                                           float available_width) const;
+
     /// Whether the captured line boxes still describe this Label.
     ///
     /// CONSERVATIVE BY CONSTRUCTION: every condition that could move a break
@@ -547,6 +588,37 @@ private:
 
     std::vector<CachedLineBox> cached_line_boxes_;
     bool captured_wrap_fallback_ = false;
+    // Measured-size memo. See Label::sync_measure_basis in label.cpp for why
+    // the basis is the resolved style and why the face is keyed through the
+    // font-registration generation rather than resolved per call.
+    struct MeasureBasis {
+        std::string text;
+        std::string family;
+        std::string font_variant;
+        float font_size = 0.0f;
+        float letter_spacing = 0.0f;
+        int font_weight = 400;
+        int font_style = 0;
+        int text_direction = 0;
+        int line_clamp = 0;
+        bool multi_line = false;
+        bool wrap_fallback = false;
+        std::uint64_t font_gen = 0;
+        bool operator==(const MeasureBasis&) const = default;
+    };
+    /// Refreshes the memo basis, dropping cached measurements when it moved.
+    /// Returns false when this Label opts out of measure caching.
+    bool sync_measure_basis() const;
+    float compute_intrinsic_width() const;
+    float compute_intrinsic_height() const;
+    float compute_measured_height(float available_width) const;
+    mutable MeasureBasis measure_basis_;
+    mutable bool measure_basis_valid_ = false;
+    mutable float measure_width_ = -1.0f;
+    mutable float measure_height_ = -1.0f;
+    mutable float measure_wrapped_for_width_ = -1.0f;
+    mutable float measure_wrapped_height_ = -1.0f;
+
     float cached_line_basis_width_ = 0.0f;
     std::string cached_line_basis_face_;
     std::string cached_line_basis_text_;

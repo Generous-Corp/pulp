@@ -1712,3 +1712,41 @@ TEST_CASE("Label paints the inherited family in Skia raster", "[label][skia][par
     CHECK(result.similarity > 0.999f);
     CHECK(result.diff_pixels == 0);
 }
+
+// Layout, not paint. The cached-shaped-layout tests above prove paint() reuses
+// its work; nothing covered the measure path Yoga drives. Every layout pass
+// asks each text leaf for its intrinsic size, so if that answer is recomputed
+// rather than remembered, a tree's steady-state cost scales with how much text
+// it contains -- on every frame of a drag, a scroll, or a viewport zoom, for a
+// tree nobody edited.
+TEST_CASE("laying out an unchanged tree re-shapes no text",
+          "[view][widget][label-cache][layout]") {
+    View root;
+    root.set_bounds({0, 0, 800, 600});
+    constexpr int kLabels = 40;
+    for (int i = 0; i < kLabels; ++i) {
+        auto child = std::make_unique<Label>("Parameter " + std::to_string(i));
+        root.add_child(std::move(child));
+    }
+
+    // First pass measures everything for the first time.
+    root.layout_children();
+
+    const uint64_t warm = text_shaper_prepare_call_count();
+    // Second pass over the identical tree: nothing moved, nothing changed
+    // text, so nothing needs shaping again.
+    root.layout_children();
+    const uint64_t steady = text_shaper_prepare_call_count() - warm;
+
+    // Control: the counter is live and this tree does reach the shaper --
+    // changing one label's text must cost shaping work on the next pass.
+    // Without this, a zero above could just mean the labels never measured.
+    auto* first = dynamic_cast<Label*>(root.child_at(0));
+    REQUIRE(first != nullptr);
+    first->set_text("A visibly different parameter name");
+    const uint64_t before_edit = text_shaper_prepare_call_count();
+    root.layout_children();
+    REQUIRE(text_shaper_prepare_call_count() - before_edit > 0);
+
+    CHECK(steady == 0);
+}
