@@ -737,3 +737,59 @@ TEST_CASE("timeline CLI interchange requires exact consent and publishes new dir
                     quote(dishonest) + " > /dev/null 2>&1") == 2);
     REQUIRE_FALSE(std::filesystem::exists(dishonest));
 }
+
+TEST_CASE("timeline CLI selects a writer profile by name and refuses unknown ones") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(24, 0.8f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+
+    const auto project_path = temp.path() / "project.json";
+    const auto remove_path = temp.path() / "remove.json";
+    const auto result_path = temp.path() / "result.json";
+    write_text(project_path, project_json(source_path));
+    write_text(
+        remove_path,
+        R"([{"data":{"clip_id":"4","sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.remove_clip","version":1}])");
+
+    const auto cli = quote(PULP_CLI_BIN);
+
+    // Discovery names classes and intents, never bit indexes.
+    const auto capabilities_path = temp.path() / "capabilities.json";
+    REQUIRE(run_cli(cli + " seq capabilities > " + quote(capabilities_path)) == 0);
+    const auto capabilities = read_text(capabilities_path);
+    REQUIRE(capabilities.find(R"("profile":"proposal")") != std::string::npos);
+    REQUIRE(capabilities.find(R"("profile":"editor")") != std::string::npos);
+    REQUIRE(capabilities.find(R"("profile":"trusted")") != std::string::npos);
+    REQUIRE(capabilities.find(R"({"class":"clip","intents":["create","modify"]})") !=
+            std::string::npos);
+
+    // A proposal writer is refused the removal, by name, and writes nothing.
+    const auto refused_out = temp.path() / "refused.json";
+    REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(remove_path) +
+                    " --writer-profile proposal --out " + quote(refused_out) + " > " +
+                    quote(result_path) + " 2>&1") != 0);
+    const auto refused = read_text(result_path);
+    REQUIRE(refused.find(R"("conflict_code":"capability_denied")") != std::string::npos);
+    REQUIRE(refused.find(R"("required_capability":{"class":"clip","intent":"remove"})") !=
+            std::string::npos);
+    REQUIRE_FALSE(std::filesystem::exists(refused_out));
+
+    // Positive control at the same target: the identical removal under the
+    // CLI's default editor authority commits and writes the output.
+    const auto applied_out = temp.path() / "applied.json";
+    REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(remove_path) +
+                    " --out " + quote(applied_out) + " > " + quote(result_path)) == 0);
+    REQUIRE(std::filesystem::is_regular_file(applied_out));
+    REQUIRE(read_text(result_path).find(R"("writer_profile":"editor")") != std::string::npos);
+
+    // An unknown name is a usage error, not a fallback to a wider authority.
+    const auto bogus_out = temp.path() / "bogus.json";
+    REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(remove_path) +
+                    " --writer-profile bogus --out " + quote(bogus_out) + " > " +
+                    quote(result_path) + " 2>&1") == 2);
+    REQUIRE(read_text(result_path).find("unknown --writer-profile") != std::string::npos);
+    REQUIRE_FALSE(std::filesystem::exists(bogus_out));
+}

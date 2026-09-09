@@ -9,7 +9,8 @@ target_sources(pulp-tool-timeline PRIVATE
     src/timeline_output.cpp
     src/timeline_playback.cpp
     src/timeline_project_loader.cpp
-    src/timeline_render.cpp)
+    src/timeline_render.cpp
+    src/writer_profile.cpp)
 
 target_include_directories(pulp-tool-timeline
     PUBLIC

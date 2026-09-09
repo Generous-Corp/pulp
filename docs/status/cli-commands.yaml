@@ -2085,6 +2085,16 @@ commands:
             required: true
           - name: --out
             kind: option
+          - name: --writer-profile
+            kind: option
+            description: "proposal, editor (default), or trusted; an unknown name is a usage error"
+      - name: capabilities
+        summary: Report the command classes and intents each named writer profile admits
+        args:
+          - name: --writer-profile
+            kind: option
+            required: false
+            description: "proposal, editor, or trusted; all three are reported when omitted"
       - name: export
         summary: Export a canonical project into a new SMF directory or standard .dawproject ZIP
         args:

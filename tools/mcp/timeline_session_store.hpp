@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/tools/timeline/agent.hpp>
+#include <pulp/tools/timeline/writer_profile.hpp>
 
 #include <pulp/timeline/transaction.hpp>
 
@@ -33,7 +34,14 @@ class TimelineSessionStore {
     TimelineSessionStore(const TimelineSessionStore&) = delete;
     TimelineSessionStore& operator=(const TimelineSessionStore&) = delete;
 
-    std::optional<std::string> open(std::string_view canonical_project, std::string& error);
+    /// Opens a session whose writer is admitted under `profile`.
+    ///
+    /// The profile is required: the authority a session's writer holds is a
+    /// decision the calling boundary must make and state, so there is no
+    /// default and no overload that omits it.
+    std::optional<std::string> open(std::string_view canonical_project,
+                                    const pulp::tools::timeline::WriterProfile& profile,
+                                    std::string& error);
     pulp::tools::timeline::OperationResult apply(std::string_view session_id,
                                                  std::string_view commands);
     pulp::tools::timeline::OperationResult diff(std::string_view session_id);
@@ -48,8 +56,18 @@ class TimelineSessionStore {
     std::unique_ptr<Impl> impl_;
 };
 
-std::optional<std::string> open_timeline_session(std::string_view canonical_project,
-                                                 std::string& error);
+/// Builds the payload an opened session reports.
+///
+/// The store charges this exact string against its output limit and the MCP
+/// boundary emits it, so the accounted size and the sent size are the same
+/// bytes rather than two constructions that have to be kept in agreement.
+std::string timeline_session_open_response(std::string_view canonical_project,
+                                           std::string_view session_id,
+                                           const pulp::tools::timeline::WriterProfile& profile);
+
+std::optional<std::string> open_timeline_session(
+    std::string_view canonical_project, const pulp::tools::timeline::WriterProfile& profile,
+    std::string& error);
 pulp::tools::timeline::OperationResult apply_timeline_session(std::string_view session_id,
                                                               std::string_view commands);
 pulp::tools::timeline::OperationResult diff_timeline_session(std::string_view session_id);

@@ -393,6 +393,27 @@ TEST_CASE("undo cannot launder a denied command class") {
     REQUIRE(session->snapshot()->assets().size() == 1);
 }
 
+TEST_CASE("a non-destructive writer may undo and redo its own work") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto agent = std::move(session->register_writer(non_destructive_capabilities())).value();
+    const ItemId asset_id{session->snapshot()->next_item_id()};
+    REQUIRE(session->submit(agent, session_transaction(agent, session->revision(),
+                                                       {CreateAsset{make_asset(asset_id)}})));
+    REQUIRE(session->snapshot()->assets().size() == 1);
+
+    // The inverse of the create is a removal the mask denies, but the writer is
+    // retracting its own committed change rather than reaching a denied effect
+    // on work it does not own. Refusing here would leave every non-destructive
+    // writer able to commit and never able to take the change back.
+    REQUIRE(session->can_undo());
+    REQUIRE(session->undo(agent));
+    REQUIRE(session->snapshot()->assets().empty());
+
+    REQUIRE(session->can_redo());
+    REQUIRE(session->redo(agent));
+    REQUIRE(session->snapshot()->assets().size() == 1);
+}
+
 TEST_CASE("value-dependent and aggregate commands cannot launder child authority") {
     SECTION("replacing complete note content requires remove authority") {
         auto session = std::move(DocumentSession::create(make_project())).value();

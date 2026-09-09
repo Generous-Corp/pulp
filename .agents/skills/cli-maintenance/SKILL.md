@@ -216,6 +216,32 @@ all) and the `actions/secrets` probe. See
 release-publishing credentials"*, and verify any such test FAILS with the
 scoping removed before trusting it.
 
+### `confirm_failure.sh` cannot reach a shell-out CLI test on its own
+
+The CLI test binaries exec the built CLI rather than linking it:
+`pulp-test-cli-timeline`, `pulp-test-cli-bake` and `pulp-test-cli-swap-pack` are
+each compiled with `PULP_CLI_BIN="$<TARGET_FILE:pulp-cli>"` and link only
+libraries, never the command sources. `cmd_*.cpp` files reach the test through
+`pulp-cli` (output name `pulp-cpp`), a second executable.
+
+`tools/scripts/confirm_failure.sh` guards its verdict by fingerprinting the
+binary named in `--test` and refusing to rule if that binary is unchanged after
+the break — the stale-artifact trap the script exists to catch. For a shell-out
+test the fingerprint is of the harness, not of the subject, so a genuine break in
+a `cmd_*.cpp` leaves it byte-identical and the script exits 2 INCONCLUSIVE. That
+is the guard working correctly on the wrong artifact, not a coverage gap in the
+test, and rerunning it will not change the answer.
+
+Until the script grows a way to name the subject binary, verify a CLI behaviour
+change by applying the same guard to `pulp-cpp`: delete the command's object,
+rebuild `pulp-cli` and the test target through `tools/ci/governed-build.sh`,
+confirm a compile line for your source appears in the build log and that the
+`pulp-cpp` hash moved, then run the test. Repeat after `git checkout` of the
+file; a restored build that hashes byte-identical to the baseline is the proof
+that the source was the only variable. Do not substitute `cp`/`.bak` for the
+`git checkout` — that is the same-second mtime hazard the script was written to
+remove.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source

@@ -5,6 +5,7 @@
 #include "timeline_session_store.hpp"
 
 #include <pulp/tools/timeline/agent.hpp>
+#include <pulp/tools/timeline/writer_profile.hpp>
 
 #include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timeline/schema_json.hpp>
@@ -32,6 +33,7 @@ struct TimelineArguments {
     const pulp::timeline::JsonValue* format = nullptr;
     const pulp::timeline::JsonValue* accept_losses = nullptr;
     const pulp::timeline::JsonValue* plan_only = nullptr;
+    const pulp::timeline::JsonValue* writer_profile = nullptr;
 };
 
 pulp::runtime::Result<TimelineArguments, std::string>
@@ -53,6 +55,7 @@ parse_timeline_arguments(const std::string& params_json) {
     result.format = root.find("format");
     result.accept_losses = root.find("accept_losses");
     result.plan_only = root.find("plan_only");
+    result.writer_profile = root.find("writer_profile");
     return pulp::runtime::Ok(std::move(result));
 }
 
@@ -62,6 +65,24 @@ std::string timeline_argument_error(std::string_view message) {
                           ",\"stage\":\"arguments\"},\"ok\":false}");
     payload.insert(payload.size() - 1, ",\"isError\":true");
     return payload;
+}
+
+/// Resolves the writer authority a caller selected for this call.
+///
+/// Absent selection is the non-destructive proposal authority. An unrecognized
+/// name is a usage error rather than a fallback to a more permissive profile.
+pulp::runtime::Result<pulp::tools::timeline::WriterProfile, std::string>
+timeline_writer_profile(const pulp::timeline::JsonValue* value) {
+    if (value == nullptr)
+        return pulp::runtime::Ok(pulp::tools::timeline::proposal_writer_profile());
+    if (value->kind != pulp::timeline::JsonValue::Kind::String)
+        return pulp::runtime::Err(std::string("Error: writer_profile must be a string"));
+    auto profile = pulp::tools::timeline::writer_profile_by_name(value->scalar);
+    if (!profile)
+        return pulp::runtime::Err(
+            "Error: unknown writer_profile \"" + value->scalar + "\"; expected one of " +
+            std::string(pulp::tools::timeline::selectable_writer_profile_names()));
+    return pulp::runtime::Ok(std::move(profile).value());
 }
 
 const std::string* required_timeline_string(const pulp::timeline::JsonValue* value) {
@@ -117,12 +138,19 @@ std::string handle_timeline_project_open(const std::string& params_json) {
     const auto* canonical = parsed ? parsed.value()->root().find("project") : nullptr;
     if (canonical == nullptr)
         return timeline_argument_error("Error: opened project did not contain canonical state");
+    auto profile = timeline_writer_profile(arguments.value().writer_profile);
+    if (!profile)
+        return timeline_argument_error(profile.error());
     std::string error;
-    auto session_id = open_timeline_session(parsed.value()->raw(*canonical), error);
+    auto session_id =
+        open_timeline_session(parsed.value()->raw(*canonical), profile.value(), error);
     if (!session_id)
         return timeline_argument_error("Error: " + error);
-    opened.json.insert(opened.json.size() - 1,
-                       ",\"session_id\":" + pulp::timeline::quote_json_string(*session_id));
+    // The store charged this exact payload against its output limit, so the
+    // opened session reports the authority it was admitted under rather than a
+    // second construction that could drift from the accounted one.
+    opened.json = timeline_session_open_response(parsed.value()->raw(*canonical), *session_id,
+                                                 profile.value());
     return timeline_result(std::move(opened));
 }
 
@@ -141,8 +169,11 @@ std::string handle_timeline_command_apply(const std::string& params_json) {
     const auto commands_json = arguments.value().parsed->raw(*commands);
     if (session_id != nullptr)
         return timeline_result(apply_timeline_session(*session_id, commands_json));
-    return timeline_result(
-        pulp::tools::timeline::command_apply(timeline_project_source(*project), commands_json));
+    auto profile = timeline_writer_profile(arguments.value().writer_profile);
+    if (!profile)
+        return timeline_argument_error(profile.error());
+    return timeline_result(pulp::tools::timeline::command_apply(
+        timeline_project_source(*project), commands_json, profile.value()));
 }
 
 std::string handle_timeline_diff(const std::string& params_json) {
