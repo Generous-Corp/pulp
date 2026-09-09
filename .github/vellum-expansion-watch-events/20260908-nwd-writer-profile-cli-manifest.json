@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260908-nwd-writer-profile-cli-manifest",
+  "created_at": "2026-09-08T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Timeline writer-authority change that crosses this family through exactly one path: docs/status/cli-commands.yaml, which the family claims because the design-import commands are catalogued in the same manifest as every other CLI command. The diff adds the seq writer-profile rows to that shared manifest and changes nothing about design import. The design-import command entries in that file are untouched, and no file under tools/import-design, tools/cli/import_*, tools/mcp/**/*design*, templates/**/*design* or docs/**/*design-import* is in the diff; the selector match is the manifest itself, not any design surface. The substance of the change is elsewhere: a named WriterProfile (proposal, editor, trusted) that binds the offline CLI and MCP timeline writers to an explicit capability mask and retention quota, so a proposal-class writer is refused by name instead of by an unnamed default, and every refusal projects a typed conflict code. The MCP tool schema gains the writer_profile selector; timeline-mcp-drift guards that projection and was proven to fail on a mutated artifact and pass on the committed one. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-cli-timeline",
+    "pulp-test-mcp-timeline-tools",
+    "pulp-test-timeline-agent",
+    "timeline-mcp-drift",
+    "sequencer-exposure-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

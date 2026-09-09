@@ -1,6 +1,8 @@
 #pragma once
 
 #include <pulp/tools/timeline/agent.hpp>
+#include <pulp/tools/timeline/agent_view_projection.hpp>
+#include <pulp/tools/timeline/writer_profile.hpp>
 
 #include <pulp/timeline/transaction.hpp>
 
@@ -26,6 +28,20 @@ struct TimelineSessionStoreLimits {
     std::size_t max_history_bytes_per_session = 0;
 };
 
+/// Optimistic-concurrency and retry controls for one apply.
+///
+/// Both fields are optional and both default to the pre-existing behaviour, so
+/// a caller that supplies neither applies unconditionally against the current
+/// revision exactly as before.
+struct TimelineApplyOptions {
+    /// Caller-chosen retry token. Empty means every call allocates fresh
+    /// identities and is therefore a distinct apply.
+    std::string idempotency_key;
+    /// Revision the caller last observed. Unset applies against whatever the
+    /// current revision is, which cannot detect an interleaved write.
+    std::optional<pulp::timeline::DocumentRevision> expected_revision;
+};
+
 class TimelineSessionStore {
   public:
     explicit TimelineSessionStore(TimelineSessionStoreLimits limits = {});
@@ -33,12 +49,39 @@ class TimelineSessionStore {
     TimelineSessionStore(const TimelineSessionStore&) = delete;
     TimelineSessionStore& operator=(const TimelineSessionStore&) = delete;
 
-    std::optional<std::string> open(std::string_view canonical_project, std::string& error);
+    /// Opens a session whose writer is admitted under `profile`.
+    ///
+    /// The profile is required: the authority a session's writer holds is a
+    /// decision the calling boundary must make and state, so there is no
+    /// default and no overload that omits it.
+    std::optional<std::string> open(std::string_view canonical_project,
+                                    const pulp::tools::timeline::WriterProfile& profile,
+                                    std::string& error);
     pulp::tools::timeline::OperationResult apply(std::string_view session_id,
-                                                 std::string_view commands);
+                                                 std::string_view commands,
+                                                 const TimelineApplyOptions& options = {});
     pulp::tools::timeline::OperationResult diff(std::string_view session_id);
     pulp::tools::timeline::OperationResult undo(std::string_view session_id);
     pulp::tools::timeline::OperationResult redo(std::string_view session_id);
+
+    /// Projects the session's live document as a bounded outline.
+    ///
+    /// The projection reads the session's own current revision rather than a
+    /// caller-supplied one: a reader asking "what is there now" cannot state a
+    /// revision it has not been told yet, and AgentView still refuses a pin
+    /// that has since moved.
+    pulp::tools::timeline::OperationResult view_outline(std::string_view session_id);
+    /// Projects one bounded window of clips from a sequence in the session.
+    pulp::tools::timeline::OperationResult
+    view_region(std::string_view session_id,
+                const pulp::tools::timeline::RegionViewOptions& options);
+    /// Projects the outline diff for the session's most recent applied
+    /// transaction.
+    ///
+    /// A session that has applied nothing has no transition to project and is
+    /// refused rather than answered with an empty diff, which would be
+    /// indistinguishable from a transaction that changed nothing.
+    pulp::tools::timeline::OperationResult view_diff(std::string_view session_id);
 
     std::size_t admission_charge_for_testing() const;
     void set_max_output_bytes_for_testing(std::size_t maximum);
@@ -48,12 +91,30 @@ class TimelineSessionStore {
     std::unique_ptr<Impl> impl_;
 };
 
-std::optional<std::string> open_timeline_session(std::string_view canonical_project,
-                                                 std::string& error);
-pulp::tools::timeline::OperationResult apply_timeline_session(std::string_view session_id,
-                                                              std::string_view commands);
+/// Builds the payload an opened session reports.
+///
+/// The store charges this exact string against its output limit and the MCP
+/// boundary emits it, so the accounted size and the sent size are the same
+/// bytes rather than two constructions that have to be kept in agreement.
+std::string timeline_session_open_response(std::string_view canonical_project,
+                                           std::string_view session_id,
+                                           const pulp::tools::timeline::WriterProfile& profile);
+
+std::optional<std::string> open_timeline_session(
+    std::string_view canonical_project, const pulp::tools::timeline::WriterProfile& profile,
+    std::string& error);
+pulp::tools::timeline::OperationResult
+apply_timeline_session(std::string_view session_id, std::string_view commands,
+                       const TimelineApplyOptions& options = {});
 pulp::tools::timeline::OperationResult diff_timeline_session(std::string_view session_id);
 pulp::tools::timeline::OperationResult undo_timeline_session(std::string_view session_id);
 pulp::tools::timeline::OperationResult redo_timeline_session(std::string_view session_id);
+pulp::tools::timeline::OperationResult
+view_outline_timeline_session(std::string_view session_id);
+pulp::tools::timeline::OperationResult
+view_region_timeline_session(std::string_view session_id,
+                             const pulp::tools::timeline::RegionViewOptions& options);
+pulp::tools::timeline::OperationResult
+view_diff_timeline_session(std::string_view session_id);
 
 } // namespace pulp_mcp

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/tools/timeline/writer_profile.hpp>
+
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -59,7 +61,13 @@ class ProjectSource {
 };
 
 OperationResult project_open(const ProjectSource& project);
-OperationResult command_apply(const ProjectSource& project, std::string_view commands);
+/// Applies commands under an explicit writer authority.
+///
+/// `profile` is required: the authority a transaction is admitted under is a
+/// decision each boundary must make and state, so there is no default and no
+/// overload that omits it.
+OperationResult command_apply(const ProjectSource& project, std::string_view commands,
+                              const WriterProfile& profile);
 OperationResult validate(const ProjectSource& project);
 OperationResult explain(const ProjectSource& project, std::uint32_t sample_rate = 48'000);
 OperationResult render(const ProjectSource& project, const std::filesystem::path& output,
@@ -93,7 +101,8 @@ OperationResult import_project(const std::filesystem::path& input, std::string_v
 
 /// Convenience overloads that auto-detect canonical inline JSON versus a path.
 OperationResult project_open(std::string_view project);
-OperationResult command_apply(std::string_view project, std::string_view commands);
+OperationResult command_apply(std::string_view project, std::string_view commands,
+                              const WriterProfile& profile);
 OperationResult validate(std::string_view project);
 OperationResult explain(std::string_view project, std::uint32_t sample_rate = 48'000);
 OperationResult render(std::string_view project, const std::filesystem::path& output,

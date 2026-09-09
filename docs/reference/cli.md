@@ -1738,7 +1738,9 @@ engine.
 pulp seq schema
 pulp seq validate song.pulpseq.json
 pulp seq explain song.pulpseq.json [--sample-rate 48000]
-pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json]
+pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json] \
+  [--writer-profile proposal|editor|trusted]
+pulp seq capabilities [--writer-profile proposal|editor|trusted]
 pulp seq export song.pulpseq.json --format smf --plan
 pulp seq export song.pulpseq.json --format smf --out song-smf \
   [--accept-loss concept-id]...
@@ -1746,6 +1748,11 @@ pulp seq export song.pulpseq.json --format dawproject --out song.dawproject \
   [--accept-loss concept-id]...
 pulp seq import song.mid --format smf --out imported-song
 pulp seq import song.dawproject --format dawproject --out imported-song
+pulp seq view outline song.pulpseq.json
+pulp seq view region song.pulpseq.json --sequence 2 --start 0 --end 1920 \
+  [--limit 100] [--absolute] [--after <token>]
+pulp seq view diff song.pulpseq.json commands.json \
+  [--writer-profile proposal|editor|trusted]
 ```
 
 `apply` accepts an array of typed command envelopes. It prints the committed
@@ -1753,6 +1760,18 @@ project and revision as JSON; `--out` also writes the canonical project member
 through a sibling temporary file. Invalid projects, unknown command types,
 precondition conflicts, and empty command batches fail without publishing a
 partial edit.
+
+`--writer-profile` selects the authority the edit is admitted under. `proposal`
+admits every command class but no removal and carries a small retained-byte
+quota; `editor` (the CLI default) admits every class and intent under a finite
+quota; `trusted` admits everything with no quota. An unrecognized name is a
+usage error rather than a fallback to a wider authority. A refused edit prints a
+typed refusal naming the conflict, the offending command, and — when the
+authority itself was denied — the class and intent it required, by name.
+
+`capabilities` reports what each named profile admits, as class and intent
+names. It never emits a bit index or a raw capability integer, so a caller
+cannot come to depend on the internal encoding.
 
 `export` first plans conversion against the selected format and stops unless
 every reported lossy concept has its own repeated `--accept-loss <concept-id>`
@@ -1789,6 +1808,24 @@ second render of the same document may claim about the first). The top-level
 `reproducibility` is the weakest claim any track makes, so a caller reading only
 that field never over-reads a render as bit-reproducible. Every content path the
 compiler lowers today is produced in band, so tracks report `synchronous`.
+
+`view` projects the same document as a bounded, versioned agent view and never
+writes to it. Every payload carries a `version` field, so a consumer pins the
+projection shape rather than inferring it. The same encoders back the
+`pulp_timeline_view_outline`, `pulp_timeline_view_region`, and
+`pulp_timeline_view_diff` MCP tools, so the CLI and MCP payloads are identical
+by construction rather than by review.
+
+`view outline` returns the project, sequence, track, and clip identities with
+per-node content hashes and an explicit count of what the view omitted.
+`view region` pages one half-open window of clips from a single sequence; the
+window is read in the musical timebase unless `--absolute` selects the absolute
+one, and a page that has more to give returns a `next` continuation token to
+pass back verbatim as `--after`. `view diff` applies the supplied commands to an
+in-memory copy and reports which items changed and how, leaving the project on
+disk byte-for-byte as it found it. Because that copy is a real transaction, the
+diff carries the same authority `apply` does: `--writer-profile proposal` is
+refused a removal by name rather than reporting a change it would not admit.
 
 See [One typed edit through CLI and MCP](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp)
 for a generated-schema lookup, complete command envelope, transactional apply,

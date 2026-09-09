@@ -89,6 +89,52 @@ def _session_property() -> dict:
     }
 
 
+def _writer_profile_property() -> dict:
+    # Deliberately an open string rather than an enum. The profile names are
+    # owned by the tools/timeline writer boundary, which already refuses an
+    # unknown name as a usage error; restating the list here would put the
+    # authoritative copy in the lower layer and let the two drift.
+    return {
+        "type": "string",
+        "minLength": 1,
+        "description": (
+            "Writer authority to register under, by name. Defaults to the "
+            "non-destructive proposal profile; an unknown name is refused rather "
+            "than downgraded."
+        ),
+    }
+
+
+def _idempotency_key_property() -> dict:
+    # An open string for the same reason writer_profile is: the key is the
+    # caller's own retry token and only has to be stable across that caller's
+    # retries. The session layer owns what a repeat means; constraining the
+    # shape here would only reject keys the lower layer would have honoured.
+    return {
+        "type": "string",
+        "minLength": 1,
+        "description": (
+            "Caller-chosen retry token. Reapplying with the same key and the same "
+            "commands returns the original result instead of applying them twice; "
+            "the same key with different commands is refused as a collision. "
+            "Omitting it makes every call a fresh apply."
+        ),
+    }
+
+
+def _expected_revision_property() -> dict:
+    return {
+        "type": "integer",
+        "minimum": 0,
+        "description": (
+            "Document revision the caller last read. The apply is refused as stale "
+            "if the document has moved on since, so a write cannot silently land on "
+            "top of another writer's. Omitting it applies against the current "
+            "revision unconditionally."
+        ),
+    }
+
+
 def _command_envelope(command_types: list[str]) -> dict:
     type_name_schema = {"type": "string", "not": {}}
     if command_types:
@@ -134,7 +180,13 @@ def generate(manifest: dict) -> str:
         {
             "name": "pulp_timeline_project_open",
             "description": "Open a timeline project document and return its parsed, validated state.",
-            "inputSchema": _input_schema({"project": _project_property()}, ["project"]),
+            "inputSchema": _input_schema(
+                {
+                    "project": _project_property(),
+                    "writer_profile": _writer_profile_property(),
+                },
+                ["project"],
+            ),
             "x-pulp-operation": "project.open",
             "x-pulp-document-types": document_types,
         },
@@ -149,6 +201,9 @@ def generate(manifest: dict) -> str:
                 {
                     "project": _project_property(),
                     "session_id": _session_property(),
+                    "writer_profile": _writer_profile_property(),
+                    "idempotency_key": _idempotency_key_property(),
+                    "expected_revision": _expected_revision_property(),
                     "commands": {
                         "type": "array",
                         "minItems": 1,
