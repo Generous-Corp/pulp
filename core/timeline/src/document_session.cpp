@@ -783,10 +783,19 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::undo(WriterToke
     }
     auto record = impl_->undo.back();
     auto transaction = impl_->make_history_transaction(writer, record.inverse);
-    if (auto* state = impl_->find_writer(writer.id_)) {
-        const auto view = current();
-        if (auto refusal = refuse_by_class(*state, transaction, *view.snapshot, view.revision))
-            return failure<CommitResult>(*refusal);
+    // A writer retracting its own recorded transaction needs no authority beyond the
+    // authority it already exercised to commit it. The inverse of a permitted
+    // create is a remove, so re-checking it against the mask leaves a
+    // non-destructive writer's own history write-only: able to commit a change
+    // and never able to take it back. Another writer's record is still checked,
+    // so a denied class cannot be laundered across writers.
+    if (record.writer != writer.id_) {
+        if (auto* state = impl_->find_writer(writer.id_)) {
+            const auto view = current();
+            if (auto refusal =
+                    refuse_by_class(*state, transaction, *view.snapshot, view.revision))
+                return failure<CommitResult>(*refusal);
+        }
     }
     impl_->redo.emplace_back();
     auto result =
@@ -823,10 +832,19 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::redo(WriterToke
     }
     auto record = impl_->redo.back();
     auto transaction = impl_->make_history_transaction(writer, record.forward);
-    if (auto* state = impl_->find_writer(writer.id_)) {
-        const auto view = current();
-        if (auto refusal = refuse_by_class(*state, transaction, *view.snapshot, view.revision))
-            return failure<CommitResult>(*refusal);
+    // A writer reapplying its own recorded transaction needs no authority beyond the
+    // authority it already exercised to commit it. The forward record of a permitted
+    // create is a remove, so re-checking it against the mask leaves a
+    // non-destructive writer's own history write-only: able to commit a change
+    // and never able to take it back. Another writer's record is still checked,
+    // so a denied class cannot be laundered across writers.
+    if (record.writer != writer.id_) {
+        if (auto* state = impl_->find_writer(writer.id_)) {
+            const auto view = current();
+            if (auto refusal =
+                    refuse_by_class(*state, transaction, *view.snapshot, view.revision))
+                return failure<CommitResult>(*refusal);
+        }
     }
     impl_->undo.emplace_back();
     auto result =
