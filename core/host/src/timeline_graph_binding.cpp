@@ -151,6 +151,7 @@ TimelineGraphPlaybackBinding::adopt_program(const playback::PlaybackProgram& pro
                       next->realtime_stretch->latency_samples(),
                       previous->realtime_stretch->latency_samples());
     next->tracks = previous->tracks;
+    next->track_event_shifts = previous->track_event_shifts;
     next->owned_devices = previous->owned_devices;
     next->automation_tracks.reserve(previous->automation_tracks.size());
     std::vector<NodeId> claimed_device_nodes;
@@ -328,14 +329,23 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
         }
         return cleared;
     };
-    for (const auto& track : state->tracks) {
-        const auto note_result = track->note_renderer->process(block, transport);
+    for (std::size_t track_index = 0; track_index < state->tracks.size(); ++track_index) {
+        const auto& track = state->tracks[track_index];
+        const auto shift = track_index < state->track_event_shifts.size()
+                               ? state->track_event_shifts[track_index]
+                               : playback::EventCompensationShift{};
+        const auto note_result = track->note_renderer->process(block, transport, shift);
         saturating_add(result.emitted_note_events, note_result.emitted_events);
         saturating_add(result.dropped_note_events, note_result.dropped_events);
         if (note_result.code != playback::NoteRenderCode::Ok) {
             const bool notes_cleared = clear_notes();
             const bool automation_cleared = clear_automation(delivered_automation_tracks);
-            return fail_closed(TimelineGraphProcessCode::NoteRenderFailed,
+            const bool compensation_refused =
+                note_result.code == playback::NoteRenderCode::CompensationUnsupported ||
+                note_result.code == playback::NoteRenderCode::CompensationLoopWrapUnsupported;
+            return fail_closed(compensation_refused
+                                   ? TimelineGraphProcessCode::EventCompensationUnsupported
+                                   : TimelineGraphProcessCode::NoteRenderFailed,
                                notes_cleared && automation_cleared);
         }
         if (!state->graph_snapshot.inject_midi(track->midi_node, track->note_renderer->events())) {

@@ -402,7 +402,7 @@
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
-          "rationale": "The offline MCP tools do not expose AgentView outline, paging, or dirty-set projection.",
+          "rationale": "The offline MCP tools do not expose AgentView outline or paging, and no tool projects AgentView::diff's bounded outline diff. MCP does already ship a dirty-set projection, timeline_dirty_set_json in tools/mcp/timeline_session_store.cpp surfaced by pulp_timeline_diff, but that is the session store's own dirty set rather than AgentView's revision-ranged OutlineDiff, so the gap is the AgentView projection specifically and not dirty-set reporting in general.",
           "dependencies": [
             "offline-agent-view-projection"
           ],
@@ -2612,7 +2612,7 @@
       "id": "midi-expression-playback",
       "title": "MIDI expression and controller playback with nested-lane boundary chase",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "65511aee-f118-40e3-b01a-9e31435ec670",
       "owned_paths": [
         "core/timeline/include/pulp/timeline/midi_lane.hpp",
@@ -2630,6 +2630,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8096,
+        "accepted_head": "2e0f4684780d8cf7b822d0f51ad035a1c1ffc4e7",
+        "merge_sha": "8e20653beffcd9c9b398025392ec723ea54d78a0",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/include/pulp/playback/program.hpp",
@@ -2675,7 +2681,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "ControllerProgramEvent, its total order, and TrackProgram::arrangement_controller_events() are public installed headers. Every event carries its own MIDI wire address plus authored lane and point identity, so a consumer reproduces the authored streams without a side table. This is deliberately public rather than engine-internal so Forge Sequencer and Forge Modular can consume it through their own lane.",
+          "rationale": "ControllerProgramEvent, its total order, and TrackProgram::arrangement_controller_events() are public installed headers. Every event carries its own MIDI wire address plus authored lane and point identity, so a consumer reproduces the authored streams without a side table. This is deliberately public rather than engine-internal so Forge Sequencer and Forge Modular can consume it through their own lane, but only in process: the exposure stops at the program wire. encode_program_wire() refuses any controller-bearing program with ProgramWireErrorCode::ControllerEventsUnsupported because the wire format has no controller section yet, so a consumer that crosses a process or plugin boundary cannot carry these events until that section lands. Read the exposed claim as in-process only.",
           "evidence": [
             {
               "kind": "sdk_header",
@@ -2735,7 +2741,7 @@
       "id": "nested-sequence-gain-composition",
       "title": "Nested SequenceRef gain composition with a documented precedence model",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "f2a1c7d4-6b93-4e08-9a15-3c7e5b21d0af",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -2746,6 +2752,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8104,
+        "accepted_head": "c989173936d548490f71a393423b138d247de385",
+        "merge_sha": "a07941336a80b1c1d7a6e449bdb43291be217c78",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
@@ -2824,6 +2836,175 @@
           "owner": "sequencer-control-closure",
           "dependencies": [
             "nested-sequence-gain-composition"
+          ]
+        }
+      }
+    },
+    {
+      "id": "event-stream-pdc-contract",
+      "title": "Event-stream delay-compensation contract, scheduling shift, and typed latency refusals",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "3e91b7c2-48da-4f16-b5c0-9d2ea6f31c47",
+      "owned_paths": [
+        "core/playback/include/pulp/playback/event_compensation.hpp",
+        "core/playback/include/pulp/playback/note_renderer.hpp",
+        "core/playback/src/note_renderer.cpp",
+        "core/host/include/pulp/host/timeline_graph_binding.hpp",
+        "core/host/src/timeline_graph_binding.cpp",
+        "core/host/src/timeline_graph_binding_candidate.cpp",
+        "core/host/src/timeline_graph_binding_internal.hpp",
+        "core/host/src/timeline_device_resolver.cpp",
+        "test/test_playback_event_pdc.cpp",
+        "test/test_timeline_event_pdc_admission.cpp",
+        "test/cmake/timeline_tests.cmake",
+        "docs/policies/event-stream-pdc.md",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        ".agents/skills/hosting/SKILL.md",
+        "core/host/src/signal_graph_prepared_topology_edit.cpp"
+      ],
+      "release": {
+        "pr": 8114,
+        "accepted_head": "f2570550225beef73c3539b4d759588c886894a4",
+        "merge_sha": "903345ab9f6b68d8815a4bb68dab359c8f8b4ff0",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/event_compensation.hpp",
+          "needles": [
+            "EventCompensationShift",
+            "accumulate_event_chain_shift",
+            "shifted_range_origin",
+            "event_compensation_admits_live_input"
+          ]
+        },
+        {
+          "path": "core/playback/src/note_renderer.cpp",
+          "needles": [
+            "compensated_start",
+            "range_admits_event_compensation"
+          ]
+        },
+        {
+          "path": "core/host/include/pulp/host/timeline_graph_binding.hpp",
+          "needles": [
+            "EventDeviceLatencyUnavailable",
+            "EventDeviceLatencyOutOfRange",
+            "EventChainLiveInputUnsupported",
+            "EventCompensationUnsupported"
+          ]
+        },
+        {
+          "path": "core/host/src/timeline_device_resolver.cpp",
+          "needles": [
+            "resolve_event_device_latency",
+            "event_domain_latency_samples"
+          ]
+        },
+        {
+          "path": "docs/policies/event-stream-pdc.md",
+          "needles": [
+            "RESOLVED for the scheduled event stream",
+            "Deliberate deviation from the design proposal"
+          ]
+        },
+        {
+          "path": "test/test_playback_event_pdc.cpp",
+          "needles": [
+            "a compensated stream is read early by exactly the shift",
+            "a changed shift is held until the transport stops"
+          ]
+        },
+        {
+          "path": "test/test_timeline_event_pdc_admission.cpp",
+          "needles": [
+            "an unanswerable device latency is refused rather than read as zero",
+            "the scheduling shift uses event-domain latency alone"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "EventCompensationShift",
+            "shift_relatch_pending"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "EventCompensationShift, accumulate_event_chain_shift(), shifted_range_origin(), range_admits_event_compensation() and event_compensation_admits_live_input() are public installed playback headers, and ArrangementNoteRenderer::process() takes the shift as a prepared argument. A host outside Pulp can therefore compute and apply the same compensation the engine does, against the same ceiling, without reimplementing the rule.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/event_compensation.hpp",
+              "needles": [
+                "struct EventCompensationShift",
+                "accumulate_event_chain_shift",
+                "shifted_range_origin",
+                "event_compensation_admits_live_input"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/note_renderer.hpp",
+              "needles": [
+                "EventCompensationShift requested_shift",
+                "CompensationUnsupported",
+                "shift_relatch_pending"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/host/include/pulp/host/timeline_graph_binding.hpp",
+              "needles": [
+                "event_compensation_shift_for",
+                "EventDeviceLatencyUnavailable"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_playback_event_pdc.cpp",
+              "needles": [
+                "a shift is applied per transport range, and refuses to read past a loop end"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "No `pulp seq` operation reports or sets a device chain's event latency, and none should until an event-to-event device executes: a CLI reading a shift that is structurally zero would publish a number with no content. Owner: the sequencer control closure lane, gated on event-to-event execution landing first.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema exposes no event-latency or compensation operation, for the same reason as the CLI surface. Owner: the sequencer control closure lane.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "This slice refuses live input into a compensated event chain rather than exposing a monitoring control for it, so there is no behaviour here for a live surface to project. A per-track monitor policy is the prerequisite for any live control, not a projection of what shipped here.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "event-stream-pdc-contract"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises event-chain compensation. Advertising it now would claim an executable event-device chain that does not exist; the capability becomes advertisable when event-to-event execution lands.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
           ]
         }
       }

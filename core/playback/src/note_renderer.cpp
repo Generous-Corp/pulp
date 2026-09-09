@@ -78,6 +78,8 @@ void ArrangementNoteRenderer::reset() noexcept {
     pending_flush_ = false;
     state_overflow_ = false;
     has_block_index_ = false;
+    has_latched_shift_ = false;
+    latched_shift_ = {};
     last_block_index_ = 0;
     dropped_events_ = 0;
 }
@@ -151,6 +153,35 @@ void ArrangementNoteRenderer::update_carry_state(const TransportSnapshot& transp
 
 NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& block,
                                                   const TransportSnapshot& transport) noexcept {
+    return process(block, transport, EventCompensationShift{});
+}
+
+NoteRenderResult
+ArrangementNoteRenderer::process(const PlaybackProgramBlock& block,
+                                 const TransportSnapshot& transport,
+                                 EventCompensationShift requested_shift) noexcept {
+    // The first block latches whatever it is given; after that a change waits
+    // for the transport to stop. Re-aligning while a musician is listening
+    // would displace every later event by the delta, and there is no arrangement
+    // of the scheduler that makes that inaudible. Holding the older alignment
+    // keeps the stream continuous and leaves the correction to a boundary that
+    // is silent by construction.
+    if (!has_latched_shift_) {
+        latched_shift_ = requested_shift;
+        has_latched_shift_ = true;
+    } else if (latched_shift_ != requested_shift && !transport.is_playing) {
+        latched_shift_ = requested_shift;
+    }
+    auto result = process_shifted(block, transport, latched_shift_);
+    result.applied_shift = latched_shift_;
+    result.shift_relatch_pending = latched_shift_ != requested_shift;
+    return result;
+}
+
+NoteRenderResult
+ArrangementNoteRenderer::process_shifted(const PlaybackProgramBlock& block,
+                                         const TransportSnapshot& transport,
+                                         EventCompensationShift shift) noexcept {
     runtime::ScopedNoAlloc no_alloc;
     output_.clear();
     ump_output_.clear();
@@ -226,13 +257,34 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
         // without the other and leave a note hanging.
         const auto pass_index = transport.scrubbing ? 0 : range.loop_pass_index;
 
+        const auto refuse_compensation = [&](NoteRenderCode code) noexcept {
+            (void)flush(range.sample_offset);
+            update_carry_state(transport, last_cursor);
+            result.code = code;
+            result.emitted_events = static_cast<std::uint32_t>(output_.size());
+            result.dropped_events = dropped_events_;
+            return result;
+        };
+        if (!range_admits_event_compensation(range, shift))
+            return refuse_compensation(NoteRenderCode::CompensationUnsupported);
+        // An enabled loop bounds how far ahead this pass may legally read. The
+        // tempo-map conversion is skipped entirely when nothing compensates, so
+        // an uncompensated stream pays no per-range cost for the guard.
+        if (shift.compensating() && transport.loop.enabled && !transport.scrubbing &&
+            !loop_admits_event_compensation(
+                range, shift, transport.tempo_map->ticks_to_samples(transport.loop.end)))
+            return refuse_compensation(NoteRenderCode::CompensationLoopWrapUnsupported);
+        // Per range, never per block: a block that straddles a loop wrap carries
+        // two monotonic ranges, and the second one's window must be shifted from
+        // its own origin or the wrap replays the pre-wrap events.
+        const auto compensated_start = shifted_range_origin(range, shift);
         const auto search_sample =
             range.host_beat_mapping
                 ? transport.tempo_map->ticks_to_samples(range.timeline_tick_start)
-                : range.timeline_sample_start;
+                : compensated_start;
         const auto mapped_end_sample =
             range.host_beat_mapping ? transport.tempo_map->ticks_to_samples(range.timeline_tick_end)
-                                    : range.timeline_sample_start;
+                                    : compensated_start;
         auto cursor =
             std::lower_bound(events.begin(), events.end(), search_sample,
                              [](const NoteProgramEvent& event, timebase::SamplePosition sample) {
@@ -247,9 +299,9 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
                 if (!host_mapped_output_offset_for_tick(range, cursor->tick, local_offset))
                     continue;
             } else {
-                if (!detail::note_event_offset_in_range(cursor->sample, range.timeline_sample_start,
+                if (!detail::note_event_offset_in_range(cursor->sample, compensated_start,
                                                         range.frame_count, local_offset)) {
-                    if (cursor->sample >= range.timeline_sample_start)
+                    if (cursor->sample >= compensated_start)
                         break;
                     continue;
                 }
