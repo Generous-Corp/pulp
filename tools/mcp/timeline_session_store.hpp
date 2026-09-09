@@ -27,6 +27,20 @@ struct TimelineSessionStoreLimits {
     std::size_t max_history_bytes_per_session = 0;
 };
 
+/// Optimistic-concurrency and retry controls for one apply.
+///
+/// Both fields are optional and both default to the pre-existing behaviour, so
+/// a caller that supplies neither applies unconditionally against the current
+/// revision exactly as before.
+struct TimelineApplyOptions {
+    /// Caller-chosen retry token. Empty means every call allocates fresh
+    /// identities and is therefore a distinct apply.
+    std::string idempotency_key;
+    /// Revision the caller last observed. Unset applies against whatever the
+    /// current revision is, which cannot detect an interleaved write.
+    std::optional<pulp::timeline::DocumentRevision> expected_revision;
+};
+
 class TimelineSessionStore {
   public:
     explicit TimelineSessionStore(TimelineSessionStoreLimits limits = {});
@@ -43,7 +57,8 @@ class TimelineSessionStore {
                                     const pulp::tools::timeline::WriterProfile& profile,
                                     std::string& error);
     pulp::tools::timeline::OperationResult apply(std::string_view session_id,
-                                                 std::string_view commands);
+                                                 std::string_view commands,
+                                                 const TimelineApplyOptions& options = {});
     pulp::tools::timeline::OperationResult diff(std::string_view session_id);
     pulp::tools::timeline::OperationResult undo(std::string_view session_id);
     pulp::tools::timeline::OperationResult redo(std::string_view session_id);
@@ -68,8 +83,9 @@ std::string timeline_session_open_response(std::string_view canonical_project,
 std::optional<std::string> open_timeline_session(
     std::string_view canonical_project, const pulp::tools::timeline::WriterProfile& profile,
     std::string& error);
-pulp::tools::timeline::OperationResult apply_timeline_session(std::string_view session_id,
-                                                              std::string_view commands);
+pulp::tools::timeline::OperationResult
+apply_timeline_session(std::string_view session_id, std::string_view commands,
+                       const TimelineApplyOptions& options = {});
 pulp::tools::timeline::OperationResult diff_timeline_session(std::string_view session_id);
 pulp::tools::timeline::OperationResult undo_timeline_session(std::string_view session_id);
 pulp::tools::timeline::OperationResult redo_timeline_session(std::string_view session_id);

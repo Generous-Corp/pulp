@@ -50,6 +50,24 @@ Apply edits as one expected-revision transaction, validate the result, use
 `explain` to inspect playback lowering/PDC, then render only when an audio
 artifact is needed. Never modify canonical project JSON text directly.
 
+`command_apply` carries both halves of that sentence as optional arguments,
+and both are session-only — a stateless apply opens its own document and
+keeps no retry record, so it refuses them rather than accepting and ignoring
+them. `expected_revision` is the revision you last read; supply it and an
+interleaved write is reported as `stale_revision` instead of being
+overwritten. `idempotency_key` names the write itself, for the case where the
+response was lost rather than the write: retrying under the same token
+re-submits the identities the first attempt allocated, so a still-cached
+result comes back verbatim and one that has aged out is refused as
+`already_applied_result_expired`. That refusal means the write landed and the
+result is no longer readable — it does not mean the write failed, and
+re-issuing the commands under a fresh token would apply them twice.
+
+A retry token is only honoured for the request it first named. Reusing one
+with different commands, or with a different `expected_revision`, is refused
+as `transaction_id_collision`, because the alternative is answering a
+different request with an earlier result.
+
 ## Contracts
 
 - `Project`, `Sequence`, `Track`, and `Clip` are immutable snapshots. Validate

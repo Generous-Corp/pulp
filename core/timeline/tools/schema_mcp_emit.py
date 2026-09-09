@@ -105,6 +105,36 @@ def _writer_profile_property() -> dict:
     }
 
 
+def _idempotency_key_property() -> dict:
+    # An open string for the same reason writer_profile is: the key is the
+    # caller's own retry token and only has to be stable across that caller's
+    # retries. The session layer owns what a repeat means; constraining the
+    # shape here would only reject keys the lower layer would have honoured.
+    return {
+        "type": "string",
+        "minLength": 1,
+        "description": (
+            "Caller-chosen retry token. Reapplying with the same key and the same "
+            "commands returns the original result instead of applying them twice; "
+            "the same key with different commands is refused as a collision. "
+            "Omitting it makes every call a fresh apply."
+        ),
+    }
+
+
+def _expected_revision_property() -> dict:
+    return {
+        "type": "integer",
+        "minimum": 0,
+        "description": (
+            "Document revision the caller last read. The apply is refused as stale "
+            "if the document has moved on since, so a write cannot silently land on "
+            "top of another writer's. Omitting it applies against the current "
+            "revision unconditionally."
+        ),
+    }
+
+
 def _command_envelope(command_types: list[str]) -> dict:
     type_name_schema = {"type": "string", "not": {}}
     if command_types:
@@ -172,6 +202,8 @@ def generate(manifest: dict) -> str:
                     "project": _project_property(),
                     "session_id": _session_property(),
                     "writer_profile": _writer_profile_property(),
+                    "idempotency_key": _idempotency_key_property(),
+                    "expected_revision": _expected_revision_property(),
                     "commands": {
                         "type": "array",
                         "minItems": 1,
