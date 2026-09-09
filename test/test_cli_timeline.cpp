@@ -101,6 +101,50 @@ std::string project_json(const std::filesystem::path& source,
     return take(serialize_project(project, registry)).json;
 }
 
+// Builds a project whose root sequence references a child sequence, so
+// compiling has to flatten the child into its parent. The child track carries a
+// non-unity fader: that gain composes into a media leaf's own clip gain, but a
+// note leaf compiles to events no renderer scales by clip gain, so the same
+// shape is refused there. The two leaves are the only difference between the
+// two projects, which is what makes the media one a control rather than a
+// second happy path.
+std::string nested_project_json(const std::filesystem::path& source, bool note_leaf) {
+    constexpr std::uint64_t frame_count = 24;
+    auto child_clip =
+        note_leaf
+            ? take(Clip::create({12}, {0}, {timebase::kTicksPerQuarter},
+                                take(MidiContent::create(
+                                    {NoteEvent{{13}, {0}, {240}, 40'000, 64, 0}}))))
+            : take(Clip::create({12}, {0}, {timebase::kTicksPerQuarter},
+                                MediaRef{{5}, {0}, frame_count}, {.gain_linear = 1.0f}));
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "child";
+    child_input.clips = {child_clip};
+    child_input.mixer = TrackMixer{0.5f, 0.0f};
+    auto child_track = take(Track::create(std::move(child_input)));
+    auto child = take(Sequence::create({10}, "child",
+                                       timebase::TickDuration{timebase::kTicksPerQuarter},
+                                       {child_track}));
+    auto root_clip =
+        take(Clip::create({4}, {0}, {timebase::kTicksPerQuarter}, SequenceRef{{10}, {0}}));
+    auto root_track = take(Track::create({3}, "root", {root_clip}));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {root_track}));
+    MediaAsset asset{{5},
+                     "source.wav",
+                     frame_count,
+                     {48'000, 1},
+                     file_hash(source),
+                     AssetStoragePolicy::External,
+                     {{AssetLocatorKind::ExternalUri, source.string()}},
+                     {},
+                     {}};
+    auto project =
+        take(Project::create(ProjectInput{{1}, "nested", 100, {2}, {asset}, {root, child}}));
+    auto registry = take(make_builtin_timeline_registry());
+    return take(serialize_project(project, registry)).json;
+}
+
 void write_text(const std::filesystem::path& path, std::string_view text) {
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     REQUIRE(stream);
@@ -880,4 +924,54 @@ TEST_CASE("timeline CLI view projects outlines regions and diffs without writing
     REQUIRE(run_cli(cli + " seq view bogus " + quote(project_path) + " > " + quote(out_path) +
                     " 2>&1") == 2);
     REQUIRE(read_text(out_path).find("unknown view verb") != std::string::npos);
+}
+
+TEST_CASE("pulp seq validate reports nested composition refusals and fails closed") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(24, 0.8f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+
+    const auto cli = quote(PULP_CLI_BIN);
+    const auto out_path = temp.path() / "validate.json";
+
+    // A refusal is the answer the caller asked for, so it arrives as a
+    // diagnostic -- but validate still exits non-zero, because a validator that
+    // reports a refusal and then claims success has validated nothing. The
+    // refusal names itself with the stable enumerator name; the numeric value is
+    // not a contract, since the enum is appended to.
+    const auto note_path = temp.path() / "nested-note.json";
+    write_text(note_path, nested_project_json(source_path, true));
+    REQUIRE(run_cli(cli + " seq validate " + quote(note_path) + " > " + quote(out_path) +
+                    " 2>&1") != 0);
+    const auto refused = read_text(out_path);
+    REQUIRE(refused.find(R"("code":"NestedGainSinkUnsupported")") != std::string::npos);
+    REQUIRE(refused.find(R"("ok":false)") != std::string::npos);
+    // The offending leaf, so a caller can act on the refusal instead of only
+    // reading it.
+    REQUIRE(refused.find(R"("item":"12")") != std::string::npos);
+
+    // The control. Without it this case also passes against a validate that
+    // refuses everything, which is exactly as useless as one that accepts
+    // everything: the same nesting with a media leaf composes, because gain
+    // multiplies into a clip gain the renderer reads.
+    const auto media_path = temp.path() / "nested-media.json";
+    write_text(media_path, nested_project_json(source_path, false));
+    REQUIRE(run_cli(cli + " seq validate " + quote(media_path) + " > " + quote(out_path) +
+                    " 2>&1") == 0);
+    const auto composed = read_text(out_path);
+    REQUIRE(composed.find(R"("diagnostics":[])") != std::string::npos);
+    REQUIRE(composed.find(R"("ok":true)") != std::string::npos);
+
+    // A project that cannot be opened is not a compile refusal, and must not be
+    // reported as an empty diagnostic list.
+    const auto unreadable_path = temp.path() / "unreadable.json";
+    write_text(unreadable_path, "{not json");
+    REQUIRE(run_cli(cli + " seq validate " + quote(unreadable_path) + " > " + quote(out_path) +
+                    " 2>&1") != 0);
+    const auto unopened = read_text(out_path);
+    REQUIRE(unopened.find(R"("stage":"open")") != std::string::npos);
+    REQUIRE(unopened.find(R"("diagnostics")") == std::string::npos);
 }

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260909-nwd-validate-compile-diagnostics",
+  "created_at": "2026-09-09T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Timeline validation change that crosses this family through exactly one path: docs/status/cli-commands.yaml, which the family claims because every CLI command is catalogued in the same shared manifest as the design-import commands. The diff rewrites the seq validate summary in that manifest and changes nothing about design import: the design-import entries in that file are untouched, and no file under tools/import-design, tools/import-validation, tools/cli/**/import_design*, tools/mcp/**/*design*, templates/**/*design*, tools/templates/from-figma, tools/templates/from-v0 or docs/**/*design-import* appears in the diff, nor does docs/status/tools.yaml. The match was measured by running every selector in every watch_scope family against the complete changed-path set and returned that one pair, paired with a control run of the same matcher over two paths that had to match and did. The substance of the change is elsewhere: seq validate previously loaded a project, confirmed the registry schema accepted it, and returned ok true unconditionally, so a document the program compiler refuses to lower validated clean. It now compiles the project, reports each compile refusal in the diagnostics array the result has always promised, and exits non-zero when it emits one. A refusal names itself with the stable PascalCase enumerator name and names the item it refused; the numeric code_id beside it carries no contract because the refusal vocabulary is appended to, and the mapper switch deliberately carries no default so an appended enumerator is a compiler diagnostic rather than a silently wrong wire name. Failing to open a project stays a read failure reporting its stage rather than an empty diagnostic list. pulp_timeline_validate already routed through the shared tools/timeline entry point and timeline_result already marks a non-zero result isError, so MCP inherits the projection with no MCP code change, but inheritance was an inference from reading a call rather than an observation and is now asserted directly over MCP. Both surfaces carry a mandatory negative control: the same nested fixture with a media leaf composes and must return exit 0 with an empty diagnostics list, because without it the test would also pass against a validate that refuses everything. Two break-and-restore runs confirmed the CLI test and the MCP test each fail when the projection is reverted to unconditional success. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-cli-timeline",
+    "pulp-test-mcp-timeline-tools",
+    "tools/scripts/confirm_failure.sh",
+    "tools/scripts/vellum_expansion_watch_check.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

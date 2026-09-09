@@ -285,15 +285,28 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     // the recorded save stack and translate to a real baseline immediately
     // before painting. The bridge has recorded this state for years; dropping
     // it here displaced imported canvas labels by roughly one ascent.
-    auto text_baseline = canvas::TextBaseline::top;
+    auto text_baseline = canvas::TextBaseline::alphabetic;
     std::vector<canvas::TextBaseline> text_baseline_stack;
     const auto baseline_y = [&](const std::string& text, float y) {
+        // `alphabetic` needs no metrics: y already IS the baseline. Skipping
+        // the measure there also keeps the default path off a shaping call.
+        if (text_baseline == canvas::TextBaseline::alphabetic)
+            return y;
         const auto metrics = canvas.measure_text_full(text);
         switch (text_baseline) {
         case canvas::TextBaseline::middle:
             return y + (metrics.ascent - metrics.descent) * 0.5f;
         case canvas::TextBaseline::bottom:
+        case canvas::TextBaseline::ideographic:
+            // No ideographic metric is available from TextMetrics, and the
+            // ideographic baseline sits at or just above the descent line for
+            // the Latin faces this canvas shapes, so it shares `bottom`.
             return y - metrics.descent;
+        case canvas::TextBaseline::hanging:
+            // The hanging baseline is a Devanagari-derived metric absent from
+            // TextMetrics. Engines that cannot read a BASE table place it a
+            // fixed fraction down the ascent; 0.8 is the conventional value.
+            return y + metrics.ascent * 0.8f;
         case canvas::TextBaseline::top:
         default:
             return y + metrics.ascent;
@@ -549,9 +562,12 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             else canvas.set_text_align(canvas::TextAlign::left);
             break;
         case CanvasDrawCmd::Type::set_text_baseline:
-            if (cmd.int_val == 1) text_baseline = canvas::TextBaseline::middle;
+            if (cmd.int_val == 0) text_baseline = canvas::TextBaseline::top;
+            else if (cmd.int_val == 1) text_baseline = canvas::TextBaseline::middle;
             else if (cmd.int_val == 2) text_baseline = canvas::TextBaseline::bottom;
-            else text_baseline = canvas::TextBaseline::top;
+            else if (cmd.int_val == 4) text_baseline = canvas::TextBaseline::hanging;
+            else if (cmd.int_val == 5) text_baseline = canvas::TextBaseline::ideographic;
+            else text_baseline = canvas::TextBaseline::alphabetic;
             break;
 
         // Line cap/join

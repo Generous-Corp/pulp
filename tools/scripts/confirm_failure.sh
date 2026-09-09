@@ -25,7 +25,13 @@
 # Usage:
 #   confirm_failure.sh --file <path> --break <sed/perl cmd> \
 #                      --build-dir <dir> --target <cmake target> \
-#                      --test <command> [--jobs N]
+#                      --test <command> [--jobs N] [--object <basename>]
+#
+# --object names the source whose object file carries the edited file, for a
+# source the compiler never sees directly. A JS prelude under core/view/js is
+# embedded into web_compat_preludes_gen.cpp at build time, so there is no
+# web-compat-foo.js.o to watch for and the recompile evidence must be
+# `--object web_compat_preludes_gen.cpp` instead.
 #
 # The break command is run with the file path appended, e.g.
 #   --break "perl -0pi -e 's/policy.priority/0/'"
@@ -45,6 +51,7 @@ BUILD_DIR=""
 TARGET=""
 TEST_CMD=""
 JOBS=""
+OBJECT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -54,6 +61,7 @@ while [ $# -gt 0 ]; do
         --target)    TARGET="$2"; shift 2 ;;
         --test)      TEST_CMD="$2"; shift 2 ;;
         --jobs)      JOBS="$2"; shift 2 ;;
+        --object)    OBJECT="$2"; shift 2 ;;
         -h|--help)   sed -n '3,40p' "$0"; exit 0 ;;
         *) echo "confirm-failure: unknown argument '$1'" >&2; exit 2 ;;
     esac
@@ -97,6 +105,11 @@ trap 'rm -f "$BUILD_LOG"' EXIT
 BASE="$(basename "$FILE")"
 IS_HEADER=0
 case "$BASE" in *.h|*.hpp|*.hh|*.hxx|*.inc) IS_HEADER=1 ;; esac
+
+# The object to delete and to watch for in the build log. Normally that is the
+# edited file's own object; --object redirects it when the edited source is
+# embedded into a generated translation unit and has no object of its own.
+OBJ_BASE="${OBJECT:-$BASE}"
 
 # The binary the test runs. Verifying an OBJECT recompiled is not enough: the
 # archive can relink while the executable's link is skipped, because make
@@ -154,7 +167,7 @@ invalidate() {
         # A header's dependents are unknown here, so every object goes.
         find "$BUILD_DIR" -name '*.o' -delete 2>/dev/null || true
     else
-        find "$BUILD_DIR" -name "${BASE}.o" -delete 2>/dev/null || true
+        find "$BUILD_DIR" -name "${OBJ_BASE}.o" -delete 2>/dev/null || true
     fi
 }
 
@@ -173,12 +186,21 @@ build_and_verify_recompile() {
         sed -n '$p' "$BUILD_LOG" >&2
         return 2
     fi
+    # Echo the compile line that was matched. The verdict already depends on
+    # it, but a reader of the transcript cannot see a grep that happened inside
+    # a temp file this script deletes -- and "Built target" is not evidence, so
+    # the line itself has to reach the log.
+    local evidence=""
     if [ "$IS_HEADER" -eq 1 ]; then
-        grep -qE 'Building [A-Z]+ object' "$BUILD_LOG" && return 0
+        evidence="$(grep -m1 -E 'Building [A-Z]+ object' "$BUILD_LOG")"
     else
-        grep -qF "${BASE}.o" "$BUILD_LOG" && return 0
+        evidence="$(grep -m1 -F "${OBJ_BASE}.o" "$BUILD_LOG")"
     fi
-    say "$phase: the build did NOT recompile $BASE"
+    if [ -n "$evidence" ]; then
+        say "$phase: recompiled -- ${evidence#"${evidence%%[![:space:]]*}"}"
+        return 0
+    fi
+    say "$phase: the build did NOT recompile $OBJ_BASE"
     say "  The binary still holds the old code, so any result now is meaningless."
     say "  This is the stale-object trap: an edit landing in the same filesystem"
     say "  second as the previous build leaves the object looking current."
