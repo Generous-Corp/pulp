@@ -1102,7 +1102,14 @@ void WidgetBridge::poll_async_results() {
         dispatch_event(engine_, result.callback_id, "result", payload);
     }
 
-    if (had_pending_frames) {
+    // Skip this drain when the previous service pass already ran the frame
+    // callbacks: a self-rearming rAF refills pending_frame_ids_ from inside
+    // __flushFrames__, so draining here as well would run the same callback
+    // twice per host tick and draw the scene twice per display period. The
+    // exchange consumes the slot, so at most one poll can skip per service
+    // drain and a poll-only host still drains on every call.
+    const bool serviced = std::exchange(frames_drained_by_service_, false);
+    if (had_pending_frames && !serviced) {
         engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
     }
 
@@ -1135,6 +1142,10 @@ void WidgetBridge::service_frame_callbacks() {
                                     pending_frame_ids_.size());
         engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
         engine_.pump_message_loop();
+        // Tell the next poll this tick's frames are already drawn. Set only on
+        // an actual drain, so a service pass with nothing pending never
+        // suppresses a later poll.
+        frames_drained_by_service_ = true;
     }
     if (pending_runtime_settle_rounds_ > 0)
         request_repaint();
