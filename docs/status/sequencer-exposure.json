@@ -3031,7 +3031,9 @@
         "tools/mcp/timeline_session_store.hpp",
         "tools/timeline/CMakeLists.txt",
         "tools/timeline/include/pulp/tools/timeline/agent.hpp",
-        "tools/timeline/src/timeline_agent.cpp"
+        "tools/timeline/src/timeline_agent.cpp",
+        "core/timeline/src/document_session.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
       ],
       "evidence": [
         {
