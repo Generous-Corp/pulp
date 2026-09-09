@@ -77,6 +77,13 @@ RAISE_RE = re.compile(r"\bCompileErrorCode::([A-Za-z_]\w*)")
 # A field whose declared default happens to name a code declares nothing about
 # where that code is raised.
 FIELD_DEFAULT_RE = re.compile(r"^\s*CompileErrorCode\s+\w+\s*=\s*CompileErrorCode::")
+# A `case` label names a value control arrives at, not a refusal control
+# constructs. The shape this exists for is the switch that maps every
+# enumerator to its own name for a diagnostic: reading those labels as raises
+# reports a refusal at every arm of a string table, and the enumerator sitting
+# in a neighbouring arm lends its name to the window as if the code had read
+# it. Only the label is consumed, so a raise sharing the line is still seen.
+CASE_LABEL_RE = re.compile(r"\bcase\s+(?:[A-Za-z_]\w*\s*::\s*)*[A-Za-z_]\w*\s*:(?!:)")
 
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//[^\n]*")
@@ -124,6 +131,21 @@ def strip_comments(text: str) -> str:
         return "".join("\n" if character == "\n" else " " for character in match.group(0))
 
     return LINE_COMMENT_RE.sub(blank, BLOCK_COMMENT_RE.sub(blank, STRING_LITERAL_RE.sub(blank, text)))
+
+
+def strip_case_labels(line: str) -> str:
+    """Blank the `case X::Y:` labels in a line, preserving its length.
+
+    Applied to raise detection only. The label still stands in the window
+    `authored_reads` walks, because switching on an authored enum is a real
+    read of the document and dropping it would let a guarded refusal pass for
+    one that reads nothing.
+
+    A label wrapped across lines is not recognised and still reads as a raise.
+    That direction asks for an allowlist entry that is not owed, which someone
+    has to answer, rather than dropping a refusal that is.
+    """
+    return CASE_LABEL_RE.sub(lambda match: " " * len(match.group(0)), line)
 
 
 def source_files(root: Path) -> list[Path]:
@@ -222,7 +244,7 @@ def raise_sites(root: Path, refusals: set[str], symbols: set[str]) -> list[dict[
         for index, line in enumerate(lines):
             if FIELD_DEFAULT_RE.match(line):
                 continue
-            for code in RAISE_RE.findall(line):
+            for code in RAISE_RE.findall(strip_case_labels(line)):
                 if code not in refusals:
                     continue
                 sites.append(
@@ -443,6 +465,54 @@ def run_selftest() -> int:
         )
         if verify(root):
             print("selftest rejected a refusal that reads nothing authorable")
+            return 1
+        synthetic.unlink()
+
+        # A switch mapping every enumerator to its own name raises nothing. The
+        # arms name refusal codes and a neighbouring arm names an enumerator the
+        # timeline also declares, so a check that reads a label as a raise finds
+        # a refusal here and calls it authorable on the strength of the arm next
+        # to it.
+        synthetic.write_text(
+            "#include <pulp/playback/program_compiler.hpp>\n"
+            "namespace pulp::playback {\n"
+            "std::string_view name_of(CompileErrorCode code) noexcept {\n"
+            "    switch (code) {\n"
+            "    case CompileErrorCode::StaleRevision:\n"
+            "        return \"StaleRevision\";\n"
+            "    case CompileErrorCode::TrimmedGrooveUnsupported:\n"
+            "        return \"TrimmedGrooveUnsupported\";\n"
+            "    }\n"
+            "    return {};\n"
+            "}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        if verify(root):
+            print("selftest read a case label as a raise site")
+            return 1
+
+        # Consuming the label must not consume the line. A refusal constructed
+        # in the arm's body is still a raise, including when it shares the line
+        # with the label that guards it.
+        synthetic.write_text(
+            "#include <pulp/playback/program_compiler.hpp>\n"
+            "namespace pulp::playback {\n"
+            "CompileError refuse(const timeline::Clip& clip) {\n"
+            "    switch (clip.time_anchor()) {\n"
+            "    case timeline::ClipTimeAnchor::Musical: "
+            "return {CompileErrorCode::TrimmedGrooveUnsupported, clip.id(), 0};\n"
+            "    }\n"
+            "    return {};\n"
+            "}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        if not any(
+            "selftest_refusal.cpp" in error and "TrimmedGrooveUnsupported" in error
+            for error in verify(root)
+        ):
+            print("selftest missed a refusal raised in the body of a switch arm")
             return 1
         synthetic.unlink()
 
