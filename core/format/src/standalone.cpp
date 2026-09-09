@@ -2,6 +2,9 @@
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
+#include <pulp/format/detail/standalone_key_driver.hpp>
+#include <pulp/format/detail/standalone_key_schedule.hpp>
+#include <pulp/format/detail/standalone_key_sequence.hpp>
 #include <pulp/format/detail/standalone_musical_typing.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
@@ -19,11 +22,15 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -1149,6 +1156,119 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             "Standalone: audio inspector enabled via PULP_AUDIO_INSPECTOR env var");
     }
 #endif
+
+    // ── Synthetic key-sequence driver (test harness) ────────────────────────
+    //
+    // When `effective_config.test_key_sequence` is non-empty (set via config or
+    // PULP_TEST_KEY_SEQUENCE), press each key in turn on a frame schedule and
+    // photograph the surface between presses. This is the keyboard sibling of
+    // the pointer-drag hook: it exists so a keyboard-driven UX claim can be
+    // backed by a screenshot of the real shipping build instead of a unit test
+    // that calls the script layer directly.
+    //
+    // The delivery deliberately enters through the platform view's own key
+    // methods (see standalone_key_driver_mac.mm), reproducing the order the
+    // window manager offers a key down in. Driving the script layer directly
+    // would bypass the very code path a keyboard regression lives in.
+    if (!effective_config.test_key_sequence.empty()) {
+        std::vector<detail::KeySequenceStep> steps;
+        std::string parse_error;
+        if (!detail::parse_key_sequence(effective_config.test_key_sequence,
+                                        steps, parse_error)) {
+            // Fail loudly and press nothing. A partially-run sequence would
+            // produce artifacts that look like a completed run.
+            runtime::log_error(
+                "Standalone: key sequence rejected ({}) — no keys will be sent: {}",
+                parse_error, effective_config.test_key_sequence);
+        } else if (!detail::synthetic_key_delivery_supported()) {
+            runtime::log_error(
+                "Standalone: synthetic key delivery is unsupported on this "
+                "platform — no keys will be sent");
+        } else {
+            auto* host = window.get();
+            auto* editor_view = bridge->view();
+            const bool owns_close = effective_config.screenshot_path.empty();
+            detail::KeySequenceSchedule schedule(
+                steps, effective_config.test_key_frame_delay);
+            const std::string shot_dir = effective_config.test_key_shot_dir;
+
+            auto capture_png = [host, editor_view, w, h]() -> std::vector<uint8_t> {
+                if (editor_view) {
+                    auto r = pulp::view::capture_view(*editor_view, w, h);
+                    if (r.ok && r.used == pulp::view::ScreenshotBackend::default_backend)
+                        return r.png;
+                }
+                return host->capture_back_buffer_png();
+            };
+            auto write_shot = [shot_dir, capture_png](const std::string& name) {
+                if (shot_dir.empty()) return;
+                const std::string path = shot_dir + "/" + name + ".png";
+                auto png = capture_png();
+                if (png.empty()) {
+                    runtime::log_error("Standalone: key-sequence capture empty for {}",
+                                       path);
+                    return;
+                }
+                std::ofstream out(path, std::ios::binary);
+                out.write(reinterpret_cast<const char*>(png.data()),
+                          static_cast<std::streamsize>(png.size()));
+                runtime::log_info("Standalone: key-sequence frame written to {}", path);
+            };
+
+            auto prior = pre_screenshot_idle;
+            pre_screenshot_idle = [prior, host, owns_close,
+                                   schedule = std::move(schedule),
+                                   write_shot = std::move(write_shot)]() mutable {
+                if (prior) prior();
+                const auto tick = schedule.tick();
+                switch (tick.action) {
+                case detail::KeySequenceSchedule::Action::wait:
+                    break;
+                case detail::KeySequenceSchedule::Action::capture_initial:
+                    write_shot("key-00-initial");
+                    break;
+                case detail::KeySequenceSchedule::Action::press: {
+                    const auto& step = schedule.steps()[tick.index];
+                    const bool sent = detail::deliver_synthetic_key(
+                        host->native_content_view_handle(), step);
+                    // Log every press, delivered or not, so a run that pressed
+                    // fewer keys than requested is visible in the log rather
+                    // than inferred from artifacts that silently stopped.
+                    if (sent)
+                        runtime::log_info("Standalone: key-sequence pressed [{}] {}",
+                                          tick.index, step.label);
+                    else
+                        runtime::log_error(
+                            "Standalone: key-sequence FAILED to deliver [{}] {}",
+                            tick.index, step.label);
+                    break;
+                }
+                case detail::KeySequenceSchedule::Action::capture: {
+                    const auto& step = schedule.steps()[tick.index];
+                    char stem[64];
+                    std::snprintf(stem, sizeof(stem), "key-%02d-%s",
+                                  static_cast<int>(tick.index) + 1,
+                                  step.label.c_str());
+                    write_shot(stem);
+                    break;
+                }
+                case detail::KeySequenceSchedule::Action::finish:
+                    runtime::log_info("Standalone: key sequence complete");
+                    // Only close when nothing else owns the exit. With
+                    // --screenshot also set, the screenshot one-shot closes,
+                    // and closing here first would race it out of its frame.
+                    if (owns_close) host->request_close();
+                    break;
+                }
+            };
+            window->set_idle_callback(pre_screenshot_idle);
+            runtime::log_info(
+                "Standalone: key sequence armed — {} step(s), {} frame delay, "
+                "shots to '{}'",
+                steps.size(), effective_config.test_key_frame_delay,
+                shot_dir.empty() ? std::string("<none>") : shot_dir);
+        }
+    }
 
     if (!opts.initially_hidden)
         window->show();

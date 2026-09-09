@@ -118,6 +118,16 @@ produced by the render callback. To capture a UI that must show live signal
 `StandaloneConfig::screenshot_keeps_audio` or export
 `PULP_SCREENSHOT_KEEP_AUDIO=1`.
 
+A standalone capture can also press keys. Set `PULP_TEST_KEY_SEQUENCE` to a
+comma-separated spec (`"down,down,return"`, modifiers as `cmd+a`),
+`PULP_TEST_KEY_FRAMES` to the settle gap between a press and its capture, and
+`PULP_TEST_KEY_SHOT_DIR` to a directory; the run writes one PNG before any key
+and one after each press, then exits. The keys are delivered through the
+platform view's own key-handling methods in the order the window manager uses
+them, so a keyboard regression that lives in that dispatch is reproduced rather
+than bypassed. An unrecognized token rejects the whole spec and presses nothing,
+so read the run's log before reading its images.
+
 In C++ tests and tools, prefer `pulp::view::capture_view()` when the caller
 needs a trustworthy PNG. It selects the capture backend for the view tree,
 refuses native-overlay-only captures with a reason, routes GPU-required views
