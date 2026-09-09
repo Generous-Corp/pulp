@@ -608,6 +608,39 @@ When promoting an entry off the `cli_only` list, add the matching
 `pulp_<command>` tool to `tools/mcp/pulp_mcp.cpp` and the parity check
 will auto-detect the new coverage; remove the baseline entry in the same PR.
 
+### Pairing a CLI verb with a timeline MCP tool
+
+A read-only CLI verb that also wants an MCP peer in the timeline family hits
+three things that are invisible from the CLI side.
+
+**The generated timeline catalog is hard-capped at exactly ten operations.**
+`tools/mcp/CMakeLists.txt` raises `FATAL_ERROR` unless
+`timeline_mcp_tools.json` defines ten tools, checks each one's name against a
+fixed ordered list, and `mcp_timeline_tools.cpp` carries a matching
+`static_assert(bindings.size() == kTimelineMcpToolNames.size())`. Adding an
+eleventh entry there fails the configure, not the build. An additional timeline
+tool therefore ships as a hand-written descriptor fragment plus its own binding
+array, concatenated into `tools_list_json()`; `control_mcp_tools_json_fragment()`
+is the existing shape to copy. The cap is deliberate — the ten generated
+operations are a frozen contract — so raise it only by changing that contract,
+never to make room for a new tool.
+
+**The published catalog mixes two renderings, so a substring needle asserts
+provenance rather than presence.** Generated descriptors come out
+pretty-printed (`"name" : "pulp_timeline_command_apply"`) while a hand-written
+fragment stays compact (`"name":"pulp_timeline_view_outline"`), and
+`tools_list_json()` concatenates both. A needle for one spelling silently
+measures which side a tool was authored on. Parse the catalog and walk
+`tools[].name` instead, and include a name that must be absent so the walk
+itself can fail.
+
+**The server binary and the MCP test target are separate targets.** Building
+`pulp-test-mcp-timeline-tools` does not relink `pulp-mcp`, so an end-to-end
+`tools/list` probe can read a stale server and report a correctly registered
+tool as missing. Rebuild `pulp-mcp` before believing an absence, and pair the
+probe with a tool that must be present — that control is what distinguishes a
+stale binary from a real registration gap.
+
 ### Inspector MCP boundary
 
 `pulp_control_profiles` is the canonical static profile reader;

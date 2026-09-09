@@ -16,6 +16,12 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   `pulp_timeline_render`, `pulp_timeline_export`, and `pulp_timeline_import`.
   Seven operations retain stateless `pulp::tool-timeline` entry points; diff,
   undo, and redo are MCP-local operations backed by a live `DocumentSession`.
+  Three further read-projection tools —
+  `pulp_timeline_view_outline`, `pulp_timeline_view_region`, and
+  `pulp_timeline_view_diff` — sit alongside that catalog rather than inside
+  it, because the generated ten-tool manifest is pinned to the editing verbs
+  it describes (see "The view projection is published outside the generated
+  ten-tool catalog").
 - Use `/seq` for the agent-guided inspect, validate, edit, explain, import, and
   consent-gated export workflow. Use `pulp seq` and `pulp render` directly for
   shell scripts, CI, and human-operated headless workflows. Prefer `seq apply`
@@ -49,6 +55,24 @@ durable handoff.
 Apply edits as one expected-revision transaction, validate the result, use
 `explain` to inspect playback lowering/PDC, then render only when an audio
 artifact is needed. Never modify canonical project JSON text directly.
+
+`command_apply` carries both halves of that sentence as optional arguments,
+and both are session-only — a stateless apply opens its own document and
+keeps no retry record, so it refuses them rather than accepting and ignoring
+them. `expected_revision` is the revision you last read; supply it and an
+interleaved write is reported as `stale_revision` instead of being
+overwritten. `idempotency_key` names the write itself, for the case where the
+response was lost rather than the write: retrying under the same token
+re-submits the identities the first attempt allocated, so a still-cached
+result comes back verbatim and one that has aged out is refused as
+`already_applied_result_expired`. That refusal means the write landed and the
+result is no longer readable — it does not mean the write failed, and
+re-issuing the commands under a fresh token would apply them twice.
+
+A retry token is only honoured for the request it first named. Reusing one
+with different commands, or with a different `expected_revision`, is refused
+as `transaction_id_collision`, because the alternative is answering a
+different request with an earlier result.
 
 ## Contracts
 
@@ -553,6 +577,36 @@ not authenticate the `DirtySet`: the public type has no session-issued origin
 token, so callers must pair it with the exact `CommitResult` that produced it.
 Do not present AgentView as an arbitrary since-revision diff or as a substitute
 for session provenance.
+
+### The view projection is published outside the generated ten-tool catalog
+
+`AgentView` reaches CLI and MCP through one shared encoder in
+`tools/timeline/src/timeline_agent_view.cpp`, so `pulp seq view` and the
+`pulp_timeline_view_*` tools emit byte-identical payloads by construction
+rather than by review. A Forge consumer therefore has a single shape to pin,
+and every payload carries a `version` field so it can pin it explicitly.
+
+The MCP registration deliberately does **not** extend the generated catalog.
+`tools/mcp/CMakeLists.txt` raises `FATAL_ERROR` unless the generated timeline
+tool JSON holds exactly ten tools, and `mcp_timeline_tools.cpp` carries a
+matching `static_assert(bindings.size() == kTimelineMcpToolNames.size())`.
+Adding a read verb there would mean widening a cap that exists to keep the
+editing catalog honest against its schema. So the view tools follow the
+`control_mcp_tools_json_fragment()` precedent instead: a hand-written
+descriptor fragment plus a separate binding array, both appended alongside the
+generated ten. Because that fragment is a hand-built string, its
+well-formedness is asserted rather than assumed — `test_mcp_timeline_sessions.cpp`
+parses it and the whole `tools/list` catalog, since a stray comma there would
+break tool discovery for every client at once.
+
+Note the input asymmetry, which is intentional. The MCP tools take a
+`session_id`, like every other MCP timeline tool, and read the live session's
+current revision — that is the Forge-facing live read. The CLI takes a project
+path, because a one-shot CLI invocation has no session. `view diff` on either
+surface applies the commands to an in-memory copy and writes nothing, but that
+copy is a real transaction, so the diff carries the same authority `apply`
+does: a `proposal` writer is refused a removal by name rather than reporting a
+change it would not admit.
 
 ### Widening `ClipContent` is guarded, and the two guards are not interchangeable
 

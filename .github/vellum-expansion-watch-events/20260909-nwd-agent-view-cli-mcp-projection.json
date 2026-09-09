@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260909-nwd-agent-view-cli-mcp-projection",
+  "created_at": "2026-09-09T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Timeline read-projection change that crosses this family through exactly one path: docs/status/cli-commands.yaml, which the family claims because every CLI command is catalogued in the same shared manifest as the design-import commands. The diff adds the seq view rows to that manifest and changes nothing about design import: the design-import entries in that file are untouched, and no file under tools/import-design, tools/import-validation, tools/cli/import_*, tools/mcp/**/*design*, templates/**/*design* or docs/**/*design-import* appears in the diff. The selector match was measured against every pattern in both family tables and returned that one path, paired with a control pattern that had to match and did. The substance of the change is elsewhere: the released AgentView projection is exposed as pulp seq view outline|region|diff on the CLI and as pulp_timeline_view_outline|region|diff on MCP, both encoded by one shared encoder in tools/timeline so the two boundaries emit identical payloads by construction rather than by review, each carrying the AgentView value's own version. The inputs differ deliberately: MCP takes the session_id every other timeline tool takes, the one-shot CLI takes a project path. Bounded windows are refused as usage errors rather than silently rounded, and view diff leaves the project byte-for-byte unchanged while carrying the same writer-authority selection apply does. The generated timeline catalog is capped at ten operations, so the three tools ship as a hand-written descriptor fragment alongside it. Four break-and-restore runs confirmed the CLI window filter, the MCP window filter, the catalog registration and the writer-profile refusal each fail when the code under test is broken. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-cli-timeline",
+    "pulp-test-mcp-timeline-tools",
+    "timeline-mcp-drift",
+    "tools/scripts/sequencer_exposure_check.py",
+    "tools/scripts/vellum_expansion_watch_check.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

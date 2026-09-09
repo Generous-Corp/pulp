@@ -178,6 +178,47 @@ def main() -> int:
             for name in writer_profile_tools
         ),
     )
+    apply_properties = command_apply["inputSchema"]["properties"]
+    check(
+        "the retry token and the read revision are declared on session applies",
+        "idempotency_key" in apply_properties and "expected_revision" in apply_properties,
+    )
+    check(
+        "the retry token is an open string, because the caller owns its shape",
+        apply_properties["idempotency_key"].get("type") == "string"
+        and apply_properties["idempotency_key"].get("minLength") == 1
+        and "enum" not in apply_properties["idempotency_key"],
+    )
+    check(
+        "the read revision is a non-negative integer, matching the document counter",
+        apply_properties["expected_revision"].get("type") == "integer"
+        and apply_properties["expected_revision"].get("minimum") == 0,
+    )
+    check(
+        "both retry controls stay optional so an unkeyed apply is still the default",
+        "idempotency_key" not in command_apply["inputSchema"]["required"]
+        and "expected_revision" not in command_apply["inputSchema"]["required"],
+    )
+    check(
+        "operations that hold no session record do not accept the retry controls",
+        all(
+            "idempotency_key" not in _tool(document, name)["inputSchema"]["properties"]
+            and "expected_revision"
+            not in _tool(document, name)["inputSchema"]["properties"]
+            for name in [
+                "pulp_timeline_project_open",
+                "pulp_timeline_diff",
+                "pulp_timeline_undo",
+                "pulp_timeline_redo",
+                "pulp_timeline_validate",
+                "pulp_timeline_explain",
+                "pulp_timeline_render",
+                "pulp_timeline_export",
+                "pulp_timeline_import",
+            ]
+        ),
+    )
+
     check(
         "operations that register no writer do not accept a writer authority",
         all(

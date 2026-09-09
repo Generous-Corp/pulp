@@ -793,3 +793,91 @@ TEST_CASE("timeline CLI selects a writer profile by name and refuses unknown one
     REQUIRE(read_text(result_path).find("unknown --writer-profile") != std::string::npos);
     REQUIRE_FALSE(std::filesystem::exists(bogus_out));
 }
+
+TEST_CASE("timeline CLI view projects outlines regions and diffs without writing the project") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(24, 0.8f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+
+    const auto project_path = temp.path() / "project.json";
+    const auto musical_path = temp.path() / "musical.json";
+    const auto remove_path = temp.path() / "remove.json";
+    const auto out_path = temp.path() / "view.json";
+    write_text(project_path, project_json(source_path));
+    write_text(musical_path, project_json(source_path, AssetLocatorKind::ExternalUri, {}, true));
+    write_text(
+        remove_path,
+        R"([{"data":{"clip_id":"4","sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.remove_clip","version":1}])");
+    const auto project_before = read_text(project_path);
+
+    const auto cli = quote(PULP_CLI_BIN);
+
+    // The outline is versioned so a consumer can pin the projection shape.
+    REQUIRE(run_cli(cli + " seq view outline " + quote(project_path) + " > " + quote(out_path)) ==
+            0);
+    const auto outline = read_text(out_path);
+    REQUIRE(outline.find(R"("version":1)") != std::string::npos);
+    REQUIRE(outline.find(R"("revision":"0")") != std::string::npos);
+    REQUIRE(outline.find(R"("project_name":"cli")") != std::string::npos);
+    REQUIRE(outline.find(R"("name":"root")") != std::string::npos);
+    REQUIRE(outline.find(R"("name":"audio")") != std::string::npos);
+
+    // The fixture clip is absolute-anchored and 24 frames long.
+    REQUIRE(run_cli(cli + " seq view region " + quote(project_path) +
+                    " --sequence 2 --start 0 --end 24 --absolute > " + quote(out_path)) == 0);
+    const auto covering = read_text(out_path);
+    REQUIRE(covering.find(R"("id":"4")") != std::string::npos);
+    REQUIRE(covering.find(R"("anchor":"absolute")") != std::string::npos);
+    REQUIRE(covering.find(R"("next":null)") != std::string::npos);
+
+    // Negative control at the same target: a window past the clip pages empty,
+    // so the read above measured the window filter rather than a projection
+    // that returns every clip it holds.
+    REQUIRE(run_cli(cli + " seq view region " + quote(project_path) +
+                    " --sequence 2 --start 100 --end 200 --absolute > " + quote(out_path)) == 0);
+    REQUIRE(read_text(out_path).find(R"("items":[])") != std::string::npos);
+
+    // The musical timebase is reachable from the same verb, and is the default.
+    REQUIRE(run_cli(cli + " seq view region " + quote(musical_path) + " --sequence 2 --start 0" +
+                    " --end " + std::to_string(timebase::kTicksPerQuarter) + " > " +
+                    quote(out_path)) == 0);
+    const auto musical = read_text(out_path);
+    REQUIRE(musical.find(R"("id":"4")") != std::string::npos);
+    REQUIRE(musical.find(R"("anchor":"musical")") != std::string::npos);
+
+    // A diff applies the commands to an in-memory copy: it reports the change
+    // and leaves the project on disk byte-for-byte as it found it.
+    REQUIRE(run_cli(cli + " seq view diff " + quote(project_path) + " " + quote(remove_path) +
+                    " > " + quote(out_path)) == 0);
+    const auto diff = read_text(out_path);
+    REQUIRE(diff.find(R"("version":1)") != std::string::npos);
+    REQUIRE(diff.find(R"("revision":"1")") != std::string::npos);
+    REQUIRE(diff.find(R"("item_id":"4")") != std::string::npos);
+    REQUIRE(read_text(project_path) == project_before);
+
+    // The diff carries the same authority selection `apply` does, so a
+    // proposal writer is refused the removal by name.
+    REQUIRE(run_cli(cli + " seq view diff " + quote(project_path) + " " + quote(remove_path) +
+                    " --writer-profile proposal > " + quote(out_path) + " 2>&1") != 0);
+    REQUIRE(read_text(out_path).find(R"("conflict_code":"capability_denied")") !=
+            std::string::npos);
+    REQUIRE(read_text(project_path) == project_before);
+
+    // Malformed windows are usage errors, never rounded into something the
+    // projection would answer.
+    REQUIRE(run_cli(cli + " seq view region " + quote(project_path) + " --start 0 --end 24 > " +
+                    quote(out_path) + " 2>&1") == 2);
+    REQUIRE(read_text(out_path).find("requires --sequence") != std::string::npos);
+    REQUIRE(run_cli(cli + " seq view region " + quote(project_path) +
+                    " --sequence 2 --start x --end 24 > " + quote(out_path) + " 2>&1") == 2);
+    REQUIRE(read_text(out_path).find("whole number of ticks") != std::string::npos);
+    REQUIRE(run_cli(cli + " seq view region " + quote(project_path) +
+                    " --sequence 2 --start 0 --end 24 --after not-a-cursor > " + quote(out_path) +
+                    " 2>&1") != 0);
+    REQUIRE(run_cli(cli + " seq view bogus " + quote(project_path) + " > " + quote(out_path) +
+                    " 2>&1") == 2);
+    REQUIRE(read_text(out_path).find("unknown view verb") != std::string::npos);
+}

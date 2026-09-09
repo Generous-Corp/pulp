@@ -3218,6 +3218,193 @@
           "owner": "sequencer-control-closure"
         }
       }
+    },
+    {
+      "id": "offline-apply-retry-and-staleness",
+      "title": "Retry token and expected revision on offline session applies",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/mcp/timeline_session_store.cpp",
+        "tools/mcp/timeline_session_store.hpp",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/tools/schema_mcp_emit.py",
+        ".agents/skills/timeline/SKILL.md",
+        "test/test_mcp_timeline_sessions.cpp",
+        "core/timeline/tools/test_schema_mcp_emit.py"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/schema/timeline_mcp_tools.json",
+          "needles": [
+            "idempotency_key",
+            "expected_revision"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Both controls are arguments on an offline tool boundary, not a linkable SDK entry point. The session store that owns the retry record is a tools/mcp translation unit with no installed header, and the transaction identity and revision types the controls address are already installed by core/timeline."
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The offline CLI applies commands per invocation and keeps no session, so it has nowhere to record a retry token between calls and no revision a caller could have read from a prior call. Reaching parity means giving the CLI a durable session first; until then the surface is absent rather than refused.",
+          "dependencies": [
+            "offline-cli-durable-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "idempotency_key",
+                "expected_revision"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline_apply_options",
+                "require session_id"
+              ]
+            }
+          ],
+          "rationale": "pulp_timeline_command_apply takes both controls as optional arguments declared in the published inputSchema, so an MCP client discovers them without reading source. idempotency_key names a write: a retry under the same token re-submits the identities the first attempt allocated, so a still-cached result returns verbatim and one that has aged out is refused as already_applied_result_expired rather than applied twice. The recorded request bytes are compared here because DocumentSession compares command identities but not payloads, so a token reused for different commands is refused as a collision instead of being answered with the earlier result. expected_revision is forwarded as the transaction precondition, so an interleaved write is reported as stale_revision. Both are session state and are refused, not ignored, on the stateless path."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Retry deduplication and optimistic concurrency are properties of an offline document editing boundary, not a live per-instance product control."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "The design-time manifest does not yet publish that an apply can be retried under a token or gated on a revision, so a design-time caller cannot discover the controls from the manifest alone.",
+          "dependencies": [
+            "design-time-writer-authority-manifest"
+          ],
+          "owner": "sequencer-control-closure"
+        }
+      }
+    },
+    {
+      "id": "offline-agent-view-projection",
+      "title": "Bounded AgentView outline, region paging and diff projection on the offline CLI and MCP",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "tools/timeline/include/pulp/tools/timeline/agent_view_projection.hpp",
+        "tools/timeline/src/timeline_agent_view.cpp",
+        "tools/timeline/CMakeLists.txt",
+        "tools/cli/cmd_seq.cpp",
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/mcp/mcp_tools.hpp",
+        "tools/mcp/pulp_mcp.cpp",
+        "tools/mcp/timeline_session_store.cpp",
+        "tools/mcp/timeline_session_store.hpp",
+        "test/test_cli_timeline.cpp",
+        "test/test_mcp_timeline_sessions.cpp",
+        "docs/status/cli-commands.yaml",
+        "docs/reference/cli.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "tools/timeline/include/pulp/tools/timeline/agent_view_projection.hpp",
+          "needles": [
+            "agent_view_outline_json",
+            "agent_view_region_page_json",
+            "agent_view_outline_diff_json"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "AgentView itself is already an installed public projection, exposed by p0-38-agent-view. What this row adds is its JSON encoding for two offline tool boundaries, and that encoder lives in the tools/timeline support library, which is not installed by cmake --install. An SDK consumer reads the Outline, RegionPage and OutlineDiff values directly and needs no encoder; only a process boundary does."
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "docs/status/cli-commands.yaml",
+              "needles": [
+                "outline, region, or diff"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "view region requires --sequence",
+                "unknown view verb"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/timeline/src/timeline_agent_view.cpp",
+              "needles": [
+                "view_outline",
+                "view_region",
+                "view_diff"
+              ]
+            }
+          ],
+          "rationale": "pulp seq view outline, region and diff project AgentView over a project path without a session, which is the only shape a one-shot CLI can offer. A region read is a bounded window: it requires --sequence, --start and --end, takes an optional --limit and --after cursor, and selects the timebase with --absolute, so paging is the caller's own vocabulary rather than a whole-sequence dump. A malformed window is refused as a usage error with exit code 2 rather than rounded into a window the projection would answer. view diff applies its commands to an in-memory copy and leaves the project byte-for-byte as it found it, and it carries the same authority selection apply does, so --writer-profile proposal is refused a removal by name instead of reporting a change it would not admit."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "pulp_timeline_view_outline",
+                "timeline_view_mcp_tools_json_fragment"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_tools.hpp",
+              "needles": [
+                "handle_timeline_view_outline",
+                "handle_timeline_view_region",
+                "handle_timeline_view_diff"
+              ]
+            },
+            {
+              "kind": "mcp_projection",
+              "path": "tools/timeline/include/pulp/tools/timeline/agent_view_projection.hpp",
+              "needles": [
+                "agent_view_outline_json",
+                "agent_view_region_page_json",
+                "agent_view_outline_diff_json"
+              ]
+            }
+          ],
+          "rationale": "pulp_timeline_view_outline, _view_region and _view_diff read a live session by session_id, which is the session-oriented input every other MCP timeline tool takes and the correct live read for a design-time caller. Their descriptors are published in tools/list, so a client discovers the tools and their window arguments without reading source. The three tools are declared as a hand-written fragment alongside the generated catalog rather than inside it, because that catalog is capped at exactly ten tools by a CMake FATAL_ERROR and a matching static_assert; control_mcp_tools_json_fragment is the existing precedent for publishing beside it. Because the descriptors are hand-written their well-formedness is asserted rather than assumed, and the catalog is read back as parsed JSON so the assertion measures the tool's presence and not the renderer's whitespace. Both boundaries call one encoder, so the CLI and MCP payloads are identical by construction rather than by review, and every payload carries the version the AgentView value itself reports so a consumer can pin the shape."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "This row supplies the projection encoder that p0-38-agent-view's live gap names as one of its two dependencies, but not the other: Product A still has no exact-document session an executor could bind an AgentView read to, so there is no live per-instance control to expose the projection through. The surface is absent rather than refused.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The projection is a runtime read over a document, matching the not_applicable disposition p0-38-agent-view already carries on this surface for AgentView itself. Encoding that read for two tool boundaries does not make it an installed design-time capability."
+        }
+      }
     }
   ],
   "tombstones": []
