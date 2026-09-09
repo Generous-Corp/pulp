@@ -160,7 +160,7 @@ TEST_CASE("canvas text placed past its surface edge is reported",
 }
 
 TEST_CASE("the positive control turns a clean tree into findings",
-          "[appearance][coverage]") {
+          "[appearance][instrument]") {
     View root;
     root.set_bounds({0, 0, 400, 200});
     // Two labels with a small gap: genuinely clean, and close enough that a few
@@ -375,7 +375,7 @@ TEST_CASE("hidden text is counted as unseen rather than clean",
 }
 
 TEST_CASE("a run that measured nothing is not reported as trustworthy",
-          "[appearance][coverage]") {
+          "[appearance][instrument]") {
     View root;
     root.set_bounds({0, 0, 400, 200});
     // TextButton paints text but exposes no typography, so its ink cannot be
@@ -400,7 +400,7 @@ TEST_CASE("a run that measured nothing is not reported as trustworthy",
 }
 
 TEST_CASE("a report is untrustworthy once blind skips outnumber what it saw",
-          "[appearance][coverage]") {
+          "[appearance][instrument]") {
     View root;
     root.set_bounds({0, 0, 400, 400});
 
@@ -435,7 +435,7 @@ TEST_CASE("a report is untrustworthy once blind skips outnumber what it saw",
     REQUIRE(control.coverage.trustworthy());
 }
 
-TEST_CASE("an empty tree is never trustworthy", "[appearance][coverage]") {
+TEST_CASE("an empty tree is never trustworthy", "[appearance][instrument]") {
     View root;
     root.set_bounds({0, 0, 400, 200});
 
@@ -446,7 +446,7 @@ TEST_CASE("an empty tree is never trustworthy", "[appearance][coverage]") {
     REQUIRE_FALSE(report.coverage.trustworthy());
 }
 
-TEST_CASE("coverage is printed on every run", "[appearance][coverage]") {
+TEST_CASE("coverage is printed on every run", "[appearance][instrument]") {
     View root;
     root.set_bounds({0, 0, 400, 200});
     add_label(root, "only", "Rate", {0, 0, 120, 20});
