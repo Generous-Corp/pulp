@@ -1811,17 +1811,17 @@
         },
         "offline_timeline_cli": {
           "disposition": "gap",
-          "rationale": "The offline Timeline CLI does not yet issue proposal-safe commands through restricted writer identities.",
+          "rationale": "The offline Timeline CLI issues commands through restricted writer identities via --writer-profile; that closure is carried by the offline-writer-profile-authority row. This row is released, so its disposition is fixed at its own release commit and cannot be re-dispositioned in place.",
           "dependencies": [
-            "P0-40"
+            "offline-writer-profile-authority"
           ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
-          "rationale": "The offline Timeline MCP server does not yet bind sessions to restricted writer masks and quotas.",
+          "rationale": "The offline Timeline MCP server binds sessions to restricted writer masks and quotas via the writer_profile argument; that closure is carried by the offline-writer-profile-authority row. This row is released, so its disposition is fixed at its own release commit and cannot be re-dispositioned in place.",
           "dependencies": [
-            "P0-40"
+            "offline-writer-profile-authority"
           ],
           "owner": "timeline-cli-mcp"
         },
@@ -3109,7 +3109,7 @@
       "id": "offline-writer-profile-authority",
       "title": "Named writer authority for the offline CLI and MCP boundaries",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
       "owned_paths": [
         "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp",
@@ -3131,6 +3131,12 @@
         "core/timeline/src/document_session.cpp",
         "test/test_timeline_writer_capabilities.cpp"
       ],
+      "release": {
+        "pr": 8119,
+        "accepted_head": "d02f4018211c1597d93da17fcfe298afd77d9b34",
+        "merge_sha": "fa79fc3d0a3b5b0ce9935782eb78e9960132914b",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp",
