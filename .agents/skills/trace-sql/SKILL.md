@@ -457,3 +457,55 @@ host's Options. If a trace shows no `gpu_render_time`, check that flag before
 suspecting the adapter.
 
 A3 v2 terminal evidence is analyzer-derived rather than sidecar-attested. The pinned replay must bind the exact trace digest, role/campaign/instance/build identity, GPU and trace evidence IDs, process PID/UPID, the closed category set, zero drops, and a completed flush.
+
+## Self time is the query that finds an opaque parent
+
+A slice's `dur` includes everything it called, so a parent that dominates a
+duration ranking tells you nothing about where the time went. Rank by **self
+time** — total minus the sum of *direct* children — and an unattributed block
+names itself:
+
+```sql
+SELECT s.name, COUNT(*) AS n,
+       SUM(s.dur)/1e6 AS total_ms,
+       (SUM(s.dur) - IFNULL(SUM((SELECT SUM(c.dur) FROM slice c
+                                 WHERE c.parent_id = s.id AND c.dur >= 0)), 0))/1e6 AS self_ms
+FROM slice s WHERE s.dur >= 0
+GROUP BY s.name ORDER BY self_ms DESC LIMIT 20;
+```
+
+Beware the shape of the subquery: summing **all** descendants instead of direct
+children double-counts nested time and drives self time negative. `parent_id`
+(not a recursive descent) is the correct join, and a negative `self_ms` in the
+output means you got it wrong, not that the trace is broken.
+
+This is the query that showed `dom_event_evaluate` holding 2119.8 ms of self
+time out of 2213.6 ms total — 95.8% of a script event handler outside every span
+the tree emitted.
+
+## Querying the JS bridge spans
+
+`js_native:<fn>` slices (one per JS→C++ bridge call, tracing builds only) and
+script-authored `pulpTrace` spans both land on the **`js`** category. Attribute a
+handler's native half with:
+
+```sql
+SELECT name, COUNT(*) AS calls, SUM(dur)/1e6 AS ms, MAX(dur)/1e6 AS max_ms
+FROM slice WHERE name GLOB 'js_native:*' AND dur >= 0
+GROUP BY name ORDER BY ms DESC LIMIT 25;
+```
+
+`GLOB`, not `LIKE` — the rule in "SQL discipline" applies here, and `js_native:`
+is a prefix so the pattern is cheap.
+
+**Check for corrupted parentage before trusting any `js` aggregate.** An
+unbalanced `__traceBegin__` re-parents later slices under a span that never
+closed; the runtime force-closes it and marks the trace. This must return zero
+rows, and if it does not, the nesting is untrustworthy from that timestamp on:
+
+```sql
+SELECT COUNT(*) FROM slice WHERE name = 'js_trace_force_closed_unbalanced_scope';
+```
+
+Its positive control is the counter track `js_trace_unbalanced_scopes`, which
+carries the leaked depth as a value rather than a count of incidents.

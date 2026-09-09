@@ -647,3 +647,47 @@ three distinct links: trace localization, platform-race proof, and product
 acceptance. Never describe Perfetto alone as having found the root cause.
 
 For A3 v2, do not validate a submitted analysis sidecar in isolation. Rehash the exact `.pftrace`, verify prepared-analyzer provenance, run that analyzer, and require its evidence/process scope and capture completeness to agree with the digest-bound campaign, category set, and sidecar bindings.
+
+## A script event handler is not opaque any more — but you must ask for it
+
+`dom_event_evaluate` wraps the whole of a script's event handler, and for a long
+time nothing inside it emitted a span. Re-attributing a band-drag capture by
+**self time** (a slice's total minus the sum of its direct children) put 95.8%
+of that block outside every span the tree emitted — 2119.8 ms of self time under
+2213.6 ms of total, across 127 pointer events. That is not a slow handler you can
+locate; it is a handler you cannot see into at all.
+
+Two instruments now open it, and they answer different questions:
+
+- **`js_native:<fn>` spans** — every JS→C++ native is registered through the one
+  `register_bridge_function` template, so each call is wrapped in a span named
+  for the bridge function. This is what to reach for when the script is one this
+  repo does not own (an imported design's `runtime.js`, a materialized React
+  bundle): you get the native half of the handler attributed by name with zero
+  edits to the script. It is compiled out when tracing is off.
+- **`pulpTrace.begin/end/scope(name, fn)`** (raw: `__traceBegin__` /
+  `__traceEnd__`) — a script naming its own spans. Only useful when you can edit
+  the script, and only covers what you chose to wrap.
+
+Read the two together. A handler whose self time collapses once `js_native:*`
+appears was spending its time in bridge calls; one whose self time stays high is
+spending it in the script's own interpreted work, and no native span will ever
+show you that — you need `pulpTrace` scopes in the script itself.
+
+### `js_trace_force_closed_unbalanced_scope` in a trace is a defect marker
+
+`pulpTrace` pairing belongs to the script's control flow, so an early return or a
+throw between `begin` and `end` leaves a span open — which silently re-parents
+every later slice under a span that never closed, and quietly corrupts every
+attribution downstream of it. The dispatch boundary force-closes what a handler
+leaves open and says so three ways: the counter track
+`js_trace_unbalanced_scopes`, a slice named
+`js_trace_force_closed_unbalanced_scope`, and a line on stderr. If you see
+either in a capture, **the trace's parentage before that point is suspect** —
+fix the script's pairing (prefer `pulpTrace.scope()`, which is try/finally) and
+re-capture rather than reasoning about the numbers you have.
+
+`__traceStats__()` returns `{depth, forceClosed, unmatchedEnd, refused}` from JS
+for the same reason, and those counters increment whether tracing is compiled in
+or not — so a test can assert balance on the default gate build where every
+Perfetto macro expands to nothing.
