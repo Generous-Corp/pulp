@@ -2535,6 +2535,102 @@
       }
     },
     {
+      "id": "standalone-key-sequence-driver-installed-sdk",
+      "title": "Standalone synthetic key-sequence driver ships with the selected SDK",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "standalone-key-sequence-driver-20260909",
+      "owned_paths": [
+        "core/format/include/pulp/format/standalone.hpp",
+        "core/format/include/pulp/format/detail/standalone_environment.hpp",
+        "core/format/include/pulp/format/detail/standalone_key_sequence.hpp",
+        "core/format/include/pulp/format/detail/standalone_key_driver.hpp",
+        "core/format/include/pulp/format/detail/standalone_key_schedule.hpp",
+        "core/format/src/standalone_key_driver_mac.mm",
+        "core/format/src/standalone_key_driver_stub.cpp",
+        "test/test_standalone_key_sequence.cpp",
+        "test/cmake/core_runtime_canvas_signal_tests.cmake"
+      ],
+      "evidence": [
+        {
+          "path": "core/format/include/pulp/format/standalone.hpp",
+          "needles": [
+            "std::string test_key_sequence;",
+            "int test_key_frame_delay"
+          ]
+        },
+        {
+          "path": "core/format/include/pulp/format/detail/standalone_environment.hpp",
+          "needles": [
+            "PULP_TEST_KEY_SEQUENCE"
+          ]
+        },
+        {
+          "path": "core/format/include/pulp/format/detail/standalone_key_sequence.hpp",
+          "needles": [
+            "bool parse_key_sequence"
+          ]
+        },
+        {
+          "path": "core/format/include/pulp/format/detail/standalone_key_driver.hpp",
+          "needles": [
+            "bool deliver_synthetic_key"
+          ]
+        },
+        {
+          "path": "test/cmake/core_runtime_canvas_signal_tests.cmake",
+          "needles": [
+            "pulp-test-standalone-key-sequence"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The standalone harness gains an env-gated synthetic key-sequence driver. StandaloneConfig carries test_key_sequence, test_key_frame_delay, and test_key_shot_dir as public installed fields with PULP_TEST_KEY_SEQUENCE / PULP_TEST_KEY_FRAMES / PULP_TEST_KEY_SHOT_DIR overrides, and the parser plus the platform delivery declaration are installed detail headers, so an SDK consumer can drive keys through the real AppKit responder chain and capture per-press frames without a source checkout. The non-Apple translation unit reports the capability as unsupported rather than pretending a press landed.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/format/include/pulp/format/standalone.hpp",
+              "needles": [
+                "std::string test_key_sequence;"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/format/include/pulp/format/detail/standalone_key_driver.hpp",
+              "needles": [
+                "bool deliver_synthetic_key"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/cmake/core_runtime_canvas_signal_tests.cmake",
+              "needles": [
+                "pulp-test-standalone-key-sequence"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The key-sequence driver adds no Timeline command, argument, or handler; it only presses keys inside an already-running windowed standalone process."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP operation, schema, or handler is added or widened; nothing here is reachable from an offline session."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Synthetic key delivery is gated on an explicit test environment variable and grants no sequencer live control; it cannot move transport, tempo, or a parameter on its own."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This row records an installed test-harness seam. It declares no design-time capability and leaves the agent capability manifest unchanged."
+        }
+      }
+    },
+    {
       "id": "standalone-open-documents-installed-sdk",
       "title": "Standalone document-open seam ships with the selected SDK",
       "classification": "public_sdk",
