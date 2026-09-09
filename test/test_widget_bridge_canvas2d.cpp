@@ -303,6 +303,63 @@ TEST_CASE("WidgetBridge direct Canvas2D gap APIs replay expected canvas commands
     REQUIRE(blend->f[0] == static_cast<float>(static_cast<int>(pulp::canvas::Canvas::BlendMode::copy)));
 }
 
+// Browser-authored canvas code writes captions against a baseline y and never
+// assigns ctx.textBaseline, because Canvas2D's initial value is `alphabetic`.
+// A shim that starts in `top` re-reads that y as the top of the font box, so
+// the glyphs land a full ascent lower — a caption placed just above a plot is
+// then painted across the plot's top gridline. This drives the whole real path:
+// the JS default, the string the bridge receives, and the replayed baseline.
+TEST_CASE("Canvas2D default text baseline places captions on the baseline y",
+          "[view][bridge][canvas][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The plot's top edge; the caption is authored 8 above it, as Spectr's
+    // axis labels are.
+    constexpr float plot_top = 108.0f;
+    constexpr float caption_y = plot_top - 8.0f;
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'canvas-default-baseline';
+        c.width = 300; c.height = 200;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        window.__defaultBaseline = ctx.textBaseline;
+        ctx.font = '20px Inter';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('dB (gain)', 40, 100);
+    )");
+    root.layout_children();
+
+    auto default_baseline = engine.evaluate("window.__defaultBaseline");
+    REQUIRE(std::string(default_baseline.getWithDefault<std::string_view>(""))
+            == "alphabetic");
+
+    auto* canvas = canvasFromBridge(bridge, engine, "canvas-default-baseline");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    // The baseline is resolved into the fill_text y during replay rather than
+    // forwarded as its own draw command, so the y is where it is observable.
+    using DrawType = pulp::canvas::DrawCommand::Type;
+    const pulp::canvas::DrawCommand* text = nullptr;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawType::fill_text) text = &cmd;
+    }
+
+    REQUIRE(text != nullptr);
+    REQUIRE_THAT(text->f[1], WithinAbs(caption_y, 1e-3f));
+    // Ink rises above an alphabetic baseline, so the caption clears the plot.
+    REQUIRE(text->f[1] < plot_top);
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // WidgetBridge auto-wires repaint_callback_ to the root view's host invalidator
 // so JS-driven UI changes (and rAF callbacks) actually schedule a paint when

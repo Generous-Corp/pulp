@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20260909-canvas2d-alphabetic-baseline-default",
+  "kind": "change",
+  "created_at": "2026-09-09T19:30:00Z",
+  "slices": [
+    "canvas-kernel",
+    "retained-ui-kernel"
+  ],
+  "rationale": "Canvas2D's initial textBaseline is `alphabetic` -- the y handed to fillText IS the baseline -- and Pulp defaulted to `top` at every layer, so browser-authored canvas code that never assigns ctx.textBaseline had every string displaced downward by one full ascent; a caption drawn just above a plot landed inside it. Fixing that spans two transferred slices, which is why one event names both: the vocabulary lives in canvas-kernel and the paint-time resolution lives in retained-ui-kernel, and neither half is correct alone. canvas-kernel is touched only at core/canvas/include/pulp/canvas/canvas.hpp, where `enum class TextBaseline` gains `alphabetic`, `hanging` and `ideographic` APPENDED after the existing `top, middle, bottom`. Appending rather than inserting is the whole compatibility argument: top/middle/bottom keep underlying values 0/1/2, which are the same integers the widget bridge already records in CanvasDrawCmd::int_val, so any command recorded before this change still decodes to the baseline it decoded to before. The enum is also not persisted or cast anywhere -- a repo-wide search finds pulp::canvas::TextBaseline only in this header and in core/view/src/canvas_widget.cpp, never converted to or from an integer -- so widening it cannot reinterpret stored data. retained-ui-kernel is touched only at core/view/src/canvas_widget.cpp: the paint-time default moves from `top` to `alphabetic`, the wire decode maps 0 to top explicitly and now falls through to `alphabetic` instead of `top`, `alphabetic` returns y untouched (which also keeps the default path off a measure_text_full shaping call), `ideographic` shares `bottom`'s y - descent, and `hanging` resolves to y + ascent * 0.8. This is deliberately NOT a no-op and should not be read as one: canvas content that never set textBaseline moves up by one ascent. That is the intended correction toward the Canvas2D initial value, and content that had compensated for the old default by hand will shift. Two approximations are stated rather than hidden. TextMetrics here exposes no hanging or ideographic metric and the faces this canvas shapes carry no BASE table, so `ideographic` is aliased to the descent line and `hanging` uses the conventional 0.8-of-ascent fallback; neither factor is derived from a font metric, and neither has been diffed against a browser's placement -- they are engine-style fallbacks, correct in kind, unverified in magnitude. The paired opacity fix (an unparseable CSS opacity now resolves to its initial value 1 rather than 0) lands in core/view/js/web-compat-style-decl-paint.js, which is outside every transferred slice and is named here only so a reader is not surprised by it in the diff. This is pulp-only. The defaults it restores are generic Canvas2D and CSS behaviour that a Vellum-native canvas will also owe, but the implementation is bound to Pulp's own recorded-command integer codes and to what Pulp's TextMetrics happens to expose; a Vellum-native canvas should derive baselines from its own font-metric model rather than copy this int_val handshake and its 0.8 constant. There is no named immutable Vellum framework commit to backport against, and this records no Vellum acknowledgement.",
+  "tests": [
+    "pulp-test-canvas-widget",
+    "pulp-test-canvas2d-shim-late",
+    "pulp-test-web-compat-events",
+    "pulp-test-widget-bridge-canvas2d"
+  ],
+  "disposition": "pulp-only"
+}
