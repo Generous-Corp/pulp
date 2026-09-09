@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260909-batched-canvas-path-and-js-trace-watch",
+  "created_at": "2026-09-09T21:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record the Pulp-owned canvasPathPolyline bridge wire that collapses a moveTo plus lineTo run into one crossing, the Canvas2D shim path buffer and its flush invariant, and the JS trace scopes that make an unbalanced scope observable. The change stays inside the existing WidgetBridge canvas2d and runtime tracing boundary, updates only the canvas2d oracle's per-method bridge lists in the harness, adds no Vellum implementation or authority transfer, and leaves the accepted expansion boundary unchanged.",
+  "tests": [
+    "pulp-test-canvas2d-shim",
+    "pulp-test-widget-bridge-canvas2d-bridge-fns",
+    "canvas-path-flush-lint",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
