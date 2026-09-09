@@ -147,6 +147,7 @@ if (!Element.prototype.appendChild ||
             throw e;
         }
         child._nativeCreated = true;
+        __invalidateStyleCache__(child);
         if (child._textContent) setText(child._id, child._textContent);
         // Replay presentational `width`/`height` HTML attributes that
         // were captured before mount. React/JSX commits setAttribute()
@@ -228,6 +229,7 @@ if (!Element.prototype.appendChild ||
         child._parentElement = null;
         if (child._nativeCreated) __domRemove(child._id, 1);
         child._nativeCreated = false;
+        __invalidateStyleCache__(child);
         return child;
     };
     Element.prototype.removeChild.__pulp_dom_ops__ = true;
@@ -301,6 +303,7 @@ if (!Element.prototype.appendChild ||
             throw e;
         }
         newChild._nativeCreated = true;
+        __invalidateStyleCache__(newChild);
         if (newChild._textContent) setText(newChild._id, newChild._textContent);
         // Same pre-mount attribute replay path as appendChild, including
         // ARIA attributes.
