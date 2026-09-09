@@ -103,6 +103,24 @@ struct StandaloneConfig {
     // own; this flag is for the case where only the pixels need it.
     bool screenshot_keeps_audio = false;
 
+    // Synthetic key-sequence driver for the test harness. When non-empty,
+    // run_with_editor() presses each key in turn through the host's REAL key
+    // path once the UI has settled, so a keyboard-driven behaviour can be
+    // proven on the shipping surface instead of only in a unit test. The
+    // spec is comma-separated and accepts modifiers, e.g.
+    // "down,down,cmd+a,return". Set via set_config() or PULP_TEST_KEY_SEQUENCE.
+    // An unparseable spec is rejected at startup rather than partially run.
+    std::string test_key_sequence;
+    // Frames to wait before the first key and between consecutive keys. The
+    // gap has to outlast whatever the UI does in response to a press
+    // (animation, relayout, a script tick) or the next key lands mid-update.
+    int test_key_frame_delay = 20;
+    // When non-empty, capture a PNG into this directory after every key,
+    // named "key-<NN>-<name>.png", plus "key-00-initial.png" before the first
+    // press. That per-press series is what turns "the sequence ran" into
+    // evidence of what each individual press did.
+    std::string test_key_shot_dir;
+
     // When non-empty, run_with_editor() arms the same one-shot frame-delay
     // path as `screenshot_path` and, after the delay, writes the live output
     // probe's latest snapshot (peak/RMS/dBFS/clip/NaN/silence counters) as a

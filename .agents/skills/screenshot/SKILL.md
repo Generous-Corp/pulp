@@ -256,6 +256,76 @@ the app is alive, `lsof -p <pid>` must not map
 `HALC_ProxyIOContext::IOWorkLoop()`. Both appear when a device IS open, so
 their absence is a two-state result rather than a hopeful one.
 
+## Driving the KEYBOARD in a standalone capture
+
+`PULP_TEST_KEY_SEQUENCE` presses keys in the real shipping build and
+photographs the surface between presses. It is the keyboard sibling of the
+pointer hook (`PULP_TEST_POINTER_DRAG`), and it exists because a keyboard UX
+claim used to be unprovable: the harness could move a pointer and take a
+picture, but it could not press a key, so every arrow-key or shortcut claim
+bottomed out in a unit test or a disassembly rather than a screenshot of the
+installed app.
+
+```sh
+PULP_TEST_KEY_SEQUENCE="down,down,down,return" \
+PULP_TEST_KEY_FRAMES=20 \
+PULP_TEST_KEY_SHOT_DIR=/tmp/keys \
+  ./MyApp.app/Contents/MacOS/MyApp
+```
+
+Writes `/tmp/keys/key-00-initial.png` (before any key), then
+`key-01-down.png`, `key-02-down.png`, … one frame per press, then closes.
+
+- **Spec grammar**: comma-separated tokens, `mod+mod+key`. Keys:
+  `up down left right home end pageup pagedown return|enter escape|esc tab
+  space backspace delete|del`, single characters `a`-`z` / `0`-`9`, and
+  `f1`-`f12`. Modifiers: `cmd|command|meta|super shift ctrl|control
+  alt|opt|option`. Case and whitespace are normalized.
+- **It fails CLOSED.** One unknown token rejects the whole spec and presses
+  NOTHING, logging `key sequence rejected`. That is deliberate: a harness that
+  skipped a typo'd key would hand you artifacts from a run that pressed fewer
+  keys than you asked for, and nothing in the images would say so. Read the log
+  before reading the pictures.
+- **`PULP_TEST_KEY_FRAMES`** (default 20) is the frame gap between every press
+  and its capture, and between a capture and the next press. Raise it for a UI
+  with entry animation; a capture taken mid-transition is a picture of the
+  animation, not of the key's effect.
+- **Combining with `--screenshot`**: the key run then does NOT close the
+  window; the screenshot one-shot owns the exit. Give the screenshot a frame
+  delay past the sequence's own length or it fires mid-sequence.
+- **No audio device** — same as any screenshot-only launch (see above).
+
+### Why it enters through `performKeyEquivalent:` first
+
+`core/format/src/standalone_key_driver_mac.mm` delivers each press as
+`if (![view performKeyEquivalent:e]) [view keyDown:e];` — reproducing the order
+`NSWindow.sendEvent:` itself uses. AppKit offers **every** key down to
+`performKeyEquivalent:` down the view hierarchy, and only sends `keyDown:` when
+that returns `NO`.
+
+That ordering is not incidental, it is the whole point. A driver that called
+`keyDown:` alone would hide any defect in how the two entry points divide the
+work — and that is a live defect class: when both entry points fan a key out to
+the script layer, one physical press reads as two, so a listbox advances two
+items per arrow and half its entries are unreachable. A driver that skipped the
+offer would photograph a perfectly healthy dropdown.
+
+The event is handed to the responder methods directly rather than queued with
+`-[NSApplication postEvent:atStart:]`. A queued synthetic event is silently
+discarded when the window is not key — the normal state for an unattended run —
+so the queued route yields a plausible-looking run that pressed nothing at all.
+
+### Reading the artifacts
+
+One press must equal one unit of movement. Count from `key-00-initial.png`:
+after N presses the selection must sit on item N, not 2N. If it sits on 2N you
+are looking at double delivery, not at a slow UI.
+
+A press that could not be delivered logs
+`key-sequence FAILED to deliver [i] <token>` and still advances the schedule, so
+the frame count stays aligned with the requested sequence — check the log for
+that line before concluding a UI ignored a key.
+
 ## Render size: use the design's true root, not the source bbox
 
 `--render-size WxH` must match the imported design's **root frame** size, not

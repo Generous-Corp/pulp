@@ -159,6 +159,21 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
             config.screenshot_frame_delay = parsed;
     }
 
+    // Synthetic key-sequence driver (see StandaloneConfig::test_key_sequence).
+    if (auto keys = runtime::get_env("PULP_TEST_KEY_SEQUENCE");
+        keys && config.test_key_sequence.empty()) {
+        config.test_key_sequence = *keys;
+    }
+    if (auto key_frames = runtime::get_env("PULP_TEST_KEY_FRAMES")) {
+        int parsed = 0;
+        if (parse_positive_frame_delay(*key_frames, parsed))
+            config.test_key_frame_delay = parsed;
+    }
+    if (auto shot_dir = runtime::get_env("PULP_TEST_KEY_SHOT_DIR");
+        shot_dir && config.test_key_shot_dir.empty()) {
+        config.test_key_shot_dir = *shot_dir;
+    }
+
     // Programmatic live-probe readout for agents / CI. Parse the request even
     // when probes are compiled out so run_with_editor() can reject it with a
     // specific unsupported-build error instead of falling through to generic
