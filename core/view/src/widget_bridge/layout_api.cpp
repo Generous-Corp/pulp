@@ -5,6 +5,8 @@
 
 #include "../import_validation_bridge.hpp"
 
+#include <pulp/runtime/trace.hpp>
+
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -728,8 +730,10 @@ void BridgeRegistrars::register_layout_flex_api(WidgetBridge& self) {
 }
 
 void WidgetBridge::ensure_layout() {
+    PULP_TRACE_SCOPE_NAMED("layout", "bridge_ensure_layout");
     const auto generation = root_.tree_layout_generation();
     if (generation == last_layout_generation_) return;
+    PULP_TRACE_SCOPE_NAMED("layout", "bridge_forced_layout");
     root_.layout_children_if_needed();
     // Record the generation AFTER the pass, not the value sampled before it.
     // `layout_children()` assigns child bounds, and `set_bounds` bumps the
