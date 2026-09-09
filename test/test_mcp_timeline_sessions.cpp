@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "../tools/mcp/mcp_json.hpp"
+#include "../tools/mcp/mcp_server.hpp"
 #include "../tools/mcp/mcp_tools.hpp"
 #include "../tools/mcp/timeline_session_store.hpp"
 #include "mcp_server_test_support.hpp"
@@ -735,3 +736,137 @@ TEST_CASE("timeline MCP refuses retry controls on a stateless apply",
 }
 
 } // namespace
+
+TEST_CASE("timeline MCP view projects the live session and refuses malformed windows",
+          "[mcp][tools][timeline][agent-view]") {
+    TempDir temp;
+    pulp::audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.8f)};
+    const auto source_path = temp.path / "source.wav";
+    REQUIRE(pulp::audio::write_wav_file(source_path.string(), source,
+                                        pulp::audio::WavBitDepth::Float32));
+
+    const auto opened = handle_timeline_project_open(
+        "{\"project\":" +
+        pulp::timeline::quote_json_string(make_timeline_project_json(source_path)) + "}");
+    const auto session_id = timeline_string_from_response(opened, "session_id");
+    REQUIRE_FALSE(session_id.empty());
+    const auto session_argument = "\"session_id\":" + pulp::timeline::quote_json_string(session_id);
+
+    // The outline reads the session's own revision, so an unedited session
+    // projects revision zero rather than refusing for want of a caller pin.
+    const auto outline = handle_timeline_view_outline("{" + session_argument + "}");
+    require_contains(outline, R"JSON("version":1)JSON");
+    require_contains(outline, R"JSON("revision":"0")JSON");
+    require_contains(outline, R"JSON("project_name":"mcp")JSON");
+    require_contains(outline, R"JSON("name":"root")JSON");
+    require_contains(outline, R"JSON("name":"audio")JSON");
+
+    // A session that has applied nothing has no transition to project, and is
+    // refused rather than answered with an empty diff a caller could not tell
+    // apart from a transaction that changed nothing.
+    const auto undiffable = handle_timeline_view_diff("{" + session_argument + "}");
+    require_contains(undiffable, R"JSON("isError":true)JSON");
+    require_contains(undiffable, "applied no transaction");
+
+    const std::string command =
+        R"JSON([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])JSON";
+    require_contains(
+        handle_timeline_command_apply("{\"commands\":" + command + "," + session_argument + "}"),
+        R"JSON("revision":"1")JSON");
+
+    // Both projections follow the live session forward; neither is pinned to
+    // the revision the session was opened at.
+    require_contains(handle_timeline_view_outline("{" + session_argument + "}"),
+                     R"JSON("revision":"1")JSON");
+    const auto diff = handle_timeline_view_diff("{" + session_argument + "}");
+    require_contains(diff, R"JSON("version":1)JSON");
+    require_contains(diff, R"JSON("revision":"1")JSON");
+    require_contains(diff, R"JSON("item_id":"4")JSON");
+    require_contains(diff, R"JSON("flags":["content"])JSON");
+    require_contains(diff, R"JSON("flag_bits":4)JSON");
+    require_contains(diff, R"JSON("kind":"clip")JSON");
+
+    // The fixture clip is absolute-anchored and 32 frames long.
+    const auto covering =
+        handle_timeline_view_region("{" + session_argument +
+                                    R"JSON(,"sequence_id":2,"start":0,"end":32,"absolute":true})JSON");
+    require_contains(covering, R"JSON("version":1)JSON");
+    require_contains(covering, R"JSON("id":"4")JSON");
+    require_contains(covering, R"JSON("anchor":"absolute")JSON");
+    require_contains(covering, R"JSON("next":null)JSON");
+
+    // Negative control at the same target: a window past the clip returns an
+    // empty page, so the covering read above measured the filter and not a
+    // projection that returns everything it holds.
+    require_contains(
+        handle_timeline_view_region("{" + session_argument +
+                                    R"JSON(,"sequence_id":2,"start":100,"end":200,"absolute":true})JSON"),
+        R"JSON("items":[])JSON");
+
+    // Malformed windows are named, never rounded into something answerable.
+    require_contains(handle_timeline_view_region("{" + session_argument +
+                                                 R"JSON(,"start":0,"end":32,"absolute":true})JSON"),
+                     "sequence_id must be a positive integer");
+    require_contains(
+        handle_timeline_view_region("{" + session_argument +
+                                    R"JSON(,"sequence_id":2,"start":1.5,"end":32,"absolute":true})JSON"),
+        "start must be a whole number of ticks");
+    require_contains(
+        handle_timeline_view_region("{" + session_argument +
+                                    R"JSON(,"sequence_id":2,"start":0,"end":32,"limit":0})JSON"),
+        "limit must be a positive integer");
+    require_contains(
+        handle_timeline_view_region("{" + session_argument +
+                                    R"JSON(,"sequence_id":2,"start":0,"end":32,"after":"not-a-cursor"})JSON"),
+        "continuation token");
+    require_contains(handle_timeline_view_outline(R"JSON({"project":"{}"})JSON"),
+                     "session_id is required");
+    require_contains(handle_timeline_view_diff(R"JSON({"session_id":"timeline-missing"})JSON"),
+                     "unknown or expired timeline session");
+}
+
+TEST_CASE("timeline MCP publishes the view projection tools in a parseable catalog",
+          "[mcp][tools][timeline][agent-view]") {
+    // The descriptors are hand-written, so their well-formedness is asserted
+    // rather than assumed: a stray comma here would break tools/list wholesale.
+    const auto fragment = timeline_view_mcp_tools_json_fragment();
+    auto parsed = pulp::timeline::parse_json("[" + fragment + "]");
+    REQUIRE(parsed);
+    const auto& root = (*parsed)->root();
+    REQUIRE(root.kind == pulp::timeline::JsonValue::Kind::Array);
+    REQUIRE(root.array.size() == 3);
+
+    // The published catalog is read as JSON rather than as text: it is rendered
+    // with different spacing than the fragment above, so a substring needle
+    // would assert the renderer's whitespace instead of the tool's presence.
+    const auto catalog = pulp_mcp::server::tools_list_json();
+    auto catalog_parsed = pulp::timeline::parse_json(catalog);
+    REQUIRE(catalog_parsed);
+    const auto* tools = (*catalog_parsed)->root().find("tools");
+    REQUIRE(tools != nullptr);
+    REQUIRE(tools->kind == pulp::timeline::JsonValue::Kind::Array);
+    std::vector<std::string> published;
+    for (const auto& tool : tools->array) {
+        const auto* name = tool.find("name");
+        REQUIRE(name != nullptr);
+        REQUIRE(name->kind == pulp::timeline::JsonValue::Kind::String);
+        published.push_back(name->scalar);
+    }
+    const auto publishes = [&published](const std::string& name) {
+        return std::find(published.begin(), published.end(), name) != published.end();
+    };
+
+    for (const auto* name : {"pulp_timeline_view_outline", "pulp_timeline_view_region",
+                             "pulp_timeline_view_diff"}) {
+        require_contains(fragment, std::string(R"JSON("name":")JSON") + name + R"JSON(")JSON");
+        INFO(catalog);
+        REQUIRE(publishes(name));
+    }
+    // Control: the generated ten-tool catalog is still published alongside it,
+    // so the walk above reads a real catalog rather than an empty list.
+    INFO(catalog);
+    REQUIRE(publishes("pulp_timeline_command_apply"));
+    REQUIRE_FALSE(publishes("pulp_timeline_view_absent"));
+}

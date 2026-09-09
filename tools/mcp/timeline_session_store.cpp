@@ -1,5 +1,7 @@
 #include "timeline_session_store.hpp"
 
+#include <pulp/timeline_agent_view/agent_view.hpp>
+
 #include <pulp/timeline/document_session.hpp>
 #include <pulp/timeline/schema_json.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -401,6 +403,81 @@ struct TimelineSessionStore::Impl {
         return {0, std::move(json)};
     }
 
+    pulp::tools::timeline::OperationResult view_outline(std::string_view id) {
+        std::lock_guard lock(mutex_);
+        auto* session = find(id);
+        if (session == nullptr)
+            return session_failure("unknown or expired timeline session");
+        const auto current = session->document->current();
+        const auto revision = current.revision;
+        auto view = pulp::timeline_agent_view::AgentView::create(current);
+        if (!view)
+            return {1, pulp::tools::timeline::agent_view_error_json("view", view.error())};
+        auto outline = view.value().outline(revision);
+        if (!outline)
+            return {1, pulp::tools::timeline::agent_view_error_json("outline", outline.error())};
+        auto json = pulp::tools::timeline::agent_view_outline_json(outline.value());
+        if (json_tool_payload_size(json) > limits.max_output_bytes)
+            return session_failure("timeline session output byte budget exceeded");
+        return {0, std::move(json)};
+    }
+
+    pulp::tools::timeline::OperationResult
+    view_region(std::string_view id, const pulp::tools::timeline::RegionViewOptions& options) {
+        std::lock_guard lock(mutex_);
+        auto* session = find(id);
+        if (session == nullptr)
+            return session_failure("unknown or expired timeline session");
+        const auto current = session->document->current();
+        pulp::timeline_agent_view::RegionRequest request;
+        request.expected_revision = current.revision;
+        request.sequence_id = pulp::timeline::ItemId{options.sequence_id};
+        request.anchor = options.absolute ? pulp::timeline::ClipTimeAnchor::Absolute
+                                          : pulp::timeline::ClipTimeAnchor::Musical;
+        request.start = options.start;
+        request.end = options.end;
+        request.limit = options.limit;
+        if (!options.after.empty()) {
+            auto cursor = pulp::tools::timeline::parse_region_cursor_token(options.after);
+            if (!cursor)
+                return {2, "{\"error\":{\"message\":\"after is not a continuation token from a "
+                           "prior page\",\"stage\":\"region\"},\"ok\":false}"};
+            request.after = *cursor;
+        }
+        auto view = pulp::timeline_agent_view::AgentView::create(current);
+        if (!view)
+            return {1, pulp::tools::timeline::agent_view_error_json("view", view.error())};
+        auto page = view.value().region(request);
+        if (!page)
+            return {1, pulp::tools::timeline::agent_view_error_json("region", page.error())};
+        auto json = pulp::tools::timeline::agent_view_region_page_json(page.value());
+        if (json_tool_payload_size(json) > limits.max_output_bytes)
+            return session_failure("timeline session output byte budget exceeded");
+        return {0, std::move(json)};
+    }
+
+    pulp::tools::timeline::OperationResult view_diff(std::string_view id) {
+        std::lock_guard lock(mutex_);
+        auto* session = find(id);
+        if (session == nullptr)
+            return session_failure("unknown or expired timeline session");
+        if (session->latest_after.value == 0)
+            return session_failure("session has applied no transaction to diff");
+        const auto current = session->document->current();
+        auto view = pulp::timeline_agent_view::AgentView::create(current);
+        if (!view)
+            return {1, pulp::tools::timeline::agent_view_error_json("view", view.error())};
+        const pulp::timeline_agent_view::DirtyRevisionRange revisions{session->latest_before,
+                                                                     session->latest_after};
+        auto diff = view.value().diff(current.revision, revisions, session->latest_dirty);
+        if (!diff)
+            return {1, pulp::tools::timeline::agent_view_error_json("diff", diff.error())};
+        auto json = pulp::tools::timeline::agent_view_outline_diff_json(diff.value());
+        if (json_tool_payload_size(json) > limits.max_output_bytes)
+            return session_failure("timeline session output byte budget exceeded");
+        return {0, std::move(json)};
+    }
+
     pulp::tools::timeline::OperationResult undo(std::string_view id) {
         std::lock_guard lock(mutex_);
         auto* session = find(id);
@@ -638,6 +715,22 @@ pulp::tools::timeline::OperationResult TimelineSessionStore::diff(std::string_vi
     return impl_->diff(session_id);
 }
 
+pulp::tools::timeline::OperationResult
+TimelineSessionStore::view_outline(std::string_view session_id) {
+    return impl_->view_outline(session_id);
+}
+
+pulp::tools::timeline::OperationResult
+TimelineSessionStore::view_region(std::string_view session_id,
+                                  const pulp::tools::timeline::RegionViewOptions& options) {
+    return impl_->view_region(session_id, options);
+}
+
+pulp::tools::timeline::OperationResult
+TimelineSessionStore::view_diff(std::string_view session_id) {
+    return impl_->view_diff(session_id);
+}
+
 pulp::tools::timeline::OperationResult TimelineSessionStore::undo(std::string_view session_id) {
     return impl_->undo(session_id);
 }
@@ -680,6 +773,22 @@ apply_timeline_session(std::string_view session_id, std::string_view commands,
 
 pulp::tools::timeline::OperationResult diff_timeline_session(std::string_view session_id) {
     return timeline_sessions().diff(session_id);
+}
+
+pulp::tools::timeline::OperationResult
+view_outline_timeline_session(std::string_view session_id) {
+    return timeline_sessions().view_outline(session_id);
+}
+
+pulp::tools::timeline::OperationResult
+view_region_timeline_session(std::string_view session_id,
+                             const pulp::tools::timeline::RegionViewOptions& options) {
+    return timeline_sessions().view_region(session_id, options);
+}
+
+pulp::tools::timeline::OperationResult
+view_diff_timeline_session(std::string_view session_id) {
+    return timeline_sessions().view_diff(session_id);
 }
 
 pulp::tools::timeline::OperationResult undo_timeline_session(std::string_view session_id) {

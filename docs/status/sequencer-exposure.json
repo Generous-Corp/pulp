@@ -3196,6 +3196,119 @@
           "owner": "sequencer-control-closure"
         }
       }
+    },
+    {
+      "id": "offline-agent-view-projection",
+      "title": "Bounded AgentView outline, region paging and diff projection on the offline CLI and MCP",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "tools/timeline/include/pulp/tools/timeline/agent_view_projection.hpp",
+        "tools/timeline/src/timeline_agent_view.cpp",
+        "tools/timeline/CMakeLists.txt",
+        "tools/cli/cmd_seq.cpp",
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/mcp/mcp_tools.hpp",
+        "tools/mcp/pulp_mcp.cpp",
+        "tools/mcp/timeline_session_store.cpp",
+        "tools/mcp/timeline_session_store.hpp",
+        "test/test_cli_timeline.cpp",
+        "test/test_mcp_timeline_sessions.cpp",
+        "docs/status/cli-commands.yaml",
+        "docs/reference/cli.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "tools/timeline/include/pulp/tools/timeline/agent_view_projection.hpp",
+          "needles": [
+            "agent_view_outline_json",
+            "agent_view_region_page_json",
+            "agent_view_outline_diff_json"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "AgentView itself is already an installed public projection, exposed by p0-38-agent-view. What this row adds is its JSON encoding for two offline tool boundaries, and that encoder lives in the tools/timeline support library, which is not installed by cmake --install. An SDK consumer reads the Outline, RegionPage and OutlineDiff values directly and needs no encoder; only a process boundary does."
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "docs/status/cli-commands.yaml",
+              "needles": [
+                "outline, region, or diff"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "view region requires --sequence",
+                "unknown view verb"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/timeline/src/timeline_agent_view.cpp",
+              "needles": [
+                "view_outline",
+                "view_region",
+                "view_diff"
+              ]
+            }
+          ],
+          "rationale": "pulp seq view outline, region and diff project AgentView over a project path without a session, which is the only shape a one-shot CLI can offer. A region read is a bounded window: it requires --sequence, --start and --end, takes an optional --limit and --after cursor, and selects the timebase with --absolute, so paging is the caller's own vocabulary rather than a whole-sequence dump. A malformed window is refused as a usage error with exit code 2 rather than rounded into a window the projection would answer. view diff applies its commands to an in-memory copy and leaves the project byte-for-byte as it found it, and it carries the same authority selection apply does, so --writer-profile proposal is refused a removal by name instead of reporting a change it would not admit."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "pulp_timeline_view_outline",
+                "timeline_view_mcp_tools_json_fragment"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_tools.hpp",
+              "needles": [
+                "handle_timeline_view_outline",
+                "handle_timeline_view_region",
+                "handle_timeline_view_diff"
+              ]
+            },
+            {
+              "kind": "mcp_projection",
+              "path": "tools/timeline/include/pulp/tools/timeline/agent_view_projection.hpp",
+              "needles": [
+                "agent_view_outline_json",
+                "agent_view_region_page_json",
+                "agent_view_outline_diff_json"
+              ]
+            }
+          ],
+          "rationale": "pulp_timeline_view_outline, _view_region and _view_diff read a live session by session_id, which is the session-oriented input every other MCP timeline tool takes and the correct live read for a design-time caller. Their descriptors are published in tools/list, so a client discovers the tools and their window arguments without reading source. The three tools are declared as a hand-written fragment alongside the generated catalog rather than inside it, because that catalog is capped at exactly ten tools by a CMake FATAL_ERROR and a matching static_assert; control_mcp_tools_json_fragment is the existing precedent for publishing beside it. Because the descriptors are hand-written their well-formedness is asserted rather than assumed, and the catalog is read back as parsed JSON so the assertion measures the tool's presence and not the renderer's whitespace. Both boundaries call one encoder, so the CLI and MCP payloads are identical by construction rather than by review, and every payload carries the version the AgentView value itself reports so a consumer can pin the shape."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "This row supplies the projection encoder that p0-38-agent-view's live gap names as one of its two dependencies, but not the other: Product A still has no exact-document session an executor could bind an AgentView read to, so there is no live per-instance control to expose the projection through. The surface is absent rather than refused.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The projection is a runtime read over a document, matching the not_applicable disposition p0-38-agent-view already carries on this surface for AgentView itself. Encoding that read for two tool boundaries does not make it an installed design-time capability."
+        }
+      }
     }
   ],
   "tombstones": []
