@@ -10,6 +10,7 @@
 #include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timeline/schema_json.hpp>
 
+#include <charconv>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -34,6 +35,8 @@ struct TimelineArguments {
     const pulp::timeline::JsonValue* accept_losses = nullptr;
     const pulp::timeline::JsonValue* plan_only = nullptr;
     const pulp::timeline::JsonValue* writer_profile = nullptr;
+    const pulp::timeline::JsonValue* idempotency_key = nullptr;
+    const pulp::timeline::JsonValue* expected_revision = nullptr;
 };
 
 pulp::runtime::Result<TimelineArguments, std::string>
@@ -56,6 +59,8 @@ parse_timeline_arguments(const std::string& params_json) {
     result.accept_losses = root.find("accept_losses");
     result.plan_only = root.find("plan_only");
     result.writer_profile = root.find("writer_profile");
+    result.idempotency_key = root.find("idempotency_key");
+    result.expected_revision = root.find("expected_revision");
     return pulp::runtime::Ok(std::move(result));
 }
 
@@ -103,6 +108,38 @@ timeline_sample_rate(const pulp::timeline::JsonValue* value) {
             std::string("Error: sample_rate must be an integer between 1 and 768000"));
     }
     return pulp::runtime::Ok(parsed.value());
+}
+
+/// Reads the retry and staleness controls an apply may carry.
+///
+/// Both are optional, and both are refused rather than ignored when the shapes
+/// are wrong: a caller that mistypes a retry token would otherwise be told its
+/// call was deduplicated when nothing recorded it.
+pulp::runtime::Result<TimelineApplyOptions, std::string>
+timeline_apply_options(const TimelineArguments& arguments) {
+    TimelineApplyOptions options;
+    if (const auto* key = arguments.idempotency_key; key != nullptr) {
+        if (key->kind != pulp::timeline::JsonValue::Kind::String || key->scalar.empty())
+            return pulp::runtime::Err(
+                std::string("Error: idempotency_key must be a non-empty string"));
+        options.idempotency_key = key->scalar;
+    }
+    if (const auto* revision = arguments.expected_revision; revision != nullptr) {
+        if (revision->kind != pulp::timeline::JsonValue::Kind::Number ||
+            revision->scalar.empty() || revision->scalar.front() == '-' ||
+            revision->scalar.find_first_of(".eE") != std::string::npos)
+            return pulp::runtime::Err(
+                std::string("Error: expected_revision must be a non-negative integer"));
+        std::uint64_t value = 0;
+        const auto* first = revision->scalar.data();
+        const auto* last = first + revision->scalar.size();
+        const auto parsed = std::from_chars(first, last, value);
+        if (parsed.ec != std::errc{} || parsed.ptr != last)
+            return pulp::runtime::Err(
+                std::string("Error: expected_revision must be a non-negative integer"));
+        options.expected_revision = pulp::timeline::DocumentRevision{value};
+    }
+    return pulp::runtime::Ok(std::move(options));
 }
 
 std::string timeline_result(pulp::tools::timeline::OperationResult result) {
@@ -167,8 +204,18 @@ std::string handle_timeline_command_apply(const std::string& params_json) {
         commands->array.empty())
         return timeline_argument_error("Error: commands must be a non-empty array");
     const auto commands_json = arguments.value().parsed->raw(*commands);
+    auto options = timeline_apply_options(arguments.value());
+    if (!options)
+        return timeline_argument_error(options.error());
     if (session_id != nullptr)
-        return timeline_result(apply_timeline_session(*session_id, commands_json));
+        return timeline_result(
+            apply_timeline_session(*session_id, commands_json, options.value()));
+    // Both controls are session state: a stateless apply opens its own document
+    // and keeps no retry record, so honouring either here would report a
+    // deduplication or a staleness check that nothing performed.
+    if (!options.value().idempotency_key.empty() || options.value().expected_revision)
+        return timeline_argument_error(
+            "Error: idempotency_key and expected_revision require session_id");
     auto profile = timeline_writer_profile(arguments.value().writer_profile);
     if (!profile)
         return timeline_argument_error(profile.error());

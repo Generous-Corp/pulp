@@ -126,6 +126,41 @@ std::string timeline_dirty_set_json(const pulp::timeline::DirtySet& dirty) {
 
 namespace {
 
+/// Retry-window depth for one session.
+///
+/// Bounds two tables that must agree: the DocumentSession result cache, which
+/// pins a project snapshot per entry, and the key-to-identity map below that
+/// makes those entries reachable at all. Sizing them apart would let a key
+/// survive in one table after the other dropped it, which answers a retry with
+/// a collision or a fresh apply instead of the original result.
+///
+/// Kept small deliberately. Each cached result pins a predecessor and a
+/// successor snapshot, so this trades a bounded amount of retained memory for a
+/// retry window, and a window is all a retry needs.
+constexpr std::size_t kSessionRetryWindow = 8;
+
+/// The identities one keyed apply allocated.
+///
+/// A retry has to reproduce them exactly. `equivalent()` compares the
+/// transaction id, the expected revision, and every command id, so reusing only
+/// the transaction id would reach the cache and then be rejected as a collision
+/// against the caller's own earlier attempt.
+/// Everything a keyed apply has to reproduce in order to be the same
+/// transaction again.
+///
+/// The identities and the revision it was applied against are what
+/// DocumentSession compares; the command bytes and the response are what it
+/// cannot see. It compares command identities but not command payloads, so a
+/// token reused with different commands would otherwise be judged a match and
+/// answered with the wrong result.
+struct IdempotencyRecord {
+    pulp::timeline::TransactionId transaction;
+    std::vector<pulp::timeline::CommandId> command_ids;
+    pulp::timeline::DocumentRevision expected_revision;
+    std::string commands;
+    std::string response;
+};
+
 struct TimelineSession {
     TimelineSession(std::unique_ptr<pulp::timeline::DocumentSession> document_value,
                     pulp::timeline::WriterToken writer_value,
@@ -143,6 +178,13 @@ struct TimelineSession {
     pulp::timeline::DocumentRevision latest_before;
     pulp::timeline::DocumentRevision latest_after;
     std::size_t admission_charge = 0;
+    /// Retry token to the identities its first successful apply allocated.
+    /// Populated only on success: a refused apply left no result to replay, so
+    /// its key stays free for a genuine retry.
+    std::unordered_map<std::string, IdempotencyRecord> idempotency;
+    /// Insertion order for the map above, evicted oldest-first to match how
+    /// DocumentSession evicts its result cache.
+    std::deque<std::string> idempotency_order;
 };
 
 } // namespace
@@ -179,7 +221,7 @@ struct TimelineSessionStore::Impl {
             return std::nullopt;
         }
         pulp::timeline::SessionLimits session_limits;
-        session_limits.max_cached_results = 0;
+        session_limits.max_cached_results = kSessionRetryWindow;
         session_limits.journal.max_retained_bytes =
             history_reservation_ / 3 * 2 + history_reservation_ % 3 * 2 / 3;
         session_limits.undo.max_retained_bytes =
@@ -214,7 +256,71 @@ struct TimelineSessionStore::Impl {
         return id;
     }
 
-    pulp::tools::timeline::OperationResult apply(std::string_view id, std::string_view commands) {
+    /// Returns the identities a previous successful apply under this key
+    /// allocated, or nullptr for an unkeyed or first-seen call.
+    static const IdempotencyRecord* find_idempotency(const TimelineSession& session,
+                                                     const std::string& key) {
+        if (key.empty())
+            return nullptr;
+        const auto found = session.idempotency.find(key);
+        return found == session.idempotency.end() ? nullptr : &found->second;
+    }
+
+    /// Records the identities a key committed under, evicting oldest-first so
+    /// the table stays bounded by the same retry window as the result cache.
+    static void remember_idempotency(TimelineSession& session, const std::string& key,
+                                     IdempotencyRecord record) {
+        if (key.empty())
+            return;
+        while (session.idempotency_order.size() >= kSessionRetryWindow) {
+            session.idempotency.erase(session.idempotency_order.front());
+            session.idempotency_order.pop_front();
+        }
+        session.idempotency_order.push_back(key);
+        session.idempotency.emplace(key, std::move(record));
+    }
+
+    /// Refuses a retry token whose request no longer matches the one it names.
+    ///
+    /// DocumentSession compares command identities but not command payloads, so
+    /// a token reused for different work would be judged equivalent and
+    /// answered with the earlier result. The token's owner is this layer, so
+    /// the refusal has to be issued here.
+    static pulp::tools::timeline::OperationResult
+    retry_token_collision(const TimelineSession& session, const IdempotencyRecord& record) {
+        pulp::timeline::TransactionError error;
+        error.code = pulp::timeline::ConflictCode::TransactionIdCollision;
+        error.transaction = record.transaction;
+        error.expected_revision = record.expected_revision;
+        error.current_revision = session.document->revision();
+        return transaction_failure(error, {});
+    }
+
+    /// Re-submits a transaction that already committed under this token.
+    ///
+    /// The commands are deliberately not re-evaluated: they were written
+    /// against the revision this transaction was applied to, and the document
+    /// has usually moved on, so reducing them again would refuse a write that
+    /// in fact landed. DocumentSession is the only thing that can tell a still
+    /// cached result from one that has aged out, so the submit runs for its
+    /// verdict alone and the recorded response is what a hit returns.
+    pulp::tools::timeline::OperationResult replay_apply(TimelineSession& session,
+                                                        const IdempotencyRecord& record,
+                                                        std::vector<pulp::timeline::Command> decoded) {
+        pulp::timeline::Transaction transaction;
+        transaction.id = record.transaction;
+        transaction.expected_revision = record.expected_revision;
+        transaction.commands.reserve(decoded.size());
+        for (std::size_t i = 0; i < decoded.size() && i < record.command_ids.size(); ++i)
+            transaction.commands.push_back({record.command_ids[i], std::move(decoded[i])});
+        auto committed = session.document->submit(session.writer, std::move(transaction));
+        if (!committed)
+            return transaction_failure(committed.error(), {});
+        return {0, record.response};
+    }
+
+    pulp::tools::timeline::OperationResult apply(std::string_view id, std::string_view commands,
+                                                 const TimelineApplyOptions& options) {
         std::lock_guard lock(mutex_);
         auto* session = find(id);
         if (session == nullptr)
@@ -227,13 +333,38 @@ struct TimelineSessionStore::Impl {
             return session_failure("timeline persistence error " +
                                        std::to_string(static_cast<unsigned>(decoded.error().code)),
                                    2, decoded.error().path);
+        // A keyed retry has to arrive at commit carrying the identities its
+        // first attempt carried, or it is a different transaction and the
+        // result cache cannot recognize it.
+        const auto* replay = find_idempotency(*session, options.idempotency_key);
+        if (replay != nullptr) {
+            const bool same_request =
+                replay->commands == commands &&
+                (!options.expected_revision ||
+                 options.expected_revision.value() == replay->expected_revision);
+            if (!same_request)
+                return retry_token_collision(*session, *replay);
+            return replay_apply(*session, *replay, std::move(decoded).value());
+        }
+        IdempotencyRecord allocated;
+        allocated.transaction = session->writer.allocate_transaction_id();
+        allocated.command_ids.reserve(decoded.value().size());
+        for (std::size_t i = 0; i < decoded.value().size(); ++i)
+            allocated.command_ids.push_back(session->writer.allocate_command_id());
+        const IdempotencyRecord& identities = allocated;
+
         pulp::timeline::Transaction transaction;
-        transaction.id = session->writer.allocate_transaction_id();
-        transaction.expected_revision = session->document->revision();
+        transaction.id = identities.transaction;
+        // Unset means the caller is not claiming to have read anything, so the
+        // current revision is used and the staleness check cannot fire. A
+        // caller that does supply one gets refused when the document moved.
+        transaction.expected_revision =
+            options.expected_revision.value_or(session->document->revision());
+        allocated.expected_revision = transaction.expected_revision;
         transaction.commands.reserve(decoded.value().size());
-        for (auto& command : decoded.value())
+        for (std::size_t i = 0; i < decoded.value().size(); ++i)
             transaction.commands.push_back(
-                {session->writer.allocate_command_id(), std::move(command)});
+                {identities.command_ids[i], std::move(decoded.value()[i])});
         // submit() consumes the transaction, so the authority each command
         // requires is captured while it is still readable.
         const auto authorities = pulp::tools::timeline::capture_command_authorities(transaction);
@@ -246,8 +377,17 @@ struct TimelineSessionStore::Impl {
         if (!prepared)
             return std::move(prepared).error();
         auto committed = session->document->submit(session->writer, std::move(transaction));
-        return finish_commit(id, *session, std::move(committed), std::move(prepared).value(),
-                             authorities);
+        auto result = finish_commit(id, *session, std::move(committed),
+                                    std::move(prepared).value(), authorities);
+        // Only a committed apply is worth remembering: a refusal changed
+        // nothing, so replaying its token should re-attempt rather than hand
+        // back a refusal the caller may since have fixed.
+        if (result.exit_code == 0) {
+            allocated.commands = std::string(commands);
+            allocated.response = result.json;
+            remember_idempotency(*session, options.idempotency_key, std::move(allocated));
+        }
+        return result;
     }
 
     pulp::tools::timeline::OperationResult diff(std::string_view id) {
@@ -488,9 +628,10 @@ TimelineSessionStore::open(std::string_view canonical_project,
     return impl_->open(canonical_project, profile, error);
 }
 
-pulp::tools::timeline::OperationResult TimelineSessionStore::apply(std::string_view session_id,
-                                                                   std::string_view commands) {
-    return impl_->apply(session_id, commands);
+pulp::tools::timeline::OperationResult
+TimelineSessionStore::apply(std::string_view session_id, std::string_view commands,
+                            const TimelineApplyOptions& options) {
+    return impl_->apply(session_id, commands, options);
 }
 
 pulp::tools::timeline::OperationResult TimelineSessionStore::diff(std::string_view session_id) {
@@ -531,9 +672,10 @@ std::optional<std::string> open_timeline_session(
     return timeline_sessions().open(canonical_project, profile, error);
 }
 
-pulp::tools::timeline::OperationResult apply_timeline_session(std::string_view session_id,
-                                                              std::string_view commands) {
-    return timeline_sessions().apply(session_id, commands);
+pulp::tools::timeline::OperationResult
+apply_timeline_session(std::string_view session_id, std::string_view commands,
+                       const TimelineApplyOptions& options) {
+    return timeline_sessions().apply(session_id, commands, options);
 }
 
 pulp::tools::timeline::OperationResult diff_timeline_session(std::string_view session_id) {
