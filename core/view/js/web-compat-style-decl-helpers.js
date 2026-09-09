@@ -165,5 +165,8 @@ CSSStyleDeclaration.prototype.removeProperty = function(name) {
     var camel = name.replace(/-([a-z])/g, function(_, c) { return c.toUpperCase(); });
     var old = this._props[camel] || "";
     delete this._props[camel];
+    // Drop any applied-value record too, so re-setting the same value later is
+    // treated as a fresh write rather than deduped against the removed one.
+    delete this._applied[camel];
     return old;
 };
