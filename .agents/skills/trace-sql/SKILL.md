@@ -439,6 +439,39 @@ Two other capture-shaping facts worth knowing before you blame a query:
   `trace-analysis` skill has the coverage matrix and the `[plugin-gpu-host]
   … mode=` line that names the host you actually got.
 
+## A zero-row query on a WRAPPED ring is not a finding
+
+The `stats` table is the only thing that distinguishes "the span never fired"
+from "the capture is unreadable", and the second case is the one that looks
+clean. When the in-process ring wraps, the interned string table at the head of
+the sequence is overwritten and every later packet on that sequence is skipped;
+`trace_processor` opens the file, reports no error, and answers every query with
+zero rows. The file on disk is full-size, so nothing about it looks wrong.
+
+Run this before quoting a number out of any capture:
+
+```sql
+select name, value from stats
+where value != 0 and name in (
+  'traced_buf_write_wrap_count',
+  'traced_buf_bytes_written',
+  'traced_buf_buffer_size',
+  'traced_buf_bytes_overwritten',
+  'traced_buf_incremental_sequences_dropped',
+  'packet_skipped_seq_needs_incremental_state_invalid');
+```
+
+A non-zero `traced_buf_write_wrap_count`, or any
+`packet_skipped_seq_needs_incremental_state_invalid`, condemns the trace. Do not
+analyse it and do not report an absence from it — re-capture with
+`PULP_TRACE_RING_KB` raised (KB; default 80 MB; a UI capture carrying
+`js_native:*` spans needs ≥ `262144`).
+
+Note the asymmetry: a clean `stats` table proves only that nothing overflowed,
+not that anything recorded. Pair it with a positive control whose count MUST be
+non-zero for the workload you captured, e.g. `select count(*) from slice where
+name='dom_event_evaluate'` for a pointer-driven UI capture.
+
 ## GPU render time is now OPT-IN (WAH-13)
 
 `SkiaSurface::gpu_render_timing_available()` reporting false is no longer

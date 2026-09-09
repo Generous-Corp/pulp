@@ -691,3 +691,41 @@ re-capture rather than reasoning about the numbers you have.
 for the same reason, and those counters increment whether tracing is compiled in
 or not — so a test can assert balance on the default gate build where every
 Perfetto macro expands to nothing.
+
+### Before you read any number: prove the capture is not truncated
+
+A Perfetto in-process capture fails in a way that looks exactly like success.
+The ring is fixed-size; when it wraps, the interned string table at the head of
+the sequence is overwritten, and every packet on that sequence after that point
+becomes unparseable. `trace_processor` loads the file without complaint and
+reports **zero slices**. What you have is a large `.pftrace` — a real, 100 MB
+file with a plausible timestamp — that contains nothing, and a query returning
+no rows against it reads identically to "that span never fired".
+
+So a zero-row result is only a finding once you have shown the trace is intact.
+Run this first, on every capture, before quoting anything from it:
+
+```sql
+SELECT name, value FROM stats WHERE name IN (
+  'traced_buf_write_wrap_count',
+  'traced_buf_bytes_written',
+  'traced_buf_bytes_overwritten',
+  'traced_buf_buffer_size',
+  'packet_skipped_seq_needs_incremental_state_invalid')
+  AND value != 0;
+```
+
+`traced_buf_write_wrap_count > 0` or any
+`packet_skipped_seq_needs_incremental_state_invalid` means the capture is
+truncated — re-capture with a bigger ring, do not analyse it. Pair it with a
+positive control that must be non-zero for a capture of that workload (for a UI
+drag: `SELECT COUNT(*) FROM slice WHERE name='dom_event_evaluate'`), because a
+clean `stats` table on an empty trace only proves nothing overflowed.
+
+The ring size the env-driven autostart uses is `$PULP_TRACE_RING_KB` (KB,
+default 80 MB, accepted range 1 MB–4 GB; a malformed value is refused on stderr
+rather than silently falling back). The 80 MB default is sized for a render/DSP
+capture. **A script-heavy UI capture with `js_native:*` spans enabled will
+overrun it** — one 6-second Spectr band drag wrote 100.4 MB into the 80 MB ring
+and produced a zero-slice file. Budget ≥ 256 MB (`PULP_TRACE_RING_KB=262144`)
+for that shape of capture.

@@ -32,6 +32,7 @@ bool tracing_reminder_first_time(std::atomic<bool>& already_emitted) {
 #include <fstream>
 #include <chrono>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -115,6 +116,27 @@ std::string default_out_path() {
     auto dir = std::filesystem::temp_directory_path(ec);
     if (ec) return "pulp-trace.pftrace";
     return (dir / "pulp-trace.pftrace").string();
+}
+
+// Ring size for the env-driven autostart path. The default is sized for a
+// render/DSP capture; a script-heavy UI capture emits far more events, and an
+// overrun does not degrade gracefully — see parse_autostart_ring_kb() for what
+// an undersized ring actually produces. The parse itself lives in the header so
+// it is unit-testable in the default tracing-OFF build; this wrapper only reads
+// the environment and reports a rejection.
+std::uint32_t autostart_ring_kb() {
+    const char* raw = std::getenv("PULP_TRACE_RING_KB");
+    if (raw == nullptr || *raw == '\0')
+        return detail::default_autostart_ring_kb;
+    if (const auto parsed = detail::parse_autostart_ring_kb(raw))
+        return *parsed;
+    // Refuse quietly-wrong input loudly: silently keeping the default would hand
+    // back exactly the empty trace this knob exists to prevent.
+    std::cerr << "PULP_TRACE_RING_KB=" << raw << " is not an integer in ["
+              << detail::min_autostart_ring_kb << ", "
+              << detail::max_autostart_ring_kb << "]; using the "
+              << detail::default_autostart_ring_kb << " KB default\n";
+    return detail::default_autostart_ring_kb;
 }
 
 std::optional<std::uint64_t> make_ownership_token() {
@@ -273,7 +295,7 @@ void Tracing::attach() {
     // in the host's environment is the whole opt-in.
     const char* path = std::getenv("PULP_TRACE_PATH");
     if (!path || !*path || active()) return;
-    auto started = start_exclusive({}, path);
+    auto started = start_exclusive({}, path, autostart_ring_kb());
     if (started.status != TraceStartStatus::Started ||
         !started.ownership)
         return;
