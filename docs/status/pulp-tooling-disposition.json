@@ -3263,6 +3263,55 @@
               }
             ],
             "subcommands": []
+          },
+          {
+            "name": "view",
+            "arguments": [
+              {
+                "name": "verb",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "project",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "commands",
+                "kind": "positional",
+                "required": false
+              },
+              {
+                "name": "--sequence",
+                "kind": "option"
+              },
+              {
+                "name": "--start",
+                "kind": "option"
+              },
+              {
+                "name": "--end",
+                "kind": "option"
+              },
+              {
+                "name": "--limit",
+                "kind": "option"
+              },
+              {
+                "name": "--absolute",
+                "kind": "flag"
+              },
+              {
+                "name": "--after",
+                "kind": "option"
+              },
+              {
+                "name": "--writer-profile",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
           }
         ]
       },

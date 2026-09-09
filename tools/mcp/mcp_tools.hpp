@@ -91,8 +91,16 @@ std::string handle_timeline_explain(const std::string& params_json);
 std::string handle_timeline_render(const std::string& params_json);
 std::string handle_timeline_export(const std::string& params_json);
 std::string handle_timeline_import(const std::string& params_json);
+std::string handle_timeline_view_outline(const std::string& params_json);
+std::string handle_timeline_view_region(const std::string& params_json);
+std::string handle_timeline_view_diff(const std::string& params_json);
 std::optional<std::string> handle_timeline_tool(std::string_view name,
                                                 const std::string& params_json);
+/// Descriptors for the timeline read-projection tools.
+///
+/// These are hand-written rather than generated because the generated timeline
+/// catalog is pinned to exactly the ten document-editing tools it describes.
+std::string timeline_view_mcp_tools_json_fragment();
 #endif
 std::string handle_inspect_pending_requests(const std::string& params_json);
 

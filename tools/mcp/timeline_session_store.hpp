@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/tools/timeline/agent.hpp>
+#include <pulp/tools/timeline/agent_view_projection.hpp>
 #include <pulp/tools/timeline/writer_profile.hpp>
 
 #include <pulp/timeline/transaction.hpp>
@@ -63,6 +64,25 @@ class TimelineSessionStore {
     pulp::tools::timeline::OperationResult undo(std::string_view session_id);
     pulp::tools::timeline::OperationResult redo(std::string_view session_id);
 
+    /// Projects the session's live document as a bounded outline.
+    ///
+    /// The projection reads the session's own current revision rather than a
+    /// caller-supplied one: a reader asking "what is there now" cannot state a
+    /// revision it has not been told yet, and AgentView still refuses a pin
+    /// that has since moved.
+    pulp::tools::timeline::OperationResult view_outline(std::string_view session_id);
+    /// Projects one bounded window of clips from a sequence in the session.
+    pulp::tools::timeline::OperationResult
+    view_region(std::string_view session_id,
+                const pulp::tools::timeline::RegionViewOptions& options);
+    /// Projects the outline diff for the session's most recent applied
+    /// transaction.
+    ///
+    /// A session that has applied nothing has no transition to project and is
+    /// refused rather than answered with an empty diff, which would be
+    /// indistinguishable from a transaction that changed nothing.
+    pulp::tools::timeline::OperationResult view_diff(std::string_view session_id);
+
     std::size_t admission_charge_for_testing() const;
     void set_max_output_bytes_for_testing(std::size_t maximum);
 
@@ -89,5 +109,12 @@ apply_timeline_session(std::string_view session_id, std::string_view commands,
 pulp::tools::timeline::OperationResult diff_timeline_session(std::string_view session_id);
 pulp::tools::timeline::OperationResult undo_timeline_session(std::string_view session_id);
 pulp::tools::timeline::OperationResult redo_timeline_session(std::string_view session_id);
+pulp::tools::timeline::OperationResult
+view_outline_timeline_session(std::string_view session_id);
+pulp::tools::timeline::OperationResult
+view_region_timeline_session(std::string_view session_id,
+                             const pulp::tools::timeline::RegionViewOptions& options);
+pulp::tools::timeline::OperationResult
+view_diff_timeline_session(std::string_view session_id);
 
 } // namespace pulp_mcp

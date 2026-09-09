@@ -37,6 +37,12 @@ struct TimelineArguments {
     const pulp::timeline::JsonValue* writer_profile = nullptr;
     const pulp::timeline::JsonValue* idempotency_key = nullptr;
     const pulp::timeline::JsonValue* expected_revision = nullptr;
+    const pulp::timeline::JsonValue* sequence_id = nullptr;
+    const pulp::timeline::JsonValue* start = nullptr;
+    const pulp::timeline::JsonValue* end = nullptr;
+    const pulp::timeline::JsonValue* limit = nullptr;
+    const pulp::timeline::JsonValue* absolute = nullptr;
+    const pulp::timeline::JsonValue* after = nullptr;
 };
 
 pulp::runtime::Result<TimelineArguments, std::string>
@@ -61,6 +67,12 @@ parse_timeline_arguments(const std::string& params_json) {
     result.writer_profile = root.find("writer_profile");
     result.idempotency_key = root.find("idempotency_key");
     result.expected_revision = root.find("expected_revision");
+    result.sequence_id = root.find("sequence_id");
+    result.start = root.find("start");
+    result.end = root.find("end");
+    result.limit = root.find("limit");
+    result.absolute = root.find("absolute");
+    result.after = root.find("after");
     return pulp::runtime::Ok(std::move(result));
 }
 
@@ -350,6 +362,100 @@ std::string handle_timeline_import(const std::string& params_json) {
         pulp::tools::timeline::filesystem_path_from_utf8(*output)));
 }
 
+namespace {
+
+/// Parses a JSON integer field into `out`, refusing any non-integer spelling.
+///
+/// A window bound arrives as a JSON number, but a number that carries a
+/// fraction or an exponent is not a tick position; accepting one would silently
+/// truncate a caller's request rather than tell them it was malformed.
+template <typename T>
+bool parse_view_integer(const pulp::timeline::JsonValue& value, T& out) {
+    if (value.kind != pulp::timeline::JsonValue::Kind::Number || value.scalar.empty() ||
+        value.scalar.find_first_of(".eE") != std::string::npos)
+        return false;
+    const auto* first = value.scalar.data();
+    const auto* last = first + value.scalar.size();
+    const auto parsed = std::from_chars(first, last, out);
+    return parsed.ec == std::errc{} && parsed.ptr == last;
+}
+
+/// Reads the bounded-window arguments a `view_region` call carries.
+pulp::runtime::Result<pulp::tools::timeline::RegionViewOptions, std::string>
+timeline_region_options(const TimelineArguments& arguments) {
+    pulp::tools::timeline::RegionViewOptions options;
+    if (arguments.sequence_id == nullptr ||
+        !parse_view_integer(*arguments.sequence_id, options.sequence_id) ||
+        options.sequence_id == 0)
+        return pulp::runtime::Err(
+            std::string("Error: sequence_id must be a positive integer naming a sequence"));
+    if (arguments.start == nullptr || !parse_view_integer(*arguments.start, options.start))
+        return pulp::runtime::Err(std::string("Error: start must be a whole number of ticks"));
+    if (arguments.end == nullptr || !parse_view_integer(*arguments.end, options.end))
+        return pulp::runtime::Err(std::string("Error: end must be a whole number of ticks"));
+    if (const auto* limit = arguments.limit) {
+        if (!parse_view_integer(*limit, options.limit) || options.limit == 0)
+            return pulp::runtime::Err(std::string("Error: limit must be a positive integer"));
+    }
+    if (const auto* absolute = arguments.absolute) {
+        if (absolute->kind != pulp::timeline::JsonValue::Kind::Boolean)
+            return pulp::runtime::Err(std::string("Error: absolute must be a boolean"));
+        options.absolute = absolute->boolean;
+    }
+    if (const auto* after = arguments.after) {
+        if (after->kind != pulp::timeline::JsonValue::Kind::String || after->scalar.empty())
+            return pulp::runtime::Err(
+                std::string("Error: after must be a continuation token from a prior page"));
+        options.after = after->scalar;
+    }
+    return pulp::runtime::Ok(std::move(options));
+}
+
+} // namespace
+
+std::string handle_timeline_view_outline(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* session = required_timeline_string(arguments.value().session_id);
+    if (session == nullptr)
+        return timeline_argument_error("Error: session_id is required");
+    return timeline_result(view_outline_timeline_session(*session));
+}
+
+std::string handle_timeline_view_region(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* session = required_timeline_string(arguments.value().session_id);
+    if (session == nullptr)
+        return timeline_argument_error("Error: session_id is required");
+    auto options = timeline_region_options(arguments.value());
+    if (!options)
+        return timeline_argument_error(options.error());
+    return timeline_result(view_region_timeline_session(*session, options.value()));
+}
+
+std::string handle_timeline_view_diff(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* session = required_timeline_string(arguments.value().session_id);
+    if (session == nullptr)
+        return timeline_argument_error("Error: session_id is required");
+    return timeline_result(view_diff_timeline_session(*session));
+}
+
+std::string timeline_view_mcp_tools_json_fragment() {
+    // Hand-written rather than generated: the generated timeline catalog is
+    // pinned to exactly the ten document-editing tools, and these three are a
+    // read projection over that document rather than another editing verb.
+    return
+        R"JSON({"description":"Project a timeline session's document as a bounded, versioned outline.","inputSchema":{"additionalProperties":false,"properties":{"session_id":{"description":"Session identifier returned by pulp_timeline_project_open.","minLength":1,"type":"string"}},"required":["session_id"],"type":"object"},"name":"pulp_timeline_view_outline"},)JSON"
+        R"JSON({"description":"Project one bounded window of clips from a sequence in a timeline session.","inputSchema":{"additionalProperties":false,"properties":{"absolute":{"description":"Read the absolute timebase instead of the musical one.","type":"boolean"},"after":{"description":"Continuation token from a prior page's next field, verbatim.","minLength":1,"type":"string"},"end":{"description":"Exclusive end of the half-open window, in the selected timebase.","type":"integer"},"limit":{"description":"Maximum clips per page. Clamped by the view's own limits.","minimum":1,"type":"integer"},"sequence_id":{"description":"Identifier of the sequence to page through.","minimum":1,"type":"integer"},"session_id":{"description":"Session identifier returned by pulp_timeline_project_open.","minLength":1,"type":"string"},"start":{"description":"Inclusive start of the half-open window, in the selected timebase.","type":"integer"}},"required":["session_id","sequence_id","start","end"],"type":"object"},"name":"pulp_timeline_view_region"},)JSON"
+        R"JSON({"description":"Project the outline diff for a timeline session's most recent applied transaction.","inputSchema":{"additionalProperties":false,"properties":{"session_id":{"description":"Session identifier returned by pulp_timeline_project_open.","minLength":1,"type":"string"}},"required":["session_id"],"type":"object"},"name":"pulp_timeline_view_diff"})JSON";
+}
+
 std::optional<std::string> handle_timeline_tool(std::string_view name,
                                                 const std::string& params_json) {
     using Handler = std::string (*)(const std::string&);
@@ -370,7 +476,18 @@ std::optional<std::string> handle_timeline_tool(std::string_view name,
         ToolBinding{kTimelineImportToolName, handle_timeline_import},
     };
     static_assert(bindings.size() == kTimelineMcpToolNames.size());
+    // The read-projection verbs are bound separately because the generated
+    // catalog above is pinned to the ten editing tools it describes.
+    static constexpr std::array<ToolBinding, 3> view_bindings{
+        ToolBinding{"pulp_timeline_view_outline", handle_timeline_view_outline},
+        ToolBinding{"pulp_timeline_view_region", handle_timeline_view_region},
+        ToolBinding{"pulp_timeline_view_diff", handle_timeline_view_diff},
+    };
     for (const auto& binding : bindings) {
+        if (name == binding.name)
+            return binding.handler(params_json);
+    }
+    for (const auto& binding : view_bindings) {
         if (name == binding.name)
             return binding.handler(params_json);
     }
