@@ -107,6 +107,10 @@ function __pulpElementWantsScrollView__(element) {
 Element.prototype._ensureNative = function() {
     if (this._nativeCreated) return;
     this._nativeCreated = true;
+    // Tag defaults below write widget state directly; drop any applied-value
+    // record so a later style write for the same property is not deduped
+    // against a widget that has since been (re)created.
+    __invalidateStyleCache__(this);
 
     var tag = this.tagName.toLowerCase();
     var id = this._id;
@@ -363,6 +367,8 @@ function __replayMediaAttributes__(el) {
     if (!el || !el._nativeCreated || !el._attributes) return;
     var tag = el.tagName.toLowerCase();
     if (tag !== "svg" && tag !== "img" && tag !== "canvas" && tag !== "video") return;
+    // Writes width/height straight to the widget, bypassing el.style.
+    __invalidateStyleCache__(el);
     if (typeof setFlex === "function") {
         var w = el._attributes.width;
         var h = el._attributes.height;
@@ -779,6 +785,8 @@ Object.defineProperty(Element.prototype, "hidden", {
     get: function() { return this._hidden; },
     set: function(v) {
         this._hidden = !!v;
+        // Shares the widget's visibility slot with CSS `display`.
+        __invalidateStyleCache__(this);
         if (this._nativeCreated) setVisible(this._id, !this._hidden);
     }
 });
@@ -817,6 +825,7 @@ Element.prototype.show = function() {
     this._dialogOpen = true;
     this.setAttribute("open", "");
     if (this._nativeCreated && typeof setVisible === "function") {
+        __invalidateStyleCache__(this);
         setVisible(this._id, true);
     }
 };
@@ -835,6 +844,7 @@ Element.prototype.close = function(returnValue) {
     this._dialogReturnValue = (returnValue !== undefined) ? String(returnValue) : "";
     this.removeAttribute("open");
     if (this._nativeCreated && typeof setVisible === "function") {
+        __invalidateStyleCache__(this);
         setVisible(this._id, false);
     }
     var evt = (typeof Event === "function")
@@ -1381,6 +1391,7 @@ function _reparentNative(child, parentId) {
     }
 
     child._nativeCreated = true;
+    __invalidateStyleCache__(child);
 
     // Replay presentational attributes after the native node is recreated so
     // the new flex sizing matches the original.
