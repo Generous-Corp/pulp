@@ -496,6 +496,10 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // constructor and prototype are in scope.
     eval_or_throw(engine_, "web_compat_canvas_matrix", preludes::web_compat_canvas_matrix);
     eval_or_throw(engine_, "web_compat_canvas_image", preludes::web_compat_canvas_image);
+    // Generated alias-group table read by _applyProperty's write-dedup
+    // guard. Plain data, no dependencies, so it evaluates before the
+    // declaration that consumes it.
+    eval_or_throw(engine_, "web_compat_style_dedup_table", preludes::web_compat_style_dedup_table);
     eval_or_throw(engine_, "web_compat_style_decl", preludes::web_compat_style_decl);
     // Per-domain `_applyProperty` handler modules. The property switch is split
     // into layout / paint / typography / transform / misc handlers;
@@ -1088,7 +1092,14 @@ void WidgetBridge::poll_async_results() {
         dispatch_event(engine_, result.callback_id, "result", payload);
     }
 
-    if (had_pending_frames) {
+    // Skip this drain when the previous service pass already ran the frame
+    // callbacks: a self-rearming rAF refills pending_frame_ids_ from inside
+    // __flushFrames__, so draining here as well would run the same callback
+    // twice per host tick and draw the scene twice per display period. The
+    // exchange consumes the slot, so at most one poll can skip per service
+    // drain and a poll-only host still drains on every call.
+    const bool serviced = std::exchange(frames_drained_by_service_, false);
+    if (had_pending_frames && !serviced) {
         engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
     }
 
@@ -1121,6 +1132,10 @@ void WidgetBridge::service_frame_callbacks() {
                                     pending_frame_ids_.size());
         engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
         engine_.pump_message_loop();
+        // Tell the next poll this tick's frames are already drawn. Set only on
+        // an actual drain, so a service pass with nothing pending never
+        // suppresses a later poll.
+        frames_drained_by_service_ = true;
     }
     if (pending_runtime_settle_rounds_ > 0)
         request_repaint();

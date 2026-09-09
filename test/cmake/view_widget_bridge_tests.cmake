@@ -839,6 +839,13 @@ pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
 # flexWrap value translations).
 pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 
+# Yoga node-tree lifetime. A layout pass that reuses solver state across
+# passes must resolve the geometry a from-scratch pass resolves, and a
+# nested pass over a different root (grid containers and views that own
+# their child layout re-enter layout mid-walk) must leave the outer pass
+# intact.
+pulp_add_test_suite(pulp-test-yoga-tree-reuse LIBRARIES pulp::view)
+
 # Widget bridge — recovered Canvas2D/CSS compatibility regressions.
 # The canonical Canvas2D bridge surface is in
 # pulp-test-widget-bridge-wave2-cheap below; this older split keeps

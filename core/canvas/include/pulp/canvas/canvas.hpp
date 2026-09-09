@@ -217,7 +217,14 @@ using Paint = std::variant<Color, LinearGradient, RadialGradient, ConicGradient>
 // (RTL).
 enum class TextAlign { left, center, right, justify };
 enum class TextVerticalAlign { top, center, bottom, baseline };
-enum class TextBaseline { top, middle, bottom };
+// Canvas2D text baselines. `alphabetic` is the CSS/Canvas2D initial value:
+// the y passed to fill_text IS the baseline, which is what browser-authored
+// canvas code assumes when it never assigns ctx.textBaseline. `hanging` and
+// `ideographic` have no dedicated font metric here and are approximated from
+// ascent/descent, matching how engines fall back when the face carries no
+// BASE table. Enumerators are appended so the wire codes the widget bridge
+// records for top/middle/bottom keep their existing values.
+enum class TextBaseline { top, middle, bottom, alphabetic, hanging, ideographic };
 enum class TextDirection { left_to_right, right_to_left, top_to_bottom, bottom_to_top };
 
 // CanvasCapability lives in its own header so capability-query call sites can

@@ -997,6 +997,17 @@ declared in `core/timeline/include/pulp/timeline/**` or named by
 an enum constant, a schema field. A refusal that only inspects internal
 lowering state passes without an entry.
 
+**Naming a code is not raising it.** Two mentions are excluded on purpose: a
+field whose declared default happens to be a code, and a `case` label. A table
+that maps every `CompileErrorCode` member to a wire name — the shape any
+projection of the codes over a wire needs — mentions all of them at once, and
+each label reads its own enumerator, so without the exclusion the table reports
+as a raise of every refusal it can spell while raising none. Only the label
+text is dropped, never the line, so a raise sharing a line with a label is
+still found; the selftest holds both halves of that boundary. If you are adding
+such a table, expect the gate to stay quiet about it and keep the real raise
+sites in `core/playback/src/` as the thing it is watching.
+
 **Three things it cannot see, so do not read a pass as "the compiler accepts
 everything authorable":** a refusal expressed by dropping, clamping, or
 substituting rather than by naming a code; a refusal raised through a different

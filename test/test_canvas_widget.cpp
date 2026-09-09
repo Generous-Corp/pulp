@@ -140,6 +140,93 @@ TEST_CASE("CanvasWidget replays Canvas2D text baselines", "[canvas_widget][canva
     REQUIRE(stroke_ys[0] == Catch::Approx(30.0f));
 }
 
+// Canvas2D's initial textBaseline is `alphabetic`: the y handed to fillText is
+// the baseline itself. A replay that starts in `top` instead pushes every
+// caption that never assigns textBaseline down by a full ascent, which is how a
+// label authored to sit above a plot ends up drawn across its top gridline.
+TEST_CASE("CanvasWidget replays an unset text baseline as alphabetic",
+          "[canvas_widget][canvas2d][text]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 200});
+
+    CanvasDrawCmd font;
+    font.type = CanvasDrawCmd::Type::set_font;
+    font.text = "Inter";
+    font.extra = 20.0f;   // deterministic metrics: ascent 15, descent 5
+    cw.add_command(font);
+
+    // No set_text_baseline command at all — the browser default applies.
+    CanvasDrawCmd draw;
+    draw.type = CanvasDrawCmd::Type::fill_text;
+    draw.x = 10.0f;
+    draw.y = 100.0f;
+    draw.text = "dB (gain)";
+    draw.color = {255, 255, 255, 255};
+    cw.add_command(draw);
+
+    cw.paint(rc);
+
+    const DrawCommand* text = nullptr;
+    for (const auto& command : rc.commands()) {
+        if (command.type == DrawCommand::Type::fill_text) text = &command;
+    }
+    REQUIRE(text != nullptr);
+    REQUIRE(text->f[1] == Catch::Approx(100.0f));
+
+    // The symptom, stated as geometry: a caption asked for 8 above a boundary
+    // must paint entirely above it. Ink rises `ascent` above an alphabetic
+    // baseline, so the whole glyph box clears a boundary 8 below the y.
+    const float boundary = 108.0f;
+    REQUIRE(text->f[1] < boundary);
+}
+
+// The three baselines with no dedicated font metric still have to resolve to
+// distinct, spec-shaped positions rather than silently collapsing onto `top`.
+TEST_CASE("CanvasWidget replays alphabetic, hanging and ideographic baselines",
+          "[canvas_widget][canvas2d][text]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 200});
+
+    CanvasDrawCmd font;
+    font.type = CanvasDrawCmd::Type::set_font;
+    font.text = "Inter";
+    font.extra = 20.0f;
+    cw.add_command(font);
+
+    const auto add = [&](int baseline, float y) {
+        CanvasDrawCmd state;
+        state.type = CanvasDrawCmd::Type::set_text_baseline;
+        state.int_val = baseline;
+        cw.add_command(state);
+
+        CanvasDrawCmd draw;
+        draw.type = CanvasDrawCmd::Type::fill_text;
+        draw.x = 10.0f;
+        draw.y = y;
+        draw.text = "Ag";
+        draw.color = {255, 255, 255, 255};
+        cw.add_command(draw);
+    };
+
+    add(3, 50.0f);   // alphabetic  → y
+    add(4, 50.0f);   // hanging     → y + ascent * 0.8
+    add(5, 50.0f);   // ideographic → y - descent
+
+    cw.paint(rc);
+
+    std::vector<float> ys;
+    for (const auto& command : rc.commands()) {
+        if (command.type == DrawCommand::Type::fill_text)
+            ys.push_back(command.f[1]);
+    }
+    REQUIRE(ys.size() == 3);
+    REQUIRE(ys[0] == Catch::Approx(50.0f));
+    REQUIRE(ys[1] == Catch::Approx(62.0f));
+    REQUIRE(ys[2] == Catch::Approx(45.0f));
+}
+
 TEST_CASE("CanvasWidget: clear command fills background", "[canvas_widget]") {
     RecordingCanvas rc;
     CanvasWidget cw;
