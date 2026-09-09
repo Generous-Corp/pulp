@@ -13,11 +13,13 @@
 
 #include <pulp/state/store.hpp>
 #include <pulp/view/appearance_defects.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -36,6 +38,9 @@ struct Args {
     /// An empty finding list is only evidence of a clean panel if the same
     /// instrument, on the same tree, can be made to report something.
     float control_inflate = 0.0f;
+    /// Where to write a PNG of the very tree that was measured. A screenshot
+    /// captured by some other run is a picture of a different tree.
+    std::filesystem::path screenshot;
     /// Clicks to drive before measuring, in root coordinates. A panel reached
     /// only by navigating to it cannot be audited from the initial state.
     std::vector<pulp::view::Point> clicks;
@@ -48,6 +53,7 @@ void usage() {
         "  --height N         viewport height (default 860)\n"
         "  --frames N         frames to poll before measuring (default 8)\n"
         "  --list-runs        print every measured text run\n"
+        "  --screenshot PATH  write a PNG of the measured tree to PATH\n"
         "  --click X,Y        click at root coordinates before measuring\n"
         "                     (repeatable; frames are polled between clicks)\n"
         "  --allow-untrustworthy  exit 0 even when coverage is too thin to\n"
@@ -86,6 +92,10 @@ bool parse(int argc, char** argv, Args& out) {
                                   std::strtof(spec.substr(comma + 1).c_str(), nullptr)});
         }
         else if (a == "--control-inflate") { if (!next(out.control_inflate)) return false; }
+        else if (a == "--screenshot") {
+            if (i + 1 >= argc) return false;
+            out.screenshot = std::string(argv[++i]);
+        }
         else if (a == "--list-runs") out.list_runs = true;
         else if (a == "--allow-untrustworthy") out.allow_untrustworthy = true;
         else if (a == "-h" || a == "--help") return false;
@@ -136,6 +146,25 @@ int main(int argc, char** argv) {
     for (const auto& click : args.clicks) {
         root.simulate_click(click);
         pump();
+    }
+
+    if (!args.screenshot.empty()) {
+        // capture_view refuses a blank or clear-only frame rather than writing
+        // one, so a saved PNG here is a frame that actually painted.
+        auto shot = pulp::view::capture_view(
+            root, static_cast<uint32_t>(args.width),
+            static_cast<uint32_t>(args.height), 2.0f,
+            pulp::view::ScreenshotBackend::skia);
+        if (!shot.ok) {
+            std::cerr << "appearance-audit: screenshot not trustworthy: "
+                      << shot.reason << "\n";
+        } else {
+            std::ofstream out(args.screenshot, std::ios::binary);
+            out.write(reinterpret_cast<const char*>(shot.png.data()),
+                      static_cast<std::streamsize>(shot.png.size()));
+            std::cout << "screenshot: " << args.screenshot.string() << " ("
+                      << shot.png.size() << " bytes)\n";
+        }
     }
 
     pulp::view::AppearanceOptions detect_options;
