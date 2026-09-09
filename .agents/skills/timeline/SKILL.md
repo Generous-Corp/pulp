@@ -3101,3 +3101,25 @@ does not". Check which field, and for gain check what the leaf content is.
 records the precedence model and the remaining gaps; the refusal codes live in
 `CompileErrorCode` and each carries an entry in
 `tools/scripts/negative_capability_allowlist.json`.
+
+## The bounce CLI renders through the graph binding, and parity is the gate
+
+`timeline render` no longer calls `playback::ArrangementAudioRenderer::process`
+directly. It builds a device-free graph
+(`build_device_free_timeline_graph()`), prepares a
+`TimelineGraphPlaybackBinding`, and feeds it a silent input block, so the CLI
+reaches the same per-track renderer through the node that already wraps it.
+
+What that buys is a path device chains can be added to. What it costs is a
+standing obligation: the bounce must stay sample-identical to the direct
+renderer. `test/test_timeline_agent.cpp` holds that oracle in its sample-exact
+`WithinAbs` assertions on rendered PCM. **If one of those moves, the render
+path changed audio** — treat it as a regression, not as a threshold to widen.
+
+Only the render call was swapped. The CLI keeps its own transport and block
+loop, so frame counts stay frame-addressed and no tick conversion enters the
+path — which is why the in-memory budget check and the emitted JSON are
+unchanged. Preserve that split if you extend the command; routing the loop
+through the offline renderer instead would make the CLI's frame arithmetic
+tick-derived, and a saturating conversion turns an absurd request into a
+plausible bounce.
