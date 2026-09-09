@@ -452,6 +452,45 @@ The setter trap stores into `_props` BEFORE `_applyProperty` runs, so the displa
 
 Not changed by this fix: `createCol` / `createRow` / `createPanel` C++ paths preserve their explicit direction; typed React props in `pulp-react/prop-applier.ts` route directly through bridge setters and don't touch `style`.
 
+### A restored style value is often the empty string, so honor CSS initial values
+
+`web-compat-document.js`'s `:hover` translator snapshots `el.style[prop]` on
+`mouseenter` and assigns it back on `mouseleave`. For the ordinary case — an
+element that never carried an *inline* value for the hovered property — the
+snapshot is the empty string, so the restore assigns `""`, not a number.
+
+That makes `parseFloat(resolved) || 0` a trap in `_applyPaintProp`: `""`
+parses to `NaN`, `NaN || 0` is `0`, and the widget is left fully transparent
+while its rect, visibility and clip box are untouched — the element looks
+deleted rather than un-styled, which sends you hunting in layout instead of
+paint. When a paint property cannot parse its resolved value, fall back to
+that property's **CSS initial value** (`opacity` → `1`), never to zero.
+
+The same shape applies to any future numeric paint property routed through
+this path. A test for it must NOT pre-assign the inline value, or it
+exercises the parseable branch and passes regardless; assert
+`isNaN(parseFloat(el.style.<prop>))` after the leave as a control.
+
+### Canvas2D `textBaseline` initializes to `alphabetic`, not `top`
+
+The Canvas2D initial value for `textBaseline` is `"alphabetic"`: the `y`
+handed to `fillText` IS the baseline. Browser-authored canvas code that never
+assigns `ctx.textBaseline` — which is most of it — relies on that, so
+defaulting to `top` treats the same `y` as the top of the em box and pushes
+every such caption down by one ascent. The symptom is subtle: text still
+draws, in roughly the right place, just consistently low.
+
+The default lives in three places that must agree, and changing one alone
+produces a shim/native split that only shows up in a render:
+`core/view/js/web-compat-canvas.js` (the shim's own `this.textBaseline`),
+`core/view/src/widget_bridge/canvas2d_api.cpp` (the `canvasSetTextBaseline`
+default argument and its string→int mapping), and
+`core/view/src/canvas_widget.cpp` (the replay's initial `TextBaseline`).
+
+`canvas::TextBaseline` enumerators are **append-only**: the bridge records the
+enum's integer value into the command stream, so reordering it would silently
+reinterpret every previously recorded `top` / `middle` / `bottom`.
+
 ### CSS-shim gap fills — translator vs. bridge contract
 
 Three classes of "silent drop" recur in `web-compat-style-decl.js`. When

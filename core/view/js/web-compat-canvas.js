@@ -59,7 +59,11 @@ function CanvasRenderingContext2D(canvasEl) {
     // canvas* functions. Plain JS fields preserve getter round-trips; the
     // _sync* helpers below push them on demand.
     this.textAlign = "left";
-    this.textBaseline = "top";
+    // Canvas2D's initial textBaseline is "alphabetic" — the y handed to
+    // fillText is the baseline itself. Defaulting to "top" instead moved
+    // every caption that never assigns textBaseline down by one ascent,
+    // so text authored just above a rect landed inside it.
+    this.textBaseline = "alphabetic";
     this.lineCap = "butt";
     this.lineJoin = "miter";
     this.miterLimit = 10;
