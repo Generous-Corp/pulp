@@ -1755,6 +1755,19 @@ pulp seq view diff song.pulpseq.json commands.json \
   [--writer-profile proposal|editor|trusted]
 ```
 
+`validate` compiles the project and reports every compile refusal in a
+`diagnostics` array, exiting non-zero when it emits one. Compiling is the
+validation: a document can satisfy the schema and still describe something the
+compiler will not lower, so a validator that only decodes accepts work that
+cannot be played. Each diagnostic names its refusal with the stable `code`
+enumerator name and names the `item` it refused, as a quoted decimal id or
+`null` where the refusal names no single item. The numeric `code_id` beside it
+is a debugging aid and carries no contract, because the refusal vocabulary is
+appended to. A project that cannot be opened at all is a failure to read rather
+than a refusal, so it reports its `stage` instead of an empty diagnostic list.
+The `pulp_timeline_validate` MCP tool returns the same payload and marks the
+result an error, so the CLI and MCP answers are identical by construction.
+
 `apply` accepts an array of typed command envelopes. It prints the committed
 project and revision as JSON; `--out` also writes the canonical project member
 through a sibling temporary file. Invalid projects, unknown command types,
