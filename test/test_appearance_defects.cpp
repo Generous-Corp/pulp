@@ -115,17 +115,73 @@ TEST_CASE("text painted wider than its box is reported as truncation",
     REQUIRE(f.painted_width > f.box_width);
 }
 
-TEST_CASE("text that fits its box reports no truncation",
-          "[appearance][layout]") {
+TEST_CASE("canvas text placed past its surface edge is reported",
+          "[appearance][canvas]") {
     View root;
     root.set_bounds({0, 0, 400, 200});
-    add_label(root, "roomy", "Hi", {0, 0, 320, 18});
+
+    // The defect an axis caption has: narrower than the surface it is drawn on,
+    // yet anchored so far right that most of it lands outside it. A detector
+    // that only compares widths calls this clean.
+    auto widget = std::make_unique<CanvasWidget>();
+    widget->set_id("graph");
+    auto* raw = widget.get();
+    root.add_child(std::move(widget));
+    raw->set_bounds({0, 0, 400, 200});
+    raw->add_command(font_cmd("Inter", 16));
+    raw->add_command(text_cmd("dBFS (analyzer)", 380, 40, 16));
 
     const auto report = detect_appearance_defects(root);
 
     INFO(report.to_string());
-    REQUIRE(count_kind(report, AppearanceDefectKind::painted_wider_than_box) == 0);
-    REQUIRE(report.coverage.text_runs_measured == 1);  // control: it did look
+    REQUIRE(report.coverage.canvas_text_measured == 1);
+    REQUIRE(count_kind(report, AppearanceDefectKind::painted_wider_than_box) == 1);
+    const auto& f = report.findings.front();
+    REQUIRE(f.a_text == "dBFS (analyzer)");
+    REQUIRE(f.painted_width < f.box_width);  // narrower than the surface
+    REQUIRE(f.overflow_px > 0.0f);           // and still hanging off its edge
+
+    // Control: the same caption anchored inside the surface is not a finding,
+    // so what is reported is the placement and not the text.
+    View clean_root;
+    clean_root.set_bounds({0, 0, 400, 200});
+    auto inside = std::make_unique<CanvasWidget>();
+    inside->set_id("graph");
+    auto* inside_raw = inside.get();
+    clean_root.add_child(std::move(inside));
+    inside_raw->set_bounds({0, 0, 400, 200});
+    inside_raw->add_command(font_cmd("Inter", 16));
+    inside_raw->add_command(text_cmd("dBFS (analyzer)", 20, 40, 16));
+
+    const auto control = detect_appearance_defects(clean_root);
+    INFO(control.to_string());
+    REQUIRE(control.coverage.canvas_text_measured == 1);
+    REQUIRE(control.clean());
+}
+
+TEST_CASE("the positive control turns a clean tree into findings",
+          "[appearance][coverage]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    // Two labels with a small gap: genuinely clean, and close enough that a few
+    // pixels of inflation must make them collide.
+    add_label(root, "left", "Gain", {0, 0, 40, 18});
+    add_label(root, "right", "Mix", {44, 0, 40, 18});
+
+    const auto measured = detect_appearance_defects(root);
+    INFO(measured.to_string());
+    REQUIRE(measured.clean());
+    REQUIRE(measured.coverage.text_runs_measured == 2);
+
+    AppearanceOptions control_options;
+    control_options.control_inflate_ink_px = 8.0f;
+    const auto control = detect_appearance_defects(root, control_options);
+    INFO(control.to_string());
+    REQUIRE(count_kind(control, AppearanceDefectKind::text_overlap) == 1);
+    REQUIRE(names_pair(control, "left", "right"));
+    // The control must not invent coverage it did not already have.
+    REQUIRE(control.coverage.text_runs_measured
+            == measured.coverage.text_runs_measured);
 }
 
 TEST_CASE("a multi-line label is measured rather than skipped",

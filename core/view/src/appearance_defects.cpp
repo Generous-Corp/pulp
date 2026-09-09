@@ -455,8 +455,9 @@ std::string AppearanceFinding::describe() const {
     os << to_string(kind) << ": ";
     if (kind == AppearanceDefectKind::painted_wider_than_box) {
         os << a_id << " \"" << a_text << "\" paints " << painted_width
-           << "px into a " << box_width << "px box (over by "
-           << (painted_width - box_width) << "px) at " << rect_str(a_rect);
+           << "px of ink outside its " << box_width << "px box by "
+           << overflow_px << "px: ink " << rect_str(a_rect) << " vs box "
+           << rect_str(b_rect);
     } else {
         os << a_id << " \"" << a_text << "\" " << rect_str(a_rect)
            << "  x  " << b_id << " \"" << b_text << "\" " << rect_str(b_rect)
@@ -488,11 +489,21 @@ AppearanceReport detect_appearance_defects(const View& root,
     walker.walk(root, {0.0f, 0.0f, 0.0f, 0.0f}, root_abs, false, nullptr,
                 paint_order);
 
-    // Detector 2 — painted wider than its box.
+    // Detector 2 — glyphs painted outside the box that is meant to hold them.
+    //
+    // Comparing widths alone answers a narrower question than the defect: a
+    // run can be narrower than its box and still hang off an edge, which is
+    // what an axis label pushed past the surface it is drawn on looks like.
+    // The property is the ink's extents against the box's, so both the
+    // outgrown-box case and the pushed-off-the-edge case are the same finding.
     for (const auto& run : report.runs) {
-        if (run.from_canvas) continue;
         if (run.box.width <= 0.0f) continue;
-        if (run.ink.width > run.box.width + options.width_tolerance_px) {
+        const float tol = options.width_tolerance_px;
+        const float over_left = run.box.x - run.ink.x;
+        const float over_right =
+            (run.ink.x + run.ink.width) - (run.box.x + run.box.width);
+        const float overflow = std::max(over_left, over_right);
+        if (overflow > tol) {
             AppearanceFinding f;
             f.kind = AppearanceDefectKind::painted_wider_than_box;
             f.a_id = run.node_id;
@@ -501,7 +512,20 @@ AppearanceReport detect_appearance_defects(const View& root,
             f.b_rect = run.box;
             f.painted_width = run.ink.width;
             f.box_width = run.box.width;
+            f.overflow_px = overflow;
             report.findings.push_back(std::move(f));
+        }
+    }
+
+    // The positive control for an empty finding list, applied before the
+    // collision pass so the pair loop is exercised on exactly the runs the
+    // real measurement produced.
+    if (options.control_inflate_ink_px > 0.0f) {
+        const float g = options.control_inflate_ink_px;
+        for (auto& run : report.runs) {
+            run.visible_ink = Rect{run.visible_ink.x - g, run.visible_ink.y - g,
+                                   run.visible_ink.width + 2.0f * g,
+                                   run.visible_ink.height + 2.0f * g};
         }
     }
 

@@ -32,6 +32,10 @@ struct Args {
     int frames = 8;
     bool list_runs = false;
     bool allow_untrustworthy = false;
+    /// Positive control: inflate every run's ink before the collision pass.
+    /// An empty finding list is only evidence of a clean panel if the same
+    /// instrument, on the same tree, can be made to report something.
+    float control_inflate = 0.0f;
     /// Clicks to drive before measuring, in root coordinates. A panel reached
     /// only by navigating to it cannot be audited from the initial state.
     std::vector<pulp::view::Point> clicks;
@@ -48,6 +52,12 @@ void usage() {
         "                     (repeatable; frames are polled between clicks)\n"
         "  --allow-untrustworthy  exit 0 even when coverage is too thin to\n"
         "                     support a clean verdict\n"
+        "  --control-inflate N  positive control: grow every run's ink by N px\n"
+        "                     before the collision pass. On any panel with text\n"
+        "                     this MUST report collisions; if it does not, the\n"
+        "                     instrument never reached the panel and a clean run\n"
+        "                     means nothing. Findings under inflation describe\n"
+        "                     the control, not the panel.\n"
         "\n"
         "exit: 0 clean and trustworthy, 1 defects found, 2 could not run,\n"
         "      3 no defects but coverage too thin for that to mean anything\n";
@@ -75,6 +85,7 @@ bool parse(int argc, char** argv, Args& out) {
             out.clicks.push_back({std::strtof(spec.substr(0, comma).c_str(), nullptr),
                                   std::strtof(spec.substr(comma + 1).c_str(), nullptr)});
         }
+        else if (a == "--control-inflate") { if (!next(out.control_inflate)) return false; }
         else if (a == "--list-runs") out.list_runs = true;
         else if (a == "--allow-untrustworthy") out.allow_untrustworthy = true;
         else if (a == "-h" || a == "--help") return false;
@@ -127,7 +138,13 @@ int main(int argc, char** argv) {
         pump();
     }
 
-    const auto report = pulp::view::detect_appearance_defects(root);
+    pulp::view::AppearanceOptions detect_options;
+    detect_options.control_inflate_ink_px = args.control_inflate;
+    const auto report = pulp::view::detect_appearance_defects(root, detect_options);
+    if (args.control_inflate > 0.0f) {
+        std::cout << "POSITIVE CONTROL: ink inflated by " << args.control_inflate
+                  << "px; collisions below are the control, not the panel\n";
+    }
     std::cout << report.to_string() << "\n";
 
     if (args.list_runs) {
@@ -138,6 +155,18 @@ int main(int argc, char** argv) {
                       << run.ink.width << "," << run.ink.height << ")"
                       << " text=\"" << run.text << "\"\n";
         }
+    }
+
+    // Under the control the meaning of the exit code inverts: finding nothing
+    // is the failure, because it means the instrument cannot see this panel.
+    if (args.control_inflate > 0.0f) {
+        if (report.findings.empty()) {
+            std::cerr << "appearance-audit: CONTROL FAILED — inflating ink "
+                         "produced no collisions, so the detector is not "
+                         "reaching this panel\n";
+            return 4;
+        }
+        return 0;
     }
 
     if (!report.clean()) return 1;

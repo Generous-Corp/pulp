@@ -111,6 +111,10 @@ struct AppearanceFinding {
     Rect a_rect{}, b_rect{}, overlap{};
     float painted_width = 0.0f;
     float box_width = 0.0f;
+    /// How far the ink reaches past the worse of the box's two vertical edges.
+    /// Positive whenever the glyphs are outside the box, whether because they
+    /// are wider than it or because they were placed off one of its sides.
+    float overflow_px = 0.0f;
 
     std::string describe() const;
 };
@@ -140,6 +144,17 @@ struct AppearanceOptions {
     /// screen space, and a run scrolled out of its own clip is not on screen
     /// at all.
     bool compare_across_scroll_frames = false;
+    /// Grow every measured run's ink by this many pixels on each side before
+    /// the collision detectors run.
+    ///
+    /// This is the positive control for an empty finding list. A detector that
+    /// reports nothing has either found a clean panel or failed to reach it,
+    /// and the report reads identically either way. Re-running with a few
+    /// pixels of inflation on a panel with any text density at all MUST
+    /// produce collisions; if it does not, the instrument never saw the text
+    /// and its clean verdict means nothing. Never a measurement — findings
+    /// produced under inflation describe the control, not the panel.
+    float control_inflate_ink_px = 0.0f;
 };
 
 /// Walk `root` (already laid out) and report painted-text defects.
