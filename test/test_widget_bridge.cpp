@@ -7702,3 +7702,68 @@ TEST_CASE("the first geometry read lays out rather than returning 0x0",
     CHECK(w > 0.0);
     CHECK(h > 0.0);
 }
+
+// ── Position writes must reach the next geometry read ───────────────────────
+// Geometry readers lay out only when the tree's layout generation moved. The
+// CSS position offsets feed the Yoga pass, so a write that changes one has to
+// move that generation or the next read answers from the pre-move box.
+TEST_CASE("setLeft/setTop are visible to the next geometry read", "[widget-bridge][layout]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createCol('outer','');"
+                       "setFlex('outer','width',300);"
+                       "setFlex('outer','height',300);"
+                       "createCol('inner','outer');"
+                       "setFlex('inner','width',50);"
+                       "setFlex('inner','height',50);"
+                       "layout();");
+
+    // The read that establishes a completed layout, so the next one is the
+    // one the generation guard could wrongly elide.
+    const auto x0 = engine.evaluate("getLayoutRect('inner').x").getWithDefault<double>(-1.0);
+    REQUIRE(x0 == Catch::Approx(0.0));
+
+    engine.evaluate("setPosition('inner','absolute');"
+                    "setLeft('inner',120);"
+                    "setTop('inner',60);");
+
+    // No explicit layout() call: the read itself must observe the move.
+    CHECK(engine.evaluate("getLayoutRect('inner').x").getWithDefault<double>(-1.0)
+          == Catch::Approx(120.0));
+    CHECK(engine.evaluate("getLayoutRect('inner').y").getWithDefault<double>(-1.0)
+          == Catch::Approx(60.0));
+}
+
+TEST_CASE("re-writing the same position does not force a layout", "[widget-bridge][layout]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createCol('outer','');"
+                       "setFlex('outer','width',300);"
+                       "setFlex('outer','height',300);"
+                       "createCol('inner','outer');"
+                       "setFlex('inner','width',50);"
+                       "setFlex('inner','height',50);"
+                       "setPosition('inner','absolute');"
+                       "setLeft('inner',120);"
+                       "setTop('inner',60);"
+                       "layout();");
+    engine.evaluate("getLayoutRect('inner').x");
+
+    // The design-import replay re-applies captured position metadata on every
+    // commit. Identical values must stay free, or each re-applied binding
+    // costs a whole-tree pass.
+    const auto before = View::layout_pass_count();
+    for (int i = 0; i < 40; ++i) {
+        engine.evaluate("setPosition('inner','absolute');"
+                        "setLeft('inner',120);"
+                        "setTop('inner',60);");
+        engine.evaluate("getLayoutRect('inner').x");
+    }
+    CHECK(View::layout_pass_count() - before == 0);
+}
