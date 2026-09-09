@@ -669,6 +669,128 @@ TEST_CASE("WidgetBridge poll_async_results alone does NOT fire setTimeout (regre
     REQUIRE(engine.evaluate("fired").getWithDefault<int>(-1) == 1);
 }
 
+// A self-rearming requestAnimationFrame — the shape every scripted render loop
+// uses — refills the pending-frame queue from inside the drain that is running
+// it. Both bridge entry points drain that queue, so an unguarded pair runs the
+// same callback twice per host tick and draws the scene twice per display
+// period. These cases pin the drain to once per tick while proving it never
+// reaches zero, in each of the three ways a host can drive the bridge.
+namespace {
+inline int draw_count(ScriptEngine& engine) {
+    return engine.evaluate("draws").getWithDefault<int>(-1);
+}
+
+inline void load_self_rearming_raf(WidgetBridge& bridge) {
+    bridge.load_script(R"(
+        var draws = 0;
+        function render() {
+            draws += 1;
+            window.requestAnimationFrame(render);
+        }
+        window.requestAnimationFrame(render);
+    )");
+}
+}  // namespace
+
+TEST_CASE("WidgetBridge host idle pump runs a self-rearming rAF once per tick",
+          "[view][bridge][frame-pump]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    load_self_rearming_raf(bridge);
+    // Control: the loop must actually be running, otherwise every "once per
+    // tick" assertion below would pass trivially on a dead scene.
+    REQUIRE(draw_count(engine) >= 1);
+
+    // load_script drains directly rather than through a service pass, so the
+    // handshake slot is empty and the first tick may still draw twice. One
+    // warm-up pump settles it; the steady state is the contract.
+    host_idle_pump(bridge);
+
+    for (int tick = 0; tick < 5; ++tick) {
+        const int before = draw_count(engine);
+        host_idle_pump(bridge);
+        const int drawn = draw_count(engine) - before;
+        // Control first: a pump that drains nothing freezes the scene, which is
+        // far worse than draining twice. Fail loudly on zero.
+        REQUIRE(drawn >= 1);
+        REQUIRE(drawn == 1);
+    }
+}
+
+TEST_CASE("WidgetBridge poll_async_results alone keeps a self-rearming rAF running",
+          "[view][bridge][frame-pump]") {
+    // A host that drives only the async-result poll still has to draw. This is
+    // the liveness proof for the guarded drain: with no service pass to set the
+    // handshake, every poll must drain.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    load_self_rearming_raf(bridge);
+    REQUIRE(draw_count(engine) >= 1);
+
+    for (int tick = 0; tick < 5; ++tick) {
+        const int before = draw_count(engine);
+        bridge.poll_async_results();
+        const int drawn = draw_count(engine) - before;
+        REQUIRE(drawn >= 1);
+        REQUIRE(drawn == 1);
+    }
+}
+
+TEST_CASE("WidgetBridge service_frame_callbacks alone keeps a self-rearming rAF running",
+          "[view][bridge][frame-pump]") {
+    // The mirror case: a host that drives only the frame pump.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    load_self_rearming_raf(bridge);
+    REQUIRE(draw_count(engine) >= 1);
+
+    for (int tick = 0; tick < 5; ++tick) {
+        const int before = draw_count(engine);
+        bridge.service_frame_callbacks();
+        const int drawn = draw_count(engine) - before;
+        REQUIRE(drawn >= 1);
+        REQUIRE(drawn == 1);
+    }
+}
+
+TEST_CASE("WidgetBridge frame drain resumes on the poll after a service drain",
+          "[view][bridge][frame-pump]") {
+    // The handshake is a single slot that each poll consumes, so a poll can
+    // skip at most once per service drain. Without that bound a host whose
+    // cadence changes could stop drawing entirely.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    load_self_rearming_raf(bridge);
+    host_idle_pump(bridge);
+
+    bridge.service_frame_callbacks();
+    const int after_service = draw_count(engine);
+
+    // The one permitted skip: this tick's frames were just drawn.
+    bridge.poll_async_results();
+    REQUIRE(draw_count(engine) == after_service);
+
+    // The slot is consumed, so the very next poll must draw again.
+    bridge.poll_async_results();
+    REQUIRE(draw_count(engine) == after_service + 1);
+}
+
 TEST_CASE("WidgetBridge execAsync preserves JSON-heavy results", "[view][bridge][async]") {
     ScriptEngine engine;
     View root;

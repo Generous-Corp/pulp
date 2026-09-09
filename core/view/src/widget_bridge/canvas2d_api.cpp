@@ -910,8 +910,18 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
     register_bridge_function(api, "canvasSetTextBaseline", [&self](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_text_baseline;
-            auto bl = args.get<std::string>(1, "top");
-            cmd.int_val = (bl == "middle") ? 1 : (bl == "bottom") ? 2 : 0;
+            // Canvas2D's initial textBaseline is `alphabetic`, so an absent or
+            // unrecognized value must resolve there, not to `top`. Folding
+            // alphabetic into the `top` code displaced every caption a browser
+            // draws relative to a baseline by one full ascent, pushing labels
+            // authored just above a plot down into it.
+            auto bl = args.get<std::string>(1, "alphabetic");
+            cmd.int_val = (bl == "top")         ? 0
+                        : (bl == "middle")      ? 1
+                        : (bl == "bottom")      ? 2
+                        : (bl == "hanging")     ? 4
+                        : (bl == "ideographic") ? 5
+                                                : 3;  // alphabetic
             c->add_command(cmd);
         }
         return choc::value::Value();
