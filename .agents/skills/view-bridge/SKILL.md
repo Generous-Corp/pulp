@@ -2302,3 +2302,36 @@ for exactly that, and a linker applies no predicate.
 `vst3_adapter.cpp` calls instead of naming `PulpPlugView`. Keep the factory's
 definition in that file: it is compiled per-plugin, so the symbol resolves the
 same way `PulpPlugView`'s constructor always did.
+
+## The standalone harness can press keys, not just move a pointer
+
+`core/format/src/standalone.cpp` arms three harness hooks off `StandaloneConfig`
++ env: `screenshot_path` (`PULP_SCREENSHOT`), the pointer drag
+(`PULP_TEST_POINTER_DRAG`, owned by the mac window host), and the key sequence
+(`test_key_sequence` / `PULP_TEST_KEY_SEQUENCE`). Reach for the key sequence
+whenever a keyboard behaviour needs proving against the shipping build rather
+than against a bridge unit test.
+
+Shape, if you are extending it:
+
+- The spec parser (`detail/standalone_key_sequence.hpp`) and the press/capture
+  frame schedule (`detail/standalone_key_schedule.hpp`) are pure headers with
+  no window and no AppKit, so both are unit-tested directly
+  (`test/test_standalone_key_sequence.cpp`). Only the delivery is
+  platform-specific (`standalone_key_driver_mac.mm`, stub elsewhere).
+- Delivery goes through `WindowHost::native_content_view_handle()` — the public
+  `void*` NSView seam — so the driver lives entirely in `core/format` and needs
+  no edit to `core/view/platform/mac/window_host_mac.mm`. It also needs no
+  `PULP_VIEW_OBJC_SUFFIX` wiring, because `performKeyEquivalent:` / `keyDown:` /
+  `keyUp:` are NSResponder methods available on any `NSView*`, not methods of
+  the per-binary mangled `PulpView_*` class.
+- The driver calls `performKeyEquivalent:` before `keyDown:`, in that order,
+  because that is what `NSWindow.sendEvent:` does. Do not "simplify" it to a
+  bare `keyDown:`: a key fanned out to the script layer from BOTH entry points
+  reads as two presses, and calling only one of them makes that defect
+  invisible to the very harness meant to catch it.
+- The schedule reports `finish` a full slot AFTER the last capture, never in the
+  same frame, so a caller that closes on `finish` cannot close the window while
+  a capture is still reading pixels out of the surface.
+- The key run only closes the window when no `--screenshot` one-shot is armed;
+  otherwise the screenshot owns the exit and closing here would race it.
