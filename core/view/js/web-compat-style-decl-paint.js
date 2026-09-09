@@ -58,18 +58,25 @@ function _resolveGradientStopColors(text) {
 // exported rather than inlined so it can be tested: reading `el.style.boxShadow`
 // back returns whatever string was assigned whether or not it parsed, so a
 // round-trip assertion passes against a shadow that never reached the renderer.
+var _BOX_SHADOW_OFFSETS =
+    "(-?[\\d.]+)px\\s+(-?[\\d.]+)px\\s+([\\d.]+)px(?:\\s+(-?[\\d.]+)px)?";
+// Compiled once. Both are stateless (no /g, so no lastIndex) and therefore safe
+// to share across calls.
+var _BOX_SHADOW_OFFSETS_FIRST_RE =
+    new RegExp("^" + _BOX_SHADOW_OFFSETS + "\\s+(.*)$");
+var _BOX_SHADOW_COLOR_FIRST_RE =
+    new RegExp("^(\\S+)\\s+" + _BOX_SHADOW_OFFSETS + "\\s*$");
+
 function _parseBoxShadowOffsets(text) {
     var work = _resolveGradientStopColors(String(text));
-    var OFFSETS =
-        "(-?[\\d.]+)px\\s+(-?[\\d.]+)px\\s+([\\d.]+)px(?:\\s+(-?[\\d.]+)px)?";
     // Anchored. Unanchored, this matches INSIDE a colour-first shadow: given
     // `#f7f3ff2e 0px 1px 3px 0px` it starts at the offsets and takes the
     // trailing `0px` as the colour, yielding a shadow that parses "successfully"
     // with garbage in it — worse than not matching, because the colour-first
     // branch below never gets a chance to run.
-    var m = work.match(new RegExp("^" + OFFSETS + "\\s+(.*)$"));
+    var m = work.match(_BOX_SHADOW_OFFSETS_FIRST_RE);
     if (m) return m;
-    var first = work.match(new RegExp("^(\\S+)\\s+" + OFFSETS + "\\s*$"));
+    var first = work.match(_BOX_SHADOW_COLOR_FIRST_RE);
     // Re-ordered into the colour-last shape so callers have one layout to read.
     if (first) return [first[0], first[2], first[3], first[4], first[5], first[1]];
     return null;

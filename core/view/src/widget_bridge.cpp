@@ -496,6 +496,10 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // constructor and prototype are in scope.
     eval_or_throw(engine_, "web_compat_canvas_matrix", preludes::web_compat_canvas_matrix);
     eval_or_throw(engine_, "web_compat_canvas_image", preludes::web_compat_canvas_image);
+    // Generated alias-group table read by _applyProperty's write-dedup
+    // guard. Plain data, no dependencies, so it evaluates before the
+    // declaration that consumes it.
+    eval_or_throw(engine_, "web_compat_style_dedup_table", preludes::web_compat_style_dedup_table);
     eval_or_throw(engine_, "web_compat_style_decl", preludes::web_compat_style_decl);
     // Per-domain `_applyProperty` handler modules. The property switch is split
     // into layout / paint / typography / transform / misc handlers;

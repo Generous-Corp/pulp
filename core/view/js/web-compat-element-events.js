@@ -38,6 +38,7 @@ function __forgetWidgetCallbacks__(ids, options) {
         if (preserveDomElementState && element) {
             element._autoEventsRegistered = false;
             element._nativeCreated = false;
+            __invalidateStyleCache__(element);
             __nativeElements__[id] = element;
         } else {
             delete __eventListeners__[id];
