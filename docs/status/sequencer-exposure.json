@@ -1967,7 +1967,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid \u2014 swing, a groove table or a per-step nudge \u2014 without running its own scheduler beside the kernel. The header also exposes the scheduling coordinate itself: coordinate_at(lane, tick) answers which step a lane's walk selects at a grid coordinate and upcoming_coordinate(lane) answers the step it will fire next, so a UI or a test can read the pipeline stage without pushing audio through the player.",
+          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid — swing, a groove table or a per-step nudge — without running its own scheduler beside the kernel. The header also exposes the scheduling coordinate itself: coordinate_at(lane, tick) answers which step a lane's walk selects at a grid coordinate and upcoming_coordinate(lane) answers the step it will fire next, so a UI or a test can read the pipeline stage without pushing audio through the player.",
           "evidence": [
             {
               "kind": "sdk_header",
@@ -2036,7 +2036,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations \u2014 which is every LFO a musician can reach \u2014 no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from. set_lfo_rate_hz() and set_lfo_depth() report whether the value was taken and refuse the rates and depths prepare() refuses, so the config the bank reports stays one prepare() accepts.",
+          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations — which is every LFO a musician can reach — no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from. set_lfo_rate_hz() and set_lfo_depth() report whether the value was taken and refuse the rates and depths prepare() refuses, so the config the bank reports stays one prepare() accepts.",
           "evidence": [
             {
               "kind": "sdk_header",
@@ -3307,6 +3307,128 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "The projection is a runtime read over a document, matching the not_applicable disposition p0-38-agent-view already carries on this surface for AgentView itself. Encoding that read for two tool boundaries does not make it an installed design-time capability."
+        }
+      }
+    },
+    {
+      "id": "offline-validate-compile-diagnostics",
+      "title": "Compile refusals reported as validate diagnostics on the offline CLI and MCP",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "tools/timeline/include/pulp/tools/timeline/agent.hpp",
+        "tools/timeline/src/timeline_agent.cpp",
+        "test/test_cli_timeline.cpp",
+        "test/test_mcp_timeline_tools.cpp",
+        "docs/status/cli-commands.yaml",
+        "docs/reference/cli.md",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "tools/timeline/src/timeline_agent.cpp",
+          "needles": [
+            "compile_error_code_name",
+            "validate_diagnostics_json"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "CompileErrorCode is already an installed public enum, and an SDK consumer reads the CompileError value directly: it holds the enumerator, the item, the limit and the actual, so it needs no string name and no JSON. What this row adds is the encoding of that value for two process boundaries, and that encoder lives in the tools/timeline support library, which cmake --install does not install. Claiming an installed-SDK surface for it would advertise something no consumer of the installed headers can call."
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "docs/status/cli-commands.yaml",
+              "needles": [
+                "report every compile refusal as a diagnostic"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "validate requires one project path",
+                "timeline::validate"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "validate_diagnostics_json",
+                "NestedGainSinkUnsupported"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_cli_timeline.cpp",
+              "needles": [
+                "pulp seq validate reports nested composition refusals and fails closed",
+                "nested-media.json"
+              ]
+            }
+          ],
+          "rationale": "pulp seq validate previously loaded a project, confirmed the registry schema accepted it, and returned ok true unconditionally, so a document the program compiler refuses to lower validated clean. It now compiles the project, which is what validating it means, reports each refusal in the diagnostics array the result has always promised, and exits non-zero when it emits one, because a validator that reports a refusal and then claims success has validated nothing. A refusal names itself with the stable PascalCase enumerator name and names the item it refused as a quoted decimal id, or null where the refusal names no single item; the numeric code_id beside it is a debugging aid that carries no contract, because the refusal vocabulary is appended to. The mapper switch deliberately carries no default, so appending an enumerator is a -Wswitch diagnostic at that switch rather than a silently wrong wire name reaching a caller. Failing to open a project at all stays a read failure that reports its stage rather than an empty diagnostic list, so an unreadable file cannot be read as a project with nothing wrong with it. This closes the CLI gap nested-sequence-gain-composition records, where an author could compose a child fader over a note leaf and discover the refusal only at compile time. That released row's own dispositions are frozen at its merge, so the closure is recorded here rather than by editing it."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_validate",
+                "project.validate"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_validate",
+                "isError"
+              ]
+            },
+            {
+              "kind": "mcp_projection",
+              "path": "tools/timeline/include/pulp/tools/timeline/agent.hpp",
+              "needles": [
+                "reports every compile refusal as a diagnostic"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "make_nested_note_timeline_project_json",
+                "NestedGainSinkUnsupported"
+              ]
+            }
+          ],
+          "rationale": "pulp_timeline_validate is one of the ten generated timeline tools and already routed through the shared pulp::tools::timeline::validate entry point, and timeline_result already marks a non-zero result isError, so the projection reaches MCP with no MCP code change and the two boundaries emit the same payload by construction rather than by review. Inheriting it was an inference from reading a call rather than something any test observed, and the MCP surface is the one Forge consumes, so the refusal is now asserted directly over MCP: the tool names the refusal, names the leaf, and returns an error result rather than a quiet success. This closes the MCP gap nested-sequence-gain-composition records, whose dispositions are frozen at that row's merge and are therefore closed by this row rather than by an edit to it."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Validating a document is an offline read over a project on disk. Product A still has no exact-document timeline session an executor could bind a validation to, so there is no live per-instance control to report a refusal through. The surface is absent rather than refused, and it is absent for the sequencer generally rather than for compile diagnostics specifically.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "Reporting a refusal after the fact is not the same as advertising it in advance. An agent can now ask whether a document compiles and read back which leaf was refused, but no installed agent-capability row still declares what a nested sequence preserves, so an agent composing a pattern cannot discover before authoring that a child fader composes over media and is refused over notes. Owner: NW-D, once the runtime it would advertise is complete across the remaining NW-C slices.",
+          "dependencies": [
+            "nested-sequence-composition-capability-row"
+          ],
+          "owner": "sequencer-control-closure"
         }
       }
     }
