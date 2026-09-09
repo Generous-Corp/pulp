@@ -402,7 +402,7 @@
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
-          "rationale": "The offline MCP tools do not expose AgentView outline, paging, or dirty-set projection.",
+          "rationale": "The offline MCP tools do not expose AgentView outline or paging, and no tool projects AgentView::diff's bounded outline diff. MCP does already ship a dirty-set projection, timeline_dirty_set_json in tools/mcp/timeline_session_store.cpp surfaced by pulp_timeline_diff, but that is the session store's own dirty set rather than AgentView's revision-ranged OutlineDiff, so the gap is the AgentView projection specifically and not dirty-set reporting in general.",
           "dependencies": [
             "offline-agent-view-projection"
           ],
@@ -1811,17 +1811,17 @@
         },
         "offline_timeline_cli": {
           "disposition": "gap",
-          "rationale": "The offline Timeline CLI does not yet issue proposal-safe commands through restricted writer identities.",
+          "rationale": "The offline Timeline CLI issues commands through restricted writer identities via --writer-profile; that closure is carried by the offline-writer-profile-authority row. This row is released, so its disposition is fixed at its own release commit and cannot be re-dispositioned in place.",
           "dependencies": [
-            "P0-40"
+            "offline-writer-profile-authority"
           ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
-          "rationale": "The offline Timeline MCP server does not yet bind sessions to restricted writer masks and quotas.",
+          "rationale": "The offline Timeline MCP server binds sessions to restricted writer masks and quotas via the writer_profile argument; that closure is carried by the offline-writer-profile-authority row. This row is released, so its disposition is fixed at its own release commit and cannot be re-dispositioned in place.",
           "dependencies": [
-            "P0-40"
+            "offline-writer-profile-authority"
           ],
           "owner": "timeline-cli-mcp"
         },
@@ -2612,7 +2612,7 @@
       "id": "midi-expression-playback",
       "title": "MIDI expression and controller playback with nested-lane boundary chase",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "65511aee-f118-40e3-b01a-9e31435ec670",
       "owned_paths": [
         "core/timeline/include/pulp/timeline/midi_lane.hpp",
@@ -2630,6 +2630,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8096,
+        "accepted_head": "2e0f4684780d8cf7b822d0f51ad035a1c1ffc4e7",
+        "merge_sha": "8e20653beffcd9c9b398025392ec723ea54d78a0",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/include/pulp/playback/program.hpp",
@@ -2675,7 +2681,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "ControllerProgramEvent, its total order, and TrackProgram::arrangement_controller_events() are public installed headers. Every event carries its own MIDI wire address plus authored lane and point identity, so a consumer reproduces the authored streams without a side table. This is deliberately public rather than engine-internal so Forge Sequencer and Forge Modular can consume it through their own lane.",
+          "rationale": "ControllerProgramEvent, its total order, and TrackProgram::arrangement_controller_events() are public installed headers. Every event carries its own MIDI wire address plus authored lane and point identity, so a consumer reproduces the authored streams without a side table. This is deliberately public rather than engine-internal so Forge Sequencer and Forge Modular can consume it through their own lane, but only in process: the exposure stops at the program wire. encode_program_wire() refuses any controller-bearing program with ProgramWireErrorCode::ControllerEventsUnsupported because the wire format has no controller section yet, so a consumer that crosses a process or plugin boundary cannot carry these events until that section lands. Read the exposed claim as in-process only.",
           "evidence": [
             {
               "kind": "sdk_header",
@@ -2735,7 +2741,7 @@
       "id": "nested-sequence-gain-composition",
       "title": "Nested SequenceRef gain composition with a documented precedence model",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "f2a1c7d4-6b93-4e08-9a15-3c7e5b21d0af",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -2746,6 +2752,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8104,
+        "accepted_head": "c989173936d548490f71a393423b138d247de385",
+        "merge_sha": "a07941336a80b1c1d7a6e449bdb43291be217c78",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
@@ -2825,6 +2837,476 @@
           "dependencies": [
             "nested-sequence-gain-composition"
           ]
+        }
+      }
+    },
+    {
+      "id": "event-stream-pdc-contract",
+      "title": "Event-stream delay-compensation contract, scheduling shift, and typed latency refusals",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "3e91b7c2-48da-4f16-b5c0-9d2ea6f31c47",
+      "owned_paths": [
+        "core/playback/include/pulp/playback/event_compensation.hpp",
+        "core/playback/include/pulp/playback/note_renderer.hpp",
+        "core/playback/src/note_renderer.cpp",
+        "core/host/include/pulp/host/timeline_graph_binding.hpp",
+        "core/host/src/timeline_graph_binding.cpp",
+        "core/host/src/timeline_graph_binding_candidate.cpp",
+        "core/host/src/timeline_graph_binding_internal.hpp",
+        "core/host/src/timeline_device_resolver.cpp",
+        "test/test_playback_event_pdc.cpp",
+        "test/test_timeline_event_pdc_admission.cpp",
+        "test/cmake/timeline_tests.cmake",
+        "docs/policies/event-stream-pdc.md",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        ".agents/skills/hosting/SKILL.md",
+        "core/host/src/signal_graph_prepared_topology_edit.cpp"
+      ],
+      "release": {
+        "pr": 8114,
+        "accepted_head": "f2570550225beef73c3539b4d759588c886894a4",
+        "merge_sha": "903345ab9f6b68d8815a4bb68dab359c8f8b4ff0",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/event_compensation.hpp",
+          "needles": [
+            "EventCompensationShift",
+            "accumulate_event_chain_shift",
+            "shifted_range_origin",
+            "event_compensation_admits_live_input"
+          ]
+        },
+        {
+          "path": "core/playback/src/note_renderer.cpp",
+          "needles": [
+            "compensated_start",
+            "range_admits_event_compensation"
+          ]
+        },
+        {
+          "path": "core/host/include/pulp/host/timeline_graph_binding.hpp",
+          "needles": [
+            "EventDeviceLatencyUnavailable",
+            "EventDeviceLatencyOutOfRange",
+            "EventChainLiveInputUnsupported",
+            "EventCompensationUnsupported"
+          ]
+        },
+        {
+          "path": "core/host/src/timeline_device_resolver.cpp",
+          "needles": [
+            "resolve_event_device_latency",
+            "event_domain_latency_samples"
+          ]
+        },
+        {
+          "path": "docs/policies/event-stream-pdc.md",
+          "needles": [
+            "RESOLVED for the scheduled event stream",
+            "Deliberate deviation from the design proposal"
+          ]
+        },
+        {
+          "path": "test/test_playback_event_pdc.cpp",
+          "needles": [
+            "a compensated stream is read early by exactly the shift",
+            "a changed shift is held until the transport stops"
+          ]
+        },
+        {
+          "path": "test/test_timeline_event_pdc_admission.cpp",
+          "needles": [
+            "an unanswerable device latency is refused rather than read as zero",
+            "the scheduling shift uses event-domain latency alone"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "EventCompensationShift",
+            "shift_relatch_pending"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "EventCompensationShift, accumulate_event_chain_shift(), shifted_range_origin(), range_admits_event_compensation() and event_compensation_admits_live_input() are public installed playback headers, and ArrangementNoteRenderer::process() takes the shift as a prepared argument. A host outside Pulp can therefore compute and apply the same compensation the engine does, against the same ceiling, without reimplementing the rule.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/event_compensation.hpp",
+              "needles": [
+                "struct EventCompensationShift",
+                "accumulate_event_chain_shift",
+                "shifted_range_origin",
+                "event_compensation_admits_live_input"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/note_renderer.hpp",
+              "needles": [
+                "EventCompensationShift requested_shift",
+                "CompensationUnsupported",
+                "shift_relatch_pending"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/host/include/pulp/host/timeline_graph_binding.hpp",
+              "needles": [
+                "event_compensation_shift_for",
+                "EventDeviceLatencyUnavailable"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_playback_event_pdc.cpp",
+              "needles": [
+                "a shift is applied per transport range, and refuses to read past a loop end"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "No `pulp seq` operation reports or sets a device chain's event latency, and none should until an event-to-event device executes: a CLI reading a shift that is structurally zero would publish a number with no content. Owner: the sequencer control closure lane, gated on event-to-event execution landing first.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema exposes no event-latency or compensation operation, for the same reason as the CLI surface. Owner: the sequencer control closure lane.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "This slice refuses live input into a compensated event chain rather than exposing a monitoring control for it, so there is no behaviour here for a live surface to project. A per-track monitor policy is the prerequisite for any live control, not a projection of what shipped here.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "event-stream-pdc-contract"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises event-chain compensation. Advertising it now would claim an executable event-device chain that does not exist; the capability becomes advertisable when event-to-event execution lands.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        }
+      }
+    },
+    {
+      "id": "offline-writer-profile-authority",
+      "title": "Named writer authority for the offline CLI and MCP boundaries",
+      "classification": "public_sdk",
+      "delivery_state": "released",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp",
+        "tools/timeline/src/writer_profile.cpp",
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/cli/cmd_seq.cpp",
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/tools/schema_mcp_emit.py",
+        "core/timeline/tools/test_schema_mcp_emit.py",
+        "test/test_cli_timeline.cpp",
+        "test/test_mcp_timeline_sessions.cpp",
+        "test/test_timeline_agent.cpp",
+        "tools/mcp/timeline_session_store.cpp",
+        "tools/mcp/timeline_session_store.hpp",
+        "tools/timeline/CMakeLists.txt",
+        "tools/timeline/include/pulp/tools/timeline/agent.hpp",
+        "tools/timeline/src/timeline_agent.cpp",
+        "core/timeline/src/document_session.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "release": {
+        "pr": 8119,
+        "accepted_head": "d02f4018211c1597d93da17fcfe298afd77d9b34",
+        "merge_sha": "fa79fc3d0a3b5b0ce9935782eb78e9960132914b",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp",
+          "needles": [
+            "enum class WriterProfileKind",
+            "selectable_writer_profile_names"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The public tools header installs the named authority enum, the three profile factories, and the by-name selector.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp",
+              "needles": [
+                "enum class WriterProfileKind",
+                "proposal_writer_profile"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "needles": [
+                "selectable_writer_profile_names",
+                "writer_profile_json"
+              ],
+              "path": "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp"
+            },
+            {
+              "kind": "cli_handler",
+              "needles": [
+                "--writer-profile",
+                "seq_writer_profile"
+              ],
+              "path": "tools/cli/cmd_seq.cpp"
+            }
+          ],
+          "rationale": "The CLI admits a document writer under the quota-bounded editor authority by default; a caller selects the narrower proposal authority, or the unquotaed trusted one, by name with --writer-profile, and an unrecognized name is refused rather than silently downgraded. A caller discovers the vocabulary machine-readably by running seq capabilities, which emits every selectable profile and its quotas as JSON. The definition is cited at the header rather than at core/timeline/schema/timeline_cli_verbs.json because that generated manifest enumerates document and command types, not the authority selector that qualifies them; the emitter models per-verb payload fields only, so the selector has no representation there by construction."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "needles": [
+                "writer_profile",
+                "pulp_timeline_command_apply"
+              ],
+              "path": "core/timeline/schema/timeline_mcp_tools.json"
+            },
+            {
+              "kind": "mcp_handler",
+              "needles": [
+                "timeline_writer_profile",
+                "writer_profile_by_name"
+              ],
+              "path": "tools/mcp/mcp_timeline_tools.cpp"
+            }
+          ],
+          "rationale": "The MCP boundary admits a document writer under the non-destructive proposal authority when no selection is present; a caller escapes it in the same slice by passing the writer_profile argument as editor or trusted, and an unrecognized name is refused rather than silently downgraded. The argument is declared in the published tool inputSchema for both pulp_timeline_project_open and pulp_timeline_command_apply, so an MCP client discovers it without reading source."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Writer authority is a property of an offline document boundary, not a live per-instance product control."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "The design-time manifest does not yet publish which writer authority a design-time caller is admitted under.",
+          "dependencies": [
+            "design-time-writer-authority-manifest"
+          ],
+          "owner": "sequencer-control-closure"
+        }
+      }
+    },
+    {
+      "id": "offline-apply-retry-and-staleness",
+      "title": "Retry token and expected revision on offline session applies",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/mcp/timeline_session_store.cpp",
+        "tools/mcp/timeline_session_store.hpp",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/tools/schema_mcp_emit.py",
+        ".agents/skills/timeline/SKILL.md",
+        "test/test_mcp_timeline_sessions.cpp",
+        "core/timeline/tools/test_schema_mcp_emit.py"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/schema/timeline_mcp_tools.json",
+          "needles": [
+            "idempotency_key",
+            "expected_revision"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Both controls are arguments on an offline tool boundary, not a linkable SDK entry point. The session store that owns the retry record is a tools/mcp translation unit with no installed header, and the transaction identity and revision types the controls address are already installed by core/timeline."
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The offline CLI applies commands per invocation and keeps no session, so it has nowhere to record a retry token between calls and no revision a caller could have read from a prior call. Reaching parity means giving the CLI a durable session first; until then the surface is absent rather than refused.",
+          "dependencies": [
+            "offline-cli-durable-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "idempotency_key",
+                "expected_revision"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline_apply_options",
+                "require session_id"
+              ]
+            }
+          ],
+          "rationale": "pulp_timeline_command_apply takes both controls as optional arguments declared in the published inputSchema, so an MCP client discovers them without reading source. idempotency_key names a write: a retry under the same token re-submits the identities the first attempt allocated, so a still-cached result returns verbatim and one that has aged out is refused as already_applied_result_expired rather than applied twice. The recorded request bytes are compared here because DocumentSession compares command identities but not payloads, so a token reused for different commands is refused as a collision instead of being answered with the earlier result. expected_revision is forwarded as the transaction precondition, so an interleaved write is reported as stale_revision. Both are session state and are refused, not ignored, on the stateless path."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Retry deduplication and optimistic concurrency are properties of an offline document editing boundary, not a live per-instance product control."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "The design-time manifest does not yet publish that an apply can be retried under a token or gated on a revision, so a design-time caller cannot discover the controls from the manifest alone.",
+          "dependencies": [
+            "design-time-writer-authority-manifest"
+          ],
+          "owner": "sequencer-control-closure"
+        }
+      }
+    },
+    {
+      "id": "offline-agent-view-projection",
+      "title": "Bounded AgentView outline, region paging and diff projection on the offline CLI and MCP",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "tools/timeline/include/pulp/tools/timeline/agent_view_projection.hpp",
+        "tools/timeline/src/timeline_agent_view.cpp",
+        "tools/timeline/CMakeLists.txt",
+        "tools/cli/cmd_seq.cpp",
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/mcp/mcp_tools.hpp",
+        "tools/mcp/pulp_mcp.cpp",
+        "tools/mcp/timeline_session_store.cpp",
+        "tools/mcp/timeline_session_store.hpp",
+        "test/test_cli_timeline.cpp",
+        "test/test_mcp_timeline_sessions.cpp",
+        "docs/status/cli-commands.yaml",
+        "docs/reference/cli.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "tools/timeline/include/pulp/tools/timeline/agent_view_projection.hpp",
+          "needles": [
+            "agent_view_outline_json",
+            "agent_view_region_page_json",
+            "agent_view_outline_diff_json"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "AgentView itself is already an installed public projection, exposed by p0-38-agent-view. What this row adds is its JSON encoding for two offline tool boundaries, and that encoder lives in the tools/timeline support library, which is not installed by cmake --install. An SDK consumer reads the Outline, RegionPage and OutlineDiff values directly and needs no encoder; only a process boundary does."
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "docs/status/cli-commands.yaml",
+              "needles": [
+                "outline, region, or diff"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "view region requires --sequence",
+                "unknown view verb"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/timeline/src/timeline_agent_view.cpp",
+              "needles": [
+                "view_outline",
+                "view_region",
+                "view_diff"
+              ]
+            }
+          ],
+          "rationale": "pulp seq view outline, region and diff project AgentView over a project path without a session, which is the only shape a one-shot CLI can offer. A region read is a bounded window: it requires --sequence, --start and --end, takes an optional --limit and --after cursor, and selects the timebase with --absolute, so paging is the caller's own vocabulary rather than a whole-sequence dump. A malformed window is refused as a usage error with exit code 2 rather than rounded into a window the projection would answer. view diff applies its commands to an in-memory copy and leaves the project byte-for-byte as it found it, and it carries the same authority selection apply does, so --writer-profile proposal is refused a removal by name instead of reporting a change it would not admit."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "pulp_timeline_view_outline",
+                "timeline_view_mcp_tools_json_fragment"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_tools.hpp",
+              "needles": [
+                "handle_timeline_view_outline",
+                "handle_timeline_view_region",
+                "handle_timeline_view_diff"
+              ]
+            },
+            {
+              "kind": "mcp_projection",
+              "path": "tools/timeline/include/pulp/tools/timeline/agent_view_projection.hpp",
+              "needles": [
+                "agent_view_outline_json",
+                "agent_view_region_page_json",
+                "agent_view_outline_diff_json"
+              ]
+            }
+          ],
+          "rationale": "pulp_timeline_view_outline, _view_region and _view_diff read a live session by session_id, which is the session-oriented input every other MCP timeline tool takes and the correct live read for a design-time caller. Their descriptors are published in tools/list, so a client discovers the tools and their window arguments without reading source. The three tools are declared as a hand-written fragment alongside the generated catalog rather than inside it, because that catalog is capped at exactly ten tools by a CMake FATAL_ERROR and a matching static_assert; control_mcp_tools_json_fragment is the existing precedent for publishing beside it. Because the descriptors are hand-written their well-formedness is asserted rather than assumed, and the catalog is read back as parsed JSON so the assertion measures the tool's presence and not the renderer's whitespace. Both boundaries call one encoder, so the CLI and MCP payloads are identical by construction rather than by review, and every payload carries the version the AgentView value itself reports so a consumer can pin the shape."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "This row supplies the projection encoder that p0-38-agent-view's live gap names as one of its two dependencies, but not the other: Product A still has no exact-document session an executor could bind an AgentView read to, so there is no live per-instance control to expose the projection through. The surface is absent rather than refused.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The projection is a runtime read over a document, matching the not_applicable disposition p0-38-agent-view already carries on this surface for AgentView itself. Encoding that read for two tool boundaries does not make it an installed design-time capability."
         }
       }
     }

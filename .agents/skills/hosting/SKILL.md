@@ -335,6 +335,33 @@ Two things that bite when baking analog VCF nodes:
 
 ## Signal graph gotchas
 
+### A hosted device's latency is discovered once, on the control thread
+
+`PluginSlot::latency_query()` exists because `latency_samples()` returns an
+`int` either way and so cannot separate "this device reports zero" from "this
+backend has no way to ask". Ask the query first and fail closed on
+`Unsupported` / `QueryFailed`; coercing an unanswered query to zero is what a
+later alignment proof would then certify. The hosted LV2 backend really does
+return `Unsupported`, so this is not hypothetical.
+
+Read it on the CONTROL THREAD, at admission, exactly once, and cache it into the
+prepared snapshot. The metadata accessors reach into the live plugin object
+(VST3 `getLatencySamples()` and friends) and are unsafe from the audio thread —
+`process()` must consume a prepared number, never a live slot. Range-check the
+result against `CustomNodeType::kMaxLatencySamples`; do not declare a second
+ceiling beside it.
+
+Pulp as a host offers a hosted CLAP plugin only the GUI extension, so
+`clap_host_latency::changed` is unreachable and a device that varies its latency
+mid-stream is **not observable** until the next control-thread relatch. Two
+consequences: a mid-stream change cannot be refused (there is nothing to refuse
+on), and any test of change-handling needs a synthetic latency source rather
+than a real backend.
+
+The timeline binding builds on this to schedule compensated event streams; the
+contract, including why an event-to-audio device contributes nothing to the
+shift, is `docs/policies/event-stream-pdc.md`.
+
 ### Timeline-owned built-in devices stay document-authoritative
 
 `PluginFormat::BuiltIn` is the host-only identity for pathless Pulp devices. Its

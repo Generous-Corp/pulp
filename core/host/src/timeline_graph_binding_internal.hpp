@@ -1,7 +1,9 @@
 #pragma once
 
+#include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/timeline_graph_binding.hpp>
+#include <pulp/playback/event_compensation.hpp>
 #include <pulp/playback/realtime_stretch_renderer.hpp>
 
 #include "timeline_automation_delivery.hpp"
@@ -214,6 +216,11 @@ struct detail::TimelineGraphBindingState {
     std::vector<std::shared_ptr<TimelineGraphBoundTrack>> tracks;
     std::vector<TimelineGraphBoundDevice> owned_devices;
     std::vector<std::shared_ptr<TimelineGraphAutomationTrack>> automation_tracks;
+    /// One prepared event-scheduling shift per entry of `tracks`, in the same
+    /// order. Held here rather than in the shared bound track so a republished
+    /// generation carries its own value: the shift is a host fact, and the
+    /// program it schedules against must never become a function of the graph.
+    std::vector<playback::EventCompensationShift> track_event_shifts;
     TimelineGraphBindingConfig config;
     std::vector<timeline::ItemId> prepared_track_ids;
     std::vector<timeline::ItemId> post_device_routed_track_ids;
@@ -258,7 +265,8 @@ TimelineGraphAdmission resolve_timeline_device_route(
     const TimelineGraphBindingState* previous, TimelineDeviceSlotFactory factory,
     std::vector<TimelineDeviceGraphRoute>& generated_routes,
     std::vector<TimelineAutomationRouteMetadata>& metadata, std::vector<NodeId>& claimed_nodes,
-    std::vector<TimelineGraphBoundDevice>& owned_devices);
+    std::vector<TimelineGraphBoundDevice>& owned_devices,
+    playback::EventCompensationShift& event_shift);
 
 const timeline::Track* timeline_project_track_for(const playback::PlaybackProgram& program,
                                                   timeline::ItemId track_id,
@@ -272,6 +280,37 @@ remove_stale_timeline_devices(const std::unique_ptr<SignalGraph::PreparedTopolog
 TimelineGraphAdmission
 validate_owned_timeline_devices(const playback::PlaybackProgram& program,
                                 std::span<const TimelineGraphBoundDevice> devices) noexcept;
+
+/// The graph's own per-node latency ceiling, reused rather than redeclared so
+/// the event lane and the audio lane cannot disagree about what is expressible.
+/// At 48 kHz it is roughly 1.365 s, which bounds how far ahead an event chain
+/// may be read.
+inline constexpr int kEventDeviceLatencyCeilingSamples = CustomNodeType::kMaxLatencySamples;
+
+/// Reads one admitted device's latency on the control thread and range-checks
+/// it. Never called from process(): reaching into a live PluginSlot for
+/// metadata is control-thread-only work, and the value is cached into the
+/// prepared binding exactly once.
+TimelineGraphAdmission resolve_event_device_latency(const PluginSlot& slot,
+                                                    timeline::ItemId placement_id, NodeId node,
+                                                    int& latency_samples) noexcept;
+
+/// The event-domain latency one admitted placement contributes to its track's
+/// scheduling shift.
+///
+/// A device that converts events to audio contributes zero: the graph's own
+/// delay compensation already aligns its audio output against every sibling
+/// branch, so adding the same number to the event window would compensate it
+/// twice and pull the stream early. Only a device that delays the EVENTS it
+/// passes on moves the window.
+int event_domain_latency_samples(const timeline::DevicePlacement& placement,
+                                 int reported_latency_samples) noexcept;
+
+/// Decides whether a prepared shift may coexist with the track's declared
+/// providers, and turns an accumulation failure into a typed admission.
+TimelineGraphAdmission admit_event_compensation(const playback::EventCompensationResult& resolved,
+                                                playback::ProviderSelectorProgram provider,
+                                                timeline::ItemId track_id) noexcept;
 
 TimelineGraphAdmission reconcile_detached_post_device_bypasses(
     const std::unique_ptr<SignalGraph::PreparedTopologyEdit>& edit,

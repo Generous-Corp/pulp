@@ -1,5 +1,7 @@
 #include "timeline_session_store.hpp"
 
+#include <pulp/timeline_agent_view/agent_view.hpp>
+
 #include <pulp/timeline/document_session.hpp>
 #include <pulp/timeline/schema_json.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -126,18 +128,65 @@ std::string timeline_dirty_set_json(const pulp::timeline::DirtySet& dirty) {
 
 namespace {
 
+/// Retry-window depth for one session.
+///
+/// Bounds two tables that must agree: the DocumentSession result cache, which
+/// pins a project snapshot per entry, and the key-to-identity map below that
+/// makes those entries reachable at all. Sizing them apart would let a key
+/// survive in one table after the other dropped it, which answers a retry with
+/// a collision or a fresh apply instead of the original result.
+///
+/// Kept small deliberately. Each cached result pins a predecessor and a
+/// successor snapshot, so this trades a bounded amount of retained memory for a
+/// retry window, and a window is all a retry needs.
+constexpr std::size_t kSessionRetryWindow = 8;
+
+/// The identities one keyed apply allocated.
+///
+/// A retry has to reproduce them exactly. `equivalent()` compares the
+/// transaction id, the expected revision, and every command id, so reusing only
+/// the transaction id would reach the cache and then be rejected as a collision
+/// against the caller's own earlier attempt.
+/// Everything a keyed apply has to reproduce in order to be the same
+/// transaction again.
+///
+/// The identities and the revision it was applied against are what
+/// DocumentSession compares; the command bytes and the response are what it
+/// cannot see. It compares command identities but not command payloads, so a
+/// token reused with different commands would otherwise be judged a match and
+/// answered with the wrong result.
+struct IdempotencyRecord {
+    pulp::timeline::TransactionId transaction;
+    std::vector<pulp::timeline::CommandId> command_ids;
+    pulp::timeline::DocumentRevision expected_revision;
+    std::string commands;
+    std::string response;
+};
+
 struct TimelineSession {
     TimelineSession(std::unique_ptr<pulp::timeline::DocumentSession> document_value,
-                    pulp::timeline::WriterToken writer_value, std::size_t admission_charge_value)
+                    pulp::timeline::WriterToken writer_value,
+                    pulp::tools::timeline::WriterProfile profile_value,
+                    std::size_t admission_charge_value)
         : document(std::move(document_value)), writer(std::move(writer_value)),
-          admission_charge(admission_charge_value) {}
+          profile(profile_value), admission_charge(admission_charge_value) {}
 
     std::unique_ptr<pulp::timeline::DocumentSession> document;
     pulp::timeline::WriterToken writer;
+    /// The authority this session's writer was admitted under. Retained so
+    /// every receipt names it rather than leaving callers to assume it.
+    pulp::tools::timeline::WriterProfile profile;
     pulp::timeline::DirtySet latest_dirty;
     pulp::timeline::DocumentRevision latest_before;
     pulp::timeline::DocumentRevision latest_after;
     std::size_t admission_charge = 0;
+    /// Retry token to the identities its first successful apply allocated.
+    /// Populated only on success: a refused apply left no result to replay, so
+    /// its key stays free for a genuine retry.
+    std::unordered_map<std::string, IdempotencyRecord> idempotency;
+    /// Insertion order for the map above, evicted oldest-first to match how
+    /// DocumentSession evicts its result cache.
+    std::deque<std::string> idempotency_order;
 };
 
 } // namespace
@@ -149,7 +198,9 @@ struct TimelineSessionStore::Impl {
             history_reservation_ = limits.max_admission_charge_bytes / limits.max_sessions / 2;
     }
 
-    std::optional<std::string> open(std::string_view canonical_project, std::string& error) {
+    std::optional<std::string> open(std::string_view canonical_project,
+                                    const pulp::tools::timeline::WriterProfile& profile,
+                                    std::string& error) {
         auto registry = pulp::timeline::make_builtin_timeline_registry();
         if (!registry) {
             error = "could not construct the built-in schema registry";
@@ -172,7 +223,7 @@ struct TimelineSessionStore::Impl {
             return std::nullopt;
         }
         pulp::timeline::SessionLimits session_limits;
-        session_limits.max_cached_results = 0;
+        session_limits.max_cached_results = kSessionRetryWindow;
         session_limits.journal.max_retained_bytes =
             history_reservation_ / 3 * 2 + history_reservation_ % 3 * 2 / 3;
         session_limits.undo.max_retained_bytes =
@@ -183,7 +234,7 @@ struct TimelineSessionStore::Impl {
             error = "could not create a document session";
             return std::nullopt;
         }
-        auto writer = document.value()->register_writer();
+        auto writer = document.value()->register_writer(profile.mask);
         if (!writer) {
             error = "could not register a document writer";
             return std::nullopt;
@@ -191,8 +242,7 @@ struct TimelineSessionStore::Impl {
 
         std::lock_guard lock(mutex_);
         const auto id = "timeline-" + process_nonce_ + "-" + std::to_string(next_id_);
-        const auto output = "{\"ok\":true,\"project\":" + serialized.value().json +
-                            ",\"session_id\":" + pulp::timeline::quote_json_string(id) + "}";
+        const auto output = timeline_session_open_response(serialized.value().json, id, profile);
         if (json_tool_payload_size(output) > limits.max_output_bytes) {
             error = "opened project exceeds the timeline session output limit";
             return std::nullopt;
@@ -202,13 +252,77 @@ struct TimelineSessionStore::Impl {
             evict(order_.front());
         ++next_id_;
         order_.push_back(id);
-        sessions_.emplace(
-            id, TimelineSession{std::move(document).value(), std::move(writer).value(), charge});
+        sessions_.emplace(id, TimelineSession{std::move(document).value(),
+                                              std::move(writer).value(), profile, charge});
         admission_charge_ += charge;
         return id;
     }
 
-    pulp::tools::timeline::OperationResult apply(std::string_view id, std::string_view commands) {
+    /// Returns the identities a previous successful apply under this key
+    /// allocated, or nullptr for an unkeyed or first-seen call.
+    static const IdempotencyRecord* find_idempotency(const TimelineSession& session,
+                                                     const std::string& key) {
+        if (key.empty())
+            return nullptr;
+        const auto found = session.idempotency.find(key);
+        return found == session.idempotency.end() ? nullptr : &found->second;
+    }
+
+    /// Records the identities a key committed under, evicting oldest-first so
+    /// the table stays bounded by the same retry window as the result cache.
+    static void remember_idempotency(TimelineSession& session, const std::string& key,
+                                     IdempotencyRecord record) {
+        if (key.empty())
+            return;
+        while (session.idempotency_order.size() >= kSessionRetryWindow) {
+            session.idempotency.erase(session.idempotency_order.front());
+            session.idempotency_order.pop_front();
+        }
+        session.idempotency_order.push_back(key);
+        session.idempotency.emplace(key, std::move(record));
+    }
+
+    /// Refuses a retry token whose request no longer matches the one it names.
+    ///
+    /// DocumentSession compares command identities but not command payloads, so
+    /// a token reused for different work would be judged equivalent and
+    /// answered with the earlier result. The token's owner is this layer, so
+    /// the refusal has to be issued here.
+    static pulp::tools::timeline::OperationResult
+    retry_token_collision(const TimelineSession& session, const IdempotencyRecord& record) {
+        pulp::timeline::TransactionError error;
+        error.code = pulp::timeline::ConflictCode::TransactionIdCollision;
+        error.transaction = record.transaction;
+        error.expected_revision = record.expected_revision;
+        error.current_revision = session.document->revision();
+        return transaction_failure(error, {});
+    }
+
+    /// Re-submits a transaction that already committed under this token.
+    ///
+    /// The commands are deliberately not re-evaluated: they were written
+    /// against the revision this transaction was applied to, and the document
+    /// has usually moved on, so reducing them again would refuse a write that
+    /// in fact landed. DocumentSession is the only thing that can tell a still
+    /// cached result from one that has aged out, so the submit runs for its
+    /// verdict alone and the recorded response is what a hit returns.
+    pulp::tools::timeline::OperationResult replay_apply(TimelineSession& session,
+                                                        const IdempotencyRecord& record,
+                                                        std::vector<pulp::timeline::Command> decoded) {
+        pulp::timeline::Transaction transaction;
+        transaction.id = record.transaction;
+        transaction.expected_revision = record.expected_revision;
+        transaction.commands.reserve(decoded.size());
+        for (std::size_t i = 0; i < decoded.size() && i < record.command_ids.size(); ++i)
+            transaction.commands.push_back({record.command_ids[i], std::move(decoded[i])});
+        auto committed = session.document->submit(session.writer, std::move(transaction));
+        if (!committed)
+            return transaction_failure(committed.error(), {});
+        return {0, record.response};
+    }
+
+    pulp::tools::timeline::OperationResult apply(std::string_view id, std::string_view commands,
+                                                 const TimelineApplyOptions& options) {
         std::lock_guard lock(mutex_);
         auto* session = find(id);
         if (session == nullptr)
@@ -221,23 +335,61 @@ struct TimelineSessionStore::Impl {
             return session_failure("timeline persistence error " +
                                        std::to_string(static_cast<unsigned>(decoded.error().code)),
                                    2, decoded.error().path);
+        // A keyed retry has to arrive at commit carrying the identities its
+        // first attempt carried, or it is a different transaction and the
+        // result cache cannot recognize it.
+        const auto* replay = find_idempotency(*session, options.idempotency_key);
+        if (replay != nullptr) {
+            const bool same_request =
+                replay->commands == commands &&
+                (!options.expected_revision ||
+                 options.expected_revision.value() == replay->expected_revision);
+            if (!same_request)
+                return retry_token_collision(*session, *replay);
+            return replay_apply(*session, *replay, std::move(decoded).value());
+        }
+        IdempotencyRecord allocated;
+        allocated.transaction = session->writer.allocate_transaction_id();
+        allocated.command_ids.reserve(decoded.value().size());
+        for (std::size_t i = 0; i < decoded.value().size(); ++i)
+            allocated.command_ids.push_back(session->writer.allocate_command_id());
+        const IdempotencyRecord& identities = allocated;
+
         pulp::timeline::Transaction transaction;
-        transaction.id = session->writer.allocate_transaction_id();
-        transaction.expected_revision = session->document->revision();
+        transaction.id = identities.transaction;
+        // Unset means the caller is not claiming to have read anything, so the
+        // current revision is used and the staleness check cannot fire. A
+        // caller that does supply one gets refused when the document moved.
+        transaction.expected_revision =
+            options.expected_revision.value_or(session->document->revision());
+        allocated.expected_revision = transaction.expected_revision;
         transaction.commands.reserve(decoded.value().size());
-        for (auto& command : decoded.value())
+        for (std::size_t i = 0; i < decoded.value().size(); ++i)
             transaction.commands.push_back(
-                {session->writer.allocate_command_id(), std::move(command)});
+                {identities.command_ids[i], std::move(decoded.value()[i])});
+        // submit() consumes the transaction, so the authority each command
+        // requires is captured while it is still readable.
+        const auto authorities = pulp::tools::timeline::capture_command_authorities(transaction);
         auto preview =
             pulp::timeline::reduce_transaction(*session->document->snapshot(), transaction);
         if (!preview)
-            return transaction_failure(preview.error());
+            return transaction_failure(preview.error(), authorities);
         auto prepared = prepare_candidate(id, *session, preview.value().project,
                                           preview.value().dirty, registry.value());
         if (!prepared)
             return std::move(prepared).error();
         auto committed = session->document->submit(session->writer, std::move(transaction));
-        return finish_commit(id, *session, std::move(committed), std::move(prepared).value());
+        auto result = finish_commit(id, *session, std::move(committed),
+                                    std::move(prepared).value(), authorities);
+        // Only a committed apply is worth remembering: a refusal changed
+        // nothing, so replaying its token should re-attempt rather than hand
+        // back a refusal the caller may since have fixed.
+        if (result.exit_code == 0) {
+            allocated.commands = std::string(commands);
+            allocated.response = result.json;
+            remember_idempotency(*session, options.idempotency_key, std::move(allocated));
+        }
+        return result;
     }
 
     pulp::tools::timeline::OperationResult diff(std::string_view id) {
@@ -246,6 +398,81 @@ struct TimelineSessionStore::Impl {
         if (session == nullptr)
             return session_failure("unknown or expired timeline session");
         auto json = status_json(id, *session);
+        if (json_tool_payload_size(json) > limits.max_output_bytes)
+            return session_failure("timeline session output byte budget exceeded");
+        return {0, std::move(json)};
+    }
+
+    pulp::tools::timeline::OperationResult view_outline(std::string_view id) {
+        std::lock_guard lock(mutex_);
+        auto* session = find(id);
+        if (session == nullptr)
+            return session_failure("unknown or expired timeline session");
+        const auto current = session->document->current();
+        const auto revision = current.revision;
+        auto view = pulp::timeline_agent_view::AgentView::create(current);
+        if (!view)
+            return {1, pulp::tools::timeline::agent_view_error_json("view", view.error())};
+        auto outline = view.value().outline(revision);
+        if (!outline)
+            return {1, pulp::tools::timeline::agent_view_error_json("outline", outline.error())};
+        auto json = pulp::tools::timeline::agent_view_outline_json(outline.value());
+        if (json_tool_payload_size(json) > limits.max_output_bytes)
+            return session_failure("timeline session output byte budget exceeded");
+        return {0, std::move(json)};
+    }
+
+    pulp::tools::timeline::OperationResult
+    view_region(std::string_view id, const pulp::tools::timeline::RegionViewOptions& options) {
+        std::lock_guard lock(mutex_);
+        auto* session = find(id);
+        if (session == nullptr)
+            return session_failure("unknown or expired timeline session");
+        const auto current = session->document->current();
+        pulp::timeline_agent_view::RegionRequest request;
+        request.expected_revision = current.revision;
+        request.sequence_id = pulp::timeline::ItemId{options.sequence_id};
+        request.anchor = options.absolute ? pulp::timeline::ClipTimeAnchor::Absolute
+                                          : pulp::timeline::ClipTimeAnchor::Musical;
+        request.start = options.start;
+        request.end = options.end;
+        request.limit = options.limit;
+        if (!options.after.empty()) {
+            auto cursor = pulp::tools::timeline::parse_region_cursor_token(options.after);
+            if (!cursor)
+                return {2, "{\"error\":{\"message\":\"after is not a continuation token from a "
+                           "prior page\",\"stage\":\"region\"},\"ok\":false}"};
+            request.after = *cursor;
+        }
+        auto view = pulp::timeline_agent_view::AgentView::create(current);
+        if (!view)
+            return {1, pulp::tools::timeline::agent_view_error_json("view", view.error())};
+        auto page = view.value().region(request);
+        if (!page)
+            return {1, pulp::tools::timeline::agent_view_error_json("region", page.error())};
+        auto json = pulp::tools::timeline::agent_view_region_page_json(page.value());
+        if (json_tool_payload_size(json) > limits.max_output_bytes)
+            return session_failure("timeline session output byte budget exceeded");
+        return {0, std::move(json)};
+    }
+
+    pulp::tools::timeline::OperationResult view_diff(std::string_view id) {
+        std::lock_guard lock(mutex_);
+        auto* session = find(id);
+        if (session == nullptr)
+            return session_failure("unknown or expired timeline session");
+        if (session->latest_after.value == 0)
+            return session_failure("session has applied no transaction to diff");
+        const auto current = session->document->current();
+        auto view = pulp::timeline_agent_view::AgentView::create(current);
+        if (!view)
+            return {1, pulp::tools::timeline::agent_view_error_json("view", view.error())};
+        const pulp::timeline_agent_view::DirtyRevisionRange revisions{session->latest_before,
+                                                                     session->latest_after};
+        auto diff = view.value().diff(current.revision, revisions, session->latest_dirty);
+        if (!diff)
+            return {1, pulp::tools::timeline::agent_view_error_json("diff", diff.error())};
+        auto json = pulp::tools::timeline::agent_view_outline_diff_json(diff.value());
         if (json_tool_payload_size(json) > limits.max_output_bytes)
             return session_failure("timeline session output byte budget exceeded");
         return {0, std::move(json)};
@@ -261,14 +488,16 @@ struct TimelineSessionStore::Impl {
             return session_failure("could not construct the built-in schema registry");
         auto preview =
             pulp::timeline::detail::DocumentSessionPreviewAccess::undo(*session->document);
+        // Undo carries no caller commands, so there is no required authority to
+        // name; the empty list is stated rather than inherited from a default.
         if (!preview)
-            return transaction_failure(preview.error());
+            return transaction_failure(preview.error(), {});
         auto prepared = prepare_candidate(id, *session, preview.value().project,
                                           preview.value().dirty, registry.value());
         if (!prepared)
             return std::move(prepared).error();
         return finish_commit(id, *session, session->document->undo(session->writer),
-                             std::move(prepared).value());
+                             std::move(prepared).value(), {});
     }
 
     pulp::tools::timeline::OperationResult redo(std::string_view id) {
@@ -281,14 +510,16 @@ struct TimelineSessionStore::Impl {
             return session_failure("could not construct the built-in schema registry");
         auto preview =
             pulp::timeline::detail::DocumentSessionPreviewAccess::redo(*session->document);
+        // Redo carries no caller commands, so there is no required authority to
+        // name; the empty list is stated rather than inherited from a default.
         if (!preview)
-            return transaction_failure(preview.error());
+            return transaction_failure(preview.error(), {});
         auto prepared = prepare_candidate(id, *session, preview.value().project,
                                           preview.value().dirty, registry.value());
         if (!prepared)
             return std::move(prepared).error();
         return finish_commit(id, *session, session->document->redo(session->writer),
-                             std::move(prepared).value());
+                             std::move(prepared).value(), {});
     }
 
     std::size_t admission_charge() const {
@@ -327,38 +558,34 @@ struct TimelineSessionStore::Impl {
     }
 
     static pulp::tools::timeline::OperationResult
-    transaction_failure(const pulp::timeline::TransactionError& error) {
-        std::string_view code = "transaction_conflict";
-        std::string_view message = "timeline transaction conflict";
-        if (error.code == pulp::timeline::ConflictCode::NothingToUndo) {
-            code = "nothing_to_undo";
-            message = "nothing to undo";
-        } else if (error.code == pulp::timeline::ConflictCode::NothingToRedo) {
-            code = "nothing_to_redo";
-            message = "nothing to redo";
-        }
-        return {1, "{\"error\":{\"conflict_code\":" + pulp::timeline::quote_json_string(code) +
-                       ",\"message\":" + pulp::timeline::quote_json_string(message) +
-                       ",\"numeric_code\":" + std::to_string(static_cast<unsigned>(error.code)) +
-                       ",\"stage\":\"session\"},\"ok\":false}"};
+    transaction_failure(
+        const pulp::timeline::TransactionError& error,
+        const std::vector<pulp::tools::timeline::CommandAuthorityRecord>& authorities) {
+        return {1, pulp::tools::timeline::transaction_refusal_json(error, "session", authorities)};
     }
 
     static std::string status_json(std::string_view id, pulp::timeline::DocumentRevision before,
                                    pulp::timeline::DocumentRevision after,
                                    const pulp::timeline::DirtySet& dirty, bool can_undo,
-                                   bool can_redo) {
+                                   bool can_redo,
+                                   pulp::tools::timeline::WriterProfileKind profile) {
         return "{\"after_revision\":\"" + std::to_string(after.value) +
                "\",\"before_revision\":\"" + std::to_string(before.value) +
                "\",\"can_redo\":" + std::string(can_redo ? "true" : "false") +
                ",\"can_undo\":" + std::string(can_undo ? "true" : "false") +
                ",\"dirty\":" + timeline_dirty_set_json(dirty) + ",\"ok\":true,\"revision\":\"" +
                std::to_string(after.value) +
-               "\",\"session_id\":" + pulp::timeline::quote_json_string(id) + "}";
+               "\",\"session_id\":" + pulp::timeline::quote_json_string(id) +
+               ",\"writer_profile\":" +
+               pulp::timeline::quote_json_string(
+                   pulp::tools::timeline::writer_profile_name(profile)) +
+               "}";
     }
 
     static std::string status_json(std::string_view id, const TimelineSession& session) {
         return status_json(id, session.latest_before, session.latest_after, session.latest_dirty,
-                           session.document->can_undo(), session.document->can_redo());
+                           session.document->can_undo(), session.document->can_redo(),
+                           session.profile.kind);
     }
 
     std::size_t session_charge(std::size_t project_json_bytes) const noexcept {
@@ -404,7 +631,7 @@ struct TimelineSessionStore::Impl {
         if (before.value == std::numeric_limits<std::uint64_t>::max())
             return pulp::runtime::Err(session_failure("timeline session revision space exhausted"));
         const pulp::timeline::DocumentRevision after{before.value + 1};
-        auto output = status_json(id, before, after, dirty, false, false);
+        auto output = status_json(id, before, after, dirty, false, false, session.profile.kind);
         output.insert(output.size() - 1, ",\"project\":" + project_json);
         const auto wire_size_bound = json_tool_payload_size(output);
         if (wire_size_bound > limits.max_output_bytes)
@@ -418,9 +645,10 @@ struct TimelineSessionStore::Impl {
         std::string_view id, TimelineSession& session,
         pulp::runtime::Result<pulp::timeline::CommitResult, pulp::timeline::TransactionError>
             committed,
-        PreparedCandidate prepared) {
+        PreparedCandidate prepared,
+        const std::vector<pulp::tools::timeline::CommandAuthorityRecord>& authorities) {
         if (!committed)
-            return transaction_failure(committed.error());
+            return transaction_failure(committed.error(), authorities);
         for (const auto& victim : prepared.evictions)
             evict(victim);
         admission_charge_ -= session.admission_charge;
@@ -470,18 +698,37 @@ TimelineSessionStore::TimelineSessionStore(TimelineSessionStoreLimits limits)
 
 TimelineSessionStore::~TimelineSessionStore() = default;
 
-std::optional<std::string> TimelineSessionStore::open(std::string_view canonical_project,
-                                                      std::string& error) {
-    return impl_->open(canonical_project, error);
+std::optional<std::string>
+TimelineSessionStore::open(std::string_view canonical_project,
+                           const pulp::tools::timeline::WriterProfile& profile,
+                           std::string& error) {
+    return impl_->open(canonical_project, profile, error);
 }
 
-pulp::tools::timeline::OperationResult TimelineSessionStore::apply(std::string_view session_id,
-                                                                   std::string_view commands) {
-    return impl_->apply(session_id, commands);
+pulp::tools::timeline::OperationResult
+TimelineSessionStore::apply(std::string_view session_id, std::string_view commands,
+                            const TimelineApplyOptions& options) {
+    return impl_->apply(session_id, commands, options);
 }
 
 pulp::tools::timeline::OperationResult TimelineSessionStore::diff(std::string_view session_id) {
     return impl_->diff(session_id);
+}
+
+pulp::tools::timeline::OperationResult
+TimelineSessionStore::view_outline(std::string_view session_id) {
+    return impl_->view_outline(session_id);
+}
+
+pulp::tools::timeline::OperationResult
+TimelineSessionStore::view_region(std::string_view session_id,
+                                  const pulp::tools::timeline::RegionViewOptions& options) {
+    return impl_->view_region(session_id, options);
+}
+
+pulp::tools::timeline::OperationResult
+TimelineSessionStore::view_diff(std::string_view session_id) {
+    return impl_->view_diff(session_id);
 }
 
 pulp::tools::timeline::OperationResult TimelineSessionStore::undo(std::string_view session_id) {
@@ -500,18 +747,48 @@ void TimelineSessionStore::set_max_output_bytes_for_testing(std::size_t maximum)
     impl_->set_max_output_bytes(maximum);
 }
 
-std::optional<std::string> open_timeline_session(std::string_view canonical_project,
-                                                 std::string& error) {
-    return timeline_sessions().open(canonical_project, error);
+std::string timeline_session_open_response(std::string_view canonical_project,
+                                           std::string_view session_id,
+                                           const pulp::tools::timeline::WriterProfile& profile) {
+    return "{\"capabilities\":" + pulp::tools::timeline::writer_capability_json(profile.mask) +
+           ",\"ok\":true,\"project\":" + std::string(canonical_project) +
+           ",\"session_id\":" + pulp::timeline::quote_json_string(session_id) +
+           ",\"writer_profile\":" +
+           pulp::timeline::quote_json_string(
+               pulp::tools::timeline::writer_profile_name(profile.kind)) +
+           "}";
 }
 
-pulp::tools::timeline::OperationResult apply_timeline_session(std::string_view session_id,
-                                                              std::string_view commands) {
-    return timeline_sessions().apply(session_id, commands);
+std::optional<std::string> open_timeline_session(
+    std::string_view canonical_project, const pulp::tools::timeline::WriterProfile& profile,
+    std::string& error) {
+    return timeline_sessions().open(canonical_project, profile, error);
+}
+
+pulp::tools::timeline::OperationResult
+apply_timeline_session(std::string_view session_id, std::string_view commands,
+                       const TimelineApplyOptions& options) {
+    return timeline_sessions().apply(session_id, commands, options);
 }
 
 pulp::tools::timeline::OperationResult diff_timeline_session(std::string_view session_id) {
     return timeline_sessions().diff(session_id);
+}
+
+pulp::tools::timeline::OperationResult
+view_outline_timeline_session(std::string_view session_id) {
+    return timeline_sessions().view_outline(session_id);
+}
+
+pulp::tools::timeline::OperationResult
+view_region_timeline_session(std::string_view session_id,
+                             const pulp::tools::timeline::RegionViewOptions& options) {
+    return timeline_sessions().view_region(session_id, options);
+}
+
+pulp::tools::timeline::OperationResult
+view_diff_timeline_session(std::string_view session_id) {
+    return timeline_sessions().view_diff(session_id);
 }
 
 pulp::tools::timeline::OperationResult undo_timeline_session(std::string_view session_id) {

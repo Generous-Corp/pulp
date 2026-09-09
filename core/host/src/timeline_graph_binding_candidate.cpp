@@ -13,6 +13,20 @@
 namespace pulp::host {
 using namespace detail::timeline_graph_binding;
 
+playback::EventCompensationShift
+TimelineGraphPlaybackBinding::event_compensation_shift_for(
+    timeline::ItemId track_id) const noexcept {
+    auto state = state_.read();
+    if (!state)
+        return {};
+    for (std::size_t index = 0; index < state->tracks.size(); ++index) {
+        if (state->tracks[index]->id == track_id)
+            return index < state->track_event_shifts.size() ? state->track_event_shifts[index]
+                                                            : playback::EventCompensationShift{};
+    }
+    return {};
+}
+
 NodeId TimelineGraphPlaybackBinding::device_node_for(timeline::ItemId placement_id) const noexcept {
     auto state = state_.read();
     if (!state)
@@ -207,6 +221,7 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
     next->prepared_max_block_size = static_cast<std::uint32_t>(maximum_block_size);
     next->automation_claim_owner = automation_claim_owner_;
     next->tracks.reserve(ordered.size());
+    next->track_event_shifts.reserve(ordered.size());
     next->automation_tracks.reserve(ordered.size());
     next->prepared_track_ids.reserve(ordered.size());
     next->post_device_routed_track_ids.reserve(ordered.size());
@@ -328,10 +343,11 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
             }
         }
 
+        playback::EventCompensationShift event_shift;
         if (const auto resolved = resolve_timeline_device_route(
                 program, route, track, edit, previous.get(), timeline_device_factory_,
                 generated_device_routes[route_index], route_metadata[route_index],
-                claimed_device_nodes, next->owned_devices);
+                claimed_device_nodes, next->owned_devices, event_shift);
             !resolved)
             return resolved;
 
@@ -353,6 +369,7 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
             !reconciled)
             return reconciled;
         next->tracks.push_back(std::move(track));
+        next->track_event_shifts.push_back(event_shift);
         next->automation_tracks.push_back(std::move(automation).value());
         next->prepared_track_ids.push_back(route.track_id);
         if (route.post_device_audio_source != 0)
