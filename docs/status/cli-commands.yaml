@@ -2085,6 +2085,16 @@ commands:
             required: true
           - name: --out
             kind: option
+          - name: --writer-profile
+            kind: option
+            description: "proposal, editor (default), or trusted; an unknown name is a usage error"
+      - name: capabilities
+        summary: Report the command classes and intents each named writer profile admits
+        args:
+          - name: --writer-profile
+            kind: option
+            required: false
+            description: "proposal, editor, or trusted; all three are reported when omitted"
       - name: export
         summary: Export a canonical project into a new SMF directory or standard .dawproject ZIP
         args:
@@ -2119,6 +2129,41 @@ commands:
             kind: option
             required: true
             description: New artifact directory; existing paths are never overwritten
+      - name: view
+        summary: Project a document as a bounded, versioned agent view without writing to it
+        args:
+          - name: verb
+            kind: positional
+            required: true
+            description: "outline, region, or diff"
+          - name: project
+            kind: positional
+            required: true
+          - name: commands
+            kind: positional
+            required: false
+            description: Command-envelope array; required by the diff verb only
+          - name: --sequence
+            kind: option
+            description: "region: identifier of the sequence to page through"
+          - name: --start
+            kind: option
+            description: "region: inclusive window start, in the selected timebase"
+          - name: --end
+            kind: option
+            description: "region: exclusive window end, in the selected timebase"
+          - name: --limit
+            kind: option
+            description: "region: maximum clips per page; clamped by the view's own limits"
+          - name: --absolute
+            kind: flag
+            description: "region: read the absolute timebase instead of the musical one"
+          - name: --after
+            kind: option
+            description: "region: continuation token from a prior page's next field"
+          - name: --writer-profile
+            kind: option
+            description: "diff: proposal, editor (default), or trusted; the diff carries the same authority apply does"
     docs: reference/cli.md#seq
 
   - name: render

@@ -1,4 +1,5 @@
 #include <pulp/tools/timeline/agent.hpp>
+#include <pulp/tools/timeline/writer_profile.hpp>
 
 #include "timeline_agent_internal.hpp"
 
@@ -92,7 +93,8 @@ OperationResult project_open(const ProjectSource& project) {
     return {0, "{\"ok\":true,\"project\":" + serialized.value().json + "}"};
 }
 
-OperationResult command_apply(const ProjectSource& project, std::string_view commands) {
+OperationResult command_apply(const ProjectSource& project, std::string_view commands,
+                              const WriterProfile& profile) {
     auto registry = pulp::timeline::make_builtin_timeline_registry();
     if (!registry)
         return failure("registry", "could not construct the built-in schema registry");
@@ -105,7 +107,7 @@ OperationResult command_apply(const ProjectSource& project, std::string_view com
     auto session = pulp::timeline::DocumentSession::create(std::move(loaded).value().value);
     if (!session)
         return failure("apply", "could not create a document session");
-    auto writer = session.value()->register_writer();
+    auto writer = session.value()->register_writer(profile.mask);
     if (!writer)
         return failure("apply", "could not register a document writer");
     pulp::timeline::Transaction transaction;
@@ -114,20 +116,18 @@ OperationResult command_apply(const ProjectSource& project, std::string_view com
     transaction.commands.reserve(decoded.value().size());
     for (auto& command : decoded.value())
         transaction.commands.push_back({writer.value().allocate_command_id(), std::move(command)});
+    const auto authorities = capture_command_authorities(transaction);
     auto committed = session.value()->submit(writer.value(), std::move(transaction));
-    if (!committed) {
-        const auto& error = committed.error();
-        return failure("apply",
-                       "timeline transaction conflict " +
-                           std::to_string(static_cast<unsigned>(error.code)),
-                       error.item.valid() ? std::to_string(error.item.value) : std::string{});
-    }
+    if (!committed)
+        return {1, transaction_refusal_json(committed.error(), "apply", authorities)};
     auto serialized =
         pulp::timeline::serialize_project(*committed.value().snapshot, registry.value());
     if (!serialized)
         return failure("apply", persistence_message(serialized.error()), serialized.error().path);
     return {0, "{\"ok\":true,\"project\":" + serialized.value().json + ",\"revision\":\"" +
-                   std::to_string(committed.value().revision.value) + "\"}"};
+                   std::to_string(committed.value().revision.value) +
+                   "\",\"writer_profile\":" +
+                   pulp::timeline::quote_json_string(writer_profile_name(profile.kind)) + "}"};
 }
 
 OperationResult validate(const ProjectSource& project) {
@@ -201,8 +201,9 @@ OperationResult project_open(std::string_view project) {
     return project_open(ProjectSource::auto_detect(project));
 }
 
-OperationResult command_apply(std::string_view project, std::string_view commands) {
-    return command_apply(ProjectSource::auto_detect(project), commands);
+OperationResult command_apply(std::string_view project, std::string_view commands,
+                              const WriterProfile& profile) {
+    return command_apply(ProjectSource::auto_detect(project), commands, profile);
 }
 
 OperationResult validate(std::string_view project) {

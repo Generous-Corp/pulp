@@ -216,6 +216,32 @@ all) and the `actions/secrets` probe. See
 release-publishing credentials"*, and verify any such test FAILS with the
 scoping removed before trusting it.
 
+### `confirm_failure.sh` cannot reach a shell-out CLI test on its own
+
+The CLI test binaries exec the built CLI rather than linking it:
+`pulp-test-cli-timeline`, `pulp-test-cli-bake` and `pulp-test-cli-swap-pack` are
+each compiled with `PULP_CLI_BIN="$<TARGET_FILE:pulp-cli>"` and link only
+libraries, never the command sources. `cmd_*.cpp` files reach the test through
+`pulp-cli` (output name `pulp-cpp`), a second executable.
+
+`tools/scripts/confirm_failure.sh` guards its verdict by fingerprinting the
+binary named in `--test` and refusing to rule if that binary is unchanged after
+the break — the stale-artifact trap the script exists to catch. For a shell-out
+test the fingerprint is of the harness, not of the subject, so a genuine break in
+a `cmd_*.cpp` leaves it byte-identical and the script exits 2 INCONCLUSIVE. That
+is the guard working correctly on the wrong artifact, not a coverage gap in the
+test, and rerunning it will not change the answer.
+
+Until the script grows a way to name the subject binary, verify a CLI behaviour
+change by applying the same guard to `pulp-cpp`: delete the command's object,
+rebuild `pulp-cli` and the test target through `tools/ci/governed-build.sh`,
+confirm a compile line for your source appears in the build log and that the
+`pulp-cpp` hash moved, then run the test. Repeat after `git checkout` of the
+file; a restored build that hashes byte-identical to the baseline is the proof
+that the source was the only variable. Do not substitute `cp`/`.bak` for the
+`git checkout` — that is the same-second mtime hazard the script was written to
+remove.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source
@@ -581,6 +607,39 @@ automatically; baselines should use the form natural to each side
 When promoting an entry off the `cli_only` list, add the matching
 `pulp_<command>` tool to `tools/mcp/pulp_mcp.cpp` and the parity check
 will auto-detect the new coverage; remove the baseline entry in the same PR.
+
+### Pairing a CLI verb with a timeline MCP tool
+
+A read-only CLI verb that also wants an MCP peer in the timeline family hits
+three things that are invisible from the CLI side.
+
+**The generated timeline catalog is hard-capped at exactly ten operations.**
+`tools/mcp/CMakeLists.txt` raises `FATAL_ERROR` unless
+`timeline_mcp_tools.json` defines ten tools, checks each one's name against a
+fixed ordered list, and `mcp_timeline_tools.cpp` carries a matching
+`static_assert(bindings.size() == kTimelineMcpToolNames.size())`. Adding an
+eleventh entry there fails the configure, not the build. An additional timeline
+tool therefore ships as a hand-written descriptor fragment plus its own binding
+array, concatenated into `tools_list_json()`; `control_mcp_tools_json_fragment()`
+is the existing shape to copy. The cap is deliberate — the ten generated
+operations are a frozen contract — so raise it only by changing that contract,
+never to make room for a new tool.
+
+**The published catalog mixes two renderings, so a substring needle asserts
+provenance rather than presence.** Generated descriptors come out
+pretty-printed (`"name" : "pulp_timeline_command_apply"`) while a hand-written
+fragment stays compact (`"name":"pulp_timeline_view_outline"`), and
+`tools_list_json()` concatenates both. A needle for one spelling silently
+measures which side a tool was authored on. Parse the catalog and walk
+`tools[].name` instead, and include a name that must be absent so the walk
+itself can fail.
+
+**The server binary and the MCP test target are separate targets.** Building
+`pulp-test-mcp-timeline-tools` does not relink `pulp-mcp`, so an end-to-end
+`tools/list` probe can read a stale server and report a correctly registered
+tool as missing. Rebuild `pulp-mcp` before believing an absence, and pair the
+probe with a tool that must be present — that control is what distinguishes a
+stale binary from a real registration gap.
 
 ### Inspector MCP boundary
 

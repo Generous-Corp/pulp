@@ -5,11 +5,13 @@ target_sources(pulp-tool-timeline PRIVATE
     src/bounded_zip_archive.cpp
     src/dawproject_media_packager.cpp
     src/timeline_agent.cpp
+    src/timeline_agent_view.cpp
     src/timeline_interchange.cpp
     src/timeline_output.cpp
     src/timeline_playback.cpp
     src/timeline_project_loader.cpp
-    src/timeline_render.cpp)
+    src/timeline_render.cpp
+    src/writer_profile.cpp)
 
 target_include_directories(pulp-tool-timeline
     PUBLIC
@@ -20,6 +22,9 @@ target_include_directories(pulp-tool-timeline
 )
 
 target_link_libraries(pulp-tool-timeline
+    PUBLIC
+        # A public header projects AgentView, so consumers compile against it.
+        pulp::timeline-agent-view
     PRIVATE
         pulp::playback
         pulp::project-package

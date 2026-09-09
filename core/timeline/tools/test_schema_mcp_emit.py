@@ -151,6 +151,91 @@ def main() -> int:
             {"required": ["session_id"], "not": {"required": ["project"]}},
         ],
     )
+    writer_profile_tools = [
+        name
+        for name in ["pulp_timeline_project_open", "pulp_timeline_command_apply"]
+        if "writer_profile" in _tool(document, name)["inputSchema"]["properties"]
+    ]
+    check(
+        "the writer-authority argument is declared on both writer-registering tools",
+        writer_profile_tools
+        == ["pulp_timeline_project_open", "pulp_timeline_command_apply"],
+    )
+    check(
+        "the writer-authority argument is an open string, not a duplicated enum",
+        all(
+            _tool(document, name)["inputSchema"]["properties"]["writer_profile"].get("type")
+            == "string"
+            and "enum"
+            not in _tool(document, name)["inputSchema"]["properties"]["writer_profile"]
+            for name in writer_profile_tools
+        ),
+    )
+    check(
+        "the writer-authority argument stays optional so the safe default applies",
+        all(
+            "writer_profile" not in _tool(document, name)["inputSchema"]["required"]
+            for name in writer_profile_tools
+        ),
+    )
+    apply_properties = command_apply["inputSchema"]["properties"]
+    check(
+        "the retry token and the read revision are declared on session applies",
+        "idempotency_key" in apply_properties and "expected_revision" in apply_properties,
+    )
+    check(
+        "the retry token is an open string, because the caller owns its shape",
+        apply_properties["idempotency_key"].get("type") == "string"
+        and apply_properties["idempotency_key"].get("minLength") == 1
+        and "enum" not in apply_properties["idempotency_key"],
+    )
+    check(
+        "the read revision is a non-negative integer, matching the document counter",
+        apply_properties["expected_revision"].get("type") == "integer"
+        and apply_properties["expected_revision"].get("minimum") == 0,
+    )
+    check(
+        "both retry controls stay optional so an unkeyed apply is still the default",
+        "idempotency_key" not in command_apply["inputSchema"]["required"]
+        and "expected_revision" not in command_apply["inputSchema"]["required"],
+    )
+    check(
+        "operations that hold no session record do not accept the retry controls",
+        all(
+            "idempotency_key" not in _tool(document, name)["inputSchema"]["properties"]
+            and "expected_revision"
+            not in _tool(document, name)["inputSchema"]["properties"]
+            for name in [
+                "pulp_timeline_project_open",
+                "pulp_timeline_diff",
+                "pulp_timeline_undo",
+                "pulp_timeline_redo",
+                "pulp_timeline_validate",
+                "pulp_timeline_explain",
+                "pulp_timeline_render",
+                "pulp_timeline_export",
+                "pulp_timeline_import",
+            ]
+        ),
+    )
+
+    check(
+        "operations that register no writer do not accept a writer authority",
+        all(
+            "writer_profile" not in _tool(document, name)["inputSchema"]["properties"]
+            for name in [
+                "pulp_timeline_diff",
+                "pulp_timeline_undo",
+                "pulp_timeline_redo",
+                "pulp_timeline_validate",
+                "pulp_timeline_explain",
+                "pulp_timeline_render",
+                "pulp_timeline_export",
+                "pulp_timeline_import",
+            ]
+        ),
+    )
+
     check(
         "iteration operations require an open session",
         all(

@@ -462,6 +462,8 @@ std::string pulp_mcp::server::tools_list_json() {
         out += pulp_mcp::kTimelineMcpTools[i];
     }
     out += ",";
+    out += pulp_mcp::timeline_view_mcp_tools_json_fragment();
+    out += ",";
 #endif
     const auto control_tools = pulp_mcp::control_mcp_tools_json_fragment();
     if (!control_tools.empty()) {
