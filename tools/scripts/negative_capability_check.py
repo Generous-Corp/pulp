@@ -10,7 +10,9 @@ adding one cost a written reason and an owner rather than nothing.
 The check reads the refusal-shaped members of `CompileErrorCode`, finds every
 site that raises one, decides whether the refused construct is reachable from
 the timeline authoring surface, and requires an allowlist entry for each
-authorable refusal. It does not forbid negative capabilities; it forbids
+authorable refusal. Naming a code is not raising it: a field's declared default
+and a `case` label both mention a code that some other site already produced,
+so neither counts as a site. It does not forbid negative capabilities; it forbids
 undocumented ones, and it fails on an allowlist entry whose raise site is gone
 so the written reasons cannot outlive the code.
 
@@ -77,6 +79,11 @@ RAISE_RE = re.compile(r"\bCompileErrorCode::([A-Za-z_]\w*)")
 # A field whose declared default happens to name a code declares nothing about
 # where that code is raised.
 FIELD_DEFAULT_RE = re.compile(r"^\s*CompileErrorCode\s+\w+\s*=\s*CompileErrorCode::")
+# A `case` label selects on a code the compiler already produced elsewhere, so
+# a table that maps every member to its wire name would otherwise read as a
+# raise of all of them. Only the label text is dropped, never the whole line, so
+# a genuine raise sharing the line with a label is still found.
+CASE_LABEL_RE = re.compile(r"\bcase\s+(?:[A-Za-z_]\w*::)*CompileErrorCode::[A-Za-z_]\w*\s*:(?!:)")
 
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//[^\n]*")
@@ -124,6 +131,11 @@ def strip_comments(text: str) -> str:
         return "".join("\n" if character == "\n" else " " for character in match.group(0))
 
     return LINE_COMMENT_RE.sub(blank, BLOCK_COMMENT_RE.sub(blank, STRING_LITERAL_RE.sub(blank, text)))
+
+
+def blank_case_labels(text: str) -> str:
+    """Blank out `case CompileErrorCode::X:` labels, preserving line count."""
+    return CASE_LABEL_RE.sub(lambda match: " " * len(match.group(0)), text)
 
 
 def source_files(root: Path) -> list[Path]:
@@ -218,7 +230,7 @@ def raise_sites(root: Path, refusals: set[str], symbols: set[str]) -> list[dict[
         text = path.read_text(encoding="utf-8", errors="replace")
         if "CompileErrorCode::" not in text:
             continue
-        lines = strip_comments(text).splitlines()
+        lines = blank_case_labels(strip_comments(text)).splitlines()
         for index, line in enumerate(lines):
             if FIELD_DEFAULT_RE.match(line):
                 continue
@@ -445,6 +457,57 @@ def run_selftest() -> int:
             print("selftest rejected a refusal that reads nothing authorable")
             return 1
         synthetic.unlink()
+
+        mapping = root / "core/playback/src/selftest_mapping.cpp"
+
+        # A table mapping every member to its wire name raises none of them.
+        mapping.write_text(
+            "#include <pulp/playback/program_compiler.hpp>\n"
+            "namespace pulp::playback {\n"
+            "const char* name(const timeline::Clip& clip, CompileErrorCode code) {\n"
+            "    (void)clip.playback_properties();\n"
+            "    switch (code) {\n"
+            "    case CompileErrorCode::TrimmedGrooveUnsupported:\n"
+            "        return \"TrimmedGrooveUnsupported\";\n"
+            "    case CompileErrorCode::NestedMixerPanUnsupported:\n"
+            "        return \"NestedMixerPanUnsupported\";\n"
+            "    default:\n"
+            "        return \"\";\n"
+            "    }\n"
+            "}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        if any("selftest_mapping.cpp" in error for error in verify(root)):
+            print("selftest read a case label as a raise")
+            return 1
+
+        # Dropping the label must not take a raise sharing its line with it.
+        mapping.write_text(
+            "#include <pulp/playback/program_compiler.hpp>\n"
+            "namespace pulp::playback {\n"
+            "CompileError refuse(const timeline::Clip& clip, CompileErrorCode code) {\n"
+            "    switch (code) {\n"
+            "    case CompileErrorCode::TrimmedGrooveUnsupported:"
+            " return {CompileErrorCode::NestedMixerPanUnsupported, clip.id(), 0};\n"
+            "    default:\n"
+            "        return {};\n"
+            "    }\n"
+            "}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        reported = [error for error in verify(root) if "selftest_mapping.cpp" in error]
+        if not any("NestedMixerPanUnsupported" in error for error in reported):
+            print("selftest lost a raise sharing a line with a case label")
+            return 1
+        if any("TrimmedGrooveUnsupported" in error for error in reported):
+            print("selftest read the label on that line as a raise")
+            return 1
+        mapping.unlink()
+        if verify(root):
+            print("selftest rejected the fixture after the mapping cases")
+            return 1
 
         # A refusal-shaped member added to the enum must be picked up by name.
         header = root / COMPILE_ERROR_HEADER

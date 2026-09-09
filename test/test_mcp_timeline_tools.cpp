@@ -150,6 +150,36 @@ make_nested_timeline_project_json(const std::filesystem::path& source) {
     return require_timeline_result(serialize_project(project, registry)).json;
 }
 
+// A nested project whose child track carries a non-unity fader over a note
+// leaf. Gain composes by multiplying into the flattened leaf's own clip gain,
+// which note events do not carry, so lowering this shape is refused. It exists
+// to prove the refusal reaches the MCP surface, not only the CLI one.
+std::string make_nested_note_timeline_project_json() {
+    using namespace pulp::timeline;
+    using pulp::timebase::kTicksPerQuarter;
+    auto child_clip = require_timeline_result(
+        Clip::create({12}, {0}, {kTicksPerQuarter},
+                     require_timeline_result(
+                         MidiContent::create({NoteEvent{{13}, {0}, {240}, 40'000, 64, 0}}))));
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "child";
+    child_input.clips = {child_clip};
+    child_input.mixer = TrackMixer{0.5f, 0.0f};
+    auto child_track = require_timeline_result(Track::create(std::move(child_input)));
+    auto child = require_timeline_result(Sequence::create(
+        {10}, "child", pulp::timebase::TickDuration{kTicksPerQuarter}, {child_track}));
+    auto root_clip = require_timeline_result(
+        Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}));
+    auto root_track = require_timeline_result(Track::create({3}, "root", {root_clip}));
+    auto root = require_timeline_result(
+        Sequence::create({2}, "root", std::nullopt, {root_track}));
+    auto project = require_timeline_result(
+        Project::create(ProjectInput{{1}, "nested notes", 100, {2}, {}, {root, child}}));
+    auto registry = require_timeline_result(make_builtin_timeline_registry());
+    return require_timeline_result(serialize_project(project, registry)).json;
+}
+
 TEST_CASE("timeline asset discovery budgets non-intersecting nested probes",
           "[mcp][tools][timeline]") {
     using namespace pulp::timeline;
@@ -254,6 +284,19 @@ TEST_CASE("timeline MCP operations edit and render inline projects", "[mcp][tool
 
     const auto validated = handle_timeline_validate(project_only);
     require_contains(validated, R"JSON("diagnostics":[])JSON");
+    // A project that lowers reports an empty list and is not an error result.
+    REQUIRE(validated.find(R"JSON("isError":true)JSON") == std::string::npos);
+
+    // The same projection the CLI emits, over MCP: a compile refusal names
+    // itself with the stable enumerator name and names the leaf it refused, and
+    // the tool result is marked an error rather than a quiet success.
+    const auto refused = handle_timeline_validate(
+        "{\"project\":" +
+        pulp::timeline::quote_json_string(make_nested_note_timeline_project_json()) + "}");
+    require_contains(refused, R"JSON("code":"NestedGainSinkUnsupported")JSON");
+    require_contains(refused, R"JSON("item":"12")JSON");
+    require_contains(refused, R"JSON("ok":false)JSON");
+    require_contains(refused, R"JSON("isError":true)JSON");
 
     const auto explained =
         handle_timeline_explain("{\"project\":" + project_argument + ",\"sample_rate\":44100}");

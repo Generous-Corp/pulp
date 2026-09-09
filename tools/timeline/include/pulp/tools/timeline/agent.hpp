@@ -68,7 +68,10 @@ OperationResult project_open(const ProjectSource& project);
 /// overload that omits it.
 OperationResult command_apply(const ProjectSource& project, std::string_view commands,
                               const WriterProfile& profile);
-OperationResult validate(const ProjectSource& project);
+/// Compiles the project and reports every compile refusal as a diagnostic.
+/// Exits non-zero when it emits one: a refusal is a validation result, not an
+/// internal error, but it is still a failure to validate.
+OperationResult validate(const ProjectSource& project, std::uint32_t sample_rate = 48'000);
 OperationResult explain(const ProjectSource& project, std::uint32_t sample_rate = 48'000);
 OperationResult render(const ProjectSource& project, const std::filesystem::path& output,
                        std::uint32_t sample_rate = 48'000);
@@ -103,7 +106,7 @@ OperationResult import_project(const std::filesystem::path& input, std::string_v
 OperationResult project_open(std::string_view project);
 OperationResult command_apply(std::string_view project, std::string_view commands,
                               const WriterProfile& profile);
-OperationResult validate(std::string_view project);
+OperationResult validate(std::string_view project, std::uint32_t sample_rate = 48'000);
 OperationResult explain(std::string_view project, std::uint32_t sample_rate = 48'000);
 OperationResult render(std::string_view project, const std::filesystem::path& output,
                        std::uint32_t sample_rate = 48'000);

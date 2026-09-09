@@ -455,3 +455,42 @@ TEST_CASE("CSS hover: _parseCssText kebab-case → camelCase", "[issue-1323][css
         "})()").getWithDefault<std::string_view>(""));
     REQUIRE(key == "backgroundColor");
 }
+
+// A `:hover` rule on an element that carries no inline `opacity` is the
+// ordinary case, and it is the one that broke: `mouseenter` snapshots
+// `el.style.opacity` as the empty string, so `mouseleave` restores by
+// assigning `""`. CSS defines opacity's initial value as 1, so the widget
+// has to paint fully again. Coercing an unparseable value to 0 instead
+// leaves the element invisible while its rect, visibility and clip box stay
+// untouched — which is why hovering a settings row made it disappear rather
+// than looking like a style reset.
+TEST_CASE("CSS hover: opacity with no inline value restores to 1 on leave",
+          "[css-hover][opacity]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __fadeRow = document.createElement('div');
+        __fadeRow.className = 'fade-row';
+        document.body.appendChild(__fadeRow);
+
+        var __fadeStyle = document.createElement('style');
+        __fadeStyle.textContent = '.fade-row:hover { opacity: 0.5; }';
+        document.body.appendChild(__fadeStyle);
+    )JS");
+
+    const auto id = std::string(env.engine.evaluate(
+        "__fadeRow._id").getWithDefault<std::string_view>(""));
+    auto* row = env.widget(id);
+    REQUIRE(row != nullptr);
+    CHECK(std::abs(row->opacity() - 1.0f) < 0.001f);
+
+    hover_enter(env, id);
+    CHECK(std::abs(row->opacity() - 0.5f) < 0.001f);
+
+    hover_leave(env, id);
+    // Control: prove the restore really routes through the unparseable
+    // branch. If the saved value were a number this case would pass for a
+    // reason unrelated to the fix.
+    REQUIRE(env.engine.evaluate(
+        "isNaN(parseFloat(__fadeRow.style.opacity))").getWithDefault<bool>(false));
+    CHECK(std::abs(row->opacity() - 1.0f) < 0.001f);
+}
