@@ -1731,7 +1731,9 @@ engine.
 pulp seq schema
 pulp seq validate song.pulpseq.json
 pulp seq explain song.pulpseq.json [--sample-rate 48000]
-pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json]
+pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json] \
+  [--writer-profile proposal|editor|trusted]
+pulp seq capabilities [--writer-profile proposal|editor|trusted]
 pulp seq export song.pulpseq.json --format smf --plan
 pulp seq export song.pulpseq.json --format smf --out song-smf \
   [--accept-loss concept-id]...
@@ -1746,6 +1748,18 @@ project and revision as JSON; `--out` also writes the canonical project member
 through a sibling temporary file. Invalid projects, unknown command types,
 precondition conflicts, and empty command batches fail without publishing a
 partial edit.
+
+`--writer-profile` selects the authority the edit is admitted under. `proposal`
+admits every command class but no removal and carries a small retained-byte
+quota; `editor` (the CLI default) admits every class and intent under a finite
+quota; `trusted` admits everything with no quota. An unrecognized name is a
+usage error rather than a fallback to a wider authority. A refused edit prints a
+typed refusal naming the conflict, the offending command, and — when the
+authority itself was denied — the class and intent it required, by name.
+
+`capabilities` reports what each named profile admits, as class and intent
+names. It never emits a bit index or a raw capability integer, so a caller
+cannot come to depend on the internal encoding.
 
 `export` first plans conversion against the selected format and stops unless
 every reported lossy concept has its own repeated `--accept-loss <concept-id>`

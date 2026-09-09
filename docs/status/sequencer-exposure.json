@@ -3008,6 +3008,114 @@
           ]
         }
       }
+    },
+    {
+      "id": "offline-writer-profile-authority",
+      "title": "Named writer authority for the offline CLI and MCP boundaries",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp",
+        "tools/timeline/src/writer_profile.cpp",
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/cli/cmd_seq.cpp",
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/tools/schema_mcp_emit.py",
+        "core/timeline/tools/test_schema_mcp_emit.py",
+        "test/test_cli_timeline.cpp",
+        "test/test_mcp_timeline_sessions.cpp",
+        "test/test_timeline_agent.cpp",
+        "tools/mcp/timeline_session_store.cpp",
+        "tools/mcp/timeline_session_store.hpp",
+        "tools/timeline/CMakeLists.txt",
+        "tools/timeline/include/pulp/tools/timeline/agent.hpp",
+        "tools/timeline/src/timeline_agent.cpp",
+        "core/timeline/src/document_session.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp",
+          "needles": [
+            "enum class WriterProfileKind",
+            "selectable_writer_profile_names"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The public tools header installs the named authority enum, the three profile factories, and the by-name selector.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp",
+              "needles": [
+                "enum class WriterProfileKind",
+                "proposal_writer_profile"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "needles": [
+                "selectable_writer_profile_names",
+                "writer_profile_json"
+              ],
+              "path": "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp"
+            },
+            {
+              "kind": "cli_handler",
+              "needles": [
+                "--writer-profile",
+                "seq_writer_profile"
+              ],
+              "path": "tools/cli/cmd_seq.cpp"
+            }
+          ],
+          "rationale": "The CLI admits a document writer under the quota-bounded editor authority by default; a caller selects the narrower proposal authority, or the unquotaed trusted one, by name with --writer-profile, and an unrecognized name is refused rather than silently downgraded. A caller discovers the vocabulary machine-readably by running seq capabilities, which emits every selectable profile and its quotas as JSON. The definition is cited at the header rather than at core/timeline/schema/timeline_cli_verbs.json because that generated manifest enumerates document and command types, not the authority selector that qualifies them; the emitter models per-verb payload fields only, so the selector has no representation there by construction."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "needles": [
+                "writer_profile",
+                "pulp_timeline_command_apply"
+              ],
+              "path": "core/timeline/schema/timeline_mcp_tools.json"
+            },
+            {
+              "kind": "mcp_handler",
+              "needles": [
+                "timeline_writer_profile",
+                "writer_profile_by_name"
+              ],
+              "path": "tools/mcp/mcp_timeline_tools.cpp"
+            }
+          ],
+          "rationale": "The MCP boundary admits a document writer under the non-destructive proposal authority when no selection is present; a caller escapes it in the same slice by passing the writer_profile argument as editor or trusted, and an unrecognized name is refused rather than silently downgraded. The argument is declared in the published tool inputSchema for both pulp_timeline_project_open and pulp_timeline_command_apply, so an MCP client discovers it without reading source."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Writer authority is a property of an offline document boundary, not a live per-instance product control."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "The design-time manifest does not yet publish which writer authority a design-time caller is admitted under.",
+          "dependencies": [
+            "design-time-writer-authority-manifest"
+          ],
+          "owner": "sequencer-control-closure"
+        }
+      }
     }
   ],
   "tombstones": []

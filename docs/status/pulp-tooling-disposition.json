@@ -3195,6 +3195,21 @@
               {
                 "name": "--out",
                 "kind": "option"
+              },
+              {
+                "name": "--writer-profile",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "capabilities",
+            "arguments": [
+              {
+                "name": "--writer-profile",
+                "kind": "option",
+                "required": false
               }
             ],
             "subcommands": []
