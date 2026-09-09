@@ -997,6 +997,17 @@ declared in `core/timeline/include/pulp/timeline/**` or named by
 an enum constant, a schema field. A refusal that only inspects internal
 lowering state passes without an entry.
 
+**Naming a code is not raising it.** Two mentions are excluded on purpose: a
+field whose declared default happens to be a code, and a `case` label. A table
+that maps every `CompileErrorCode` member to a wire name — the shape any
+projection of the codes over a wire needs — mentions all of them at once, and
+each label reads its own enumerator, so without the exclusion the table reports
+as a raise of every refusal it can spell while raising none. Only the label
+text is dropped, never the line, so a raise sharing a line with a label is
+still found; the selftest holds both halves of that boundary. If you are adding
+such a table, expect the gate to stay quiet about it and keep the real raise
+sites in `core/playback/src/` as the thing it is watching.
+
 **Three things it cannot see, so do not read a pass as "the compiler accepts
 everything authorable":** a refusal expressed by dropping, clamping, or
 substituting rather than by naming a code; a refusal raised through a different
@@ -1005,15 +1016,18 @@ sits further than `AUTHORING_LOOKBACK_LINES` above the raise or arrives through
 an internal struct field that no longer names its model origin.
 
 **A `case` label is a destination, not a raise.** The check consumes
-`case Scope::Enumerator:` before it looks for raises, because a switch that maps
-every enumerator to its own name for a diagnostic otherwise reports one refusal
-per arm — and the enumerator sitting in a neighbouring arm lends its name to the
-lookback window, so each of those phantom refusals also reads as authorable on
-evidence it never touched. Only the label is consumed: a refusal constructed in
-the arm's body is still a raise, including on the same line as the label. Two
-shapes it still reads as raises, deliberately, because over-flagging asks for an
-entry someone must answer rather than dropping one that is owed: a label wrapped
-across lines, and a `code == CompileErrorCode::X` comparison.
+`case Scope::CompileErrorCode::Enumerator:` before it looks for raises, because a
+switch that maps every enumerator to its own name for a diagnostic otherwise
+reports one refusal per arm — and the enumerator sitting in a neighbouring arm
+lends its name to the lookback window, so each of those phantom refusals also
+reads as authorable on evidence it never touched. Only the label text is
+consumed, never the whole line: a refusal constructed in the arm's body is still
+a raise, including on the same line as the label. A label on some other enum is
+left alone, because it names no code for the raise pattern to find. One shape it
+still reads as a raise, deliberately, because over-flagging asks for an entry
+someone must answer rather than dropping one that is owed: a
+`code == CompileErrorCode::X` comparison, which names a code without
+constructing one.
 
 All three seeded entries are `live-defect` — expression lanes on a clip,
 expression lanes on a trimmed nested clip, and the nested-sequence flattening

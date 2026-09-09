@@ -2098,6 +2098,48 @@ requires a `.dawproject` ZIP, rejects unsafe or unsupported archive entries,
 confines media resolution to safe package-relative entries, and publishes
 canonical `project.json` plus sealed sibling artifacts into a new directory.
 
+### `seq validate` compiles, so a schema-valid project can still be refused
+
+Decoding is not validation. A document can satisfy the registry schema and
+still describe something the program compiler will not lower — the compiler's
+refusal vocabulary exists precisely for shapes the model permits and playback
+cannot honour. So `validate` compiles the project, reports each refusal in a
+`diagnostics` array, and exits non-zero when it emits one. A validator that
+reports a refusal and then claims success has validated nothing.
+
+Two details of that wire shape are contracts, and one deliberately is not:
+
+- The `code` is the **PascalCase enumerator name**, never the numeric value.
+  `CompileErrorCode` is appended to, so its numbering is a process-internal
+  detail no caller may key off. `code_id` rides alongside as a debugging aid and
+  carries no contract.
+- The mapper's switch carries **no `default:`**, so appending an enumerator is a
+  `-Wswitch` diagnostic at that switch rather than a silently wrong wire name
+  reaching a caller. Do not add a `default:` to quiet it — that is the entire
+  mechanism.
+- Failing to *open* a project is not a compile refusal. It reports its `stage`
+  and no `diagnostics` key at all, so a caller cannot read an unreadable file as
+  a project with nothing wrong with it.
+
+MCP inherits this for free: `pulp_timeline_validate` already routes through the
+shared `pulp::tools::timeline::validate` entry point, and `timeline_result`
+already marks a non-zero result `isError`. Inheriting it is still a claim about
+a call rather than an observation, so `test_mcp_timeline_tools.cpp` asserts the
+refusal over MCP directly. The MCP surface is the one Forge consumes; do not
+leave it proven only by the CLI test.
+
+**The negative control is what makes the refusal test mean anything.** Test the
+same nested fixture twice, differing *only* in the leaf: a note leaf is refused
+`NestedGainSinkUnsupported` because gain composes by multiplying into the
+flattened leaf's own clip gain and note events carry none, while a media leaf
+composes and must return exit 0 with `"diagnostics":[]`. Without that second
+case the test also passes against a `validate` that refuses everything, which is
+exactly as useless as one that accepts everything.
+
+`emit()` routes a failing result to stderr, so a CLI test asserting a refusal
+must redirect `2>&1` or it will read an empty file and fail for the wrong
+reason.
+
 The live MCP server embeds `timeline_mcp_tools.json` at configure time and
 dispatches exactly ten operations. Seven operations retain stateless
 `pulp::tool-timeline` entry points; diff, undo, and redo retain an actual
