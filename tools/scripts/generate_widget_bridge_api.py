@@ -137,6 +137,12 @@ export interface PulpBridgeTextMetrics {
     descent?: number;
     lineHeight?: number;
 }
+export interface PulpBridgeTraceStats {
+    depth: number;
+    forceClosed: number;
+    unmatchedEnd: number;
+    refused: number;
+}
 export interface PulpBridgeCanvasImageData {
     width: number;
     height: number;
@@ -171,6 +177,9 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "__cancelTimer__": "(timerId: number) => void",
     "__flushTimers__": "() => void",
     "__performanceNow__": "() => number",
+    "__traceBegin__": "(name: string) => void",
+    "__traceEnd__": "() => void",
+    "__traceStats__": "() => PulpBridgeTraceStats",
     "__unbindEvents__": "(id: number) => boolean",
     "animate": "(id: string, property: string, targetValue: number | string, durationMs: number, easingName?: string) => void",
     "applyTokenDiff": "(json: string) => void",
