@@ -931,10 +931,18 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         [self setNeedsDisplay:YES];
         return YES;
     }
-    // Unconsumed: additive script fan-out (no-op when the script target is
-    // not linked); NO keeps menu shortcuts (Cmd+W, Cmd+Q) working.
-    pulp::view::script_events::dispatch_global_key(
-        static_cast<int>(key), mods, /*is_down=*/true);
+    // Unconsumed: additive script fan-out, but only for a Command chord.
+    // AppKit offers every key down here before sending keyDown:, and only a
+    // Command chord is exclusive to this offer -- a plain key arrives again
+    // through keyDown:, which fans out to the same script listeners. Fanning
+    // an unmodified key out from both entry points makes one physical press
+    // read as two: a listbox opens on its second item and skips every other
+    // item thereafter. The fan-out is a no-op when the script target is not
+    // linked; NO keeps menu shortcuts (Cmd+W, Cmd+Q) working.
+    if ((event.modifierFlags & NSEventModifierFlagCommand) != 0) {
+        pulp::view::script_events::dispatch_global_key(
+            static_cast<int>(key), mods, /*is_down=*/true);
+    }
     return NO;
 }
 

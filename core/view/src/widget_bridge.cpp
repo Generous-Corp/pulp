@@ -758,7 +758,21 @@ void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is
     // on another thread between snapshot and dispatch. recursive_mutex
     // tolerates same-thread reentry.
     std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    auto& owners = document_navigation_owners();
     for (auto* b : all_bridges_set()) {
+        // A bridge holding the navigation claim was already offered this key
+        // directly, through the `on_navigation_key` hook the claim installs.
+        // That offer reports "handled" only when a JS listener called
+        // `preventDefault()`, so a host that treats an unhandled offer as
+        // "nobody took it" falls through to this fan-out and delivers the same
+        // physical key press to the same bridge a second time. An open listbox
+        // then advances two items per arrow and half its entries become
+        // unreachable. The claim is what makes the direct delivery certain, so
+        // it is also what makes a second delivery a duplicate.
+        if (const auto it = owners.find(&b->root_);
+            it != owners.end() && it->second == b &&
+            b->root_.accepts_navigation_input() && b->root_.on_navigation_key)
+            continue;
         b->forward_key_event(key_code, modifiers, is_down);
     }
 }
