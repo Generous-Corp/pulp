@@ -662,6 +662,14 @@
             "kind": "flag"
           },
           {
+            "name": "--trace",
+            "kind": "flag"
+          },
+          {
+            "name": "--allow-tracing",
+            "kind": "flag"
+          },
+          {
             "name": "--allow-unsupported-sdk",
             "kind": "flag"
           },
