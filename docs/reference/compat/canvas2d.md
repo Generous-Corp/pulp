@@ -96,3 +96,27 @@ input is normalized in `__dispatch__` (including the legacy positional
 `deltaX`, `deltaY` form) and dispatched exactly once; the registration callback
 only keeps the native channel alive. This changes event delivery, not the
 Canvas2D drawing inventory or backend status above.
+
+## Batched path emission
+
+`moveTo` and `lineTo` do not cross the bridge one point at a time. The shim
+buffers a contiguous run of path points and ships it as a single
+`canvasPathPolyline(canvasId, coords)` call, where `coords` is a flat
+`[x0, y0, x1, y1, …]` array; the native side expands it back into the same
+`move_to` + `line_to` command sequence the per-point calls produced. `rect`
+composes through that same buffer. A malformed run — odd length, a
+non-finite coordinate, or more than 65536 values — is rejected whole, so a
+bad batch never records a partial path.
+
+This changes the wire, not the Canvas2D drawing inventory or the recorded
+command stream: `moveTo`, `lineTo` and `rect` keep their catalog status and
+their observable output. The per-point `canvasMoveTo` / `canvasLineTo`
+bridge functions remain registered and are still used when
+`canvasPathPolyline` is absent, so a host on an older bridge surface renders
+identically.
+
+The invariant that makes it safe is a flush: every other shim method that
+emits a `canvas*` bridge call must call `this._fp()` first, or its command
+would land ahead of the buffered points and silently reorder the path.
+`tools/scripts/check_canvas_path_flush.py` (ctest `canvas-path-flush-lint`)
+enforces that for every bridge-emitting method in the shim.
