@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260909-painted-appearance-defect-detectors-watch",
+  "created_at": "2026-09-09T08:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Read-only detectors over an already-laid-out View tree, plus the one measurement they needed. A visual defect a user can point at -- two labels printed on top of each other, a caption whose glyphs run past the box that is meant to hold them, an axis label drawn over the graph -- was previously argued from proxies: a value arriving at the runtime, a node existing in a layout snapshot. Each of those can be true while the screen is wrong. detect_appearance_defects walks the tree, resolves every painted text run into screen space (applying a ScrollView's paint-time offset so a scrolled row is never compared against a fixed one in the wrong coordinate frame), replays the CanvasDrawCmd stream so command-drawn text is measurable at all, and reports colliding pairs and ink wider than its box. Every run carries a coverage statistic, because an empty finding list from an instrument that measured a fraction of the surface is not evidence of absence. Label::painted_text_extents is the enabling measurement: intrinsic_width() deliberately returns 0 for a multi-line Label so the parent drives wrapping -- a Yoga contract that stays unchanged -- which left every multi-line caption invisible to anything asking where the ink lands. This reaches render-assets-and-backends only through the core/view/** path selector. Nothing paints: no render backend, raster path, GPU surface, asset pipeline, or Skia/Dawn code is touched, no importer or DesignIR schema changes, and no existing layout or paint behavior is altered. Registered as watch-only so the family's coverage stays honest about a measurement-only addition that crossed its selector without changing what the family proves. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-appearance-defects",
+    "pulp-test-layout-snapshot"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

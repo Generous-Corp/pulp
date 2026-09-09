@@ -676,6 +676,11 @@ if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/screenshot)
 endif()
 
+# ── Appearance Audit Tool ─────────────────────────────────────────────────
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/appearance)
+endif()
+
 # ── Out-of-process plugin scan worker ─────────────────────────────────────
 if(NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/scan-worker)

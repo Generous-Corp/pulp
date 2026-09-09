@@ -4,6 +4,11 @@
 # Reusable layout-tree parity oracle for design-import live/baked modes.
 pulp_add_test_suite(pulp-test-layout-snapshot LIBRARIES pulp::view)
 
+# Painted-appearance defect detectors: text box collisions, ink wider than its
+# box, and canvas-command text — plus the coverage statistic that keeps an
+# empty finding list from reading as a pass.
+pulp_add_test_suite(pulp-test-appearance-defects LIBRARIES pulp::view)
+
 # Rect / IntRect layout geometry primitives: slicing, insets, unions,
 # hit-testing, and the float-vs-integer center truncation that is the whole
 # reason the two rect types do not share an implementation.
