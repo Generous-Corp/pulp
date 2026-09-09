@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260909-yoga-tree-reuse-revert",
+  "kind": "change",
+  "created_at": "2026-09-09T18:00:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Reverts the Yoga node-tree reuse change and restores per-pass node ownership in core/view/src/yoga_layout.cpp, plus the trace scopes in core/view/src/widget_bridge/layout_api.cpp. The reuse change registered under event 20260909-yoga-tree-reuse claimed that layout results are unchanged by construction; a differential test that runs each layout pass twice -- once against whatever solver state is retained and once against a tree discarded immediately beforehand -- shows that claim does not hold. Over 240 randomised mutations of a stretch column of soft-wrapped labels, 25 nodes resolved to a different box under reuse than from scratch, differing by up to one pixel in width, height and x offset. Separately, reuse converts per-call node ownership into a single thread_local slot keyed on the root view, while apply_yoga_results re-enters layout on a different root mid-walk for grid containers and for views that own their child layout; the nested pass discards and frees the outer pass's node tree while the outer walk is still iterating it, a use-after-free that segfaults in a headless test and is reachable from the widget bridge's createGrid. The reverted change did not claim a user-visible speedup and shipped without a runtime kill switch, so reverting costs a measured microbenchmark win and no user-facing behaviour. The regression test lands with the revert as pulp-test-yoga-tree-reuse: it fails on the reverted commit and passes here, so a future re-land has an executable acceptance gate rather than a by-construction argument. No public signature, no measure-func contract, and no Vellum artifact changes. This records no Vellum acknowledgement.",
+  "tests": [
+    "pulp-test-widget-bridge-yoga",
+    "pulp-test-yoga-layout-bench",
+    "pulp-test-yoga-tree-reuse"
+  ],
+  "disposition": "pulp-only"
+}

@@ -3,22 +3,22 @@
 // WHY THIS EXISTS
 // ---------------
 // `View::layout_children()` routes to `yoga_layout()`
-// (core/view/src/yoga_layout.cpp), which re-applies every style, runs
-// `YGNodeCalculateLayout` and copies results back into the View tree on EVERY
-// call. The YGNode tree it drives is kept alive between passes and revalidated
-// against the live View tree, so Yoga's own dirty flags and measure caches
-// survive a pass and the engine can skip subtrees nothing touched; a
-// structural change to the View tree falls back to a full rebuild.
+// (core/view/src/yoga_layout.cpp), which — on EVERY call — builds a fresh
+// YGNode tree (`YGNodeNew` per managed descendant), re-applies every style,
+// runs `YGNodeCalculateLayout`, copies results back into the View tree, and
+// then `YGNodeFreeRecursive`s the whole thing. Yoga's own dirty-flag and
+// measure caches live on those nodes, so they are discarded every pass.
 //
 // Every platform paint path calls `root_.layout_children()` immediately
 // before painting (plugin_view_host_mac.mm, _win.cpp, _linux.cpp, _ios.mm),
-// so that pass runs at frame rate whether or not anything layout-relevant
-// changed — which is why its cost when NOTHING changed is the number that
-// matters most here.
+// so that build/free cycle runs at frame rate whether or not anything
+// layout-relevant changed.
 //
 // This file measures what that actually costs — wall clock and allocation
-// volume per pass — for 100 / 250 / 500-node trees, static and animated, and
-// scores it against a committed baseline.
+// volume per pass — for 100 / 250 / 500-node trees, static and animated. It
+// is deliberately a MEASUREMENT, not a fix: it exists so that any future
+// "persistent Yoga nodes" or "layout-dirty gate" change is chosen on
+// evidence and can be scored against a committed baseline.
 //
 // It doubles as a regression gate: the REQUIREs at the bottom fail if a
 // single layout pass ever eats a significant slice of a 60fps frame budget.
@@ -34,23 +34,25 @@
 // Run it (Release; the table prints on stdout, no flags needed):
 //   ./build/test/pulp-test-yoga-layout-bench
 //
-// BASELINE — Apple M-series, Release (-O3), tree idle otherwise. The first
-// column is the cost when the YGNode tree was rebuilt on every pass; the
-// second is the cost with the tree reused across passes.
+// BASELINE — 2026-07-12, Apple M-series, Release (-O3), tree idle otherwise:
 //
-//   nodes  mode      rebuilt_us  reused_us  rebuilt_allocs  reused_allocs
-//     100  static          76.9       ~19             229             60
-//     100  animated        78.0       ~24             229             63
-//     241  static         175.1       ~44             448             96
-//     241  animated       177.7       ~57             448             99
-//     484  static         376.6       ~89             813            154
-//     484  animated       375.8      ~109             813            157
+//   nodes  mode      mean_us  allocs/pass  bytes/pass  %frame(60fps)
+//     100  static       76.9          229       68144          0.46%
+//     100  animated     78.0          229       68144          0.47%
+//     241  static      175.1          448      158288          1.05%
+//     241  animated    177.7          448      158288          1.07%
+//     484  static      376.6          813      327344          2.26%
+//     484  animated    375.8          813      327344          2.25%
 //
-// Reading of that: the dominant cost was never the solve, it was throwing the
-// solver's state away. Reuse takes roughly three quarters of both the wall
-// clock and the allocator traffic off every pass, and — unlike the rebuilding
-// version — a pass where nothing changed is now measurably cheaper than one
-// where a style moved, because Yoga can skip the clean subtrees.
+// Reading of that: TIME is not the problem. A 484-node layout pass is ~0.38ms,
+// ~2.3% of a 60fps frame — rebuilding the Yoga tree every frame is not what
+// would make a plugin UI drop frames. What IS real is the allocator traffic:
+// ~1.7 allocations per managed node per pass, so at 60fps a 484-node tree
+// churns ~49k malloc/free pairs and ~19 MB/s of transient heap per second,
+// forever, even when nothing changed (static and animated cost the same,
+// within noise — see the second test case). That is an allocator-pressure and
+// power argument, not a frame-budget argument, and it should be argued on
+// those terms.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -283,7 +285,6 @@ namespace pulp::view {
 uint64_t yoga_layout_pass_count();
 uint32_t yoga_layout_last_node_count();
 uint32_t yoga_layout_max_node_count();
-uint64_t yoga_layout_tree_build_count();
 void     yoga_layout_reset_stats();
 }
 
@@ -393,15 +394,17 @@ TEST_CASE("Yoga layout pass cost at 100 / 250 / 500 nodes", "[view][layout][benc
     }
 }
 
-// A layout pass over a tree where NOTHING changed must not cost more than one
-// where a style moved. That is the property reusing the YGNode tree buys: the
-// dirty flags and measure caches survive, so a no-op pass walks the styles and
-// then finds nothing to re-solve.
+// Documents the finding that motivates any future dirty-gate work: a layout
+// pass over a tree where NOTHING changed costs essentially the same as one
+// where a style changed, because the YGNode tree (and with it Yoga's dirty
+// flags and measure caches) is rebuilt from scratch either way.
 //
-// The assertion is deliberately loose (static must not be *more* than the
+// The assertion is deliberately loose (static must not be *more* than 2x the
 // animated cost) — it is a statement about the architecture, not a timing
-// race. The printed ratio is what tells the story.
-TEST_CASE("An unchanged Yoga tree costs less than a changed one", "[view][layout][bench][yoga]") {
+// race. If someone lands persistent Yoga nodes plus a dirty gate, the static
+// case should collapse toward zero and this test still passes; the printed
+// ratio is what tells the story.
+TEST_CASE("Unchanged Yoga tree costs the same as a changed one", "[view][layout][bench][yoga]") {
     auto tree = build_tree(15, 15); // 241 managed nodes
 
     auto stat = measure(*tree, /*animated=*/false, 300, 30);
@@ -413,10 +416,9 @@ TEST_CASE("An unchanged Yoga tree costs less than a changed one", "[view][layout
                 anim.mean_us, anim.allocs_per_pass,
                 anim.mean_us > 0 ? stat.mean_us / anim.mean_us : 0.0);
 
-    REQUIRE(stat.mean_us < anim.mean_us);
-    // Neither pass allocates YGNodes any more; what remains is the per-node
-    // child-ordering vector, which both passes pay equally.
-    REQUIRE(std::abs(stat.allocs_per_pass - anim.allocs_per_pass) <= 5.0);
+    REQUIRE(stat.mean_us < 2.0 * anim.mean_us);
+    // Same allocation volume either way — the churn is unconditional.
+    REQUIRE(std::abs(stat.allocs_per_pass - anim.allocs_per_pass) <= 1.0);
 }
 
 // ─── Scaling past 500 nodes ────────────────────────────────────────────────
@@ -483,8 +485,7 @@ TEST_CASE("Yoga layout cost scales with node count", "[view][layout][bench][yoga
 // This test drives a tree through frames where ONLY paint state changes (the
 // hover-glow / shader-uniform / meter-value case: colors and opacity, nothing
 // that can move a box) and asserts:
-//   1. a layout pass runs on EVERY frame (pass count == frame count), off ONE
-//      YGNode tree — the frames re-solve, they do not rebuild,
+//   1. a full Yoga rebuild runs on EVERY frame (pass count == frame count),
 //   2. every one of those passes produces byte-identical bounds — i.e. 100% of
 //      the work is provably discardable,
 //   3. View's layout-dirty flag is not even SET by a paint-only mutation, and
@@ -532,10 +533,8 @@ TEST_CASE("Paint-only frames still pay for a full relayout", "[view][layout][ben
     const uint64_t passes = yoga_layout_pass_count();
     const uint64_t allocs = g_alloc_count.load();
 
-    // 1. One layout pass per frame, unconditionally — but a single YGNode
-    //    tree underneath all of them.
+    // 1. One full Yoga tree build+free per frame, unconditionally.
     REQUIRE(passes == static_cast<uint64_t>(kFrames));
-    REQUIRE(yoga_layout_tree_build_count() == 1u);
     REQUIRE(yoga_layout_last_node_count() == 484u);
 
     // 2. Every pass recomputed the same answer.
@@ -554,7 +553,7 @@ TEST_CASE("Paint-only frames still pay for a full relayout", "[view][layout][ben
     REQUIRE(tree->leaves[0]->layout_dirty() == false);
 
     std::printf("\n  Paint-only animation, 484-node tree, %d frames:\n"
-                "    layout passes      : %llu  (one per frame — no dirty gate)\n"
+                "    full Yoga rebuilds : %llu  (one per frame — no dirty gate)\n"
                 "    bounds that changed: %zu / %zu\n"
                 "    heap allocations   : %llu  (%.0f/frame)\n"
                 "    layout wall clock  : %.1f ms over %d frames (%.2f ms/s at 60fps)\n"
