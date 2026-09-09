@@ -3324,7 +3324,9 @@
         "docs/status/cli-commands.yaml",
         "docs/reference/cli.md",
         "docs/status/sequencer-exposure.json",
-        ".agents/skills/timeline/SKILL.md"
+        ".agents/skills/timeline/SKILL.md",
+        ".agents/skills/playback/SKILL.md",
+        "tools/scripts/negative_capability_check.py"
       ],
       "evidence": [
         {
