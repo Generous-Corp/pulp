@@ -48,6 +48,94 @@ std::string error_json(std::string_view stage, std::string_view message,
     return result;
 }
 
+/// Stable wire names for the program compiler's refusal vocabulary.
+///
+/// The enum is appended to whenever a new refusal is defined, so its numeric
+/// value is not a contract anyone outside the process may key off. The switch
+/// deliberately carries no `default`, which turns a newly added enumerator into
+/// a compiler diagnostic here rather than into a diagnostic that silently
+/// reports the wrong name to a caller.
+std::string_view compile_error_code_name(playback::CompileErrorCode code) noexcept {
+    switch (code) {
+    case playback::CompileErrorCode::InvalidRequest:
+        return "InvalidRequest";
+    case playback::CompileErrorCode::StaleRevision:
+        return "StaleRevision";
+    case playback::CompileErrorCode::ExecutorUnavailable:
+        return "ExecutorUnavailable";
+    case playback::CompileErrorCode::InvalidStructure:
+        return "InvalidStructure";
+    case playback::CompileErrorCode::GenerationExhausted:
+        return "GenerationExhausted";
+    case playback::CompileErrorCode::CompilerAlreadyBound:
+        return "CompilerAlreadyBound";
+    case playback::CompileErrorCode::AudioProgramInvalid:
+        return "AudioProgramInvalid";
+    case playback::CompileErrorCode::AutomationProgramInvalid:
+        return "AutomationProgramInvalid";
+    case playback::CompileErrorCode::NestedSequenceUnsupported:
+        return "NestedSequenceUnsupported";
+    case playback::CompileErrorCode::ExpansionBudgetExceeded:
+        return "ExpansionBudgetExceeded";
+    case playback::CompileErrorCode::NoteProgramCapacityExceeded:
+        return "NoteProgramCapacityExceeded";
+    case playback::CompileErrorCode::OfflineStretchFailed:
+        return "OfflineStretchFailed";
+    case playback::CompileErrorCode::TrimmedMidiLaneUnsupported:
+        return "TrimmedMidiLaneUnsupported";
+    case playback::CompileErrorCode::MidiExpressionLaneUnsupported:
+        return "MidiExpressionLaneUnsupported";
+    case playback::CompileErrorCode::MidiExpressionLaneBudgetExceeded:
+        return "MidiExpressionLaneBudgetExceeded";
+    case playback::CompileErrorCode::TrimmedGrooveUnsupported:
+        return "TrimmedGrooveUnsupported";
+    case playback::CompileErrorCode::TrimmedRegisteredContentUnsupported:
+        return "TrimmedRegisteredContentUnsupported";
+    case playback::CompileErrorCode::UnresolvedRegisteredContent:
+        return "UnresolvedRegisteredContent";
+    case playback::CompileErrorCode::RegisteredContentCompileFailed:
+        return "RegisteredContentCompileFailed";
+    case playback::CompileErrorCode::RegisteredContentFragmentQuotaExceeded:
+        return "RegisteredContentFragmentQuotaExceeded";
+    case playback::CompileErrorCode::NestedMixerPanUnsupported:
+        return "NestedMixerPanUnsupported";
+    case playback::CompileErrorCode::NestedGainSinkUnsupported:
+        return "NestedGainSinkUnsupported";
+    case playback::CompileErrorCode::NestedPlacementFadeUnsupported:
+        return "NestedPlacementFadeUnsupported";
+    }
+    return "InvalidRequest";
+}
+
+/// Emits an id as a quoted decimal string so a 64-bit value survives a JSON
+/// reader that stores every bare number as a double, and `null` when the
+/// refusal names no single item.
+std::string diagnostic_id_json(pulp::timeline::ItemId id) {
+    if (!id.valid())
+        return "null";
+    return pulp::timeline::quote_json_string(std::to_string(id.value));
+}
+
+/// Projects a compile refusal into the `diagnostics` array `validate` has
+/// always promised. `code` is the stable string name, never the numeric value;
+/// `code_id` accompanies it only as a debugging aid and carries no contract.
+std::string validate_diagnostics_json(const playback::CompileError& error) {
+    std::string json = "{\"diagnostics\":[{\"actual\":";
+    json += std::to_string(error.actual);
+    json += ",\"code\":";
+    json += pulp::timeline::quote_json_string(compile_error_code_name(error.code));
+    json += ",\"code_id\":";
+    json += std::to_string(static_cast<unsigned>(error.code));
+    json += ",\"item\":";
+    json += diagnostic_id_json(error.item);
+    json += ",\"limit\":";
+    json += std::to_string(error.limit);
+    json += ",\"revision\":";
+    json += pulp::timeline::quote_json_string(std::to_string(error.revision));
+    json += "}],\"ok\":false}";
+    return json;
+}
+
 } // namespace
 
 OperationResult detail::failure(std::string_view stage, std::string_view message,
@@ -130,13 +218,22 @@ OperationResult command_apply(const ProjectSource& project, std::string_view com
                    pulp::timeline::quote_json_string(writer_profile_name(profile.kind)) + "}"};
 }
 
-OperationResult validate(const ProjectSource& project) {
+OperationResult validate(const ProjectSource& project, std::uint32_t sample_rate) {
+    if (sample_rate == 0 || sample_rate > timebase::kMaximumCompiledSampleRate)
+        return failure("validate", "sample_rate must be between 1 and 768000", {}, 2);
     auto registry = pulp::timeline::make_builtin_timeline_registry();
     if (!registry)
         return failure("registry", "could not construct the built-in schema registry");
     auto loaded = detail::load_project(project, registry.value());
     if (!loaded)
         return failure("open", persistence_message(loaded.error()), loaded.error().path);
+    // Compiling is the validation. A refusal is the answer the caller asked
+    // for, not an internal error, so it is reported as a diagnostic rather
+    // than as the compiler's opaque message -- but it still exits non-zero,
+    // because a validator that always succeeds validates nothing.
+    auto compiled = detail::compile_project(loaded.value(), sample_rate);
+    if (!compiled)
+        return {1, validate_diagnostics_json(compiled.error())};
     return {0, "{\"diagnostics\":[],\"ok\":true}"};
 }
 
@@ -206,8 +303,8 @@ OperationResult command_apply(std::string_view project, std::string_view command
     return command_apply(ProjectSource::auto_detect(project), commands, profile);
 }
 
-OperationResult validate(std::string_view project) {
-    return validate(ProjectSource::auto_detect(project));
+OperationResult validate(std::string_view project, std::uint32_t sample_rate) {
+    return validate(ProjectSource::auto_detect(project), sample_rate);
 }
 
 OperationResult explain(std::string_view project, std::uint32_t sample_rate) {
