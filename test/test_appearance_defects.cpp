@@ -343,6 +343,42 @@ TEST_CASE("a run that measured nothing is not reported as trustworthy",
     REQUIRE(report.to_string().find("NOT TRUSTWORTHY") != std::string::npos);
 }
 
+TEST_CASE("a report is untrustworthy once blind skips outnumber what it saw",
+          "[appearance][coverage]") {
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+
+    // One label the detector can measure, against a majority it cannot. The
+    // finding list is empty either way, so the only thing separating "nothing
+    // is wrong" from "I could not look" is this ratio.
+    add_label(root, "seen", "Output", {0, 0, 120, 18});
+    for (int i = 0; i < 3; ++i) {
+        auto button = std::make_unique<TextButton>();
+        button->set_label("Apply");
+        button->set_id("blind" + std::to_string(i));
+        auto* raw = button.get();
+        root.add_child(std::move(button));
+        raw->set_bounds({0, static_cast<float>(40 + i * 30), 100, 24});
+    }
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.clean());
+    REQUIRE(report.coverage.text_runs_measured == 1);
+    REQUIRE(report.coverage.skipped_unmeasurable == 3);
+    REQUIRE_FALSE(report.coverage.trustworthy());
+
+    // The control: the same one measured run with the blind majority removed
+    // must be trustworthy, otherwise the ratio is not what decided it.
+    View clean_root;
+    clean_root.set_bounds({0, 0, 400, 400});
+    add_label(clean_root, "seen", "Output", {0, 0, 120, 18});
+    const auto control = detect_appearance_defects(clean_root);
+    REQUIRE(control.coverage.text_runs_measured == 1);
+    REQUIRE(control.coverage.trustworthy());
+}
+
 TEST_CASE("an empty tree is never trustworthy", "[appearance][coverage]") {
     View root;
     root.set_bounds({0, 0, 400, 200});
