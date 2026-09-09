@@ -451,7 +451,7 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/platform/mac/window_host_mac.mm",
           "state": "pulp-owned-retained",
-          "revision": "c8d7fea9dbe8705c2f6bf7858adde73cfd787b64",
+          "revision": "6991cd9e8437864616c391c2e61a660a280d4e27",
           "object_id": "38efd70d29672c7a061001959099605a0c6d912a",
           "object_type": "blob"
         },
@@ -475,7 +475,7 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "c8d7fea9dbe8705c2f6bf7858adde73cfd787b64",
+          "revision": "6991cd9e8437864616c391c2e61a660a280d4e27",
           "object_id": "6a9334461bd4ab3ba5fc203206ae8fd74400b71f",
           "object_type": "blob"
         },
