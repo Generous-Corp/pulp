@@ -2759,6 +2759,13 @@ capability arrives. The check only sees refusals that name a code, so a field
 the compiler silently drops or clamps passes it: that case needs a test, not a
 gate.
 
+It also does not read a `case` label as a raise. A tool that maps every
+`CompileErrorCode` enumerator to its own name — `tools/timeline/src/` has one
+for diagnostics — is a string table, not a refusal site, and the enumerator in a
+neighbouring arm is not evidence the mapping read a document. Adding a codes
+switch does not owe the allowlist anything; raising a code inside an arm still
+does.
+
 ## New public API in `core/timeline/include` needs a contract or docs fail
 
 `tools/build-api-docs.sh` runs `tools/scripts/timeline_api_docs_check.py` over
