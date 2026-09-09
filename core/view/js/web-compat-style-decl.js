@@ -14,6 +14,14 @@ function CSSStyleDeclaration(el) {
     // so the two paths converge on `View::active_overlay_` without
     // double-claim/double-release surprises.
     this._autoOverlayClaimed = false;
+    // Raw string last APPLIED per property, used to skip a write that would
+    // reproduce the state the widget is already in. Keyed on the raw
+    // (pre-var-resolution) string because that is what the caller supplies and
+    // what deterministically produces the applied value for a given theme.
+    // Only ever written after a property actually reaches the bridge, so a
+    // value stored while the widget did not exist can never suppress a later
+    // real apply.
+    this._applied = {};
 }
 
 // z-index threshold above which an absolutely
@@ -67,6 +75,21 @@ CSSStyleDeclaration.prototype._reevaluateOverlay = function() {
     }
 };
 
+// Drop the applied-value cache so the next write for each property reaches the
+// bridge again. Required wherever widget state changes underneath a surviving
+// Element: the native widget is recreated (the cache would describe a widget
+// that no longer exists) or another code path writes a slot the cache claims.
+CSSStyleDeclaration.prototype._invalidateApplied = function() {
+    this._applied = {};
+};
+
+// Same, addressed by element, for the non-style call sites that mutate widget
+// state directly (show/close/hidden/media-attribute replay). Tolerates an
+// element with no style declaration yet.
+function __invalidateStyleCache__(el) {
+    if (el && el.style && el.style._applied) el.style._applied = {};
+}
+
 // Flush all stored properties to the bridge
 CSSStyleDeclaration.prototype._flushAll = function() {
     for (var key in this._props) {
@@ -90,7 +113,47 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
     var id = this._el._id;
     if (!this._el._nativeCreated) return;
 
-    var resolved = _resolveVar(String(value));
+    var raw = (value === null || value === undefined) ? "" : String(value);
+    // typeof, not `!== undefined`: _DEDUP_GROUP is a plain object, so an
+    // inherited Object.prototype name would otherwise read as a group index.
+    var g = _DEDUP_GROUP[key];
+    var group = (typeof g === "number") ? g : undefined;
+
+    // Skip a write that reproduces the value already applied. Stylesheet
+    // re-application rewrites every matched declaration on every pass, so
+    // during an interaction the overwhelming majority of writes are this case;
+    // each one otherwise pays var() resolution, per-property parsing, and a
+    // bridge crossing to set a value the widget already holds.
+    //
+    // A var() value is never cached: it resolves against live theme tokens, so
+    // the same raw string can legitimately produce a different applied value
+    // after a token changes, with no write to observe.
+    var cacheable = (group !== undefined && raw.indexOf("var(") < 0);
+    if (cacheable && this._applied[key] === raw) return;
+
+    var resolved = _resolveVar(raw);
+
+    // Several CSS properties reach one piece of widget state -- visibility and
+    // opacity both drive setOpacity, shorthands expand over their longhands --
+    // so a cached value is only trustworthy while no property sharing its
+    // state has been applied since. _DEDUP_GROUP names those sharers; it is
+    // derived from the handlers' own bridge calls by
+    // tools/scripts/style_dedup_table.py rather than maintained by hand, and a
+    // handler that starts writing a different slot fails that checker rather
+    // than silently rendering wrong. A property absent from the table (a
+    // shorthand that expands over a computed edge, or anything the derivation
+    // could not classify) is never cached and drops the whole cache when it
+    // applies, so being missing costs speed and not correctness.
+    if (group === undefined) {
+        this._applied = {};
+    } else {
+        var members = _DEDUP_MEMBERS[group];
+        for (var m = 0; m < members.length; m++) {
+            if (members[m] !== key) delete this._applied[members[m]];
+        }
+        if (cacheable) this._applied[key] = raw;
+        else delete this._applied[key];
+    }
 
     // Try each domain handler in turn. Each returns true once it has
     // claimed (and applied) the key. Unknown keys fall through every

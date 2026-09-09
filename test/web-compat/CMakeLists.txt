@@ -52,6 +52,7 @@ add_executable(pulp-test-web-compat-events
     test_selector_matching.cpp
     test_element_api.cpp
     test_css_hover_translation.cpp
+    test_style_write_dedup.cpp
 )
 target_link_libraries(pulp-test-web-compat-events PRIVATE pulp::view Catch2::Catch2WithMain)
 target_include_directories(pulp-test-web-compat-events PRIVATE ${WEBCOMPAT_INCLUDE_DIR})

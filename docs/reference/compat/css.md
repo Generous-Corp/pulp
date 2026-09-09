@@ -911,6 +911,16 @@ effect until raster `background-image: url(...)` paint is wired.
    because
    it requires baseline-set tracking that Yoga does not implement.
 
+## `opacity` restore on hover-leave
+
+The `:hover` translator snapshots `el.style[prop]` on `mouseenter` and
+assigns it back on `mouseleave`. An element carrying no inline `opacity` is
+therefore restored by assigning the empty string, which is not a number.
+An unparseable `opacity` resolves to the CSS initial value of `1`, never to
+`0`: coercing it to `0` leaves the element laid out, hit-testable and
+clipped exactly as before but painted fully transparent, which reads as the
+element vanishing rather than as a style reset.
+
 ## Shared WidgetBridge lifecycle note
 
 The bridge now has one owner for DOM wheel-event fan-out and restores root

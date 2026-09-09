@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260909-style-write-dedup-watch",
+  "created_at": "2026-09-09T08:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Performance change to the web-compat CSS shim that crosses this family only because it edits files under core/view. A style write that reproduces the value already applied to the widget now returns before var() resolution, per-property parsing and the bridge call, instead of re-applying it. Measured on a drag interaction, the overwhelming majority of style writes are that case: a stylesheet re-application pass rewrites every matched declaration on every pass whether or not anything changed, so an interaction that alters no fonts still re-sent every font property every frame. Nothing about what gets rendered changes; the change is confined to skipping writes that would set the state the widget already holds. Correctness rests on the cache never outliving the state it describes. Several CSS properties reach one piece of widget state (visibility and opacity both drive setOpacity, shorthands expand over their longhands), so a cached value is only trusted while nothing sharing its state has been applied since. Those sharers are DERIVED from the handlers rather than listed by hand: tools/scripts/style_dedup_table.py reads each _apply*Prop case, records the bridge function and literal sub-key it reaches (setFlex(id, \"margin_top\", v) -- the sub-key, not the function, is the real granularity), treats a computed sub-key as conflicting with every sub-key of its function, and unions the properties that collide into groups. A ctest (style-dedup-table-sync) re-derives the table and fails if a handler has drifted from it. A property the extractor cannot classify is absent from the table, and an absent property is never cached and drops the whole element's cache when it applies, so a gap in the derivation costs speed and never correctness. The earlier design -- wipe every other entry on any apply -- was equally safe and provably inert: within one stylesheet pass each property's apply wiped the previous one's entry, so the cache retained only the last-written property and measured a 1x speedup; it was replaced after the benchmark, not before. Values containing var() are never deduped because they resolve against live theme tokens and can change with no write to observe. Every path that changes widget state underneath a surviving Element drops the cache: the sites that assign _nativeCreated, plus the non-style writers found by an audited sweep of the live prelude list (media-attribute replay, the hidden setter, dialog show and close). Six tests cover the repeat-skip, distinct-values-land, aliasing, var(), widget-recreation and clearing cases; a seventh A/Bs the guard inside one binary and asserts the apply count collapses. The two regexes _parseBoxShadowOffsets rebuilt on every call are hoisted to module scope; both are stateless, so sharing them across calls carries no lastIndex hazard. Registered as watch-only so the family's coverage stays honest about a change that touched its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-web-compat-events",
+    "tools/scripts/vellum_expansion_watch_check.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
