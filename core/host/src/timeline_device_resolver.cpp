@@ -179,6 +179,47 @@ bool canonical_builtin_node(const GraphNode* node) noexcept {
 
 } // namespace
 
+TimelineGraphAdmission resolve_event_device_latency(const PluginSlot& slot,
+                                                    timeline::ItemId placement_id, NodeId node,
+                                                    int& latency_samples) noexcept {
+    // Ask whether the number is a fact before reading it. `latency_samples()`
+    // returns an int either way, so on its own it cannot separate "this device
+    // reports zero" from "this backend has no way to ask", and the second one
+    // silently certifies an alignment nobody verified.
+    if (slot.latency_query() != PluginSlot::LatencyQuery::Available)
+        return reject(TimelineGraphAdmissionCode::EventDeviceLatencyUnavailable,
+                      static_cast<std::uint64_t>(slot.latency_query()), 0, placement_id, node);
+    const int reported = slot.latency_samples();
+    if (reported < 0 || reported > kEventDeviceLatencyCeilingSamples)
+        return reject(TimelineGraphAdmissionCode::EventDeviceLatencyOutOfRange,
+                      static_cast<std::uint64_t>(reported),
+                      static_cast<std::uint64_t>(kEventDeviceLatencyCeilingSamples), placement_id,
+                      node);
+    latency_samples = reported;
+    return {};
+}
+
+int event_domain_latency_samples(const timeline::DevicePlacement& placement,
+                                 int reported_latency_samples) noexcept {
+    return placement.configuration.slot_kind == timeline::DeviceSlotKind::EventToEvent
+               ? reported_latency_samples
+               : 0;
+}
+
+TimelineGraphAdmission admit_event_compensation(const playback::EventCompensationResult& resolved,
+                                                playback::ProviderSelectorProgram provider,
+                                                timeline::ItemId track_id) noexcept {
+    if (!resolved) {
+        const auto actual = resolved.actual < 0 ? 0u : static_cast<std::uint64_t>(resolved.actual);
+        return reject(TimelineGraphAdmissionCode::EventDeviceLatencyOutOfRange, actual,
+                      static_cast<std::uint64_t>(resolved.limit), track_id);
+    }
+    if (!playback::event_compensation_admits_live_input(resolved.shift, provider))
+        return reject(TimelineGraphAdmissionCode::EventChainLiveInputUnsupported,
+                      static_cast<std::uint64_t>(resolved.shift.samples), 0, track_id);
+    return {};
+}
+
 const timeline::Track* timeline_project_track_for(const playback::PlaybackProgram& program,
                                                   timeline::ItemId track_id,
                                                   TimelineGraphAdmission& error) noexcept {
@@ -192,7 +233,9 @@ TimelineGraphAdmission resolve_timeline_device_route(
     const TimelineGraphBindingState* previous, TimelineDeviceSlotFactory factory,
     std::vector<TimelineDeviceGraphRoute>& generated_routes,
     std::vector<TimelineAutomationRouteMetadata>& metadata,
-    std::vector<NodeId>& claimed_nodes, std::vector<TimelineGraphBoundDevice>& owned_devices) {
+    std::vector<NodeId>& claimed_nodes, std::vector<TimelineGraphBoundDevice>& owned_devices,
+    playback::EventCompensationShift& event_shift) {
+    event_shift = {};
     const auto* program_track = program.find_track(route.track_id);
     if (!program_track)
         return reject(TimelineGraphAdmissionCode::MissingTrack, 0, 1, route.track_id);
@@ -272,6 +315,23 @@ TimelineGraphAdmission resolve_timeline_device_route(
     if (!canonical_builtin_node(node))
         return reject(TimelineGraphAdmissionCode::DeviceFactoryFailed, 0, 1, placement.id,
                       plugin_node);
+    // Discovery is control-thread work and happens exactly once, here, so the
+    // shift the audio thread schedules against is a cached prepared number and
+    // never a live metadata call.
+    int reported_latency = 0;
+    if (const auto latency = resolve_event_device_latency(*node->plugin, placement.id, plugin_node,
+                                                          reported_latency);
+        !latency)
+        return latency;
+    const int event_latency = event_domain_latency_samples(placement, reported_latency);
+    const std::array<int, 1> chain_latencies{event_latency};
+    const auto resolved = playback::accumulate_event_chain_shift(
+        chain_latencies, kEventDeviceLatencyCeilingSamples);
+    if (const auto admitted =
+            admit_event_compensation(resolved, program_track->provider(), route.track_id);
+        !admitted)
+        return admitted;
+    event_shift = resolved.shift;
     metadata.push_back({generated_routes.front(), node->plugin->parameters()});
     if (const auto admission =
             detail::validate_timeline_automation_routes(*program_track, metadata, claimed_nodes);
