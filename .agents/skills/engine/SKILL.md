@@ -772,3 +772,59 @@ then never runs.
 back returns whatever string was assigned whether or not it ever parsed, so a
 round-trip passes against a shadow that never reached the renderer. Export the
 parse helper and assert its decomposition directly.
+
+### A style write that changes nothing must not cross the bridge
+
+`CSSStyleDeclaration._applyProperty` skips a write whose raw string equals the
+one already applied for that property. This is not a micro-optimisation: a
+stylesheet re-application pass rewrites *every* matched declaration on every
+pass, so an interaction that changes no fonts still re-sent every font property
+every frame, each one paying `var()` resolution, per-property parsing and a
+bridge call to set a value the widget already held.
+
+Four things about the cache are load-bearing, and all four are easy to break:
+
+- **It is keyed on the RAW string, before `var()` resolution — and `var()`
+  values are never deduped.** They resolve against live theme tokens, so the
+  same raw string can legitimately produce a different applied value with no
+  write to observe.
+- **A property only trusts its cache while nothing sharing its widget state has
+  been applied since.** Several CSS properties reach one piece of widget state
+  (`visibility` and `opacity` both drive `setOpacity`; shorthands expand over
+  their longhands), so caching properties independently would let a stale entry
+  suppress a write the widget needs. `_DEDUP_GROUP` / `_DEDUP_MEMBERS` in
+  `web-compat-style-dedup-table.js` partition the properties into groups that
+  share state; applying one member drops the cached entries of the others.
+  **That table is generated, not hand-written** — `tools/scripts/style_dedup_table.py`
+  reads the `_apply*Prop` handlers, records which bridge function and which
+  literal sub-key each `case` reaches (`setFlex(id, "margin_top", v)` — the
+  sub-key, not the function, is the real granularity), and unions the properties
+  that collide. A computed sub-key conflicts with every sub-key of its function.
+  Only *writes* count: a `get*` bridge call reads state, and treating one as a
+  slot would merge every property that resolves a `var()` into a single group
+  and erase the optimisation while still rendering correctly.
+  A hand-maintained alias table would have to stay exhaustively correct forever
+  and fails *visually and silently* when it does not; a `ctest` re-derives this
+  one and fails if it has drifted from the handlers. A property the extractor
+  cannot classify is absent from the table, and an absent property is never
+  cached **and** drops the whole element's cache when it applies — so being
+  missing costs speed, never correctness.
+- **A blanket wipe on every apply looks safer and is inert.** That was the first
+  implementation: within a single stylesheet pass each property's apply wiped
+  the previous property's entry, so the cache retained only the last-written
+  property and every write missed on the next pass, self-perpetuating. It
+  measured a 1x speedup over three runs — correct, and worth exactly nothing.
+  If you change this cache, re-run the `[style][dedup][benchmark]` case; it
+  A/Bs the guard inside one binary and prints the apply ratio.
+- **Anything that changes widget state outside `el.style` must call
+  `__invalidateStyleCache__(el)`.** The cache describes a widget, not an
+  Element, so it is wrong the moment the widget is recreated under a surviving
+  Element (`_ensureNative`, `_reparentNative`, the `appendChild` /
+  `removeChild` / `replaceChild` mount paths, `__forgetWidgetCallbacks__`) or
+  another path writes a slot it claims (media-attribute replay, the `hidden`
+  setter, dialog `show` / `close`). **If you add a bridge setter call outside
+  the `web-compat-style-decl-*` handlers, you are adding one of these.** The
+  failure mode is a later identical style write being skipped as redundant
+  against a widget that no longer holds that value — which renders wrong with
+  every test still green, because `el.style.foo` reads back the assigned string
+  whether or not it ever reached the widget. Assert against real `View` state.

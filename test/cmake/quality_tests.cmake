@@ -697,6 +697,16 @@ if(Python3_Interpreter_FOUND)
     # swept dirs is registered or excluded), and the CLAUDE.md digest generated
     # from it must be in sync. This is what keeps agents from hand-rolling a
     # script for a job a shipped tool already does.
+    # The style write-dedup alias table is DERIVED from the `_apply*Prop`
+    # handlers, not maintained by hand: a property may only trust its cached
+    # value while nothing sharing its bridge slot has been applied since. If a
+    # handler starts writing a different slot and the table is not regenerated,
+    # a stale cache entry suppresses a write the widget needs and the page
+    # renders wrong with every behavioural test still green. This re-derives the
+    # table and fails when it has drifted.
+    add_test(NAME style-dedup-table-sync COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/style_dedup_table.py")
+
     add_test(NAME tools-registry-check COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
     add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
