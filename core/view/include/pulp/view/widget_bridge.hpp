@@ -562,6 +562,20 @@ private:
     std::shared_ptr<QueryService> query_service_;
 
     std::vector<int> pending_frame_ids_;
+    // Single-slot handshake between the two frame-draining entry points.
+    // `service_frame_callbacks()` sets it when it drains pending_frame_ids_;
+    // `poll_async_results()` consumes it (exchange-to-false) and skips its own
+    // drain for that one pass. A rAF callback that re-arms itself refills the
+    // queue while it is being drained, so without this both entry points fire
+    // the same self-rearming callback in one host tick and the scene is drawn
+    // twice per display period. Browser semantics agree: a frame requested from
+    // inside a frame callback belongs to the NEXT frame, never the current one.
+    //
+    // Liveness is bounded by construction: every poll clears the slot, so two
+    // consecutive polls can never both skip, and a skip only ever follows a
+    // service pass that already drew. A host that drives poll alone therefore
+    // keeps drawing on every poll.
+    bool frames_drained_by_service_ = false;
     // Requested by __pulpRuntimeSettle__ while QuickJS is inside a native
     // callback. Drained only from the outer host-frame boundary; this is a
     // budget, not a synchronous recursion request.
