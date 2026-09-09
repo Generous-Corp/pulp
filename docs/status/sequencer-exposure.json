@@ -2844,7 +2844,7 @@
       "id": "event-stream-pdc-contract",
       "title": "Event-stream delay-compensation contract, scheduling shift, and typed latency refusals",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "3e91b7c2-48da-4f16-b5c0-9d2ea6f31c47",
       "owned_paths": [
         "core/playback/include/pulp/playback/event_compensation.hpp",
@@ -2865,6 +2865,12 @@
         ".agents/skills/hosting/SKILL.md",
         "core/host/src/signal_graph_prepared_topology_edit.cpp"
       ],
+      "release": {
+        "pr": 8114,
+        "accepted_head": "f2570550225beef73c3539b4d759588c886894a4",
+        "merge_sha": "903345ab9f6b68d8815a4bb68dab359c8f8b4ff0",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/include/pulp/playback/event_compensation.hpp",
