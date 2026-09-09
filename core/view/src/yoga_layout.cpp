@@ -6,6 +6,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include "yoga_measurement_internal.hpp"
 #include <yoga/Yoga.h>
 #include <vector>
@@ -15,6 +16,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstddef>
+#include <cstring>
+#include <cmath>
+#include <functional>
+#include <string>
+#include <unordered_map>
 
 namespace pulp::view {
 
@@ -537,6 +544,10 @@ namespace {
 std::atomic<uint64_t> g_layout_pass_count{0};
 std::atomic<uint32_t> g_layout_last_nodes{0};
 std::atomic<uint32_t> g_layout_max_nodes{0};
+std::atomic<uint64_t> g_tree_build_count{0};
+
+// Defined below with the tree cache it owns.
+void discard_cached_yoga_tree();
 
 bool layout_stats_enabled() {
     static const bool on = std::getenv("PULP_LAYOUT_STATS") != nullptr;
@@ -547,27 +558,114 @@ bool layout_stats_enabled() {
 uint64_t yoga_layout_pass_count()      { return g_layout_pass_count.load(std::memory_order_relaxed); }
 uint32_t yoga_layout_last_node_count() { return g_layout_last_nodes.load(std::memory_order_relaxed); }
 uint32_t yoga_layout_max_node_count()  { return g_layout_max_nodes.load(std::memory_order_relaxed); }
+uint64_t yoga_layout_tree_build_count() { return g_tree_build_count.load(std::memory_order_relaxed); }
 void     yoga_layout_reset_stats() {
+    discard_cached_yoga_tree();
+    g_tree_build_count.store(0, std::memory_order_relaxed);
     g_layout_pass_count.store(0, std::memory_order_relaxed);
     g_layout_last_nodes.store(0, std::memory_order_relaxed);
     g_layout_max_nodes.store(0, std::memory_order_relaxed);
 }
 
+
+// Yoga node trees are rebuilt from the View tree on every layout pass, which
+// makes every node look new to Yoga and defeats its own dirty-skipping: a
+// repeated pass over an unchanged tree costs a full build, a full solve and a
+// full teardown. The tree is kept alive between passes instead, keyed on the
+// root view and validated against the live child order before it is reused, so
+// a pass over a structurally identical tree re-applies styles (Yoga ignores an
+// unchanged style write) and lets the engine skip the subtrees nothing touched.
+//
+// One entry, per thread: layout runs on the thread that owns the view tree, and
+// alternating roots simply fall back to a rebuild. Views are only ever compared
+// by address here, never dereferenced through the cache, so a retired tree is
+// inert rather than dangling.
+namespace {
+
+// The inputs yoga_measure reads for a measured leaf. Yoga caches a measurement
+// against its constraints, so a reused node must be marked dirty when any of
+// these move or the stale size survives the pass.
+struct MeasureSignature {
+    float       intrinsic_width  = 0.0f;
+    float       intrinsic_height = 0.0f;
+    std::size_t text_hash        = 0;
+
+    bool operator==(const MeasureSignature& other) const {
+        // Bit-compare rather than float-compare so a NaN intrinsic (which
+        // checked_yoga_measurement diagnoses) still matches itself and does not
+        // re-dirty the node on every pass.
+        return std::memcmp(this, &other, sizeof(MeasureSignature)) == 0;
+    }
+};
+
+struct YogaTreeCache {
+    View*        root      = nullptr;
+    YGConfigRef  config    = nullptr;
+    YGNodeRef    node      = nullptr;
+    bool         subpixel  = false;
+    std::unordered_map<YGNodeRef, MeasureSignature> measure_signatures;
+
+    void discard() {
+        if (node)   YGNodeFreeRecursive(node);
+        if (config) YGConfigFree(config);
+        node = nullptr;
+        config = nullptr;
+        root = nullptr;
+        measure_signatures.clear();
+    }
+};
+
+thread_local YogaTreeCache g_tree_cache;
+
+// Most style writers below are conditional — a padding of 0 or an unset
+// logical edge simply is not written — which is correct against a freshly
+// created node and wrong against a reused one, where the previous pass's value
+// would survive. A reused node is therefore styled indirectly: every write
+// lands on a scratch node reset to Yoga's defaults, and the finished style is
+// copied across. YGNodeCopyStyle compares before it assigns, so an unchanged
+// node is still not marked dirty and Yoga can still skip its subtree.
+YGNodeRef style_scratch_node() {
+    static thread_local YGNodeRef scratch = YGNodeNew();
+    YGNodeReset(scratch);
+    return scratch;
+}
+
+void discard_cached_yoga_tree() { g_tree_cache.discard(); }
+
+MeasureSignature measure_signature_of(const View& view) {
+    MeasureSignature sig;
+    sig.intrinsic_width  = view.intrinsic_width();
+    sig.intrinsic_height = view.intrinsic_height();
+    // Two different strings can share an intrinsic size yet wrap differently at
+    // a bounded width, so the copy itself is part of the signature.
+    if (auto* label = dynamic_cast<const Label*>(&view))
+        sig.text_hash = std::hash<std::string>{}(label->text());
+    return sig;
+}
+
+} // namespace
+
 static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
                                YGConfigRef config, bool& wants_subpixel,
-                               float viewport_width, float viewport_height) {
+                               float viewport_width, float viewport_height,
+                               bool reuse, bool& reuse_ok,
+                               float forced_width, float forced_height) {
     ++node_tally;
     if (view.subpixel_layout()) wants_subpixel = true;
+
+    YGNodeRef style_node = reuse ? style_scratch_node() : node;
+    if (!std::isnan(forced_width))  YGNodeStyleSetWidth(style_node, forced_width);
+    if (!std::isnan(forced_height)) YGNodeStyleSetHeight(style_node, forced_height);
     // Position-type wins ordering: tell Yoga "this is absolute" BEFORE
     // any flex-flow attributes are applied, so flex_grow/flex_shrink/
     // flex_basis can be gated on absolute-ness in apply_flex_style and
     // never contribute to the parent's flex line.
-    apply_position_style(node, view);
+    apply_position_style(style_node, view);
 
     const bool is_absolute = view.position() == View::Position::absolute
                           || view.position() == View::Position::fixed;
-    apply_flex_style(node, view.flex(), is_absolute, viewport_width, viewport_height);
-    apply_border_widths(node, view);
+    apply_flex_style(style_node, view.flex(), is_absolute, viewport_width, viewport_height);
+    apply_border_widths(style_node, view);
     // Wire View::Overflow through to Yoga so the engine knows about clipping
     // context. Yoga's overflow has 3
     // values (visible/hidden/scroll) matching CSS — for layout the only
@@ -580,7 +678,7 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
             case View::Overflow::hidden:  yo = YGOverflowHidden;  break;
             case View::Overflow::scroll:  yo = YGOverflowScroll;  break;
         }
-        YGNodeStyleSetOverflow(node, yo);
+        YGNodeStyleSetOverflow(style_node, yo);
     }
     // Writing direction propagates into Yoga's YGDirection, which controls how
     // `start`/`end` resolve and whether `flexDirection: row` visually reverses
@@ -613,7 +711,10 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
                 }
                 break;
         }
-        YGNodeStyleSetDirection(node, ydir);
+        YGNodeStyleSetDirection(style_node, ydir);
+    }
+    if (reuse) {
+        YGNodeCopyStyle(node, style_node);
     }
     YGNodeSetContext(node, &view);
 
@@ -634,11 +735,13 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
     if (!has_managed_children) {
         const auto intrinsic = sanitize_yoga_measurement(
             view.intrinsic_width(), view.intrinsic_height());
-        if (intrinsic.width > 0 || intrinsic.height > 0 || intrinsic.rejected_non_finite) {
+        const bool wants_measure =
+            intrinsic.width > 0 || intrinsic.height > 0 || intrinsic.rejected_non_finite;
+        if (wants_measure) {
             // Invalid intrinsic values must still enter the callback so the
             // originating View is diagnosed rather than silently treated as a
             // zero-sized non-measurable leaf.
-            YGNodeSetMeasureFunc(node, yoga_measure);
+            if (!YGNodeHasMeasureFunc(node)) YGNodeSetMeasureFunc(node, yoga_measure);
             // Wire Yoga's baseline channel for text-bearing leaves so flex
             // containers can honor
             // `align-items: baseline`. Today only Labels report a real
@@ -647,11 +750,41 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
             if (dynamic_cast<const Label*>(&view)) {
                 YGNodeSetBaselineFunc(node, yoga_baseline);
             }
+            if (reuse) {
+                // A reused node keeps Yoga's cached measurement, which is only
+                // valid while the callback's inputs are unchanged.
+                const auto sig = measure_signature_of(view);
+                auto& slot = g_tree_cache.measure_signatures[node];
+                if (!(slot == sig)) {
+                    slot = sig;
+                    YGNodeMarkDirty(node);
+                }
+            } else {
+                g_tree_cache.measure_signatures[node] = measure_signature_of(view);
+            }
+        } else if (reuse && YGNodeHasMeasureFunc(node)) {
+            // A leaf that stopped reporting an intrinsic size must stop
+            // measuring, or the reused node keeps answering with the old size.
+            YGNodeSetMeasureFunc(node, nullptr);
+            g_tree_cache.measure_signatures.erase(node);
         }
+    } else if (reuse && YGNodeHasMeasureFunc(node)) {
+        // A leaf that gained managed children is no longer measured by the
+        // callback; Yoga rejects children on a node that still has one.
+        YGNodeSetMeasureFunc(node, nullptr);
+        g_tree_cache.measure_signatures.erase(node);
     }
 
     if (!has_managed_children)
         return;
+
+    const uint32_t expected_children =
+        static_cast<uint32_t>(children.size()) + (wants_anonymous_text_box ? 1u : 0u);
+    if (reuse && YGNodeGetChildCount(node) != expected_children) {
+        // The child list changed shape; the caller rebuilds from scratch.
+        reuse_ok = false;
+        return;
+    }
 
     uint32_t insert_at = 0;
     if (wants_anonymous_text_box) {
@@ -659,19 +792,51 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
         // owner's text; apply_yoga_results recognises a child node whose
         // context IS its parent view as the anonymous box rather than as a real
         // child, and writes the resolved rect back as the text slot.
-        YGNodeRef ygText = YGNodeNewWithConfig(config);
-        YGNodeSetContext(ygText, &view);
-        YGNodeSetMeasureFunc(ygText, yoga_measure);
-        YGNodeSetBaselineFunc(ygText, yoga_baseline);
-        YGNodeInsertChild(node, ygText, insert_at++);
+        if (reuse) {
+            YGNodeRef ygText = YGNodeGetChild(node, insert_at);
+            if (YGNodeGetContext(ygText) != &view) {
+                reuse_ok = false;
+                return;
+            }
+            const auto sig = measure_signature_of(view);
+            auto& slot = g_tree_cache.measure_signatures[ygText];
+            if (!(slot == sig)) {
+                slot = sig;
+                YGNodeMarkDirty(ygText);
+            }
+            ++insert_at;
+        } else {
+            YGNodeRef ygText = YGNodeNewWithConfig(config);
+            YGNodeSetContext(ygText, &view);
+            YGNodeSetMeasureFunc(ygText, yoga_measure);
+            YGNodeSetBaselineFunc(ygText, yoga_baseline);
+            g_tree_cache.measure_signatures[ygText] = measure_signature_of(view);
+            YGNodeInsertChild(node, ygText, insert_at++);
+        }
     }
 
     for (size_t i = 0; i < children.size(); ++i) {
         auto* child = children[i];
-        YGNodeRef ygChild = YGNodeNewWithConfig(config);
-        build_yoga_subtree(*child, ygChild, node_tally, config, wants_subpixel,
-                           viewport_width, viewport_height);
-        YGNodeInsertChild(node, ygChild, insert_at++);
+        if (reuse) {
+            YGNodeRef ygChild = YGNodeGetChild(node, insert_at);
+            // Identity, not just arity: a reordered or replaced child would
+            // otherwise inherit the previous occupant's solved geometry.
+            if (YGNodeGetContext(ygChild) != child) {
+                reuse_ok = false;
+                return;
+            }
+            build_yoga_subtree(*child, ygChild, node_tally, config, wants_subpixel,
+                               viewport_width, viewport_height, true, reuse_ok,
+                               std::nanf(""), std::nanf(""));
+            if (!reuse_ok) return;
+            ++insert_at;
+        } else {
+            YGNodeRef ygChild = YGNodeNewWithConfig(config);
+            build_yoga_subtree(*child, ygChild, node_tally, config, wants_subpixel,
+                               viewport_width, viewport_height, false, reuse_ok,
+                               std::nanf(""), std::nanf(""));
+            YGNodeInsertChild(node, ygChild, insert_at++);
+        }
     }
 }
 
@@ -719,23 +884,51 @@ static void apply_yoga_results(View& parent, YGNodeRef node) {
 
 // Build YGNode tree from View tree, compute layout, apply results
 void yoga_layout(View& root) {
+    PULP_TRACE_SCOPE_NAMED("layout", "yoga_layout_pass");
     auto rootBounds = root.local_bounds();
 
     const auto stats_t0 = std::chrono::steady_clock::now();
     uint32_t node_tally = 0;
 
-    // One config per pass. Nodes hold a pointer to it, so its
+    // The config outlives a pass along with the nodes that point at it, so its
     // pointScaleFactor can be decided AFTER the build walk has seen every
     // view's subpixel_layout() flag — Yoga reads the factor at the
     // round-to-pixel-grid step at the end of YGNodeCalculateLayout.
-    YGConfigRef ygConfig = YGConfigNew();
-    bool wants_subpixel = root.subpixel_layout();
+    bool reuse = g_tree_cache.node != nullptr && g_tree_cache.root == &root;
+    if (!reuse) g_tree_cache.discard();
 
-    YGNodeRef ygRoot = YGNodeNewWithConfig(ygConfig);
-    YGNodeStyleSetWidth(ygRoot, rootBounds.width);
-    YGNodeStyleSetHeight(ygRoot, rootBounds.height);
-    build_yoga_subtree(root, ygRoot, node_tally, ygConfig, wants_subpixel,
-                       rootBounds.width, rootBounds.height);
+    bool wants_subpixel = false;
+    YGConfigRef ygConfig = nullptr;
+    YGNodeRef   ygRoot   = nullptr;
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        node_tally = 0;
+        wants_subpixel = root.subpixel_layout();
+        if (!reuse) {
+            g_tree_cache.config = YGConfigNew();
+            g_tree_cache.node   = YGNodeNewWithConfig(g_tree_cache.config);
+            g_tree_cache.root   = &root;
+            g_tree_cache.measure_signatures.clear();
+            g_tree_build_count.fetch_add(1, std::memory_order_relaxed);
+        }
+        ygConfig = g_tree_cache.config;
+        ygRoot   = g_tree_cache.node;
+
+        bool reuse_ok = true;
+        build_yoga_subtree(root, ygRoot, node_tally, ygConfig, wants_subpixel,
+                           rootBounds.width, rootBounds.height, reuse, reuse_ok,
+                           rootBounds.width, rootBounds.height);
+        // The pixel-grid factor is a config-wide setting Yoga does not treat as
+        // a style write, so a tree that changes its mind about subpixel layout
+        // has to be re-solved from a fresh build rather than reused.
+        if (reuse && (!reuse_ok || wants_subpixel != g_tree_cache.subpixel)) {
+            g_tree_cache.discard();
+            reuse = false;
+            continue;
+        }
+        break;
+    }
+    g_tree_cache.subpixel = wants_subpixel;
     // 0 disables the pixel-grid pass entirely, preserving the fractional
     // solved geometry (see View::set_subpixel_layout for why imported
     // designs need this). Default 1.0f keeps Yoga's stock whole-pixel
@@ -755,7 +948,13 @@ void yoga_layout(View& root) {
         case FlexStyle::WritingDirection::inherit:
         default:                                   rootDir = YGDirectionLTR; break;
     }
-    YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, rootDir);
+    {
+        // Separated from the enclosing pass so a trace shows how much of a pass
+        // is the style walk and how much is the solve — the two move in
+        // opposite directions when the node tree is reused.
+        PULP_TRACE_SCOPE_NAMED("layout", "yoga_calculate");
+        YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, rootDir);
+    }
     apply_yoga_results(root, ygRoot);
 
     if (std::getenv("PULP_DUMP_BOUNDS")) {
@@ -765,8 +964,6 @@ void yoga_layout(View& root) {
         std::fprintf(stderr, "=== [PULP_DUMP_BOUNDS] end ===\n\n");
     }
 
-    YGNodeFreeRecursive(ygRoot);
-    YGConfigFree(ygConfig);
 
     const uint64_t pass = g_layout_pass_count.fetch_add(1, std::memory_order_relaxed) + 1;
     g_layout_last_nodes.store(node_tally, std::memory_order_relaxed);
@@ -775,9 +972,12 @@ void yoga_layout(View& root) {
     if (layout_stats_enabled()) {
         const double us = std::chrono::duration<double, std::micro>(
                               std::chrono::steady_clock::now() - stats_t0).count();
-        std::fprintf(stderr, "[layout-stats] pass=%llu nodes=%u root=%.0fx%.0f us=%.1f\n",
-                     static_cast<unsigned long long>(pass), node_tally,
-                     rootBounds.width, rootBounds.height, us);
+        std::fprintf(stderr,
+                     "[layout-stats] pass=%llu builds=%llu nodes=%u root=%.0fx%.0f us=%.1f\n",
+                     static_cast<unsigned long long>(pass),
+                     static_cast<unsigned long long>(
+                         g_tree_build_count.load(std::memory_order_relaxed)),
+                     node_tally, rootBounds.width, rootBounds.height, us);
     }
 }
 
