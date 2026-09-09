@@ -232,9 +232,19 @@ function _applyPaintProp(decl, id, key, resolved, value) {
         }
 
         // Opacity
-        case "opacity":
-            setOpacity(id, parseFloat(resolved) || 0);
+        case "opacity": {
+            // An unparseable value means the declaration is absent, and CSS
+            // defines opacity's initial value as 1 — not 0. `el.style.opacity
+            // = ""` is how a pseudo-class restore reverts a property that had
+            // no inline value to begin with, so coercing it to 0 makes the
+            // widget stop painting while its rect, visibility and clip box
+            // stay untouched — which reads as a renderer fault rather than a
+            // style reset. The prop applier already resets a removed
+            // `opacity` prop to 1.0; this keeps the CSS lane consistent.
+            var opVal = parseFloat(resolved);
+            setOpacity(id, isNaN(opVal) ? 1 : opVal);
             return true;
+        }
 
         // Box shadow: "2px 4px 8px rgba(0,0,0,0.3)" or
         // "inset 2px 4px 8px ...".

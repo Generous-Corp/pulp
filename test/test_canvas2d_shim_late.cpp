@@ -885,7 +885,8 @@ TEST_CASE("Canvas2D shim flushes the 10-entry catalog set to the bridge",
     // regressed to default 0; pin the exact mapping the bridge declares
     // in widget_bridge.cpp:
     //   textAlign:    'left'=0, 'center'=1, 'right'=2
-    //   textBaseline: 'top'=0,  'middle'=1, 'bottom'=2
+    //   textBaseline: 'top'=0,  'middle'=1, 'bottom'=2,
+    //                 'alphabetic'=3, 'hanging'=4, 'ideographic'=5
     //   lineCap:      'butt'=0, 'round'=1,  'square'=2
     //   lineJoin:     'miter'=0,'round'=1,  'bevel'=2
     //   blendMode:    'source-over'=0, 'multiply'=1, ...
@@ -943,7 +944,7 @@ TEST_CASE("Canvas2D shim getter round-trip for the 10-entry catalog set",
         return defaults + ' || ' + assigned + ' || ' + have_methods;
     )");
     REQUIRE(result ==
-        "1|source-over|butt|miter|0|left|top"
+        "1|source-over|butt|miter|0|left|alphabetic"
         " || "
         "0.25|screen|square|round|7|right|bottom"
         " || "

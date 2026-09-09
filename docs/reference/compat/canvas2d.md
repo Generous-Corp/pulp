@@ -74,6 +74,21 @@ The catalog notes still preserve backend-specific history where it is
 useful for future audits, but the current machine-readable status is the
 catalog plus harness output above.
 
+## Text Baseline Default
+
+`textBaseline` initializes to `alphabetic`, which is the Canvas2D initial
+value: the `y` passed to `fillText` / `strokeText` is the baseline itself,
+not the top of the em box. Browser-authored canvas code that never assigns
+`ctx.textBaseline` depends on that, so a `top` default silently displaces
+every such caption down by one ascent.
+
+All six spec values are honored end to end — `top`, `hanging`, `middle`,
+`alphabetic`, `ideographic`, `bottom`. `hanging` and `ideographic` carry no
+dedicated font metric in the shaper and are approximated from ascent and
+descent, which is how engines behave when the face has no `BASE` table. The
+bridge keeps `top`, `middle` and `bottom` on their original wire codes, so a
+canvas recorded before the newer values existed replays unchanged.
+
 ## Shared WidgetBridge event dispatch
 
 Canvas elements use the same single DOM fan-out as other native widgets. Wheel
