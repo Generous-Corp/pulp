@@ -28,6 +28,7 @@
 #include <fstream>
 #include <numbers>
 #include <thread>
+#include <tuple>
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -435,4 +436,179 @@ TEST_CASE("WidgetBridge canvasSetFilter chain replays through to the recording c
     }
     REQUIRE(saw_filter);
     REQUIRE(saw_direction);
+}
+
+// ── canvasPathPolyline bridge fn ────────────────────────────────────────
+//
+// A batched moveTo + lineTo run. It exists only to collapse bridge
+// crossings: a curve drawn point-by-point costs one JS->native call per
+// point, and a band curve is thousands of points. The contract is that
+// batching is unobservable downstream — the recorded command stream must be
+// identical to the one the unbatched calls produce — so these tests compare
+// the two streams directly rather than asserting a hand-written expectation,
+// which would drift if the unbatched path ever changed shape.
+
+static std::vector<std::tuple<int, float, float>>
+pathShape(const pulp::view::CanvasWidget& canvas) {
+    std::vector<std::tuple<int, float, float>> shape;
+    for (const auto& cmd : canvas.commands())
+        shape.emplace_back(static_cast<int>(cmd.type), cmd.x, cmd.y);
+    return shape;
+}
+
+TEST_CASE("WidgetBridge canvasPathPolyline matches the unbatched command stream",
+          "[view][bridge][canvas]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        function mk(id) {
+            var c = document.createElement('canvas');
+            c.id = id; c.width = 100; c.height = 100;
+            document.body.appendChild(c);
+            return c;
+        }
+        var slow = mk('poly-slow');
+        var fast = mk('poly-fast');
+        var pts = [];
+        for (var i = 0; i < 40; ++i) pts.push(i * 1.5, Math.sin(i) * 10);
+
+        canvasMoveTo(slow._id, pts[0], pts[1]);
+        for (var j = 2; j + 1 < pts.length; j += 2)
+            canvasLineTo(slow._id, pts[j], pts[j + 1]);
+
+        canvasPathPolyline(fast._id, pts);
+    )");
+
+    auto* slow = canvasFromBridge(bridge, engine, "poly-slow");
+    auto* fast = canvasFromBridge(bridge, engine, "poly-fast");
+    REQUIRE(slow != nullptr);
+    REQUIRE(fast != nullptr);
+
+    // Guard against both canvases being empty, which would make the
+    // equality below true and meaningless.
+    REQUIRE(slow->commands().size() == 40);
+    REQUIRE(pathShape(*fast) == pathShape(*slow));
+
+    using T = pulp::view::CanvasDrawCmd::Type;
+    REQUIRE(fast->commands().front().type == T::move_to);
+    REQUIRE(fast->commands().back().type == T::line_to);
+}
+
+TEST_CASE("WidgetBridge canvasPathPolyline rejects a malformed run without partial output",
+          "[view][bridge][canvas]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Rejection is all-or-nothing: a half-applied polyline would draw a
+    // truncated path, which is a corrupted frame rather than a missing one
+    // and is much harder to notice.
+    bridge.load_script(R"(
+        function mk(id) {
+            var c = document.createElement('canvas');
+            c.id = id; c.width = 100; c.height = 100;
+            document.body.appendChild(c);
+            return c;
+        }
+        var odd     = mk('poly-odd');
+        var nonNum  = mk('poly-nonfinite');
+        var empty   = mk('poly-empty');
+        var notArr  = mk('poly-notarray');
+        var huge    = mk('poly-huge');
+        var ok      = mk('poly-ok');
+
+        canvasPathPolyline(odd._id, [1, 2, 3]);
+        // The bad value is last, so anything emitted before validating the
+        // whole run would already be recorded by now.
+        canvasPathPolyline(nonNum._id, [1, 2, 3, 4, 5, Infinity]);
+        canvasPathPolyline(empty._id, []);
+        canvasPathPolyline(notArr._id, 'nope');
+        var big = [];
+        for (var i = 0; i < 70000; ++i) big.push(i);
+        canvasPathPolyline(huge._id, big);
+
+        canvasPathPolyline(ok._id, [1, 2, 3, 4]);
+    )");
+
+    for (const char* id : {"poly-odd", "poly-nonfinite", "poly-empty",
+                           "poly-notarray", "poly-huge"}) {
+        auto* canvas = canvasFromBridge(bridge, engine, id);
+        REQUIRE(canvas != nullptr);
+        INFO("rejected input still recorded commands: " << id);
+        REQUIRE(canvas->commands().empty());
+    }
+
+    // Positive control: the same call shape with a valid run must record, so
+    // an all-empty result cannot pass by the bridge fn being unreachable.
+    auto* ok = canvasFromBridge(bridge, engine, "poly-ok");
+    REQUIRE(ok != nullptr);
+    REQUIRE(ok->commands().size() == 2);
+}
+
+TEST_CASE("Canvas2D shim batches a lineTo run into one polyline call",
+          "[view][bridge][canvas]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The shim defers moveTo/lineTo into a pending run that `_fp()` ships as
+    // one call. Count the crossings from JS rather than inferring batching
+    // from the recorded commands: batching is deliberately invisible in the
+    // command stream, so the stream alone cannot distinguish one batched call
+    // from four per-point ones. The counter is what has teeth here.
+    bridge.load_script(R"(
+        var polyCalls = 0, pointCalls = 0;
+        var _poly = canvasPathPolyline, _move = canvasMoveTo, _line = canvasLineTo;
+        canvasPathPolyline = function() { polyCalls++; return _poly.apply(null, arguments); };
+        canvasMoveTo = function() { pointCalls++; return _move.apply(null, arguments); };
+        canvasLineTo = function() { pointCalls++; return _line.apply(null, arguments); };
+
+        var c = document.createElement('canvas');
+        c.id = 'poly-shim'; c.width = 100; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(10, 0);
+        ctx.lineTo(10, 10);
+        ctx.lineTo(0, 10);
+        ctx.stroke();
+    )");
+
+    auto* canvas = canvasFromBridge(bridge, engine, "poly-shim");
+    REQUIRE(canvas != nullptr);
+
+    const auto poly_calls = engine.evaluate("polyCalls").getWithDefault<int64_t>(-1);
+    const auto point_calls = engine.evaluate("pointCalls").getWithDefault<int64_t>(-1);
+    INFO("polyline calls=" << poly_calls << " per-point calls=" << point_calls);
+    // Four path points, one crossing.
+    REQUIRE(poly_calls == 1);
+    REQUIRE(point_calls == 0);
+
+    using T = pulp::view::CanvasDrawCmd::Type;
+    std::vector<T> path_types;
+    bool saw_stroke = false;
+    for (const auto& cmd : canvas->commands()) {
+        if (cmd.type == T::move_to || cmd.type == T::line_to) {
+            // Every path command must precede the stroke: if the pending run
+            // flushed late it would land after it, and the stroke would paint
+            // an empty or stale path.
+            REQUIRE_FALSE(saw_stroke);
+            path_types.push_back(cmd.type);
+        }
+        if (cmd.type == T::stroke_path) saw_stroke = true;
+    }
+    REQUIRE(saw_stroke);
+    REQUIRE(path_types == std::vector<T>{T::move_to, T::line_to, T::line_to, T::line_to});
 }

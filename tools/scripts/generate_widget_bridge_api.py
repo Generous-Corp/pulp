@@ -202,6 +202,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "canvasPathArc": "(canvasId: string, x: number, y: number, radius: number, startAngle: number, endAngle: number, anticlockwise?: boolean) => void",
     "canvasPathArcTo": "(canvasId: string, x1: number, y1: number, x2: number, y2: number, radius: number) => void",
     "canvasPathEllipse": "(canvasId: string, x: number, y: number, radiusX: number, radiusY: number, rotation: number, startAngle: number, endAngle: number, anticlockwise?: boolean) => void",
+    "canvasPathPolyline": "(canvasId: string, coords: number[]) => void",
     "canvasPathRoundRect": "(canvasId: string, x: number, y: number, width: number, height: number, radius: number) => void",
     "canvasPutImageData": "(canvasId: string, imageData: PulpBridgeCanvasImageData, x: number, y: number) => void",
     "canvasQuadTo": "(canvasId: string, cpx: number, cpy: number, x: number, y: number) => void",

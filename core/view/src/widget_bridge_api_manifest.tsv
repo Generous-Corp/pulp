@@ -231,6 +231,7 @@ canvasSetFontFull	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasBeginPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasMoveTo	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasLineTo	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
+canvasPathPolyline	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasQuadTo	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasCubicTo	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasClosePath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp

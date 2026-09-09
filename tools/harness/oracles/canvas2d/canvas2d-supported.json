@@ -48,14 +48,18 @@
     "moveTo": {
       "kind": "method",
       "bridge": [
+        "canvasPathPolyline",
         "canvasMoveTo"
-      ]
+      ],
+      "notes": "shim coalesces a moveTo + lineTo run into one canvasPathPolyline call; the per-point fns remain the fallback for hosts without it"
     },
     "lineTo": {
       "kind": "method",
       "bridge": [
+        "canvasPathPolyline",
         "canvasLineTo"
-      ]
+      ],
+      "notes": "shim coalesces a moveTo + lineTo run into one canvasPathPolyline call; the per-point fns remain the fallback for hosts without it"
     },
     "bezierCurveTo": {
       "kind": "method",
@@ -72,10 +76,11 @@
     "rect": {
       "kind": "method",
       "bridge": [
+        "canvasPathPolyline",
         "canvasMoveTo",
         "canvasLineTo"
       ],
-      "notes": "shim composes via moveTo + 4× lineTo"
+      "notes": "shim composes via moveTo + 4× lineTo, shipped as one canvasPathPolyline call"
     },
     "arc": {
       "kind": "method",
