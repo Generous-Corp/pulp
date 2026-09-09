@@ -3529,6 +3529,166 @@
           "owner": "sequencer-control-closure"
         }
       }
+    },
+    {
+      "id": "offline-bounce-device-free-graph",
+      "title": "The offline bounce renders through the graph binding over a device-free timeline graph",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "core/host/include/pulp/host/timeline_offline_graph.hpp",
+        "core/host/src/timeline_offline_graph.cpp",
+        "core/host/CMakeLists.txt",
+        "tools/timeline/src/timeline_render.cpp",
+        "tools/timeline/CMakeLists.txt",
+        "test/test_timeline_offline_renderer.cpp",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/hosting/SKILL.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/host/src/timeline_offline_graph.cpp",
+          "needles": [
+            "build_device_free_timeline_graph",
+            "TimelineDeviceFreeGraphCode"
+          ]
+        },
+        {
+          "path": "tools/timeline/src/timeline_render.cpp",
+          "needles": [
+            "build_device_free_timeline_graph",
+            "binding.process"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/host/include/pulp/host/timeline_offline_graph.hpp",
+              "needles": [
+                "build_device_free_timeline_graph",
+                "TimelineDeviceFreeGraph"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "_pulp_sdk_header_subsystems",
+                "pulp-host"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "core/host/CMakeLists.txt",
+              "needles": [
+                "timeline_offline_graph.cpp",
+                "pulp-host"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_offline_renderer.cpp",
+              "needles": [
+                "the device-free builder emits one route per track at the parity shape"
+              ]
+            }
+          ],
+          "rationale": "The builder is a public header under core/host/include, compiled into pulp-host, and PulpInstallRules installs core/<subsystem>/include/pulp for the host subsystem whenever the pulp-host target exists, so cmake --install ships it on every platform that builds hosting. It was placed in core/host rather than tools/timeline specifically so it is installable: the same topology the bounce CLI now stands up is the topology Forge Sequencer and Forge Modular can build against the installed SDK, which is what unified-control reachability requires of this slice. Two honest limits. First, iOS does not build core/host at all, because App Store policy disallows dlopen of third-party plugins, so on iOS this header is absent rather than refused, and that absence is the pre-existing hosting boundary rather than anything this row introduces. Second, what is installed is the topology builder alone: it emits one device-free route per track onto an output node, and a consumer still drives it through TimelineGraphPlaybackBinding, which is installed separately."
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "docs/status/cli-commands.yaml",
+              "needles": [
+                "Render a canonical timeline project's arrangement audio to Float32 WAV without an audio device."
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/pulp_cli.cpp",
+              "needles": [
+                "{\"render\", \"Render a timeline project to WAV\", cmd_render}",
+                "PULP_ENABLE_PROJECT_PACKAGE"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/timeline/src/timeline_render.cpp",
+              "needles": [
+                "build_device_free_timeline_graph",
+                "binding.process"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_cli_timeline.cpp",
+              "needles": [
+                "renders through the installed command surface"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_agent.cpp",
+              "needles": [
+                "WithinAbs(0.75f, 1e-7f)"
+              ]
+            }
+          ],
+          "rationale": "pulp render already reached pulp::tools::timeline::render, and that one function is where the render call was swapped, so the CLI renders through the graph binding with no CLI-side change. The evidence that this is a real re-point rather than a refactor is the agent suite's sample-exact assertions: breaking the route-emission loop in the new builder drives seven of them from 0.75 to 0.0, which is the bounce going silent. Those assertions are therefore the regression gate for this row and must never be widened to accommodate a render-path change. Only the render call was replaced: the CLI keeps its own MasterTransport and block loop, so frame counts stay frame-addressed and no tick conversion enters the path. One caveat worth stating rather than leaving to be discovered: the render verb is registered behind PULP_ENABLE_PROJECT_PACKAGE, so a build with project packaging off has no render command at all and this surface is absent there."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_render"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_render"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_render"
+              ]
+            }
+          ],
+          "rationale": "handle_timeline_render calls the same pulp::tools::timeline::render entry point the CLI calls, and that call site is the only one, so MCP renders through the graph binding by construction rather than by a second wiring. State the limit precisely rather than let the exposed disposition imply more than it earns: the MCP test drives the tool and asserts the returned frame count, so it observes that the tool still renders and still reports the expected length, and it would pass on silence. The assertion that the samples are right lives at the library boundary in the agent suite, and MCP inherits that by sharing the entry point, not by observing it."
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "A bounce is an offline operation over a project on disk that writes a file and exits. Product A still has no exact-document timeline session an executor could bind a render to, so there is no live per-instance control through which this path could be driven or reported. The surface is absent rather than refused, and it is absent for the offline renderer generally rather than for the device-free graph specifically.",
+          "dependencies": [
+            "product-a-timeline-render-operation",
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "An agent can call the builder once it has the installed header, but no installed agent-capability row declares that an offline bounce stands up a device-free graph, what a device-free route omits, or that an empty route set builds and must not be prepared. An agent composing a bounce therefore cannot discover those constraints before authoring, and would have to read the header comments to learn them. Declaring the capability is the ledger-authority work that follows this slice rather than part of it.",
+          "dependencies": [
+            "design-time-playback-program-wire-capability"
+          ],
+          "owner": "agent-capability-maintainers"
+        }
+      }
     }
   ],
   "tombstones": []
