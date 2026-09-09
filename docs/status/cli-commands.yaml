@@ -2061,7 +2061,7 @@ commands:
       - name: schema
         summary: Emit the registry-derived timeline JSON Schema manifest
       - name: validate
-        summary: Decode and validate a canonical timeline project
+        summary: Compile a canonical timeline project and report every compile refusal as a diagnostic; exits non-zero when it emits one
         args:
           - name: project
             kind: positional
