@@ -488,6 +488,9 @@ pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-musical-typing LIBRARIES pulp::standalone)
+# Synthetic key-sequence driver: spec parsing, the press/capture frame
+# schedule, and the platform driver's refusal contract.
+pulp_add_test_suite(pulp-test-standalone-key-sequence LIBRARIES pulp::standalone)
 # One case opens the real output device before exercising its probe wiring;
 # keep only that tagged case in the validation tier.  The in-memory capture
 # ring case remains in ordinary PR coverage.

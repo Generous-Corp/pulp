@@ -430,6 +430,13 @@ set(_pulp_standalone_sources
     core/format/src/standalone_musical_typing.cpp
     core/format/src/test_signal.cpp
     core/format/src/settings_panel.cpp)
+# Synthetic key delivery for the test harness needs AppKit, so the macOS
+# backend is Obj-C++; every other platform links the unsupported stub.
+if(APPLE)
+    list(APPEND _pulp_standalone_sources core/format/src/standalone_key_driver_mac.mm)
+else()
+    list(APPEND _pulp_standalone_sources core/format/src/standalone_key_driver_stub.cpp)
+endif()
 add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
 add_library(pulp-standalone-native STATIC ${_pulp_standalone_sources})

@@ -593,7 +593,12 @@
         "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
         "tools/scripts/verify_gpu_dpr_inconclusive_receipt.py",
         "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py",
-        "docs/validation/gpu-dpr/**"
+        "docs/validation/gpu-dpr/**",
+        "core/format/src/standalone_key_driver_mac.mm",
+        "core/format/src/standalone_key_driver_stub.cpp",
+        "core/format/include/pulp/format/detail/standalone_key_driver.hpp",
+        "core/format/include/pulp/format/detail/standalone_key_schedule.hpp",
+        "core/format/include/pulp/format/detail/standalone_key_sequence.hpp"
       ]
     },
     "screenshot-sync": {
@@ -901,7 +906,12 @@
         "tools/scripts/gpu_first_visible_a3_*producer.py",
         "tools/scripts/test_gpu_first_visible_a3_campaign.py",
         "tools/scripts/test_gpu_first_visible_a3_external_adapter.py",
-        "tools/scripts/test_gpu_first_visible_a3_role_producers.py"
+        "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
+        "core/format/src/standalone_key_driver_mac.mm",
+        "core/format/src/standalone_key_driver_stub.cpp",
+        "core/format/include/pulp/format/detail/standalone_key_driver.hpp",
+        "core/format/include/pulp/format/detail/standalone_key_schedule.hpp",
+        "core/format/include/pulp/format/detail/standalone_key_sequence.hpp"
       ]
     },
     "playback": {
