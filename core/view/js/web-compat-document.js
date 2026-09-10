@@ -649,10 +649,15 @@ globalThis.self = window;
         globalThis.__pulpPopupDefaultState__ = state;
     }
     function activate(trigger, edge) {
-        if (state) dismiss(false);
         var popup = popupFor(trigger);
         var options = optionsFor(popup);
+        // Resolve the replacement before retiring what is already owned. A
+        // trigger whose menu has just closed still resolves as a trigger, so
+        // dismissing first would drop a live claim on the way to discovering
+        // there is nothing to claim -- and the caller that was closing the
+        // menu then finds nothing left to hand focus back to.
         if (!popup || !options.length) return false;
+        if (state) dismiss(false);
         var baseBackgrounds = [];
         // An app may author its row fill through either longhand, and only the
         // one it used reads back -- and it may not have authored it in script
@@ -682,7 +687,7 @@ globalThis.self = window;
         state.onNativeDismiss = function() {
             if (!state || state.popup !== popup) return;
             var liveTrigger = currentTrigger(state);
-            if (liveTrigger) liveTrigger.click();
+            if (liveTrigger) clickSelf(liveTrigger);
             dismiss(false);
         };
         popup.addEventListener("dismiss", state.onNativeDismiss);
@@ -748,6 +753,16 @@ globalThis.self = window;
         }
         if (state && state.trigger === trigger) dismiss(false);
     }
+    // This owner clicks a trigger or an option itself to commit, to close, or
+    // to mirror a keyboard open onto the app's own handler. Those are its own
+    // gestures, already accounted for by the branch that issued them; feeding
+    // them back in as if a user had pressed the control makes a close look
+    // like an open.
+    var syntheticClicks = 0;
+    function clickSelf(node) {
+        syntheticClicks++;
+        try { node.click(); } finally { syntheticClicks--; }
+    }
     function outsidePopupTarget(target) {
         return state && !state.popup.contains(target)
             && !state.trigger.contains(target);
@@ -755,7 +770,7 @@ globalThis.self = window;
     function consumeOutsideSequence(event) {
         if (event.type === "pointerdown" && outsidePopupTarget(event.target)) {
             var trigger = currentTrigger(state);
-            if (trigger) trigger.click();
+            if (trigger) clickSelf(trigger);
             dismiss(false);
             suppressOutsideSequence = true;
             if (suppressOutsideTimer) clearTimeout(suppressOutsideTimer);
@@ -779,6 +794,12 @@ globalThis.self = window;
     ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(
         function(type) { document.body.addEventListener(type, consumeOutsideSequence, true); });
     globalThis.__pulpPopupDefaultHandle__ = function(event) {
+        // Nothing dispatched inside this owner's own click is news to it. The
+        // stale-state sweep below must not run either: the branch that issued
+        // the click is mid-gesture and still needs the state it is about to
+        // retire itself, and a menu the app has just closed would otherwise be
+        // swept away before the branch can hand focus back to its trigger.
+        if (syntheticClicks) return;
         if (state && (!document.body.contains(state.trigger)
                       || !document.body.contains(state.popup))) dismiss(false);
         if (event.type === "pointerdown") {
@@ -813,7 +834,7 @@ globalThis.self = window;
         if (!state && trigger && !optedOut(trigger)
             && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
             event.preventDefault();
-            trigger.click();
+            clickSelf(trigger);
             var edge = event.key === "ArrowUp" ? "last" : "first";
             if (!activate(trigger, edge))
                 requestAnimationFrame(function() { activate(trigger, edge); });
@@ -823,7 +844,7 @@ globalThis.self = window;
         var count = state.options.length;
         if (event.key === "Escape") {
             event.preventDefault();
-            state.trigger.click();
+            clickSelf(state.trigger);
             dismiss(true);
         } else if (event.key === "ArrowDown" || event.key === "ArrowUp"
                    || event.key === "Home" || event.key === "End") {
@@ -843,7 +864,7 @@ globalThis.self = window;
             // value). Retire ownership while the authored nodes are still
             // attached so cleanup cannot mutate a detached pre-commit tree.
             dismiss(false);
-            option.click();
+            clickSelf(option);
             var replacement = currentTrigger(selectedState);
             if (replacement) replacement.focus();
             requestAnimationFrame(function() {
