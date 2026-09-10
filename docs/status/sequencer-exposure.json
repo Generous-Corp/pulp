@@ -3529,6 +3529,60 @@
           "owner": "sequencer-control-closure"
         }
       }
+    },
+    {
+      "id": "negative-capability-case-label-precision",
+      "title": "Negative-capability gate reads a switch label as a destination, not a refusal",
+      "classification": "ci_test_only",
+      "delivery_state": "pending",
+      "claim_id": "negative-capability-case-label-20260909",
+      "owned_paths": [
+        "test/cmake/timeline_tests.cmake",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "playback-negative-capability-selftest"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "A `case` label is a destination, not a raise."
+          ]
+        },
+        {
+          "path": ".agents/skills/timeline/SKILL.md",
+          "needles": [
+            "It also does not read a `case` label as a raise."
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The refusal gate is repository CI policy over playback's own error codes and installs no SDK header, target or symbol; the set of refusals a compiled plugin can meet is unchanged."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No offline Timeline command gains, loses or changes behaviour; the gate reads sources at CI time and the enumerator-to-name switch it stopped misreading is a diagnostic string table that already existed."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation is added or altered; the gate is not reachable as an MCP tool."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Detecting a raise site more precisely creates no product capability, grant or policy projection."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The gate describes no authoring capability an agent manifest could carry; it only decides which refusals owe a written owner and reason."
+        }
+      }
     }
   ],
   "tombstones": []
