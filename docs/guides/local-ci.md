@@ -1074,6 +1074,22 @@ line. Host-side setup and the deeper lease/role/memory-axis mechanics live in
 the [tartci](https://github.com/danielraffel/tartci) repo (`scripts/leases.py`,
 `scripts/host_profile.py`, `tartci host-profile` / `tartci leases`).
 
+## `brew update` in the macOS gate is advisory, not a gate
+
+`build.yml`'s macOS legs run `brew update --quiet` before installing ccache,
+because a runner with a stale Homebrew config makes the following
+`brew install` fail fast rather than update itself. That step is deliberately
+**non-fatal**: a tap fetch that misses the Homebrew CDN exits 1 with
+`Error: Failed to download` while leaving brew entirely usable, and the step
+sits ahead of every build in the required `macos` gate — so a CDN hiccup
+failed the required check on a branch whose code was fine. The `Install
+ccache` step that follows already retries behind its own `brew update`, which
+is what actually recovers the stale-config case, so ignoring the exit code
+here removes a flake without removing any coverage.
+
+When triaging a red `macos`, `Error: Failed to download` in the brew step is
+therefore no longer a cause — read past it to the build and ctest output.
+
 ## Lane timeouts — and why a timeout looks like a broken PR
 
 `[targets.<name>] timeout_secs` in `.shipyard/config.toml` bounds how long a

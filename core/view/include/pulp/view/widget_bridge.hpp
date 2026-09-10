@@ -831,6 +831,17 @@ private:
     void ensure_layout();
     std::uint64_t last_layout_generation_ = 0;  // 0 => always lay out once
 
+    // The press this bridge's script was offered through the navigation-claim
+    // hook, pending a match in the global fan-out. dispatch_global_key
+    // explains why the offer, and not the claim, is the discriminator.
+    struct NavigationOffer {
+        int key_code = 0;
+        std::uint16_t modifiers = 0;
+        bool is_down = false;
+        bool pending = false;
+    };
+    NavigationOffer last_navigation_offer_{};
+
     friend struct BridgeRegistrars;
     void register_api();
 
