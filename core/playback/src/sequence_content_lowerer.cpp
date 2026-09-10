@@ -310,11 +310,28 @@ class SequenceContentLowerer::Impl {
         }
         const auto& track = frame.sequence->tracks()[frame.track_index];
         if (frame.clip_index == 0) {
-            if (!track.device_chain().empty() || !track.automation_lanes().empty() ||
-                !track.take_lanes().empty() || track.freeze() ||
-                track.active_take_lane_id().valid() || track.record_armed())
+            if (!track.device_chain().empty() || !track.automation_lanes().empty())
                 return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
                                                        track.id()}};
+            // Freeze and an active take lane are the two states that replace a
+            // track's arrangement with something else. begin_track honours that
+            // replacement by returning Freeze or ActiveTake content and
+            // discarding the clips; this walk descends into the clips instead,
+            // so it would play precisely the material the author replaced. Each
+            // names its own code rather than sharing a generic one, because the
+            // construct that would lift it differs.
+            if (track.freeze())
+                return {.error = SequenceLoweringError{
+                            CompileErrorCode::NestedFrozenTrackUnsupported, track.id()}};
+            if (track.active_take_lane_id().valid())
+                return {.error = SequenceLoweringError{CompileErrorCode::NestedActiveTakeUnsupported,
+                                                       track.id()}};
+            // Record-arm and unselected take lanes are deliberately absent from
+            // the refusals above. Neither reaches lowered output at either
+            // level: begin_track consults freeze and the active lane and never
+            // reads record-arm or the lane list, so a nested track carrying
+            // them lowers to the same clips as one without. Refusing them
+            // rejected documents that already compile correctly.
             const auto mixer = track.mixer();
             // Pan has no sink. Flattening folds the child into the parent
             // track, and the parent's single pan also serves whatever else that

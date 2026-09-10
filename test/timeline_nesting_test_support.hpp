@@ -54,6 +54,58 @@ Project nested_note_project(bool child_has_device = false, std::size_t root_refe
     return take(Project::create(std::move(input)));
 }
 
+// Child-track state a SequenceRef then nests. Named rather than positional so
+// a call site reads as the document it authors, and so adding a state later
+// cannot silently re-target an existing call.
+struct NestedChildState {
+    bool record_armed = false;
+    // A lane that exists and holds a real take, but is not selected.
+    bool dormant_take_lane = false;
+    bool frozen = false;
+    // Selects the lane authored by dormant_take_lane.
+    bool active_take_lane = false;
+};
+
+// One child track carrying `state`, nested by a root exactly as
+// nested_note_project nests its own. The take media is declared as a project
+// asset because Project::create validates the reference; no audio data is
+// supplied, because nothing resolves a dormant lane to media.
+Project nested_child_state_project(NestedChildState state) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'b'));
+    const timebase::RationalRate rate{48'000, 1};
+    constexpr std::uint64_t kTakeFrames = 4'800;
+
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "track";
+    child_input.clips.push_back(take(Clip::create({12}, {0}, {960}, note_content(13))));
+    child_input.record_armed = state.record_armed;
+    if (state.dormant_take_lane || state.active_take_lane) {
+        auto recorded = take(Take::create({21}, MediaRef{{60}, {0}, kTakeFrames}, {0}, rate));
+        child_input.take_lanes.push_back(take(TakeLane::create({20}, "alt", {recorded})));
+    }
+    if (state.active_take_lane)
+        child_input.active_take_lane_id = {20};
+    if (state.frozen)
+        child_input.freeze = TrackFreeze{MediaRef{{60}, {0}, kTakeFrames}, {0}, rate, hash};
+
+    auto child = take(Sequence::create({10}, "child", TickDuration{960},
+                                       {take(Track::create(std::move(child_input)))}));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {nested_clip(4, 10)})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {MediaAsset{.id = {60},
+                               .name = "take",
+                               .frame_count = kTakeFrames,
+                               .sample_rate = rate,
+                               .content_hash = hash}};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
 std::shared_ptr<const Project> shared(Project project) {
     return std::make_shared<const Project>(std::move(project));
 }

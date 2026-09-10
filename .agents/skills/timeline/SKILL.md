@@ -3157,3 +3157,31 @@ show the probe **absent** — a groove that displaces nothing cannot carry it
 back, and the sounding clamp drops it as zero-length. That absence is the
 correct reading, not a missing case to chase; see the playback skill's note on
 why the reach short-circuit cannot be covered.
+
+## Only a *substituting* track state blocks nesting, and a dormant lane must hold a real take to prove it
+
+A Track's four capture-related states divide by whether anything reads them to
+replace the arrangement, not by whether they are set. `freeze` and a valid
+`active_take_lane_id` substitute: the playback lowerer discards the clips and
+emits the sealed artifact or the comp instead. `record_armed` and the
+`take_lanes` list do not — arm is document intent the capture engine reads and
+never acts on during lowering, and an unselected lane is inert document data.
+So a nested child carrying arm or a dormant lane lowers to exactly the clips a
+child without them lowers to, while a nested frozen or comped child refuses
+(`NestedFrozenTrackUnsupported`, `NestedActiveTakeUnsupported`). If you add a
+fifth state, the question to answer is "does anything substitute on this?"
+
+The fixture trap is in the other direction. `TakeLane::create` imposes **no**
+non-empty-takes requirement, so a lane holding zero takes constructs happily —
+and a test that proves dormancy with an empty lane has proved nothing, because
+an empty lane is inert for reasons that have nothing to do with selection. Author
+a lane with a real `Take` against a `MediaAsset` declared in `ProjectInput::assets`
+(`Project::create` validates the reference exists), leave `active_take_lane_id`
+unset, and the claim becomes real: this lane holds usable media and still changes
+nothing. The take needs no decoded audio — nothing resolves a dormant lane to
+media, which is precisely the property under test.
+
+Prefer a named state struct over positional bools when a fixture starts
+carrying several of these. `nested_child_state_project(NestedChildState)` reads
+as the document it authors, and adding a state later cannot silently re-target
+an existing call the way appending another `bool` parameter can.
