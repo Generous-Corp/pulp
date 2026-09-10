@@ -190,6 +190,74 @@ TEST_CASE("standalone keyDown routes a claimed materialized navigation root",
     REQUIRE(engine.evaluate("navigation_hits").getWithDefault<int>(0) == 1);
 }
 
+TEST_CASE("one unclaimed arrow press reaches a script listener once",
+          "[mac][platform][keyboard][navigation-focus]") {
+    using namespace pulp::view;
+
+    // AppKit offers a key down to performKeyEquivalent: before sending
+    // keyDown:. Only a Command chord is exclusive to that first offer --
+    // a plain key always arrives again through keyDown:. Fanning an
+    // unmodified key out to the script layer from both entry points makes
+    // one physical press read as two, which is what opens a listbox on its
+    // second item and skips every other item thereafter. The navigation
+    // claim cannot cover this case: the press that opens the menu happens
+    // before any claim exists.
+    TestRoot root;
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"JS(
+        var window_hits = 0;
+        var doc_hits = 0;
+        window.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown') window_hits += 1;
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown') doc_hits += 1;
+        });
+    )JS");
+
+    PulpView* view = make_pulp_view(&root);
+    if (view == nil) { WARN("PulpView not registered; skipping"); return; }
+    REQUIRE_FALSE(root.accepts_navigation_input());
+
+    BOOL claimed = [view performKeyEquivalent:make_down_event()];
+    if (!claimed) [view keyDown:make_down_event()];
+
+    // CONTROL: the press must land at all. A zero here would mean this
+    // harness cannot observe delivery, and the counts below would be
+    // satisfied by a dead channel rather than by correct routing.
+    REQUIRE(engine.evaluate("window_hits").getWithDefault<int>(0) > 0);
+
+    CHECK(engine.evaluate("window_hits").getWithDefault<int>(0) == 1);
+    CHECK(engine.evaluate("doc_hits").getWithDefault<int>(0) == 1);
+}
+
+TEST_CASE("a Command chord still reaches script listeners through pKE",
+          "[mac][platform][keyboard][navigation-focus]") {
+    using namespace pulp::view;
+
+    // A Command chord never arrives via keyDown:, so performKeyEquivalent:
+    // is its only route to the script layer. This is the reason the
+    // override fans out at all, and it must survive the plain-key gate.
+    TestRoot root;
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"JS(
+        var chord_hits = 0;
+        window.addEventListener('keydown', function (e) {
+            if (e.metaKey) chord_hits += 1;
+        });
+    )JS");
+
+    PulpView* view = make_pulp_view(&root);
+    if (view == nil) { WARN("PulpView not registered; skipping"); return; }
+
+    [view performKeyEquivalent:make_cmd_shift_option_v_event()];
+    CHECK(engine.evaluate("chord_hits").getWithDefault<int>(0) == 1);
+}
+
 TEST_CASE("performKeyEquivalent: routes Cmd-modified chord to rootView->on_global_key",
           "[mac][platform][keyboard][wireup][2128]") {
     using namespace pulp::view;
