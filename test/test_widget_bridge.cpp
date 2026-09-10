@@ -7630,6 +7630,83 @@ TEST_CASE("live text in a width-only label does not relayout the root",
     CHECK(control_passes > 0);
 }
 
+// Under `align-items: baseline` a row's cross-axis positions derive from each
+// item's BASELINE, and Label feeds Yoga a real one: yoga_baseline() calls
+// Label::baseline_y(), which shapes the current text and returns
+// PreparedText::ascent(). Ascent is therefore text-dependent, and it is a
+// separate max from the line height (TextShaper::prepare maxes ascent,
+// descent and leading independently against the shaped box), so new copy can
+// hold the height fixed while moving the ascent. Height alone is then not a
+// sufficient proof that nothing moved, and neither is an explicit height --
+// baseline_y() ignores the box height entirely. A baseline participant must
+// reflow on every text write.
+//
+// This asserts the GUARD rather than a measured ascent move: an exhaustive
+// scan of this platform's font stack (889 single-codepoint samples, 15
+// distinct ascent/descent/leading triples, all 79 combinations reachable by
+// mixing them) produced 79 distinct line heights and zero cases of equal
+// height with differing ascent, so no real text pair can exercise the move
+// here. The scan's collision detector was positive-controlled against a
+// synthetic face offset by +1 ascent / -1 descent, which it did report. The
+// guard still has to hold: the fast path ships to every Pulp app, on font
+// stacks this scan never saw.
+TEST_CASE("a baseline-aligned label reflows on every text write",
+          "[view][bridge][layout][perf][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createRow('row', '');
+        setFlex('row', 'width', 320);
+        setFlex('row', 'height', 40);
+        setFlex('row', 'align_items', 'baseline');
+        createLabel('lead', 'BAND', 'row');
+        setFlex('lead', 'width', 120);
+        setFlex('lead', 'height', 26);
+        createLabel('tail', 'x', 'row');
+        setFlex('tail', 'width', 120);
+        layout();
+    )");
+    engine.evaluate("getLayoutBoxMetrics('lead').offsetWidth");
+
+    auto* lead = dynamic_cast<Label*>(bridge.widget("lead"));
+    auto* tail = dynamic_cast<Label*>(bridge.widget("tail"));
+    REQUIRE(lead != nullptr);
+    REQUIRE(tail != nullptr);
+
+    // Explicit width AND height -- the pre-existing fast path's own condition,
+    // so this fails on the unguarded version for the strongest reason.
+    const auto before = View::layout_pass_count();
+    engine.evaluate("setText('lead', 'BAND 12/64')");
+    root.layout_children_if_needed();
+    const auto passes = View::layout_pass_count() - before;
+
+    INFO("layout passes for a baseline-aligned text write: " << passes);
+    CHECK(passes > 0);
+
+    // The row must still be coherent afterwards: Yoga got a real baseline
+    // from each participant rather than the degenerate box-bottom default.
+    CHECK(lead->baseline_y() > 0.0f);
+    CHECK(tail->baseline_y() > 0.0f);
+
+    // Negative control on the same tree and the same counter: drop the
+    // baseline participation and the identical write must stop invalidating.
+    // Without this, `passes > 0` above could be any unrelated dirtying.
+    engine.evaluate("setFlex('row', 'align_items', 'center')");
+    root.layout_children_if_needed();
+    const auto control_before = View::layout_pass_count();
+    engine.evaluate("setText('lead', 'BAND 13/64')");
+    root.layout_children_if_needed();
+    const auto control_passes = View::layout_pass_count() - control_before;
+
+    INFO("control layout passes once the row is not baseline-aligned: "
+         << control_passes);
+    CHECK(control_passes == 0);
+}
+
 // The fast path is a claim about geometry, not a licence to skip reflow when
 // geometry actually moves. A multi-line label with a declared width still has
 // a text-dependent height, so gaining a line must still invalidate.

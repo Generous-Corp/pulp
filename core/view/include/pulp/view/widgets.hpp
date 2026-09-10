@@ -83,6 +83,23 @@ public:
             text_direction_ != canvas::TextDirection::bottom_to_top;
         const bool single_line_simple =
             horizontal && !multi_line_ && !captured_wrap_fallback_ && !has_attributed_;
+        // Baseline alignment reads this Label's ASCENT, not its height, to
+        // place its siblings: under YGAlignBaseline a row's cross-axis
+        // positions derive from the max baseline of the participating items.
+        // Ascent and line height are independent maxes over the faces the
+        // text resolves (TextShaper::prepare takes max of the base font box
+        // and the shaped box per metric), so new copy can hold the height
+        // constant while moving the ascent -- and then a skipped
+        // invalidate_layout() would leave every sibling stale. An unchanged
+        // height is only a sufficient proof of "nothing can move" when this
+        // Label is not a baseline participant, so decline the fast path when
+        // it is. `align_self` overrides the parent's `align_items`, and
+        // `auto_` means inherit, so both have to be consulted.
+        const View* flex_parent = parent();
+        const bool baseline_aligned =
+            flex().align_self == FlexAlign::baseline ||
+            (flex().align_self == FlexAlign::auto_ && flex_parent != nullptr &&
+             flex_parent->flex().align_items == FlexAlign::baseline);
         // An explicit width pins the horizontal axis outright. The vertical
         // axis is pinned either by an explicit height, or -- for a single-line
         // Label -- by measuring it: a single-line height is one line box, so
@@ -92,8 +109,8 @@ public:
         // do anyway and which the measure memo caches; invalidate_layout()
         // costs a Yoga pass over the whole tree. Probe only when it can pay
         // off -- an intrinsic-width Label must reflow regardless.
-        const bool probe_height =
-            has_explicit_width && single_line_simple && !has_explicit_height;
+        const bool probe_height = has_explicit_width && single_line_simple &&
+                                  !has_explicit_height && !baseline_aligned;
         const float height_before = probe_height ? intrinsic_height() : 0.0f;
         text_ = std::move(text);
         // The text IS the accessible name for a label — the two-arg ctor set it
@@ -118,7 +135,7 @@ public:
         // just cache-correct re-measurement.
         const bool text_geometry_is_fixed =
             has_explicit_width && single_line_simple &&
-            (has_explicit_height ||
+            ((has_explicit_height && !baseline_aligned) ||
              (probe_height && intrinsic_height() == height_before));
         if (!text_geometry_is_fixed) invalidate_layout();
         request_repaint();
