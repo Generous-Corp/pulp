@@ -3583,6 +3583,57 @@
           "rationale": "The gate describes no authoring capability an agent manifest could carry; it only decides which refusals owe a written owner and reason."
         }
       }
+    },
+    {
+      "id": "trace-cli-reachability",
+      "title": "Perfetto tracing reachable from the CLI without hand-editing a CMake cache",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "trace-cli-reachability-20260909",
+      "owned_paths": [
+        "docs/status/cli-commands.yaml",
+        "docs/reference/cli.md"
+      ],
+      "evidence": [
+        {
+          "path": "docs/status/cli-commands.yaml",
+          "needles": [
+            "--allow-tracing",
+            "-DPULP_TRACING=ON",
+            "--profile trace create immutable"
+          ]
+        },
+        {
+          "path": "docs/reference/cli.md",
+          "needles": [
+            "pulp build --trace",
+            "#### `--profile trace`",
+            "PULP_HAS_TRACING"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "This row adds no sequencer or timeline type, target, or contract to the installed SDK. It adds a build-configuration capability to the exported package (a Pulp::tracing interface target and the PULP_HAS_TRACING variable a consumer reads instead of trusting a prefix name), which is orthogonal to sequencer exposure: the timeline and playback surface of the installed SDK is byte-identical either way, and a traced SDK is marked distribution_eligible: false rather than shipped. The row is recorded here because it edits two CLI documentation paths the sequencer ledger already claims, not because it delivers a sequencer capability."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "pulp build --trace, --allow-tracing and pulp sdk install --profile trace are build and SDK-installation flags. They add no timeline command, verb, argument, or handler, and cmd_seq.cpp is untouched."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP operation, schema, or handler is added or changed; the generated timeline MCP catalog is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "A tracing-enabled build is a development artifact that pulp ship refuses, so it neither adds nor widens a sequencer live-control grant."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Tracing is a build-time configuration of the engine, not an installed design-time capability, and the sequencer capability manifest is unchanged."
+        }
+      }
     }
   ],
   "tombstones": []
