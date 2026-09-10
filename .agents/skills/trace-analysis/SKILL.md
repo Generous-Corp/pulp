@@ -214,6 +214,17 @@ inspect the thread's scheduling for that window. A 600 ms span that was
 not a **compute** problem (optimize the code). Getting this backwards sends the
 fix in the wrong direction.
 
+**A userspace-only capture cannot answer this, and says so by returning
+nothing.** `thread_state` and `sched` are populated from ftrace; a trace with
+only the in-process SDK's track events has zero rows in both, and zero slices
+carrying `thread_dur`. Check that before reading a join's empty result as
+"never blocked" — count the rows first, and if the instrument is empty, say the
+split is unavailable rather than reporting a wall-time number as CPU time. The
+fallback that does work on such a trace is descendant self-time: subtract each
+slice's children from its own duration and rank what is left. Self time inside
+a JS evaluation span, with individually trivial bridge calls beneath it, means
+the cost is the script, not the work it asked for.
+
 ### 4. Follow the blocker across threads
 When step 3 says a span was blocked, **follow the blocker**: which thread /
 resource held it? The audio block waited on a mutex the UI thread took; the
@@ -256,6 +267,7 @@ grounds the analysis in Pulp's real seams and names the specific traps:
 | dropped frames vs vsync budget, layout-vs-paint, `TextShaper::prepare` re-runs, dirty-rect churn, GPU-submit stalls | `references/hints_frame.md` |
 | QuickJS bridge dispatch cost, a JS callback invalidating layout | `references/hints_js.md` |
 | Dawn submit/present stalls, Graphite record cost, per-pass GPU time | `references/hints_gpu.md` |
+| a drag/scroll that feels sluggish while frame medians look fine; huge bridge-call counts over one interaction | `docs/guides/interaction-cost.md` |
 | standalone vs plugin-in-DAW vs iOS/iPadOS AUv3 vs Android/Oboe vs Simulator; sample-position args, thread naming, atrace interleave | `references/hints_crossplatform.md` |
 
 ### 8. Answer in plain English (L1) — never surface SQL

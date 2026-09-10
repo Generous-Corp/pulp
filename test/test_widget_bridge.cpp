@@ -7568,6 +7568,179 @@ TEST_CASE("live text in an explicitly sized label does not relayout the root",
     CHECK(label->text() == "BAND 2/64");
 }
 
+// A live readout that declares a width but leaves its height to the line box
+// is the shape design-import emits by default -- an author only writes an
+// explicit height when centering forces them to. Requiring both axes to be
+// declared made the common case pay a full-tree Yoga pass per pointer sample.
+// A single-line label's height is one line box, so the text can only move it
+// by resolving a different font; measuring proves that per write far more
+// cheaply than relaying out the tree.
+TEST_CASE("live text in a width-only label does not relayout the root",
+          "[view][bridge][layout][perf][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('status', '');
+        setFlex('status', 'width', 240);
+        setFlex('status', 'height', 26);
+        createLabel('status-text', 'BAND 1/64', 'status');
+        setFlex('status-text', 'width', '100%');
+        layout();
+    )");
+
+    engine.evaluate("getLayoutBoxMetrics('status-text').offsetWidth");
+
+    // Drive a synthetic drag: one status write per pointer sample, each
+    // followed by the geometry read the draw path makes.
+    const auto before = View::layout_pass_count();
+    for (int i = 0; i < 60; ++i) {
+        engine.evaluate("setText('status-text', 'BAND " + std::to_string(i) +
+                        "/64')");
+        engine.evaluate("getLayoutBoxMetrics('status-text').offsetWidth");
+        root.layout_children_if_needed();
+    }
+    const auto passes = View::layout_pass_count() - before;
+
+    INFO("layout passes for 60 live-readout text writes: " << passes);
+    CHECK(passes == 0);
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("status-text"));
+    REQUIRE(label != nullptr);
+    CHECK(label->text() == "BAND 59/64");
+
+    // Negative control. The instrument must be able to read non-zero on the
+    // same tree with the same counter, or the zero above proves nothing: an
+    // intrinsic-width label has no pinned horizontal axis, so its text change
+    // really can move its siblings and MUST still invalidate.
+    engine.evaluate(R"(
+        createLabel('auto-text', 'BAND 1/64', 'status');
+        layout();
+    )");
+    const auto control_before = View::layout_pass_count();
+    engine.evaluate("setText('auto-text', 'BAND 2/64')");
+    root.layout_children_if_needed();
+    const auto control_passes = View::layout_pass_count() - control_before;
+
+    INFO("control layout passes for an intrinsic-width label: "
+         << control_passes);
+    CHECK(control_passes > 0);
+}
+
+// Under `align-items: baseline` a row's cross-axis positions derive from each
+// item's BASELINE, and Label feeds Yoga a real one: yoga_baseline() calls
+// Label::baseline_y(), which shapes the current text and returns
+// PreparedText::ascent(). Ascent is therefore text-dependent, and it is a
+// separate max from the line height (TextShaper::prepare maxes ascent,
+// descent and leading independently against the shaped box), so new copy can
+// hold the height fixed while moving the ascent. Height alone is then not a
+// sufficient proof that nothing moved, and neither is an explicit height --
+// baseline_y() ignores the box height entirely. A baseline participant must
+// reflow on every text write.
+//
+// This asserts the GUARD rather than a measured ascent move: an exhaustive
+// scan of this platform's font stack (889 single-codepoint samples, 15
+// distinct ascent/descent/leading triples, all 79 combinations reachable by
+// mixing them) produced 79 distinct line heights and zero cases of equal
+// height with differing ascent, so no real text pair can exercise the move
+// here. The scan's collision detector was positive-controlled against a
+// synthetic face offset by +1 ascent / -1 descent, which it did report. The
+// guard still has to hold: the fast path ships to every Pulp app, on font
+// stacks this scan never saw.
+TEST_CASE("a baseline-aligned label reflows on every text write",
+          "[view][bridge][layout][perf][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createRow('row', '');
+        setFlex('row', 'width', 320);
+        setFlex('row', 'height', 40);
+        setFlex('row', 'align_items', 'baseline');
+        createLabel('lead', 'BAND', 'row');
+        setFlex('lead', 'width', 120);
+        setFlex('lead', 'height', 26);
+        createLabel('tail', 'x', 'row');
+        setFlex('tail', 'width', 120);
+        layout();
+    )");
+    engine.evaluate("getLayoutBoxMetrics('lead').offsetWidth");
+
+    auto* lead = dynamic_cast<Label*>(bridge.widget("lead"));
+    auto* tail = dynamic_cast<Label*>(bridge.widget("tail"));
+    REQUIRE(lead != nullptr);
+    REQUIRE(tail != nullptr);
+
+    // Explicit width AND height -- the pre-existing fast path's own condition,
+    // so this fails on the unguarded version for the strongest reason.
+    const auto before = View::layout_pass_count();
+    engine.evaluate("setText('lead', 'BAND 12/64')");
+    root.layout_children_if_needed();
+    const auto passes = View::layout_pass_count() - before;
+
+    INFO("layout passes for a baseline-aligned text write: " << passes);
+    CHECK(passes > 0);
+
+    // The row must still be coherent afterwards: Yoga got a real baseline
+    // from each participant rather than the degenerate box-bottom default.
+    CHECK(lead->baseline_y() > 0.0f);
+    CHECK(tail->baseline_y() > 0.0f);
+
+    // Negative control on the same tree and the same counter: drop the
+    // baseline participation and the identical write must stop invalidating.
+    // Without this, `passes > 0` above could be any unrelated dirtying.
+    engine.evaluate("setFlex('row', 'align_items', 'center')");
+    root.layout_children_if_needed();
+    const auto control_before = View::layout_pass_count();
+    engine.evaluate("setText('lead', 'BAND 13/64')");
+    root.layout_children_if_needed();
+    const auto control_passes = View::layout_pass_count() - control_before;
+
+    INFO("control layout passes once the row is not baseline-aligned: "
+         << control_passes);
+    CHECK(control_passes == 0);
+}
+
+// The fast path is a claim about geometry, not a licence to skip reflow when
+// geometry actually moves. A multi-line label with a declared width still has
+// a text-dependent height, so gaining a line must still invalidate.
+TEST_CASE("a width-only multiline label still relayouts when it gains a line",
+          "[view][bridge][layout][perf][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('status', '');
+        setFlex('status', 'width', 240);
+        createLabel('status-text', 'one line', 'status');
+        setFlex('status-text', 'width', '100%');
+        setMultiLine('status-text', true);
+        layout();
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("status-text"));
+    REQUIRE(label != nullptr);
+    const float one_line = label->intrinsic_height();
+
+    const auto before = View::layout_pass_count();
+    engine.evaluate("setText('status-text', 'two\\nlines')");
+    root.layout_children_if_needed();
+
+    const float two_lines = label->intrinsic_height();
+    REQUIRE(two_lines > one_line);
+    CHECK(View::layout_pass_count() - before > 0);
+    CHECK(label->text() == "two\nlines");
+}
+
 TEST_CASE("replaying an identical flex value does not dirty geometry",
           "[view][bridge][layout][perf]") {
     ScriptEngine engine;
