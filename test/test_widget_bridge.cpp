@@ -7869,3 +7869,73 @@ TEST_CASE("re-writing the same position does not force a layout", "[widget-bridg
     }
     CHECK(View::layout_pass_count() - before == 0);
 }
+
+// ── A scripted UI revises its cursor on hover, not only on drag ─────────────
+//
+// The whole chain a plugin editor actually uses: pointer motion with no button
+// held → deliver_hover_move → on_dom_pointer_move_event → the JS `pointermove`
+// listener → setCursor → View::cursor(). Every hop existed already except the
+// first, so a scripted UI only ever saw a move once a button went down and its
+// cursor changed only on mouse-down.
+//
+// It also pins the payload: a plain hover must report `buttons === 0`. That
+// field is how a script tells hovering from dragging (grab vs grabbing), and
+// the bridge used to hardcode it to 1 for every move — so even a delivered
+// hover would have read as a drag.
+TEST_CASE("a hover runs the scripted pointermove and its cursor decision",
+          "[view][bridge][cursor][hover]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var moves = 0, downs = 0;
+        var move_buttons = -1, move_is_down = -1, down_buttons = -1;
+        createLabel('surface', 'Surface', '');
+        on('surface', 'pointermove', function(e) {
+            moves += 1;
+            move_buttons = e.buttons;
+            setCursor('surface', e.buttons ? 'grabbing' : 'grab');
+        });
+        on('surface', 'pointerdown', function(e) {
+            downs += 1;
+            down_buttons = e.buttons;
+        });
+        registerPointer('surface');
+    )");
+
+    auto* surface = bridge.widget("surface");
+    REQUIRE(surface != nullptr);
+    REQUIRE(static_cast<bool>(surface->on_dom_pointer_move_event));
+    surface->set_bounds({0, 0, 400, 300});
+    // Nothing has claimed a cursor yet, so a later reading cannot be state the
+    // scene was built with.
+    REQUIRE(surface->cursor() == View::CursorStyle::default_);
+
+    // Positive control: the button path, which worked before the fix. If this
+    // arm ever fails the harness is broken and the hover arm below proves
+    // nothing.
+    root.simulate_drag({50, 50}, {80, 80}, 1);
+    REQUIRE(engine.evaluate("downs").getWithDefault<int>(0) == 1);
+    REQUIRE(engine.evaluate("moves").getWithDefault<int>(0) >= 1);
+    CHECK(engine.evaluate("down_buttons").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("move_buttons").getWithDefault<int>(-1) == 1);
+    CHECK(surface->cursor() == View::CursorStyle::grabbing);
+
+    // The property: pointer motion, no button anywhere in it.
+    engine.evaluate("moves = 0; move_buttons = -1;");
+    pulp::view::deliver_hover_move(root, {120, 90});
+
+    CHECK(engine.evaluate("moves").getWithDefault<int>(0) == 1);
+    // A hover is not a drag. This is the bit a script reads to choose between
+    // the two cursors.
+    CHECK(engine.evaluate("move_buttons").getWithDefault<int>(-1) == 0);
+    // No extra press was manufactured on the way through.
+    CHECK(engine.evaluate("downs").getWithDefault<int>(0) == 1);
+    // And the cursor the handler chose is the one the view now publishes — the
+    // value a host reads back to tell AppKit what to display.
+    CHECK(surface->cursor() == View::CursorStyle::grab);
+}

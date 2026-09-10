@@ -116,7 +116,7 @@ struct PointerAttributes {
 
 /// Deliver one drag tick of an in-flight gesture to the captured `target`.
 ///
-/// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
+/// ── Delivery contract (asserted by test_pointer_delivery.cpp) ─────────────
 /// The target receives, in this order, EXACTLY ONCE each:
 ///   1. the MODERN channel — `on_mouse_event(MouseEvent)` with
 ///      `phase == MousePhase::drag`, carrying `modifiers`, `click_count`,
@@ -156,7 +156,7 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
 /// Deliver one BUTTONLESS pointer move — a hover — to the view under
 /// `root_pt`, which is in root-view space.
 ///
-/// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
+/// ── Delivery contract (asserted by test_pointer_delivery.cpp) ─────────────
 /// In this order:
 ///   1. hover STATE — `View::simulate_hover`, which raises `set_hovered` along
 ///      the path to the hit view, clears it everywhere else, and hands the hit
@@ -201,7 +201,7 @@ struct WheelHost {
 ///
 /// This is the mouse-wheel verb shared by the macOS standalone and plugin
 /// hosts. Before it existed the identical routing lived inline in both, and
-/// drifted. The precedence, asserted by test_pointer_dispatch.cpp, is:
+/// drifted. The precedence, asserted by test_pointer_delivery.cpp, is:
 ///   1. an open ComboBox popup whose (flip/scroll/clamp-aware) rect contains
 ///      `root_pt` consumes the wheel to scroll its item list;
 ///   2. with no hit-testable view under the point, the nearest wheel-scroll
@@ -235,7 +235,7 @@ void deliver_mouse_wheel(View& root, Point root_pt,
 /// hit_test, any combo/overlay pre-routing, and the focus protocol before
 /// calling in — those steps diverge per platform/host and stay host-side).
 ///
-/// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
+/// ── Delivery contract (asserted by test_pointer_delivery.cpp) ─────────────
 /// The target receives, in this order:
 ///   1. the MODERN channel — `on_mouse_event(MouseEvent)` with
 ///      `phase == MousePhase::press`, carrying `modifiers` and `click_count`;
@@ -313,7 +313,7 @@ struct MouseUpHost {
 
 /// Deliver a release for an in-flight gesture captured on `target`.
 ///
-/// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
+/// ── Delivery contract (asserted by test_pointer_delivery.cpp) ─────────────
 ///   1. resolve `released = root.hit_test(root_pt)` and capture the nearest
 ///      `on_click` up from `target` BEFORE any delivery;
 ///   2. the LEGACY channel — `on_mouse_up(Point)` (bare local point);

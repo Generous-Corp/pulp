@@ -73,11 +73,13 @@ std::string pointer_payload(const MouseEvent& event, bool moving) {
            "altitudeAngle:" + std::to_string(event.altitude_angle) + "," +
            "azimuthAngle:" + std::to_string(event.azimuth_angle) + "," +
            "button:" + std::to_string(button) + "," +
-           // A move carries a held button only while it is a DRAG. Reading
-           // this off `moving` alone reported `buttons: 1` for a plain
-           // hover too, which is the exact bit a script tests to tell
-           // "dragging" from "hovering" (grabbing vs grab).
-           "buttons:" + ((moving && event.is_down) ? "1" : "0") + "," +
+           // DOM `buttons` is "is a button held right now", which is exactly
+           // what is_down carries: true through press and drag, false on a
+           // hover and on release. It used to be read off `moving`, which
+           // reported 1 for a plain hover — the exact bit a script tests to
+           // tell "dragging" from "hovering" (grabbing vs grab) — and 0 on
+           // pointerdown, where a button demonstrably IS held.
+           "buttons:" + (event.is_down ? "1" : "0") + "," +
            "ctrlKey:" + (event.isCtrlDown() ? "true" : "false") + "," +
            "shiftKey:" + (event.isShiftDown() ? "true" : "false") + "," +
            "altKey:" + (event.isAltDown() ? "true" : "false") + "," +
