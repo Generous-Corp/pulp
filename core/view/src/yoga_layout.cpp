@@ -418,6 +418,19 @@ static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode width
     // YGMeasureModeUndefined. A widthless intrinsic leaf must report zero
     // width, not echo that NaN back as its measured width. Constrained
     // AtMost/Exactly inputs keep the historical fill-the-slot behavior.
+    // `AtMost` offers an upper bound, not an assignment — CSS resolves it to
+    // min(max-content, available). A soft-wrapping label reports no intrinsic
+    // width (its parent decides where lines break), so echoing the whole offer
+    // back made every auto-width ANCESTOR of such a label stretch to fill
+    // instead of hugging its text. Ask the label for its unwrapped width and
+    // clamp to what was offered.
+    if (w <= 0.0f && widthMode == YGMeasureModeAtMost) {
+        if (auto* text = dynamic_cast<Label*>(view)) {
+            const float max_content = text->max_content_width();
+            if (max_content > 0.0f) w = std::min(max_content, width);
+        }
+    }
+
     w = resolve_yoga_measure_dimension(w, width, widthMode != YGMeasureModeUndefined);
 
     // Label-specific width-aware height. When a
