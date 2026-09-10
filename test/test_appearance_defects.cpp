@@ -1,0 +1,681 @@
+#include <pulp/view/appearance_defects.hpp>
+
+#include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/buttons.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/widgets.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <memory>
+#include <string>
+
+using namespace pulp::view;
+
+namespace {
+
+int count_kind(const AppearanceReport& report, AppearanceDefectKind kind) {
+    return static_cast<int>(std::count_if(
+        report.findings.begin(), report.findings.end(),
+        [kind](const AppearanceFinding& f) { return f.kind == kind; }));
+}
+
+bool names_pair(const AppearanceReport& report, const std::string& a,
+                const std::string& b) {
+    for (const auto& f : report.findings) {
+        if ((f.a_id == a && f.b_id == b) || (f.a_id == b && f.b_id == a))
+            return true;
+    }
+    return false;
+}
+
+/// A Label placed at an exact box, bypassing flex so the fixture geometry is
+/// the thing under test rather than Yoga's answer to it.
+Label* add_label(View& parent, const std::string& id, const std::string& text,
+                 Rect box, bool multi_line = false) {
+    auto label = std::make_unique<Label>(text);
+    label->set_id(id);
+    label->set_multi_line(multi_line);
+    auto* raw = label.get();
+    parent.add_child(std::move(label));
+    raw->set_bounds(box);
+    return raw;
+}
+
+/// A container that clips whatever is placed under it, at an exact box.
+View* add_clipper(View& parent, const std::string& id, Rect box,
+                  View::Overflow overflow = View::Overflow::hidden) {
+    auto container = std::make_unique<View>();
+    container->set_id(id);
+    container->set_overflow(overflow);
+    auto* raw = container.get();
+    parent.add_child(std::move(container));
+    raw->set_bounds(box);
+    return raw;
+}
+
+CanvasDrawCmd text_cmd(const std::string& text, float x, float y, float size) {
+    CanvasDrawCmd cmd;
+    cmd.type = CanvasDrawCmd::Type::fill_text;
+    cmd.text = text;
+    cmd.x = x;
+    cmd.y = y;
+    cmd.extra = size;
+    return cmd;
+}
+
+CanvasDrawCmd font_cmd(const std::string& family, float size) {
+    CanvasDrawCmd cmd;
+    cmd.type = CanvasDrawCmd::Type::set_font;
+    cmd.text = family;
+    cmd.extra = size;
+    return cmd;
+}
+
+} // namespace
+
+TEST_CASE("overlapping text is reported as a collision", "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    // Two labels asked to paint into the same place. A user sees one string
+    // printed on top of the other.
+    add_label(root, "left", "Precision", {40, 60, 160, 20});
+    add_label(root, "right", "Latency", {40, 60, 160, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::text_overlap) == 1);
+    REQUIRE(names_pair(report, "left", "right"));
+    // The control: the same instrument on the same tree measured both runs.
+    REQUIRE(report.coverage.text_runs_measured == 2);
+    REQUIRE(report.coverage.trustworthy());
+}
+
+TEST_CASE("separated text is clean and the run is still measured",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    add_label(root, "left", "Precision", {0, 0, 160, 20});
+    add_label(root, "right", "Latency", {0, 120, 160, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    // A clean result only means something because the paired control below
+    // proves the detector looked at both runs.
+    REQUIRE(report.clean());
+    REQUIRE(report.coverage.text_runs_measured == 2);
+    REQUIRE(report.coverage.pairs_compared == 1);
+    REQUIRE(report.coverage.trustworthy());
+}
+
+TEST_CASE("text painted wider than its box is reported as truncation",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    add_label(root, "cramped",
+              "The quick brown fox jumps over the lazy dog", {0, 0, 24, 18});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::painted_wider_than_box) == 1);
+    const auto& f = report.findings.front();
+    REQUIRE(f.a_id == "cramped");
+    REQUIRE(f.painted_width > f.box_width);
+}
+
+TEST_CASE("canvas text placed past its surface edge is reported",
+          "[appearance][canvas]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+
+    // The defect an axis caption has: narrower than the surface it is drawn on,
+    // yet anchored so far right that most of it lands outside it. A detector
+    // that only compares widths calls this clean.
+    auto widget = std::make_unique<CanvasWidget>();
+    widget->set_id("graph");
+    auto* raw = widget.get();
+    root.add_child(std::move(widget));
+    raw->set_bounds({0, 0, 400, 200});
+    raw->add_command(font_cmd("Inter", 16));
+    raw->add_command(text_cmd("dBFS (analyzer)", 380, 40, 16));
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.coverage.canvas_text_measured == 1);
+    REQUIRE(count_kind(report, AppearanceDefectKind::painted_wider_than_box) == 1);
+    const auto& f = report.findings.front();
+    REQUIRE(f.a_text == "dBFS (analyzer)");
+    REQUIRE(f.painted_width < f.box_width);  // narrower than the surface
+    REQUIRE(f.overflow_px > 0.0f);           // and still hanging off its edge
+
+    // Control: the same caption anchored inside the surface is not a finding,
+    // so what is reported is the placement and not the text.
+    View clean_root;
+    clean_root.set_bounds({0, 0, 400, 200});
+    auto inside = std::make_unique<CanvasWidget>();
+    inside->set_id("graph");
+    auto* inside_raw = inside.get();
+    clean_root.add_child(std::move(inside));
+    inside_raw->set_bounds({0, 0, 400, 200});
+    inside_raw->add_command(font_cmd("Inter", 16));
+    inside_raw->add_command(text_cmd("dBFS (analyzer)", 20, 40, 16));
+
+    const auto control = detect_appearance_defects(clean_root);
+    INFO(control.to_string());
+    REQUIRE(control.coverage.canvas_text_measured == 1);
+    REQUIRE(control.clean());
+}
+
+TEST_CASE("the positive control turns a clean tree into findings",
+          "[appearance][instrument]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    // Two labels with a small gap: genuinely clean, and close enough that a few
+    // pixels of inflation must make them collide.
+    add_label(root, "left", "Gain", {0, 0, 40, 18});
+    add_label(root, "right", "Mix", {44, 0, 40, 18});
+
+    const auto measured = detect_appearance_defects(root);
+    INFO(measured.to_string());
+    REQUIRE(measured.clean());
+    REQUIRE(measured.coverage.text_runs_measured == 2);
+
+    AppearanceOptions control_options;
+    control_options.control_inflate_ink_px = 8.0f;
+    const auto control = detect_appearance_defects(root, control_options);
+    INFO(control.to_string());
+    REQUIRE(count_kind(control, AppearanceDefectKind::text_overlap) == 1);
+    REQUIRE(names_pair(control, "left", "right"));
+    // The control must not invent coverage it did not already have.
+    REQUIRE(control.coverage.text_runs_measured
+            == measured.coverage.text_runs_measured);
+}
+
+TEST_CASE("a multi-line label is measured rather than skipped",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    auto* wrapped = add_label(
+        root, "subtitle",
+        "Live is snappy and Precision is eased; the difference shows up on "
+        "long gestures more than short ones.",
+        {0, 0, 180, 60}, /*multi_line=*/true);
+
+    // The Yoga contract this detector had to work around: a multi-line label
+    // reports no intrinsic width so its parent drives wrapping. Anything that
+    // used that number to find text saw nothing here.
+    REQUIRE(wrapped->intrinsic_width() == 0.0f);
+
+    const auto extents = wrapped->painted_text_extents(180.0f);
+    REQUIRE(extents.measured);
+    REQUIRE(extents.width > 0.0f);
+    REQUIRE(extents.line_count > 1);
+
+    const auto report = detect_appearance_defects(root);
+    INFO(report.to_string());
+    REQUIRE(report.coverage.text_runs_measured == 1);
+    REQUIRE(report.coverage.skipped_unmeasurable == 0);
+}
+
+TEST_CASE("a multi-line label collides like any other text",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    add_label(root, "subtitle",
+              "Live is snappy and Precision is eased; the difference shows up "
+              "on long gestures.",
+              {20, 40, 180, 60}, /*multi_line=*/true);
+    add_label(root, "badge", "NEW", {20, 48, 60, 16});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::text_overlap) == 1);
+    REQUIRE(names_pair(report, "subtitle", "badge"));
+}
+
+TEST_CASE("canvas text commands collide", "[appearance][canvas]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    auto widget = std::make_unique<CanvasWidget>();
+    widget->set_id("graph");
+    auto* raw = widget.get();
+    root.add_child(std::move(widget));
+    raw->set_bounds({0, 0, 400, 200});
+
+    raw->add_command(font_cmd("Inter", 11));
+    raw->add_command(text_cmd("dB (gain)", 60, 30, 11));
+    raw->add_command(text_cmd("dBFS (analyzer)", 60, 30, 11));
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.coverage.canvas_text_commands == 2);
+    REQUIRE(report.coverage.canvas_text_measured == 2);
+    REQUIRE(count_kind(report, AppearanceDefectKind::canvas_text_overlap) == 1);
+}
+
+TEST_CASE("separated canvas text is clean and still measured",
+          "[appearance][canvas]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    auto widget = std::make_unique<CanvasWidget>();
+    widget->set_id("graph");
+    auto* raw = widget.get();
+    root.add_child(std::move(widget));
+    raw->set_bounds({0, 0, 400, 200});
+
+    raw->add_command(font_cmd("Inter", 11));
+    raw->add_command(text_cmd("dB (gain)", 10, 10, 11));
+    raw->add_command(text_cmd("dBFS (analyzer)", 10, 150, 11));
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.clean());
+    // Control: an empty finding list from an instrument that measured nothing
+    // would be indistinguishable from this without these two counts.
+    REQUIRE(report.coverage.canvas_text_measured == 2);
+}
+
+TEST_CASE("canvas text honours textAlign when placing ink",
+          "[appearance][canvas]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    auto widget = std::make_unique<CanvasWidget>();
+    widget->set_id("graph");
+    auto* raw = widget.get();
+    root.add_child(std::move(widget));
+    raw->set_bounds({0, 0, 400, 200});
+
+    CanvasDrawCmd right_align;
+    right_align.type = CanvasDrawCmd::Type::set_text_align;
+    right_align.int_val = 2;
+
+    raw->add_command(font_cmd("Inter", 11));
+    raw->add_command(right_align);
+    // Anchored at x=200 and right-aligned, so the ink lies to the LEFT of the
+    // anchor. A detector that ignores textAlign puts this box in the wrong
+    // half of the canvas.
+    raw->add_command(text_cmd("dBFS (analyzer)", 200, 20, 11));
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.runs.size() == 1);
+    const auto& run = report.runs.front();
+    REQUIRE(run.ink.x < 200.0f);
+    REQUIRE(run.ink.x + run.ink.width <= 200.5f);
+}
+
+TEST_CASE("text scrolled out of its container is not a collision",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+
+    auto scroller = std::make_unique<ScrollView>();
+    scroller->set_id("panel");
+    scroller->set_overflow(View::Overflow::scroll);
+    auto* raw_scroller = scroller.get();
+    root.add_child(std::move(scroller));
+    raw_scroller->set_bounds({0, 0, 400, 120});
+    raw_scroller->set_content_size({400, 900});
+
+    // A row far down the scroll content. In unscrolled content space its y
+    // lands on top of the fixed footer below; in screen space it is nowhere
+    // near it. Comparing the two without resolving the scroll frame is the
+    // false positive this fixture pins.
+    auto* row = add_label(*raw_scroller, "row", "Live = snappy", {20, 700, 200, 20});
+    (void)row;
+
+    add_label(root, "footer", "PRESETS", {20, 700, 120, 20});
+
+    raw_scroller->set_scroll(0.0f, 0.0f);
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    // The row is clipped out of its own scroll viewport, so it is not on
+    // screen and cannot collide with anything.
+    REQUIRE(report.coverage.skipped_clipped == 1);
+    REQUIRE(count_kind(report, AppearanceDefectKind::text_overlap) == 0);
+    // The viewport shows none of the content it holds, which is what a viewer
+    // sees as a blank panel, so it is reported as one.
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 1);
+}
+
+TEST_CASE("scrolling a row into view makes it collidable again",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+
+    auto scroller = std::make_unique<ScrollView>();
+    scroller->set_id("panel");
+    scroller->set_overflow(View::Overflow::scroll);
+    auto* raw_scroller = scroller.get();
+    root.add_child(std::move(scroller));
+    raw_scroller->set_bounds({0, 0, 400, 120});
+    raw_scroller->set_content_size({400, 900});
+
+    add_label(*raw_scroller, "row_a", "Live = snappy", {20, 700, 200, 20});
+    add_label(*raw_scroller, "row_b", "Precision", {20, 700, 200, 20});
+
+    raw_scroller->set_scroll(0.0f, 700.0f);
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.coverage.text_runs_measured == 2);
+    REQUIRE(count_kind(report, AppearanceDefectKind::text_overlap) == 1);
+    REQUIRE(names_pair(report, "row_a", "row_b"));
+}
+
+TEST_CASE("hidden text is counted as unseen rather than clean",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    auto* a = add_label(root, "a", "Precision", {40, 60, 160, 20});
+    add_label(root, "b", "Latency", {40, 60, 160, 20});
+    a->set_visible(false);
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.clean());
+    REQUIRE(report.coverage.skipped_invisible == 1);
+    REQUIRE(report.coverage.text_runs_measured == 1);
+}
+
+TEST_CASE("a run that measured nothing is not reported as trustworthy",
+          "[appearance][instrument]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    // TextButton paints text but exposes no typography, so its ink cannot be
+    // measured. A tree of nothing but buttons produces no findings and must
+    // not read as a pass.
+    for (int i = 0; i < 3; ++i) {
+        auto button = std::make_unique<TextButton>();
+        button->set_label("Apply");
+        button->set_id("button" + std::to_string(i));
+        auto* raw = button.get();
+        root.add_child(std::move(button));
+        raw->set_bounds({0, static_cast<float>(i * 30), 100, 24});
+    }
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.clean());
+    REQUIRE(report.coverage.skipped_unmeasurable == 3);
+    REQUIRE_FALSE(report.coverage.trustworthy());
+    REQUIRE(report.to_string().find("NOT TRUSTWORTHY") != std::string::npos);
+}
+
+TEST_CASE("a report is untrustworthy once blind skips outnumber what it saw",
+          "[appearance][instrument]") {
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+
+    // One label the detector can measure, against a majority it cannot. The
+    // finding list is empty either way, so the only thing separating "nothing
+    // is wrong" from "I could not look" is this ratio.
+    add_label(root, "seen", "Output", {0, 0, 120, 18});
+    for (int i = 0; i < 3; ++i) {
+        auto button = std::make_unique<TextButton>();
+        button->set_label("Apply");
+        button->set_id("blind" + std::to_string(i));
+        auto* raw = button.get();
+        root.add_child(std::move(button));
+        raw->set_bounds({0, static_cast<float>(40 + i * 30), 100, 24});
+    }
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.clean());
+    REQUIRE(report.coverage.text_runs_measured == 1);
+    REQUIRE(report.coverage.skipped_unmeasurable == 3);
+    REQUIRE_FALSE(report.coverage.trustworthy());
+
+    // The control: the same one measured run with the blind majority removed
+    // must be trustworthy, otherwise the ratio is not what decided it.
+    View clean_root;
+    clean_root.set_bounds({0, 0, 400, 400});
+    add_label(clean_root, "seen", "Output", {0, 0, 120, 18});
+    const auto control = detect_appearance_defects(clean_root);
+    REQUIRE(control.coverage.text_runs_measured == 1);
+    REQUIRE(control.coverage.trustworthy());
+}
+
+TEST_CASE("an empty tree is never trustworthy", "[appearance][instrument]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.clean());
+    REQUIRE_FALSE(report.coverage.trustworthy());
+}
+
+TEST_CASE("coverage is printed on every run", "[appearance][instrument]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    add_label(root, "only", "Rate", {0, 0, 120, 20});
+
+    const auto text = detect_appearance_defects(root).to_string();
+
+    REQUIRE(text.find("coverage:") != std::string::npos);
+    REQUIRE(text.find("text runs measured") != std::string::npos);
+    REQUIRE(text.find("skipped:") != std::string::npos);
+    REQUIRE(text.find("shaping:") != std::string::npos);
+}
+
+TEST_CASE("a container that paints none of its text is reported",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 860});
+
+    // A panel that is on screen with area of its own, whose content was laid
+    // out past the bottom of it. Every string it holds is cut away, so a
+    // viewer sees an empty box. This is the shape the collision detectors
+    // cannot see: text that lands nowhere makes no pair and outgrows no box.
+    auto* panel = add_clipper(root, "panel", {0, 0, 400, 200});
+    add_label(*panel, "row_a", "Bloom", {12, 400, 200, 20});
+    add_label(*panel, "row_b", "Rulers", {12, 440, 200, 20});
+    add_label(*panel, "row_c", "Status info", {12, 480, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 1);
+    const auto& f = report.findings.front();
+    REQUIRE(f.a_id == "panel");
+    REQUIRE(f.clipped_runs == 3);
+
+    // The point of the kind: without it this tree reads as a clean pass,
+    // because neither collision detector has anything to compare.
+    REQUIRE(count_kind(report, AppearanceDefectKind::text_overlap) == 0);
+    REQUIRE(count_kind(report, AppearanceDefectKind::painted_wider_than_box) == 0);
+
+    // The coverage report must name the region rather than fold it into one
+    // number, and must refuse to call itself trustworthy about it.
+    REQUIRE(report.coverage.skipped_clipped == 3);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 3);
+    REQUIRE_FALSE(report.coverage.trustworthy());
+    REQUIRE(report.to_string().find("BLIND REGION") != std::string::npos);
+}
+
+TEST_CASE("a scrolling list showing some of its rows is not an empty container",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+
+    // The negative control. A list is clipped for the ordinary reason that
+    // most of it is below the fold. Treating that as blindness would make
+    // every scrollable surface untrustworthy, which is a worse answer than the
+    // one being fixed.
+    auto scroller = std::make_unique<ScrollView>();
+    scroller->set_id("list");
+    scroller->set_overflow(View::Overflow::scroll);
+    auto* raw = scroller.get();
+    root.add_child(std::move(scroller));
+    raw->set_bounds({0, 0, 400, 120});
+    raw->set_content_size({400, 900});
+
+    add_label(*raw, "row_visible_a", "Theme", {12, 10, 200, 20});
+    add_label(*raw, "row_visible_b", "Bloom", {12, 50, 200, 20});
+    add_label(*raw, "row_below_a", "Rulers", {12, 600, 200, 20});
+    add_label(*raw, "row_below_b", "Status info", {12, 640, 200, 20});
+
+    raw->set_scroll(0.0f, 0.0f);
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    // Two rows on screen, two below the fold — the partially-clipped case.
+    REQUIRE(report.coverage.text_runs_measured == 2);
+    REQUIRE(report.coverage.skipped_clipped == 2);
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 0);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 0);
+    REQUIRE(report.coverage.trustworthy());
+    REQUIRE(report.to_string().find("BLIND REGION") == std::string::npos);
+}
+
+TEST_CASE("a well-formed panel inside a clipping container is clean",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+
+    // The clean-scene control. The same container shape as the defect fixture,
+    // with its content where it belongs.
+    auto* panel = add_clipper(root, "panel", {0, 0, 400, 200});
+    add_label(*panel, "row_a", "Bloom", {12, 20, 200, 20});
+    add_label(*panel, "row_b", "Rulers", {12, 60, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.clean());
+    REQUIRE(report.coverage.text_runs_measured == 2);
+    REQUIRE(report.coverage.skipped_clipped == 0);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 0);
+    REQUIRE(report.coverage.trustworthy());
+}
+
+TEST_CASE("one collapsed panel is reported once, at its outermost container",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 860});
+
+    // A collapsed panel drags every frame nested inside it down with it.
+    // Naming each one describes a single defect several times over.
+    auto* outer = add_clipper(root, "panel", {0, 0, 400, 200});
+    auto* inner = add_clipper(*outer, "panel_body", {0, 40, 400, 160});
+    add_label(*inner, "row_a", "Bloom", {12, 400, 200, 20});
+    add_label(*inner, "row_b", "Rulers", {12, 440, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 1);
+    REQUIRE(report.findings.front().a_id == "panel");
+    // Counted once, not once per enclosing frame.
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 2);
+}
+
+TEST_CASE("one unreachable container is enough to withdraw a clean verdict",
+          "[appearance][instrument]") {
+    View root;
+    root.set_bounds({0, 0, 400, 860});
+
+    // A screen the detector measured well, with one small region it could not
+    // see into at all. A ratio would wave this through — 8 runs measured
+    // against 1 clipped reads as ample coverage — and a caller reading only
+    // the boolean would be told the panel is well measured while a whole
+    // container of it was never reachable.
+    for (int i = 0; i < 8; ++i) {
+        add_label(root, "seen" + std::to_string(i), "Output",
+                  {0, static_cast<float>(i * 30), 120, 18});
+    }
+    auto* tooltip = add_clipper(root, "tooltip", {200, 400, 160, 40});
+    add_label(*tooltip, "tip", "Reset all gains", {4, 200, 150, 18});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.coverage.text_runs_measured == 8);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 1);
+    REQUIRE_FALSE(report.coverage.trustworthy());
+
+    // The control: the identical screen with the unreachable region removed
+    // must be trustworthy, or something other than that region decided it.
+    View control_root;
+    control_root.set_bounds({0, 0, 400, 860});
+    for (int i = 0; i < 8; ++i) {
+        add_label(control_root, "seen" + std::to_string(i), "Output",
+                  {0, static_cast<float>(i * 30), 120, 18});
+    }
+    const auto control = detect_appearance_defects(control_root);
+    REQUIRE(control.coverage.text_runs_measured == 8);
+    REQUIRE(control.coverage.trustworthy());
+}
+
+TEST_CASE("a container collapsed over its own text is reported",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 1280, 900});
+
+    // The shape a real collapsed panel takes: the frame keeps its width, loses
+    // its height, and clips away everything it holds. Its box has no area, so a
+    // detector that insists on a non-degenerate container misses exactly this.
+    auto* panel = add_clipper(root, "settings_body", {0, 200, 486, 0});
+    add_label(*panel, "opt_a", "Theme", {0, 0, 200, 20});
+    add_label(*panel, "opt_b", "Grid density", {0, 40, 200, 20});
+    add_label(*panel, "opt_c", "Peak hold", {0, 80, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 1);
+
+    const auto& f = *std::find_if(
+        report.findings.begin(), report.findings.end(), [](const AppearanceFinding& x) {
+            return x.kind == AppearanceDefectKind::container_paints_no_text;
+        });
+    REQUIRE(f.a_id == "settings_body");
+    REQUIRE(f.clipped_runs == 3);
+    // The description names the collapse, so the geometry is not left to be
+    // inferred from a rectangle printed with a zero in it.
+    REQUIRE(f.describe().find("collapsed to no area") != std::string::npos);
+
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 3);
+    REQUIRE_FALSE(report.coverage.trustworthy());
+}
+
+TEST_CASE("a panel closed by hiding it is not an empty container",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 1280, 900});
+
+    add_label(root, "title", "Spectrum", {12, 12, 200, 20});
+
+    // A container closed the ordinary way. Hiding it is what separates a panel
+    // that is shut from one that is broken, and the walk must read it that way:
+    // its text is an invisible skip, not a clipped one, and no scope opens over
+    // it. Without this the detector would call every closed menu a defect.
+    auto* panel = add_clipper(root, "menu", {0, 200, 486, 0});
+    panel->set_visible(false);
+    add_label(*panel, "item_a", "Theme", {0, 0, 200, 20});
+    add_label(*panel, "item_b", "Grid density", {0, 40, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 0);
+    REQUIRE(report.coverage.skipped_clipped == 0);
+    REQUIRE(report.coverage.skipped_invisible == 2);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 0);
+}

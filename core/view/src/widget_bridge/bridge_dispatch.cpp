@@ -1,5 +1,7 @@
 #include "bridge_dispatch.hpp"
 
+#include "js_trace_scopes.hpp"
+
 #include <pulp/runtime/trace.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -44,6 +46,9 @@ void safe_dispatch_eval(const std::shared_ptr<BridgeCallbackState>& alive,
         {
             PULP_TRACE_SCOPE_NAMED("js", "dom_event_evaluate");
             engine->evaluate(js);
+            // A handler that returned with spans still open would nest every
+            // later slice under them. Close them here, loudly.
+            js_trace::force_close_open_scopes(context);
         }
         // Pump microtasks so React setState commits (and any queueMicrotask /
         // Promise.then continuations scheduled by the handler) before the next
@@ -52,6 +57,7 @@ void safe_dispatch_eval(const std::shared_ptr<BridgeCallbackState>& alive,
         {
             PULP_TRACE_SCOPE_NAMED("js", "dom_event_microtask_pump");
             engine->pump_message_loop();
+            js_trace::force_close_open_scopes(context);
         }
     } catch (const std::exception& e) {
         std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";

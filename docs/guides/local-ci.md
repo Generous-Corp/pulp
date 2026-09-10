@@ -4139,6 +4139,229 @@ echo '{"jobs": []}' > ~/Library/Application\ Support/shipyard/queue/queue.json
 
 Re-running `tools/install-shipyard.sh` also performs this reset automatically. Tracked as #528.
 
+### macpro Proxmox host: upgrading across a major PVE release
+
+macpro is a MacPro6,1 running Proxmox VE on `192.168.86.43` (`vmbr0`, sole
+physical port `enp11s0`). It is a standalone node — no cluster, no Ceph, no ZFS —
+with the root filesystem on `pve-root` (ext4 on LVM) and guest disks on the
+`pve-data` LVM-thin pool. Guest images therefore survive a root-filesystem
+disaster; the two are separate logical volumes.
+
+Run `pve8to9 --full` (or the equivalent for the next hop) and drive it to **0
+failures** before switching any repo. On this host it flagged three things worth
+knowing again next time:
+
+- **`systemd-boot` meta-package installed but unused.** It is a hard failure for
+  the upgrade and safe to remove here: the host boots GRUB via
+  `\EFI\proxmox\shimx64.efi`, `bootctl is-installed` reports `no`, and the ESP
+  has no `/EFI/systemd` or `/loader`. Verify those before removing.
+- **The removable-media bootloader goes stale.** GRUB only refreshes
+  `/EFI/proxmox/`, leaving `/EFI/BOOT/BOOTx64.efi` frozen at its old build. On
+  Apple firmware the removable path is the fallback that catches a wiped NVRAM
+  entry, so let GRUB own it:
+  `echo 'grub-efi-amd64 grub2/force_efi_extra_removable boolean true' | debconf-set-selections -v -u`
+  then reinstall `grub-efi-amd64`. Both ESP paths should end up the same size and
+  timestamp.
+- **LVM autoactivation** on existing guest volumes is disabled from PVE 9 onward;
+  `/usr/share/pve-manager/migrations/pve-lvm-disable-autoactivation --assume-yes`
+  converts them. Without `--assume-yes` it prompts and defaults to *no*.
+
+Reboot into the newest kernel of the *old* release before switching repos. That
+proves the bootloader work is sound while rollback is still trivial.
+
+**Do not assume the kernel version.** PVE 9.2.x ships kernel **7.0**, not the
+6.14 series visible in older repo metadata. Assert on what the repo actually
+resolves to rather than a remembered number, and confirm the running kernel
+appears in `grub.cfg` before rebooting into it.
+
+**Expect the upgrade to be slow on this hardware and do not read slow as broken.**
+The 8→9 dist-upgrade moved ~750 packages and took about five hours. dpkg is
+fsync-bound and macpro's SATA-attached Apple SSD serialises flushes badly *under
+sustained write load* — measured 1.24 s per flush mid-upgrade versus **8.4 ms
+idle on the same disk**, with SMART clean and no ATA errors. The drive is
+healthy; the latency is load-induced queueing. Measure flush latency only on an
+idle system, or the number means nothing:
+
+```bash
+dd if=/dev/zero of=/root/.lat bs=4k count=50 oflag=dsync   # ~0.4s idle is normal here
+dd if=/dev/zero of=/root/.lat2 bs=4k count=50              # control: no flush
+```
+
+`force-unsafe-io` does **not** help — it governs dpkg's own fsyncs, not the ext4
+journal commits that actually stall. Raising the commit interval
+(`mount -o remount,commit=60 /`) gives a modest gain and reverts on reboot.
+
+**After the upgrade, re-check the apt sources.** The PVE 9 migration to deb822
+`.sources` re-enabled the enterprise repo, which 401s without a subscription and
+breaks every `apt update` including `pve-daily-update.timer`. The
+community `post-pve-install.sh` script does not disable the new-format file, and
+leaves the legacy `pve-no-subscription.list` alongside the new
+`proxmox.sources`, producing "configured multiple times" warnings. Fix both:
+
+```bash
+printf 'Enabled: false\n' >> /etc/apt/sources.list.d/pve-enterprise.sources
+rm -f /etc/apt/sources.list.d/pve-no-subscription.list   # superseded by proxmox.sources
+apt-get update    # must be clean: no 401, no "multiple times"
+```
+
+That script also installs the subscription-nag patch as a `DPkg::Post-Invoke`
+hook and disables `pve-ha-lrm`/`pve-ha-crm`/`corosync`. Both are intended and
+correct for a standalone node, but the apt hook fires after every dpkg run —
+move it aside for the duration of a major upgrade.
+
+Nothing needs starting by hand for CI afterwards. Templates 9000–9005 stay
+templates, `pulp-win-ci` starts on demand, and `pulp-ephemeral-pool@2.service`
+clones a runner on its own. Confirm with a registered runner, not a green unit —
+see below.
+
+### Ephemeral Linux runner pool crash-loops: `no free clone id`
+
+`pulp-ephemeral-pool@N.service` restarting every ~30s with `status=1/FAILURE`
+means a precondition check failed, not that a job died. Read the reason first:
+
+```bash
+journalctl -u 'pulp-ephemeral-pool@*' -n 20 --no-pager | grep ERROR
+```
+
+`ERROR: no free clone id in 200..202` means every VMID in the pool's clone range
+is already allocated. The pool clones a golden template into the first free id;
+stopped clones left over from earlier jobs keep those ids taken. The reaper
+refuses to clear them:
+
+```
+SKIP 200 — stopped legacy clone lacks a host generation
+```
+
+It only deletes clones it can *prove* are orphaned, by reading a marker out of
+the clone's description:
+
+```sh
+host_generation = sed -n 's/^pulp-runner-generation=\([^;]*\).*/\1/p'
+host_scope      = sed -n 's/.*;pulp-runner-scope=\([^;]*\).*/\1/p'
+```
+
+**The usual root cause is a half-deployed supervisor.** The supervisor stamps that
+description immediately after cloning:
+
+```sh
+qm set "$VMID" \
+    --description "pulp-runner-generation=${RUNNER_NAME};pulp-runner-scope=${REGISTRATION_API}"
+```
+
+A host running a supervisor from before that change never writes it, so *every*
+clone it creates is permanently unreapable — the reaper reports and never mutates
+them, the pool cannot allocate around them, and no amount of restarting resolves
+it. Deleting the stale clones by hand only buys one cycle; the next clone is born
+just as unreapable.
+
+Confirm which side is stale before clearing anything:
+
+```bash
+# ground truth: a healthy clone has a non-empty description
+for id in 200 201 202; do
+  printf '%s desc=[%s]\n' "$id" "$(qm config $id 2>/dev/null | sed -n 's/^description: //p')"
+done
+
+# does the deployed supervisor even know how to stamp it?
+grep -c 'pulp-runner-scope' /usr/local/sbin/proxmox-ephemeral-runner-linux.sh
+```
+
+All-empty descriptions plus a `0` from that grep confirm the deployed supervisor
+predates the marker.
+
+**Do not fix this by copying `tools/ci/proxmox-ephemeral-runner-linux.sh` from the
+repo onto macpro.** That was tried and it took CI down: repo HEAD's supervisor
+invokes the runner-group verifier without the `--profile` argument that macpro's
+deployed `/usr/local/lib/pulp/verify_linux_runner_group.py` requires, so the pool
+crash-loops on
+
+```
+verify_linux_runner_group.py: error: the following arguments are required: --profile
+ERROR: automatic Linux runner group policy is not fail-closed
+```
+
+and never creates a clone. macpro's helper and wrapper are a matched set with the
+*older* supervisor; repo HEAD assumes a different helper generation. Redeploying
+the supervisor therefore requires migrating the verifier and the profile wrapper
+in the same change, verified on a host that is not currently serving CI.
+
+Until that migration is done, treat orphan accumulation as a **known, tolerated
+condition**: the supervisor's own `trap ... EXIT` destroys its clone on every
+normal job completion, so orphans only appear when the supervisor dies without
+running its trap — a reboot, a hard kill, or a crash. Clear them by hand when the
+pool reports `no free clone id`:
+
+```bash
+systemctl stop pulp-ephemeral-pool@2.service
+qm list                              # note which ids are stopped vs running
+for id in <stopped ids only>; do qm destroy $id --purge --destroy-unreferenced-disks 1; done
+systemctl reset-failed 'pulp-ephemeral-pool@*'
+systemctl start pulp-ephemeral-pool@2.service
+```
+
+`qm destroy` refuses a **running** VM (`VM NNN is running - destroy failed`), so
+pass only stopped ids. A running clone that the pool no longer owns is an orphan
+too — stop it first, then destroy it.
+
+If a supervisor redeploy is ever attempted anyway, back up first and keep the
+rollback one command away; the running supervisor holds its old inode, so install
+via temp file plus atomic `mv` rather than overwriting in place:
+
+```bash
+cp -a /usr/local/sbin/proxmox-ephemeral-runner-linux.sh /root/runner.bak-$(date +%s)
+# ... install new ...
+# rollback: mv the backup back and restart the pool
+```
+
+Clear it by hand (configs first, so the destroy stays reversible):
+
+```bash
+mkdir -p /root/ephemeral-configs-backup
+cp /etc/pve/qemu-server/{200,201,202}.conf /root/ephemeral-configs-backup/
+
+systemctl stop pulp-ephemeral-pool@2.service
+for id in 200 201 202; do qm destroy $id --purge --destroy-unreferenced-disks 1; done
+systemctl reset-failed 'pulp-ephemeral-pool@*'
+systemctl start pulp-ephemeral-pool@2.service
+```
+
+Confirm every stale id is `stopped` before destroying; a `running` id is a live
+job, not a leftover.
+
+### A green pool service is not a ready runner
+
+`systemctl is-active` reporting `active` only means the script is executing. The
+runner is ready when a clone is actually up and registered:
+
+```bash
+qm list                                          # a clone in the pool range is running
+journalctl -u pulp-ephemeral-pool@2.service -n 10 --no-pager
+# JIT runner pulp-auto-ephemeral-NNN is visible to GitHub (online, busy=false)
+```
+
+A settled restart counter is likewise not proof. Check `NRestarts` has stopped
+climbing *and* that a clone is running:
+
+```bash
+systemctl show pulp-ephemeral-pool@2.service -p NRestarts --value
+```
+
+### Pool preconditions are layered — fixing one reveals the next
+
+The pool validates several preconditions before cloning and reports only the
+first that fails, so clearing one surfaces the next and reads like a regression.
+One host went through all three in sequence:
+
+1. `cannot verify runner group policy ... Temporary failure in name resolution` —
+   host DNS was down; nothing to do with the runner.
+2. `ERROR: no free clone id in 200..202` — stale clones, above.
+3. `ERROR: automatic Linux runners require the Proxmox firewall (... pending
+   changes)` — firewall mid-reload. This one clears itself; verify with
+   `pve-firewall status` reporting `enabled/running` with no pending changes.
+
+Diagnose from the newest ERROR line each time rather than assuming the previous
+fix failed.
+
 ## The Shipyard macOS lane builds Debug — on purpose
 
 `.shipyard/config.toml` configures the macOS validation lane with

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import selectors
 import subprocess
 import tempfile
 import time
@@ -169,6 +170,51 @@ def run_script(fx: Fixture, *args: str, env_extra: dict | None = None,
         ["bash", str(fx.script), *args], cwd=str(fx.main), env=env,
         capture_output=True, text=True, timeout=timeout,
     )
+
+
+def start_quarantine_watcher(wt: pathlib.Path, action: str,
+                             env_extra: dict | None = None,
+                             ready_timeout: float = 60.0) -> subprocess.Popen:
+    """Spawn a helper that acts the instant `build/` is renamed to quarantine.
+
+    The window between that rename and the safety gate that closes it is well
+    under a second. A helper that is still importing its modules when the
+    window opens never sees it, and the caller then reads its own missed cue as
+    the script having done the wrong thing -- a failure that only appears on a
+    host slow enough to push interpreter startup past the window, which is
+    exactly where these tests are hardest to debug. Readiness is handshaken
+    instead: the helper announces itself after its imports and before its first
+    poll, and this returns only once that announcement arrives.
+
+    `action` is the already-indented body to run once the quarantine entry
+    exists, with `root` bound to the worktree path and `p` to the glob match.
+    """
+    src = (
+        "import glob, os, pathlib, subprocess, sys, time\n"
+        "root=pathlib.Path(os.environ['WATCH_ROOT'])\n"
+        "sys.stdout.write('ready\\n'); sys.stdout.flush()\n"
+        "deadline=time.time()+120\n"
+        "while time.time()<deadline:\n"
+        " p=glob.glob(str(root/'.pulp-reap-build-*'))\n"
+        " if p:\n"
+        + action +
+        "  break\n"
+        " time.sleep(0.001)\n"
+    )
+    env = {**os.environ, "WATCH_ROOT": str(wt)}
+    if env_extra:
+        env.update(env_extra)
+    proc = subprocess.Popen(
+        ["python3", "-c", src], env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    with selectors.DefaultSelector() as sel:
+        sel.register(proc.stdout, selectors.EVENT_READ)
+        if sel.select(timeout=ready_timeout) and proc.stdout.readline().strip() == "ready":
+            return proc
+    proc.kill()
+    proc.wait()
+    raise AssertionError("quarantine watcher never signalled readiness")
 
 
 def lib_eval(fx: Fixture, snippet: str) -> subprocess.CompletedProcess:
@@ -498,10 +544,18 @@ class GateTests(FixtureTestCase):
     def test_a_live_process_in_the_worktree_keeps_it(self) -> None:
         wt = self.fx.add_worktree("wt-busy")
         self.fx.merge_and_mark(wt)
+        # Announce-then-sleep, not sleep-and-hope: the script only sees this
+        # process once the interpreter is actually up, and a fixed grace period
+        # is a guess about how long that takes on the slowest host that will
+        # ever run this.
         proc = subprocess.Popen(
-            ["python3", "-c", "import time; time.sleep(30)"], cwd=str(wt))
+            ["python3", "-c",
+             "import sys, time; sys.stdout.write('ready\\n'); sys.stdout.flush();"
+             " time.sleep(30)"],
+            cwd=str(wt), stdout=subprocess.PIPE, text=True)
         try:
-            time.sleep(0.3)
+            self.assertEqual(proc.stdout.readline().strip(), "ready",
+                             "fixture process never started")
             r = run_script(self.fx, "--verbose")
             self.assertIn("a live process is working in it", r.stdout)
             self.assertTrue((wt / "build").is_dir())
@@ -593,23 +647,10 @@ class DeletionTests(FixtureTestCase):
     def test_process_entering_after_quarantine_forces_restore(self) -> None:
         wt = self.fx.add_worktree("wt-post-rename-busy")
         self.fx.merge_and_mark(wt)
-        watcher = subprocess.Popen(
-            ["python3", "-c", (
-                "import glob, os, time\n"
-                "root=os.environ['WATCH_ROOT']\n"
-                "deadline=time.time()+20\n"
-                "while time.time()<deadline:\n"
-                " p=glob.glob(root+'/.pulp-reap-build-*')\n"
-                " if p:\n"
-                "  f=open(p[0]+'/CMakeCache.txt','rb')\n"
-                "  time.sleep(10)\n"
-                "  break\n"
-                " time.sleep(0.001)\n"
-            )],
-            env={**os.environ, "WATCH_ROOT": str(wt)},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        watcher = start_quarantine_watcher(wt, (
+            "  f=open(p[0]+'/CMakeCache.txt','rb')\n"
+            "  time.sleep(10)\n"
+        ))
         try:
             r = run_script(self.fx, "--yes")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -622,25 +663,15 @@ class DeletionTests(FixtureTestCase):
     def test_short_lived_writer_after_quarantine_forces_restore(self) -> None:
         wt = self.fx.add_worktree("wt-post-rename-write")
         self.fx.merge_and_mark(wt)
-        watcher = subprocess.Popen(
-            ["python3", "-c", (
-                "import glob, os, pathlib, time\n"
-                "root=os.environ['WATCH_ROOT']\n"
-                "deadline=time.time()+20\n"
-                "while time.time()<deadline:\n"
-                " p=glob.glob(root+'/.pulp-reap-build-*')\n"
-                " if p:\n"
-                "  pathlib.Path(p[0], 'late-object.o').write_text('new')\n"
-                "  break\n"
-                " time.sleep(0.001)\n"
-            )],
-            env={**os.environ, "WATCH_ROOT": str(wt)},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        watcher = start_quarantine_watcher(wt, (
+            "  pathlib.Path(p[0], 'late-object.o').write_text('new')\n"
+        ))
         try:
             r = run_script(self.fx, "--yes")
-            watcher.wait(timeout=20)
+            # The watcher exits the moment it acts, so this only has to
+            # outlast the script itself -- which on a core-starved host
+            # runs far longer than it does on an idle one.
+            watcher.wait(timeout=120)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("FAILED to remove", r.stdout)
             self.assertEqual((wt / "build" / "late-object.o").read_text(), "new")
@@ -658,27 +689,14 @@ class DeletionTests(FixtureTestCase):
         old = time.time() - 86_400
         os.utime(precious / "unique.txt", (old, old))
         os.utime(precious, (old, old))
-        watcher = subprocess.Popen(
-            ["python3", "-c", (
-                "import glob, os, pathlib, time\n"
-                "root=pathlib.Path(os.environ['WATCH_ROOT'])\n"
-                "deadline=time.time()+20\n"
-                "while time.time()<deadline:\n"
-                " p=glob.glob(str(root/'.pulp-reap-build-*'))\n"
-                " if p:\n"
-                "  q=pathlib.Path(p[0])\n"
-                "  q.rename(root/'saved-original-build')\n"
-                "  (root/'precious-source').rename(q)\n"
-                "  break\n"
-                " time.sleep(0.001)\n"
-            )],
-            env={**os.environ, "WATCH_ROOT": str(wt)},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        watcher = start_quarantine_watcher(wt, (
+            "  q=pathlib.Path(p[0])\n"
+            "  q.rename(root/'saved-original-build')\n"
+            "  (root/'precious-source').rename(q)\n"
+        ))
         try:
             r = run_script(self.fx, "--yes")
-            watcher.wait(timeout=20)
+            watcher.wait(timeout=120)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("FAILED to remove", r.stdout)
             quarantines = list(wt.glob(".pulp-reap-build-*"))
@@ -694,27 +712,14 @@ class DeletionTests(FixtureTestCase):
         wt = self.fx.add_worktree("wt-lineage-changed-late")
         self.fx.merge_and_mark(wt)
         branch = git(wt, "branch", "--show-current").strip()
-        watcher = subprocess.Popen(
-            ["python3", "-c", (
-                "import glob, os, subprocess, time\n"
-                "root=os.environ['WATCH_ROOT']\n"
-                "deadline=time.time()+20\n"
-                "while time.time()<deadline:\n"
-                " if glob.glob(root+'/.pulp-reap-build-*'):\n"
-                "  subprocess.run(['git','-C',os.environ['MAIN_ROOT'],'config','--local',"
-                "os.environ['KEY'],'active'],check=True)\n"
-                "  break\n"
-                " time.sleep(0.001)\n"
-            )],
-            env={**os.environ, "WATCH_ROOT": str(wt),
-                 "MAIN_ROOT": str(self.fx.main),
-                 "KEY": f"branch.{branch}.pulpWorktreeStatus"},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        watcher = start_quarantine_watcher(wt, (
+            "  subprocess.run(['git','-C',os.environ['MAIN_ROOT'],'config','--local',"
+            "os.environ['KEY'],'active'],check=True)\n"
+        ), env_extra={"MAIN_ROOT": str(self.fx.main),
+                      "KEY": f"branch.{branch}.pulpWorktreeStatus"})
         try:
             r = run_script(self.fx, "--yes")
-            watcher.wait(timeout=20)
+            watcher.wait(timeout=120)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("FAILED to remove", r.stdout)
             self.assertTrue((wt / "build" / "CMakeCache.txt").exists())

@@ -133,6 +133,18 @@ unplaced, so assert the text box itself.
   more and defeats the cache on any label whose text changes every frame. Where a
   shaped layout already exists (wrapped or attributed text), read its first
   line's ascent instead of measuring the face a second time.
+- **`intrinsic_width()` is a layout contract, not a measurement — a multi-line
+  Label reports 0 on purpose.** Returning 0 is what lets the parent's available
+  width drive wrapping, so anything asking "how wide is this text" gets zero for
+  every wrapped label and, if it treats that as an answer, silently skips them.
+  A layout-box dump of one real panel was blind on 63% of its text runs for
+  exactly this reason, and read as a clean result. Ask
+  `painted_text_extents(available_width)` instead: it shapes and lays out at the
+  width the Label was given, applies the line clamp and text-align, and returns
+  `measured=false` for empty text so "unknown" is distinguishable from "zero
+  sized". Do not fix the blindness by making `intrinsic_width()` return a number
+  for the multi-line case — that breaks wrapping.
+
 - **Three consumers must agree or the bug is invisible.** `intrinsic_height()`
   sizes the box, `baseline_y()` is what Yoga gets for `align-items: baseline`,
   and `paint()` places the ink. If they do not derive from one line box, the

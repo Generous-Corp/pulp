@@ -58,6 +58,33 @@ records source evidence and gives every exposure surface one disposition:
 - `not_applicable` explains why the slice is not independently meaningful on
   that surface.
 
+Every `exposed` surface also carries an `authority` descriptor recording what a
+caller is allowed to do once admitted. This is a different question from the one
+`docs/status/authority-navigation.json` answers: that file records which ledger
+is authoritative for a subject, while this descriptor records the authority the
+surface itself admits a caller under.
+
+| `admission` | Meaning |
+|---|---|
+| `in_process` | The caller links the surface directly and holds whatever the API grants. No boundary admits it, so no profile and no refusal vocabulary apply. |
+| `registered_writer` | The boundary registers a document writer under a named profile, with that profile's retained-byte ceilings and the conflict codes it can refuse with. |
+| `read_only` | The operation cannot mutate a document, so admission carries no writer and no writer-scoped refusal. |
+| `descriptor` | The surface publishes a description and admits no caller at all. |
+
+A `registered_writer` row names its `writer_profile`, its `bounds`
+(`max_transaction_retained_bytes` and `max_session_retained_bytes`, either of
+which may be `null` for a deliberately unquotaed ceiling), and the
+`refusal_codes` the boundary can turn an admitted caller away with. The other
+three admissions carry `writer_profile: null`, `bounds: null`, and an empty
+`refusal_codes`.
+
+That vocabulary is not transcribed into the ledger. The checker parses
+`tools/timeline/src/writer_profile.cpp` and
+`tools/timeline/include/pulp/tools/timeline/writer_profile.hpp` — the same
+definitions the CLI and MCP boundaries register writers from — so a row cannot
+name a profile, a ceiling, or a refusal code those boundaries do not implement.
+A source the checker cannot read is an error, never a skip.
+
 Live Product A exposure has the strongest evidence bar. A row may say
 `exposed` only when it points to a canonical capability definition, typed
 operation definition, executor binding, grant-profile policy, CLI projection,
