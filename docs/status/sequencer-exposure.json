@@ -4301,7 +4301,10 @@
         "test/test_timeline_nesting_playback.cpp",
         "tools/scripts/negative_capability_allowlist.json",
         "tools/scripts/negative_capability_check.py",
-        "docs/status/sequencer-exposure.json"
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "docs/guides/timeline-sdk.md"
       ],
       "evidence": [
         {
