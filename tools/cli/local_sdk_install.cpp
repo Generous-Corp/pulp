@@ -1,4 +1,4 @@
-// local_sdk_install.cpp — forge-dev SDK build, validation, and atomic publish.
+// local_sdk_install.cpp — local dev SDK build, validation, and atomic publish.
 
 #include "local_sdk_install.hpp"
 
@@ -190,7 +190,7 @@ bool identity_complete(const local_sdk::Identity& identity, std::string& error) 
         }
     }
     if (identity.platform != "darwin-arm64") {
-        error = "forge-dev is supported only by the Apple Silicon CLI";
+        error = "local dev SDK profiles are supported only by the Apple Silicon CLI";
         return false;
     }
     return true;
@@ -206,7 +206,7 @@ std::string command_from_args(const std::vector<std::string>& args) {
     return command;
 }
 
-void print_validation_errors(const local_sdk::Validation& validation, const char* heading) {
+void print_validation_errors(const local_sdk::Validation& validation, const std::string& heading) {
     std::cerr << "Error: " << heading << ":\n";
     for (const auto& error : validation.errors)
         std::cerr << "  - " << error << "\n";
@@ -270,40 +270,52 @@ void remove_staging(const fs::path& prefix, const fs::path& build) {
 
 } // namespace
 
-fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
+fs::path ensure_dev_profile_sdk(const fs::path& repo_root, bool tracing) {
+    // `profile` names the lane in every diagnostic below. The two profiles share
+    // this entire flow deliberately: the traced SDK gets the same clean-snapshot
+    // requirement, the same identity capture, and the same
+    // stage -> validate -> publish-by-rename discipline as forge-dev. The only
+    // differences are one CMake flag, a separate prefix root, and the extra
+    // tracing evidence checked during staged validation.
+    const std::string profile = tracing ? local_sdk::kTraceProfileName
+                                        : local_sdk::kForgeProfileName;
+    const std::string profile_root = tracing ? "trace-v1" : "forge-v1";
 #if !defined(__APPLE__) || !(defined(__aarch64__) || defined(__arm64__))
     (void)repo_root;
-    std::cerr << "Error: the forge-dev SDK profile requires Apple Silicon macOS.\n";
+    (void)tracing;
+    std::cerr << "Error: the " << profile << " SDK profile requires Apple Silicon macOS.\n";
     return {};
 #else
     if (repo_root.empty() || pulp_home().empty()) {
-        std::cerr << "Error: forge-dev requires a Pulp checkout and PULP_HOME.\n";
+        std::cerr << "Error: " << profile << " requires a Pulp checkout and PULP_HOME.\n";
         return {};
     }
 
     std::error_code ec;
     auto home = fs::absolute(pulp_home(), ec).lexically_normal();
     if (ec || !home.is_absolute()) {
-        std::cerr << "Error: forge-dev requires an absolute PULP_HOME: " << ec.message() << "\n";
+        std::cerr << "Error: " << profile << " requires an absolute PULP_HOME: " << ec.message()
+                  << "\n";
         return {};
     }
 
     bool status_ok = false;
     if (!git_checkout_clean(repo_root, status_ok) || !status_ok) {
-        std::cerr << "Error: forge-dev requires a completely clean committed checkout "
+        std::cerr << "Error: " << profile
+                  << " requires a completely clean committed checkout "
                      "(including no untracked files).\n";
         return {};
     }
 
     const auto resolved_sha = git_output(repo_root, "rev-parse HEAD");
     if (resolved_sha.empty()) {
-        std::cerr << "Error: could not resolve the checkout HEAD for forge-dev.\n";
+        std::cerr << "Error: could not resolve the checkout HEAD for " << profile << ".\n";
         return {};
     }
 
     const auto unique = std::to_string(getpid());
     const auto snapshot_path =
-        home / "sdk-source-dev" / "forge-v1" / resolved_sha / (".snapshot-" + unique);
+        home / "sdk-source-dev" / profile_root / resolved_sha / (".snapshot-" + unique);
     ScopedGitSnapshot snapshot(repo_root, snapshot_path);
     std::string snapshot_error;
     if (!snapshot.create(resolved_sha, snapshot_error)) {
@@ -335,7 +347,8 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
         std::cerr << "Error: could not resolve PROJECT_VERSION from the source snapshot.\n";
         return {};
     }
-    const auto identity = collect_identity(snapshot.path(), version);
+    auto identity = collect_identity(snapshot.path(), version);
+    identity.tracing = tracing;
     std::string identity_error;
     if (!identity_complete(identity, identity_error)) {
         std::cerr << "Error: " << identity_error << ".\n";
@@ -347,7 +360,7 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
         const auto existing = local_sdk::validate_published_install(paths.install_prefix, identity);
         if (existing.ok)
             return paths.install_prefix;
-        print_validation_errors(existing, "existing forge-dev SDK is invalid");
+        print_validation_errors(existing, "existing " + profile + " SDK is invalid");
         std::cerr << "Refusing to overwrite immutable SDK prefix " << paths.install_prefix.string()
                   << "\n";
         return {};
@@ -355,7 +368,8 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
 
     fs::create_directories(paths.install_prefix.parent_path(), ec);
     if (ec) {
-        std::cerr << "Error: could not create forge-dev SDK parent: " << ec.message() << "\n";
+        std::cerr << "Error: could not create " << profile << " SDK parent: " << ec.message()
+                  << "\n";
         return {};
     }
 
@@ -365,7 +379,8 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
     fs::remove_all(staging_prefix, ec);
     fs::create_directories(paths.build_dir, ec);
     if (ec) {
-        std::cerr << "Error: could not create forge-dev build root: " << ec.message() << "\n";
+        std::cerr << "Error: could not create " << profile << " build root: " << ec.message()
+                  << "\n";
         return {};
     }
 
@@ -409,13 +424,14 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
     auto configure_args = local_sdk::configure_arguments(snapshot.path(), active_build_dir,
                                                          staging_prefix, identity, node_runtime);
     configure_args.insert(configure_args.begin() + 1, {"-G", identity.generator});
-    if (run_with_spinner(command_from_args(configure_args), "Configuring forge-dev SDK") != 0) {
+    if (run_with_spinner(command_from_args(configure_args), "Configuring " + profile + " SDK") !=
+        0) {
         remove_staging(staging_prefix, active_build_dir);
         return {};
     }
 
     auto lease = TartciAgentBuildLease::acquire(
-        {.project_root = repo_root, .command_kind = "sdk-forge-dev"});
+        {.project_root = repo_root, .command_kind = "sdk-" + profile});
     if (!lease.ok()) {
         std::cerr << "Error: could not acquire build capacity: " << lease.error() << "\n";
         remove_staging(staging_prefix, active_build_dir);
@@ -426,12 +442,13 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
                               " --target install --parallel " + std::to_string(jobs);
     install_cmd = apply_agent_build_watchdog(apply_agent_build_qos(install_cmd, lease.qos()), jobs,
                                              lease.active());
-    if (run_with_spinner(install_cmd, "Building forge-dev SDK") != 0) {
+    if (run_with_spinner(install_cmd, "Building " + profile + " SDK") != 0) {
         remove_staging(staging_prefix, active_build_dir);
         return {};
     }
 
-    const auto post_build_identity = collect_identity(snapshot.path(), version);
+    auto post_build_identity = collect_identity(snapshot.path(), version);
+    post_build_identity.tracing = tracing;
     if (!git_checkout_clean(snapshot.path(), status_ok) || !status_ok ||
         !(post_build_identity == identity)) {
         std::cerr << "Error: immutable source/dependency identity changed during the SDK build.\n";
@@ -443,13 +460,16 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
         staging_prefix, active_build_dir, identity,
         snapshot.path() / "external" / "skia-build");
     if (!staged.ok) {
-        print_validation_errors(staged, "staged forge-dev SDK failed validation");
+        // For the traced profile this is the check that makes a mislabeled SDK
+        // impossible: no Perfetto in the installed archive means no publish, so
+        // the prefix a developer points at can never promise tracing it lacks.
+        print_validation_errors(staged, "staged " + profile + " SDK failed validation");
         remove_staging(staging_prefix, active_build_dir);
         return {};
     }
     std::string architecture_error;
     if (!normalize_installed_archives_for_arm64(staging_prefix, architecture_error)) {
-        std::cerr << "Error: staged forge-dev SDK could not be normalized to arm64: "
+        std::cerr << "Error: staged " << profile << " SDK could not be normalized to arm64: "
                   << architecture_error
                   << "\n";
         remove_staging(staging_prefix, active_build_dir);
@@ -466,7 +486,7 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
     }
     const auto published = local_sdk::validate_published_install(staging_prefix, identity);
     if (!published.ok) {
-        print_validation_errors(published, "forge-dev provenance failed validation");
+        print_validation_errors(published, profile + " provenance failed validation");
         remove_staging(staging_prefix, active_build_dir);
         return {};
     }
@@ -478,11 +498,20 @@ fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
             remove_staging(staging_prefix, active_build_dir);
             return paths.install_prefix;
         }
-        std::cerr << "Error: could not atomically publish forge-dev SDK: " << ec.message() << "\n";
+        std::cerr << "Error: could not atomically publish " << profile
+                  << " SDK: " << ec.message() << "\n";
         remove_staging(staging_prefix, active_build_dir);
         return {};
     }
     fs::remove_all(active_build_dir, ec);
     return paths.install_prefix;
 #endif
+}
+
+fs::path ensure_forge_dev_sdk(const fs::path& repo_root) {
+    return ensure_dev_profile_sdk(repo_root, false);
+}
+
+fs::path ensure_trace_sdk(const fs::path& repo_root) {
+    return ensure_dev_profile_sdk(repo_root, true);
 }

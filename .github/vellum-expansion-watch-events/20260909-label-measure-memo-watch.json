@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260909-label-measure-memo-watch",
+  "created_at": "2026-09-09T19:58:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Yoga asks every text leaf for its size several times per layout pass and again on every pass, and each of those calls reached TextShaper::prepare(), which re-validates and re-segments the string on a warm cache. This PR puts a memo in front of Label's three measurement entry points keyed on the fully resolved style, adds a width-aware measured_width() so a wrapped Label reports its shaped extent instead of the 0 that intrinsic_width() returns by design, and wraps the existing statements of yoga_layout() in trace scopes plus a node counter. The surface that crosses render-assets-and-backends is core/view only -- widgets.hpp, widgets/label.cpp and yoga_layout.cpp -- and it crosses because the acceptance's scope additions for that family carry a bare core/view/** selector, not because any renderer, GPU backend, Skia pin, font binary or asset changed. None did, and no harness or fixture changed. What this record deliberately does NOT claim is geometry equivalence. The memo is an equivalence-dependent optimization: it is correct only if the basis captures every input that can move a measurement, and the basis keys the font face indirectly through font_registration_generation() rather than resolving the face per call, while attributed text opts out of caching entirely rather than risk a key that misses a span change. That reasoning is stated in the PR and rests on the PR's own Label tests and their positive control; it has not been independently measured here, and no assertion that the same tree produces the same geometry is made in this event. An equivalence claim of exactly that shape was made about a nearby layout change and was later falsified, so it is not repeated here on an unmeasured basis. The trace scopes are also not free when PULP_TRACING_ENABLED is on -- four scopes and a counter run per layout pass -- and this record carries no measurement of that overhead. This PR is currently in conflict with main in core/view/src/yoga_layout.cpp; the event is added without rebasing or resolving that conflict, and resolving it does not change the family classification, since the conflicting file is in the same family for the same bare-selector reason. Registered watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-widget-bridge-yoga",
+    "pulp-test-widgets-label",
+    "tools/scripts/test_vellum_expansion_watch_check.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

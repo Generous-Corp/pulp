@@ -87,6 +87,13 @@ pub struct BuildArgs {
     /// treats drift as a soft warning instead of failing the build.
     /// Mirrors `pulp identity check --allow-identity-change`.
     pub allow_identity_change: bool,
+    /// `--trace` — configure with `-DPULP_TRACING=ON` into `build-trace/`.
+    /// Development only: the resulting binaries carry Perfetto and are
+    /// rejected by the ship guard.
+    pub trace: bool,
+    /// `--allow-tracing` — required to pair `--trace` with `--install`, so a
+    /// traced plug-in never reaches the user's plug-in folder by accident.
+    pub allow_tracing: bool,
     /// `--format <fmt>` / `-f <fmt>` — build a web plugin format instead of
     /// the native one. `wam` (Emscripten → AudioWorklet) or `wclap` (wasi-sdk
     /// → CLAP-in-WebAssembly). `None` builds the native plugin formats.
@@ -95,6 +102,38 @@ pub struct BuildArgs {
 
 /// Parse `pulp-rs build` flags.
 #[must_use]
+/// Reject flag combinations that would produce a tracing-enabled artifact
+/// somewhere it does not belong.
+///
+/// A traced build links Perfetto and carries the retained ship sentinel, so it
+/// must stay a development artifact. Copying one into the user's plug-in folder
+/// is the first step toward a DAW loading it, so `--install` has to be said out
+/// loud. Web plugin formats build through a different toolchain entirely and
+/// have no Perfetto backend at all, so the combination is a mistake rather than
+/// a limitation worth silently ignoring.
+pub fn check_trace_flags(args: &BuildArgs) -> Result<()> {
+    if args.allow_tracing && !args.trace {
+        return Err(CliError::BadUsage(
+            "--allow-tracing only applies with --trace".to_owned(),
+        ));
+    }
+    if args.install && args.trace && !args.allow_tracing {
+        return Err(CliError::BadUsage(
+            "--install with --trace would install a tracing-enabled build; pass \
+             --allow-tracing if that is genuinely what you want"
+                .to_owned(),
+        ));
+    }
+    if args.trace && args.web_format.is_some() {
+        return Err(CliError::BadUsage(
+            "--trace cannot be combined with --format wam|wclap (Perfetto tracing \
+             is a native-toolchain feature)"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn parse_build_args(args: &[String]) -> BuildArgs {
     let mut out = BuildArgs::default();
     out.raw_tail = args.to_vec();
@@ -107,6 +146,8 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
             "--validate" => out.validate = true,
             "--install" => out.install = true,
             "--skip-validation" => out.skip_validation = true,
+            "--trace" => out.trace = true,
+            "--allow-tracing" => out.allow_tracing = true,
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
             // `--format <fmt>` / `-f <fmt>` consume the next token as the value.
@@ -149,6 +190,12 @@ fn build_delegate_argv(args: &BuildArgs) -> Vec<String> {
         }
         if args.skip_validation {
             synthesized.push("--skip-validation".to_owned());
+        }
+        if args.trace {
+            synthesized.push("--trace".to_owned());
+        }
+        if args.allow_tracing {
+            synthesized.push("--allow-tracing".to_owned());
         }
         if let Some(engine) = &args.js_engine {
             synthesized.push(format!("--js-engine={engine}"));
@@ -215,6 +262,7 @@ fn build_with_dependency_policy<S: Spawner>(
             "--skip-validation only applies with --install".to_owned(),
         ));
     }
+    check_trace_flags(args)?;
 
     // Web plugin formats build through a different toolchain and build dir, and
     // are not part of the native install/validate/watch pipelines.
@@ -235,6 +283,17 @@ fn build_with_dependency_policy<S: Spawner>(
         let cpp_argv = build_delegate_argv(args);
         let stub = "pulp-rs build --install --watch: install/watch validation stays on the \
                     C++ parser; install pulp-cpp to enable.";
+        let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
+        return Ok(rc);
+    }
+
+    if args.trace && proj.standalone {
+        // A consumer project cannot compile Perfetto in by itself — tracing
+        // lives in the SDK archives. The C++ delegate already owns SDK
+        // resolution, so it also owns the "does this SDK actually trace?"
+        // check rather than a second, drifting copy here.
+        let cpp_argv = build_delegate_argv(args);
+        let stub = "pulp build --trace for a standalone project needs the SDK resolver;                     install pulp-cpp to enable.";
         let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
         return Ok(rc);
     }
@@ -294,8 +353,21 @@ fn build_with_dependency_policy<S: Spawner>(
         }
     }
 
+    let build_dir = if args.trace {
+        proj.trace_build_dir()
+    } else {
+        proj.build_dir.clone()
+    };
+    let configured = if args.trace {
+        // Only a cache that really says PULP_TRACING=ON counts as configured.
+        // Reusing a stale untraced cache under this path is exactly how a
+        // "trace" tree ends up unable to trace.
+        proj.trace_build_configured()
+    } else {
+        proj.is_configured()
+    };
     let needs_configure =
-        !proj.is_configured() || (!proj.standalone && !proj.checkout_dependencies_enabled());
+        !configured || (!proj.standalone && !proj.checkout_dependencies_enabled());
     if needs_configure {
         if !proj.standalone {
             if skip_dependency_bootstrap {
@@ -317,11 +389,14 @@ fn build_with_dependency_policy<S: Spawner>(
 
         let mut cfg = Invocation::new("cmake")
             .arg("-B")
-            .arg(proj.build_dir.to_string_lossy().into_owned())
+            .arg(build_dir.to_string_lossy().into_owned())
             .arg("-S")
             .arg(proj.root.to_string_lossy().into_owned());
         if !proj.standalone {
             cfg = cfg.arg("-DPULP_REQUIRE_CHECKOUT_DEPENDENCIES=ON");
+        }
+        if args.trace {
+            cfg = cfg.arg("-DPULP_TRACING=ON");
         }
         if let Some(ref e) = args.js_engine {
             cfg = cfg.arg(format!("-DPULP_JS_ENGINE={e}"));
@@ -335,7 +410,7 @@ fn build_with_dependency_policy<S: Spawner>(
 
     let mut build = Invocation::new("cmake")
         .arg("--build")
-        .arg(proj.build_dir.to_string_lossy().into_owned());
+        .arg(build_dir.to_string_lossy().into_owned());
     for a in &args.passthrough {
         build = build.arg(a.clone());
     }
@@ -344,14 +419,58 @@ fn build_with_dependency_policy<S: Spawner>(
         return Ok(rc);
     }
 
+    // Silence after a traced build is the same defect as a mislabelled traced
+    // SDK: the developer paid for tracing and is left guessing how to collect
+    // one. Always name the build tree and the next command.
+    if args.trace {
+        writeln!(
+            out,
+            "{}",
+            trace_next_steps(&build_dir.display().to_string())
+        )
+        .map_err(io_err)?;
+    }
+
     if args.test {
         let test = Invocation::new("ctest")
             .arg("--test-dir")
-            .arg(proj.build_dir.to_string_lossy().into_owned())
+            .arg(build_dir.to_string_lossy().into_owned())
             .arg("--output-on-failure");
         return spawner.run(&test);
     }
     Ok(rc)
+}
+
+/// The `pulp trace …` commands the traced-build epilogue points at, as argv
+/// tails (everything after `pulp trace`). Held as data so a test can feed each
+/// one through the real trace parser: a suggestion that does not parse is worse
+/// than no suggestion, and prose in a `writeln!` cannot be checked by anything.
+pub const TRACE_NEXT_COMMANDS: [&[&str]; 3] = [
+    &["start"],
+    &["stop"],
+    &["query", "\"<sql>\"", "--trace", "<path>"],
+];
+
+fn render_trace_command(argv: &[&str]) -> String {
+    format!("pulp trace {}", argv.join(" "))
+}
+
+/// The "you have a traced build, now collect a trace" epilogue.
+///
+/// Split out of the build path so the suggested commands are testable. The
+/// whole point of the feature is that the next step is obvious.
+pub fn trace_next_steps(build_dir: &str) -> String {
+    let start = render_trace_command(TRACE_NEXT_COMMANDS[0]);
+    let stop = render_trace_command(TRACE_NEXT_COMMANDS[1]);
+    let query = render_trace_command(TRACE_NEXT_COMMANDS[2]);
+    format!(
+        "\nTraced build in {build_dir}\n\
+         \x20 Capture:  {start}   (exercise the plug-in/app, then) {stop}\n\
+         \x20 `{stop}` prints the .pftrace path; inspect it with\n\
+         \x20           {query}\n\
+         \x20 Development only — never ship a binary from {}.",
+        crate::project::TRACE_BUILD_SUBDIR
+    )
 }
 
 /// Build the platform bootstrap invocation used before the first configure of
@@ -1035,6 +1154,22 @@ pub fn status_with<G: GitProbe>(cwd: &Path, git: &G, out: &mut impl Write) -> Re
         .map_err(io_err)?;
     }
 
+    // Answer "can I get a trace out of this tree?" without making anyone read a
+    // CMake cache. Report the separate traced tree, and when there is none, the
+    // one command that creates it.
+    writeln!(
+        out,
+        "Tracing: {}",
+        if proj.trace_build_configured() {
+            "available (build-trace/ configured with PULP_TRACING=ON)"
+        } else if proj.tracing_compiled_in() {
+            "available (build/ configured with PULP_TRACING=ON)"
+        } else {
+            "not built (run `pulp build --trace`)"
+        }
+    )
+    .map_err(io_err)?;
+
     write_pr_workflow_status(&proj, out)?;
     write_import_design_default_status(out)?;
 
@@ -1546,6 +1681,48 @@ mod tests {
     use crate::proc::testing::RecordingSpawner;
     use crate::test_support::EnvVarGuard;
 
+    /// Every command the traced-build epilogue prints must be one the real
+    /// trace parser accepts. This caught `pulp trace query --file <path>`,
+    /// whose actual flag is `--trace`: a printed next step that does not parse
+    /// defeats the point of the feature.
+    #[test]
+    fn trace_next_steps_only_suggests_commands_that_parse() {
+        for argv in TRACE_NEXT_COMMANDS {
+            let concrete: Vec<String> = argv
+                .iter()
+                .map(|tok| match *tok {
+                    "\"<sql>\"" => "select 1".to_owned(),
+                    "<path>" => "/tmp/pulp-epilogue-test.pftrace".to_owned(),
+                    other => other.to_owned(),
+                })
+                .collect();
+            crate::cmd::trace::parse(&concrete).unwrap_or_else(|e| {
+                panic!(
+                    "epilogue suggests `pulp trace {}`, which the trace parser rejects: {e}",
+                    argv.join(" ")
+                )
+            });
+        }
+    }
+
+    /// Control for the test above: prove the parser is capable of rejecting at
+    /// all, so a green run there is evidence rather than a no-op.
+    #[test]
+    fn trace_parser_rejects_the_flag_the_epilogue_used_to_print() {
+        let bad = ["query", "select 1", "--file", "/tmp/x.pftrace"].map(String::from);
+        assert!(crate::cmd::trace::parse(&bad).is_err());
+    }
+
+    #[test]
+    fn trace_next_steps_renders_its_suggested_commands() {
+        let text = trace_next_steps("/repo/build-trace");
+        for argv in TRACE_NEXT_COMMANDS {
+            let rendered = format!("pulp trace {}", argv.join(" "));
+            assert!(text.contains(&rendered), "missing `{rendered}` in:\n{text}");
+        }
+        assert!(text.contains("/repo/build-trace"), "{text}");
+    }
+
     fn standalone_project(root: &Path) -> ActiveProject {
         std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
         ActiveProject::new(root.to_path_buf(), true)
@@ -1604,6 +1781,48 @@ mod tests {
             std::fs::set_permissions(&target, perms).unwrap();
         }
         target
+    }
+
+    #[test]
+    fn parse_build_args_captures_trace_flags() {
+        let a = parse_build_args(&["--trace".to_owned(), "--allow-tracing".to_owned()]);
+        assert!(a.trace && a.allow_tracing);
+        // Control: neither is set by default, so the assertion above reflects
+        // the flags rather than a field that is always true.
+        let b = parse_build_args(&["--test".to_owned()]);
+        assert!(!b.trace && !b.allow_tracing);
+        // Unknown flags still fall through to passthrough, so --trace is being
+        // matched rather than merely tolerated.
+        assert_eq!(b.passthrough.len(), 0);
+    }
+
+    #[test]
+    fn trace_flags_reject_combinations_that_would_leak_a_traced_build() {
+        let bad_usage = |args: &[&str]| {
+            let parsed =
+                parse_build_args(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+            match check_trace_flags(&parsed) {
+                Err(CliError::BadUsage(msg)) => msg,
+                other => panic!("expected BadUsage for {args:?}, got {other:?}"),
+            }
+        };
+
+        assert!(bad_usage(&["--allow-tracing"]).contains("--allow-tracing only applies"));
+        assert!(bad_usage(&["--trace", "--install"]).contains("--allow-tracing"));
+        assert!(bad_usage(&["--trace", "--format", "wam"]).contains("--format wam|wclap"));
+
+        // Controls: every one of those is accepted once the missing piece is
+        // supplied, so the rejections above are the specific combinations and
+        // not a blanket refusal of --trace.
+        let ok = |args: &[&str]| {
+            let parsed =
+                parse_build_args(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+            check_trace_flags(&parsed).is_ok()
+        };
+        assert!(ok(&["--trace"]));
+        assert!(ok(&["--trace", "--install", "--allow-tracing"]));
+        assert!(ok(&["--format", "wam"]));
+        assert!(ok(&["--install"]));
     }
 
     #[test]

@@ -192,6 +192,16 @@ if(TARGET Pulp::clap)
     set(PULP_HAS_CLAP TRUE)
 endif()
 
+# Whether this SDK was built with Perfetto compiled in. The Pulp::tracing target
+# is exported only when PULP_TRACING was ON, so its presence is evidence rather
+# than a claim: an untraced SDK cannot define it. Consumers and `pulp` itself
+# read this to answer "can I get a trace out of this SDK?" without inspecting
+# archives.
+set(PULP_HAS_TRACING FALSE)
+if(TARGET Pulp::tracing)
+    set(PULP_HAS_TRACING TRUE)
+endif()
+
 set(PULP_HAS_LV2 FALSE)
 if(TARGET Pulp::lv2-headers)
     set(PULP_HAS_LV2 TRUE)

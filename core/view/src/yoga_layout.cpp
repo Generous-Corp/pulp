@@ -6,6 +6,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include "yoga_measurement_internal.hpp"
 #include <yoga/Yoga.h>
 #include <vector>
@@ -732,10 +733,17 @@ void yoga_layout(View& root) {
     bool wants_subpixel = root.subpixel_layout();
 
     YGNodeRef ygRoot = YGNodeNewWithConfig(ygConfig);
-    YGNodeStyleSetWidth(ygRoot, rootBounds.width);
-    YGNodeStyleSetHeight(ygRoot, rootBounds.height);
-    build_yoga_subtree(root, ygRoot, node_tally, ygConfig, wants_subpixel,
-                       rootBounds.width, rootBounds.height);
+    {
+        // Allocating and styling one YGNode per View. Its cost tracks the
+        // TOTAL node count, not how many views changed, so a wide span here
+        // beside a narrow "yoga_calculate" is the signature of rebuild
+        // overhead rather than genuine solving work.
+        PULP_TRACE_SCOPE_NAMED("layout", "yoga_build");
+        YGNodeStyleSetWidth(ygRoot, rootBounds.width);
+        YGNodeStyleSetHeight(ygRoot, rootBounds.height);
+        build_yoga_subtree(root, ygRoot, node_tally, ygConfig, wants_subpixel,
+                           rootBounds.width, rootBounds.height);
+    }
     // 0 disables the pixel-grid pass entirely, preserving the fractional
     // solved geometry (see View::set_subpixel_layout for why imported
     // designs need this). Default 1.0f keeps Yoga's stock whole-pixel
@@ -755,8 +763,16 @@ void yoga_layout(View& root) {
         case FlexStyle::WritingDirection::inherit:
         default:                                   rootDir = YGDirectionLTR; break;
     }
-    YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, rootDir);
-    apply_yoga_results(root, ygRoot);
+    {
+        // The solve itself, including any text measure callbacks it invokes.
+        PULP_TRACE_SCOPE_NAMED("layout", "yoga_calculate");
+        YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, rootDir);
+    }
+    {
+        // Copying solved geometry back onto the View tree.
+        PULP_TRACE_SCOPE_NAMED("layout", "yoga_apply");
+        apply_yoga_results(root, ygRoot);
+    }
 
     if (std::getenv("PULP_DUMP_BOUNDS")) {
         std::fprintf(stderr, "\n=== [PULP_DUMP_BOUNDS] root @ %.0fx%.0f ===\n",
@@ -765,10 +781,16 @@ void yoga_layout(View& root) {
         std::fprintf(stderr, "=== [PULP_DUMP_BOUNDS] end ===\n\n");
     }
 
-    YGNodeFreeRecursive(ygRoot);
-    YGConfigFree(ygConfig);
+    {
+        // Tearing the tree back down. Paired with "yoga_build", this is the
+        // per-pass churn a persistent tree would remove.
+        PULP_TRACE_SCOPE_NAMED("layout", "yoga_free");
+        YGNodeFreeRecursive(ygRoot);
+        YGConfigFree(ygConfig);
+    }
 
     const uint64_t pass = g_layout_pass_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    PULP_TRACE_COUNTER("layout", "yoga_nodes", static_cast<int64_t>(node_tally));
     g_layout_last_nodes.store(node_tally, std::memory_order_relaxed);
     if (node_tally > g_layout_max_nodes.load(std::memory_order_relaxed))
         g_layout_max_nodes.store(node_tally, std::memory_order_relaxed);
