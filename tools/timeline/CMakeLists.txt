@@ -26,6 +26,7 @@ target_link_libraries(pulp-tool-timeline
         # A public header projects AgentView, so consumers compile against it.
         pulp::timeline-agent-view
     PRIVATE
+        pulp::host
         pulp::playback
         pulp::project-package
         pulp::timeline

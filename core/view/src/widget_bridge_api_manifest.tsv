@@ -231,6 +231,7 @@ canvasSetFontFull	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasBeginPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasMoveTo	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasLineTo	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
+canvasPathPolyline	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasQuadTo	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasCubicTo	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasClosePath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
@@ -356,6 +357,9 @@ __scheduleTimer__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __cancelTimer__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __flushTimers__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __performanceNow__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
+__traceBegin__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
+__traceEnd__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
+__traceStats__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 readClipboard	platform_services	function	core/view/src/widget_bridge/platform_services_api.cpp
 writeClipboard	platform_services	function	core/view/src/widget_bridge/platform_services_api.cpp
 canvasSetLinearGradient	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp

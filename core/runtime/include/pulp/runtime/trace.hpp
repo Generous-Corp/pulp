@@ -150,6 +150,14 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 #define PULP_TRACE_BEGIN_ARGS(category, name, ...) \
     TRACE_EVENT_BEGIN(category, ::perfetto::StaticString(name), __VA_ARGS__)
 
+// Begin a cross-call named span whose name is computed at runtime. Same
+// dynamic-name caveats as PULP_TRACE_SCOPE_DYNAMIC: the bytes are copied per
+// event and the name multiplies `slice.name` cardinality, so reach for it only
+// when the runtime value is the thing you need to query on. The matching
+// PULP_TRACE_END must run on the same non-audio thread.
+#define PULP_TRACE_BEGIN_DYNAMIC(category, name_expr) \
+    TRACE_EVENT_BEGIN(category, ::perfetto::DynamicString{name_expr})
+
 #define PULP_TRACE_END(category) TRACE_EVENT_END(category)
 
 #define PULP_TRACE_COUNTER(category, name, value) \
@@ -165,6 +173,7 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 #define PULP_TRACE_SCOPE_NAMED_ARGS(category, name, ...) ((void)0)
 #define PULP_TRACE_BEGIN(category, name) ((void)0)
 #define PULP_TRACE_BEGIN_ARGS(category, name, ...) ((void)0)
+#define PULP_TRACE_BEGIN_DYNAMIC(category, name_expr) ((void)0)
 #define PULP_TRACE_END(category) ((void)0)
 #define PULP_TRACE_COUNTER(category, name, value) ((void)0)
 

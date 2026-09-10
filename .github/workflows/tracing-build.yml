@@ -102,3 +102,119 @@ jobs:
           Advisory, GitHub-hosted Linux — guards the opt-in path no other lane
           builds. Does not gate merge.
           EOF
+
+  # Proves the half of the tracing story no lane has ever exercised: that an
+  # INSTALLED SDK carries Perfetto and advertises it to a consumer build.
+  # `tracing-on` above builds in-tree, so it says nothing about what survives
+  # `cmake --install` — and "the SDK can trace" is exactly the claim a
+  # mislabeled prefix made falsely. Here the claim is checked against the
+  # installed artifacts.
+  tracing-consumer:
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    # Hard-coded GitHub-hosted Linux — advisory, never self-hosted (see header).
+    runs-on: ubuntu-latest
+    name: Installed traced SDK advertises tracing to a consumer
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
+
+      - name: Install Linux dev headers
+        uses: ./.github/actions/install-linux-build-deps
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure and install a traced SDK
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-sdk \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_TRACING=ON \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DCMAKE_INSTALL_PREFIX="$PWD/stage"
+          cmake --build build-sdk -j"$(nproc)"
+          cmake --install build-sdk
+
+      - name: Installed artifacts really carry Perfetto
+        # Every assertion is paired with a control on the same instrument that
+        # must be non-zero, because a grep aimed at a missing file returns 0
+        # and reads exactly like "the thing is absent".
+        run: |
+          set -euo pipefail
+          test -f stage/lib/libpulp-perfetto.a
+          test -f stage/lib/libpulp-runtime.a
+
+          sentinel=$(LC_ALL=C grep -c -a "PULP_TRACING_COMPILED_IN__DO_NOT_SHIP" \
+            stage/lib/libpulp-runtime.a || true)
+          control=$(LC_ALL=C grep -c -a "_ZN4pulp7runtime" \
+            stage/lib/libpulp-runtime.a || true)
+          echo "runtime archive: sentinel=$sentinel control=$control"
+          test "$control" -gt 0   # the archive is readable and holds pulp symbols
+          test "$sentinel" -gt 0  # ... and tracing was compiled into it
+
+          targets=stage/lib/cmake/Pulp/PulpTargets.cmake
+          tracing=$(grep -c "Pulp::tracing" "$targets" || true)
+          runtime=$(grep -c "Pulp::runtime" "$targets" || true)
+          echo "exported targets: tracing=$tracing runtime=$runtime"
+          test "$runtime" -gt 0   # the export file exists and names real targets
+          test "$tracing" -gt 0   # ... and declares the tracing interface
+
+      - name: A consumer build sees PULP_HAS_TRACING
+        run: |
+          set -euo pipefail
+          mkdir -p consumer
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.24)
+          project(pulp_tracing_consumer LANGUAGES CXX)
+          find_package(Pulp REQUIRED)
+          # EXPECT_TRACING is set by the workflow, not by the package: running
+          # this project both ways proves the assertion can fail, so a pass in
+          # the positive case is evidence rather than an assertion that never
+          # fires.
+          if(NOT DEFINED EXPECT_TRACING)
+              message(FATAL_ERROR "EXPECT_TRACING must be set by the caller")
+          endif()
+          if(EXPECT_TRACING AND NOT PULP_HAS_TRACING)
+              message(FATAL_ERROR "installed SDK does not advertise tracing")
+          endif()
+          if(NOT EXPECT_TRACING AND PULP_HAS_TRACING)
+              message(FATAL_ERROR "installed SDK unexpectedly advertises tracing")
+          endif()
+          CMAKE
+
+          cmake -S consumer -B consumer/build-yes \
+            -DPulp_DIR="$PWD/stage/lib/cmake/Pulp" -DEXPECT_TRACING=ON
+
+          # Negative control: the same project, same package, opposite
+          # expectation must FAIL. If this configure succeeded, the check above
+          # is inert and its pass would mean nothing.
+          if cmake -S consumer -B consumer/build-no \
+               -DPulp_DIR="$PWD/stage/lib/cmake/Pulp" -DEXPECT_TRACING=OFF; then
+            echo "negative control passed when it must fail: PULP_HAS_TRACING is not being read"
+            exit 1
+          fi
+          echo "negative control failed as required"
+
+      - name: Summarize
+        if: always()
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## Installed traced SDK advertises tracing to a consumer
+
+          Installed a `-DPULP_TRACING=ON` SDK, then checked the installed
+          artifacts rather than the directory name: `libpulp-perfetto.a` exists,
+          `libpulp-runtime.a` contains the tracing ship sentinel, and the
+          exported package declares `Pulp::tracing`. A scratch
+          `find_package(Pulp)` consumer then confirmed `PULP_HAS_TRACING`, with
+          a negative control proving that assertion can fail.
+
+          Every check is paired with a control that must be non-zero, so an
+          absence cannot be mistaken for a clean result.
+
+          Advisory, GitHub-hosted Linux. Does not gate merge.
+          EOF

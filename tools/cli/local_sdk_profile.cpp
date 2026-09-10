@@ -1,8 +1,9 @@
-// local_sdk_profile.cpp — pure policy and validation for forge-dev SDK installs.
+// local_sdk_profile.cpp — pure policy and validation for local dev SDK installs.
 
 #include "local_sdk_profile.hpp"
 
 #include "json_writer.hpp"
+#include "ship_tracing_guard.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -44,10 +45,21 @@ bool cache_true(const std::map<std::string, std::string>& cache, const std::stri
     return value == "ON" || value == "TRUE" || value == "1";
 }
 
+const char* profile_name_for(const Identity& i) {
+    return i.tracing ? kTraceProfileName : kForgeProfileName;
+}
+
+int profile_revision_for(const Identity& i) {
+    return i.tracing ? kTraceProfileRevision : kForgeProfileRevision;
+}
+
 std::string normalized_identity(const Identity& i) {
     std::ostringstream out;
-    out << "profile=forge-dev\n"
-        << "revision=" << kForgeProfileRevision << "\n"
+    // The forge-dev serialization is unchanged byte-for-byte so existing
+    // forge-dev prefixes keep their fingerprint and are not invalidated by the
+    // arrival of a second profile.
+    out << "profile=" << profile_name_for(i) << "\n"
+        << "revision=" << profile_revision_for(i) << "\n"
         << "sdk_version=" << i.sdk_version << "\n"
         << "source_git_sha=" << i.source_git_sha << "\n"
         << "platform=" << i.platform << "\n"
@@ -122,7 +134,7 @@ bool operator==(const Identity& lhs, const Identity& rhs) {
            lhs.macos_sdk == rhs.macos_sdk &&
            lhs.deployment_target == rhs.deployment_target &&
            lhs.skia_identity == rhs.skia_identity && lhs.vst3_git_sha == rhs.vst3_git_sha &&
-           lhs.ausdk_git_sha == rhs.ausdk_git_sha;
+           lhs.ausdk_git_sha == rhs.ausdk_git_sha && lhs.tracing == rhs.tracing;
 }
 
 InstallRequest parse_install_arguments(const std::vector<std::string>& args,
@@ -154,7 +166,8 @@ InstallRequest parse_install_arguments(const std::vector<std::string>& args,
             return out;
         }
     }
-    if (!out.profile.empty() && out.profile != kForgeProfileName) {
+    if (!out.profile.empty() && out.profile != kForgeProfileName &&
+        out.profile != kTraceProfileName) {
         out.error = "unknown local SDK profile: " + out.profile;
         return out;
     }
@@ -162,13 +175,16 @@ InstallRequest parse_install_arguments(const std::vector<std::string>& args,
         out.error = "--profile and --print-path require --local";
         return out;
     }
-    if (out.print_path && out.profile != kForgeProfileName) {
-        out.error = "--print-path requires --profile forge-dev";
+    if (out.print_path && out.profile != kForgeProfileName &&
+        out.profile != kTraceProfileName) {
+        out.error = std::string("--print-path requires --profile ") + kForgeProfileName + " or --profile " +
+                    kTraceProfileName;
         return out;
     }
-    if (out.version_explicit && out.profile == kForgeProfileName) {
-        out.error = "--version cannot be combined with --profile forge-dev; "
-                    "the version comes from the selected checkout";
+    if (out.version_explicit &&
+        (out.profile == kForgeProfileName || out.profile == kTraceProfileName)) {
+        out.error = "--version cannot be combined with --profile " + out.profile +
+                    "; the version comes from the selected checkout";
         return out;
     }
     out.ok = true;
@@ -196,9 +212,13 @@ std::string input_fingerprint(const Identity& identity) {
 Paths profile_paths(const fs::path& pulp_home, const Identity& identity) {
     Paths out;
     out.input_fingerprint = input_fingerprint(identity);
-    out.install_prefix = pulp_home / "sdk-dev" / "forge-v1" / identity.platform /
+    // A traced SDK lives under its own root. It is never reachable by walking
+    // the release or forge-dev trees, so nothing can pick it up by accident,
+    // and it can never overwrite a prefix that carries release provenance.
+    const std::string root = identity.tracing ? "trace-v1" : "forge-v1";
+    out.install_prefix = pulp_home / "sdk-dev" / root / identity.platform /
                          identity.source_git_sha / out.input_fingerprint;
-    out.build_dir = pulp_home / "sdk-build-dev" / "forge-v1" / identity.platform /
+    out.build_dir = pulp_home / "sdk-build-dev" / root / identity.platform /
                     identity.source_git_sha / out.input_fingerprint;
     return out;
 }
@@ -227,6 +247,13 @@ std::vector<std::string> configure_arguments(const fs::path& source, const fs::p
             "-DPULP_ENABLE_INSPECTOR=OFF",
             "-DPULP_BUILD_TESTS=OFF",
             "-DPULP_BUILD_EXAMPLES=OFF"};
+    if (identity.tracing) {
+        // Deliberately the SAME feature set as forge-dev, plus Perfetto. A
+        // traced SDK built with GPU or design-import off would produce traces
+        // whose render, gpu and layout categories are empty — a profile of a
+        // program the developer does not actually run.
+        args.push_back("-DPULP_TRACING=ON");
+    }
     if (node_runtime)
         args.push_back("-DPULP_NODE_RUNTIME_EXECUTABLE=" + node_runtime->string());
     return args;
@@ -276,6 +303,37 @@ Validation validate_staged_install(const fs::path& prefix, const fs::path& build
             "audio probes must stay disabled in the SDK", out);
     require(!cache_true(cache, "PULP_ENABLE_INSPECTOR"),
             "the in-plugin inspector must stay disabled in the SDK", out);
+
+    // Tracing is checked in BOTH directions, and that symmetry is the point.
+    //
+    // For a traced profile: three independent pieces of evidence must all hold
+    // before the prefix is published. A directory name is not evidence — a
+    // prefix promising tracing while containing no Perfetto is precisely the
+    // failure mode this guard exists to eliminate, and it has happened.
+    //
+    // For every other profile: PULP_TRACING must be OFF, so a dev SDK can never
+    // silently acquire an unshippable Perfetto ring. This branch is also what
+    // gives the traced checks teeth: run them against a release-shaped build
+    // and they must fail, which is asserted as a negative control in the tests.
+    if (expected.tracing) {
+        require(cache_true(cache, "PULP_TRACING"),
+                "PULP_TRACING was not enabled, so this SDK cannot trace", out);
+        // The runtime emits a retained sentinel byte-string under PULP_TRACING=ON
+        // (core/runtime/src/trace.cpp). Scanning the installed archive for it
+        // proves the flag reached the compiler, not merely the CMake cache.
+        require(pulp::cli::file_has_tracing_sentinel(prefix / "lib" / "libpulp-runtime.a"),
+                "the installed runtime archive carries no tracing sentinel, so "
+                "Perfetto was not compiled in", out);
+        // And that the exported package hands the tracing target to consumers;
+        // without it a project compiling against this SDK fails to link.
+        const auto targets = read_file(prefix / "lib" / "cmake" / "Pulp" / "PulpTargets.cmake");
+        require(targets.find("Pulp::tracing") != std::string::npos,
+                "the exported CMake package does not declare Pulp::tracing", out);
+    } else {
+        require(!cache_true(cache, "PULP_TRACING"),
+                "tracing must stay disabled outside the trace profile", out);
+    }
+
     out.ok = out.errors.empty();
     return out;
 }
@@ -295,8 +353,11 @@ std::string serialize_provenance(const Identity& i, const std::string& fingerpri
     out << "{\n"
         << "  \"schema\": " << json_string(kProvenanceSchema) << ",\n"
         << "  \"kind\": \"development\",\n"
-        << "  \"profile\": " << json_string(kForgeProfileName) << ",\n"
-        << "  \"profile_revision\": " << kForgeProfileRevision << ",\n"
+        << "  \"profile\": " << json_string(profile_name_for(i)) << ",\n"
+        << "  \"profile_revision\": " << profile_revision_for(i) << ",\n"
+        // Always false, for both profiles. PulpSdkProvenance.cmake fails closed
+        // on a development SDK that claims eligibility, and a traced SDK must
+        // never be distributable under any circumstances.
         << "  \"distribution_eligible\": false,\n"
         << "  \"sdk_version\": " << json_string(i.sdk_version) << ",\n"
         << "  \"source_git_sha\": " << json_string(i.source_git_sha) << ",\n"
@@ -309,8 +370,16 @@ std::string serialize_provenance(const Identity& i, const std::string& fingerpri
         << "  \"compiler\": " << json_string(i.compiler) << ",\n"
         << "  \"macos_sdk\": " << json_string(i.macos_sdk) << ",\n"
         << "  \"deployment_target\": " << json_string(i.deployment_target) << ",\n"
-        << "  \"features\": {\"gpu\": true, \"design_import\": true, \"webview\": true, "
-           "\"audio_probes\": false, \"inspector\": false},\n"
+        // The forge-dev feature object is emitted byte-for-byte as before, so
+        // existing forge-dev prefixes still validate and are not forced to
+        // rebuild by the arrival of the trace profile. The traced variant adds
+        // the one key that distinguishes it.
+        << (i.tracing
+                ? "  \"features\": {\"gpu\": true, \"design_import\": true, "
+                  "\"webview\": true, \"audio_probes\": false, \"inspector\": false, "
+                  "\"tracing\": true},\n"
+                : "  \"features\": {\"gpu\": true, \"design_import\": true, "
+                  "\"webview\": true, \"audio_probes\": false, \"inspector\": false},\n")
         << "  \"formats\": {\"AU\": true, \"VST3\": true, \"CLAP\": true, "
            "\"Standalone\": true},\n"
         << "  \"dependencies\": {\"skia\": " << json_string(i.skia_identity)

@@ -7707,3 +7707,170 @@ TEST_CASE("the first geometry read lays out rather than returning 0x0",
     CHECK(w > 0.0);
     CHECK(h > 0.0);
 }
+
+// ── Script-driven trace spans ───────────────────────────────────────────────
+// A C++ scope span is balanced by lifetime; a script-driven one is balanced
+// only by the script's control flow. These cover the two ways that goes wrong
+// (more opens than closes, more closes than opens) and the depth cap, in a
+// build where the Perfetto macros compile to nothing — the balance bookkeeping
+// is deliberately independent of them so it is testable on the default gate.
+TEST_CASE("script trace spans nest and unwind", "[widget-bridge][trace]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    auto depth = [&engine] {
+        return engine.evaluate("__traceStats__().depth").getWithDefault<double>(-1.0);
+    };
+
+    REQUIRE(depth() == Catch::Approx(0.0));
+    CHECK(engine.evaluate("pulpTrace.begin('outer')").getWithDefault<bool>(false));
+    CHECK(engine.evaluate("pulpTrace.begin('inner')").getWithDefault<bool>(false));
+    CHECK(depth() == Catch::Approx(2.0));
+    CHECK(engine.evaluate("pulpTrace.end()").getWithDefault<bool>(false));
+    CHECK(engine.evaluate("pulpTrace.end()").getWithDefault<bool>(false));
+    CHECK(depth() == Catch::Approx(0.0));
+
+    // scope() closes its span even when the body throws.
+    engine.evaluate(
+        "try { pulpTrace.scope('boom', function() { throw new Error('x'); }); }"
+        "catch (e) {}");
+    CHECK(depth() == Catch::Approx(0.0));
+}
+
+TEST_CASE("closing more spans than were opened is counted, not swallowed",
+          "[widget-bridge][trace]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    const auto before =
+        engine.evaluate("__traceStats__().unmatchedEnd").getWithDefault<double>(-1.0);
+    CHECK_FALSE(engine.evaluate("pulpTrace.end()").getWithDefault<bool>(true));
+    CHECK(engine.evaluate("__traceStats__().unmatchedEnd").getWithDefault<double>(-1.0)
+          == Catch::Approx(before + 1.0));
+    // A refused close must not push the depth negative.
+    CHECK(engine.evaluate("__traceStats__().depth").getWithDefault<double>(-1.0)
+          == Catch::Approx(0.0));
+}
+
+TEST_CASE("the span depth cap refuses instead of growing without bound",
+          "[widget-bridge][trace]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    engine.evaluate(
+        "var refusals = 0;"
+        "for (var i = 0; i < 200; ++i) { if (!pulpTrace.begin('deep' + i)) refusals += 1; }");
+    CHECK(engine.evaluate("__traceStats__().depth").getWithDefault<double>(-1.0)
+          == Catch::Approx(64.0));
+    CHECK(engine.evaluate("refusals").getWithDefault<double>(-1.0)
+          == Catch::Approx(136.0));
+    engine.evaluate("for (var i = 0; i < 64; ++i) pulpTrace.end();");
+    CHECK(engine.evaluate("__traceStats__().depth").getWithDefault<double>(-1.0)
+          == Catch::Approx(0.0));
+}
+
+TEST_CASE("a handler that leaves a span open is force-closed observably",
+          "[widget-bridge][trace]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createToggleButton('btn', '');
+        on('btn', 'click', function() {
+            pulpTrace.begin('leaked_a');
+            pulpTrace.begin('leaked_b');
+        });
+    )");
+    auto* button = bridge.widget("btn");
+    REQUIRE(button != nullptr);
+    REQUIRE(static_cast<bool>(button->on_click));
+    button->set_bounds({0, 0, 400, 300});
+
+    const auto before =
+        engine.evaluate("__traceStats__().forceClosed").getWithDefault<double>(-1.0);
+    root.simulate_click({50, 60});
+
+    // The handler returned with two spans open. Every later slice would have
+    // nested under them, so the boundary closes them and says how many.
+    CHECK(engine.evaluate("__traceStats__().depth").getWithDefault<double>(-1.0)
+          == Catch::Approx(0.0));
+    CHECK(engine.evaluate("__traceStats__().forceClosed").getWithDefault<double>(-1.0)
+          == Catch::Approx(before + 2.0));
+}
+
+// ── Position writes must reach the next geometry read ───────────────────────
+// Geometry readers lay out only when the tree's layout generation moved. The
+// CSS position offsets feed the Yoga pass, so a write that changes one has to
+// move that generation or the next read answers from the pre-move box.
+TEST_CASE("setLeft/setTop are visible to the next geometry read", "[widget-bridge][layout]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createCol('outer','');"
+                       "setFlex('outer','width',300);"
+                       "setFlex('outer','height',300);"
+                       "createCol('inner','outer');"
+                       "setFlex('inner','width',50);"
+                       "setFlex('inner','height',50);"
+                       "layout();");
+
+    // The read that establishes a completed layout, so the next one is the
+    // one the generation guard could wrongly elide.
+    const auto x0 = engine.evaluate("getLayoutRect('inner').x").getWithDefault<double>(-1.0);
+    REQUIRE(x0 == Catch::Approx(0.0));
+
+    engine.evaluate("setPosition('inner','absolute');"
+                    "setLeft('inner',120);"
+                    "setTop('inner',60);");
+
+    // No explicit layout() call: the read itself must observe the move.
+    CHECK(engine.evaluate("getLayoutRect('inner').x").getWithDefault<double>(-1.0)
+          == Catch::Approx(120.0));
+    CHECK(engine.evaluate("getLayoutRect('inner').y").getWithDefault<double>(-1.0)
+          == Catch::Approx(60.0));
+}
+
+TEST_CASE("re-writing the same position does not force a layout", "[widget-bridge][layout]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createCol('outer','');"
+                       "setFlex('outer','width',300);"
+                       "setFlex('outer','height',300);"
+                       "createCol('inner','outer');"
+                       "setFlex('inner','width',50);"
+                       "setFlex('inner','height',50);"
+                       "setPosition('inner','absolute');"
+                       "setLeft('inner',120);"
+                       "setTop('inner',60);"
+                       "layout();");
+    engine.evaluate("getLayoutRect('inner').x");
+
+    // The design-import replay re-applies captured position metadata on every
+    // commit. Identical values must stay free, or each re-applied binding
+    // costs a whole-tree pass.
+    const auto before = View::layout_pass_count();
+    for (int i = 0; i < 40; ++i) {
+        engine.evaluate("setPosition('inner','absolute');"
+                        "setLeft('inner',120);"
+                        "setTop('inner',60);");
+        engine.evaluate("getLayoutRect('inner').x");
+    }
+    CHECK(View::layout_pass_count() - before == 0);
+}

@@ -2,6 +2,7 @@
 
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
+#include "js_trace_scopes.hpp"
 
 #include <pulp/view/motion.hpp>
 
@@ -264,6 +265,46 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
         self.engine_.evaluate(batch + "void 0;");
         return choc::value::Value();
     });
+
+    // Script-driven trace spans. A pointer handler is one opaque block in a
+    // capture: the dispatch boundary can time `dom_event_evaluate` but cannot
+    // see inside it. These name what is inside. The pair is balanced by the
+    // script, so safe_dispatch_eval force-closes whatever the handler leaves
+    // open and reports it rather than silently re-parenting later slices.
+    register_bridge_function(api, "__traceBegin__", [](choc::javascript::ArgumentList args) {
+        return choc::value::createBool(js_trace::begin(args.get<std::string>(0, "js_scope")));
+    });
+
+    register_bridge_function(api, "__traceEnd__", [](choc::javascript::ArgumentList) {
+        return choc::value::createBool(js_trace::end());
+    });
+
+    // Balance bookkeeping, readable from script and from a test. Kept in one
+    // native so the four counters are always read from the same instant.
+    register_bridge_function(api, "__traceStats__", [](choc::javascript::ArgumentList) {
+        return choc::value::createObject("PulpTraceStats",
+            "depth", static_cast<int64_t>(js_trace::open_depth()),
+            "forceClosed", static_cast<int64_t>(js_trace::force_closed_count()),
+            "unmatchedEnd", static_cast<int64_t>(js_trace::unmatched_end_count()),
+            "refused", static_cast<int64_t>(js_trace::refused_count()));
+    });
+
+    // Install the JS-side `pulpTrace` global wrapping the natives.
+    // Idempotent - re-evaluating the same definition is a no-op.
+    self.engine_.evaluate(
+        "if (typeof globalThis.pulpTrace === 'undefined') {"
+        "  globalThis.pulpTrace = {"
+        "    begin: function(name) { return __traceBegin__(String(name)); },"
+        "    end: function() { return __traceEnd__(); },"
+        "    scope: function(name, fn) {"
+        "      var opened = __traceBegin__(String(name));"
+        "      try { return fn(); } finally { if (opened) __traceEnd__(); }"
+        "    },"
+        "    stats: function() { return __traceStats__(); },"
+        "  };"
+        "}"
+        "void 0;"
+    );
 
     // performance.now() - high-resolution monotonic time in milliseconds.
     register_bridge_function(api, "__performanceNow__", [](choc::javascript::ArgumentList) {

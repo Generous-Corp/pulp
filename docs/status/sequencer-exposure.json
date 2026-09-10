@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "ledger_id": "dev.pulp.sequencer-exposure@1",
+  "schema_version": 2,
+  "ledger_id": "dev.pulp.sequencer-exposure@2",
   "audit": {
     "status": "in_progress",
     "scope": "Protected-merged modern sequencer, timeline, playback, and sequencer-adjacent platform slices on current main.",
@@ -82,7 +82,13 @@
                 "using SequencerStateChannel"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -146,7 +152,13 @@
                 "class MidiContent"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "exposed",
@@ -167,7 +179,20 @@
                 "ProjectSource::file"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
         },
         "offline_timeline_mcp": {
           "disposition": "exposed",
@@ -189,7 +214,20 @@
                 "kTimelineCommandApplyToolName"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
         },
         "live_product_control": {
           "disposition": "gap",
@@ -244,7 +282,13 @@
                 "struct TuningReference"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "gap",
@@ -318,7 +362,13 @@
                 "struct MacroControl"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "gap",
@@ -390,7 +440,13 @@
                 "kAgentViewVersion"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "gap",
@@ -461,7 +517,13 @@
                 "using Bits = std::uint16_t"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -529,7 +591,13 @@
                 "struct DevicePlacement"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "exposed",
@@ -551,7 +619,20 @@
                 "ProjectSource::file"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
         },
         "offline_timeline_mcp": {
           "disposition": "exposed",
@@ -573,7 +654,20 @@
                 "kTimelineCommandApplyToolName"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
         },
         "live_product_control": {
           "disposition": "gap",
@@ -631,7 +725,13 @@
                 "load_builtin_plugin"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -805,7 +905,13 @@
                 "with_dynamics_lane"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "gap",
@@ -876,7 +982,13 @@
                 "render_timeline_offline"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "gap",
@@ -997,7 +1109,13 @@
                 "BufferedContentSourceConfig"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -1194,7 +1312,13 @@
                 "struct RemoveNotes"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "exposed",
@@ -1217,7 +1341,20 @@
                 "ProjectSource::file"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
         },
         "offline_timeline_mcp": {
           "disposition": "exposed",
@@ -1241,7 +1378,20 @@
                 "kTimelineCommandApplyToolName"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
         },
         "live_product_control": {
           "disposition": "gap",
@@ -1317,7 +1467,13 @@
                 "class AutomationCursor"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -1386,7 +1542,13 @@
                 "visited_candidate_count()"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -1457,7 +1619,13 @@
                 "GesturePhase phase"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -1528,7 +1696,13 @@
                 "set_track_edit_host"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -1598,7 +1772,13 @@
                 "with_loop_enabled"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -1671,7 +1851,13 @@
                 "commit_take"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -1807,7 +1993,13 @@
                 "register_writer(WriterCapabilityMask mask)"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "gap",
@@ -1980,7 +2172,13 @@
                 "std::optional<StepPlayerCoordinate> upcoming_coordinate(std::size_t lane) const noexcept {"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2005,7 +2203,13 @@
                 "midi.linear-step-player"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "descriptor",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         }
       }
     },
@@ -2048,7 +2252,13 @@
                 "void set_lfo_wave(pulp::signal::Lfo::Wave wave) noexcept {"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2073,7 +2283,13 @@
                 "audio.voice-modulation-sources"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "descriptor",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         }
       }
     },
@@ -2152,7 +2368,13 @@
                 "pulp::foundation"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2206,7 +2428,13 @@
                 "inline FirEquirippleResult design_fir_equiripple("
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2231,7 +2459,13 @@
                 "signal.fir-equiripple-design"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "descriptor",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         }
       }
     },
@@ -2270,7 +2504,13 @@
                 "gpu-health-run-attestation-v1.schema.json"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2361,7 +2601,13 @@
                 "pulp-authoring-capsule"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2438,7 +2684,13 @@
                 "class NoteRepeat {"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2468,7 +2720,13 @@
                 "midi.note-delay"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "descriptor",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         }
       }
     },
@@ -2504,7 +2762,13 @@
                 "[[nodiscard]] bool set_layout_rt(const Layout& layout) noexcept"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2530,7 +2794,13 @@
                 "set_layout_rt"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "descriptor",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         }
       }
     },
@@ -2610,7 +2880,13 @@
                 "pulp-test-standalone-key-sequence"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2684,7 +2960,13 @@
                 "core/view/platform/mac/window_host_mac_open_documents.mm"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -2796,7 +3078,13 @@
                 "bool chased"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "gap",
@@ -3068,7 +3356,13 @@
                 "a shift is applied per transport range, and refuses to read past a loop end"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "gap",
@@ -3159,7 +3453,13 @@
                 "proposal_writer_profile"
               ]
             }
-          ]
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_cli": {
           "disposition": "exposed",
@@ -3181,7 +3481,20 @@
               "path": "tools/cli/cmd_seq.cpp"
             }
           ],
-          "rationale": "The CLI admits a document writer under the quota-bounded editor authority by default; a caller selects the narrower proposal authority, or the unquotaed trusted one, by name with --writer-profile, and an unrecognized name is refused rather than silently downgraded. A caller discovers the vocabulary machine-readably by running seq capabilities, which emits every selectable profile and its quotas as JSON. The definition is cited at the header rather than at core/timeline/schema/timeline_cli_verbs.json because that generated manifest enumerates document and command types, not the authority selector that qualifies them; the emitter models per-verb payload fields only, so the selector has no representation there by construction."
+          "rationale": "The CLI admits a document writer under the quota-bounded editor authority by default; a caller selects the narrower proposal authority, or the unquotaed trusted one, by name with --writer-profile, and an unrecognized name is refused rather than silently downgraded. A caller discovers the vocabulary machine-readably by running seq capabilities, which emits every selectable profile and its quotas as JSON. The definition is cited at the header rather than at core/timeline/schema/timeline_cli_verbs.json because that generated manifest enumerates document and command types, not the authority selector that qualifies them; the emitter models per-verb payload fields only, so the selector has no representation there by construction.",
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
         },
         "offline_timeline_mcp": {
           "disposition": "exposed",
@@ -3203,7 +3516,20 @@
               "path": "tools/mcp/mcp_timeline_tools.cpp"
             }
           ],
-          "rationale": "The MCP boundary admits a document writer under the non-destructive proposal authority when no selection is present; a caller escapes it in the same slice by passing the writer_profile argument as editor or trusted, and an unrecognized name is refused rather than silently downgraded. The argument is declared in the published tool inputSchema for both pulp_timeline_project_open and pulp_timeline_command_apply, so an MCP client discovers it without reading source."
+          "rationale": "The MCP boundary admits a document writer under the non-destructive proposal authority when no selection is present; a caller escapes it in the same slice by passing the writer_profile argument as editor or trusted, and an unrecognized name is refused rather than silently downgraded. The argument is declared in the published tool inputSchema for both pulp_timeline_project_open and pulp_timeline_command_apply, so an MCP client discovers it without reading source.",
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
         },
         "live_product_control": {
           "disposition": "not_applicable",
@@ -3277,7 +3603,20 @@
               ]
             }
           ],
-          "rationale": "pulp_timeline_command_apply takes both controls as optional arguments declared in the published inputSchema, so an MCP client discovers them without reading source. idempotency_key names a write: a retry under the same token re-submits the identities the first attempt allocated, so a still-cached result returns verbatim and one that has aged out is refused as already_applied_result_expired rather than applied twice. The recorded request bytes are compared here because DocumentSession compares command identities but not payloads, so a token reused for different commands is refused as a collision instead of being answered with the earlier result. expected_revision is forwarded as the transaction precondition, so an interleaved write is reported as stale_revision. Both are session state and are refused, not ignored, on the stateless path."
+          "rationale": "pulp_timeline_command_apply takes both controls as optional arguments declared in the published inputSchema, so an MCP client discovers them without reading source. idempotency_key names a write: a retry under the same token re-submits the identities the first attempt allocated, so a still-cached result returns verbatim and one that has aged out is refused as already_applied_result_expired rather than applied twice. The recorded request bytes are compared here because DocumentSession compares command identities but not payloads, so a token reused for different commands is refused as a collision instead of being answered with the earlier result. expected_revision is forwarded as the transaction precondition, so an interleaved write is reported as stale_revision. Both are session state and are refused, not ignored, on the stateless path.",
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
         },
         "live_product_control": {
           "disposition": "not_applicable",
@@ -3358,7 +3697,13 @@
               ]
             }
           ],
-          "rationale": "pulp seq view outline, region and diff project AgentView over a project path without a session, which is the only shape a one-shot CLI can offer. A region read is a bounded window: it requires --sequence, --start and --end, takes an optional --limit and --after cursor, and selects the timebase with --absolute, so paging is the caller's own vocabulary rather than a whole-sequence dump. A malformed window is refused as a usage error with exit code 2 rather than rounded into a window the projection would answer. view diff applies its commands to an in-memory copy and leaves the project byte-for-byte as it found it, and it carries the same authority selection apply does, so --writer-profile proposal is refused a removal by name instead of reporting a change it would not admit."
+          "rationale": "pulp seq view outline, region and diff project AgentView over a project path without a session, which is the only shape a one-shot CLI can offer. A region read is a bounded window: it requires --sequence, --start and --end, takes an optional --limit and --after cursor, and selects the timebase with --absolute, so paging is the caller's own vocabulary rather than a whole-sequence dump. A malformed window is refused as a usage error with exit code 2 rather than rounded into a window the projection would answer. view diff applies its commands to an in-memory copy and leaves the project byte-for-byte as it found it, and it carries the same authority selection apply does, so --writer-profile proposal is refused a removal by name instead of reporting a change it would not admit.",
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_mcp": {
           "disposition": "exposed",
@@ -3390,7 +3735,13 @@
               ]
             }
           ],
-          "rationale": "pulp_timeline_view_outline, _view_region and _view_diff read a live session by session_id, which is the session-oriented input every other MCP timeline tool takes and the correct live read for a design-time caller. Their descriptors are published in tools/list, so a client discovers the tools and their window arguments without reading source. The three tools are declared as a hand-written fragment alongside the generated catalog rather than inside it, because that catalog is capped at exactly ten tools by a CMake FATAL_ERROR and a matching static_assert; control_mcp_tools_json_fragment is the existing precedent for publishing beside it. Because the descriptors are hand-written their well-formedness is asserted rather than assumed, and the catalog is read back as parsed JSON so the assertion measures the tool's presence and not the renderer's whitespace. Both boundaries call one encoder, so the CLI and MCP payloads are identical by construction rather than by review, and every payload carries the version the AgentView value itself reports so a consumer can pin the shape."
+          "rationale": "pulp_timeline_view_outline, _view_region and _view_diff read a live session by session_id, which is the session-oriented input every other MCP timeline tool takes and the correct live read for a design-time caller. Their descriptors are published in tools/list, so a client discovers the tools and their window arguments without reading source. The three tools are declared as a hand-written fragment alongside the generated catalog rather than inside it, because that catalog is capped at exactly ten tools by a CMake FATAL_ERROR and a matching static_assert; control_mcp_tools_json_fragment is the existing precedent for publishing beside it. Because the descriptors are hand-written their well-formedness is asserted rather than assumed, and the catalog is read back as parsed JSON so the assertion measures the tool's presence and not the renderer's whitespace. Both boundaries call one encoder, so the CLI and MCP payloads are identical by construction rather than by review, and every payload carries the version the AgentView value itself reports so a consumer can pin the shape.",
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "live_product_control": {
           "disposition": "gap",
@@ -3473,7 +3824,13 @@
               ]
             }
           ],
-          "rationale": "pulp seq validate previously loaded a project, confirmed the registry schema accepted it, and returned ok true unconditionally, so a document the program compiler refuses to lower validated clean. It now compiles the project, which is what validating it means, reports each refusal in the diagnostics array the result has always promised, and exits non-zero when it emits one, because a validator that reports a refusal and then claims success has validated nothing. A refusal names itself with the stable PascalCase enumerator name and names the item it refused as a quoted decimal id, or null where the refusal names no single item; the numeric code_id beside it is a debugging aid that carries no contract, because the refusal vocabulary is appended to. The mapper switch deliberately carries no default, so appending an enumerator is a -Wswitch diagnostic at that switch rather than a silently wrong wire name reaching a caller. Failing to open a project at all stays a read failure that reports its stage rather than an empty diagnostic list, so an unreadable file cannot be read as a project with nothing wrong with it. This closes the CLI gap nested-sequence-gain-composition records, where an author could compose a child fader over a note leaf and discover the refusal only at compile time. That released row's own dispositions are frozen at its merge, so the closure is recorded here rather than by editing it."
+          "rationale": "pulp seq validate previously loaded a project, confirmed the registry schema accepted it, and returned ok true unconditionally, so a document the program compiler refuses to lower validated clean. It now compiles the project, which is what validating it means, reports each refusal in the diagnostics array the result has always promised, and exits non-zero when it emits one, because a validator that reports a refusal and then claims success has validated nothing. A refusal names itself with the stable PascalCase enumerator name and names the item it refused as a quoted decimal id, or null where the refusal names no single item; the numeric code_id beside it is a debugging aid that carries no contract, because the refusal vocabulary is appended to. The mapper switch deliberately carries no default, so appending an enumerator is a -Wswitch diagnostic at that switch rather than a silently wrong wire name reaching a caller. Failing to open a project at all stays a read failure that reports its stage rather than an empty diagnostic list, so an unreadable file cannot be read as a project with nothing wrong with it. This closes the CLI gap nested-sequence-gain-composition records, where an author could compose a child fader over a note leaf and discover the refusal only at compile time. That released row's own dispositions are frozen at its merge, so the closure is recorded here rather than by editing it.",
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "offline_timeline_mcp": {
           "disposition": "exposed",
@@ -3510,7 +3867,13 @@
               ]
             }
           ],
-          "rationale": "pulp_timeline_validate is one of the ten generated timeline tools and already routed through the shared pulp::tools::timeline::validate entry point, and timeline_result already marks a non-zero result isError, so the projection reaches MCP with no MCP code change and the two boundaries emit the same payload by construction rather than by review. Inheriting it was an inference from reading a call rather than something any test observed, and the MCP surface is the one Forge consumes, so the refusal is now asserted directly over MCP: the tool names the refusal, names the leaf, and returns an error result rather than a quiet success. This closes the MCP gap nested-sequence-gain-composition records, whose dispositions are frozen at that row's merge and are therefore closed by this row rather than by an edit to it."
+          "rationale": "pulp_timeline_validate is one of the ten generated timeline tools and already routed through the shared pulp::tools::timeline::validate entry point, and timeline_result already marks a non-zero result isError, so the projection reaches MCP with no MCP code change and the two boundaries emit the same payload by construction rather than by review. Inheriting it was an inference from reading a call rather than something any test observed, and the MCP surface is the one Forge consumes, so the refusal is now asserted directly over MCP: the tool names the refusal, names the leaf, and returns an error result rather than a quiet success. This closes the MCP gap nested-sequence-gain-composition records, whose dispositions are frozen at that row's merge and are therefore closed by this row rather than by an edit to it.",
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
         },
         "live_product_control": {
           "disposition": "gap",
@@ -3581,6 +3944,414 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "The gate describes no authoring capability an agent manifest could carry; it only decides which refusals owe a written owner and reason."
+        }
+      }
+    },
+    {
+      "id": "trace-cli-reachability",
+      "title": "Perfetto tracing reachable from the CLI without hand-editing a CMake cache",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "trace-cli-reachability-20260909",
+      "owned_paths": [
+        "docs/status/cli-commands.yaml",
+        "docs/reference/cli.md"
+      ],
+      "evidence": [
+        {
+          "path": "docs/status/cli-commands.yaml",
+          "needles": [
+            "--allow-tracing",
+            "-DPULP_TRACING=ON",
+            "--profile trace create immutable"
+          ]
+        },
+        {
+          "path": "docs/reference/cli.md",
+          "needles": [
+            "pulp build --trace",
+            "#### `--profile trace`",
+            "PULP_HAS_TRACING"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "This row adds no sequencer or timeline type, target, or contract to the installed SDK. It adds a build-configuration capability to the exported package (a Pulp::tracing interface target and the PULP_HAS_TRACING variable a consumer reads instead of trusting a prefix name), which is orthogonal to sequencer exposure: the timeline and playback surface of the installed SDK is byte-identical either way, and a traced SDK is marked distribution_eligible: false rather than shipped. The row is recorded here because it edits two CLI documentation paths the sequencer ledger already claims, not because it delivers a sequencer capability."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "pulp build --trace, --allow-tracing and pulp sdk install --profile trace are build and SDK-installation flags. They add no timeline command, verb, argument, or handler, and cmd_seq.cpp is untouched."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP operation, schema, or handler is added or changed; the generated timeline MCP catalog is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "A tracing-enabled build is a development artifact that pulp ship refuses, so it neither adds nor widens a sequencer live-control grant."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Tracing is a build-time configuration of the engine, not an installed design-time capability, and the sequencer capability manifest is unchanged."
+        }
+      }
+    },
+    {
+      "id": "offline-bounce-device-free-graph",
+      "title": "The offline bounce renders through the graph binding over a device-free timeline graph",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
+      "owned_paths": [
+        "core/host/include/pulp/host/timeline_offline_graph.hpp",
+        "core/host/src/timeline_offline_graph.cpp",
+        "core/host/CMakeLists.txt",
+        "tools/timeline/src/timeline_render.cpp",
+        "tools/timeline/CMakeLists.txt",
+        "test/test_timeline_offline_renderer.cpp",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/hosting/SKILL.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/host/src/timeline_offline_graph.cpp",
+          "needles": [
+            "build_device_free_timeline_graph",
+            "TimelineDeviceFreeGraphCode"
+          ]
+        },
+        {
+          "path": "tools/timeline/src/timeline_render.cpp",
+          "needles": [
+            "build_device_free_timeline_graph",
+            "binding.process"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/host/include/pulp/host/timeline_offline_graph.hpp",
+              "needles": [
+                "build_device_free_timeline_graph",
+                "TimelineDeviceFreeGraph"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "_pulp_sdk_header_subsystems",
+                "pulp-host"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "core/host/CMakeLists.txt",
+              "needles": [
+                "timeline_offline_graph.cpp",
+                "pulp-host"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_offline_renderer.cpp",
+              "needles": [
+                "the device-free builder emits one route per track at the parity shape"
+              ]
+            }
+          ],
+          "rationale": "The builder is a public header under core/host/include, compiled into pulp-host, and PulpInstallRules installs core/<subsystem>/include/pulp for the host subsystem whenever the pulp-host target exists, so cmake --install ships it on every platform that builds hosting. It was placed in core/host rather than tools/timeline specifically so it is installable: the same topology the bounce CLI now stands up is the topology Forge Sequencer and Forge Modular can build against the installed SDK, which is what unified-control reachability requires of this slice. Two honest limits. First, iOS does not build core/host at all, because App Store policy disallows dlopen of third-party plugins, so on iOS this header is absent rather than refused, and that absence is the pre-existing hosting boundary rather than anything this row introduces. Second, what is installed is the topology builder alone: it emits one device-free route per track onto an output node, and a consumer still drives it through TimelineGraphPlaybackBinding, which is installed separately.",
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "docs/status/cli-commands.yaml",
+              "needles": [
+                "Render a canonical timeline project's arrangement audio to Float32 WAV without an audio device."
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/pulp_cli.cpp",
+              "needles": [
+                "{\"render\", \"Render a timeline project to WAV\", cmd_render}",
+                "PULP_ENABLE_PROJECT_PACKAGE"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/timeline/src/timeline_render.cpp",
+              "needles": [
+                "build_device_free_timeline_graph",
+                "binding.process"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_cli_timeline.cpp",
+              "needles": [
+                "renders through the installed command surface"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_agent.cpp",
+              "needles": [
+                "WithinAbs(0.75f, 1e-7f)"
+              ]
+            }
+          ],
+          "rationale": "pulp render already reached pulp::tools::timeline::render, and that one function is where the render call was swapped, so the CLI renders through the graph binding with no CLI-side change. The evidence that this is a real re-point rather than a refactor is the agent suite's sample-exact assertions: breaking the route-emission loop in the new builder drives seven of them from 0.75 to 0.0, which is the bounce going silent. Those assertions are therefore the regression gate for this row and must never be widened to accommodate a render-path change. Only the render call was replaced: the CLI keeps its own MasterTransport and block loop, so frame counts stay frame-addressed and no tick conversion enters the path. One caveat worth stating rather than leaving to be discovered: the render verb is registered behind PULP_ENABLE_PROJECT_PACKAGE, so a build with project packaging off has no render command at all and this surface is absent there.",
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_render"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_render"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_render"
+              ]
+            }
+          ],
+          "rationale": "handle_timeline_render calls the same pulp::tools::timeline::render entry point the CLI calls, and that call site is the only one, so MCP renders through the graph binding by construction rather than by a second wiring. State the limit precisely rather than let the exposed disposition imply more than it earns: the MCP test drives the tool and asserts the returned frame count, so it observes that the tool still renders and still reports the expected length, and it would pass on silence. The assertion that the samples are right lives at the library boundary in the agent suite, and MCP inherits that by sharing the entry point, not by observing it.",
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "A bounce is an offline operation over a project on disk that writes a file and exits. Product A still has no exact-document timeline session an executor could bind a render to, so there is no live per-instance control through which this path could be driven or reported. The surface is absent rather than refused, and it is absent for the offline renderer generally rather than for the device-free graph specifically.",
+          "dependencies": [
+            "product-a-timeline-render-operation",
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "An agent can call the builder once it has the installed header, but no installed agent-capability row declares that an offline bounce stands up a device-free graph, what a device-free route omits, or that an empty route set builds and must not be prepared. An agent composing a bounce therefore cannot discover those constraints before authoring, and would have to read the header comments to learn them. Declaring the capability is the ledger-authority work that follows this slice rather than part of it.",
+          "dependencies": [
+            "design-time-playback-program-wire-capability"
+          ],
+          "owner": "agent-capability-maintainers"
+        }
+      }
+    },
+    {
+      "id": "installed-mcp-server-rpath",
+      "title": "Installed MCP server resolves its GPU dependency from the SDK prefix",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "installed-mcp-server-rpath-20260910",
+      "owned_paths": [
+        "tools/mcp/CMakeLists.txt"
+      ],
+      "evidence": [
+        {
+          "path": "tools/mcp/CMakeLists.txt",
+          "needles": [
+            "INSTALL_RPATH \"@executable_path/../lib\"",
+            "MACOSX_RPATH TRUE",
+            "libwgpu_native.dylib"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "pulp-mcp was already exported and staged by cmake --install; this row adds no sequencer or timeline type, target, header, or contract to the installed SDK. It sets an install-time RPATH property on that existing binary so the loader can find libwgpu_native.dylib, which cmake --install already places in <prefix>/lib, matching the RPATH pulp-cli and pulp-scan-worker have carried for the same reason. The exported target set and the installed timeline and playback surface are byte-identical either way."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No timeline command, verb, argument, or handler changes, and cmd_seq.cpp is untouched. pulp-cli already set this RPATH and is unaffected."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP operation, schema, or handler is added, widened, or changed, and the generated timeline MCP catalog is untouched. The reachable operation set is exactly what it was; the fix only stops the already-shipped server from aborting at launch on a missing LC_RPATH entry, which is a loader-layout defect rather than an exposure change."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The offline MCP server grants no live product control, and no grant, capability, or executor binding is added or widened here."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "An install-time link property is not an installed design-time capability, and the sequencer capability manifest is unchanged."
+        }
+      }
+    },
+    {
+      "id": "ledger-authority-descriptor",
+      "title": "Every exposed ledger surface declares the authority it admits a caller under",
+      "classification": "ci_test_only",
+      "delivery_state": "released",
+      "claim_id": "b5b973dc-5612-4b50-965b-3dc648feca56",
+      "release": {
+        "pr": 8164,
+        "accepted_head": "10e0dc3f380948425d5e602e3200358f98ce28d5",
+        "merge_sha": "87cd78b9f18cf54cad67a48a0d996569eefb8ab8",
+        "integration_mode": "merge"
+      },
+      "owned_paths": [
+        "docs/reference/capability-control.md",
+        "docs/status/sequencer-exposure.json",
+        "docs/status/sequencer-exposure.schema.json",
+        "tools/scripts/sequencer_exposure_check.py",
+        "tools/scripts/test_sequencer_exposure_check.py"
+      ],
+      "evidence": [
+        {
+          "path": "docs/status/sequencer-exposure.schema.json",
+          "needles": [
+            "\"authority\"",
+            "in_process",
+            "registered_writer",
+            "refusal_codes"
+          ]
+        },
+        {
+          "path": "tools/scripts/sequencer_exposure_check.py",
+          "needles": [
+            "_load_writer_profile_vocabulary",
+            "_validate_authority",
+            "writer_profile_by_name",
+            "conflict_code_name"
+          ]
+        },
+        {
+          "path": "tools/scripts/test_sequencer_exposure_check.py",
+          "needles": [
+            "exposed surface without an authority descriptor",
+            "control: a not_applicable surface without an authority descriptor was rejected",
+            "an unreadable authority vocabulary was skipped, not refused"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The ledger schema and its checker are repository governance artifacts. No installed header, target, or exported symbol changes, and the offline writer-profile sources this gate reads are read only — tools/timeline/include/pulp/tools/timeline/writer_profile.hpp and tools/timeline/src/writer_profile.cpp are untouched."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No timeline command, verb, argument, or handler changes. The descriptor records the profile the CLI boundary already registers its writer under; it does not select, widen, or alter that registration."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP operation, schema, or handler is added or changed, and the generated catalog is untouched. As with the CLI, the descriptor records the boundary's existing writer registration rather than changing it."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Recording what authority a surface admits a caller under is an audit fact about existing boundaries, not a grant. No capability, policy, executor binding, or broker term is added or widened."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "docs/status/agent-capabilities.json is unchanged. Manifest surfaces are classified in the ledger as descriptor admissions precisely because publishing a description admits no caller."
+        }
+      }
+    },
+    {
+      "id": "nested-trimmed-groove-chase",
+      "title": "Groove-chased notes survive a trimmed nested placement",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "588515e2-d977-4581-9a0b-138057a6f6ef",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "tools/scripts/negative_capability_check.py",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "docs/guides/timeline-sdk.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "groove_timing_reach"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.hpp",
+          "needles": [
+            "groove_pad_left"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_compiler.cpp",
+          "needles": [
+            "pad_left"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "trimmed_groove_chase_project"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Lowering a trimmed nested placement is engine-internal; no installed SDK type, header or entry point changes, and the groove pad is computed and consumed entirely inside the compiler."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes; the fix alters which notes an existing compile emits, not how a compile is invoked or reported."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the existing operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal and a note-loss defect beneath controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed; the groove reach is an internal supremum with no authored surface."
         }
       }
     }

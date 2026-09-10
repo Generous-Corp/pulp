@@ -476,9 +476,11 @@ displacement from the authored onset moves note-on and note-off together, and
 the authored-onset accent scales velocity with deterministic half-up rounding
 and saturation. Ratchets inherit that single displacement and accent. A root
 leaf reads root groove; a nested leaf reads child groove exactly once. A
-`SequenceRef` that trims a grooved MIDI leaf currently fails with
-`TrimmedGrooveUnsupported`, because chasing displaced material across the
-retained source-window boundary has no defined contract yet.
+`SequenceRef` that trims a grooved MIDI leaf selects its notes over a window
+widened by the groove's timing reach, so material the groove would pull back
+across the retained source-window boundary stays available; the note rebases
+onto that widened anchor, and whether it sounds is decided afterwards by the
+clamp to the retained window.
 
 `pulp seq apply`, `pulp seq explain`, and `pulp render` expose the same
 load/edit/compile/render path for headless workflows. Their source-tree

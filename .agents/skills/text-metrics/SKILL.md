@@ -133,11 +133,44 @@ unplaced, so assert the text box itself.
   more and defeats the cache on any label whose text changes every frame. Where a
   shaped layout already exists (wrapped or attributed text), read its first
   line's ascent instead of measuring the face a second time.
+- **`intrinsic_width()` is a layout contract, not a measurement — a multi-line
+  Label reports 0 on purpose.** Returning 0 is what lets the parent's available
+  width drive wrapping, so anything asking "how wide is this text" gets zero for
+  every wrapped label and, if it treats that as an answer, silently skips them.
+  A layout-box dump of one real panel was blind on 63% of its text runs for
+  exactly this reason, and read as a clean result. Ask
+  `painted_text_extents(available_width)` instead: it shapes and lays out at the
+  width the Label was given, applies the line clamp and text-align, and returns
+  `measured=false` for empty text so "unknown" is distinguishable from "zero
+  sized". Do not fix the blindness by making `intrinsic_width()` return a number
+  for the multi-line case — that breaks wrapping.
+
 - **Three consumers must agree or the bug is invisible.** `intrinsic_height()`
   sizes the box, `baseline_y()` is what Yoga gets for `align-items: baseline`,
   and `paint()` places the ink. If they do not derive from one line box, the
   layout is self-consistent and still paints text off-centre, and the inspector's
   caret and selection band drift off the glyphs they are supposed to sit on.
+
+- **`TextShaper::prepare()` is not cheap on a warm cache — do not call it from a
+  measurement path more than once.** The name suggests a lookup, but every call
+  re-validates the UTF-8, re-allocates, and re-segments the string, taking a
+  per-segment `std::lock_guard` on the way; the cache is keyed per *segment
+  width*, so repeated `prepare()` calls for the same label all pay full price. A
+  single layout pass asks each `Label` for its size five times — the Yoga build
+  walk calls `intrinsic_width()` and `intrinsic_height()`, the measure callback
+  calls both again, and `measured_height(w)` follows — so a naive implementation
+  shapes every label roughly five times per pass. That is the single largest
+  cost in `View::layout_children()`; a tree of a few hundred labels can spend a
+  quarter of a 60 fps frame budget in it.
+- **Memoize measurement against a fully resolved basis, and fail closed.** The
+  memo key must hold the values the measurement actually depends on *after* the
+  inheritance cascade has run — the resolved font size and letter spacing, not
+  the label's own possibly-unset fields — plus
+  `canvas::font_registration_generation()`. Keying on resolved values makes the
+  basis self-invalidating: an ancestor changing the inherited font size lands as
+  a basis mismatch on the next measurement, with no notification path required.
+  Attributed text carries its own metrics source and must opt out of the memo
+  rather than be approximated by it.
 
 ## How to verify a change here
 

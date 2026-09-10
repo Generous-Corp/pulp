@@ -11,6 +11,87 @@ before you touch it.
 
 ---
 
+## Turning tracing on
+
+Tracing is one CMake option, but you should never have to reach for `cmake`
+directly — or, worse, copy a prefix and rename it. A directory named `-trace`
+proves nothing; only the symbols inside it do, and every path below verifies
+those symbols before handing you the result.
+
+### In a Pulp checkout
+
+```bash
+pulp build --trace          # configures -DPULP_TRACING=ON into build-trace/
+
+# Capture. The destination goes in the environment of the process you want
+# traced; the session autostarts at launch and flushes itself after
+# PULP_TRACE_SECONDS.
+PULP_TRACE_PATH=/tmp/drag.pftrace PULP_TRACE_SECONDS=15 \
+  ./build-trace/YourApp.app/Contents/MacOS/YourApp
+
+pulp trace open /tmp/drag.pftrace
+```
+
+The environment variables are the capture path for anything you launch
+yourself, and they are the **only** path for a plug-in: set them on the DAW
+process and every Pulp plug-in it loads records into that file.
+
+`pulp trace start` / `pulp trace stop` are **not** an alternative spelling of
+the above. They drive a session over the capability-control broker, which
+reaches only a target the broker itself launched — a headless control host. A
+Standalone you started from a shell never registers with the broker, and
+plug-ins are excluded from the control host at configure time, so neither
+answers `trace start`. Use them for broker-hosted headless targets; use the
+environment variables for everything else.
+
+`--trace` uses its own build tree. `PULP_TRACING` reaches every translation
+unit, so toggling it inside one build directory would force a full rebuild each
+way; two trees mean you can switch instantly at the cost of disk. Your ordinary
+`build/` is untouched.
+
+### In a standalone project (`pulp.toml`)
+
+A standalone project links an installed SDK, so tracing has to be compiled into
+**that SDK** — a project cannot add Perfetto to archives that do not contain it.
+Install a traced SDK once:
+
+```bash
+PULP_TRACE_SDK="$(pulp sdk install --local --profile trace --print-path)"
+pulp build --trace
+```
+
+The `trace` profile builds from a clean detached clone of the current commit and
+publishes to an immutable prefix under `$PULP_HOME/sdk-dev/trace-v1/`, but only
+after checking that the staged install really carries Perfetto: `PULP_TRACING`
+in the cache, the retained tracing sentinel inside `lib/libpulp-runtime.a`, and
+an exported `Pulp::tracing` target. If any of those is missing the install is
+rejected rather than published, so a prefix under that root always traces.
+
+Reuse is free — a second call with the same commit and toolchain returns the
+existing prefix without rebuilding.
+
+### Checking what you have
+
+```bash
+pulp status                 # reports whether tracing is available here
+pulp sdk status             # lists development SDKs and their profiles
+```
+
+Consumers can branch on the capability in CMake, reading the exported target
+rather than a directory name:
+
+```cmake
+find_package(Pulp REQUIRED)
+if(NOT PULP_HAS_TRACING)
+    message(FATAL_ERROR "this SDK cannot emit traces; install --profile trace")
+endif()
+```
+
+`PULP_HAS_TRACING` is set from `if(TARGET Pulp::tracing)`, and that target is
+exported only under `PULP_TRACING=ON`. It is evidence, not a claim.
+
+---
+
 ## Available analysis surface
 
 Capture, offline SQL, and three closed GPU analyses are available today. Rust
@@ -78,8 +159,8 @@ capture overhead.
 ### The L1 "explain" flow, spelled out
 
 ```
-1. Capture   → pulp trace start --categories dsp   (or accept a given --trace FILE.pftrace)
-             → reproduce → pulp trace stop  → /tmp/pulp-<ts>.pftrace
+1. Capture   → PULP_TRACE_PATH=/tmp/x.pftrace PULP_TRACE_SECONDS=N <run it>
+             (or accept a given --trace FILE.pftrace) → reproduce → /tmp/x.pftrace
 2. Ask       → give the .pftrace and question to an agent using trace-analysis
 3. Agent     → loads the trace-analysis skill and runs its protocol autonomously:
                forms a hypothesis, queries via the trace-sql stdlib, checks
@@ -220,7 +301,8 @@ it compiles to nothing when `PULP_TRACING` is off.
 > shortening the capture window.
 >
 > **Traces flush only on graceful teardown or `stop`.** The in-memory ring is
-> written to disk on `pulp trace stop`, on `StandaloneApp` shutdown, or on a
+> written to disk when the `PULP_TRACE_SECONDS` window elapses, on `pulp trace
+> stop`, on `StandaloneApp` shutdown, or on a
 > plugin format adapter's destroy path (VST3 `terminate` / AU dealloc / CLAP
 > `destroy`). **A host crash loses the ring** — inherent to the in-process
 > backend. An empty trace after a crash is expected, not a bug.
@@ -268,10 +350,13 @@ promise.
 ### Use case 1 — "Why is my plugin slow to open?" (the flagship)
 
 ```bash
-pulp trace start --categories render,gpu,text,js,layout
-# ... open the plugin editor (or launch the standalone app) ...
-pulp trace stop
-# Give the printed .pftrace to an agent using the trace-analysis skill.
+# Trace the process that loads the plugin. For a DAW, set these on the DAW
+# itself; for the standalone, on the standalone. Every category is recorded —
+# the environment path has no category selector.
+PULP_TRACE_PATH=/tmp/open.pftrace PULP_TRACE_SECONDS=20 <launch the host or app>
+# ... open the plugin editor while the window is running ...
+# The file flushes itself when the seconds elapse.
+# Give /tmp/open.pftrace to an agent using the trace-analysis skill.
 ```
 
 One-shot, main-thread startup laid out on a timeline: Dawn/Graphite device
@@ -297,12 +382,11 @@ A representative L1 answer:
 ### Use case 2 — "Find the slowest frames / why does the UI stutter when I move a knob?"
 
 ```bash
-pulp trace start --categories render,layout,canvas,text,js,gpu
 # Motion correlation currently requires an in-process fixture capture.
-# ... sweep the knob ...
-pulp trace stop
-# Run the trace-sql frame/layout queries against the printed file:
-pulp trace query "<SQL from trace-sql>" --trace /tmp/pulp-trace.pftrace
+PULP_TRACE_PATH=/tmp/knob.pftrace PULP_TRACE_SECONDS=15 <launch the host or app>
+# ... sweep the knob until the seconds elapse ...
+# Run the trace-sql frame/layout queries against the flushed file:
+pulp trace query "<SQL from trace-sql>" --trace /tmp/knob.pftrace
 ```
 
 The fat slices are `TextShaper::prepare` firing every frame — the knob's value
@@ -316,10 +400,9 @@ label re-shapes text on each update instead of reusing cached widths
 # Deterministic: render a fixed clip through the plugin OFFLINE (the
 # offline_process() path examples/trace-demo uses) — no live DAW, no dropouts,
 # reproduces exactly.
-pulp trace start --categories dsp,dsp.node
+PULP_TRACE_PATH=/tmp/dsp.pftrace PULP_TRACE_SECONDS=30 <run the offline render>
 # ... offline-render a fixed MIDI/audio clip through the plugin ...
-pulp trace stop
-# Give the printed .pftrace to an agent using the trace-analysis skill.
+# Give /tmp/dsp.pftrace to an agent using the trace-analysis skill.
 ```
 
 `AudioProcessLoadMeasurer` reports a calm ~40% average, but the flamegraph shows

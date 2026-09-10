@@ -13,9 +13,23 @@ namespace fs = std::filesystem;
 
 inline constexpr int kForgeProfileRevision = 2;
 inline constexpr const char* kForgeProfileName = "forge-dev";
+
+// The tracing profile: the forge-dev feature set plus Perfetto compiled in.
+//
+// It is a SEPARATE profile rather than a flag on forge-dev because a traced SDK
+// is a different binary with a different safety contract — it must never be
+// shipped — and because the two must not collide at one prefix. A prefix whose
+// name promises tracing while its libraries contain none is the exact failure
+// this profile exists to make impossible.
+inline constexpr int kTraceProfileRevision = 1;
+inline constexpr const char* kTraceProfileName = "trace";
 inline constexpr const char* kProvenanceSchema = "pulp.sdk-provenance.v1";
 
 struct Identity {
+    // Perfetto tracing compiled in. Part of the identity, not a side channel:
+    // it changes every object file, so it must change the content-addressed
+    // prefix too, or a traced and an untraced build would land on the same path.
+    bool tracing = false;
     std::string sdk_version;
     std::string source_git_sha;
     std::string platform;

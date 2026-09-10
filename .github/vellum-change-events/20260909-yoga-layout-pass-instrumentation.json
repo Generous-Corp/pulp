@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20260909-yoga-layout-pass-instrumentation",
+  "kind": "change",
+  "created_at": "2026-09-09T19:30:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "This PR's work is a Label measurement memo, but the transferred retained-UI-kernel surface it touches -- core/view/src/yoga_layout.cpp -- is instrumented, not changed. The whole delta there is an added <pulp/runtime/trace.hpp> include, four PULP_TRACE_SCOPE_NAMED(\"layout\", ...) blocks wrapped around statements that already ran in that order (yoga_build around YGNodeStyleSetWidth/Height plus build_yoga_subtree, yoga_calculate around YGNodeCalculateLayout, yoga_apply around apply_yoga_results, yoga_free around YGNodeFreeRecursive plus YGConfigFree), and one PULP_TRACE_COUNTER(\"layout\", \"yoga_nodes\", node_tally) beside the existing g_layout_last_nodes store. The point of the split is that build and free scale with the TOTAL node count while calculate scales with the work Yoga actually does, so a wide yoga_build beside a narrow yoga_calculate reads as rebuild churn rather than solving -- which is what the Label memo is trying to move. Safety here is structural and checkable by reading the diff rather than asserted: every statement pulled into a new brace block is a call, no declaration was moved into a narrower scope, and nothing later in yoga_layout reads a name whose lifetime changed, so the call sequence is identical. PULP_TRACING_ENABLED is the compile-time switch; with it off every one of these macros expands to ((void)0) in trace.hpp, so a non-tracing build emits the same code it emitted before. The \"layout\" category is already declared in trace.hpp and is not new. Two limits are worth stating rather than glossing. First, with tracing ON these scopes are not free -- four scopes and a counter run per layout pass -- and this record does not carry a measurement of that overhead. Second, this event says nothing about whether the Label measurement memo itself preserves geometry; that logic lives in core/view/src/widgets/label.cpp and core/view/include/pulp/view/widgets.hpp, which are retained-ui-kernel-deferred and not this slice, and its correctness rests on the PR's own label tests, not on any claim made here. Deliberately no equivalence claim is made for the memo. This is pulp-only: the trace macros, the category list, and the rebuild-every-pass shape they are measuring are all Pulp's own, and a Vellum-native retained UI kernel should instrument its layout pass against whatever tracing surface it owns rather than inherit Pulp's macro names and scope boundaries. There is no named immutable Vellum framework commit to backport against, and this records no Vellum acknowledgement.",
+  "tests": [
+    "pulp-test-widget-bridge-yoga",
+    "pulp-test-widgets-label"
+  ],
+  "disposition": "pulp-only"
+}

@@ -674,6 +674,49 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
 
+### `pulp build --trace` and the `trace` SDK profile
+
+Perfetto is a build-time option, so making it reachable is a CLI problem, not a
+tracing problem. Two seams carry it, and both refuse to hand back an artifact
+they have not verified:
+
+- `pulp build --trace` configures `-DPULP_TRACING=ON` into `build-trace/`,
+  never into `build/`. The separate tree is deliberate: `PULP_TRACING` reaches
+  every translation unit, so toggling it in one directory forces a full rebuild
+  each way.
+- `pulp sdk install --local --profile trace` is the forge-dev flow with tracing
+  on, published under `sdk-dev/trace-v1/`. `tracing` is a field of
+  `local_sdk::Identity`, so the content-addressed fingerprint differs and a
+  traced and an untraced build of the same commit can never collide.
+
+**The verification is the feature.** `validate_staged_install()` rejects a
+traced staging directory unless `PULP_TRACING` is on in the cache, the runtime
+archive contains the tracing ship sentinel (via `file_has_tracing_sentinel()`
+from `ship_tracing_guard.hpp` — the same instrument `pulp ship` uses), and the
+exported package declares `Pulp::tracing`. Publication is a rename after that
+check, so a prefix under `trace-v1/` cannot promise tracing it lacks. The bug
+this closes was a hand-copied `<version>-trace` prefix that contained zero
+Perfetto and had inherited `kind=release` provenance from its source — the name
+was the only claim anyone had checked.
+
+Do not verify tracing by counting `nm` symbols. The sentinel is a retained byte
+string placed for exactly this purpose, works on an installed archive, and is
+already the instrument the ship guard trusts.
+
+`PulpConfig.cmake.in` sets `PULP_HAS_TRACING` from `if(TARGET Pulp::tracing)`,
+which the install rules export only under `PULP_TRACING=ON`. Consumers read the
+capability instead of guessing from a directory name.
+
+**`pulp build` is Rust-native — implement build flags in BOTH front ends.**
+`Command::Build` routes to `cmd::orchestrate::build`, and only `--watch`,
+`--install`, `--validate`, and `--format` delegate to `pulp-cpp`. A flag added
+solely to `tools/cli/cmd_build.cpp` is invisible to the ordinary
+`pulp build` path. `--trace` therefore exists in `orchestrate.rs` (flag
+parsing, `check_trace_flags`, the build-dir choice) *and* in `cmd_build.cpp`
+for the delegated branches. The same split bites status output: a `pulp status`
+line added only to the Rust fallback never reaches installed users, because
+installed status delegates to `pulp-cpp status`.
+
 ### `pulp status` — build-governance tier line
 
 `pulp status` reports the active host-resource governance tier via a

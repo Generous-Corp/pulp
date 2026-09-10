@@ -39,6 +39,7 @@ target_sources(pulp-view-core PRIVATE
     src/yoga_layout.cpp
     src/grid_layout.cpp
     src/layout_snapshot.cpp
+    src/appearance_defects.cpp
     src/widgets.cpp
     src/widget_schema.cpp
     src/knob_sprite_paint.cpp

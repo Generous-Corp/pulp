@@ -7,7 +7,9 @@
 
 #include "support/timeline_graph_binding_test_support.hpp"
 
+#include <pulp/host/timeline_offline_graph.hpp>
 #include <pulp/host/timeline_offline_renderer.hpp>
+#include <pulp/playback/audio_renderer.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -451,4 +453,106 @@ TEST_CASE("a note authored after the region end must not enter the tail pad") {
              i < channel.size(); ++i)
             pad_energy += static_cast<double>(channel[i]) * channel[i];
     REQUIRE(pad_energy == 0.0);
+}
+
+// The device-free topology every offline bounce needs before it can drive the
+// binding at all. Its whole value is that it lands on the arrangement-parity
+// shape, so the first case ends at the direct renderer rather than at a
+// structural assertion that a plausible-but-silent topology would also satisfy.
+
+TEST_CASE("the device-free builder emits one route per track at the parity shape") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(parallel_audio_project(), map, asset_pool(std::vector<float>(512, 0.25f)), 1);
+    auto pinned = programs.store.read();
+    REQUIRE(pinned);
+
+    SignalGraph graph;
+    const auto topology = build_device_free_timeline_graph(graph, *pinned, 2);
+    REQUIRE(topology);
+    REQUIRE(topology.output_node != 0);
+    REQUIRE(topology.routes.size() == pinned->tracks().size());
+    REQUIRE_FALSE(topology.routes.empty());
+    for (std::size_t index = 0; index < topology.routes.size(); ++index) {
+        const auto& route = topology.routes[index];
+        REQUIRE(route.track_id == pinned->tracks()[index]->id());
+        REQUIRE(route.audio_destination == topology.output_node);
+        REQUIRE(route.audio_destination_first_port == 0);
+        // Device-free means device-free: no instrument exists for note events to
+        // reach, and no chain exists to bracket with post-device routes.
+        REQUIRE(route.midi_destination == 0);
+        REQUIRE(route.device_routes.empty());
+        REQUIRE(route.post_device_audio_source == 0);
+        REQUIRE(route.post_mixer_audio_destination == 0);
+    }
+
+    // Oracle: the direct renderer over the same program and transport. A
+    // topology that connected nothing would satisfy every assertion above and
+    // fail here.
+    TimelineGraphPlaybackBinding binding(graph, programs.store);
+    REQUIRE(binding.prepare(*pinned, topology.routes, config(), 48'000.0, 512));
+    std::int64_t start = 0;
+    for (const std::uint32_t frames : {1u, 64u, 512u}) {
+        const auto transport = snapshot(*pinned, frames, start);
+        Buffer direct(2, frames, 9.0f);
+        REQUIRE(playback::ArrangementAudioRenderer::process(*pinned, transport, direct.view()) ==
+                playback::AudioRenderStatus::Rendered);
+        // Two silent buffers compare equal, so the parity assertion below is
+        // only evidence while the oracle is carrying signal.
+        double direct_energy = 0.0;
+        for (const auto& channel : direct.storage)
+            for (const float sample : channel)
+                direct_energy += static_cast<double>(sample) * sample;
+        REQUIRE(direct_energy > 0.0);
+        Buffer input(2, frames);
+        Buffer routed(2, frames, 9.0f);
+        auto routed_view = routed.view();
+        REQUIRE(binding.process(routed_view, input.const_view(), transport));
+        REQUIRE(routed.storage == direct.storage);
+        start += frames;
+    }
+}
+
+TEST_CASE("the device-free builder refuses a zero channel count and adds nothing") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(audio_project(), map, asset_pool(std::vector<float>(512, 0.25f)), 1);
+    auto pinned = programs.store.read();
+    REQUIRE(pinned);
+
+    SignalGraph graph;
+    const auto topology = build_device_free_timeline_graph(graph, *pinned, 0);
+    REQUIRE_FALSE(topology);
+    REQUIRE(topology.code == TimelineDeviceFreeGraphCode::InvalidChannelCount);
+    REQUIRE(topology.output_node == 0);
+    REQUIRE(topology.routes.empty());
+    // Control: the same graph and the same program succeed at a valid width, so
+    // the refusal is the channel count rather than an unusable fixture.
+    REQUIRE(build_device_free_timeline_graph(graph, *pinned, 2));
+}
+
+TEST_CASE("a program with no tracks builds an accepted empty route set") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    auto sequence =
+        take(Sequence::create({2}, "root", std::nullopt, std::nullopt, std::vector<Track>{}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "empty";
+    input.next_item_id = 1'000;
+    input.root_sequence_id = {2};
+    input.sequences = {std::move(sequence)};
+    programs.publish(std::make_shared<const Project>(take(Project::create(std::move(input)))), map,
+                     take(playback::DecodedAudioAssetPool::create({})), 1);
+    auto pinned = programs.store.read();
+    REQUIRE(pinned);
+    REQUIRE(pinned->tracks().empty());
+
+    // Accepted, not rejected: an empty arrangement renders silence, and a caller
+    // that treats this as an error cannot bounce one.
+    SignalGraph graph;
+    const auto topology = build_device_free_timeline_graph(graph, *pinned, 2);
+    REQUIRE(topology);
+    REQUIRE(topology.output_node != 0);
+    REQUIRE(topology.routes.empty());
 }

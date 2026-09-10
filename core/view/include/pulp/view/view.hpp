@@ -1457,7 +1457,19 @@ public:
 
     /// CSS position property
     enum class Position { static_, relative, absolute, fixed, sticky };
-    void set_position(Position p) { position_ = p; }
+    // Position and the four edge offsets feed the Yoga pass, so a change here
+    // changes what a geometry query returns and must move the layout
+    // generation — geometry readers (the script bridge, the host paint path)
+    // lay out only when that generation moved, and would otherwise answer from
+    // the pre-move box. Guarded on equality because the design-import replay
+    // re-applies captured position metadata on every commit; dirtying the tree
+    // for a write that changed nothing would force a whole-tree pass per
+    // re-applied binding.
+    void set_position(Position p) {
+        if (position_ == p) return;
+        position_ = p;
+        invalidate_layout();
+    }
     Position position() const { return position_; }
 
     // top/right/bottom/left accept either a px value (the single-arg setter) or
@@ -1465,14 +1477,30 @@ public:
     // adapter dispatches on `top_unit_` / etc. and routes percent values through
     // YGNodeStyleSetPositionPercent, mirroring the FlexStyle::dim_width pattern
     // for the View positional fields.
-    void set_top(float v) { top_ = v; has_top_ = true; top_unit_ = DimensionUnit::px; }
-    void set_right(float v) { right_ = v; has_right_ = true; right_unit_ = DimensionUnit::px; }
-    void set_bottom(float v) { bottom_ = v; has_bottom_ = true; bottom_unit_ = DimensionUnit::px; }
-    void set_left(float v) { left_ = v; has_left_ = true; left_unit_ = DimensionUnit::px; }
-    void set_top(float v, DimensionUnit unit) { top_ = v; has_top_ = true; top_unit_ = unit; }
-    void set_right(float v, DimensionUnit unit) { right_ = v; has_right_ = true; right_unit_ = unit; }
-    void set_bottom(float v, DimensionUnit unit) { bottom_ = v; has_bottom_ = true; bottom_unit_ = unit; }
-    void set_left(float v, DimensionUnit unit) { left_ = v; has_left_ = true; left_unit_ = unit; }
+    void set_top(float v) { set_top(v, DimensionUnit::px); }
+    void set_right(float v) { set_right(v, DimensionUnit::px); }
+    void set_bottom(float v) { set_bottom(v, DimensionUnit::px); }
+    void set_left(float v) { set_left(v, DimensionUnit::px); }
+    void set_top(float v, DimensionUnit unit) {
+        if (has_top_ && top_ == v && top_unit_ == unit) return;
+        top_ = v; has_top_ = true; top_unit_ = unit;
+        invalidate_layout();
+    }
+    void set_right(float v, DimensionUnit unit) {
+        if (has_right_ && right_ == v && right_unit_ == unit) return;
+        right_ = v; has_right_ = true; right_unit_ = unit;
+        invalidate_layout();
+    }
+    void set_bottom(float v, DimensionUnit unit) {
+        if (has_bottom_ && bottom_ == v && bottom_unit_ == unit) return;
+        bottom_ = v; has_bottom_ = true; bottom_unit_ = unit;
+        invalidate_layout();
+    }
+    void set_left(float v, DimensionUnit unit) {
+        if (has_left_ && left_ == v && left_unit_ == unit) return;
+        left_ = v; has_left_ = true; left_unit_ = unit;
+        invalidate_layout();
+    }
     float top() const { return top_; }
     float right() const { return right_; }
     float bottom() const { return bottom_; }

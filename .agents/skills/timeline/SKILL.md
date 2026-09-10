@@ -3108,3 +3108,52 @@ does not". Check which field, and for gain check what the leaf content is.
 records the precedence model and the remaining gaps; the refusal codes live in
 `CompileErrorCode` and each carries an entry in
 `tools/scripts/negative_capability_allowlist.json`.
+
+## The bounce CLI renders through the graph binding, and parity is the gate
+
+`timeline render` no longer calls `playback::ArrangementAudioRenderer::process`
+directly. It builds a device-free graph
+(`build_device_free_timeline_graph()`), prepares a
+`TimelineGraphPlaybackBinding`, and feeds it a silent input block, so the CLI
+reaches the same per-track renderer through the node that already wraps it.
+
+What that buys is a path device chains can be added to. What it costs is a
+standing obligation: the bounce must stay sample-identical to the direct
+renderer. `test/test_timeline_agent.cpp` holds that oracle in its sample-exact
+`WithinAbs` assertions on rendered PCM. **If one of those moves, the render
+path changed audio** — treat it as a regression, not as a threshold to widen.
+
+Only the render call was swapped. The CLI keeps its own transport and block
+loop, so frame counts stay frame-addressed and no tick conversion enters the
+path — which is why the in-memory budget check and the emitted JSON are
+unchanged. Preserve that split if you extend the command; routing the loop
+through the offline renderer instead would make the CLI's frame arithmetic
+tick-derived, and a saturating conversion turns an absurd request into a
+plausible bounce.
+
+## A nested-trim fixture proves a widened selection window only with a note wholly outside the cut
+
+A `SequenceRef` that trims a grooved MIDI child selects over a window widened by
+the groove's timing reach, so material just outside a retained edge can still be
+chased back inside. Proving that from compiled output is easy to get wrong,
+because most notes cannot see the pad at all: the lowerer measures a note's
+start from the **padded** window and the compiler subtracts the pad back off, so
+the arithmetic cancels. A note whose duration merely *straddles* the cut is
+selected on overlap whether or not the window was widened, so it reads the same
+either way and proves nothing about the pad.
+
+The discriminating probe is a note lying **wholly outside** the cut — one the
+window described by the cut excludes outright. It can reach the output only
+through the widened selection, and can sound only if the groove then displaces
+it back inside, so its mere presence is a direct reading of the pad. In
+`trimmed_groove_chase_project` that is the note at 452..466 against a cut at
+470, which appears under an authored groove and is absent under a feel-free one.
+
+Two consequences for fixtures here. Vary the cut and assert the *same* sounding
+ticks across cuts: the useful case is the cut falling to the right of the chased
+note, since that is the only one where its presence depends on padding rather
+than on the cut having retained it anyway. And expect the feel-free cases to
+show the probe **absent** — a groove that displaces nothing cannot carry it
+back, and the sounding clamp drops it as zero-length. That absence is the
+correct reading, not a missing case to chase; see the playback skill's note on
+why the reach short-circuit cannot be covered.

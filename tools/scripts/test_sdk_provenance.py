@@ -35,6 +35,7 @@ class SdkProvenanceTests(unittest.TestCase):
         (self.prefix / "version.txt").write_text(f"{VERSION}\n", encoding="utf-8")
         (self.prefix / "sdk_build_type.txt").write_text("Release\n", encoding="utf-8")
         (self.build / "CMakeCache.txt").write_text(
+            "PULP_TRACING:BOOL=OFF\n"
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
             "PULP_ENABLE_INSPECTOR:BOOL=ON\n",
             encoding="utf-8",
@@ -112,11 +113,53 @@ class SdkProvenanceTests(unittest.TestCase):
             ),
             marker,
         )
-        self.assertEqual(marker["features"], {"audio_probes": False, "inspector": True})
+        self.assertEqual(
+            marker["features"],
+            {"audio_probes": False, "inspector": True, "tracing": False},
+        )
         self.assertEqual(marker["integrity"]["schema"], provenance.INTEGRITY_SCHEMA)
         self.assertEqual(
             stat.S_IMODE((self.prefix / "sdk-provenance.json").stat().st_mode),
             0o644,
+        )
+
+    def test_traced_build_cannot_mint_release_provenance(self) -> None:
+        # Control: the fixture mints a marker cleanly with tracing off, so the
+        # rejection below is caused by the flag and not by a broken fixture.
+        self.assertEqual(self.marker()["features"]["tracing"], False)
+
+        (self.build / "CMakeCache.txt").write_text(
+            "PULP_TRACING:BOOL=ON\n"
+            "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
+            "PULP_ENABLE_INSPECTOR:BOOL=ON\n",
+            encoding="utf-8",
+        )
+        with self.assertRaises(provenance.ProvenanceError) as caught:
+            self.marker()
+        self.assertIn("tracing=OFF", str(caught.exception))
+
+    def test_verify_rejects_a_marker_claiming_a_traced_release(self) -> None:
+        marker = self.marker()
+        marker["features"]["tracing"] = True
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        with self.assertRaises(provenance.ProvenanceError):
+            provenance.verify_release_marker(
+                self.prefix,
+                expected_platform="darwin-arm64",
+                expected_source_sha=self.sha,
+            )
+
+    def test_verify_accepts_a_marker_minted_before_the_tracing_key_existed(self) -> None:
+        marker = self.marker()
+        del marker["features"]["tracing"]
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        self.assertEqual(
+            provenance.verify_release_marker(
+                self.prefix,
+                expected_platform="darwin-arm64",
+                expected_source_sha=self.sha,
+            ),
+            marker,
         )
 
     def test_stamp_command_emits_capability_handoff(self) -> None:
@@ -251,6 +294,7 @@ class SdkProvenanceTests(unittest.TestCase):
 
     def test_rejects_missing_release_inspector_component(self) -> None:
         (self.build / "CMakeCache.txt").write_text(
+            "PULP_TRACING:BOOL=OFF\n"
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
             "PULP_ENABLE_INSPECTOR:BOOL=OFF\n",
             encoding="utf-8",
@@ -263,6 +307,7 @@ class SdkProvenanceTests(unittest.TestCase):
         (self.prefix / "version.txt").write_text(f"{version}\n", encoding="utf-8")
         self.write_build_info(version=version)
         (self.build / "CMakeCache.txt").write_text(
+            "PULP_TRACING:BOOL=OFF\n"
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
             "PULP_ENABLE_INSPECTOR:BOOL=OFF\n",
             encoding="utf-8",
@@ -273,7 +318,10 @@ class SdkProvenanceTests(unittest.TestCase):
         )
         marker = self.marker(release_tag=f"v{version}")
         provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
-        self.assertEqual(marker["features"], {"audio_probes": False, "inspector": False})
+        self.assertEqual(
+            marker["features"],
+            {"audio_probes": False, "inspector": False, "tracing": False},
+        )
         self.assertNotIn("integrity", marker)
         self.assertEqual(
             provenance.verify_release_marker(

@@ -6,7 +6,10 @@
 #include "shell_redirect.hpp"
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
+#include <iterator>
+#include <string>
 #include <regex>
 #include <vector>
 
@@ -22,6 +25,11 @@ int cmd_sdk(const std::vector<std::string>& args) {
         std::cout << "  install --local             Build and install the SDK from the current checkout\n";
         std::cout << "  install --local --profile forge-dev [--print-path]\n";
         std::cout << "                              Build an immutable arm64 Forge development SDK\n";
+        std::cout << "  install --local --profile trace [--print-path]\n";
+        std::cout << "                              Same, with Perfetto tracing compiled in.\n";
+        std::cout << "                              Refuses to publish unless the built archives\n";
+        std::cout << "                              really contain Perfetto. Development only —\n";
+        std::cout << "                              never ship a binary built against it.\n";
         std::cout << "  available                   List SDK versions available on GitHub releases\n";
         std::cout << "  status                      Show installed SDK versions\n";
         std::cout << "  clean                       Remove all cached SDK versions\n";
@@ -58,9 +66,13 @@ int cmd_sdk(const std::vector<std::string>& args) {
             }
             if (!request.print_path)
                 std::cout << "Building SDK from local checkout...\n";
-            auto sdk = request.profile == "forge-dev"
-                           ? ensure_forge_dev_sdk(repo_root)
-                           : ensure_checkout_sdk(repo_root, request.version);
+            fs::path sdk;
+            if (request.profile == pulp::cli::local_sdk::kTraceProfileName)
+                sdk = ensure_trace_sdk(repo_root);
+            else if (request.profile == pulp::cli::local_sdk::kForgeProfileName)
+                sdk = ensure_forge_dev_sdk(repo_root);
+            else
+                sdk = ensure_checkout_sdk(repo_root, request.version);
             if (sdk.empty()) {
                 std::cerr << "SDK build failed.\n";
                 return 1;
@@ -70,6 +82,13 @@ int cmd_sdk(const std::vector<std::string>& args) {
                     std::cerr << "Error: could not write the SDK path to stdout.\n";
                     return 1;
                 }
+            } else if (request.profile == pulp::cli::local_sdk::kTraceProfileName) {
+                // Name the next command. A developer who just paid for a traced
+                // build should never have to guess how to get a trace out of it.
+                std::cout << "Traced SDK installed at " << sdk.string() << "\n";
+                std::cout << "  Build against it:  pulp build --sdk " << sdk.string() << "\n";
+                std::cout << "  Then capture:      pulp trace start  ->  pulp trace stop\n";
+                std::cout << "  Development only — do not ship binaries built against this SDK.\n";
             } else {
                 std::cout << "SDK v" << request.version << " installed at " << sdk.string() << "\n";
             }
@@ -125,8 +144,28 @@ int cmd_sdk(const std::vector<std::string>& args) {
             for (auto& entry : fs::recursive_directory_iterator(dev_base)) {
                 if (!entry.is_regular_file() || entry.path().filename() != "sdk-provenance.json")
                     continue;
-                std::cout << "  forge-dev (development-only) — "
-                          << entry.path().parent_path().string() << "\n";
+                // Report the profile the marker itself claims rather than
+                // assuming forge-dev: two profiles now live under sdk-dev/, and
+                // a prefix that misreports which one it is would be the same
+                // class of defect the trace profile exists to prevent.
+                std::string marker;
+                {
+                    std::ifstream in(entry.path());
+                    marker.assign(std::istreambuf_iterator<char>(in),
+                                  std::istreambuf_iterator<char>());
+                }
+                std::string profile = "unknown-profile";
+                if (auto pos = marker.find("\"profile\""); pos != std::string::npos) {
+                    auto open_quote = marker.find('"', marker.find(':', pos));
+                    auto close_quote = marker.find('"', open_quote + 1);
+                    if (open_quote != std::string::npos && close_quote != std::string::npos)
+                        profile = marker.substr(open_quote + 1, close_quote - open_quote - 1);
+                }
+                std::cout << "  " << profile << " (development-only"
+                          << (marker.find("\"tracing\": true") != std::string::npos
+                                  ? ", Perfetto tracing"
+                                  : "")
+                          << ") — " << entry.path().parent_path().string() << "\n";
                 found = true;
             }
         }

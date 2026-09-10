@@ -165,6 +165,22 @@ target_sources(pulp-mcp-core PRIVATE
 target_include_directories(pulp-mcp-core PRIVATE
     "${PROJECT_SOURCE_DIR}/inspect/include")
 
+# pulp-mcp-core reaches pulp::host through pulp::tool-timeline, which backs the
+# pulp_timeline_render tool. That closure carries libwgpu_native, so the
+# installed binary needs an RPATH into the SDK prefix exactly as pulp-cli and
+# pulp-scan-worker do; without it the installed server aborts on launch with
+# "Library not loaded: @rpath/libwgpu_native.dylib".
+if(APPLE)
+    set_target_properties(pulp-mcp PROPERTIES
+        INSTALL_RPATH "@executable_path/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE
+        MACOSX_RPATH TRUE)
+elseif(UNIX)
+    set_target_properties(pulp-mcp PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE)
+endif()
+
 # Ship pulp-mcp via `cmake --install` too — same lane the SDK tarball
 # uses to deliver pulp-scan-worker. The release-CLI tarball still gets
 # it via tools/scripts/package_cli.py --mcp-binary; this install rule

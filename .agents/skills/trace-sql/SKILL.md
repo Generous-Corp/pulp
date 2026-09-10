@@ -423,6 +423,14 @@ Two other capture-shaping facts worth knowing before you blame a query:
   used to be untagged, so closing and reopening an editor inside the window let
   the FIRST session's timer stop the SECOND one — a capture that looks
   mysteriously truncated mid-gesture. A stale timer is now a no-op.
+- **Zero rows everywhere can mean the binary was never built with tracing.**
+  `PULP_TRACING` is OFF by default, and a build without it emits no spans at
+  all while every command still succeeds — the emptiest possible capture from
+  the healthiest-looking run. This is the one absence to rule out first,
+  because it is indistinguishable from a bad query by inspection of the query.
+  `pulp status` prints a `Tracing:` line for the current checkout, and
+  `pulp build --trace` produces a build that can emit. A prefix or directory
+  whose *name* contains `trace` proves nothing; only the cache does.
 - **Zero rows for `frame`/`gpu_*` can mean the host never emitted them.** A
   query over render spans returning nothing is not automatically a bad query or
   a bad capture: an editor that is neither scripted nor declares
@@ -438,6 +446,39 @@ Two other capture-shaping facts worth knowing before you blame a query:
   A result of only `layout_children` + `wm_mousemove` is the signature. The
   `trace-analysis` skill has the coverage matrix and the `[plugin-gpu-host]
   … mode=` line that names the host you actually got.
+
+## A zero-row query on a WRAPPED ring is not a finding
+
+The `stats` table is the only thing that distinguishes "the span never fired"
+from "the capture is unreadable", and the second case is the one that looks
+clean. When the in-process ring wraps, the interned string table at the head of
+the sequence is overwritten and every later packet on that sequence is skipped;
+`trace_processor` opens the file, reports no error, and answers every query with
+zero rows. The file on disk is full-size, so nothing about it looks wrong.
+
+Run this before quoting a number out of any capture:
+
+```sql
+select name, value from stats
+where value != 0 and name in (
+  'traced_buf_write_wrap_count',
+  'traced_buf_bytes_written',
+  'traced_buf_buffer_size',
+  'traced_buf_bytes_overwritten',
+  'traced_buf_incremental_sequences_dropped',
+  'packet_skipped_seq_needs_incremental_state_invalid');
+```
+
+A non-zero `traced_buf_write_wrap_count`, or any
+`packet_skipped_seq_needs_incremental_state_invalid`, condemns the trace. Do not
+analyse it and do not report an absence from it — re-capture with
+`PULP_TRACE_RING_KB` raised (KB; default 80 MB; a UI capture carrying
+`js_native:*` spans needs ≥ `262144`).
+
+Note the asymmetry: a clean `stats` table proves only that nothing overflowed,
+not that anything recorded. Pair it with a positive control whose count MUST be
+non-zero for the workload you captured, e.g. `select count(*) from slice where
+name='dom_event_evaluate'` for a pointer-driven UI capture.
 
 ## GPU render time is now OPT-IN (WAH-13)
 
@@ -457,3 +498,55 @@ host's Options. If a trace shows no `gpu_render_time`, check that flag before
 suspecting the adapter.
 
 A3 v2 terminal evidence is analyzer-derived rather than sidecar-attested. The pinned replay must bind the exact trace digest, role/campaign/instance/build identity, GPU and trace evidence IDs, process PID/UPID, the closed category set, zero drops, and a completed flush.
+
+## Self time is the query that finds an opaque parent
+
+A slice's `dur` includes everything it called, so a parent that dominates a
+duration ranking tells you nothing about where the time went. Rank by **self
+time** — total minus the sum of *direct* children — and an unattributed block
+names itself:
+
+```sql
+SELECT s.name, COUNT(*) AS n,
+       SUM(s.dur)/1e6 AS total_ms,
+       (SUM(s.dur) - IFNULL(SUM((SELECT SUM(c.dur) FROM slice c
+                                 WHERE c.parent_id = s.id AND c.dur >= 0)), 0))/1e6 AS self_ms
+FROM slice s WHERE s.dur >= 0
+GROUP BY s.name ORDER BY self_ms DESC LIMIT 20;
+```
+
+Beware the shape of the subquery: summing **all** descendants instead of direct
+children double-counts nested time and drives self time negative. `parent_id`
+(not a recursive descent) is the correct join, and a negative `self_ms` in the
+output means you got it wrong, not that the trace is broken.
+
+This is the query that showed `dom_event_evaluate` holding 2119.8 ms of self
+time out of 2213.6 ms total — 95.8% of a script event handler outside every span
+the tree emitted.
+
+## Querying the JS bridge spans
+
+`js_native:<fn>` slices (one per JS→C++ bridge call, tracing builds only) and
+script-authored `pulpTrace` spans both land on the **`js`** category. Attribute a
+handler's native half with:
+
+```sql
+SELECT name, COUNT(*) AS calls, SUM(dur)/1e6 AS ms, MAX(dur)/1e6 AS max_ms
+FROM slice WHERE name GLOB 'js_native:*' AND dur >= 0
+GROUP BY name ORDER BY ms DESC LIMIT 25;
+```
+
+`GLOB`, not `LIKE` — the rule in "SQL discipline" applies here, and `js_native:`
+is a prefix so the pattern is cheap.
+
+**Check for corrupted parentage before trusting any `js` aggregate.** An
+unbalanced `__traceBegin__` re-parents later slices under a span that never
+closed; the runtime force-closes it and marks the trace. This must return zero
+rows, and if it does not, the nesting is untrustworthy from that timestamp on:
+
+```sql
+SELECT COUNT(*) FROM slice WHERE name = 'js_trace_force_closed_unbalanced_scope';
+```
+
+Its positive control is the counter track `js_trace_unbalanced_scopes`, which
+carries the leaked depth as a value rather than a count of incidents.

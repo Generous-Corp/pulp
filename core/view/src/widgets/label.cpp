@@ -368,7 +368,96 @@ std::string Label::effective_font_family() const {
     return "Inter";
 }
 
+// ── Measured-size memo ──────────────────────────────────────────────────
+//
+// Yoga asks each text leaf for its size several times per layout pass (once
+// while building the node, again from the measure callback) and asks again on
+// every pass. Without a memo a drag, a scroll or a viewport zoom re-shapes
+// text nobody edited, so steady-state layout cost scales with how much text a
+// tree contains rather than with what changed.
+//
+// The basis is the fully RESOLVED style, which makes it self-invalidating: an
+// inherited font-size change in an ancestor lands here as a basis mismatch
+// with no notification path required. The face is keyed indirectly through
+// `font_registration_generation()` -- (family, weight, slant, generation) ->
+// face is a pure function, so the counter is equivalent to the resolved face
+// identity at the cost of one atomic load instead of a font lookup.
+// Attributed text opts out rather than risk a key that misses a span change.
+bool Label::sync_measure_basis() const {
+    if (has_attributed_) {
+        measure_basis_valid_ = false;
+        return false;
+    }
+
+    MeasureBasis fresh;
+    fresh.text = text_;
+    fresh.family = effective_font_family();
+    fresh.font_variant = font_variant();
+    fresh.font_size = font_size_;
+    if (!has_own_font_size_) {
+        if (auto inh = inheritable_font_size(); inh.has_value())
+            fresh.font_size = inh.value();
+    }
+    fresh.letter_spacing = letter_spacing_;
+    if (!has_own_letter_spacing_) {
+        if (auto inh = inheritable_letter_spacing(); inh.has_value())
+            fresh.letter_spacing = inh.value();
+    }
+    fresh.font_weight = effective_font_weight();
+    fresh.font_style = font_style_;
+    fresh.text_direction = static_cast<int>(text_direction_);
+    fresh.line_clamp = line_clamp_;
+    fresh.multi_line = multi_line_;
+    fresh.wrap_fallback = captured_wrap_fallback_;
+    fresh.font_gen = canvas::font_registration_generation();
+    fresh.line_height = line_height_;
+    fresh.text_transform = static_cast<int>(text_transform_);
+    fresh.word_break = word_break();
+    fresh.font_features = resolved_font_features();
+
+    if (!measure_basis_valid_ || !(measure_basis_ == fresh)) {
+        measure_basis_ = std::move(fresh);
+        measure_basis_valid_ = true;
+        measure_width_ = -1.0f;
+        measure_height_ = -1.0f;
+        measure_wrapped_for_width_ = -1.0f;
+        measure_wrapped_height_ = -1.0f;
+    }
+    return true;
+}
+
+float Label::intrinsic_width() const {
+    const bool cacheable = sync_measure_basis();
+    if (cacheable && measure_width_ >= 0.0f) return measure_width_;
+    const float value = compute_intrinsic_width();
+    if (cacheable) measure_width_ = value;
+    return value;
+}
+
 float Label::intrinsic_height() const {
+    const bool cacheable = sync_measure_basis();
+    if (cacheable && measure_height_ >= 0.0f) return measure_height_;
+    const float value = compute_intrinsic_height();
+    if (cacheable) measure_height_ = value;
+    return value;
+}
+
+float Label::measured_height(float available_width) const {
+    const bool cacheable = sync_measure_basis();
+    // One slot, keyed on the width asked for: a wrapped block's height is a
+    // function of the width it was given, and a pass asks for one width.
+    if (cacheable && measure_wrapped_for_width_ == available_width &&
+        measure_wrapped_height_ >= 0.0f)
+        return measure_wrapped_height_;
+    const float value = compute_measured_height(available_width);
+    if (cacheable) {
+        measure_wrapped_for_width_ = available_width;
+        measure_wrapped_height_ = value;
+    }
+    return value;
+}
+
+float Label::compute_intrinsic_height() const {
     // Cascade font_size before computing height so descendants of a parent
     // that called setInheritableFontSize report a height that matches what
     // paint() will draw.
@@ -449,27 +538,7 @@ float Label::intrinsic_height() const {
     return lh;
 }
 
-float Label::measured_height(float available_width) const {
-    // Width-aware height for multi_line Labels with soft-wrap. The Yoga
-    // measure callback receives the available width during layout, which is
-    // the only place we can run the shaper to figure out how many lines a
-    // soft-wrap block will actually produce. Without this hook, Yoga reserves
-    // exactly one line `lh` and any wrapped line past the first paints into
-    // sibling territory and is visually clipped.
-    //
-    // Contract:
-    //   • single-line labels                 → intrinsic_height() (legacy).
-    //   • multi-line + zero/unbounded width  → intrinsic_height() (\n only).
-    //   • multi-line + finite width          → shaper line count * lh.
-    //
-    // The shaper itself is the same one paint() uses, so the count we
-    // return here matches what paint() draws — no off-by-one, no
-    // double-shape penalty (TextShaper::prepare() caches per
-    // (text, family, size); paint will hit the same cache entry).
-    if ((!multi_line_ && !captured_wrap_fallback_) || text_.empty() ||
-        available_width <= 0.0f)
-        return intrinsic_height();
-
+Label::ShapingSetup Label::shaping_setup() const {
     float effective_font_size = font_size_;
     if (!has_own_font_size_) {
         if (auto inh = inheritable_font_size(); inh.has_value())
@@ -513,34 +582,77 @@ float Label::measured_height(float available_width) const {
         }
     }
 
+    const std::string wb = word_break();
+    canvas::BreakMode break_mode = canvas::BreakMode::normal;
+    if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
+    else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
+
+    ShapingSetup setup;
+    setup.display_text = display_text;
+    setup.line_height = lh;
+    setup.font_size = effective_font_size;
+    setup.letter_spacing = effective_letter_spacing;
+    setup.shaping_line_height =
+        has_attributed_ && line_height_ <= 0.0f ? 0.0f : lh;
+    setup.break_mode = break_mode;
+    return setup;
+}
+
+canvas::PreparedText Label::prepare_shaped(const ShapingSetup& setup) const {
+    std::string family = effective_font_family();
+    auto& shaper = canvas::global_text_shaper();
+    return has_attributed_
+        ? shaper.prepare(resolved_attributed_string(), resolved_font_features())
+        : shaper.prepare(setup.display_text, family, setup.font_size,
+                         effective_font_weight(), font_style_,
+                         setup.letter_spacing, resolved_font_features());
+}
+
+canvas::ShapedLayout Label::shaper_layout_for(const canvas::PreparedText& prepared,
+                                              const ShapingSetup& setup,
+                                              float available_width) const {
+    auto& shaper = canvas::global_text_shaper();
+    return shaper.layout(prepared, available_width, setup.shaping_line_height,
+                         /*max_lines=*/0, setup.break_mode);
+}
+
+float Label::compute_measured_height(float available_width) const {
+    // Width-aware height for multi_line Labels with soft-wrap. The Yoga
+    // measure callback receives the available width during layout, which is
+    // the only place we can run the shaper to figure out how many lines a
+    // soft-wrap block will actually produce. Without this hook, Yoga reserves
+    // exactly one line `lh` and any wrapped line past the first paints into
+    // sibling territory and is visually clipped.
+    //
+    // Contract:
+    //   • single-line labels                 → intrinsic_height() (legacy).
+    //   • multi-line + zero/unbounded width  → intrinsic_height() (\n only).
+    //   • multi-line + finite width          → shaper line count * lh.
+    //
+    // The shaper itself is the same one paint() uses, so the count we return
+    // here matches what paint() draws — no off-by-one. It is NOT free to call
+    // repeatedly: TextShaper::prepare() re-validates the UTF-8, re-segments,
+    // and takes a per-segment lock on every call, and its cache is keyed per
+    // segment width rather than per prepare(). Repeat measurement is avoided
+    // by the memo in front of this function, not by the shaper's own cache.
+    if ((!multi_line_ && !captured_wrap_fallback_) || text_.empty() ||
+        available_width <= 0.0f)
+        return intrinsic_height();
+
+    const ShapingSetup setup = shaping_setup();
+    const float lh = setup.line_height;
+
     if (captured_wrap_fallback_ &&
-        cached_line_layout_usable(display_text, effective_font_size,
-                                  effective_letter_spacing, available_width)) {
+        cached_line_layout_usable(setup.display_text, setup.font_size,
+                                  setup.letter_spacing, available_width)) {
         int line_count = static_cast<int>(cached_line_boxes_.size());
         if (line_clamp_ > 0 && line_clamp_ < line_count)
             line_count = line_clamp_;
         return std::ceil(lh * static_cast<float>(std::max(1, line_count)));
     }
 
-    std::string family = effective_font_family();
-    auto& shaper = canvas::global_text_shaper();
-    auto prepared = has_attributed_
-        ? shaper.prepare(resolved_attributed_string(), resolved_font_features())
-        : shaper.prepare(display_text, family, effective_font_size,
-                         effective_font_weight(), font_style_,
-                         effective_letter_spacing, resolved_font_features());
-
-    // Use the same break_mode paint uses (CSS word-break / overflow-wrap;
-    // Label paint reads `View::word_break()` at draw time, the measure path
-    // mirrors that decision).
-    const std::string wb = word_break();
-    canvas::BreakMode break_mode = canvas::BreakMode::normal;
-    if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
-    else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
-    const float shaping_line_height = has_attributed_ && line_height_ <= 0.0f
-        ? 0.0f : lh;
-    auto layout = shaper.layout(prepared, available_width, shaping_line_height,
-                                /*max_lines=*/0, break_mode);
+    auto prepared = prepare_shaped(setup);
+    auto layout = shaper_layout_for(prepared, setup, available_width);
 
     int line_count = std::max(1, layout.line_count);
     if (line_clamp_ > 0 && line_clamp_ < line_count)
@@ -551,6 +663,126 @@ float Label::measured_height(float available_width) const {
     for (int i = 0; i < line_count; ++i)
         visible_height += layout.lines[static_cast<std::size_t>(i)].height;
     return std::ceil(visible_height);
+}
+
+float Label::measured_width(float available_width) const {
+    // How far the glyphs reach, which is not the space Yoga reserved for
+    // them. `intrinsic_width()` answers the layout question ("how much room
+    // does this want?") and returns 0 for a wrapped Label on purpose, so the
+    // parent's width drives the break. Reporting that as painted geometry
+    // describes a wrapped label as occupying no width — every appearance
+    // check downstream then has nothing to measure.
+    //
+    // Same shaped block `measured_height()` reads, so the width and the line
+    // count always describe one layout.
+    if ((!multi_line_ && !captured_wrap_fallback_) || text_.empty() ||
+        available_width <= 0.0f)
+        return intrinsic_width();
+
+    const ShapingSetup setup = shaping_setup();
+
+    // A clamped block paints only its first `line_clamp_` lines, so the
+    // widest line below the clamp is not on screen and must not count.
+    if (captured_wrap_fallback_ &&
+        cached_line_layout_usable(setup.display_text, setup.font_size,
+                                  setup.letter_spacing, available_width)) {
+        int line_count = static_cast<int>(cached_line_boxes_.size());
+        if (line_clamp_ > 0 && line_clamp_ < line_count)
+            line_count = line_clamp_;
+        float widest = 0.0f;
+        for (int i = 0; i < line_count; ++i)
+            widest = std::max(widest, cached_line_boxes_[static_cast<std::size_t>(i)].width);
+        return std::ceil(widest);
+    }
+
+    auto prepared = prepare_shaped(setup);
+    auto layout = shaper_layout_for(prepared, setup, available_width);
+
+    int line_count = std::max(1, layout.line_count);
+    if (line_clamp_ > 0 && line_clamp_ < line_count)
+        line_count = line_clamp_;
+    if (line_count == layout.line_count)
+        return std::ceil(layout.total_width);
+    float widest = 0.0f;
+    for (int i = 0; i < line_count; ++i)
+        widest = std::max(widest, layout.lines[static_cast<std::size_t>(i)].width);
+    return std::ceil(widest);
+}
+
+Label::PaintedTextExtents
+Label::painted_text_extents(float available_width) const {
+    PaintedTextExtents out;
+    if (text_.empty()) return out;
+
+    // Resolve typography exactly as paint() does: the same own->inherited
+    // cascade, the same family fallback, the same fully-resolved text-align.
+    const ResolvedTextStyle rs = resolve_text_style();
+    const std::string display_text = apply_text_transform(text_);
+
+    // Same automatic line metric intrinsic_height() / measured_height() use,
+    // including the attributed-run override.
+    const float lh_mult = rs.font_size < 12.0f ? 1.6f : 1.4f;
+    float auto_lh = rs.font_size * lh_mult;
+    auto& shaper = canvas::global_text_shaper();
+    if (has_attributed_) {
+        auto attributed = shaper.prepare(resolved_attributed_string(),
+                                         resolved_font_features());
+        if (attributed.line_height() > 0) auto_lh = attributed.line_height();
+    }
+    const float lh = line_height_ > 0 ? line_height_ : auto_lh;
+
+    auto prepared = has_attributed_
+        ? shaper.prepare(resolved_attributed_string(), resolved_font_features())
+        : shaper.prepare(display_text, rs.family, rs.font_size,
+                         effective_font_weight(), rs.font_slant,
+                         rs.letter_spacing, resolved_font_features());
+
+    const std::string wb = word_break();
+    canvas::BreakMode break_mode = canvas::BreakMode::normal;
+    if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
+    else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
+
+    const bool wraps = (multi_line_ || captured_wrap_fallback_) &&
+                       available_width > 0.0f;
+    const float shaping_line_height =
+        has_attributed_ && line_height_ <= 0.0f ? 0.0f : lh;
+    auto layout = shaper.layout(prepared,
+                                wraps ? available_width : 0.0f,
+                                shaping_line_height,
+                                /*max_lines=*/wraps ? 0 : 1,
+                                break_mode);
+
+    int line_count = std::max(1, layout.line_count);
+    if (line_clamp_ > 0 && line_clamp_ < line_count) line_count = line_clamp_;
+
+    float widest = 0.0f;
+    float height = 0.0f;
+    const int available_lines = static_cast<int>(layout.lines.size());
+    for (int i = 0; i < line_count && i < available_lines; ++i) {
+        const auto& line = layout.lines[static_cast<std::size_t>(i)];
+        widest = std::max(widest, line.width);
+        height += line.height;
+    }
+    if (widest <= 0.0f) widest = prepared.total_width();
+    if (height <= 0.0f) height = lh * static_cast<float>(line_count);
+
+    out.measured = true;
+    out.width = widest;
+    out.height = height;
+    out.line_count = line_count;
+
+    // Where the ink actually starts. paint() anchors at 0 / w*0.5 / w and lets
+    // the canvas text-align place the run, so a right-aligned label's glyphs
+    // are nowhere near its box origin.
+    const float box_width = available_width > 0.0f ? available_width : widest;
+    float ink_x = 0.0f;
+    switch (rs.text_align) {
+        case LabelAlign::center: ink_x = (box_width - widest) * 0.5f; break;
+        case LabelAlign::right:  ink_x = box_width - widest; break;
+        default: break;
+    }
+    out.ink = Rect{ink_x, 0.0f, widest, height};
+    return out;
 }
 
 float Label::baseline_y() const {
@@ -600,7 +832,7 @@ float Label::baseline_y() const {
     return ascent;
 }
 
-float Label::intrinsic_width() const {
+float Label::compute_intrinsic_width() const {
     // Report the natural shaped-text width so Yoga reserves enough horizontal
     // space for the full label content. Without this, long labels in flex-row
     // containers inherit a small parent width and clip mid-word.
