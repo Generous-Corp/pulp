@@ -22,6 +22,24 @@ namespace pulp::view {
 // ── Label ────────────────────────────────────────────────────────────────────
 
 namespace {
+/// The padding Yoga applied to a view, resolved the same way `yoga_layout()`
+/// resolves it: a percent Dimension wins, otherwise the per-edge float with the
+/// uniform value as its fallback. Logical (start/end) padding is not mirrored.
+struct TextPadding {
+    float left = 0.0f;
+    float top = 0.0f;
+    float right = 0.0f;
+    float bottom = 0.0f;
+};
+
+float resolve_padding_edge(const Dimension& dim, float per_edge, float uniform,
+                           float percent_basis) {
+    if (dim.unit == DimensionUnit::percent && dim.value > 0.0f)
+        return dim.value / 100.0f * percent_basis;
+    const float value = per_edge >= 0.0f ? per_edge : uniform;
+    return value > 0.0f ? value : 0.0f;
+}
+
 /// Not atomic: every caller is the paint/layout thread, and a counter that
 /// pretended to be thread-safe would invite use from somewhere it is not.
 Label::LineBreakPathCounts& line_break_counts() {
@@ -1312,6 +1330,34 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
     // wherever that background is transparent.
     if (editor_ != nullptr) return;
     if (text_.empty()) return;
+    // Yoga insets a view's CHILDREN by its padding, but a Label's text is not a
+    // child. When layout hands the text its own anonymous inline box that box
+    // arrives already inset, so the padding must not be applied a second time;
+    // otherwise the string is drawn straight into the border box and every
+    // native draw origin below has to inset itself. A captured browser line box
+    // is measured from the owner's border box and therefore already carries the
+    // padding, which is why the two paint paths disagree without this: honoring
+    // it here is what makes them start the text at the same content edge.
+    TextPadding pad;
+    if (!has_own_text_box()) {
+        const FlexStyle& f = flex();
+        // Yoga resolves percent padding against the parent's width, so mirror
+        // that basis rather than the label's own box.
+        const float basis =
+            parent() != nullptr ? parent()->bounds().width : text_box.width;
+        pad.left = resolve_padding_edge(f.dim_padding_left, f.padding_left,
+                                        f.padding, basis);
+        pad.right = resolve_padding_edge(f.dim_padding_right, f.padding_right,
+                                         f.padding, basis);
+        pad.top = resolve_padding_edge(f.dim_padding_top, f.padding_top,
+                                       f.padding, basis);
+        pad.bottom = resolve_padding_edge(f.dim_padding_bottom, f.padding_bottom,
+                                          f.padding, basis);
+    }
+    const float content_w =
+        std::max(0.0f, text_box.width - pad.left - pad.right);
+    const float content_h =
+        std::max(0.0f, text_box.height - pad.top - pad.bottom);
     // CSS-style typography cascade. For each property:
     //   1. Use the Label's own value if explicitly set.
     //   2. Otherwise walk up the parent chain via View::inheritable_*().
@@ -1628,14 +1674,14 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
     float baseline_y;
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
-            baseline_y = first_half_leading + first_line_ascent;
+            baseline_y = pad.top + first_half_leading + first_line_ascent;
             break;
         case canvas::TextVerticalAlign::bottom:
-            baseline_y = text_box.height - text_h + first_half_leading +
+            baseline_y = pad.top + content_h - text_h + first_half_leading +
                          first_line_ascent;
             break;
         case canvas::TextVerticalAlign::baseline:
-            baseline_y = text_box.height * 0.75f;
+            baseline_y = pad.top + content_h * 0.75f;
             break;
         case canvas::TextVerticalAlign::center:
         default:
@@ -1644,8 +1690,8 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             // the line-height is. The box is the text's OWN flex box, not the
             // widget bounds, so a container whose text is an anonymous flex
             // item centres within its own box rather than the parent's.
-            baseline_y = (text_box.height - text_h) * 0.5f + first_half_leading +
-                         first_line_ascent;
+            baseline_y = pad.top + (content_h - text_h) * 0.5f +
+                         first_half_leading + first_line_ascent;
             break;
     }
     if (captured_cache_usable && shaped_layout != nullptr &&
@@ -1675,7 +1721,7 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
     // alignment.
     const LabelAlign effective_text_align = resolve_effective_align_();
 
-    float x = 0;
+    float x = pad.left;
     switch (effective_text_align) {
         case LabelAlign::left:
         case LabelAlign::auto_:         // unreachable — resolved above; keeps switch exhaustive
@@ -1684,11 +1730,11 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             break;
         case LabelAlign::center:
             canvas.set_text_align(canvas::TextAlign::center);
-            x = text_box.width * 0.5f;
+            x = pad.left + content_w * 0.5f;
             break;
         case LabelAlign::right:
             canvas.set_text_align(canvas::TextAlign::right);
-            x = text_box.width;
+            x = pad.left + content_w;
             break;
         case LabelAlign::justify:
             // Emit canvas TextAlign::justify so backends that wire
@@ -1733,7 +1779,7 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         // (CSS truncates at the trailing edge for all three). UTF-8-safe via
         // codepoint binary-search in truncate_to_width().
         float draw_x = x;
-        float available_width = text_box.width;
+        float available_width = content_w;
         if (captured_single_line) {
             draw_x = shaped_layout->lines.front().x_offset;
             available_width = std::max(0.0f, text_box.width - draw_x);
