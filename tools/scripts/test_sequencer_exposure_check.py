@@ -44,8 +44,25 @@ def row_evidence(path: str, *needles: str) -> dict:
     return {"path": path, "needles": list(needles)}
 
 
+def authority(admission: str, *, profile: str | None = None,
+              bounds: dict | None = None, codes: list[str] | None = None) -> dict:
+    return {
+        "admission": admission,
+        "writer_profile": profile,
+        "bounds": bounds,
+        "refusal_codes": codes or [],
+    }
+
+
+EDITOR_BOUNDS = {
+    "max_transaction_retained_bytes": 16 * 1024 * 1024,
+    "max_session_retained_bytes": 256 * 1024 * 1024,
+}
+
+
 def surface(disposition: str, rationale: str, items: list[dict] | None = None,
-            *, owner: str | None = None, dependencies: list[str] | None = None) -> dict:
+            *, owner: str | None = None, dependencies: list[str] | None = None,
+            admits: dict | None = None) -> dict:
     result = {
         "disposition": disposition,
         "rationale": rationale,
@@ -54,6 +71,10 @@ def surface(disposition: str, rationale: str, items: list[dict] | None = None,
     }
     if owner is not None:
         result["owner"] = owner
+    if disposition == "exposed":
+        result["authority"] = admits or authority("read_only")
+    elif admits is not None:
+        result["authority"] = admits
     return result
 
 
@@ -79,14 +100,39 @@ def fixture(root: Path, accepted_head: str, merge_sha: str) -> dict:
         "tools/cli/cmd_control.cpp": "sequencer.control CLI projection",
         "tools/mcp/mcp_control_tools.cpp": "sequencer.control MCP projection",
         "test/test_control.cpp": "sequencer.control executor acceptance test",
+        # The checker reads the authority vocabulary out of this pair rather than
+        # carrying its own copy, so the fixture must ship a readable one.
+        "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp": (
+            "inline constexpr std::size_t kProposalMaxTransactionRetainedBytes = 1024ull * 1024ull;\n"
+            "inline constexpr std::size_t kProposalMaxSessionRetainedBytes = 32ull * 1024ull * 1024ull;\n"
+            "inline constexpr std::size_t kEditorMaxTransactionRetainedBytes = 16ull * 1024ull * 1024ull;\n"
+            "inline constexpr std::size_t kEditorMaxSessionRetainedBytes = 256ull * 1024ull * 1024ull;\n"
+        ),
+        "tools/timeline/src/writer_profile.cpp": (
+            "WriterProfile writer_profile_by_name(std::string_view name) {\n"
+            "  if (name == \"proposal\") { return proposal_writer_profile(); }\n"
+            "  if (name == \"editor\") { return editor_writer_profile(); }\n"
+            "  if (name == \"trusted\") { return trusted_writer_profile(); }\n"
+            "  return {};\n"
+            "}\n"
+            "\n"
+            "const char* conflict_code_name(ConflictCode code) {\n"
+            "  switch (code) {\n"
+            "    case ConflictCode::CapabilityDenied: return \"capability_denied\";\n"
+            "    case ConflictCode::WriterQuotaExhausted: return \"writer_quota_exhausted\";\n"
+            "    case ConflictCode::StaleRevision: return \"stale_revision\";\n"
+            "  }\n"
+            "  return \"capability_denied\";\n"
+            "}\n"
+        ),
     }
     for path, text in files.items():
         write(root, path, text)
 
     na = lambda why: surface("not_applicable", why)  # noqa: E731
     return {
-        "schema_version": 1,
-        "ledger_id": "dev.pulp.sequencer-exposure@1",
+        "schema_version": 2,
+        "ledger_id": "dev.pulp.sequencer-exposure@2",
         "audit": {
             "status": "complete",
             "scope": "Calibrated checker fixture.",
@@ -114,7 +160,10 @@ def fixture(root: Path, accepted_head: str, merge_sha: str) -> dict:
                     "offline_timeline_cli": surface("exposed", "Real CLI definition and handler.", [
                         evidence("cli_definition", "core/timeline/schema/timeline_cli_verbs.json", "timeline.open"),
                         evidence("cli_handler", "tools/cli/cmd_seq.cpp", "cmd_seq", "timeline.open"),
-                    ]),
+                    ], admits=authority(
+                        "registered_writer", profile="editor", bounds=dict(EDITOR_BOUNDS),
+                        codes=["capability_denied", "writer_quota_exhausted", "stale_revision"],
+                    )),
                     "offline_timeline_mcp": surface("exposed", "Real MCP definition and handler.", [
                         evidence("mcp_definition", "core/timeline/schema/timeline_mcp_tools.json", "pulp_timeline_project_open"),
                         evidence("mcp_handler", "tools/mcp/mcp_timeline_tools.cpp", "handle_timeline_project_open", "ToolBinding"),
@@ -235,6 +284,67 @@ def main() -> int:
         errors = validate_document(valid, root)
         if errors:
             raise AssertionError("valid fixture failed:\n" + "\n".join(errors))
+
+        # An exposed surface must declare the authority it admits a caller under.
+        # The rejection is the assertion that matters, so it is stated first and
+        # both of its controls are stated beside it: without the pair, a checker
+        # that accepted everything and a checker that rejected everything would
+        # look identical here.
+        missing_authority = copy.deepcopy(valid)
+        del missing_authority["rows"][0]["surfaces"]["offline_timeline_cli"]["authority"]
+        expect_red(
+            "exposed surface without an authority descriptor",
+            missing_authority, root,
+            "authority: required for an exposed surface",
+        )
+        if validate_document(copy.deepcopy(valid), root):
+            raise AssertionError(
+                "control: the same surface WITH its authority descriptor was rejected"
+            )
+        na_surface = copy.deepcopy(valid)
+        if "authority" in na_surface["rows"][0]["surfaces"]["live_product_control"]:
+            raise AssertionError("control fixture is not a bare not_applicable surface")
+        if validate_document(na_surface, root):
+            raise AssertionError(
+                "control: a not_applicable surface without an authority descriptor was rejected"
+            )
+
+        # The descriptor is checked against the shipped C++ vocabulary, not against
+        # a transcription of it, so a row cannot name a profile, quota, or refusal
+        # code the boundaries do not implement.
+        wrong_quota = copy.deepcopy(valid)
+        wrong_quota["rows"][0]["surfaces"]["offline_timeline_cli"]["authority"]["bounds"][
+            "max_session_retained_bytes"
+        ] = 1
+        expect_red(
+            "writer bounds disagreeing with the shipped ceiling",
+            wrong_quota, root, "disagrees with the 'editor' profile",
+        )
+        unknown_profile = copy.deepcopy(valid)
+        unknown_profile["rows"][0]["surfaces"]["offline_timeline_cli"]["authority"][
+            "writer_profile"
+        ] = "supervisor"
+        expect_red(
+            "writer profile absent from writer_profile_by_name",
+            unknown_profile, root, "supervisor",
+        )
+        unknown_code = copy.deepcopy(valid)
+        unknown_code["rows"][0]["surfaces"]["offline_timeline_cli"]["authority"][
+            "refusal_codes"
+        ].append("not_a_real_code")
+        expect_red(
+            "refusal code absent from conflict_code_name",
+            unknown_code, root, "not_a_real_code",
+        )
+
+        # A vocabulary this cannot read is an error, never a skip.
+        unreadable = Path(directory) / "no-vocabulary"
+        unreadable.mkdir()
+        if not any(
+            "authority vocabulary" in error
+            for error in validate_document(copy.deepcopy(valid), unreadable)
+        ):
+            raise AssertionError("an unreadable authority vocabulary was skipped, not refused")
         provenance_errors = validate_git_provenance(valid, root)
         if provenance_errors:
             raise AssertionError("valid provenance failed:\n" + "\n".join(provenance_errors))

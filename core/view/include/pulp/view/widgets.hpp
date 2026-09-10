@@ -260,6 +260,32 @@ public:
     /// `intrinsic_width()`, which is already the shaped width for them.
     float measured_width(float available_width) const;
 
+    /// The extents of the glyphs this Label will actually paint, given the
+    /// content width it has been laid out at. `measured_width()` above
+    /// answers the width half of this question on its own; this also reports
+    /// the painted height, the clamped line count, and where the ink lands.
+    ///
+    /// `intrinsic_width()` answers a different question and deliberately
+    /// returns 0 for a multi-line Label so the parent's available width drives
+    /// wrapping — a Yoga contract, not a measurement. Anything that wants to
+    /// know where the ink lands (does it collide with a sibling, does it run
+    /// past its own box) therefore cannot use it: a multi-line Label reads as
+    /// having no text at all. This runs the same shaper, the same
+    /// own->inherited cascade, the same text-transform, the same break mode and
+    /// the same line clamp that `paint()` does, and reports the result in the
+    /// Label's LOCAL coordinates.
+    ///
+    /// `measured` false means the extents are unknown (empty text), which is
+    /// not the same as zero-sized and must never be reported as "no overlap".
+    struct PaintedTextExtents {
+        bool measured = false;
+        float width = 0.0f;       ///< widest painted line
+        float height = 0.0f;      ///< total painted height (line clamp applied)
+        int line_count = 0;
+        Rect ink{};               ///< local ink box, text-align applied to x
+    };
+    PaintedTextExtents painted_text_extents(float available_width) const;
+
     /// One captured line of text: where it sits in this Label's box, and which
     /// slice of the text it holds (UTF-16 code units, as the capture indexes).
     struct CachedLineBox {
