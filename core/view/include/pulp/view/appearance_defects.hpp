@@ -30,6 +30,16 @@ enum class AppearanceDefectKind {
     /// `stroke_text`) share pixels. These are drawn by a command stream, not
     /// by a layout node, so no box-based check can see them.
     canvas_text_overlap,
+    /// A clipping container is on screen with area of its own, and every
+    /// piece of text beneath it is clipped away — the user sees an empty
+    /// panel. The signature is exact: N text runs in the subtree, all N
+    /// clipped, N >= 1. A scroll frame showing some of its rows measures at
+    /// least one and is not this; a frame scrolled entirely past its text
+    /// measures none and is, which is honest, because that frame is blank to
+    /// look at. This is the one defect the collision detectors are
+    /// structurally unable to see: text that never lands anywhere produces no
+    /// pair to compare and no box to outgrow, so the report reads clean.
+    container_paints_no_text,
 };
 
 const char* to_string(AppearanceDefectKind kind);
@@ -75,6 +85,13 @@ struct AppearanceCoverage {
     int skipped_invisible = 0;
     int skipped_empty = 0;
     int skipped_clipped = 0;
+    /// The part of `skipped_clipped` that fell inside a container reported as
+    /// `container_paints_no_text`. Clipping means two different things and a
+    /// single count conflates them: a row scrolled below the fold was
+    /// correctly not evaluated, while text inside a container that paints
+    /// nothing is a region the walk could not see into at all. Only the
+    /// second is blindness, and only the second is counted here.
+    int skipped_clipped_in_empty_container = 0;
     int skipped_unmeasurable = 0;
     int skipped_degenerate_box = 0;
 
@@ -97,8 +114,12 @@ struct AppearanceCoverage {
     }
     int text_runs_total() const { return text_runs_measured + total_skipped(); }
 
-    /// A run that measured nothing, or measured a minority of the text it saw,
-    /// cannot support a claim of absence.
+    /// A run that measured nothing, measured a minority of the text it saw,
+    /// or could not see into a region at all cannot support a claim of
+    /// absence. The region term is a veto rather than a ratio: a caller that
+    /// reads this boolean and nothing else must not be told a panel is
+    /// well-measured while an entire container of it was never reachable,
+    /// however small that container is against the rest of the screen.
     bool trustworthy() const;
 
     std::string to_string() const;
@@ -111,6 +132,9 @@ struct AppearanceFinding {
     Rect a_rect{}, b_rect{}, overlap{};
     float painted_width = 0.0f;
     float box_width = 0.0f;
+    /// For `container_paints_no_text`: how many text runs the container holds,
+    /// every one of them clipped away.
+    int clipped_runs = 0;
     /// How far the ink reaches past the worse of the box's two vertical edges.
     /// Positive whenever the glyphs are outside the box, whether because they
     /// are wider than it or because they were placed off one of its sides.

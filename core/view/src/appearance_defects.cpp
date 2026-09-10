@@ -12,6 +12,7 @@
 #include <cmath>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 namespace pulp::view {
 namespace {
@@ -65,9 +66,44 @@ bool transform_is_axis_aligned(const CanvasTextState& s) {
            s.a > 0.0f && s.d > 0.0f;
 }
 
+/// A container that clips its children, and what the walk found beneath it.
+/// Tracked so an absence can be attributed to a region rather than reported as
+/// a single number for the whole screen.
+struct ClipScope {
+    const View* view = nullptr;
+    Rect box{};             ///< the container's own box, absolute
+    Rect clip{};            ///< its effective clip after every ancestor
+    int parent = -1;        ///< index of the nearest enclosing scope, or -1
+    int measured = 0;       ///< text runs beneath it that reached the screen
+    int clipped = 0;        ///< text runs beneath it cut away entirely
+    std::string sample_text;///< the first clipped string, so a finding is concrete
+};
+
 struct Walker {
     const AppearanceOptions& options;
     AppearanceReport& report;
+    std::vector<ClipScope> scopes;
+    std::vector<int> open_scopes;
+
+    /// A run reached the screen. Every enclosing container gets the credit,
+    /// because a container that shows even one string is not empty.
+    void note_measured() {
+        ++report.coverage.text_runs_measured;
+        for (const int i : open_scopes)
+            ++scopes[static_cast<std::size_t>(i)].measured;
+    }
+
+    /// A run was cut away entirely. Charged to every enclosing container; which
+    /// of them is actually at fault is decided after the walk, by whether any
+    /// sibling text survived.
+    void note_clipped(const std::string& text) {
+        ++report.coverage.skipped_clipped;
+        for (const int i : open_scopes) {
+            auto& scope = scopes[static_cast<std::size_t>(i)];
+            ++scope.clipped;
+            if (scope.sample_text.empty()) scope.sample_text = text;
+        }
+    }
 
     void record_skip(TextRunSkip why) {
         switch (why) {
@@ -84,7 +120,7 @@ struct Walker {
         if (clip_active) {
             const Rect visible = intersect_rect(run.ink, clip);
             if (visible.width <= 0.0f || visible.height <= 0.0f) {
-                record_skip(TextRunSkip::clipped_away);
+                note_clipped(run.text);
                 return;
             }
             run.clip = clip;
@@ -93,7 +129,7 @@ struct Walker {
             run.clip = run.ink;
             run.visible_ink = run.ink;
         }
-        ++report.coverage.text_runs_measured;
+        note_measured();
         report.runs.push_back(std::move(run));
     }
 
@@ -246,7 +282,7 @@ struct Walker {
                         visible = intersect_rect(ink, effective);
                         if (visible.width <= 0.0f || visible.height <= 0.0f) {
                             ++report.coverage.canvas_text_skipped;
-                            ++report.coverage.skipped_clipped;
+                            note_clipped(cmd.text);
                             break;
                         }
                     }
@@ -266,7 +302,7 @@ struct Walker {
                     run.scroll_frame = scroll_frame;
                     run.from_canvas = true;
                     ++report.coverage.canvas_text_measured;
-                    ++report.coverage.text_runs_measured;
+                    note_measured();
                     report.runs.push_back(std::move(run));
                     break;
                 }
@@ -284,8 +320,10 @@ struct Walker {
 
         Rect clip = inherited_clip;
         bool active = clip_active;
-        if (view.overflow() == View::Overflow::hidden ||
-            view.overflow() == View::Overflow::scroll) {
+        const bool clips_children =
+            view.overflow() == View::Overflow::hidden ||
+            view.overflow() == View::Overflow::scroll;
+        if (clips_children) {
             clip = active ? intersect_rect(inherited_clip, abs) : abs;
             active = true;
         }
@@ -296,6 +334,20 @@ struct Walker {
             // manufactures collisions that no user can see.
             count_hidden_subtree(view);
             return;
+        }
+
+        // Opened only for a visible container: a hidden one paints nothing by
+        // definition, which the invisible skip already records.
+        int scope_index = -1;
+        if (clips_children) {
+            ClipScope scope;
+            scope.view = &view;
+            scope.box = abs;
+            scope.clip = clip;
+            scope.parent = open_scopes.empty() ? -1 : open_scopes.back();
+            scopes.push_back(std::move(scope));
+            scope_index = static_cast<int>(scopes.size()) - 1;
+            open_scopes.push_back(scope_index);
         }
 
         collect_from(view, abs, clip, active, order, scroll_frame);
@@ -314,6 +366,8 @@ struct Walker {
 
         for (auto* child : view.sorted_children_by_z_index())
             walk(*child, child_origin, clip, active, child_frame, paint_order);
+
+        if (scope_index >= 0) open_scopes.pop_back();
     }
 
     void count_hidden_subtree(const View& view) {
@@ -414,6 +468,8 @@ const char* to_string(AppearanceDefectKind kind) {
         case AppearanceDefectKind::text_overlap: return "text_overlap";
         case AppearanceDefectKind::painted_wider_than_box: return "painted_wider_than_box";
         case AppearanceDefectKind::canvas_text_overlap: return "canvas_text_overlap";
+        case AppearanceDefectKind::container_paints_no_text:
+            return "container_paints_no_text";
     }
     return "unknown";
 }
@@ -422,6 +478,17 @@ bool AppearanceCoverage::trustworthy() const {
     if (text_runs_measured <= 0) return false;
     const int total = text_runs_total();
     if (total <= 0) return false;
+    // A container that paints none of its text is a region the walk could not
+    // see into, and one is enough: an empty finding list says nothing about
+    // what that container holds, however small it is against the rest of the
+    // screen. So it vetoes rather than adding to a ratio, which is the only
+    // form that protects a caller who reads this boolean and nothing else.
+    //
+    // Clipping on its own stays innocent. Counting every clipped run as
+    // blindness would make a scrollable list untrustworthy for the ordinary
+    // reason that most of it is below the fold, which is a worse answer than
+    // the one being fixed.
+    if (skipped_clipped_in_empty_container > 0) return false;
     // Skips that are not evidence of blindness: text that is genuinely absent,
     // hidden, or scrolled off screen was correctly not evaluated.
     const int blind = skipped_unmeasurable + skipped_degenerate_box;
@@ -434,7 +501,9 @@ std::string AppearanceCoverage::to_string() const {
        << " text runs measured"
        << " (skipped: " << skipped_invisible << " invisible, "
        << skipped_empty << " empty, "
-       << skipped_clipped << " clipped away, "
+       << skipped_clipped << " clipped away ("
+       << skipped_clipped_in_empty_container
+       << " of them inside a container that paints nothing), "
        << skipped_unmeasurable << " unmeasurable, "
        << skipped_degenerate_box << " zero-area box)"
        << "; canvas: " << canvas_text_measured << " of " << canvas_text_commands
@@ -442,6 +511,11 @@ std::string AppearanceCoverage::to_string() const {
        << "; pairs: " << pairs_compared << " compared, "
        << pairs_skipped_cross_frame << " skipped as cross-scroll-frame"
        << "; shaping: " << (shaping_is_real ? "real" : "ESTIMATED");
+    if (skipped_clipped_in_empty_container > 0)
+        os << "\n  BLIND REGION: " << skipped_clipped_in_empty_container
+           << " text run(s) sit inside a container that paints none of its"
+              " text. Nothing here is evidence about what that container"
+              " holds.";
     if (!trustworthy())
         os << "\n  NOT TRUSTWORTHY: too little of the surface was measured for"
               " an empty result to mean anything.";
@@ -453,7 +527,12 @@ std::string AppearanceFinding::describe() const {
     os.setf(std::ios::fixed);
     os.precision(1);
     os << to_string(kind) << ": ";
-    if (kind == AppearanceDefectKind::painted_wider_than_box) {
+    if (kind == AppearanceDefectKind::container_paints_no_text) {
+        os << a_id << " is on screen at " << rect_str(a_rect)
+           << " but all " << clipped_runs
+           << " of its text runs are clipped away (e.g. \"" << a_text
+           << "\"); its clip is " << rect_str(b_rect);
+    } else if (kind == AppearanceDefectKind::painted_wider_than_box) {
         os << a_id << " \"" << a_text << "\" paints " << painted_width
            << "px of ink outside its " << box_width << "px box by "
            << overflow_px << "px: ink " << rect_str(a_rect) << " vs box "
@@ -483,11 +562,54 @@ AppearanceReport detect_appearance_defects(const View& root,
     AppearanceReport report;
     report.coverage.shaping_is_real = canvas::global_text_shaper().uses_real_shaping();
 
-    Walker walker{options, report};
+    Walker walker{options, report, {}, {}};
     int paint_order = 0;
     const Rect root_abs{0.0f, 0.0f, root.bounds().width, root.bounds().height};
     walker.walk(root, {0.0f, 0.0f, 0.0f, 0.0f}, root_abs, false, nullptr,
                 paint_order);
+
+    // Detector 4 — a container that is on screen but paints none of its text.
+    //
+    // This is the defect the collision detectors are structurally unable to
+    // see. Text that lands nowhere produces no pair to compare and no box to
+    // outgrow, so an empty panel and a correct one are the same empty finding
+    // list. The signature separating it from an ordinary scroll frame is that
+    // NOTHING beneath the container survived its clip: a list showing some of
+    // its rows measured at least one run and is not reported here.
+    {
+        const auto& scopes = walker.scopes;
+        std::vector<bool> qualifies(scopes.size(), false);
+        for (std::size_t i = 0; i < scopes.size(); ++i) {
+            const auto& scope = scopes[i];
+            qualifies[i] = scope.clipped > 0 && scope.measured == 0 &&
+                           scope.box.width > 0.0f && scope.box.height > 0.0f &&
+                           scope.clip.width > 0.0f && scope.clip.height > 0.0f;
+        }
+        for (std::size_t i = 0; i < scopes.size(); ++i) {
+            if (!qualifies[i]) continue;
+            // Name the outermost container only. A collapsed panel takes every
+            // frame nested inside it down too, and listing each one describes
+            // one defect several times over.
+            bool inside_another = false;
+            for (int p = scopes[i].parent; p >= 0; p = scopes[static_cast<std::size_t>(p)].parent) {
+                if (qualifies[static_cast<std::size_t>(p)]) { inside_another = true; break; }
+            }
+            if (inside_another) continue;
+
+            const auto& scope = scopes[i];
+            // Reported scopes never nest, so no clipped run is counted twice.
+            report.coverage.skipped_clipped_in_empty_container += scope.clipped;
+
+            AppearanceFinding f;
+            f.kind = AppearanceDefectKind::container_paints_no_text;
+            f.a_id = node_label(*scope.view);
+            f.a_text = scope.sample_text;
+            f.a_rect = scope.box;
+            f.b_rect = scope.clip;
+            f.clipped_runs = scope.clipped;
+            report.findings.push_back(std::move(f));
+        }
+    }
 
     // Detector 2 — glyphs painted outside the box that is meant to hold them.
     //

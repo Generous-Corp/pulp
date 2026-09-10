@@ -43,6 +43,18 @@ Label* add_label(View& parent, const std::string& id, const std::string& text,
     return raw;
 }
 
+/// A container that clips whatever is placed under it, at an exact box.
+View* add_clipper(View& parent, const std::string& id, Rect box,
+                  View::Overflow overflow = View::Overflow::hidden) {
+    auto container = std::make_unique<View>();
+    container->set_id(id);
+    container->set_overflow(overflow);
+    auto* raw = container.get();
+    parent.add_child(std::move(container));
+    raw->set_bounds(box);
+    return raw;
+}
+
 CanvasDrawCmd text_cmd(const std::string& text, float x, float y, float size) {
     CanvasDrawCmd cmd;
     cmd.type = CanvasDrawCmd::Type::fill_text;
@@ -331,6 +343,9 @@ TEST_CASE("text scrolled out of its container is not a collision",
     // screen and cannot collide with anything.
     REQUIRE(report.coverage.skipped_clipped == 1);
     REQUIRE(count_kind(report, AppearanceDefectKind::text_overlap) == 0);
+    // The viewport shows none of the content it holds, which is what a viewer
+    // sees as a blank panel, so it is reported as one.
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 1);
 }
 
 TEST_CASE("scrolling a row into view makes it collidable again",
@@ -457,4 +472,153 @@ TEST_CASE("coverage is printed on every run", "[appearance][instrument]") {
     REQUIRE(text.find("text runs measured") != std::string::npos);
     REQUIRE(text.find("skipped:") != std::string::npos);
     REQUIRE(text.find("shaping:") != std::string::npos);
+}
+
+TEST_CASE("a container that paints none of its text is reported",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 860});
+
+    // A panel that is on screen with area of its own, whose content was laid
+    // out past the bottom of it. Every string it holds is cut away, so a
+    // viewer sees an empty box. This is the shape the collision detectors
+    // cannot see: text that lands nowhere makes no pair and outgrows no box.
+    auto* panel = add_clipper(root, "panel", {0, 0, 400, 200});
+    add_label(*panel, "row_a", "Bloom", {12, 400, 200, 20});
+    add_label(*panel, "row_b", "Rulers", {12, 440, 200, 20});
+    add_label(*panel, "row_c", "Status info", {12, 480, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 1);
+    const auto& f = report.findings.front();
+    REQUIRE(f.a_id == "panel");
+    REQUIRE(f.clipped_runs == 3);
+
+    // The point of the kind: without it this tree reads as a clean pass,
+    // because neither collision detector has anything to compare.
+    REQUIRE(count_kind(report, AppearanceDefectKind::text_overlap) == 0);
+    REQUIRE(count_kind(report, AppearanceDefectKind::painted_wider_than_box) == 0);
+
+    // The coverage report must name the region rather than fold it into one
+    // number, and must refuse to call itself trustworthy about it.
+    REQUIRE(report.coverage.skipped_clipped == 3);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 3);
+    REQUIRE_FALSE(report.coverage.trustworthy());
+    REQUIRE(report.to_string().find("BLIND REGION") != std::string::npos);
+}
+
+TEST_CASE("a scrolling list showing some of its rows is not an empty container",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+
+    // The negative control. A list is clipped for the ordinary reason that
+    // most of it is below the fold. Treating that as blindness would make
+    // every scrollable surface untrustworthy, which is a worse answer than the
+    // one being fixed.
+    auto scroller = std::make_unique<ScrollView>();
+    scroller->set_id("list");
+    scroller->set_overflow(View::Overflow::scroll);
+    auto* raw = scroller.get();
+    root.add_child(std::move(scroller));
+    raw->set_bounds({0, 0, 400, 120});
+    raw->set_content_size({400, 900});
+
+    add_label(*raw, "row_visible_a", "Theme", {12, 10, 200, 20});
+    add_label(*raw, "row_visible_b", "Bloom", {12, 50, 200, 20});
+    add_label(*raw, "row_below_a", "Rulers", {12, 600, 200, 20});
+    add_label(*raw, "row_below_b", "Status info", {12, 640, 200, 20});
+
+    raw->set_scroll(0.0f, 0.0f);
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    // Two rows on screen, two below the fold — the partially-clipped case.
+    REQUIRE(report.coverage.text_runs_measured == 2);
+    REQUIRE(report.coverage.skipped_clipped == 2);
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 0);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 0);
+    REQUIRE(report.coverage.trustworthy());
+    REQUIRE(report.to_string().find("BLIND REGION") == std::string::npos);
+}
+
+TEST_CASE("a well-formed panel inside a clipping container is clean",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+
+    // The clean-scene control. The same container shape as the defect fixture,
+    // with its content where it belongs.
+    auto* panel = add_clipper(root, "panel", {0, 0, 400, 200});
+    add_label(*panel, "row_a", "Bloom", {12, 20, 200, 20});
+    add_label(*panel, "row_b", "Rulers", {12, 60, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.clean());
+    REQUIRE(report.coverage.text_runs_measured == 2);
+    REQUIRE(report.coverage.skipped_clipped == 0);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 0);
+    REQUIRE(report.coverage.trustworthy());
+}
+
+TEST_CASE("one collapsed panel is reported once, at its outermost container",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 400, 860});
+
+    // A collapsed panel drags every frame nested inside it down with it.
+    // Naming each one describes a single defect several times over.
+    auto* outer = add_clipper(root, "panel", {0, 0, 400, 200});
+    auto* inner = add_clipper(*outer, "panel_body", {0, 40, 400, 160});
+    add_label(*inner, "row_a", "Bloom", {12, 400, 200, 20});
+    add_label(*inner, "row_b", "Rulers", {12, 440, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 1);
+    REQUIRE(report.findings.front().a_id == "panel");
+    // Counted once, not once per enclosing frame.
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 2);
+}
+
+TEST_CASE("one unreachable container is enough to withdraw a clean verdict",
+          "[appearance][instrument]") {
+    View root;
+    root.set_bounds({0, 0, 400, 860});
+
+    // A screen the detector measured well, with one small region it could not
+    // see into at all. A ratio would wave this through — 8 runs measured
+    // against 1 clipped reads as ample coverage — and a caller reading only
+    // the boolean would be told the panel is well measured while a whole
+    // container of it was never reachable.
+    for (int i = 0; i < 8; ++i) {
+        add_label(root, "seen" + std::to_string(i), "Output",
+                  {0, static_cast<float>(i * 30), 120, 18});
+    }
+    auto* tooltip = add_clipper(root, "tooltip", {200, 400, 160, 40});
+    add_label(*tooltip, "tip", "Reset all gains", {4, 200, 150, 18});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(report.coverage.text_runs_measured == 8);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 1);
+    REQUIRE_FALSE(report.coverage.trustworthy());
+
+    // The control: the identical screen with the unreachable region removed
+    // must be trustworthy, or something other than that region decided it.
+    View control_root;
+    control_root.set_bounds({0, 0, 400, 860});
+    for (int i = 0; i < 8; ++i) {
+        add_label(control_root, "seen" + std::to_string(i), "Output",
+                  {0, static_cast<float>(i * 30), 120, 18});
+    }
+    const auto control = detect_appearance_defects(control_root);
+    REQUIRE(control.coverage.text_runs_measured == 8);
+    REQUIRE(control.coverage.trustworthy());
 }
