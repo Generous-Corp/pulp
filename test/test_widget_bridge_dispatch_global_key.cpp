@@ -236,3 +236,82 @@ TEST_CASE("core root-key dispatcher reaches only the matching WidgetBridge",
     REQUIRE(engine_a.evaluate("count()").getWithDefault<int>(-1) == 1);
     REQUIRE(engine_b.evaluate("count()").getWithDefault<int>(-1) == 0);
 }
+
+TEST_CASE("the global fan-out suppresses only a press the bridge was offered",
+          "[view][widget-bridge][keyboard][navigation]") {
+    // A bridge that lends its root to a materialized document gets arrow keys
+    // twice when the host offers the press through the navigation-claim hook
+    // and then fans the same press out globally: an open listbox advances two
+    // items per press, so half its entries are unreachable. Suppressing on the
+    // claim alone is the wrong cure — the hook reports "handled" only when a JS
+    // listener called preventDefault(), and host key paths that never invoke
+    // the hook arrive at the fan-out having offered nothing, so a claim-keyed
+    // skip drops those presses outright and the arrows go dead. The
+    // discriminator has to be the offer, not the claim.
+    using namespace pulp::view;
+    using pulp::state::StateStore;
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // No preventDefault: this listener is the "JS saw it but did not consume
+    // it" case, which is exactly what the claim-keyed skip could not tell
+    // apart from "JS never saw it".
+    bridge.load_script(R"JS(
+        var events = [];
+        window.addEventListener('keydown', function(e) { events.push(e.key); });
+        function count() { return events.length; }
+    )JS");
+    auto count = [&] { return engine.evaluate("count()").getWithDefault<int>(-1); };
+
+    const int down = static_cast<int>(KeyCode::down);
+    REQUIRE(engine.evaluate("claimDocumentNavigationFocus()")
+                .getWithDefault<bool>(false));
+
+    auto offer = [&] {
+        KeyEvent ev;
+        ev.key = KeyCode::down;
+        ev.modifiers = 0;
+        ev.is_down = true;
+        REQUIRE(static_cast<bool>(root.on_navigation_key));
+        root.on_navigation_key(ev);
+    };
+
+    SECTION("an offered press is delivered once, not twice") {
+        offer();
+        const int after_offer = count();
+        // Control: the offer itself reached the listener, so a flat count
+        // across the fan-out below means suppression, not a dead script.
+        REQUIRE(after_offer == 1);
+
+        WidgetBridge::dispatch_global_key(down, 0, /*is_down=*/true);
+        CHECK(count() == 1);
+    }
+
+    SECTION("a press the hook never offered is still delivered") {
+        // The claim is held, but this press did not come through the hook.
+        WidgetBridge::dispatch_global_key(down, 0, /*is_down=*/true);
+        CHECK(count() == 1);
+    }
+
+    SECTION("the stamp is consumed, so the next press is not swallowed") {
+        offer();
+        WidgetBridge::dispatch_global_key(down, 0, /*is_down=*/true);
+        REQUIRE(count() == 1);
+
+        // A second, identical press with no offer behind it must land.
+        WidgetBridge::dispatch_global_key(down, 0, /*is_down=*/true);
+        CHECK(count() == 2);
+    }
+
+    SECTION("releasing the claim drops any pending stamp") {
+        offer();
+        REQUIRE(count() == 1);
+        engine.evaluate("releaseDocumentNavigationFocus()");
+
+        WidgetBridge::dispatch_global_key(down, 0, /*is_down=*/true);
+        CHECK(count() == 2);
+    }
+}
