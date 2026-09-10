@@ -864,6 +864,31 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
 
+## `Error: Failed to download` in the required macOS gate is brew, not you
+
+A red `macos` whose log dies between `gpu-provenance-hydration: PASS` and
+`Install ccache` — roughly 180 lines, no compile line, no ctest output — is the
+`brew update (macOS)` step, not the branch. Homebrew exits 1 with
+
+```
+Error: Failed to download !
+```
+
+when a tap fetch misses the CDN, even though brew itself remains usable and the
+run goes on to update taps successfully two lines later. That step is now
+non-fatal (`|| echo …`), and the `Install ccache` step below it already retries
+behind its own `brew update`, which is what actually recovers the stale-config
+case the step exists for. So:
+
+- If you see this on an older run, re-run the job; the branch is fine.
+- Read past the brew group before believing a `macos` failure at all. The
+  distinguishing feature of a real failure is a compile line or a ctest
+  summary; a gate that died before either one failed on infrastructure.
+
+This is the same class of trap as a 31-line preamble death from a stale base —
+a required check going red for a reason that has nothing to do with the diff,
+and that looks identical to a test failure at the check-name level.
+
 ## A red advisory alias does not necessarily mean tests failed
 
 `linux` and `windows` are **alias checks**: jobs that mirror real advisory
