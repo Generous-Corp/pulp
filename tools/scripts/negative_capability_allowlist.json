@@ -2,13 +2,6 @@
   "$comment": "Refusals the playback compiler raises against constructs a user can author. An entry records who owns the refusal and why it stands; it is not a claim that the refusal is correct. status=live-defect means the document is authorable today and unplayable, and the refusal is a placeholder for work that has not happened; status=intended means the refusal is the answer. Enforced by tools/scripts/negative_capability_check.py.",
   "refusals": [
     {
-      "code": "TrimmedGrooveUnsupported",
-      "file": "core/playback/src/sequence_content_lowerer.cpp",
-      "owner": "playback",
-      "status": "live-defect",
-      "reason": "A nested MIDI leaf with authored groove refuses when SequenceRef trimming changes its source window, because groove displacement can move events across either retained boundary and the compiler has no defined chase, clip or discard rule; the refusal stands until source-window groove inheritance is specified."
-    },
-    {
       "code": "TrimmedRegisteredContentUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
@@ -26,15 +19,15 @@
       "code": "NestedMixerPanUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
-      "status": "live-defect",
-      "reason": "set_track_mixer authors a stereo balance on a track that a SequenceRef then nests. Flattening folds the child into the parent track, a clip carries no pan of its own, and the parent's single pan also serves every other clip on that track, so the child's balance can be neither written anywhere nor dropped without silently centring the child. Unlike gain there is no sink for any content kind; the refusal stands until a flattened leaf can carry its own stereo placement."
+      "status": "intended",
+      "reason": "set_track_mixer authors a stereo balance on a track that a SequenceRef then nests. Flattening folds the child into the parent track, a clip carries no pan of its own, and the parent's single pan also serves every other clip on that track, so the child's balance can be neither written anywhere nor dropped without silently centring the child. Unlike gain there is no sink for any content kind. The refusal is the answer rather than a placeholder: declining to flatten is correct while a flattened leaf has nowhere to carry its own stereo placement. Flip this back to live-defect when ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp gains a pan or balance field, because that field is the missing sink and its arrival is the checkable condition."
     },
     {
       "code": "NestedGainSinkUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
-      "status": "live-defect",
-      "reason": "A nested gain composes by multiplying into the flattened leaf's clip gain, which only reaches a renderer for media content; note, registered and opaque leaves compile to events and no renderer scales an event by the gain of the clip that carried it. Folding a child fader into one would discard it with nothing to read the loss from, so the compile refuses and names the leaf. The refusal stands until event rendering has a defined response to clip gain, which is a product question about velocity and level, not a lowering detail."
+      "status": "intended",
+      "reason": "A nested gain composes by multiplying into the flattened leaf's clip gain, which only reaches a renderer for media content; note, registered and opaque leaves compile to events and no renderer scales an event by the gain of the clip that carried it. Folding a child fader into one would discard it with nothing to read the loss from, so the compile refuses and names the leaf. The refusal is the answer rather than a placeholder: what a clip gain should mean for an event is a product question about velocity versus level, not a lowering detail. Flip this back to live-defect when a MIDI or registered leaf gains a defined output-gain sink, an event renderer that reads ClipPlaybackProperties::gain_linear, because that sink is the checkable condition."
     },
     {
       "code": "NestedPlacementFadeUnsupported",

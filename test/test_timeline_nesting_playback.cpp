@@ -664,12 +664,22 @@ NoteModifier certain_ratchet(std::uint64_t note_id, std::uint16_t ratchets) {
     return modifier;
 }
 
-GrooveTemplate one_step_groove(std::int64_t timing_offset, std::int32_t velocity_scale) {
+GrooveTemplate one_step_groove(std::int64_t timing_offset, std::int32_t velocity_scale,
+                               std::int32_t timing_strength = kGrooveUnitScale) {
     GrooveTemplateInput input;
     input.step = TickDuration{100};
     input.steps = {GrooveStep{TickDuration{timing_offset}, velocity_scale}};
+    input.timing_strength = timing_strength;
     return take(GrooveTemplate::create(std::move(input)));
 }
+
+// How the child sequence's groove is authored. `no_table` states no feel at all;
+// `zero_strength` carries a real one-entry table whose offsets are scaled to
+// nothing. Both displace no material, so both must lower to precisely the window
+// the cut describes. They are kept distinct because they are different shapes of
+// the same answer — no feel by absence, no feel by scale — and lowering must not
+// depend on which shape arrives.
+enum class ChaseGroove { authored, no_table, zero_strength };
 
 Project nested_groove_project(bool trim_child = false) {
     auto child_clip = take(Clip::create({12}, {0}, {960}, note_content(13)));
@@ -702,6 +712,59 @@ Project nested_groove_project(bool trim_child = false) {
     return take(Project::create(std::move(input)));
 }
 
+// A child holding a note that straddles a cut, a note entirely left of it, and
+// one well clear of it. Note 17 (452..466) is the sharpest of the three: it lies
+// wholly outside the window the cut describes, so it can reach the output only
+// through a widened selection, and can sound only if something then displaces it
+// back inside. The cut
+// falls at `source_start`, and the placement moves with the cut, so child tick T
+// lands on root tick 1000 + T no matter where the cut is. That is what makes the
+// variants directly comparable: any difference in the compiled events is a
+// difference the trim caused, which is exactly what must not happen.
+Project trimmed_groove_chase_project(std::int64_t source_start,
+                                     ChaseGroove groove = ChaseGroove::authored) {
+    auto notes = take(MidiContent::create({
+        NoteEvent{{17}, {452}, {14}, 40'000, 64, 0},
+        NoteEvent{{13}, {465}, {100}, 40'000, 64, 0},
+        NoteEvent{{15}, {600}, {100}, 40'000, 64, 0},
+    }));
+    auto child_clip = take(Clip::create({12}, {0}, {960}, std::move(notes)));
+    SequenceInput child_input;
+    child_input.id = {10};
+    child_input.name = "child";
+    child_input.musical_duration = TickDuration{960};
+    child_input.tracks = {track(11, {child_clip})};
+    if (groove == ChaseGroove::authored)
+        child_input.groove = one_step_groove(20, kGrooveUnitScale);
+    else if (groove == ChaseGroove::zero_strength)
+        child_input.groove = one_step_groove(20, kGrooveUnitScale, 0);
+    auto child = take(Sequence::create(std::move(child_input)));
+
+    SequenceInput root_input;
+    root_input.id = {2};
+    root_input.name = "root";
+    root_input.tracks = {
+        track(3, {nested_clip(4, 10, 1000 + source_start, 960 - source_start, source_start)}),
+    };
+    auto root = take(Sequence::create(std::move(root_input)));
+
+    ProjectInput input;
+    input.id = {1};
+    input.name = "trimmed groove chase";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+std::vector<TickPosition> chase_ticks(const Project& project) {
+    const auto program = compile(shared(project));
+    std::vector<TickPosition> ticks;
+    for (const auto& event : program->find_track({3})->arrangement_note_events())
+        ticks.push_back(event.tick);
+    return ticks;
+}
+
 CompileError compile_error_for(const Project& project);
 
 } // namespace
@@ -721,10 +784,104 @@ TEST_CASE("Nested MIDI reads exactly its owning sequence groove") {
     REQUIRE(root_events[1].tick == TickPosition{440});
 }
 
-TEST_CASE("A trimmed nested MIDI leaf with authored groove is explicitly refused") {
-    const auto error = compile_error_for(nested_groove_project(true));
-    REQUIRE(error.code == CompileErrorCode::TrimmedGrooveUnsupported);
-    REQUIRE(error.item == ItemId{12});
+TEST_CASE("A trimmed nested MIDI leaf with authored groove lowers like the untrimmed one") {
+    // The trim keeps every note this groove touches, so trimming must change
+    // nothing at all about how they sound. This case used to be refused
+    // outright; it now compiles, and it compiles to the same events.
+    const auto trimmed = compile(shared(nested_groove_project(true)));
+    const auto trimmed_events = trimmed->find_track({3})->arrangement_note_events();
+    const auto untrimmed = compile(shared(nested_groove_project(false)));
+    const auto untrimmed_events = untrimmed->find_track({3})->arrangement_note_events();
+
+    REQUIRE(trimmed_events.size() == 2);
+    REQUIRE(trimmed_events[0].tick == untrimmed_events[0].tick);
+    REQUIRE(trimmed_events[0].tick == TickPosition{620});
+    REQUIRE(trimmed_events[0].velocity == untrimmed_events[0].velocity);
+    REQUIRE(trimmed_events[0].velocity == 20'000);
+    REQUIRE(trimmed_events[1].tick == untrimmed_events[1].tick);
+    REQUIRE(trimmed_events[1].tick == TickPosition{860});
+}
+
+TEST_CASE("A groove chases a note back across a nested trim edge") {
+    // Note 13 is authored at child tick 465, five ticks left of the cut at 470,
+    // and the owner's groove pushes it +20. Reading the groove at the note's own
+    // authored tick puts it at 485 — inside the retained window — so it sounds,
+    // at its full authored length. Selecting first and grooving afterwards would
+    // have shortened it to 95 ticks and started it five ticks late.
+    //
+    // Note 17 is the sharper reading. It runs 452..466, entirely left of the
+    // cut, so the window the cut describes excludes it outright. It reaches the
+    // output only because selection ran over the widened window, and it sounds
+    // only because the groove then carried it to 472. Its presence is therefore
+    // a direct reading of the pad rather than of the clamp that follows.
+    const auto ticks = chase_ticks(trimmed_groove_chase_project(470));
+    REQUIRE(ticks.size() == 6);
+    CHECK(ticks[0] == TickPosition{1472});
+    CHECK(ticks[1] == TickPosition{1485});
+    CHECK(ticks[2] == TickPosition{1486});
+    CHECK(ticks[3] == TickPosition{1585});
+    CHECK(ticks[4] == TickPosition{1620});
+    CHECK(ticks[5] == TickPosition{1720});
+}
+
+TEST_CASE("Nested groove timing does not depend on where the trim edge falls") {
+    // Three different cuts, all retaining both notes, all placed so that a given
+    // child tick lands on a fixed root tick. The groove is read at the note's
+    // authored position rather than at its distance from the cut, so all three
+    // must agree exactly. Cut 470 is the discriminating one: it is the only cut
+    // that falls to the right of note 13, and the only one for which note 17 is
+    // present because the window was widened rather than because the cut
+    // retained it anyway. A selection that ignored the pad would drop note 17 at
+    // 470 alone, and the three would stop agreeing.
+    const auto at_400 = chase_ticks(trimmed_groove_chase_project(400));
+    const auto at_440 = chase_ticks(trimmed_groove_chase_project(440));
+    const auto at_470 = chase_ticks(trimmed_groove_chase_project(470));
+
+    REQUIRE(at_400.size() == 6);
+    CHECK(at_400 == at_440);
+    CHECK(at_400 == at_470);
+    CHECK(at_400[0] == TickPosition{1472});
+}
+
+TEST_CASE("A trimmed nested leaf under a feel-free groove is untouched by chasing") {
+    // A groove that states no feel displaces nothing, so there is nothing to
+    // chase and the leaf must lower to precisely the window the cut describes:
+    // note 13 truncated at the cut, starting there and running to its authored
+    // end, and note 17 absent entirely because the window was never widened.
+    // This is the path every existing nesting takes, and it must not move.
+    const auto ticks = chase_ticks(trimmed_groove_chase_project(470, ChaseGroove::no_table));
+    REQUIRE(ticks.size() == 4);
+    CHECK(ticks[0] == TickPosition{1470});
+    CHECK(ticks[1] == TickPosition{1565});
+    CHECK(ticks[2] == TickPosition{1600});
+    CHECK(ticks[3] == TickPosition{1700});
+}
+
+TEST_CASE("A zero-strength groove table chases nothing across a nested trim edge") {
+    // A groove that is not feel-free by shape: it carries a real one-entry table,
+    // and only its timing strength reduces the displacement to nothing. It must
+    // lower to precisely the window the cut describes and agree with the
+    // no-table groove exactly.
+    //
+    // What this asserts is that agreement, and not coverage of the strength-zero
+    // short-circuit in groove_timing_reach. That short-circuit cannot be
+    // observed from compiled output at all: a note the pad admits lies entirely
+    // left of the retained start, and with nothing to displace it the sounding
+    // clamp reduces it to zero length and drops it. Measured rather than
+    // assumed — with the short-circuit removed, note 17 sits squarely in the
+    // pad region and every assertion below still holds, while the same note is
+    // plainly visible under the authored groove above. It is a cost guard, not
+    // a behavioural one, and no black-box fixture can make it fail.
+    const auto ticks =
+        chase_ticks(trimmed_groove_chase_project(470, ChaseGroove::zero_strength));
+    const auto without_table =
+        chase_ticks(trimmed_groove_chase_project(470, ChaseGroove::no_table));
+    REQUIRE(ticks.size() == 4);
+    CHECK(ticks == without_table);
+    CHECK(ticks[0] == TickPosition{1470});
+    CHECK(ticks[1] == TickPosition{1565});
+    CHECK(ticks[2] == TickPosition{1600});
+    CHECK(ticks[3] == TickPosition{1700});
 }
 
 TEST_CASE("A nested note clip keeps its modifiers and authored seed") {
@@ -1282,3 +1439,4 @@ TEST_CASE("Trimming a nested clip shortens its fades and keeps their shape") {
     // trimmed to nothing but a fade still fades the way it was authored to.
     REQUIRE(playback.fade_shape == ClipFadeShape::EqualPower);
 }
+
