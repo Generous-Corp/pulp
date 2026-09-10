@@ -4354,6 +4354,117 @@
           "rationale": "No design-time capability is registered or removed; the groove reach is an internal supremum with no authored surface."
         }
       }
+    },
+    {
+      "id": "nested-substitution-state-refusal-split",
+      "title": "Nested child track states split by whether they substitute content",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "ce3e007c-374a-4704-8e8c-cd35a795d583",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "tools/timeline/src/timeline_agent.cpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "test/timeline_nesting_test_support.hpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "NestedFrozenTrackUnsupported",
+            "NestedActiveTakeUnsupported"
+          ]
+        },
+        {
+          "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+          "needles": [
+            "NestedFrozenTrackUnsupported",
+            "NestedActiveTakeUnsupported"
+          ]
+        },
+        {
+          "path": "tools/timeline/src/timeline_agent.cpp",
+          "needles": [
+            "NestedFrozenTrackUnsupported",
+            "NestedActiveTakeUnsupported"
+          ]
+        },
+        {
+          "path": "test/timeline_nesting_test_support.hpp",
+          "needles": [
+            "NestedChildState",
+            "nested_child_state_project"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "NestedFrozenTrackUnsupported",
+            "NestedActiveTakeUnsupported"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "substitutes",
+            "NestedFrozenTrackUnsupported"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The two new CompileErrorCode members are diagnostics on an existing public enum, exactly as the three nested-mixer codes were, and the retirements remove refusals rather than adding a type. No installed header, entry point or SDK type changes, so claiming an installed-SDK surface would advertise something that does not exist.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+              "needles": [
+                "NestedFrozenTrackUnsupported",
+                "NestedActiveTakeUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The CLI now names both refusals distinctly instead of reporting a shared code, but it can neither author a child track's freeze, take lanes or record-arm state nor report in advance that a nesting will refuse: those states reach a project through loading, not through any `pulp seq` verb. An author still discovers a frozen or comped nesting only at compile time. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to proposal-safe writers and can then surface these codes.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-substitution-state-refusal-split"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema carries no operation that reports whether a nested child will substitute its arrangement, and none that authors the states which decide it. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-substitution-state-refusal-split"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A live timeline authority is absent for the sequencer generally, so neither the two documents that now compile nor the two named refusals are reachable as a live control. Owner: NW-D, and only where that source is Pulp-owned; otherwise it stays a recorded cross-repository dependency.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "nested-substitution-state-refusal-split"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises which child-track states survive nesting. An agent building reusable patterns still cannot discover that record-arm and an unselected take lane nest freely while freeze and a selected lane refuse. Owner: NW-D, once the runtime it would advertise is complete across the remaining NW-C slices.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-substitution-state-refusal-split"
+          ]
+        }
+      }
     }
   ],
   "tombstones": []
