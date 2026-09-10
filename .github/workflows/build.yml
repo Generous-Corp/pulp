@@ -1306,9 +1306,17 @@ jobs:
       # Local self-hosted Macs already keep brew warm between runs, but
       # `brew update --quiet` is idempotent and cheap there; cheap
       # enough to run unconditionally on every macOS leg.
+      #
+      # Never fatal. A tap fetch that misses the Homebrew CDN exits 1
+      # ("Failed to download") while leaving brew perfectly usable, and
+      # this step sits ahead of every build in the required macOS gate --
+      # so a CDN hiccup failed the gate on code that was fine. The
+      # install step below already retries with its own `brew update`,
+      # which is what actually recovers the stale-config case, so
+      # swallowing the exit code here costs no coverage.
       - name: brew update (macOS)
         if: runner.os == 'macOS'
-        run: brew update --quiet
+        run: brew update --quiet || echo "brew update failed; install steps retry"
 
       - name: Install ccache (macOS)
         if: runner.os == 'macOS'
