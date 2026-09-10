@@ -56,6 +56,36 @@ over real offline queries.
 
 ## Capture (if you don't already have a `.pftrace`)
 
+### Getting a build that can trace at all
+
+Tracing is off by default, so an ordinary build emits nothing no matter how
+`pulp trace start` is invoked. Do not reach for `cmake -DPULP_TRACING=ON` and do
+not copy an SDK prefix under a `-trace` name — a name is not evidence, and a
+hand-copied prefix inherits the *release* provenance of whatever it was copied
+from, which is how a directory came to claim tracing while containing zero
+Perfetto.
+
+```bash
+pulp build --trace                                 # in a Pulp checkout
+pulp sdk install --local --profile trace --print-path   # for a standalone project
+```
+
+Both paths verify the result before handing it to you: the `trace` SDK profile
+refuses to publish a staged install unless `PULP_TRACING` is on in the cache,
+the runtime archive carries the tracing ship sentinel, and the exported package
+declares `Pulp::tracing`.
+
+`--trace` builds into `build-trace/`, separate from `build/`, because
+`PULP_TRACING` reaches every translation unit. Expect a cold build the first
+time; after that the two trees rebuild independently.
+
+**Before investigating an empty trace, check the build can trace.** `pulp
+status` prints a `Tracing:` line, and a consumer build can read
+`PULP_HAS_TRACING` from `find_package(Pulp)` — set from the presence of the
+exported target, so it is evidence rather than a claim. Silence from a build
+that was never configured with tracing looks identical to silence from a bug.
+
+
 If a capture or query fails for an unclear reason, run the readiness check
 first. It reports offline `trace_processor` readiness without probing a legacy
 Inspector endpoint:
