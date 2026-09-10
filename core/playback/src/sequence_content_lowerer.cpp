@@ -1,5 +1,7 @@
 #include "sequence_content_lowerer.hpp"
 
+#include <pulp/timebase/quantize.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -23,6 +25,38 @@ namespace {
 bool consumes_clip_gain(const timeline::ClipContent& content) noexcept {
     return std::holds_alternative<timeline::MediaRef>(content) ||
            std::holds_alternative<timeline::EmptyContent>(content);
+}
+
+/// The greatest number of ticks `GrooveTemplate::apply_timing` can move any
+/// position under `groove`.
+///
+/// Swing warps a position toward its pair's pivot, so the extreme displacement
+/// is the pivot's own distance from the grid line, and it is attained exactly at
+/// the pair midpoint. That is why one evaluation there reads the supremum rather
+/// than a sample of it. A per-step table adds at most its widest authored
+/// offset, and the two compose additively.
+///
+/// Timing strength scales both terms and never magnifies, so the unscaled sum
+/// still bounds the scaled result; strength is consulted only for the degenerate
+/// zero, where the groove provably moves nothing at all.
+///
+/// The result is a supremum, not an estimate: a selection window widened by this
+/// many ticks cannot miss a note the groove would have pulled into view.
+std::int64_t groove_timing_reach(const timeline::GrooveTemplate& groove) noexcept {
+    if (groove.states_no_feel() || groove.timing_strength() == 0)
+        return 0;
+    std::int64_t reach = 0;
+    if (const auto grid = groove.swing_grid(); grid.value != 0) {
+        const auto extreme = timebase::swing_displacement(timebase::TickPosition{grid.value}, grid,
+                                                          groove.swing());
+        reach = extreme.value < 0 ? -extreme.value : extreme.value;
+    }
+    std::int64_t widest_step = 0;
+    for (const auto& step : groove.steps()) {
+        const auto offset = step.timing_offset.value;
+        widest_step = std::max(widest_step, offset < 0 ? -offset : offset);
+    }
+    return reach + widest_step;
 }
 
 } // namespace
@@ -195,6 +229,10 @@ class SequenceContentLowerer::Impl {
         timebase::TickDuration target_duration;
         std::int64_t left_trim = 0;
         std::int64_t right_trim = 0;
+        // Ticks of content kept beyond each cut edge so the owner's groove has
+        // something to pull inward. Never wider than the trim it sits behind.
+        std::int64_t pad_left = 0;
+        std::int64_t pad_right = 0;
         std::size_t note_index = 0;
         std::vector<timeline::NoteEvent> clipped_notes;
         timeline::ItemId context_sequence_id;
@@ -206,14 +244,15 @@ class SequenceContentLowerer::Impl {
 
     StepResult append(timeline::Clip clip, timeline::ItemId source,
                       double source_frame_offset = 0.0, timeline::ItemId context_sequence_id = {},
-                      std::optional<timebase::TickPosition> context_start = std::nullopt) {
+                      std::optional<timebase::TickPosition> context_start = std::nullopt,
+                      std::int64_t groove_pad_left = 0, std::int64_t groove_pad_right = 0) {
         if (expanded_clips_ >= max_expanded_clips_)
             return {.error =
                         SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded, source}};
         ++expanded_clips_;
         const auto authored_start = context_start.value_or(clip.start());
-        output_->push_back(
-            {std::move(clip), source_frame_offset, context_sequence_id, authored_start});
+        output_->push_back({std::move(clip), source_frame_offset, context_sequence_id,
+                            authored_start, groove_pad_left, groove_pad_right});
         return {};
     }
 
@@ -381,6 +420,21 @@ class SequenceContentLowerer::Impl {
             next_generated_id_ == std::numeric_limits<std::uint64_t>::max())
             return {.error = SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded,
                                                    child.id()}};
+        // A trimmed note leaf keeps a little content beyond each cut edge, so a
+        // groove that pulls a note inward across that edge still has the note to
+        // pull. Padding past the child's own extent would select nothing — the
+        // child holds no note outside itself — so the reach is capped by the
+        // trim, which also keeps the widened window inside the child and
+        // therefore free of overflow. An untrimmed edge pads by zero for the
+        // same reason, and a groove that states no feel reaches zero, so both
+        // cases lower to exactly the clip they lowered to before.
+        std::int64_t pad_left = 0;
+        std::int64_t pad_right = 0;
+        if (std::holds_alternative<timeline::MidiContent>(child.content())) {
+            const auto reach = groove_timing_reach(frame.sequence->groove());
+            pad_left = std::min(reach, left_trim);
+            pad_right = std::min(reach, right_trim);
+        }
         pending_leaf_ = PendingLeaf{
             child,
             timeline::ItemId{next_generated_id_++},
@@ -390,6 +444,8 @@ class SequenceContentLowerer::Impl {
             target_duration,
             left_trim,
             right_trim,
+            pad_left,
+            pad_right,
             0,
             {},
             frame.sequence->id(),
@@ -421,8 +477,14 @@ class SequenceContentLowerer::Impl {
         if (note_start > std::numeric_limits<std::int64_t>::max() - note.duration.value)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, note.id}};
         const auto note_end = note_start + note.duration.value;
-        const auto audible_start = std::max(note_start, pending.clipped_start.value);
-        const auto audible_end = std::min(note_end, pending.clipped_end.value);
+        // Selection runs over the padded window, but the note still rebases onto
+        // the padded anchor, so a retained note keeps its true distance from the
+        // cut edge. Whether it actually sounds is decided later, after the groove
+        // has moved it and the compiler has clamped it to the audible window.
+        const auto window_start = pending.clipped_start.value - pending.pad_left;
+        const auto window_end = pending.clipped_end.value + pending.pad_right;
+        const auto audible_start = std::max(note_start, window_start);
+        const auto audible_end = std::min(note_end, window_end);
         if (audible_end <= audible_start)
             return {};
         if (expanded_note_events_ > max_expanded_note_events_ ||
@@ -431,7 +493,7 @@ class SequenceContentLowerer::Impl {
                                                    pending.child.id()}};
         expanded_note_events_ += 2;
         auto clipped_note = note;
-        clipped_note.start = timebase::TickPosition{audible_start - pending.clipped_start.value};
+        clipped_note.start = timebase::TickPosition{audible_start - window_start};
         clipped_note.duration = timebase::TickDuration{audible_end - audible_start};
         pending.clipped_notes.push_back(clipped_note);
         return {};
@@ -447,10 +509,6 @@ class SequenceContentLowerer::Impl {
             if (!owner)
                 return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                        pending.context_sequence_id}};
-            if ((pending.left_trim != 0 || pending.right_trim != 0) &&
-                !owner->groove().states_no_feel())
-                return {.error = SequenceLoweringError{CompileErrorCode::TrimmedGrooveUnsupported,
-                                                       pending.child.id()}};
             // A nested note clip keeps its modifiers and its authored seed.
             // Rebuilding with the notes alone would leave the notes sounding
             // unconditionally inside a SequenceRef while they honour their
@@ -594,7 +652,8 @@ class SequenceContentLowerer::Impl {
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                    pending.child.id()}};
         return append(std::move(flattened).value(), pending.child.id(), source_frame_offset,
-                      pending.context_sequence_id, pending.clipped_start);
+                      pending.context_sequence_id, pending.clipped_start, pending.pad_left,
+                      pending.pad_right);
     }
 
     const timeline::Project& project_;
