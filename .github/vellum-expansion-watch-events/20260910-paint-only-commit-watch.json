@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260910-paint-only-commit-watch",
+  "created_at": "2026-09-10T22:40:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Stops a React commit that changed only provably non-geometric props from forcing a full re-apply of the captured import document. Touching render-assets-and-backends is packages/pulp-react only: commitUpdate consults a hand-curated PAINT_ONLY_KEYS whitelist before calling markMaterializedTreeDirty, and any key not on that whitelist -- including every unrecognised key -- still takes the existing full-re-apply path, so behaviour is byte-identical for every commit the gate does not recognise. The whitelist deliberately excludes border, borderWidth and the side width shorthands even though prop-applier-paint.ts owns them, because they carry a width; it also excludes opacity and color because the captured-metadata pass writes setOpacity and setTextColor itself, and suppressing those commits would leave React's value standing until a later structural commit restored the captured one. No renderer, backend, font, asset or Skia pin changes; no harness, fixture, snapshot or threshold changes. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "host-config-materialized-metadata",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
