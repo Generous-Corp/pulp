@@ -99,6 +99,7 @@ getLayoutBoxMetrics	layout	function	core/view/src/widget_bridge/layout_api.cpp
 getLayoutAncestorRects	layout	function	core/view/src/widget_bridge/layout_api.cpp
 getRootSize	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setPointerEvents	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
+setHitSlop	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
 setBackfaceVisibility	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
 setVisibility	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
 setWhiteSpace	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp

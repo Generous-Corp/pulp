@@ -630,6 +630,51 @@ public:
     void set_pointer_events(PointerEvents p) { pointer_events_ = p; }
     PointerEvents pointer_events() const { return pointer_events_; }
 
+    /// React Native `hitSlop` — extra hit-test area OUTSIDE the painted box.
+    ///
+    /// A control's comfortable touch target and its visual weight are different
+    /// numbers. A 20pt-tall switch or a 16pt-tall slider looks right and is
+    /// hard to hit; growing the box to fix that would change the layout and the
+    /// look. `hit_slop` grows only the area `hit_test()` accepts, so the
+    /// painted control, its bounds, and the Yoga layout are all untouched.
+    ///
+    /// The insets are in the view's OWN coordinate space (post-scale), in
+    /// points, one per edge, and are applied in two places: a parent uses a
+    /// child's slop to decide whether to descend into it, and the view uses its
+    /// own to decide whether a point that missed `local_bounds()` still counts
+    /// as a hit. Both are required — inflating only the terminal check leaves
+    /// the parent refusing to descend, so the slop would never be consulted.
+    ///
+    /// Slop does NOT change paint, layout, focus order, or accessibility
+    /// bounds, and it does not let a `PointerEvents::none` view become
+    /// hittable. Overlapping slop resolves the same way overlapping boxes do:
+    /// topmost in z-order wins, because slop is evaluated inside the existing
+    /// reverse-z walk rather than beside it.
+    ///
+    /// `pulp::view::HitMetrics` supplies the device-appropriate figures — a
+    /// 44pt touch target for a 16pt control means 14pt of slop per edge.
+    struct HitSlop {
+        float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
+        bool empty() const {
+            return top == 0.0f && right == 0.0f && bottom == 0.0f && left == 0.0f;
+        }
+    };
+    void set_hit_slop(float uniform) { hit_slop_ = {uniform, uniform, uniform, uniform}; }
+    void set_hit_slop(float top, float right, float bottom, float left) {
+        hit_slop_ = {top, right, bottom, left};
+    }
+    void set_hit_slop(HitSlop s) { hit_slop_ = s; }
+    HitSlop hit_slop() const { return hit_slop_; }
+
+    /// `local_bounds()` grown by `hit_slop()`. The rect `hit_test()` actually
+    /// accepts, and the one a test should assert against.
+    Rect hit_bounds() const {
+        Rect b = local_bounds();
+        return Rect{b.x - hit_slop_.left, b.y - hit_slop_.top,
+                    b.width + hit_slop_.left + hit_slop_.right,
+                    b.height + hit_slop_.top + hit_slop_.bottom};
+    }
+
     /// React Native backfaceVisibility. Stored on the View for plumbing parity
     /// with `@pulp/react`. Pulp's transform model is currently 2D-affine, so
     /// this behaves as a paint-time no-op.
@@ -2621,6 +2666,7 @@ private:
     bool hovered_ = false;
     bool default_hover_feedback_ = false;
     bool hit_testable_ = true;
+    HitSlop hit_slop_{};
     PointerEvents pointer_events_ = PointerEvents::auto_;
     bool backface_visible_ = true;
     bool requires_gpu_host_ = false;

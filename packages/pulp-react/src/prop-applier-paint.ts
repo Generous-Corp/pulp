@@ -462,6 +462,23 @@ export function applyPaintProp(
         // widget_bridge.cpp::setMixBlendMode.
         case 'mixBlendMode':       call('setMixBlendMode', id, value as string); return true;
         case 'pointerEvents':      call('setPointerEvents', id, value as string); return true;
+        // React Native `hitSlop`. Grows only the hit-test area, never the
+        // painted box or the layout. Accepts a number (uniform inset) or an
+        // object with any of {top,right,bottom,left}; a missing edge inherits
+        // the CSS-shorthand way (right<-top, bottom<-top, left<-right).
+        case 'hitSlop': {
+            const hs = value as number | { top?: number; right?: number; bottom?: number; left?: number } | null;
+            let t = 0, r = 0, b = 0, l = 0;
+            if (typeof hs === 'number') { t = r = b = l = hs; }
+            else if (hs && typeof hs === 'object') {
+                t = Number(hs.top) || 0;
+                r = hs.right != null ? Number(hs.right) || 0 : t;
+                b = hs.bottom != null ? Number(hs.bottom) || 0 : t;
+                l = hs.left != null ? Number(hs.left) || 0 : r;
+            }
+            call('setHitSlop', id, t, r, b, l);
+            return true;
+        }
         case 'userSelect':         call('setUserSelect', id, value as string); return true;
 
         // backgroundRepeat is storage-only at the View layer

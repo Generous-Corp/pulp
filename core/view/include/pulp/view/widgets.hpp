@@ -6,6 +6,7 @@
 #include <pulp/view/caret.hpp>
 #include <pulp/view/custom_shader_host.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/hit_metrics.hpp>
 #include <pulp/canvas/attributed_string.hpp>
 #include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/audio_bridge.hpp>
@@ -1460,7 +1461,22 @@ public:
     RangeSlider() {
         set_access_role(AccessRole::slider);
         set_focusable(true);
+        // The control paints 16pt on its minor axis, which is comfortable to
+        // look at and uncomfortable to hit. Grow only the hit area to the 44pt
+        // touch target HitMetrics specifies -- (44 - 16) / 2 = 14pt per edge --
+        // so the thumb is grabbable without the box, the layout or the paint
+        // changing. The major axis gets the same 14pt so the thumb is still
+        // grabbable at either travel extreme, where half of it sits outside
+        // the track.
+        const float target = HitMetrics::default_min_target_pt(PointerType::touch);
+        const float slop = std::max(0.0f, (target - kMinorAxisExtent) * 0.5f);
+        set_hit_slop(slop);
     }
+
+    /// The thumb's minor-axis extent at rest, in points. `paint()` derives the
+    /// thumb from this and the constructor sizes the hit slop from it, so the
+    /// two cannot drift.
+    static constexpr float kMinorAxisExtent = 16.0f;
 
     // ── AccessibilityValueInterface (caller's min/max/step units) ────────
     double get_current_value() const override { return value_; }
