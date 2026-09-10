@@ -261,6 +261,16 @@ public:
     /// what is actually drawn.
     float intrinsic_width() const override;
 
+    /// Widest this label can be if nothing soft-wrapped — CSS max-content.
+    ///
+    /// A soft-wrapping label reports `intrinsic_width() == 0` so its parent's
+    /// width, not the single-line advance, decides where lines break. That
+    /// leaves an auto-width ANCESTOR with no content measurement at all, so
+    /// the shrink-to-fit pass has nothing to hug and the ancestor stretches to
+    /// fill the space it was offered. This reports the unwrapped width for
+    /// exactly that pass.
+    float max_content_width() const;
+
     /// Intrinsic height based on font size and line height.
     /// Walks the inheritance cascade so an unset font_size
     /// picks up an ancestor View's setInheritableFontSize value.
@@ -678,6 +688,15 @@ private:
     /// Returns false when this Label opts out of measure caching.
     bool sync_measure_basis() const;
     float compute_intrinsic_width() const;
+    float compute_max_content_width() const;
+    /// Whether paint() will emit one line per `\n` rather than drawing the
+    /// whole string in a single fill_text. Measurement has to agree with
+    /// paint on this or width and height disagree about the same string.
+    /// paint()'s own predicate also admits a usable captured line cache and
+    /// the attributed path; neither belongs here -- the cache check reads a
+    /// laid-out width (measurement cannot depend on the layout it feeds) and
+    /// attributed text is measured on its own branch.
+    bool paints_as_lines() const { return multi_line_ || captured_wrap_fallback_; }
     float compute_intrinsic_height() const;
     float compute_measured_height(float available_width) const;
     mutable MeasureBasis measure_basis_;

@@ -832,15 +832,26 @@ float Label::baseline_y() const {
     return ascent;
 }
 
+float Label::max_content_width() const {
+    // A non-wrapping label's intrinsic width already IS its max-content width,
+    // and that path is memoized — only the wrapping case has to re-shape.
+    if (!multi_line_) return intrinsic_width();
+    return compute_max_content_width();
+}
+
 float Label::compute_intrinsic_width() const {
+    // A soft-wrapping label reports 0 so the parent's width — not the
+    // single-line advance — drives where its lines break. Its unwrapped width
+    // is still available to callers through max_content_width().
+    if (multi_line_) return 0;
+    return compute_max_content_width();
+}
+
+float Label::compute_max_content_width() const {
     // Report the natural shaped-text width so Yoga reserves enough horizontal
     // space for the full label content. Without this, long labels in flex-row
     // containers inherit a small parent width and clip mid-word.
-    //
-    // For multi-line labels we deliberately return 0 so the parent
-    // container's available width drives line wrapping instead of the
-    // single-line text width.
-    if (text_.empty() || multi_line_) return 0;
+    if (text_.empty()) return 0;
 
     // Intrinsic measurement must match what paint() will actually draw, so
     // honor the same own→inherited cascade for font_size and letter_spacing.
@@ -909,12 +920,42 @@ float Label::compute_intrinsic_width() const {
     std::string effective_family = effective_font_family();
 
     auto& shaper = canvas::global_text_shaper();
-    auto prepared = has_attributed_
-        ? shaper.prepare(resolved_attributed_string(), resolved_font_features())
-        : shaper.prepare(display_text, effective_family, effective_font_size,
-                         effective_font_weight(), font_style_,
-                         effective_letter_spacing, resolved_font_features());
-    float width = prepared.total_width();
+    float width = 0.0f;
+    if (has_attributed_) {
+        width = shaper.prepare(resolved_attributed_string(),
+                               resolved_font_features()).total_width();
+    } else if (!paints_as_lines()) {
+        // A single-line label draws the WHOLE string in one fill_text call --
+        // `\n` is not a break there, it is just another character in the run.
+        // Measuring it as segments would reserve less than paint draws and
+        // clip, and would disagree with intrinsic_height(), which returns the
+        // one-line metric for exactly this case.
+        width = shaper.prepare(display_text, effective_family,
+                               effective_font_size,
+                               effective_font_weight(), font_style_,
+                               effective_letter_spacing,
+                               resolved_font_features())
+                    .total_width();
+    } else {
+        // Once the label paints as lines, max-content is the widest HARD-BREAK
+        // segment: an explicit newline always breaks, so a string carrying one
+        // is never as wide as its full advance and must not reserve that much.
+        std::size_t start = 0;
+        while (true) {
+            const std::size_t nl = display_text.find('\n', start);
+            const std::string segment = display_text.substr(
+                start, nl == std::string::npos ? std::string::npos : nl - start);
+            const float seg = shaper.prepare(segment, effective_family,
+                                             effective_font_size,
+                                             effective_font_weight(), font_style_,
+                                             effective_letter_spacing,
+                                             resolved_font_features())
+                                  .total_width();
+            if (seg > width) width = seg;
+            if (nl == std::string::npos) break;
+            start = nl + 1;
+        }
+    }
 
     // Sub-pixel-safe ceil so layout never clips on rounding.
     return std::ceil(width);
