@@ -232,6 +232,46 @@ View* focused_input_under_root(View& root) {
     return still_in_tree(focused, &root) ? focused : nullptr;
 }
 
+void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers) {
+    deliver_hover_move(root, root_pt, modifiers, PointerAttributes{});
+}
+
+void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
+                        const PointerAttributes& pointer) {
+    // 1. Hover STATE first, so a handler reading `is_hovered()` during the
+    //    dispatch below sees the state this same move established.
+    root.simulate_hover(root_pt);
+
+    // 2. Hit-test AFTER the state pass: an `on_hover_move` handler is allowed
+    //    to restructure the tree, and a target captured before it ran could
+    //    already be detached.
+    auto* target = root.hit_test(root_pt);
+    if (!target) return;
+
+    MouseEvent me;
+    me.position = point_to_local(root_pt, target, &root);
+    me.window_position = root_pt;
+    // A hover has no button down. `none` (not the `left` default) is what keeps
+    // a handler from reading this as the primary button being held.
+    me.button = MouseButton::none;
+    me.modifiers = modifiers;
+    me.click_count = 0;
+    me.is_down = false;
+    me.phase = MousePhase::hover;
+    me.pointer_type = pointer.type;
+    me.pressure = pointer.pressure;
+    me.pointer_id = pointer.pointer_id;
+    me.altitude_angle = pointer.altitude_angle;
+    me.azimuth_angle = pointer.azimuth_angle;
+    me.movement_x = pointer.movement_x;
+    me.movement_y = pointer.movement_y;
+    me.has_movement_delta = pointer.has_movement_delta;
+
+    // 3. Modern + JS channels. `moving` selects the pointer-MOVE callback, the
+    //    one a scripted `pointermove` / `mousemove` listener is bound to.
+    dispatch_dom_pointer_event(root, target, me, /*moving=*/true);
+}
+
 void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count,
                         PointerType pointer_type, float pressure) {
