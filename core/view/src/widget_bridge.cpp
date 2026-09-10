@@ -602,6 +602,11 @@ bool WidgetBridge::claim_document_navigation_focus() {
         return false;
     }
     root_.on_navigation_key = [this](const KeyEvent& event) {
+        // Record that this exact press really reached script here, so the
+        // global fan-out can suppress its duplicate of THIS press without
+        // suppressing presses it was never offered.
+        last_navigation_offer_ = {static_cast<int>(event.key), event.modifiers,
+                                  event.is_down, /*pending=*/true};
         return forward_key_event_handled(
             static_cast<int>(event.key), event.modifiers, event.is_down,
             &root_);
@@ -618,6 +623,10 @@ void WidgetBridge::release_document_navigation_focus() noexcept {
     owners.erase(it);
     root_.scripted_navigation_input_ = false;
     root_.on_navigation_key = {};
+    // Without the claim there is no path that offers a key here first, so any
+    // stamp left pending could only ever suppress a press that was never
+    // offered. Drop it with the claim.
+    last_navigation_offer_ = {};
     if (focused_input_under_root(root_) == &root_) {
         root_.release_input_focus();
         root_.View::on_focus_changed(false);
@@ -762,21 +771,22 @@ void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is
     // on another thread between snapshot and dispatch. recursive_mutex
     // tolerates same-thread reentry.
     std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
-    auto& owners = document_navigation_owners();
     for (auto* b : all_bridges_set()) {
-        // A bridge holding the navigation claim was already offered this key
-        // directly, through the `on_navigation_key` hook the claim installs.
-        // That offer reports "handled" only when a JS listener called
-        // `preventDefault()`, so a host that treats an unhandled offer as
-        // "nobody took it" falls through to this fan-out and delivers the same
-        // physical key press to the same bridge a second time. An open listbox
-        // then advances two items per arrow and half its entries become
-        // unreachable. The claim is what makes the direct delivery certain, so
-        // it is also what makes a second delivery a duplicate.
-        if (const auto it = owners.find(&b->root_);
-            it != owners.end() && it->second == b &&
-            b->root_.accepts_navigation_input() && b->root_.on_navigation_key)
+        // A bridge that was already offered THIS press through the
+        // navigation-claim hook must not receive it twice: an open listbox
+        // would advance two items per arrow and half its entries become
+        // unreachable. But the offer is what makes the delivery a duplicate,
+        // not the claim — the hook reports "handled" only when a JS listener
+        // called `preventDefault()`, and host key paths that return before
+        // reaching the hook arrive here having offered nothing. Suppressing on
+        // the claim alone drops those keys outright, so match and consume the
+        // recorded offer instead. Unmatched presses still deliver.
+        auto& offer = b->last_navigation_offer_;
+        if (offer.pending && offer.key_code == key_code
+            && offer.modifiers == modifiers && offer.is_down == is_down) {
+            offer.pending = false;
             continue;
+        }
         b->forward_key_event(key_code, modifiers, is_down);
     }
 }
