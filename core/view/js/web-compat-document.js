@@ -619,8 +619,14 @@ globalThis.self = window;
         for (var i = 0; i < state.options.length; ++i) {
             var active = i === state.activeIndex;
             state.options[i].setAttribute("data-pulp-popup-active", active ? "true" : "false");
+            // Restoring an empty base must actually CLEAR the background.
+            // The style bridge drops a value it cannot parse as a color, so
+            // assigning "" is a silent no-op and the highlight stays behind on
+            // every row the selection has visited -- the menu smears instead of
+            // moving. "transparent" is a real color, so it clears.
             var background = active
-                ? "rgba(120,180,255,0.18)" : state.baseBackgrounds[i];
+                ? "rgba(120,180,255,0.18)"
+                : (state.baseBackgrounds[i] || "transparent");
             state.options[i].style.background = background;
             state.options[i].style.backgroundColor = background;
         }
@@ -632,8 +638,12 @@ globalThis.self = window;
         var options = optionsFor(popup);
         if (!popup || !options.length) return false;
         var baseBackgrounds = [];
+        // An app may author its row fill through either longhand, and only the
+        // one it used reads back. Capture both so the restore returns the row
+        // to the app's own appearance rather than blanking it.
         for (var i = 0; i < options.length; ++i)
-            baseBackgrounds.push(options[i].style.background || "");
+            baseBackgrounds.push(options[i].style.background
+                                 || options[i].style.backgroundColor || "");
         var hoverHandlers = [];
         var triggerKind = trigger.getAttribute("aria-haspopup");
         var triggerPeers = document.querySelectorAll(
@@ -678,8 +688,9 @@ globalThis.self = window;
         for (var i = 0; i < state.options.length; ++i) {
             state.options[i].removeEventListener(
                 "pointerenter", state.hoverHandlers[i]);
-            state.options[i].style.background = state.baseBackgrounds[i];
-            state.options[i].style.backgroundColor = state.baseBackgrounds[i];
+            var restored = state.baseBackgrounds[i] || "transparent";
+            state.options[i].style.background = restored;
+            state.options[i].style.backgroundColor = restored;
             state.options[i].removeAttribute("data-pulp-popup-active");
         }
         state = null;

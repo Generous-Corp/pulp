@@ -1639,6 +1639,19 @@ TEST_CASE("a mouse-opened popup accepts arrow navigation and paints its highligh
         "getAttribute('data-pulp-popup-active') === 'false'")
                 .getWithDefault<bool>(false));
 
+    // The highlight MOVES; it must not smear. Clearing the previous row has to
+    // assign a background the paint bridge can parse: an empty string is
+    // silently dropped there, so the row would keep its highlight pixels while
+    // only the attribute moved, and every visited row would stay lit.
+    REQUIRE(engine.evaluate(
+        "(function(o) {"
+        "  return o.style.background !== 'rgba(120,180,255,0.18)'"
+        "      && o.style.backgroundColor !== 'rgba(120,180,255,0.18)'"
+        "      && o.style.background !== ''"
+        "      && o.style.backgroundColor !== '';"
+        "})(globalThis.__pulpPopupDefaultState__.options[0])")
+                .getWithDefault<bool>(false));
+
     REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::up));
     REQUIRE(engine.evaluate(
         "globalThis.__pulpPopupDefaultState__.activeIndex === 0")
