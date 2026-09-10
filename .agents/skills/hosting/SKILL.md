@@ -2292,3 +2292,36 @@ Two gotchas worth knowing before you debug an output that looks *almost* right:
   which is correct for a real-time reader but would silently turn an absurd
   region into a plausible bounce here, so the renderer rejects a saturated
   derivation instead of using it.
+
+## Standing up a bounce graph: the device-free shape, and its two traps
+
+`TimelineGraphPlaybackBinding` is expressed entirely in `NodeId`s, so a caller
+that wants to render a compiled `PlaybackProgram` has to build a graph and a
+route table before it can prepare anything. Use
+`build_device_free_timeline_graph()`
+(`pulp/host/timeline_offline_graph.hpp`) rather than assembling that by hand.
+It adds one output node and returns one `TimelineTrackGraphRoute` per program
+track, in program order.
+
+The binding still creates the per-track arrangement-audio and mixer nodes
+itself, so this topology is at exact parity with
+`playback::ArrangementAudioRenderer` over the same program. Device chains are
+additive on top of this shape, not a different one.
+
+Two things about `TimelineTrackGraphRoute` are easy to get wrong because the
+struct looks under-specified when it is actually complete:
+
+- **All-zero post-device fields are the device-free contract, not a stub.**
+  With `post_device_audio_source` and `post_mixer_audio_destination` both zero
+  the binding inserts the track mixer directly between arrangement audio and
+  `audio_destination`. Populating them "for symmetry" brackets a hosted device
+  chain that does not exist.
+- **`midi_destination` stays zero, and that is not a gap to fill.** A
+  device-free graph instantiates no instrument, so there is nothing for note
+  events to reach. Routing them at a node that does not exist renders the same
+  audio and hides the missing instrument.
+
+An empty route set is a valid *build* result — a trackless arrangement renders
+silence — but it must not reach `prepare()`, which rejects it as an
+under-specified request (`TimelineOfflineRenderCode::InvalidProgram` documents
+the same rule). Skip the graph and write the zero-filled buffer instead.

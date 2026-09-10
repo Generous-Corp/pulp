@@ -4,6 +4,9 @@
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/buffer.hpp>
+#include <pulp/host/signal_graph_runtime.hpp>
+#include <pulp/host/timeline_graph_binding.hpp>
+#include <pulp/host/timeline_offline_graph.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/transport.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -70,8 +73,40 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
         return detail::failure("render", "could not allocate the in-memory render buffer");
     }
 
-    playback::MasterTransport transport;
     constexpr std::uint32_t block_size = 512;
+    host::SignalGraph graph;
+    host::TimelineGraphPlaybackBinding binding(graph, compiled.value()->store);
+    const auto topology = host::build_device_free_timeline_graph(graph, *program, channels);
+    if (!topology)
+        return detail::failure("render", "render graph topology error " +
+                                             std::to_string(static_cast<unsigned>(topology.code)));
+    // A program with no tracks renders silence. Preparing an empty binding would
+    // be rejected as an under-specified request, so the graph stays out of the
+    // way and the zero-filled buffer is written as it always was.
+    const bool routed = !topology.routes.empty();
+    std::vector<float> silence;
+    std::vector<const float*> silence_data;
+    if (routed) {
+        host::TimelineGraphBindingConfig binding_config;
+        binding_config.audio_channels = channels;
+        const auto admission =
+            binding.prepare(*program, topology.routes, binding_config,
+                            static_cast<double>(sample_rate), static_cast<int>(block_size));
+        if (!admission)
+            return detail::failure("render",
+                                   "render graph admission error " +
+                                       std::to_string(static_cast<unsigned>(admission.code)));
+        try {
+            silence.assign(static_cast<std::size_t>(channels) * block_size, 0.0f);
+            silence_data.reserve(channels);
+        } catch (const std::bad_alloc&) {
+            return detail::failure("render", "could not allocate the render graph input buffer");
+        }
+        for (std::uint32_t channel = 0; channel < channels; ++channel)
+            silence_data.push_back(silence.data() + static_cast<std::size_t>(channel) * block_size);
+    }
+
+    playback::MasterTransport transport;
     if (transport.prepare(*compiled.value()->tempo_map,
                           {.max_buffer_size = block_size, .initially_playing = true}) !=
         playback::TransportError::None)
@@ -92,12 +127,14 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
         auto block_program = compiled.value()->store.read();
         if (!block_program)
             return detail::failure("render", "compiled program disappeared");
-        const auto status =
-            playback::ArrangementAudioRenderer::process(*block_program, snapshot, block);
-        if (status != playback::AudioRenderStatus::Rendered &&
-            status != playback::AudioRenderStatus::Silent)
-            return detail::failure("render", "audio renderer error " +
-                                                 std::to_string(static_cast<unsigned>(status)));
+        if (routed) {
+            const pulp::audio::BufferView<const float> input(silence_data.data(), channels, count);
+            const auto result = binding.process(block, input, snapshot);
+            if (!result)
+                return detail::failure("render",
+                                       "render graph process error " +
+                                           std::to_string(static_cast<unsigned>(result.code)));
+        }
         offset += count;
     }
     const auto written = detail::write_wav_atomic(output, rendered);
