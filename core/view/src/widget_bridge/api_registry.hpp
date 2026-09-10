@@ -32,24 +32,24 @@ void register_bridge_function(BridgeApiContext& context, std::string_view name, 
 #if defined(PULP_TRACING_ENABLED) && PULP_TRACING_ENABLED
     if constexpr (std::is_convertible_v<Fn&&, choc::javascript::Context::NativeFunction>) {
         choc::javascript::Context::NativeFunction inner(std::forward<Fn>(fn));
-        std::string span = "js_native:" + std::string(name);
+        std::string span(name);
         context.engine.register_function(
             std::string(name),
             choc::javascript::Context::NativeFunction(
                 [inner = std::move(inner), span = std::move(span)](
                     choc::javascript::ArgumentList args) {
-                    PULP_TRACE_SCOPE_DYNAMIC("js", span);
+                    PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span);
                     return inner(args);
                 }));
         return;
     } else if constexpr (std::is_convertible_v<Fn&&, NativeFunction>) {
         NativeFunction inner(std::forward<Fn>(fn));
-        std::string span = "js_native:" + std::string(name);
+        std::string span(name);
         context.engine.register_function(
             std::string(name),
             NativeFunction([inner = std::move(inner), span = std::move(span)](
                                const choc::value::Value* args, size_t num_args) {
-                PULP_TRACE_SCOPE_DYNAMIC("js", span);
+                PULP_TRACE_SCOPE_NAMED_ARGS("js", "js_native", "fn", span);
                 return inner(args, num_args);
             }));
         return;
