@@ -91,6 +91,39 @@ weight for its own text** — the anonymous box gets no intrinsic size from the
 shaper. A test that only asserts child geometry passes while the text is
 unplaced, so assert the text box itself.
 
+## Padding reaches a Label's text only through the captured line box
+
+Yoga insets a view's **children** by its padding. A `Label`'s own string is not a
+child, so nothing in layout moves it: the native paint path anchors its
+alignment `x` and its baseline arithmetic at the box it is handed, which for a
+label with no anonymous inline box of its own is the **border** box.
+
+A captured browser line box is measured as `rect - ownerBounds`, and
+`ownerBounds` is the owner's border box — so `padding-left` and `padding-top`
+are already baked into every captured `left`/`top`. The two paint paths
+therefore disagree by exactly the padding, and the disagreement is invisible for
+as long as the cache is honored, because only the native path is wrong.
+
+That makes it look like a cache bug when the cache is what was hiding it. A
+label whose captured basis is stale — a basis captured against a truncated
+string, say — correctly falls back to native painting, and the same text jumps
+left by `padding-left` and up by `padding-top` while its siblings, whose caches
+are still valid, do not move. The symptom presents as one item in a row being
+misaligned, so the instinct is to weaken the predicate that rejected the stale
+basis. Do not: that predicate is right, and weakening it paints stale geometry.
+
+Two consequences when touching this code:
+
+- Resolve padding the way `yoga_layout()` resolves it — a percent `Dimension`
+  wins, otherwise the per-edge float with the uniform value as its fallback, and
+  percent resolves against the **parent's** width. A second resolution rule here
+  drifts from layout silently.
+- Apply it only when `!has_own_text_box()`. Layout already inset an anonymous
+  inline box, so padding applied again doubles it.
+
+A fixture with zero padding cannot see any of this. Give the label real padding
+and assert the draw origin on both branches of the cache predicate.
+
 ## Gotchas
 
 - **Captured line boxes in tests are usually hand-authored fixtures, not real
