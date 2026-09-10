@@ -468,11 +468,15 @@ unset(_pulp_standalone_sources)
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
 # tools/timeline publishes through core/project_package, so the target does not
-# exist in a package-stripped build.
+# exist in a package-stripped build. It also links pulp::host to render a bounce
+# through the graph binding, and hosting is not built on iOS (see core/host
+# above), so the tool follows its own consumers — tools/cli, tools/mcp, and the
+# test suite are all NOT IOS — rather than becoming a consumerless target that
+# fails the iPhoneSimulator configure on a missing pulp::host.
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
     add_subdirectory(tools/design-ab)
-    if(PULP_ENABLE_PROJECT_PACKAGE)
+    if(PULP_ENABLE_PROJECT_PACKAGE AND NOT IOS)
         add_subdirectory(tools/timeline)
     endif()
 endif()
