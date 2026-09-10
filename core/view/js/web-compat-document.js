@@ -502,9 +502,11 @@ var document = {
             }
             if (event._stoppedImmediate) break;
         }
-        if (!event.defaultPrevented
-            && typeof globalThis.__pulpPopupDefaultHandle__ === "function")
+        if (!event.defaultPrevented && !event.__pulpPopupOffered
+            && typeof globalThis.__pulpPopupDefaultHandle__ === "function") {
+            event.__pulpPopupOffered = true;
             globalThis.__pulpPopupDefaultHandle__(event);
+        }
         return !event.defaultPrevented;
     }
 };
@@ -692,6 +694,27 @@ globalThis.self = window;
             });
         }
     }
+    // A trigger's own handler is what creates the menu, and it does not
+    // necessarily run before the event that opened it finishes: the standalone
+    // mac host defers its click to the main queue, and a React app commits its
+    // open state on a later tick. Claiming once, synchronously, therefore
+    // inspects a DOM where the popup does not exist yet and silently gives up —
+    // leaving an open menu with no owner, so arrow keys do nothing and the
+    // highlight is never painted. Re-offer the claim across a few frames, and
+    // treat an already-owned popup as done so a pointerdown and its trailing
+    // click cannot fight over the same menu.
+    function claimAfterCommit(trigger, edge, retries) {
+        if (state && state.trigger === trigger
+            && document.body.contains(state.popup)) return;
+        if (activate(trigger, edge)) return;
+        if (retries > 0) {
+            requestAnimationFrame(function() {
+                claimAfterCommit(trigger, edge, retries - 1);
+            });
+            return;
+        }
+        if (state && state.trigger === trigger) dismiss(false);
+    }
     function outsidePopupTarget(target) {
         return state && !state.popup.contains(target)
             && !state.trigger.contains(target);
@@ -727,12 +750,19 @@ globalThis.self = window;
                       || !document.body.contains(state.popup))) dismiss(false);
         if (event.type === "pointerdown") {
             var pointerTrigger = triggerFrom(event.target);
-            if (pointerTrigger && !optedOut(pointerTrigger)) {
-                requestAnimationFrame(function() {
-                    if (!activate(pointerTrigger, "first")
-                        && state && state.trigger === pointerTrigger) dismiss(false);
-                });
-            }
+            if (pointerTrigger && !optedOut(pointerTrigger))
+                claimAfterCommit(pointerTrigger, "first", 3);
+            return;
+        }
+        // A press and its click are one gesture, and which of the two the app
+        // opens its menu on is the app's choice, not something this owner can
+        // observe. Offer the claim on both; claimAfterCommit is idempotent for
+        // a menu already owned, so the second offer is a no-op rather than a
+        // re-open.
+        if (event.type === "click") {
+            var clickTrigger = triggerFrom(event.target);
+            if (clickTrigger && !optedOut(clickTrigger))
+                claimAfterCommit(clickTrigger, "first", 3);
             return;
         }
         if (event.type === "pointermove") {

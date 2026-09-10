@@ -1511,3 +1511,142 @@ TEST_CASE("mac harness: a running frame driver engages pointer coalescing",
     CHECK(probe->ups == 1);
     CHECK(probe->order == "pdu");   // motion never arrives after its release
 }
+
+TEST_CASE("a mouse-opened popup accepts arrow navigation and paints its highlight",
+          "[mac][platform-harness][keyboard][popup-default]") {
+    // The keyboard-opened case is covered above. This pins the path a user
+    // actually takes: press the trigger with the mouse, then press an arrow.
+    // Nothing here calls `trigger.focus()`, because a native click does not
+    // set `document.activeElement` — so a popup owner that only learns about a
+    // trigger through the focused element never takes ownership of a
+    // mouse-opened menu, and both arrow navigation and the highlight are dead.
+    pulp::view::ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 320, 200});
+    pulp::state::StateStore store;
+    pulp::view::WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var popup = null;
+        var selected = 'A';
+        var triggerClicks = 0;
+        var trigger = document.createElement('button');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-controls', 'mouse-popup');
+        trigger.textContent = 'A';
+        trigger.style.position = 'absolute';
+        trigger.style.left = '8px';
+        trigger.style.top = '8px';
+        trigger.style.width = '80px';
+        trigger.style.height = '24px';
+        trigger.addEventListener('click', function() {
+            ++triggerClicks;
+            if (popup) {
+                popup.parentNode.removeChild(popup);
+                popup = null;
+                return;
+            }
+            popup = document.createElement('div');
+            popup.id = 'mouse-popup';
+            popup.setAttribute('role', 'listbox');
+            popup.style.position = 'absolute';
+            popup.style.left = '8px';
+            popup.style.top = '36px';
+            popup.style.width = '100px';
+            popup.style.height = '64px';
+            ['A', 'B'].forEach(function(label) {
+                var option = document.createElement('button');
+                option.setAttribute('role', 'option');
+                option.textContent = label;
+                option.addEventListener('click', function() {
+                    selected = label;
+                    trigger.textContent = label;
+                    if (popup) popup.parentNode.removeChild(popup);
+                    popup = null;
+                });
+                popup.appendChild(option);
+            });
+            document.body.appendChild(popup);
+        });
+        document.body.appendChild(trigger);
+    )");
+    const auto trigger_id = std::string(
+        engine.evaluate("trigger._id").getWithDefault<std::string_view>(""));
+    auto* trigger_view = bridge.widget(trigger_id);
+    REQUIRE(trigger_view != nullptr);
+    // WindowHost runs a real root layout at construction. Give the trigger an
+    // explicit absolute-layout contract so Yoga cannot collapse it; a
+    // zero-sized trigger would make the mouse control below unsatisfiable.
+    trigger_view->set_position(View::Position::absolute);
+    trigger_view->set_left(8.0f);
+    trigger_view->set_top(8.0f);
+    trigger_view->flex().preferred_width = 80.0f;
+    trigger_view->flex().preferred_height = 24.0f;
+    trigger_view->set_bounds({8, 8, 80, 24});
+    trigger_view->set_hit_testable(true);
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+    host->set_app_key_monitor([](const pulp::view::KeyEvent&) { return false; });
+
+    // Control: the synthetic press must actually land on the trigger. Without
+    // this the whole case could pass vacuously by never opening the menu.
+    REQUIRE(root.hit_test({40, 20}) == trigger_view);
+
+    // The standalone host defers its click to the main queue, and the popup
+    // owner schedules its claim on a frame callback. Run the REAL event loop so
+    // both settle exactly as they do in production; a bare synthetic press
+    // would assert against an ordering the user never sees.
+    REQUIRE(pt::run_hidden_event_loop(
+        *host,
+        {{.at_ms = 10,
+          .events = {{.phase = pt::SimulatedMouse::Phase::down, .x = 40, .y = 20}}},
+         {.at_ms = 30,
+          .events = {{.phase = pt::SimulatedMouse::Phase::up, .x = 40, .y = 20}}}},
+        /*stop_after_ms=*/250));
+
+    // Control: the mouse really opened the menu, and it did so without any
+    // focus assignment. Both must hold before the ownership claim means
+    // anything.
+    REQUIRE(engine.evaluate("triggerClicks").getWithDefault<int>(-1) == 1);
+    REQUIRE(engine.evaluate("!!document.getElementById('mouse-popup')")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("document.activeElement !== trigger")
+                .getWithDefault<bool>(false));
+
+    // The claim itself: a mouse-opened popup is owned, and its first option is
+    // painted, not merely marked.
+    REQUIRE(engine.evaluate("!!globalThis.__pulpPopupDefaultState__")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 0")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.options[0]."
+        "getAttribute('data-pulp-popup-active') === 'true' && "
+        "globalThis.__pulpPopupDefaultState__.options[0].style.background === "
+        "'rgba(120,180,255,0.18)'")
+                .getWithDefault<bool>(false));
+
+    // Arrow navigation moves the selection and repaints the highlight.
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 1 && "
+        "globalThis.__pulpPopupDefaultState__.options[1]."
+        "getAttribute('data-pulp-popup-active') === 'true' && "
+        "globalThis.__pulpPopupDefaultState__.options[1].style.background === "
+        "'rgba(120,180,255,0.18)' && "
+        "globalThis.__pulpPopupDefaultState__.options[0]."
+        "getAttribute('data-pulp-popup-active') === 'false'")
+                .getWithDefault<bool>(false));
+
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::up));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 0")
+                .getWithDefault<bool>(false));
+
+    // Enter commits the highlighted option, which is what makes the highlight
+    // a selection rather than decoration.
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::enter));
+    REQUIRE(engine.evaluate("selected === 'A' && popup === null")
+                .getWithDefault<bool>(false));
+}
