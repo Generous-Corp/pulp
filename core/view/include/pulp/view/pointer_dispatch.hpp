@@ -153,6 +153,39 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count,
                         MouseButton button, const PointerAttributes& pointer);
 
+/// Deliver one BUTTONLESS pointer move — a hover — to the view under
+/// `root_pt`, which is in root-view space.
+///
+/// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
+/// In this order:
+///   1. hover STATE — `View::simulate_hover`, which raises `set_hovered` along
+///      the path to the hit view, clears it everywhere else, and hands the hit
+///      view a positioned `on_hover_move`;
+///   2. the MODERN channel — `on_mouse_event(MouseEvent)` with
+///      `phase == MousePhase::hover`, `is_down == false` and
+///      `button == MouseButton::none`;
+///   3. the JS channel — `on_dom_pointer_move_event` along the same
+///      target-to-root path a drag walks, which is what makes a scripted UI's
+///      `pointermove` / `mousemove` listener run.
+///
+/// Step 3 is the whole reason this verb exists. Hover was the ONLY phase with
+/// no portable delivery function, so every native host open-coded it as a bare
+/// `simulate_hover` — and `simulate_hover` runs no JavaScript. A scripted UI
+/// therefore received `pointerdown`, `pointermove`-while-dragging and
+/// `pointerup`, but never a plain hover, so a handler that picks the cursor
+/// (`grab` / `col-resize` / `crosshair`) from the pointer position only ever
+/// ran once a button went down. That is the shape of the defect a user reports
+/// as "the cursor only changes when I click".
+///
+/// Resolve the cursor AFTER calling this, never before: the value a scripted UI
+/// wants published is the one its handler just set.
+void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers = 0);
+
+/// Attribute-carrying hover overload, for a host that knows the pointer device
+/// (a trackpad/stylus hover) or reports movement deltas.
+void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
+                        const PointerAttributes& pointer);
+
 /// Host hooks the portable wheel router calls back into. Kept as a struct so
 /// a new hook can be threaded in without re-touching every call site.
 struct WheelHost {

@@ -73,7 +73,11 @@ std::string pointer_payload(const MouseEvent& event, bool moving) {
            "altitudeAngle:" + std::to_string(event.altitude_angle) + "," +
            "azimuthAngle:" + std::to_string(event.azimuth_angle) + "," +
            "button:" + std::to_string(button) + "," +
-           "buttons:" + (moving ? "1" : "0") + "," +
+           // A move carries a held button only while it is a DRAG. Reading
+           // this off `moving` alone reported `buttons: 1` for a plain
+           // hover too, which is the exact bit a script tests to tell
+           // "dragging" from "hovering" (grabbing vs grab).
+           "buttons:" + ((moving && event.is_down) ? "1" : "0") + "," +
            "ctrlKey:" + (event.isCtrlDown() ? "true" : "false") + "," +
            "shiftKey:" + (event.isShiftDown() ? "true" : "false") + "," +
            "altKey:" + (event.isAltDown() ? "true" : "false") + "," +

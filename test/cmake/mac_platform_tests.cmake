@@ -160,3 +160,25 @@ if(APPLE AND NOT PULP_IOS)
     )
     catch_discover_tests(pulp-test-mac-hover-cursor-stationary)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # The cursor a window host applies on a BUTTONLESS hover, when the region
+    # under the pointer decides its cursor in a pointer-move handler — the
+    # shape a scripted UI has. A region with a statically assigned cursor is
+    # resolvable by hit-test alone and cannot see this defect, so the scene
+    # carries one only as the positive control. Nothing portable can pin the
+    # result: the answer lives in +[NSCursor currentCursor].
+    add_executable(pulp-test-mac-hover-cursor-delivery
+        test_mac_hover_cursor_delivery.mm
+    )
+    target_link_libraries(pulp-test-mac-hover-cursor-delivery PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+    )
+    # Pull the host archive member; the case messages the class but references
+    # no C++ symbol from window_host_mac.mm.
+    target_link_options(pulp-test-mac-hover-cursor-delivery PRIVATE
+        "LINKER:-u,_OBJC_CLASS_$_PulpView"
+    )
+    catch_discover_tests(pulp-test-mac-hover-cursor-delivery)
+endif()

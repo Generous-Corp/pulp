@@ -878,7 +878,11 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
             tracker->note_published(pulp::view::View::CursorStyle::default_);
         return;
     }
-    root->simulate_hover(local);
+    // Same hover delivery the standalone host uses: hover state, then the JS
+    // `pointermove` a scripted UI binds its cursor decision to. A bare
+    // `simulate_hover` runs no JavaScript, so a hosted scripted editor only
+    // revised its cursor once a button went down.
+    pulp::view::deliver_hover_move(*root, local);
     const auto style = pulp::view::hover_cursor_at(*root, local);
     pulp::view::mac_geometry::set_ns_cursor_for_style(style);
     if (tracker) tracker->note_published(style);
