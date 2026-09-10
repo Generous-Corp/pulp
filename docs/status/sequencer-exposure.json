@@ -4222,8 +4222,14 @@
       "id": "ledger-authority-descriptor",
       "title": "Every exposed ledger surface declares the authority it admits a caller under",
       "classification": "ci_test_only",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "b5b973dc-5612-4b50-965b-3dc648feca56",
+      "release": {
+        "pr": 8164,
+        "accepted_head": "10e0dc3f380948425d5e602e3200358f98ce28d5",
+        "merge_sha": "87cd78b9f18cf54cad67a48a0d996569eefb8ab8",
+        "integration_mode": "merge"
+      },
       "owned_paths": [
         "docs/reference/capability-control.md",
         "docs/status/sequencer-exposure.json",
