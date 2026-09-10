@@ -167,6 +167,8 @@ setPanelStyle	widget_value	function	core/view/src/widget_bridge/widget_value_con
 setScrollContentSize	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setTextRuns	typography	function	core/view/src/widget_bridge/text_runs_api.cpp
 setBackground	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
+getBackground	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
+clearBackground	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 createSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp	factory:SvgPath
 setSvgPath	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.d
 setSvgViewBox	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.viewBox
