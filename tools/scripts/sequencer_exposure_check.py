@@ -63,6 +63,29 @@ REQUIRED_LIVE_KINDS = {
     "mcp_projection",
     "test",
 }
+ADMISSIONS = {
+    "in_process",
+    "registered_writer",
+    "read_only",
+    "descriptor",
+}
+REQUIRED_AUTHORITY_KEYS = {
+    "admission",
+    "writer_profile",
+    "bounds",
+    "refusal_codes",
+}
+REQUIRED_BOUNDS_KEYS = {
+    "max_transaction_retained_bytes",
+    "max_session_retained_bytes",
+}
+# The authority vocabulary has one source and two readers. The offline writer
+# profiles are defined in C++ for the CLI and MCP boundaries; this gate parses
+# that same source rather than transcribing it, so a ledger row cannot describe
+# a profile, quota or refusal code the boundaries do not actually implement.
+WRITER_PROFILE_HEADER = "tools/timeline/include/pulp/tools/timeline/writer_profile.hpp"
+WRITER_PROFILE_SOURCE = "tools/timeline/src/writer_profile.cpp"
+
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 LEDGER_PATH = "docs/status/sequencer-exposure.json"
@@ -78,6 +101,87 @@ SHARED_CROSS_DOMAIN_PATHS = {
 
 def _is_nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _eval_byte_literal(expression: str) -> int | None:
+    """Evaluate a C++ integer-constant expression such as ``1024ull * 1024ull``.
+
+    Returns None for anything that is not a plain product/sum of literals, so a
+    constant this gate cannot read fails closed rather than being guessed at.
+    """
+    cleaned = re.sub(r"\b(\d+)(?:ull|ul|ll|u|l)\b", r"\1", expression, flags=re.IGNORECASE)
+    cleaned = cleaned.strip().rstrip(";").strip()
+    if not cleaned or not re.fullmatch(r"[0-9+*()\s]+", cleaned):
+        return None
+    try:
+        value = eval(cleaned, {"__builtins__": {}}, {})  # noqa: S307 - literal arithmetic only
+    except (SyntaxError, ValueError, TypeError, ZeroDivisionError):
+        return None
+    return value if isinstance(value, int) else None
+
+
+def _load_writer_profile_vocabulary(repo_root: Path) -> tuple[dict[str, dict[str, int | None]],
+                                                              set[str],
+                                                              list[str]]:
+    """Read the offline writer authority vocabulary from its C++ definition.
+
+    The ledger and the CLI/MCP boundaries must name the same profiles, quotas and
+    refusal codes. Parsing the shipped source keeps that a single source of truth
+    rather than a transcription that can drift silently. A source this cannot read
+    is an error, never a skip: a gate that quietly stops checking is worse than no
+    gate.
+    """
+    errors: list[str] = []
+    header_path = repo_root / WRITER_PROFILE_HEADER
+    source_path = repo_root / WRITER_PROFILE_SOURCE
+    for path, label in ((header_path, WRITER_PROFILE_HEADER), (source_path, WRITER_PROFILE_SOURCE)):
+        if not path.is_file():
+            errors.append(f"authority vocabulary: {label} is missing; cannot validate authority")
+    if errors:
+        return {}, set(), errors
+    header = header_path.read_text(encoding="utf-8")
+    source = source_path.read_text(encoding="utf-8")
+
+    by_name = re.search(
+        r"writer_profile_by_name\b.*?\{(.*?)\n\}", source, re.S
+    )
+    if by_name is None:
+        return {}, set(), ["authority vocabulary: cannot locate writer_profile_by_name"]
+    names = re.findall(r'name\s*==\s*"([a-z_]+)"', by_name.group(1))
+    if not names:
+        return {}, set(), ["authority vocabulary: writer_profile_by_name names no profiles"]
+
+    profiles: dict[str, dict[str, int | None]] = {}
+    for name in names:
+        camel = name.capitalize()
+        bounds: dict[str, int | None] = {}
+        for ledger_key, cpp_key in (
+            ("max_transaction_retained_bytes", f"k{camel}MaxTransactionRetainedBytes"),
+            ("max_session_retained_bytes", f"k{camel}MaxSessionRetainedBytes"),
+        ):
+            match = re.search(rf"\b{cpp_key}\s*=\s*([^;]+);", header)
+            if match is None:
+                # No constant means the profile is deliberately unquotaed, which
+                # the boundaries publish as a null ceiling.
+                bounds[ledger_key] = None
+                continue
+            value = _eval_byte_literal(match.group(1))
+            if value is None:
+                errors.append(
+                    f"authority vocabulary: cannot evaluate {cpp_key} in {WRITER_PROFILE_HEADER}"
+                )
+                bounds[ledger_key] = None
+                continue
+            bounds[ledger_key] = value
+        profiles[name] = bounds
+
+    codes_body = re.search(r"conflict_code_name\b.*?\{(.*?)\n\}", source, re.S)
+    if codes_body is None:
+        return profiles, set(), errors + ["authority vocabulary: cannot locate conflict_code_name"]
+    codes = set(re.findall(r'return\s+"([a-z_]+)";', codes_body.group(1)))
+    if not codes:
+        errors.append("authority vocabulary: conflict_code_name names no refusal codes")
+    return profiles, codes, errors
 
 
 def _exact_keys(value: Any, required: set[str], optional: set[str], where: str,
@@ -152,6 +256,93 @@ def _validate_evidence(
     return kind if require_kind and kind in EVIDENCE_KINDS else None
 
 
+def _validate_authority(
+    authority: Any,
+    disposition: Any,
+    surface_name: str,
+    where: str,
+    errors: list[str],
+    profiles: dict[str, dict[str, int | None]],
+    refusal_codes: set[str],
+) -> None:
+    """Validate the authority an exposed surface admits a caller under.
+
+    An exposed surface has to state which authority it grants, because a reader
+    cannot otherwise tell a quota-bounded proposal writer from an unrestricted
+    one. A surface that grants nothing states that explicitly rather than by
+    omission.
+    """
+    if disposition != "exposed":
+        if authority is not None:
+            errors.append(
+                f"{where}.authority: only an exposed surface carries an authority descriptor"
+            )
+        return
+    if authority is None:
+        errors.append(f"{where}.authority: required for an exposed surface")
+        return
+    if not _exact_keys(authority, REQUIRED_AUTHORITY_KEYS, set(), f"{where}.authority", errors):
+        return
+
+    admission = authority.get("admission")
+    if admission not in ADMISSIONS:
+        errors.append(f"{where}.authority.admission: unknown admission {admission!r}")
+        return
+
+    profile = authority.get("writer_profile")
+    bounds = authority.get("bounds")
+    if admission == "registered_writer":
+        if profile not in profiles:
+            errors.append(
+                f"{where}.authority.writer_profile: {profile!r} is not a profile "
+                f"{WRITER_PROFILE_SOURCE} defines"
+            )
+        elif not isinstance(bounds, dict):
+            errors.append(
+                f"{where}.authority.bounds: a registered writer must state its retained-byte "
+                "ceilings"
+            )
+        elif _exact_keys(bounds, REQUIRED_BOUNDS_KEYS, set(), f"{where}.authority.bounds", errors):
+            expected = profiles[profile]
+            for key in sorted(REQUIRED_BOUNDS_KEYS):
+                if bounds.get(key) != expected[key]:
+                    errors.append(
+                        f"{where}.authority.bounds.{key}: {bounds.get(key)!r} disagrees with the "
+                        f"{profile!r} profile in {WRITER_PROFILE_HEADER} ({expected[key]!r})"
+                    )
+    else:
+        if profile is not None:
+            errors.append(
+                f"{where}.authority.writer_profile: must be null when admission is {admission!r}; "
+                "no writer is registered"
+            )
+        if bounds is not None:
+            errors.append(
+                f"{where}.authority.bounds: must be null when admission is {admission!r}"
+            )
+
+    codes = authority.get("refusal_codes")
+    if not isinstance(codes, list) or any(not _is_nonempty_string(code) for code in codes):
+        errors.append(f"{where}.authority.refusal_codes: expected a list of strings")
+        return
+    if len(codes) != len(set(codes)):
+        errors.append(f"{where}.authority.refusal_codes: duplicate refusal code")
+    unknown = sorted(set(codes) - refusal_codes)
+    if unknown:
+        errors.append(
+            f"{where}.authority.refusal_codes: {', '.join(unknown)} not named by "
+            f"conflict_code_name in {WRITER_PROFILE_SOURCE}"
+        )
+    if admission == "registered_writer" and not codes:
+        errors.append(
+            f"{where}.authority.refusal_codes: a registered writer must name the refusals it emits"
+        )
+    if admission != "registered_writer" and codes:
+        errors.append(
+            f"{where}.authority.refusal_codes: must be empty when admission is {admission!r}"
+        )
+
+
 def _validate_surface(
     surface: Any,
     name: str,
@@ -160,16 +351,21 @@ def _validate_surface(
     errors: list[str],
     *,
     validate_current_paths: bool,
+    profiles: dict[str, dict[str, int | None]],
+    refusal_codes: set[str],
 ) -> set[str]:
     if not _exact_keys(
         surface,
         {"disposition", "rationale"},
-        {"owner", "dependencies", "evidence"},
+        {"owner", "dependencies", "evidence", "authority"},
         where,
         errors,
     ):
         return set()
     disposition = surface.get("disposition")
+    _validate_authority(
+        surface.get("authority"), disposition, name, where, errors, profiles, refusal_codes
+    )
     if disposition not in DISPOSITIONS:
         errors.append(f"{where}.disposition: unknown disposition {disposition!r}")
     if not _is_nonempty_string(surface.get("rationale")):
@@ -250,15 +446,19 @@ def _validate_surface(
 def validate_document(document: Any, repo_root: Path) -> list[str]:
     """Return every ledger error. An empty list means the document is valid."""
     errors: list[str] = []
+    writer_profiles, writer_refusal_codes, vocabulary_errors = _load_writer_profile_vocabulary(
+        repo_root
+    )
+    errors.extend(vocabulary_errors)
     if not _exact_keys(
         document, {"schema_version", "ledger_id", "audit", "rows", "tombstones"}, set(),
         "ledger", errors
     ):
         return errors
-    if document.get("schema_version") != 1:
-        errors.append("ledger.schema_version: expected 1")
-    if document.get("ledger_id") != "dev.pulp.sequencer-exposure@1":
-        errors.append("ledger.ledger_id: expected dev.pulp.sequencer-exposure@1")
+    if document.get("schema_version") != 2:
+        errors.append("ledger.schema_version: expected 2")
+    if document.get("ledger_id") != "dev.pulp.sequencer-exposure@2":
+        errors.append("ledger.ledger_id: expected dev.pulp.sequencer-exposure@2")
     audit = document.get("audit")
     if _exact_keys(
         audit, {"status", "scope", "owner", "dependencies", "gaps"}, set(),
@@ -392,6 +592,8 @@ def validate_document(document: Any, repo_root: Path) -> list[str]:
                 surfaces[surface_name], surface_name, repo_root,
                 f"{where}.surfaces.{surface_name}", errors,
                 validate_current_paths=delivery_state == "pending",
+                profiles=writer_profiles,
+                refusal_codes=writer_refusal_codes,
             )
 
     if len(live_ids) != len(set(live_ids)):
@@ -482,6 +684,16 @@ def validate_schema_contract(schema: Any) -> list[str]:
         errors.append("schema contract: disposition enum drifted from checker")
     if set(evidence_properties.get("kind", {}).get("enum", [])) != EVIDENCE_KINDS:
         errors.append("schema contract: evidence-kind enum drifted from checker")
+    authority_definition = definitions.get("authority", {})
+    authority_properties = authority_definition.get("properties", {})
+    if set(authority_properties) != REQUIRED_AUTHORITY_KEYS:
+        errors.append("schema contract: authority fields drifted from checker")
+    if set(authority_definition.get("required", [])) != REQUIRED_AUTHORITY_KEYS:
+        errors.append("schema contract: required authority fields drifted from checker")
+    if set(authority_properties.get("admission", {}).get("enum", [])) != ADMISSIONS:
+        errors.append("schema contract: admission enum drifted from checker")
+    if "authority" not in surface_properties:
+        errors.append("schema contract: surface must carry an authority descriptor")
     expected_row_fields = {
         "id", "title", "delivery_state", "claim_id", "owned_paths",
         "classification", "evidence", "surfaces"
@@ -537,6 +749,16 @@ def validate_schema_contract(schema: Any) -> list[str]:
         if set(dispositions) == {"gap", "deferred"}:
             gap_rule = rule
             break
+    exposed_rule = None
+    for rule in definitions.get("surface", {}).get("allOf", []):
+        if rule.get("if", {}).get("properties", {}).get("disposition", {}).get("const") == "exposed":
+            exposed_rule = rule
+            break
+    exposed_then = exposed_rule.get("then", {}) if isinstance(exposed_rule, dict) else {}
+    if set(exposed_then.get("required", [])) != {"evidence", "authority"}:
+        errors.append(
+            "schema contract: exposed must require evidence and an authority descriptor"
+        )
     gap_then = gap_rule.get("then", {}) if isinstance(gap_rule, dict) else {}
     dependency_floor = (
         gap_then.get("properties", {}).get("dependencies", {}).get("minItems")
