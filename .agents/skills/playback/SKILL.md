@@ -1015,6 +1015,20 @@ error enum, such as an importer's or a renderer's; and an authored read that
 sits further than `AUTHORING_LOOKBACK_LINES` above the raise or arrives through
 an internal struct field that no longer names its model origin.
 
+**A `case` label is a destination, not a raise.** The check consumes
+`case Scope::CompileErrorCode::Enumerator:` before it looks for raises, because a
+switch that maps every enumerator to its own name for a diagnostic otherwise
+reports one refusal per arm — and the enumerator sitting in a neighbouring arm
+lends its name to the lookback window, so each of those phantom refusals also
+reads as authorable on evidence it never touched. Only the label text is
+consumed, never the whole line: a refusal constructed in the arm's body is still
+a raise, including on the same line as the label. A label on some other enum is
+left alone, because it names no code for the raise pattern to find. One shape it
+still reads as a raise, deliberately, because over-flagging asks for an entry
+someone must answer rather than dropping one that is owed: a
+`code == CompileErrorCode::X` comparison, which names a code without
+constructing one.
+
 All three seeded entries are `live-defect` — expression lanes on a clip,
 expression lanes on a trimmed nested clip, and the nested-sequence flattening
 refusals. They are tracked, not resolved. Removing one from the allowlist is

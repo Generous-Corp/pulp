@@ -137,3 +137,26 @@ if(APPLE AND NOT PULP_IOS)
     )
     catch_discover_tests(pulp-test-coremidi-shared-client)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # AppKit re-asks which cursor to show when the pointer MOVES and never
+    # because the content under a still pointer changed. These cases drive the
+    # hosts' frame-path refresh directly, with no synthesized mouse move or
+    # click, and assert the cursor AppKit is told to display follows the region
+    # that slid under the pointer. Nothing portable can pin it: the answer lives
+    # in +[NSCursor currentCursor].
+    add_executable(pulp-test-mac-hover-cursor-stationary
+        test_mac_hover_cursor_stationary.mm
+    )
+    target_link_libraries(pulp-test-mac-hover-cursor-stationary PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+    )
+    # Pull the host archive members; the cases message the classes but
+    # reference no C++ symbol from either .mm.
+    target_link_options(pulp-test-mac-hover-cursor-stationary PRIVATE
+        "LINKER:-u,_OBJC_CLASS_$_PulpView"
+        "LINKER:-u,_OBJC_CLASS_$_PulpPluginView"
+    )
+    catch_discover_tests(pulp-test-mac-hover-cursor-stationary)
+endif()
