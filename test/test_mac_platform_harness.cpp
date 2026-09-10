@@ -1627,6 +1627,23 @@ TEST_CASE("a mouse-opened popup accepts arrow navigation and paints its highligh
         "'rgba(120,180,255,0.18)'")
                 .getWithDefault<bool>(false));
 
+    const auto option_id = [&engine](int index) {
+        return std::string(
+            engine
+                .evaluate("globalThis.__pulpPopupDefaultState__.options["
+                          + std::to_string(index) + "]._id")
+                .getWithDefault<std::string_view>(""));
+    };
+    auto* option0_view = bridge.widget(option_id(0));
+    auto* option1_view = bridge.widget(option_id(1));
+    REQUIRE(option0_view != nullptr);
+    REQUIRE(option1_view != nullptr);
+    // Control for the pair of widget assertions below: the highlighted row is
+    // painted natively, so a later "no background" reading means the highlight
+    // came off, not that the instrument is looking at the wrong widget.
+    REQUIRE(option0_view->has_background_color());
+    REQUIRE_FALSE(option1_view->has_background_color());
+
     // Arrow navigation moves the selection and repaints the highlight.
     REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
     REQUIRE(engine.evaluate(
@@ -1639,18 +1656,15 @@ TEST_CASE("a mouse-opened popup accepts arrow navigation and paints its highligh
         "getAttribute('data-pulp-popup-active') === 'false'")
                 .getWithDefault<bool>(false));
 
-    // The highlight MOVES; it must not smear. Clearing the previous row has to
-    // assign a background the paint bridge can parse: an empty string is
-    // silently dropped there, so the row would keep its highlight pixels while
-    // only the attribute moved, and every visited row would stay lit.
-    REQUIRE(engine.evaluate(
-        "(function(o) {"
-        "  return o.style.background !== 'rgba(120,180,255,0.18)'"
-        "      && o.style.backgroundColor !== 'rgba(120,180,255,0.18)'"
-        "      && o.style.background !== ''"
-        "      && o.style.backgroundColor !== '';"
-        "})(globalThis.__pulpPopupDefaultState__.options[0])")
-                .getWithDefault<bool>(false));
+    // The highlight MOVES; it must not smear, and it must come off cleanly.
+    // Read the WIDGET, not the inline style: the inline string can say the
+    // highlight is gone while the painted background still carries it, which
+    // is exactly the failure this covers. These options carry no authored
+    // fill, so the row the selection left must be back to having no
+    // background at all -- neither the highlight, nor a transparent fill
+    // painted over whatever else the row would show.
+    REQUIRE_FALSE(option0_view->has_background_color());
+    REQUIRE(option1_view->has_background_color());
 
     REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::up));
     REQUIRE(engine.evaluate(

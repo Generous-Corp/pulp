@@ -614,21 +614,37 @@ globalThis.self = window;
         return popupState.triggerOrdinal >= 0
             ? triggers[popupState.triggerOrdinal] || null : null;
     }
+    // The highlight is an overlay: it has to come off a row as cleanly as it
+    // went on. Assigning the captured base back is not enough on its own --
+    // the style bridge drops a value it cannot parse as a color, so the empty
+    // string is a silent no-op and the highlight stays behind on every row the
+    // selection has visited, smearing instead of moving. Assigning
+    // "transparent" instead is also wrong: it paints a transparent fill over a
+    // background the row may have from somewhere other than its inline style,
+    // blanking rows the app had filled. Restore what was there, and where
+    // nothing was, remove ours.
+    function restoreOptionBackground(option, base) {
+        if (base) {
+            option.style.background = base;
+            option.style.backgroundColor = base;
+            return;
+        }
+        option.style.removeProperty("background");
+        option.style.removeProperty("background-color");
+        if (option._nativeCreated && typeof clearBackground === "function")
+            clearBackground(option._id);
+    }
     function paint() {
         if (!state) return;
         for (var i = 0; i < state.options.length; ++i) {
             var active = i === state.activeIndex;
             state.options[i].setAttribute("data-pulp-popup-active", active ? "true" : "false");
-            // Restoring an empty base must actually CLEAR the background.
-            // The style bridge drops a value it cannot parse as a color, so
-            // assigning "" is a silent no-op and the highlight stays behind on
-            // every row the selection has visited -- the menu smears instead of
-            // moving. "transparent" is a real color, so it clears.
-            var background = active
-                ? "rgba(120,180,255,0.18)"
-                : (state.baseBackgrounds[i] || "transparent");
-            state.options[i].style.background = background;
-            state.options[i].style.backgroundColor = background;
+            if (active) {
+                state.options[i].style.background = "rgba(120,180,255,0.18)";
+                state.options[i].style.backgroundColor = "rgba(120,180,255,0.18)";
+            } else {
+                restoreOptionBackground(state.options[i], state.baseBackgrounds[i]);
+            }
         }
         globalThis.__pulpPopupDefaultState__ = state;
     }
@@ -639,11 +655,19 @@ globalThis.self = window;
         if (!popup || !options.length) return false;
         var baseBackgrounds = [];
         // An app may author its row fill through either longhand, and only the
-        // one it used reads back. Capture both so the restore returns the row
-        // to the app's own appearance rather than blanking it.
-        for (var i = 0; i < options.length; ++i)
-            baseBackgrounds.push(options[i].style.background
-                                 || options[i].style.backgroundColor || "");
+        // one it used reads back -- and it may not have authored it in script
+        // at all, in which case the inline style is empty while the row is
+        // still painted. Ask the widget for its applied background so the
+        // restore returns the row to the app's own appearance rather than
+        // blanking it.
+        for (var i = 0; i < options.length; ++i) {
+            var authored = options[i].style.background
+                || options[i].style.backgroundColor || "";
+            if (!authored && options[i]._nativeCreated
+                && typeof getBackground === "function")
+                authored = getBackground(options[i]._id) || "";
+            baseBackgrounds.push(authored);
+        }
         var hoverHandlers = [];
         var triggerKind = trigger.getAttribute("aria-haspopup");
         var triggerPeers = document.querySelectorAll(
@@ -688,9 +712,7 @@ globalThis.self = window;
         for (var i = 0; i < state.options.length; ++i) {
             state.options[i].removeEventListener(
                 "pointerenter", state.hoverHandlers[i]);
-            var restored = state.baseBackgrounds[i] || "transparent";
-            state.options[i].style.background = restored;
-            state.options[i].style.backgroundColor = restored;
+            restoreOptionBackground(state.options[i], state.baseBackgrounds[i]);
             state.options[i].removeAttribute("data-pulp-popup-active");
         }
         state = null;
