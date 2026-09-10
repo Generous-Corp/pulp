@@ -520,8 +520,8 @@ buffer.
 
 ### CSS-shim gap fills — translator vs. bridge contract
 
-Three classes of "silent drop" recur in `web-compat-style-decl.js`. When
-adding a CSS property, walk all three before declaring done:
+Four classes of "silent drop" recur in `web-compat-style-decl.js`. When
+adding a style property, walk all four before declaring done:
 
 1. **Missing `case "X":`** — the property is nowhere in the switch, so
    `el.style.X = ...` writes to `_props[X]` and never reaches the
@@ -547,6 +547,18 @@ adding a CSS property, walk all three before declaring done:
    `packages/pulp-react/src/prop-applier.ts` (`_normalizeFontWeight`)
    for parity with React-Native style objects — both paths must
    emit the same numeric weight.
+
+4. **Not a CSS property at all** — React Native contributes style keys
+   CSS never had (`hitSlop`). The shim still has to carry them,
+   because the RN-style object and `el.style.X` are the same surface
+   to a consumer, and the three-class walk above applies unchanged.
+   The extra cost is that there is no CSS shorthand to inherit from,
+   so `packages/pulp-react/src/prop-applier-paint.ts` has to accept
+   BOTH the RN forms (a number, or `{top,right,bottom,left}`) and the
+   CSS-shorthand form a designer will reach for anyway
+   (`hitSlop: '12px 2px'`), and normalize to the four-value bridge
+   call. Emitting the number form only is the silent half-fix: the
+   object form then writes `[object Object]` into one edge.
 
 **`__cssProperties__` array gotcha:** properties also need an entry in
 the `__cssProperties__` array near the bottom of
