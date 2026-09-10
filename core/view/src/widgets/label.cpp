@@ -410,6 +410,10 @@ bool Label::sync_measure_basis() const {
     fresh.multi_line = multi_line_;
     fresh.wrap_fallback = captured_wrap_fallback_;
     fresh.font_gen = canvas::font_registration_generation();
+    fresh.line_height = line_height_;
+    fresh.text_transform = static_cast<int>(text_transform_);
+    fresh.word_break = word_break();
+    fresh.font_features = resolved_font_features();
 
     if (!measure_basis_valid_ || !(measure_basis_ == fresh)) {
         measure_basis_ = std::move(fresh);

@@ -1750,3 +1750,45 @@ TEST_CASE("laying out an unchanged tree re-shapes no text",
 
     CHECK(steady == 0);
 }
+
+// A restyle that changes only a shaping input the measure memo does not key
+// on returns the previous box. In a settings sheet that applies line-height
+// and text-transform after first layout, the stale height lets sibling
+// sections overlap.
+TEST_CASE("restyling a shaping input re-measures the label",
+          "[view][widget][label-cache][layout]") {
+    auto measured_height = [](const std::function<void(Label&)>& restyle) {
+        View root;
+        root.set_bounds({0, 0, 800, 600});
+        auto owned = std::make_unique<Label>("Spectrum metaphor");
+        Label* label = owned.get();
+        root.add_child(std::move(owned));
+
+        // Measure once under the default style, so the memo is populated and
+        // the restyle below has something stale to return.
+        root.layout_children();
+        const float first = label->intrinsic_height();
+
+        restyle(*label);
+        root.layout_children();
+        return std::pair{first, label->intrinsic_height()};
+    };
+
+    SECTION("line-height") {
+        auto [before, after] =
+            measured_height([](Label& l) { l.set_line_height(48.0f); });
+        // Control: the baseline measured something, so a zero delta below
+        // cannot be a label that never measured at all.
+        REQUIRE(before > 0.0f);
+        CHECK(after != before);
+    }
+
+    SECTION("text-transform") {
+        auto [before, after] = measured_height([](Label& l) {
+            l.set_line_height(11.0f);
+            l.set_text_transform(Label::TextTransform::uppercase);
+        });
+        REQUIRE(before > 0.0f);
+        CHECK(after != before);
+    }
+}

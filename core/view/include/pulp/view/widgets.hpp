@@ -604,6 +604,15 @@ private:
         bool multi_line = false;
         bool wrap_fallback = false;
         std::uint64_t font_gen = 0;
+        // Every input shaping_setup()/prepare_shaped() reads must appear
+        // here, or a restyle that changes only one of them keeps the stale
+        // box: line height scales measured height directly, a text-transform
+        // changes advances and so can change the line count, the word-break
+        // mode changes where lines break, and font features change shaping.
+        float line_height = 0.0f;
+        int text_transform = 0;
+        std::string word_break;
+        std::vector<canvas::Canvas::FontFeature> font_features;
         bool operator==(const MeasureBasis&) const = default;
     };
     /// Refreshes the memo basis, dropping cached measurements when it moved.
