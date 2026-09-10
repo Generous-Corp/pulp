@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260909-mac-stationary-cursor-update-watch",
+  "created_at": "2026-09-09T08:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "A CSS cursor that changes because hover state changed did not reach the OS while the pointer stayed still. The macOS hosts resolved and set a cursor only from mouseMoved:, so the pointer had to physically move -- or a button had to be held -- before the arrow matched the region under it. A hover cursor is the one cursor case where the pointer is by definition stationary, so the dispatch site and the trigger disagreed. The fix adds NSTrackingCursorUpdate and a cursorUpdate: handler so AppKit asks the view for the cursor when the tracking region takes over, and a refreshHoverCursor pass driven from the frame producer (animation timer, drawRect:, GPU display link) so a cursor that changes underneath a still pointer is republished. The hit-test that both paths need was factored out of the mouseMoved: body into a shared resolve helper rather than duplicated. Touching render-assets-and-backends is core/view only and confined to the two AppKit hosts plus a new hover_cursor unit that holds the resolve-and-dedupe logic in portable C++ with no AppKit types, so Windows and Linux -- which have no cursor dispatch at all today -- can adopt it without reimplementing the policy. Touching visual-proof-harness is compat.json alone: the cursor row moves from an unqualified claim to partial, with cell, help, progress and wait listed as unsupported values and alias and copy added to the supported set, which makes the compat surface narrower and more honest rather than wider. No harness code, fixture, snapshot, threshold, renderer, font or Skia pin changes. No public API outside the new hover_cursor header, no authority moves and no Vellum artifact changes; registered as watch-only so both families' coverage stays honest about a change that crossed their selectors.",
+  "tests": [
+    "pulp-test-hover-cursor",
+    "pulp-test-mac-hover-cursor-stationary",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

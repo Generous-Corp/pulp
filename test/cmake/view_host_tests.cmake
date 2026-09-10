@@ -41,6 +41,9 @@ pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
 # Per-class recycling ViewPool + View::prepare_for_reuse
 pulp_add_test_suite(pulp-test-view-pool LIBRARIES pulp::view)
+# Hover-cursor tracking: platform cursor APIs re-ask only on pointer motion, so
+# this is the portable half of keeping the cursor correct under a still pointer.
+pulp_add_test_suite(pulp-test-hover-cursor LIBRARIES pulp::view)
 # View mutation/lifetime contract: identity across callbacks, transactional
 # attach, root-owned retirement, exactly-once frame-clock propagation.
 pulp_add_test_suite(pulp-test-view-lifecycle-contract LIBRARIES pulp::view)

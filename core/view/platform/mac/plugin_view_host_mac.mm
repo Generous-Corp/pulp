@@ -47,6 +47,7 @@
 // PULP_HAS_SKIA — a non-Skia build would not see the type.
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
+#include <pulp/view/hover_cursor.hpp>
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/gpu_surface.hpp>
@@ -102,6 +103,12 @@ extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
 // vsync — the event-independent cadence that hands the DAW keyboard back the
 // instant focus clears without a following key/mouse event.
 - (void)syncKeyFocus;
+// Re-resolve the cursor at the last known pointer position and publish it only
+// when it changed. Declared here so the host's frame-tick block (below the
+// @implementation) can call it every vsync: AppKit re-asks which cursor to show
+// when the pointer MOVES and never because content moved under a still pointer,
+// so this is what makes a hovered region change update the cursor immediately.
+- (void)refreshHoverCursor;
 @end
 
 // ── Accessibility element wrapping a Pulp View ──────────────────────────────
@@ -853,9 +860,13 @@ bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
 // Set the macOS cursor from the view under `local` (root coords). Use the same
 // complete mapping as the standalone host so diagonal resize, grab/grabbing,
 // invisible, and CSS-backed styles cannot silently degrade in a plug-in view.
-void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point local) {
+void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point local,
+                                    pulp::view::HoverCursorTracker* tracker) {
   try {
     if (!root) return;
+    // Remember the position so the frame path can re-resolve after content
+    // moves under a pointer that never moves again.
+    if (tracker) tracker->set_pointer(local);
     // Route hover over an OPEN dropdown to the combo so every row highlights —
     // the menu overlays sibling views, so a plain hit_test/simulate_hover would
     // land on the sibling under the lower rows and they'd never highlight.
@@ -863,12 +874,30 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
             root, local, [&](pulp::view::MouseEvent&) {})) {
         pulp::view::mac_geometry::set_ns_cursor_for_style(
             pulp::view::View::CursorStyle::default_);
+        if (tracker)
+            tracker->note_published(pulp::view::View::CursorStyle::default_);
         return;
     }
     root->simulate_hover(local);
-    auto* target = root->hit_test(local);
-    pulp::view::mac_geometry::set_ns_cursor_for_style(
-        target ? target->cursor() : pulp::view::View::CursorStyle::default_);
+    const auto style = pulp::view::hover_cursor_at(*root, local);
+    pulp::view::mac_geometry::set_ns_cursor_for_style(style);
+    if (tracker) tracker->note_published(style);
+  } catch (...) {
+    // A cursor update must never take down the host process.
+  }
+}
+
+// Re-resolve the cursor at the pointer position `tracker` remembers and publish
+// it only when it changed. Driven from the editor's display link so a layout
+// pass that slides a different widget under a STATIONARY pointer updates the
+// cursor: AppKit re-asks on pointer motion only, so without this the stale
+// cursor stays until the next move or click.
+void pulp_plugin_refresh_hover_cursor(pulp::view::View* root,
+                                      pulp::view::HoverCursorTracker* tracker) {
+  try {
+    if (!root || !tracker) return;
+    if (auto changed = tracker->poll(*root))
+        pulp::view::mac_geometry::set_ns_cursor_for_style(*changed);
   } catch (...) {
     // A cursor update must never take down the host process.
   }
@@ -918,6 +947,9 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     pulp::view::ViewCapture _dragTarget;
     NSResponder* _priorResponder;   // identity-validated before use, never deref'd
     NSTrackingArea* _trackingArea;  // hover tracking for the i-beam over text fields
+    // Last pointer position + last published cursor style, so the frame
+    // path can re-publish when the content under a still pointer changes.
+    pulp::view::HoverCursorTracker _hoverCursor;
 }
 
 - (BOOL)isFlipped { return NO; }
@@ -1010,18 +1042,31 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     _trackingArea = [[NSTrackingArea alloc]
         initWithRect:self.bounds
              options:(NSTrackingMouseMoved | NSTrackingActiveInKeyWindow |
-                      NSTrackingInVisibleRect | NSTrackingCursorUpdate)
+                      NSTrackingInVisibleRect | NSTrackingCursorUpdate |
+                      NSTrackingMouseEnteredAndExited)
                owner:self
             userInfo:nil];
     [self addTrackingArea:_trackingArea];
 }
 - (void)mouseMoved:(NSEvent*)event {
     if (!self.rootView) return;
-    pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event]);
+    pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event], &_hoverCursor);
 }
 - (void)cursorUpdate:(NSEvent*)event {
-    if (self.rootView) pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event]);
+    if (self.rootView)
+        pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event], &_hoverCursor);
     else [super cursorUpdate:event];
+}
+- (void)mouseExited:(NSEvent*)event {
+    // Pointer is off the editor: stop re-resolving for it, and make the first
+    // resolve after it returns publish unconditionally.
+    _hoverCursor.clear_pointer();
+    [super mouseExited:event];
+}
+// Re-ask what the cursor should be under a pointer that has not moved. Called
+// once per rendered frame by the editor's display link.
+- (void)refreshHoverCursor {
+    pulp_plugin_refresh_hover_cursor(self.rootView, &_hoverCursor);
 }
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
@@ -1460,6 +1505,10 @@ public:
                 if (tick.should_render || dirtied_during_tick) {
                     if (tick.should_render)
                         pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
+                    // The frame that moved content under a stationary pointer is
+                    // the only chance to update the cursor: AppKit re-asks on
+                    // pointer motion, never because the content moved.
+                    [self->view_ refreshHoverCursor];
                     if (self->view_) {
                         // An ANIMATING tree re-arms the dirty flag so the gate stays
                         // open for the settling frame after the last animation one.
@@ -1669,12 +1718,21 @@ private:
 // See PulpPluginView::syncKeyFocus — declared so the GPU host's display-link
 // frame-tick block can reconcile first-responder every vsync.
 - (void)syncKeyFocus;
+// Re-resolve the cursor at the last known pointer position and publish it only
+// when it changed. Declared here so the host's frame-tick block (below the
+// @implementation) can call it every vsync: AppKit re-asks which cursor to show
+// when the pointer MOVES and never because content moved under a still pointer,
+// so this is what makes a hovered region change update the cursor immediately.
+- (void)refreshHoverCursor;
 @end
 
 @implementation PulpGpuPluginView {
     pulp::view::ViewCapture _dragTarget;
     NSResponder* _priorResponder;   // identity-validated before use, never deref'd
     NSTrackingArea* _trackingArea;  // hover tracking for the i-beam over text fields
+    // Last pointer position + last published cursor style, so the frame
+    // path can re-publish when the content under a still pointer changes.
+    pulp::view::HoverCursorTracker _hoverCursor;
 }
 
 // Keyboard-focus contract — see PulpPluginView::acceptsFirstResponder above:
@@ -1751,18 +1809,31 @@ private:
     _trackingArea = [[NSTrackingArea alloc]
         initWithRect:self.bounds
              options:(NSTrackingMouseMoved | NSTrackingActiveInKeyWindow |
-                      NSTrackingInVisibleRect | NSTrackingCursorUpdate)
+                      NSTrackingInVisibleRect | NSTrackingCursorUpdate |
+                      NSTrackingMouseEnteredAndExited)
                owner:self
             userInfo:nil];
     [self addTrackingArea:_trackingArea];
 }
 - (void)mouseMoved:(NSEvent*)event {
     if (!self.rootView) return;
-    pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event]);
+    pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event], &_hoverCursor);
 }
 - (void)cursorUpdate:(NSEvent*)event {
-    if (self.rootView) pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event]);
+    if (self.rootView)
+        pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event], &_hoverCursor);
     else [super cursorUpdate:event];
+}
+- (void)mouseExited:(NSEvent*)event {
+    // Pointer is off the editor: stop re-resolving for it, and make the first
+    // resolve after it returns publish unconditionally.
+    _hoverCursor.clear_pointer();
+    [super mouseExited:event];
+}
+// Re-ask what the cursor should be under a pointer that has not moved. Called
+// once per rendered frame by the editor's display link.
+- (void)refreshHoverCursor {
+    pulp_plugin_refresh_hover_cursor(self.rootView, &_hoverCursor);
 }
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
@@ -2503,6 +2574,10 @@ private:
                     }
                     if (tick.should_render)
                         pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
+                    // The frame that moved content under a stationary pointer is
+                    // the only chance to update the cursor: AppKit re-asks on
+                    // pointer motion, never because the content moved.
+                    [self->metal_view_ refreshHoverCursor];
                     if (tick.continuous) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);
                     }
