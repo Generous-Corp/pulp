@@ -4,6 +4,7 @@
 #include <pulp/view/window_manager.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
+#include <pulp/view/hover_cursor.hpp>
 #include <pulp/view/pointer_coalescer.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/runtime/trace.hpp>
@@ -32,6 +33,7 @@
 #include <iostream>
 #include <memory>   // shared_ptr liveness token for deferred clicks
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -181,6 +183,12 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 
 @implementation PulpView {
     pulp::view::ViewCapture _dragTargetCapture;
+    // Where the pointer is and which cursor style AppKit was last told to
+    // show. The frame path re-resolves through this so content moving under a
+    // STATIONARY pointer still changes the cursor: AppKit only re-asks on
+    // pointer motion, so without it the stale cursor survives until the user
+    // moves or clicks.
+    pulp::view::HoverCursorTracker _hoverCursor;
     pulp::view::View* _focusedView;
     pulp::view::Point _relativeMouseWindowPoint;
     BOOL _relativeMouseMode;
@@ -295,7 +303,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     self.trackingArea = [[NSTrackingArea alloc]
         initWithRect:self.bounds
              options:(NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
-                      NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect)
+                      NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect |
+                      NSTrackingCursorUpdate)
                owner:self
             userInfo:nil];
     [self addTrackingArea:self.trackingArea];
@@ -559,6 +568,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 // send a cursorUpdate while this view owns the drag, so publish
                 // the captured view's post-handler style at each pointer phase.
                 set_ns_cursor_for_style(target->cursor());
+                _hoverCursor.note_published(target->cursor());
             }
         }
             [self setNeedsDisplay:YES];
@@ -604,8 +614,10 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     if (!dragTarget) { _dragTargetCapture.reset(); return; }
     pulp::view::deliver_mouse_drag(*self.rootView, dragTarget, pt,
                                    modifiers, clickCount);
-    if (auto* target = _dragTargetCapture.live_in(*self.rootView))
+    if (auto* target = _dragTargetCapture.live_in(*self.rootView)) {
         set_ns_cursor_for_style(target->cursor());
+        _hoverCursor.note_published(target->cursor());
+    }
     [self setNeedsDisplay:YES];
 }
 
@@ -862,8 +874,10 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 };
                 pulp::view::deliver_mouse_up(*self.rootView, dragTarget, pt, modifiers,
                                              static_cast<int>(event.clickCount), up_host);
-                if (auto* target = releasedTarget.live_in(*self.rootView))
+                if (auto* target = releasedTarget.live_in(*self.rootView)) {
                     set_ns_cursor_for_style(target->cursor());
+                    _hoverCursor.note_published(target->cursor());
+                }
             }
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
@@ -1166,6 +1180,58 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     }
 }
 
+// Resolve the cursor style for a pointer at `pt` (root coords). The inspector
+// overlay owns move/resize affordances above the regular tree, so its hook wins
+// when it returns a style >= 0; -1 defers to the hit view's own cursor().
+// `nullopt` means nothing under the pointer wants a cursor and the caller should
+// leave the current one alone. Shared by the pointer handlers and the frame
+// path so the two cannot answer differently.
+- (std::optional<pulp::view::View::CursorStyle>)resolveHoverCursorAt:(pulp::view::Point)pt {
+    if (!self.rootView) return std::nullopt;
+    int inspector_cursor = -1;
+    {
+        pulp::view::MouseEvent cme;
+        cme.position = {pt.x, pt.y};
+        cme.is_down = false;
+        // Gate to this window's root so the canvas overlay's cursor affordance
+        // is not driven by moves inside a secondary window.
+        inspector_cursor =
+            pulp::view::View::call_inspector_cursor_hook(cme, self.rootView);
+    }
+    if (inspector_cursor >= 0)
+        return static_cast<pulp::view::View::CursorStyle>(inspector_cursor);
+    if (auto* target = self.rootView->hit_test(pt)) return target->cursor();
+    return std::nullopt;
+}
+
+// AppKit asks the owner of a NSTrackingCursorUpdate area what cursor to show
+// when the pointer enters it. Answering here is what keeps a cursor set from
+// mouseMoved: on screen: a view that claims no cursor for its area has its
+// cursor reset to the arrow by AppKit's own cursor-rect pass, which is why a
+// hover-set cursor used to survive only while a button was held.
+- (void)cursorUpdate:(NSEvent*)event {
+    if (!self.rootView) { [super cursorUpdate:event]; return; }
+    auto pt = [self localPoint:event];
+    _hoverCursor.set_pointer(pt);
+    auto style = [self resolveHoverCursorAt:pt];
+    if (!style) { [super cursorUpdate:event]; return; }
+    pulp::view::mac_geometry::set_ns_cursor_for_style(*style);
+    _hoverCursor.note_published(*style);
+}
+
+// Re-resolve the cursor at the LAST KNOWN pointer position and push it only
+// when it changed. Driven from the frame path, so a layout pass that slides a
+// different view under a pointer that never moved still updates the cursor —
+// AppKit re-asks on pointer motion only and would otherwise show the stale one
+// until the next move or click.
+- (void)refreshHoverCursor {
+    if (!self.rootView || !_hoverCursor.has_pointer()) return;
+    auto style = [self resolveHoverCursorAt:_hoverCursor.pointer()];
+    if (!style) return;
+    if (auto changed = _hoverCursor.poll_resolved(*style))
+        pulp::view::mac_geometry::set_ns_cursor_for_style(*changed);
+}
+
 - (void)mouseMoved:(NSEvent*)event {
     @try {
         try {
@@ -1198,27 +1264,13 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 
             self.rootView->simulate_hover(pt);
 
-            auto* target = self.rootView->hit_test(pt);
-            // The inspector overlay may override the cursor for
-            // its move/resize affordances (it owns mouse-move before normal
-            // hit-testing). A returned style >= 0 wins over the hit view's
-            // own cursor(); -1 defers to the normal path below.
-            int inspector_cursor = -1;
-            {
-                pulp::view::MouseEvent cme;
-                cme.position = {pt.x, pt.y};
-                cme.is_down = false;
-                // Gate to this window's root so the canvas
-                // overlay's cursor affordance is not driven by moves inside a
-                // secondary window.
-                inspector_cursor =
-                    pulp::view::View::call_inspector_cursor_hook(cme, self.rootView);
-            }
-            if (target || inspector_cursor >= 0) {
-                auto style = inspector_cursor >= 0
-                    ? static_cast<pulp::view::View::CursorStyle>(inspector_cursor)
-                    : target->cursor();
-                pulp::view::mac_geometry::set_ns_cursor_for_style(style);
+            // Remember where the pointer is so the frame path can re-resolve
+            // the cursor after the content under it moves.
+            _hoverCursor.set_pointer(pt);
+            auto style = [self resolveHoverCursorAt:pt];
+            if (style) {
+                pulp::view::mac_geometry::set_ns_cursor_for_style(*style);
+                _hoverCursor.note_published(*style);
             }
 
             [self setNeedsDisplay:YES];
@@ -1236,6 +1288,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 
 - (void)mouseExited:(NSEvent*)event {
     (void)event;
+    // The pointer is off this surface: stop re-resolving for it, and make the
+    // first resolve after it returns publish unconditionally.
+    _hoverCursor.clear_pointer();
     @try {
         try {
             if (!self.rootView) return;
@@ -1316,6 +1371,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             } else if (self.rootView) {
                 self.rootView->advance_gesture_recognizers();
             }
+            // The frame just moved content; re-ask what the cursor should be
+            // under a pointer that may not have moved at all.
+            [self refreshHoverCursor];
             [self setNeedsDisplay:YES];
 
             // Stop the timer when nothing is moving any more. Uses the same
@@ -1365,6 +1423,13 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         pulp::view::View::paint_overlays(canvas, self.rootView);
 
         // Inspector overlay is painted automatically via View::paint_overlays()
+
+        // The layout above may have slid a different view under a pointer that
+        // never moved. AppKit re-asks which cursor to show on pointer motion
+        // only, so re-ask here or the stale cursor survives until the user
+        // moves or clicks. (PulpMetalView overrides -drawRect: to a no-op and
+        // refreshes from its display link instead, so this fires once per host.)
+        [self refreshHoverCursor];
     }
 }
 
@@ -3107,6 +3172,9 @@ private:
                         return;
                     }
                     pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
+                    // Content may have moved under a stationary pointer; AppKit
+                    // will not re-ask on its own.
+                    [self->metal_view_ refreshHoverCursor];
                     if (tick.continuous) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);
                         // Note: animation pump: animation /

@@ -451,8 +451,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/platform/mac/window_host_mac.mm",
           "state": "pulp-owned-retained",
-          "revision": "18bcd1cad5063c4fd9e307e8e16c943d9553a422",
-          "object_id": "1f5a0b53f3ddc11a7716bc904ede83fdc9a26c42",
+          "revision": "15095cb1e7b51c4ef7d41ac3c4ff4868dec108a0",
+          "object_id": "4bb0cb42fec9a1b6cc426632465fa45beeb74e6a",
           "object_type": "blob"
         },
         {

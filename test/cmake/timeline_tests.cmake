@@ -453,8 +453,10 @@ if(Python3_Interpreter_FOUND)
     # document unplayable with nothing saying so at authoring time, which is
     # worse than the construct not existing. Every such refusal must carry a
     # written reason and an owner. The selftest proves the check names a
-    # refusal dropped from the allowlist, names a newly added one, and still
-    # passes a refusal that reads nothing a document can carry.
+    # refusal dropped from the allowlist, names a newly added one, still
+    # passes a refusal that reads nothing a document can carry, and reads a
+    # `case` label as the destination it is rather than as a raise while
+    # still naming a refusal constructed in the arm's body.
     add_test(NAME playback-negative-capability COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/negative_capability_check.py"
         --repo-root "${CMAKE_SOURCE_DIR}")
