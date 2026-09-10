@@ -7568,6 +7568,102 @@ TEST_CASE("live text in an explicitly sized label does not relayout the root",
     CHECK(label->text() == "BAND 2/64");
 }
 
+// A live readout that declares a width but leaves its height to the line box
+// is the shape design-import emits by default -- an author only writes an
+// explicit height when centering forces them to. Requiring both axes to be
+// declared made the common case pay a full-tree Yoga pass per pointer sample.
+// A single-line label's height is one line box, so the text can only move it
+// by resolving a different font; measuring proves that per write far more
+// cheaply than relaying out the tree.
+TEST_CASE("live text in a width-only label does not relayout the root",
+          "[view][bridge][layout][perf][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('status', '');
+        setFlex('status', 'width', 240);
+        setFlex('status', 'height', 26);
+        createLabel('status-text', 'BAND 1/64', 'status');
+        setFlex('status-text', 'width', '100%');
+        layout();
+    )");
+
+    engine.evaluate("getLayoutBoxMetrics('status-text').offsetWidth");
+
+    // Drive a synthetic drag: one status write per pointer sample, each
+    // followed by the geometry read the draw path makes.
+    const auto before = View::layout_pass_count();
+    for (int i = 0; i < 60; ++i) {
+        engine.evaluate("setText('status-text', 'BAND " + std::to_string(i) +
+                        "/64')");
+        engine.evaluate("getLayoutBoxMetrics('status-text').offsetWidth");
+        root.layout_children_if_needed();
+    }
+    const auto passes = View::layout_pass_count() - before;
+
+    INFO("layout passes for 60 live-readout text writes: " << passes);
+    CHECK(passes == 0);
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("status-text"));
+    REQUIRE(label != nullptr);
+    CHECK(label->text() == "BAND 59/64");
+
+    // Negative control. The instrument must be able to read non-zero on the
+    // same tree with the same counter, or the zero above proves nothing: an
+    // intrinsic-width label has no pinned horizontal axis, so its text change
+    // really can move its siblings and MUST still invalidate.
+    engine.evaluate(R"(
+        createLabel('auto-text', 'BAND 1/64', 'status');
+        layout();
+    )");
+    const auto control_before = View::layout_pass_count();
+    engine.evaluate("setText('auto-text', 'BAND 2/64')");
+    root.layout_children_if_needed();
+    const auto control_passes = View::layout_pass_count() - control_before;
+
+    INFO("control layout passes for an intrinsic-width label: "
+         << control_passes);
+    CHECK(control_passes > 0);
+}
+
+// The fast path is a claim about geometry, not a licence to skip reflow when
+// geometry actually moves. A multi-line label with a declared width still has
+// a text-dependent height, so gaining a line must still invalidate.
+TEST_CASE("a width-only multiline label still relayouts when it gains a line",
+          "[view][bridge][layout][perf][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('status', '');
+        setFlex('status', 'width', 240);
+        createLabel('status-text', 'one line', 'status');
+        setFlex('status-text', 'width', '100%');
+        setMultiLine('status-text', true);
+        layout();
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("status-text"));
+    REQUIRE(label != nullptr);
+    const float one_line = label->intrinsic_height();
+
+    const auto before = View::layout_pass_count();
+    engine.evaluate("setText('status-text', 'two\\nlines')");
+    root.layout_children_if_needed();
+
+    const float two_lines = label->intrinsic_height();
+    REQUIRE(two_lines > one_line);
+    CHECK(View::layout_pass_count() - before > 0);
+    CHECK(label->text() == "two\nlines");
+}
+
 TEST_CASE("replaying an identical flex value does not dirty geometry",
           "[view][bridge][layout][perf]") {
     ScriptEngine engine;

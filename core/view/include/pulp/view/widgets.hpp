@@ -60,11 +60,11 @@ public:
 
     void set_text(std::string text) {
         if (text == text_) return;
-        // A horizontal, single-line Label with explicit width AND height cannot
-        // move itself or its siblings when only its copy changes. Live
-        // readouts commonly update this kind of Label every pointer sample.
-        // Re-running Yoga for the whole imported tree in that case is pure
-        // work and can consume multiple milliseconds of the input budget.
+        // A horizontal, single-line Label whose laid-out box does not move
+        // when its copy changes cannot move its siblings either, so it does
+        // not need a layout pass. Live readouts update this kind of Label on
+        // every pointer sample; re-running Yoga over the whole imported tree
+        // per sample is pure work and can consume the entire input budget.
         //
         // Keep the conservative path for intrinsic-width, multiline,
         // vertical, attributed, and captured-wrap Labels. Their text can
@@ -81,9 +81,20 @@ public:
         const bool horizontal =
             text_direction_ != canvas::TextDirection::top_to_bottom &&
             text_direction_ != canvas::TextDirection::bottom_to_top;
-        const bool text_geometry_is_fixed =
-            has_explicit_width && has_explicit_height && horizontal && !multi_line_ &&
-            !captured_wrap_fallback_ && !has_attributed_;
+        const bool single_line_simple =
+            horizontal && !multi_line_ && !captured_wrap_fallback_ && !has_attributed_;
+        // An explicit width pins the horizontal axis outright. The vertical
+        // axis is pinned either by an explicit height, or -- for a single-line
+        // Label -- by measuring it: a single-line height is one line box, so
+        // it only moves when the new copy resolves a different font (fallback
+        // to a taller family) or a different inherited metric. Probing costs
+        // one shaper prepare() on a short string, which paint() is about to
+        // do anyway and which the measure memo caches; invalidate_layout()
+        // costs a Yoga pass over the whole tree. Probe only when it can pay
+        // off -- an intrinsic-width Label must reflow regardless.
+        const bool probe_height =
+            has_explicit_width && single_line_simple && !has_explicit_height;
+        const float height_before = probe_height ? intrinsic_height() : 0.0f;
         text_ = std::move(text);
         // The text IS the accessible name for a label — the two-arg ctor set it
         // and set_text() did not, so every Label built by the JS bridge
@@ -105,6 +116,10 @@ public:
         // PreText-style shaper cache is keyed by (text, family, size), so the
         // new text simply hits a different cache entry — no algorithm change,
         // just cache-correct re-measurement.
+        const bool text_geometry_is_fixed =
+            has_explicit_width && single_line_simple &&
+            (has_explicit_height ||
+             (probe_height && intrinsic_height() == height_before));
         if (!text_geometry_is_fixed) invalidate_layout();
         request_repaint();
     }
