@@ -890,6 +890,19 @@ storage-only rather than missing bridge wiring: the JS style adapter calls the
 registered bridge functions, and View preserves the values. They have no visual
 effect until raster `background-image: url(...)` paint is wired.
 
+## Non-CSS properties the style adapter accepts
+
+`el.style.hitSlop` is not a CSS property and has no CSS cascade, computed
+value, or percentage basis. The style adapter accepts it anyway because the
+React Native prop of the same name is the only way to grow a control's
+hit-test rect, and a design that reaches for one surface should not be
+forced onto the other. It parses a number, a string of 1-4 numbers using
+the `margin` fill order, or an RN `{top,right,bottom,left}` object, and
+forwards to `setHitSlop`. Object edges are independent — a missing edge is
+`0`, not an inherited one — which is React Native's rule, not the CSS
+shorthand rule; only the string form fills. The catalog entry is
+`rn/hitSlop`, since that is where the semantics are defined.
+
 ## Known buggy-but-supported
 
 1. `css/lineHeight` unitless multiplier (`lineHeight: 1.5`) — silently

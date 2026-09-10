@@ -463,18 +463,31 @@ export function applyPaintProp(
         case 'mixBlendMode':       call('setMixBlendMode', id, value as string); return true;
         case 'pointerEvents':      call('setPointerEvents', id, value as string); return true;
         // React Native `hitSlop`. Grows only the hit-test area, never the
-        // painted box or the layout. Accepts a number (uniform inset) or an
-        // object with any of {top,right,bottom,left}; a missing edge inherits
-        // the CSS-shorthand way (right<-top, bottom<-top, left<-right).
+        // painted box or the layout. Accepts a number (uniform inset), a
+        // string of 1-4 numbers (same order and same fill rules as the
+        // `margin` shorthand), or an RN object with any of
+        // {top,right,bottom,left}. Object edges are independent -- a missing
+        // edge is 0, as in React Native -- and the shorthand fill applies to
+        // the string form only. This mirrors the `hitSlop` case in
+        // web-compat-style-decl-misc.js so that `el.style.hitSlop` and the
+        // JSX prop cannot disagree about the same input.
         case 'hitSlop': {
-            const hs = value as number | { top?: number; right?: number; bottom?: number; left?: number } | null;
+            const hs = value as number | string | { top?: number; right?: number; bottom?: number; left?: number } | null;
+            const edge = (v: unknown): number =>
+                typeof v === 'number' && Number.isFinite(v) ? v : parseFloat(String(v ?? '')) || 0;
             let t = 0, r = 0, b = 0, l = 0;
-            if (typeof hs === 'number') { t = r = b = l = hs; }
+            if (typeof hs === 'number') { t = r = b = l = edge(hs); }
             else if (hs && typeof hs === 'object') {
-                t = Number(hs.top) || 0;
-                r = hs.right != null ? Number(hs.right) || 0 : t;
-                b = hs.bottom != null ? Number(hs.bottom) || 0 : t;
-                l = hs.left != null ? Number(hs.left) || 0 : r;
+                t = edge(hs.top);
+                r = edge(hs.right);
+                b = edge(hs.bottom);
+                l = edge(hs.left);
+            } else if (hs != null) {
+                const p = String(hs).trim().split(/\s+/).map(edge);
+                t = p[0];
+                r = p.length > 1 ? p[1] : t;
+                b = p.length > 2 ? p[2] : t;
+                l = p.length > 3 ? p[3] : r;
             }
             call('setHitSlop', id, t, r, b, l);
             return true;
