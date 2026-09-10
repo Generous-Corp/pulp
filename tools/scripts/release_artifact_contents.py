@@ -1033,6 +1033,18 @@ def verify_sdk_archive(
                 raise ContentError(
                     f"{path.name}: sdk-provenance.json is invalid: {exc}"
                 ) from exc
+            expected_features = {
+                "audio_probes": False,
+                "inspector": version_tuple(version)
+                >= version_tuple(matrix.inspector_sdk_floor),
+            }
+            # `tracing` is newer than the oldest release archives in the wild, so
+            # its absence is not a failure: archives minted before it existed came
+            # from a pipeline that never enabled tracing. Its presence, however,
+            # is binding — a release archive may not carry a traced build.
+            archived_features = provenance.get("features")
+            if isinstance(archived_features, dict) and "tracing" in archived_features:
+                expected_features["tracing"] = False
             expected = {
                 "schema": "pulp.sdk-provenance.v1",
                 "kind": "release",
@@ -1044,11 +1056,7 @@ def verify_sdk_archive(
                 "source_git_dirty": False,
                 "platform": platform,
                 "build_type": "Release",
-                "features": {
-                    "audio_probes": False,
-                    "inspector": version_tuple(version)
-                    >= version_tuple(matrix.inspector_sdk_floor),
-                },
+                "features": expected_features,
             }
             mismatches = {
                 key: (provenance.get(key), value)
