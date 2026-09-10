@@ -738,7 +738,14 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     {CompileErrorCode::InvalidStructure, clip.id(), request_->document_revision});
             const auto& note = notes->notes()[note_index_++];
             const auto note_end = note.start + note.duration;
-            if (note.start.value < 0 || note_end > timebase::TickPosition{clip.duration().value})
+            // A flattened leaf may carry note content beyond each end of its
+            // audible window for the groove to pull inward, so the storable span
+            // is the padded one. The audible span is still the clip's own, and
+            // the sounding clamp below is what enforces it.
+            const auto pad_left = lowered_clip.groove_pad_left;
+            const auto storable_end = timebase::TickPosition{pad_left + clip.duration().value +
+                                                             lowered_clip.groove_pad_right};
+            if (note.start.value < 0 || note_end > storable_end)
                 return fail(
                     {CompileErrorCode::InvalidStructure, note.id, request_->document_revision});
             const auto* modifier = notes->modifier_for(note.id);
@@ -750,12 +757,18 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 return fail({CompileErrorCode::InvalidStructure, lowered_clip.context_sequence_id,
                              request_->document_revision});
             const auto& groove = context_sequence->groove();
-            const auto context_onset =
-                lowered_clip.context_start + timebase::TickDuration{note.start.value};
+            // Note offsets are measured from the padded anchor, so both the
+            // context tick the groove is read at and the authored position it
+            // displaces step back by the same pad. Undoing it here rather than
+            // in `context_start` keeps that field meaning the owner tick of
+            // `clip.start()`, which registered content and chord lookups need.
+            const auto padded_anchor = timebase::TickDuration{note.start.value - pad_left};
+            const auto context_onset = lowered_clip.context_start + padded_anchor;
             const auto sounding_context_onset = groove.apply_timing(context_onset);
             const auto displacement = sounding_context_onset - context_onset;
-            const auto authored_start = clip.start() + timebase::TickDuration{note.start.value};
-            const auto authored_end = clip.start() + timebase::TickDuration{note_end.value};
+            const auto authored_start = clip.start() + padded_anchor;
+            const auto authored_end =
+                clip.start() + timebase::TickDuration{note_end.value - pad_left};
             const auto shifted_start = authored_start + displacement;
             const auto shifted_end = authored_end + displacement;
             const auto sounding_start = std::max(shifted_start, clip.start());
