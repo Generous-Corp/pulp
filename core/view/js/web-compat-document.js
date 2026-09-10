@@ -624,6 +624,42 @@ globalThis.self = window;
         }
         globalThis.__pulpPopupDefaultState__ = state;
     }
+    // Seed order for the keyboard cursor when a popup opens. Every signal
+    // requires the author to have explicitly marked a selection, so an
+    // unmarked list falls through to the edge the caller asked for.
+    // Ordered most to least authoritative:
+    //   1. aria-activedescendant on the trigger or the popup: an explicit id
+    //      pointer at exactly one option, so it cannot be ambiguous.
+    //   2. aria-selected="true": ARIA's selection state for role="option".
+    //   3. aria-checked="true": ARIA's state for menuitemradio/menuitemcheckbox.
+    //   4. the option's own checked property, a path distinct from
+    //      aria-checked because assigning the property writes no attribute.
+    //   5. aria-current: "the current item in a set". Weakest, because it
+    //      also marks navigation position rather than selection.
+    function selectedIndexIn(popup, trigger, options) {
+        var pointerHolders = [trigger, popup];
+        for (var h = 0; h < pointerHolders.length; ++h) {
+            var holder = pointerHolders[h];
+            var activeId = holder && holder.getAttribute
+                ? holder.getAttribute("aria-activedescendant") : null;
+            if (!activeId) continue;
+            for (var p = 0; p < options.length; ++p)
+                if (options[p].id === activeId) return p;
+        }
+        var marks = ["aria-selected", "aria-checked"];
+        for (var m = 0; m < marks.length; ++m)
+            for (var i = 0; i < options.length; ++i)
+                if (options[i].getAttribute
+                    && options[i].getAttribute(marks[m]) === "true") return i;
+        for (var c = 0; c < options.length; ++c)
+            if (options[c].checked === true) return c;
+        for (var u = 0; u < options.length; ++u) {
+            var current = options[u].getAttribute
+                ? options[u].getAttribute("aria-current") : null;
+            if (current && current !== "false") return u;
+        }
+        return -1;
+    }
     function activate(trigger, edge) {
         if (state) dismiss(false);
         var popup = popupFor(trigger);
@@ -636,13 +672,15 @@ globalThis.self = window;
         var triggerKind = trigger.getAttribute("aria-haspopup");
         var triggerPeers = document.querySelectorAll(
             '[aria-haspopup="' + triggerKind + '"]');
+        var selectedIndex = selectedIndexIn(popup, trigger, options);
         state = { trigger: trigger, triggerId: trigger.id || "",
                   triggerKind: triggerKind,
                   triggerOrdinal: Array.prototype.indexOf.call(triggerPeers, trigger),
                   popup: popup, options: options,
                   baseBackgrounds: baseBackgrounds,
                   hoverHandlers: hoverHandlers,
-                  activeIndex: edge === "last" ? options.length - 1 : 0 };
+                  activeIndex: selectedIndex >= 0 ? selectedIndex
+                      : (edge === "last" ? options.length - 1 : 0) };
         state.onNativeDismiss = function() {
             if (!state || state.popup !== popup) return;
             var liveTrigger = currentTrigger(state);
