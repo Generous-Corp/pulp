@@ -58,15 +58,47 @@ provably cannot move the box:
 - the label must be single-line, horizontal, non-attributed, and not a
   captured-wrap fallback, and
 - the vertical axis must be pinned — either by an explicit height, or by
-  measuring the line box before and after the write and finding it unchanged.
+  measuring the line box before and after the write and finding it unchanged, and
+- the label must not participate in baseline alignment.
 
 The measured form matters. Requiring a declared height on both axes sounds
 safe, but design-import emits a declared width and an implicit line-box height
 — authors write an explicit height only when centering forces them to. So the
 *common* case missed the fast path, and a routine CSS cleanup that dropped a
-`height: 100%` silently reintroduced a full-tree relayout per sample. Measuring
-costs one shaper `prepare()` on a short string, which the measure memo caches
-and which paint is about to do anyway.
+`height: 100%` silently reintroduced a full-tree relayout per sample.
+
+**The probe is not a cost — it is a saving.** Measured over a 60-sample
+synthetic drag on a width-only label, counting
+`canvas::text_shaper_prepare_call_count()` and `View::layout_pass_count()`:
+
+| | shaper `prepare()` calls | layout passes |
+|---|---|---|
+| probe on (fast path taken) | 60 — one per write | **0** |
+| probe off (invalidate per write) | 120 — two per write | **60** |
+
+`Label::intrinsic_height()` is memoized on a fully-resolved `MeasureBasis`
+that includes the text, so the pre-write probe is a memo hit in steady state
+and the post-write probe is the miss. That single shaping is then cached for
+the paint and measure calls that follow. Skipping the probe does not avoid
+that work — it defers it into a Yoga pass that asks for the text *twice*.
+
+**Baseline alignment is the one case an unchanged height does not cover.**
+Under `align-items: baseline` Yoga places the row from each item's baseline,
+and `yoga_baseline()` asks `Label::baseline_y()`, which shapes the text and
+returns `PreparedText::ascent()`. `TextShaper::prepare` maxes ascent, descent
+and leading *independently* against the shaped box, so copy can hold the line
+height constant while moving the ascent. `baseline_y()` also ignores the box
+height entirely, so an explicit height pins the box without pinning the
+baseline. A baseline participant therefore reflows on every text write.
+
+No text pair on this platform's font stack actually exercises that move — an
+exhaustive scan (889 single-codepoint samples across 23 Unicode blocks, 15
+distinct ascent/descent/leading triples, all 79 combinations reachable by
+mixing them) produced 79 distinct line heights and zero equal-height /
+differing-ascent pairs. The scan's detector was positive-controlled against a
+synthetic face offset by +1 ascent / −1 descent, which it did report. The guard
+is kept because the fast path ships to every Pulp app, on font stacks that scan
+never saw.
 
 Intrinsic-width, multiline, vertical, attributed, and captured-wrap labels keep
 the conservative path: their text really can move their siblings.
