@@ -109,6 +109,18 @@ bool set_child_view_bounds_in_host(NSView* container,
 // Detach a child view previously attached via attach_child_view_to_host.
 void detach_child_view_from_host(NSView* container, void* child_view_handle);
 
+// True when a native child view attached via attach_child_view_to_host covers
+// `window_point` (window coordinates). Such a child — a WKWebView, a hosted
+// plug-in editor, any platform control — is NOT in the Pulp View tree and owns
+// its own cursor, but a tracking area is not occluded by subviews, so the host
+// still receives -mouseMoved:/-cursorUpdate: over it. Callers use this to leave
+// the cursor to AppKit there instead of publishing a Pulp-tree answer that
+// would wipe the child's choice on every button-less move. Only direct
+// subviews are considered: attach_child_view_to_host is the sole place Pulp
+// parents anything into a host content view, so every direct subview is a
+// foreign child. Hidden children do not count.
+bool native_child_owns_window_point(NSView* container, NSPoint window_point);
+
 // Mask an attached child view to a visible sub-rectangle expressed in the
 // child's OWN top-left [0,0,frame_w,frame_h] box (Pulp convention), via a
 // CALayer mask, so a native child inside a scroll region is clipped to its

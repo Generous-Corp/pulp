@@ -465,6 +465,22 @@ bool set_child_view_bounds_in_host(NSView* container,
     return true;
 }
 
+bool native_child_owns_window_point(NSView* container, NSPoint window_point) {
+    if (!container) {
+        return false;
+    }
+    for (NSView* child in container.subviews) {
+        if (child.isHidden || child.alphaValue <= 0.0) {
+            continue;
+        }
+        const NSPoint in_child = [child convertPoint:window_point fromView:nil];
+        if ([child mouse:in_child inRect:child.bounds]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void detach_child_view_from_host(NSView* container, void* child_view_handle) {
     if (!container || !child_view_handle) {
         return;

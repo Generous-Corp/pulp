@@ -189,6 +189,11 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     // pointer motion, so without it the stale cursor survives until the user
     // moves or clicks.
     pulp::view::HoverCursorTracker _hoverCursor;
+    // Set on every pointer event whose position an attached native child view
+    // owns. The frame path has only the tracked root-space point, which cannot
+    // be converted back once a design viewport is in effect, so it reads this
+    // instead of re-hit-testing.
+    BOOL _pointerOverNativeChild;
     pulp::view::View* _focusedView;
     pulp::view::Point _relativeMouseWindowPoint;
     BOOL _relativeMouseMode;
@@ -1225,8 +1230,23 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // mouseMoved: on screen: a view that claims no cursor for its area has its
 // cursor reset to the arrow by AppKit's own cursor-rect pass, which is why a
 // hover-set cursor used to survive only while a button was held.
+// An attached native child (a WKWebView, a hosted editor) is not in the Pulp
+// View tree and picks its own cursor, but this view's tracking area is not
+// occluded by subviews — so -mouseMoved:/-cursorUpdate: still arrive over it.
+// Publishing a Pulp-tree answer there would set the arrow on every button-less
+// move and wipe the child's choice; the cursor would then appear to change only
+// once a button went down, because the drag path publishes the captured cursor
+// and no -mouseMoved: arrives mid-drag. Record ownership and leave the cursor
+// to AppKit.
+- (BOOL)noteNativeChildOwnsEvent:(NSEvent*)event {
+    _pointerOverNativeChild = pulp::view::mac_geometry::native_child_owns_window_point(
+        self, event.locationInWindow) ? YES : NO;
+    return _pointerOverNativeChild;
+}
+
 - (void)cursorUpdate:(NSEvent*)event {
     if (!self.rootView) { [super cursorUpdate:event]; return; }
+    if ([self noteNativeChildOwnsEvent:event]) { [super cursorUpdate:event]; return; }
     auto pt = [self localPoint:event];
     _hoverCursor.set_pointer(pt);
     auto style = [self resolveHoverCursorAt:pt];
@@ -1242,6 +1262,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // until the next move or click.
 - (void)refreshHoverCursor {
     if (!self.rootView || !_hoverCursor.has_pointer()) return;
+    if (_pointerOverNativeChild) return;
     auto style = [self resolveHoverCursorAt:_hoverCursor.pointer()];
     if (!style) return;
     if (auto changed = _hoverCursor.poll_resolved(*style))
@@ -1283,7 +1304,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             // Remember where the pointer is so the frame path can re-resolve
             // the cursor after the content under it moves.
             _hoverCursor.set_pointer(pt);
-            auto style = [self resolveHoverCursorAt:pt];
+            std::optional<pulp::view::View::CursorStyle> style;
+            if (![self noteNativeChildOwnsEvent:event])
+                style = [self resolveHoverCursorAt:pt];
             if (style) {
                 pulp::view::mac_geometry::set_ns_cursor_for_style(*style);
                 _hoverCursor.note_published(*style);

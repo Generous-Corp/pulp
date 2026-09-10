@@ -160,3 +160,26 @@ if(APPLE AND NOT PULP_IOS)
     )
     catch_discover_tests(pulp-test-mac-hover-cursor-stationary)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # A native child NSView attached via attach_native_child_view (a WKWebView,
+    # a hosted editor) is not in the Pulp View tree and owns its own cursor,
+    # but a macOS tracking area is not occluded by subviews — so the host still
+    # gets -mouseMoved: over it. These cases pin that a button-less move there
+    # leaves the child's cursor alone, with a control move over Pulp-owned
+    # content that must still publish the tree's cursor.
+    add_executable(pulp-test-mac-native-child-cursor
+        test_mac_native_child_cursor.mm
+    )
+    target_link_libraries(pulp-test-mac-native-child-cursor PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+    )
+    # Pull the host archive members; the cases message the classes but
+    # reference no C++ symbol from either .mm.
+    target_link_options(pulp-test-mac-native-child-cursor PRIVATE
+        "LINKER:-u,_OBJC_CLASS_$_PulpView"
+        "LINKER:-u,_OBJC_CLASS_$_PulpPluginView"
+    )
+    catch_discover_tests(pulp-test-mac-native-child-cursor)
+endif()
