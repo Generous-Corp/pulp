@@ -182,6 +182,30 @@ jobs:
         if: contains(needs.resolve-runners.outputs.asan_runs_on, 'namespace-profile')
         uses: ./.github/actions/setup-namespace-macos-cache
 
+      - name: Reclaim hosted macOS disk
+        # A GitHub-hosted macOS image ships nine Xcode bundles and leaves this
+        # job roughly 39 GiB free, which two co-resident Debug+ASan trees
+        # exhaust. Removing the inactive bundles roughly doubles the budget.
+        # Runs on disposable GitHub-hosted runners only, so a self-hosted or
+        # Namespace machine is never mutated. Mirrors the coverage lane.
+        if: runner.os == 'macOS' && runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          active_developer="$(xcode-select -p)"
+          active_xcode="${active_developer%/Contents/Developer}"
+          active_xcode="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${active_xcode}")"
+          echo "Preserving active Xcode: ${active_xcode}"
+          while IFS= read -r -d '' candidate; do
+            candidate_real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${candidate}")"
+            if [ "${candidate_real}" != "${active_xcode}" ]; then
+              echo "Removing inactive hosted-runner Xcode: ${candidate}"
+              sudo rm -rf -- "${candidate}"
+            fi
+          done < <(find /Applications -maxdepth 1 -type d -name 'Xcode*.app' -print0)
+          brew cleanup --prune=all || true
+          df -h /
+
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
 
@@ -227,6 +251,12 @@ jobs:
             -j$(sysctl -n hw.ncpu)
           ctest --test-dir build-asan-artifact --output-on-failure \
             -R '^(clap|vst3|au)-bundle-lifecycle-PulpEffect$'
+          # This second Debug+ASan tree has served its purpose. The full ctest
+          # pass below runs for roughly fifty minutes against build-asan and
+          # writes install prefixes of its own, so the artifact tree is
+          # released here rather than held to the end of the job.
+          rm -rf build-asan-artifact
+          df -h .
 
       - name: Test with ASan
         env:
