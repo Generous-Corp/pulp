@@ -10,8 +10,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+
+#include <choc/text/choc_JSON.h>
+
+#include <array>
+#include <memory>
+#include <string>
+#include <string_view>
 
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
@@ -187,4 +195,65 @@ TEST_CASE("RangeSlider thumb grows on pointer proximity", "[range-slider][hover]
     slider.on_mouse_leave();
     for (int i = 0; i < 50; ++i) slider.advance_animations(0.01f);
     CHECK_THAT(slider.hover_scale(), WithinAbs(1.0, 1e-3));
+}
+
+TEST_CASE("layout snapshot reports the reachable area, not the painted one",
+          "[hit-slop][layout-snapshot]") {
+    // A reachability census reads hit_regions and calls itself "the runtime's
+    // own hit-testing accounting". If that rect were the painted box, a control
+    // that presents a larger target than it paints would be censused as the
+    // smaller thing, and the census could never see this feature at all.
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto padded = std::make_unique<View>();
+    padded->set_id("padded");
+    padded->set_bounds({50, 50, 40, 20});
+    padded->set_hit_slop(12.0f, 2.0f, 12.0f, 2.0f);
+    root.add_child(std::move(padded));
+
+    auto plain = std::make_unique<View>();
+    plain->set_id("plain");
+    plain->set_bounds({50, 120, 40, 20});
+    root.add_child(std::move(plain));
+
+    const auto tree = choc::json::parse(dump_layout_tree(root));
+    const auto& nodes = tree["nodes"];
+
+    auto find = [&](std::string_view id) {
+        for (uint32_t i = 0; i < nodes.size(); ++i)
+            if (nodes[i]["id"].getString() == id) return nodes[i];
+        FAIL("node not in snapshot: " << id);
+        return nodes[0];
+    };
+    auto box = [](const choc::value::ValueView& r) {
+        return std::array<double, 4>{r["x"].getWithDefault(0.0), r["y"].getWithDefault(0.0),
+                                     r["w"].getWithDefault(0.0), r["h"].getWithDefault(0.0)};
+    };
+
+    const auto padded_node = find("padded");
+    const auto painted = box(padded_node["rect"]);
+    const auto reachable = box(padded_node["hit_regions"][0]["rect"]);
+
+    // Painted box is untouched -- hit slop must not move or resize any pixel.
+    CHECK_THAT(painted[0], WithinAbs(50.0, 1e-4));
+    CHECK_THAT(painted[1], WithinAbs(50.0, 1e-4));
+    CHECK_THAT(painted[2], WithinAbs(40.0, 1e-4));
+    CHECK_THAT(painted[3], WithinAbs(20.0, 1e-4));
+
+    // Reachable box is the 44x44 target: 40+2+2 wide, 20+12+12 tall.
+    CHECK_THAT(reachable[0], WithinAbs(48.0, 1e-4));
+    CHECK_THAT(reachable[1], WithinAbs(38.0, 1e-4));
+    CHECK_THAT(reachable[2], WithinAbs(44.0, 1e-4));
+    CHECK_THAT(reachable[3], WithinAbs(44.0, 1e-4));
+
+    // Control: a sibling with no slop reports its painted box unchanged. If the
+    // emitter grew every rect, this would read 44x44 too and the assertion
+    // above would pass for the wrong reason.
+    const auto plain_node = find("plain");
+    const auto plain_hit = box(plain_node["hit_regions"][0]["rect"]);
+    CHECK_THAT(plain_hit[0], WithinAbs(50.0, 1e-4));
+    CHECK_THAT(plain_hit[1], WithinAbs(120.0, 1e-4));
+    CHECK_THAT(plain_hit[2], WithinAbs(40.0, 1e-4));
+    CHECK_THAT(plain_hit[3], WithinAbs(20.0, 1e-4));
 }
