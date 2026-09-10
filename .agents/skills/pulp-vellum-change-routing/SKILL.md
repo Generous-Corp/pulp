@@ -190,6 +190,38 @@ The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
 unregenerated ledger fails locally and in CI with the repair command in the
 failure message rather than only as a stale-identity report.
 
+## The "Vellum freeze" CI job runs two checks, and the second is the one that fails
+
+`.github/workflows/vellum-freeze-check.yml` runs `vellum_freeze_check.py` **and**
+`vellum_expansion_watch_check.py` under the single job name `Vellum freeze`. A
+`core/view/**` change routinely passes the first ("No transferred Vellum slice or
+authority transition is affected") and fails the second, so reading the job name
+sends you to the wrong script. Open the log and find which one raised.
+
+Three non-obvious rules of the expansion-watch checker, none derivable from a
+skim of the source:
+
+- **Both `--base` and `--head` must be full 40-char SHAs.** A ref name fails with
+  `base: expected full commit SHA`, which reads like a different bug than the one
+  CI hit. Always `--base $(git rev-parse ...) --head $(git rev-parse HEAD)`.
+- **Coverage is exact set equality**, not a superset test: the checker raises on
+  `covered != affected`, so claiming an extra capability family fails exactly as
+  hard as omitting one. Claiming the same family from two event files in one diff
+  is also rejected (`duplicate capability-family claims`).
+- **Verify a branch against its MERGE-BASE, not `origin/main`.** Diffing a branch
+  that is behind main reports every watch event main has added since as a
+  deletion, and the checker rejects it with
+  `<event>.json: watch events are append-only`. That is an artifact of the
+  comparison base, not a real append-only violation — `git merge-base origin/main
+  HEAD` makes it disappear. CI compares against the PR base, so a branch that is
+  merely stale never sees this.
+
+The event itself is an append-only JSON file directly under
+`.github/vellum-expansion-watch-events/`, named exactly `<event_id>.json`, with
+`capability_families` sorted and drawn from the known scope set. A change that
+adds no authority carries `"disposition": "watch-only-no-authority"` and
+`"authority_effect": "none"`.
+
 ## Validate the contract
 
 Run the closed eight-case suite and projection validator:

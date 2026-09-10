@@ -491,6 +491,33 @@ default argument and its string→int mapping), and
 enum's integer value into the command stream, so reordering it would silently
 reinterpret every previously recorded `top` / `middle` / `bottom`.
 
+### A canvas path run is buffered — any new shim emitter must flush it first
+
+`moveTo` / `lineTo` in `core/view/js/web-compat-canvas.js` do not cross the
+bridge per point. They accumulate into `this._pendPts`, and `_fp()` ships the
+whole run as one `canvasPathPolyline` call. This exists because the crossing,
+not the engine, is the cost on a canvas-heavy UI: a band drag measured
+959,968 `canvasLineTo` calls in 115,880 runs — 81% of them inside runs of 64
+points or more, and every run immediately preceded by a `canvasMoveTo`.
+Collapsing a run into one call removes roughly half of all bridge crossings
+without changing a single recorded command. Reach for this shape before
+reaching for a different JS engine; swapping QuickJS for JSC or V8 does not
+make a crossing cheaper.
+
+The buffering has one invariant, and it is easy to break by accident: **any
+shim method that calls a `canvas*` bridge global must call `this._fp()` as
+its first statement.** Without it the new command is recorded ahead of the
+buffered points, so a `stroke()` paints an empty path, or a `fillStyle`
+applies to the wrong subpath. Nothing about the recorded stream looks wrong
+in isolation — the commands are all present, just out of order.
+
+`tools/scripts/check_canvas_path_flush.py` (ctest `canvas-path-flush-lint`)
+enforces it. It parses the prototype methods out of the shim by brace depth,
+so it fails closed if it stops recognizing the file: finding zero
+bridge-emitting methods is treated as an error, not a clean result. `moveTo`,
+`lineTo`, `rect` and `_fp` are the only exemptions, because they own the
+buffer.
+
 ### CSS-shim gap fills — translator vs. bridge contract
 
 Three classes of "silent drop" recur in `web-compat-style-decl.js`. When

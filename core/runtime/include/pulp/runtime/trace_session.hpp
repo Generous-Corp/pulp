@@ -37,6 +37,42 @@ bool tracing_reminder_first_time(std::atomic<bool>& already_emitted);
 /// startup (no `#ifdef` at the call site).
 void log_tracing_reminder();
 
+namespace detail {
+
+/// Ring size the env-driven autostart uses when $PULP_TRACE_RING_KB is unset.
+/// Sized for a render/DSP capture.
+inline constexpr std::uint32_t default_autostart_ring_kb = 80u * 1024u;
+/// Accepted bounds for an override: 1 MB to 4 GB, expressed in KB.
+inline constexpr std::uint32_t min_autostart_ring_kb = 1024u;
+inline constexpr std::uint32_t max_autostart_ring_kb = 4u * 1024u * 1024u;
+
+/// Parse a $PULP_TRACE_RING_KB value. Returns the requested ring size in KB, or
+/// nullopt when `raw` is absent, empty, not a bare decimal integer, or outside
+/// [min_autostart_ring_kb, max_autostart_ring_kb].
+///
+/// This is a separate pure function, and the caller reports a rejection rather
+/// than silently falling back, because an undersized ring does not degrade
+/// gracefully: the ring wraps, the interned string table at the head of the
+/// sequence is overwritten, and every later packet on that sequence becomes
+/// unparseable. What lands on disk is then a large .pftrace that opens without
+/// complaint and contains zero slices. A typo that quietly kept the default
+/// would produce exactly the empty capture this override exists to avoid.
+///
+/// Config-independent, so it is unit-testable in the default OFF build.
+inline std::optional<std::uint32_t> parse_autostart_ring_kb(const char* raw) {
+    if (raw == nullptr || *raw == '\0') return std::nullopt;
+    std::uint64_t value = 0;
+    for (const char* c = raw; *c != '\0'; ++c) {
+        if (*c < '0' || *c > '9') return std::nullopt;
+        value = value * 10u + static_cast<std::uint64_t>(*c - '0');
+        if (value > max_autostart_ring_kb) return std::nullopt;
+    }
+    if (value < min_autostart_ring_kb) return std::nullopt;
+    return static_cast<std::uint32_t>(value);
+}
+
+}  // namespace detail
+
 /// Result of stopping a session: the flushed trace path + basic loss accounting
 /// so a caller can tell whether the ring dropped data under load (plan §0b #4).
 struct TraceStopResult {
