@@ -56,6 +56,16 @@
 /// without bound while the UI is visually idle. Safe to call when nothing is
 /// held.
 - (void)flushCoalescedPointerInput;
+
+/// Re-resolve the cursor at the last known pointer position and push it to
+/// AppKit only when it changed.
+///
+/// AppKit re-asks which cursor to show when the pointer MOVES; it never re-asks
+/// because the content under a still pointer changed. A host calls this from
+/// its frame path so a layout pass that slides a different view under a
+/// stationary pointer updates the cursor immediately instead of at the user's
+/// next mouse move or click. No-op when the pointer is outside the view.
+- (void)refreshHoverCursor;
 @end
 
 #endif
