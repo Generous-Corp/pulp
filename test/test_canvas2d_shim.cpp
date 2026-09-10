@@ -37,7 +37,9 @@
 #include "include/core/SkSurface.h"
 #endif
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -1777,3 +1779,63 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
     REQUIRE(any_painted);
 }
 #endif  // PULP_HAS_SKIA (closing the gradient/pattern test block above)
+
+TEST_CASE("Canvas2D shim batches a lineTo run into one polyline call",
+          "[view][canvas2d][path-batching]") {
+    ScriptedBridge env;
+
+    // The shim defers moveTo/lineTo into a pending run that `_fp()` ships as
+    // one `canvasPathPolyline` call. Count the crossings from JS rather than
+    // inferring batching from the recorded commands: the polyline expands
+    // back into move_to/line_to on the native side, so batching is
+    // deliberately invisible in the command stream and the stream alone
+    // cannot tell one batched call from four per-point ones. The counters are
+    // what have teeth here.
+    env.load(R"(
+        var polyCalls = 0, pointCalls = 0;
+        var _poly = canvasPathPolyline, _move = canvasMoveTo, _line = canvasLineTo;
+        canvasPathPolyline = function() { polyCalls++; return _poly.apply(null, arguments); };
+        canvasMoveTo = function() { pointCalls++; return _move.apply(null, arguments); };
+        canvasLineTo = function() { pointCalls++; return _line.apply(null, arguments); };
+
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(10, 0);
+        ctx.lineTo(10, 10);
+        ctx.lineTo(0, 10);
+        ctx.stroke();
+    )");
+
+    auto* canvas = env.canvas();
+    REQUIRE(canvas != nullptr);
+
+    const auto poly_calls =
+        env.engine.evaluate("polyCalls").getWithDefault<int64_t>(-1);
+    const auto point_calls =
+        env.engine.evaluate("pointCalls").getWithDefault<int64_t>(-1);
+    INFO("polyline calls=" << poly_calls << " per-point calls=" << point_calls);
+    // Four path points, one crossing.
+    REQUIRE(poly_calls == 1);
+    REQUIRE(point_calls == 0);
+
+    using T = pulp::view::CanvasDrawCmd::Type;
+    std::vector<T> path_types;
+    bool saw_stroke = false;
+    for (const auto& cmd : canvas->commands()) {
+        if (cmd.type == T::move_to || cmd.type == T::line_to) {
+            // Every path command must precede the stroke: if the pending run
+            // flushed late it would land after it, and the stroke would paint
+            // an empty or stale path.
+            REQUIRE_FALSE(saw_stroke);
+            path_types.push_back(cmd.type);
+        }
+        if (cmd.type == T::stroke_path) saw_stroke = true;
+    }
+    REQUIRE(saw_stroke);
+    REQUIRE(path_types == std::vector<T>{T::move_to, T::line_to, T::line_to, T::line_to});
+}

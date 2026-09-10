@@ -185,3 +185,60 @@ TEST_CASE("tracing honors explicit category selection",
     CHECK(bytes.find("selected_render_event") != std::string::npos);
     CHECK(bytes.find("excluded_dsp_event") == std::string::npos);
 }
+
+// ── $PULP_TRACE_RING_KB ─────────────────────────────────────────────────────
+//
+// Why the ring size is worth a test at all: an undersized ring does not report
+// an error. It wraps, overwrites the interned string table at the head of the
+// sequence, and every later packet on that sequence becomes unparseable — so
+// what lands on disk is a large .pftrace that opens without complaint and
+// contains zero slices. Silently keeping the default on a typo therefore
+// reproduces exactly the failure this override exists to prevent, which is why
+// "absent" and "refused" must be distinguishable to the caller rather than both
+// collapsing to the default. The parse is config-independent so these run in
+// the DEFAULT PULP_TRACING=OFF build, which is the only build the gate reaches.
+
+using pulp::runtime::detail::default_autostart_ring_kb;
+using pulp::runtime::detail::max_autostart_ring_kb;
+using pulp::runtime::detail::min_autostart_ring_kb;
+using pulp::runtime::detail::parse_autostart_ring_kb;
+
+TEST_CASE("a ring-size override is parsed when it is a plain integer in range",
+          "[tracing]") {
+    const auto parsed = parse_autostart_ring_kb("262144");
+    REQUIRE(parsed.has_value());
+    CHECK(*parsed == 262144u);
+
+    CHECK(parse_autostart_ring_kb("1024") == min_autostart_ring_kb);
+    CHECK(parse_autostart_ring_kb("4194304") == max_autostart_ring_kb);
+    CHECK(default_autostart_ring_kb >= min_autostart_ring_kb);
+    CHECK(default_autostart_ring_kb <= max_autostart_ring_kb);
+}
+
+TEST_CASE("an absent or empty ring-size override is not an error", "[tracing]") {
+    CHECK_FALSE(parse_autostart_ring_kb(nullptr).has_value());
+    CHECK_FALSE(parse_autostart_ring_kb("").has_value());
+}
+
+TEST_CASE("a malformed ring-size override is refused rather than rounded",
+          "[tracing]") {
+    // A trailing unit is the likely typo, and "256M" read as 256 KB would be a
+    // ring 1000x smaller than asked for — an empty capture, reported as fine.
+    CHECK_FALSE(parse_autostart_ring_kb("256M").has_value());
+    CHECK_FALSE(parse_autostart_ring_kb("256 ").has_value());
+    CHECK_FALSE(parse_autostart_ring_kb(" 256").has_value());
+    CHECK_FALSE(parse_autostart_ring_kb("0x40000").has_value());
+    CHECK_FALSE(parse_autostart_ring_kb("-262144").has_value());
+    CHECK_FALSE(parse_autostart_ring_kb("26.2144").has_value());
+    CHECK_FALSE(parse_autostart_ring_kb("abc").has_value());
+}
+
+TEST_CASE("an out-of-range ring-size override is refused at both ends",
+          "[tracing]") {
+    CHECK_FALSE(parse_autostart_ring_kb("0").has_value());
+    CHECK_FALSE(parse_autostart_ring_kb("1023").has_value());
+    CHECK_FALSE(parse_autostart_ring_kb("4194305").has_value());
+    // Well past 32 bits: the accumulator must refuse rather than wrap into a
+    // small, plausible-looking ring size.
+    CHECK_FALSE(parse_autostart_ring_kb("99999999999999999999").has_value());
+}

@@ -218,6 +218,17 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME forced-restore-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_forced_restore_lint.py")
 
+    # Canvas path-flush lint: moveTo/lineTo defer their bridge call into a
+    # pending run that `_fp()` ships as one batched call, so every other method
+    # that emits a bridge command must flush first. A missed flush reorders a
+    # path fragment into the wrong paint state -- a silently corrupted frame,
+    # which review and whole-image pixel scores both read straight past.
+    add_test(NAME canvas-path-flush-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/check_canvas_path_flush.py"
+        --file "${CMAKE_SOURCE_DIR}/core/view/js/web-compat-canvas.js")
+    add_test(NAME canvas-path-flush-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_canvas_path_flush.py")
+
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
     # -j`, which can exhaust memory / oversubscribe cores on a shared machine.
