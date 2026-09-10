@@ -423,6 +423,14 @@ Two other capture-shaping facts worth knowing before you blame a query:
   used to be untagged, so closing and reopening an editor inside the window let
   the FIRST session's timer stop the SECOND one — a capture that looks
   mysteriously truncated mid-gesture. A stale timer is now a no-op.
+- **Zero rows everywhere can mean the binary was never built with tracing.**
+  `PULP_TRACING` is OFF by default, and a build without it emits no spans at
+  all while every command still succeeds — the emptiest possible capture from
+  the healthiest-looking run. This is the one absence to rule out first,
+  because it is indistinguishable from a bad query by inspection of the query.
+  `pulp status` prints a `Tracing:` line for the current checkout, and
+  `pulp build --trace` produces a build that can emit. A prefix or directory
+  whose *name* contains `trace` proves nothing; only the cache does.
 - **Zero rows for `frame`/`gpu_*` can mean the host never emitted them.** A
   query over render spans returning nothing is not automatically a bad query or
   a bad capture: an editor that is neither scripted nor declares

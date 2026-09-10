@@ -1,4 +1,5 @@
 #include "tools/cli/local_sdk_profile.hpp"
+#include "tools/cli/ship_tracing_guard.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace local_sdk = pulp::cli::local_sdk;
 namespace fs = std::filesystem;
@@ -286,4 +288,178 @@ TEST_CASE("forge development SDK provenance rejects a different source commit",
     other.source_git_sha = std::string(40, 'e');
     const auto validation = local_sdk::validate_published_install(prefix, other);
     REQUIRE_FALSE(validation.ok);
+}
+
+namespace {
+
+local_sdk::Identity trace_identity() {
+    auto i = identity();
+    i.tracing = true;
+    return i;
+}
+
+// Upgrade a release-shaped planted install into a traced one: the CMake cache
+// says tracing was on, the exported package declares the tracing target, and
+// the runtime archive carries the retained ship sentinel that
+// `core/runtime/src/trace.cpp` emits only under PULP_TRACING.
+void plant_tracing_evidence(const fs::path& prefix, const fs::path& build) {
+    auto cache = std::string(
+        "CMAKE_BUILD_TYPE:STRING=Release\n"
+        "CMAKE_OSX_ARCHITECTURES:STRING=arm64\n"
+        "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n"
+        "SKIA_DIR:PATH=/source/external/skia-build\n"
+        "PULP_ENABLE_GPU:BOOL=ON\n"
+        "PULP_HAS_SKIA:INTERNAL=TRUE\n"
+        "PULP_ENABLE_DESIGN_IMPORT:BOOL=ON\n"
+        "PULP_BUILD_WEBVIEW:BOOL=ON\n"
+        "PULP_HAS_VST3:INTERNAL=TRUE\n"
+        "PULP_HAS_AUSDK:INTERNAL=TRUE\n"
+        "PULP_HAS_CLAP:INTERNAL=TRUE\n"
+        "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
+        "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
+        "PULP_TRACING:BOOL=ON\n");
+    write_file(build / "CMakeCache.txt", cache);
+    write_file(prefix / "lib/cmake/Pulp/PulpTargets.cmake",
+               "Pulp::format Pulp::standalone Pulp::render Pulp::clap Pulp::vst3-sdk "
+               "Pulp::ausdk Pulp::tracing\n");
+    write_file(prefix / "lib/libpulp-runtime.a",
+               std::string("\x21<arch>\npadding") + std::string(pulp::cli::kTracingShipSentinel) +
+                   "more padding");
+}
+
+} // namespace
+
+TEST_CASE("trace SDK install arguments parse beside forge-dev", "[cli][sdk][trace]") {
+    const auto valid =
+        local_sdk::parse_install_arguments({"--local", "--profile", "trace", "--print-path"},
+                                           "1.0.0");
+    REQUIRE(valid.ok);
+    REQUIRE(valid.from_local);
+    REQUIRE(valid.print_path);
+    REQUIRE(valid.profile == local_sdk::kTraceProfileName);
+
+    // Control: the same shape without --local is still rejected, so a passing
+    // case above is the parser accepting the profile rather than accepting
+    // everything.
+    REQUIRE_FALSE(local_sdk::parse_install_arguments({"--profile", "trace"}, "1.0.0").ok);
+    REQUIRE_FALSE(
+        local_sdk::parse_install_arguments({"--local", "--profile", "tracing"}, "1.0.0").ok);
+    REQUIRE_FALSE(local_sdk::parse_install_arguments(
+                      {"--local", "--profile", "trace", "--version", "1.0.0"}, "1.0.0")
+                      .ok);
+}
+
+TEST_CASE("trace SDK installs under its own immutable root", "[cli][sdk][trace]") {
+    const auto traced = local_sdk::profile_paths("/tmp/pulp-home", trace_identity());
+    const auto forge = local_sdk::profile_paths("/tmp/pulp-home", identity());
+
+    REQUIRE(traced.install_prefix.string().find("sdk-dev/trace-v1/darwin-arm64") !=
+            std::string::npos);
+    REQUIRE(forge.install_prefix.string().find("sdk-dev/forge-v1/darwin-arm64") !=
+            std::string::npos);
+    // Same source and toolchain, different compiled output: the prefixes must
+    // not collide, or one profile would silently serve the other's archives.
+    REQUIRE(traced.install_prefix != forge.install_prefix);
+    REQUIRE(traced.input_fingerprint != forge.input_fingerprint);
+    REQUIRE(traced.build_dir != forge.build_dir);
+}
+
+TEST_CASE("trace SDK configure enables tracing and forge-dev does not", "[cli][sdk][trace]") {
+    const auto traced = local_sdk::configure_arguments("/source", "/build", "/stage",
+                                                       trace_identity(), std::nullopt);
+    const auto forge =
+        local_sdk::configure_arguments("/source", "/build", "/stage", identity(), std::nullopt);
+    const auto has = [](const std::vector<std::string>& args, const std::string& value) {
+        return std::find(args.begin(), args.end(), value) != args.end();
+    };
+
+    REQUIRE(has(traced, "-DPULP_TRACING=ON"));
+    REQUIRE_FALSE(has(forge, "-DPULP_TRACING=ON"));
+    // Control: both still pin the shared capability set, so the assertion above
+    // is about tracing rather than about one list being empty.
+    REQUIRE(has(traced, "-DPULP_ENABLE_GPU=ON"));
+    REQUIRE(has(forge, "-DPULP_ENABLE_GPU=ON"));
+}
+
+TEST_CASE("trace SDK validation accepts a build that really carries Perfetto",
+          "[cli][sdk][trace]") {
+    TempDir tmp;
+    const auto expected = trace_identity();
+    const auto prefix = tmp.path / "prefix";
+    const auto build = tmp.path / "build";
+    plant_install(prefix, build, expected);
+    plant_tracing_evidence(prefix, build);
+
+    const auto validation =
+        local_sdk::validate_staged_install(prefix, build, expected, "/source/external/skia-build");
+    INFO((validation.errors.empty() ? std::string{} : validation.errors.front()));
+    REQUIRE(validation.ok);
+}
+
+TEST_CASE("trace SDK validation rejects a release build wearing the trace profile",
+          "[cli][sdk][trace]") {
+    // The mislabeled-SDK regression. A directory that claims the trace profile
+    // while holding an ordinary release build must never publish: this is
+    // exactly the state a hand-copied `<version>-trace` prefix was in.
+    TempDir tmp;
+    const auto expected = trace_identity();
+    const auto prefix = tmp.path / "prefix";
+    const auto build = tmp.path / "build";
+    plant_install(prefix, build, expected);
+    // Deliberately no plant_tracing_evidence: release-shaped contents.
+
+    const auto validation =
+        local_sdk::validate_staged_install(prefix, build, expected, "/source/external/skia-build");
+    REQUIRE_FALSE(validation.ok);
+
+    const auto says = [&](const std::string& needle) {
+        return std::any_of(validation.errors.begin(), validation.errors.end(),
+                           [&](const std::string& e) { return e.find(needle) != std::string::npos; });
+    };
+    REQUIRE(says("PULP_TRACING was not enabled"));
+    REQUIRE(says("no tracing sentinel"));
+    REQUIRE(says("does not declare Pulp::tracing"));
+
+    // Control: the identical fixture validates clean under the forge-dev
+    // identity, proving these three errors come from the tracing contract and
+    // not from a broken fixture.
+    REQUIRE(local_sdk::validate_staged_install(prefix, build, identity(),
+                                               "/source/external/skia-build")
+                .ok);
+}
+
+TEST_CASE("forge-dev validation rejects a build that quietly enabled tracing",
+          "[cli][sdk][trace]") {
+    TempDir tmp;
+    const auto prefix = tmp.path / "prefix";
+    const auto build = tmp.path / "build";
+    plant_install(prefix, build, identity());
+    plant_tracing_evidence(prefix, build);
+
+    const auto validation =
+        local_sdk::validate_staged_install(prefix, build, identity(), "/source/external/skia-build");
+    REQUIRE_FALSE(validation.ok);
+    REQUIRE(std::any_of(validation.errors.begin(), validation.errors.end(),
+                        [](const std::string& e) {
+                            return e.find("tracing must stay disabled") != std::string::npos;
+                        }));
+}
+
+TEST_CASE("trace SDK provenance records the profile and stays non-distributable",
+          "[cli][sdk][trace]") {
+    const auto expected = trace_identity();
+    const auto json =
+        local_sdk::serialize_provenance(expected, local_sdk::input_fingerprint(expected));
+
+    REQUIRE(json.find("\"kind\": \"development\"") != std::string::npos);
+    REQUIRE(json.find("\"profile\": \"trace\"") != std::string::npos);
+    REQUIRE(json.find("\"tracing\": true") != std::string::npos);
+    REQUIRE(json.find("\"distribution_eligible\": false") != std::string::npos);
+
+    // Control: the forge-dev marker is byte-stable and carries no tracing key,
+    // so existing prefixes are not invalidated by this profile's arrival.
+    const auto forge =
+        local_sdk::serialize_provenance(identity(), local_sdk::input_fingerprint(identity()));
+    REQUIRE(forge.find("\"profile\": \"forge-dev\"") != std::string::npos);
+    REQUIRE(forge.find("\"tracing\"") == std::string::npos);
 }

@@ -361,6 +361,15 @@ def build_release_marker(
             "official release SDK feature contract requires "
             f"audio_probes=OFF and inspector={'ON' if expected_inspector else 'OFF'}"
         )
+    # A traced build links Perfetto and carries the retained ship sentinel, so it
+    # is a development artifact by construction. `pulp ship` already refuses one,
+    # but an official SDK must not be able to reach that point at all: refuse to
+    # mint release provenance for a build that had tracing on.
+    if _cache_bool(build_dir, "PULP_TRACING"):
+        raise ProvenanceError(
+            "official release SDK feature contract requires tracing=OFF; this "
+            "build was configured with PULP_TRACING=ON and is development-only"
+        )
 
     marker = {
         "schema": SCHEMA,
@@ -376,6 +385,7 @@ def build_release_marker(
         "features": {
             "audio_probes": False,
             "inspector": expected_inspector,
+            "tracing": False,
         },
     }
     if _version_tuple(version) >= INTEGRITY_SDK_FLOOR:
@@ -447,7 +457,14 @@ def verify_release_marker(
         "audio_probes": False,
         "inspector": _version_tuple(version) >= INSPECTOR_SDK_FLOOR,
     }
-    if marker.get("features") != expected_features:
+    features = marker.get("features")
+    # `tracing` is newer than the oldest markers in the wild, so its absence is
+    # not a failure: SDKs minted before it existed were built by a pipeline that
+    # never enabled tracing. Its presence, however, is binding — a release
+    # marker may not claim a traced build.
+    if isinstance(features, dict) and "tracing" in features:
+        expected_features["tracing"] = False
+    if features != expected_features:
         raise ProvenanceError(f"{path}: release feature contract is unsafe")
     if _version_tuple(version) >= INTEGRITY_SDK_FLOOR:
         verify_integrity(prefix, expected_platform, marker.get("integrity"))
