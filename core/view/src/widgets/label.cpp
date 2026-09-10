@@ -709,6 +709,82 @@ float Label::measured_width(float available_width) const {
     return std::ceil(widest);
 }
 
+Label::PaintedTextExtents
+Label::painted_text_extents(float available_width) const {
+    PaintedTextExtents out;
+    if (text_.empty()) return out;
+
+    // Resolve typography exactly as paint() does: the same own->inherited
+    // cascade, the same family fallback, the same fully-resolved text-align.
+    const ResolvedTextStyle rs = resolve_text_style();
+    const std::string display_text = apply_text_transform(text_);
+
+    // Same automatic line metric intrinsic_height() / measured_height() use,
+    // including the attributed-run override.
+    const float lh_mult = rs.font_size < 12.0f ? 1.6f : 1.4f;
+    float auto_lh = rs.font_size * lh_mult;
+    auto& shaper = canvas::global_text_shaper();
+    if (has_attributed_) {
+        auto attributed = shaper.prepare(resolved_attributed_string(),
+                                         resolved_font_features());
+        if (attributed.line_height() > 0) auto_lh = attributed.line_height();
+    }
+    const float lh = line_height_ > 0 ? line_height_ : auto_lh;
+
+    auto prepared = has_attributed_
+        ? shaper.prepare(resolved_attributed_string(), resolved_font_features())
+        : shaper.prepare(display_text, rs.family, rs.font_size,
+                         effective_font_weight(), rs.font_slant,
+                         rs.letter_spacing, resolved_font_features());
+
+    const std::string wb = word_break();
+    canvas::BreakMode break_mode = canvas::BreakMode::normal;
+    if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
+    else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
+
+    const bool wraps = (multi_line_ || captured_wrap_fallback_) &&
+                       available_width > 0.0f;
+    const float shaping_line_height =
+        has_attributed_ && line_height_ <= 0.0f ? 0.0f : lh;
+    auto layout = shaper.layout(prepared,
+                                wraps ? available_width : 0.0f,
+                                shaping_line_height,
+                                /*max_lines=*/wraps ? 0 : 1,
+                                break_mode);
+
+    int line_count = std::max(1, layout.line_count);
+    if (line_clamp_ > 0 && line_clamp_ < line_count) line_count = line_clamp_;
+
+    float widest = 0.0f;
+    float height = 0.0f;
+    const int available_lines = static_cast<int>(layout.lines.size());
+    for (int i = 0; i < line_count && i < available_lines; ++i) {
+        const auto& line = layout.lines[static_cast<std::size_t>(i)];
+        widest = std::max(widest, line.width);
+        height += line.height;
+    }
+    if (widest <= 0.0f) widest = prepared.total_width();
+    if (height <= 0.0f) height = lh * static_cast<float>(line_count);
+
+    out.measured = true;
+    out.width = widest;
+    out.height = height;
+    out.line_count = line_count;
+
+    // Where the ink actually starts. paint() anchors at 0 / w*0.5 / w and lets
+    // the canvas text-align place the run, so a right-aligned label's glyphs
+    // are nowhere near its box origin.
+    const float box_width = available_width > 0.0f ? available_width : widest;
+    float ink_x = 0.0f;
+    switch (rs.text_align) {
+        case LabelAlign::center: ink_x = (box_width - widest) * 0.5f; break;
+        case LabelAlign::right:  ink_x = box_width - widest; break;
+        default: break;
+    }
+    out.ink = Rect{ink_x, 0.0f, widest, height};
+    return out;
+}
+
 float Label::baseline_y() const {
     // Baseline offset from the top of the Label's box, used by Yoga's
     // YGNodeSetBaselineFunc to honor `align-items: baseline` on flex
