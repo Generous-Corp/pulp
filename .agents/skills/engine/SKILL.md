@@ -677,6 +677,30 @@ must not silently cancel its independent compatibility `mousedown`. Level 1
 (`stopPropagation`) still allows remaining same-target listeners; level 2
 (`stopImmediatePropagation`) does not.
 
+### A popup's keyboard cursor seeds from the marked selection, not an edge
+
+`web-compat-document.js`'s semantic popup default opens a `role="listbox"` /
+`role="menu"` with its cursor on the option the author marked as selected, and
+only falls back to the `edge` the caller asked for (`"first"` for ArrowDown,
+`"last"` for ArrowUp) when nothing is marked. `selectedIndexIn()` reads, in
+descending order of authority: `aria-activedescendant` on the trigger or the
+popup, `aria-selected="true"`, `aria-checked="true"`, the option's `checked`
+property, then `aria-current`. Assigning the `checked` property writes no
+attribute in this shim, so it is a genuinely separate signal from
+`aria-checked`.
+
+Two consequences for authors of scripted UI:
+
+- **A listbox that marks nothing gets edge behaviour.** There is no inference
+  from the trigger's own text: matching trigger text against option text would
+  mis-seed on duplicate labels and on triggers that decorate the value
+  ("Bands: 64"), so the shim does not do it. An app whose menu highlights the
+  wrong row on open is missing `aria-selected` on its options — which is also
+  the ARIA requirement for `role="option"` inside a listbox.
+- **This matches the native widget.** `ui_components.cpp`'s `ComboBox::open`
+  seeds `hover_index_ = selected_`. The scripted path and the native path now
+  agree, so a design that moves between them keeps the same first highlight.
+
 ## ESM support per engine
 
 | Engine | Public ESM API | Status |

@@ -1420,3 +1420,125 @@ TEST_CASE("paint_attributed_ honors text-align",
     REQUIRE_THAT(xr, WithinAbs(200.0f - kTotal, 1e-4f));
     CHECK(xr > xc);
 }
+
+// Opening a listbox seeds its keyboard cursor to the option the author marked
+// as selected, so the first highlight is the value the user already chose and
+// arrow traversal starts from there. Pulp's native ComboBox seeds the same way
+// (hover_index_ = selected_); the scripted-document popup default matches it.
+TEST_CASE("Semantic popup seeds its cursor from the marked selection",
+          "[view][bridge][events][popup-default][a11y]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var popup = null;
+        var mark_kind = 'none';
+        var trigger = document.createElement('button');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-controls', 'band-popup');
+        trigger.textContent = '64';
+        function closePopup() {
+            if (popup && popup.parentNode) popup.parentNode.removeChild(popup);
+            popup = null;
+            trigger.removeAttribute('aria-activedescendant');
+        }
+        function togglePopup() {
+            if (popup) { closePopup(); return; }
+            popup = document.createElement('div');
+            popup.setAttribute('id', 'band-popup');
+            popup.setAttribute('role', 'listbox');
+            ['32', '48', '56', '64', '128'].forEach(function(label, i) {
+                var option = document.createElement('button');
+                option.setAttribute('role', 'option');
+                option.setAttribute('id', 'band-' + label);
+                option.textContent = label;
+                if (mark_kind === 'explicit-false') {
+                    option.setAttribute('aria-selected', 'false');
+                    option.setAttribute('aria-current', 'false');
+                } else if (i === 3) {
+                    if (mark_kind === 'aria-selected')
+                        option.setAttribute('aria-selected', 'true');
+                    else if (mark_kind === 'aria-checked')
+                        option.setAttribute('aria-checked', 'true');
+                    else if (mark_kind === 'checked-property')
+                        option.checked = true;
+                    else if (mark_kind === 'aria-current')
+                        option.setAttribute('aria-current', 'true');
+                }
+                popup.appendChild(option);
+            });
+            if (mark_kind === 'activedescendant')
+                trigger.setAttribute('aria-activedescendant', 'band-64');
+            document.body.appendChild(popup);
+        }
+        trigger.addEventListener('click', togglePopup);
+        document.body.appendChild(trigger);
+        trigger.focus();
+    )");
+
+    const auto open_and_read = [&](const std::string& mark, KeyCode key) {
+        engine.evaluate("mark_kind = '" + mark + "'; trigger.focus()");
+        REQUIRE(WidgetBridge::dispatch_key_for_root(
+            root, static_cast<int>(key), 0, true));
+        return engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+            .getWithDefault<int>(-1);
+    };
+    const auto close = [&] {
+        REQUIRE(WidgetBridge::dispatch_key_for_root(
+            root, static_cast<int>(KeyCode::escape), 0, true));
+        REQUIRE(engine.evaluate("popup === null").getWithDefault<bool>(false));
+    };
+
+    SECTION("aria-selected seeds the cursor and arrows walk from there") {
+        REQUIRE(open_and_read("aria-selected", KeyCode::down) == 3);
+        REQUIRE(engine.evaluate(
+            "__pulpPopupDefaultState__.options[3].style.backgroundColor")
+                    .toString() == "rgba(120,180,255,0.18)");
+        REQUIRE(WidgetBridge::dispatch_key_for_root(
+            root, static_cast<int>(KeyCode::down), 0, true));
+        REQUIRE(engine.evaluate("__pulpPopupDefaultState__.activeIndex")
+                    .getWithDefault<int>(-1) == 4);
+        close();
+    }
+
+    SECTION("the marked selection outranks the opening edge") {
+        // ArrowUp asks for the last option; the marked selection wins.
+        REQUIRE(open_and_read("aria-selected", KeyCode::up) == 3);
+        close();
+    }
+
+    SECTION("aria-activedescendant on the trigger seeds the cursor") {
+        REQUIRE(open_and_read("activedescendant", KeyCode::down) == 3);
+        close();
+    }
+
+    SECTION("aria-checked seeds the cursor") {
+        REQUIRE(open_and_read("aria-checked", KeyCode::down) == 3);
+        close();
+    }
+
+    SECTION("a checked option property seeds the cursor") {
+        REQUIRE(open_and_read("checked-property", KeyCode::down) == 3);
+        close();
+    }
+
+    SECTION("aria-current seeds the cursor") {
+        REQUIRE(open_and_read("aria-current", KeyCode::down) == 3);
+        close();
+    }
+
+    SECTION("an unmarked list still seeds to the requested edge") {
+        REQUIRE(open_and_read("none", KeyCode::down) == 0);
+        close();
+        REQUIRE(open_and_read("none", KeyCode::up) == 4);
+        close();
+    }
+
+    SECTION("explicitly false markers select nothing") {
+        REQUIRE(open_and_read("explicit-false", KeyCode::down) == 0);
+        close();
+        REQUIRE(open_and_read("explicit-false", KeyCode::up) == 4);
+        close();
+    }
+}
