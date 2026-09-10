@@ -3794,6 +3794,48 @@
           "owner": "agent-capability-maintainers"
         }
       }
+    },
+    {
+      "id": "installed-mcp-server-rpath",
+      "title": "Installed MCP server resolves its GPU dependency from the SDK prefix",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "installed-mcp-server-rpath-20260910",
+      "owned_paths": [
+        "tools/mcp/CMakeLists.txt"
+      ],
+      "evidence": [
+        {
+          "path": "tools/mcp/CMakeLists.txt",
+          "needles": [
+            "INSTALL_RPATH \"@executable_path/../lib\"",
+            "MACOSX_RPATH TRUE",
+            "libwgpu_native.dylib"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "pulp-mcp was already exported and staged by cmake --install; this row adds no sequencer or timeline type, target, header, or contract to the installed SDK. It sets an install-time RPATH property on that existing binary so the loader can find libwgpu_native.dylib, which cmake --install already places in <prefix>/lib, matching the RPATH pulp-cli and pulp-scan-worker have carried for the same reason. The exported target set and the installed timeline and playback surface are byte-identical either way."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No timeline command, verb, argument, or handler changes, and cmd_seq.cpp is untouched. pulp-cli already set this RPATH and is unaffected."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP operation, schema, or handler is added, widened, or changed, and the generated timeline MCP catalog is untouched. The reachable operation set is exactly what it was; the fix only stops the already-shipped server from aborting at launch on a missing LC_RPATH entry, which is a loader-layout defect rather than an exposure change."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The offline MCP server grants no live product control, and no grant, capability, or executor binding is added or widened here."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "An install-time link property is not an installed design-time capability, and the sequencer capability manifest is unchanged."
+        }
+      }
     }
   ],
   "tombstones": []
